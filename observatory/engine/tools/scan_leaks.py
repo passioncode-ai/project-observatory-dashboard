@@ -44,6 +44,7 @@ is allowed to be noisy; the ledger is not.
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -60,6 +61,9 @@ sys.path.insert(0, str(ROOT / "tools"))
 import atomic              
 import paths              
 import sqlite_scan  # noqa: E402  — when a store may be read from its last mark (PB-131)
+
+# Direct scanner callers may use names; main uses a name and version pair.
+SecretRef = str | tuple[str, str | None]
 
 STATE = paths.SCRATCH / "leak-scan-state.json"
 OUT = paths.SCRATCH / "leak-scan.json"
@@ -230,9 +234,9 @@ def targets(days: int) -> tuple[list[pathlib.Path], list[dict]]:
     return out, notes
 
 
-def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, str],
+def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, SecretRef],
                 since: dict[str, int] | None = None
-                ) -> tuple[dict[tuple[str, str], int], str | None, dict[str, int], int]:
+                ) -> tuple[dict[tuple[SecretRef, str], int], str | None, dict[str, int], int]:
     """Occurrences by (secret name, `table.column`) across every text column
     of a SQLite store, read-only; the reason when it could not be read; the
     highest rowid read per table; and the number of rows read.
@@ -252,7 +256,7 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, st
     every pass and gets no mark.
     """
     since = since or {}
-    hits: dict[tuple[str, str], int] = {}
+    hits: dict[tuple[SecretRef, str], int] = {}
     high: dict[str, int] = {}
     read = 0
     if not db.is_file():
@@ -325,7 +329,8 @@ SUPPRESSIONS = paths.config_file("leak_suppressions.json")
 
 def load_suppressions(path: pathlib.Path, today) -> tuple[list[dict], list[dict]]:
     """(rules in force, problems). A rule needs `secret`, `where`, `reason` and
-    `expires_on` (YYYY-MM-DD). An expired or incomplete rule is never applied;
+    `expires_on` (YYYY-MM-DD) and the sighting's opaque `version_id`.
+    An expired or incomplete rule is never applied;
     it is reported, so a suppression cannot outlive the decision behind it."""
     if not path.is_file():
         return [], []
@@ -333,12 +338,20 @@ def load_suppressions(path: pathlib.Path, today) -> tuple[list[dict], list[dict]
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return [], [{"rule": None, "problem": f"leak_suppressions.json is unreadable ({type(exc).__name__})"}]
+    if not isinstance(doc, dict) or not isinstance(doc.get("suppressions"), list):
+        return [], [{"rule": None, "problem": "expected an object with a suppressions list; not applied"}]
     rules, problems = [], []
-    for i, r in enumerate((doc or {}).get("suppressions") or []):
-        missing = [k for k in ("secret", "where", "reason", "expires_on")
-                   if not str((r or {}).get(k) or "").strip()]
+    for i, r in enumerate(doc["suppressions"]):
+        if not isinstance(r, dict):
+            problems.append({"rule": i, "problem": "expected an object; not applied"})
+            continue
+        missing = [k for k in ("secret", "where", "reason", "expires_on", "version_id")
+                   if not isinstance(r.get(k), str) or not r[k].strip()]
         if missing:
             problems.append({"rule": i, "problem": f"missing {', '.join(missing)}; not applied"})
+            continue
+        if not re.fullmatch(r"[0-9a-f]{64}", r["version_id"]):
+            problems.append({"rule": i, "problem": "version_id must be copied from the sighting; not applied"})
             continue
         try:
             until = datetime.strptime(r["expires_on"], "%Y-%m-%d").date()
@@ -354,10 +367,12 @@ def load_suppressions(path: pathlib.Path, today) -> tuple[list[dict], list[dict]
 
 def apply_suppressions(rows: list[dict], rules: list[dict]) -> tuple[list[dict], list[dict]]:
     """(sightings still reported, sightings suppressed with their reason).
-    `where` matches as a substring of the sighting's place."""
+    Both the complete location and the salted value identity must match."""
     kept, gone = [], []
     for row in rows:
-        rule = next((r for r in rules if r["secret"] == row["secret"] and r["where"] in row["where"]), None)
+        rule = next((r for r in rules if r["secret"] == row["secret"]
+                     and r["where"] == row["where"] and row.get("version_id")
+                     and r["version_id"] == row["version_id"]), None)
         if rule:
             gone.append({**row, "reason": rule["reason"], "expires_on": rule["expires_on"]})
         else:
@@ -365,15 +380,15 @@ def apply_suppressions(rows: list[dict], rules: list[dict]) -> tuple[list[dict],
     return kept, gone
 
 
-def scan_file(path: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, str],
-              start: int, longest: int) -> tuple[dict[str, int], int, str | None]:
+def scan_file(path: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, SecretRef],
+              start: int, longest: int) -> tuple[dict[SecretRef, int], int, str | None]:
     """Occurrences by secret name, the offset reached, and why it could not be read.
 
     PERMISSION DENIED IS NOT CLEAN (PB-032). A file this process may not open
     used to return no hits, and the report counted it among the targets it had
     read. The reason now comes back, and the caller lists the file as unread.
     """
-    hits: dict[str, int] = {}
+    hits: dict[SecretRef, int] = {}
     try:
         size = path.stat().st_size
     except OSError as exc:
@@ -427,7 +442,14 @@ def main(argv: list[str]) -> int:
         print("leaks: nothing to look for — no env scan, no vault, no installed key")
         return 0
 
-    by_value = {v.encode("utf-8", "surrogateescape"): n for v, n in values.items()}
+    # Keep versions separate even when two different values share one name.
+    # The workspace-keyed HMAC cannot identify a value outside this workspace;
+    # without the salt it is None and no suppression may match.
+    by_value = {v.encode("utf-8", "surrogateescape"):
+                (n, sqlite_scan.values_digest({v: n})) for v, n in values.items()}
+    rules, rule_problems = load_suppressions(SUPPRESSIONS, datetime.now(timezone.utc).date())
+    suppression_mark = hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
+    digest = sqlite_scan.values_digest(values)
     longest = max(len(b) for b in by_value)
     # `bytes.find` PER PATTERN, not one compiled alternation. The alternation was
     # the obvious thing and it read 956 MB in 2m58s: `re` walks the buffer in its
@@ -435,7 +457,7 @@ def main(argv: list[str]) -> int:
     # buffer still win by an order of magnitude. Measured, not assumed.
     pattern = sorted(by_value, key=len, reverse=True)
 
-    state, sqlite_mark = {}, {}
+    state, sqlite_mark, saved = {}, {}, {}
     if STATE.is_file():
         try:
             saved = json.loads(STATE.read_text(encoding="utf-8"))
@@ -445,9 +467,16 @@ def main(argv: list[str]) -> int:
         except ValueError:
             state = {}
 
+    # Revisit existing transcripts when values or decisions change, including
+    # expiry. Old offsets cannot prove a new value absent from an old file.
+    decisions_changed = saved.get("suppressions_digest") != suppression_mark
+    files_full = a.full or digest is None or saved.get("values_digest") != digest or decisions_changed
+    if files_full:
+        state = {}
+
     files, notes = targets(a.days)
     unreadable: list[dict] = []
-    hits: dict[tuple[str, str], int] = {}
+    hits: dict[tuple[SecretRef, str], int] = {}
     read_bytes = 0
     for p in files:
         key = str(p)
@@ -469,8 +498,9 @@ def main(argv: list[str]) -> int:
     # rewritten in place — so it is not part of `read_bytes`.
     mem = paths.COMPANION_DB
     today = datetime.now(timezone.utc).date()
-    digest = sqlite_scan.values_digest(values)
     full, why = sqlite_scan.plan(sqlite_mark, digest, a.full, today)
+    if decisions_changed and not a.full:
+        full, why = True, "the effective suppression rules changed"
     since = {} if full else (sqlite_mark.get("stores") or {}).get(str(mem))
     mem_hits, mem_problem, mem_high, mem_rows = scan_sqlite(mem, pattern, by_value, since)
     new_mark = sqlite_scan.next_mark(sqlite_mark, digest, full, today,
@@ -483,10 +513,11 @@ def main(argv: list[str]) -> int:
                  "mode": "full" if full else "incremental", "why": why, "rows_read": mem_rows}
 
     atomic.write_json(STATE, {"updated_at": now, "offsets": state,
+                              "values_digest": digest, "suppressions_digest": suppression_mark,
                               **({"sqlite": new_mark} if new_mark else {})})
-    rows = [{"secret": name, "where": where, "occurrences": n}
-            for (name, where), n in sorted(hits.items(), key=lambda kv: -kv[1])]
-    rules, rule_problems = load_suppressions(SUPPRESSIONS, datetime.now(timezone.utc).date())
+    rows = [{"secret": name, "where": where, "occurrences": n,
+             **({"version_id": version} if version else {})}
+            for ((name, version), where), n in sorted(hits.items(), key=lambda kv: -kv[1])]
     rows, suppressed = apply_suppressions(rows, rules)
     notes = notes + unreadable
     atomic.write_json(OUT, {
@@ -494,7 +525,7 @@ def main(argv: list[str]) -> int:
         "known": len(values),
         "targets": len(files),
         "read_bytes": read_bytes,
-        "incremental": not a.full,
+        "incremental": not files_full,
         "hits": rows,
         "suppressed": suppressed,
         "suppression_problems": rule_problems,

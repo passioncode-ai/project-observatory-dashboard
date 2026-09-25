@@ -46,3 +46,7 @@ opt-in scheduler installation. Empty-state observation uses `local`; Google refr
 uses its collector's supported `--force` option and rebuilds the registry before
 the dashboard. `tests/test_pages.py` checks the command bridges and actual tool
 subcommands; `tests/test_dashboard_render.py` executes the renderer.
+
+### OSS-13 — a suppression cannot hide a replacement value (PB-032)
+
+Given an accepted sighting with a reason and expiry, the operator copies its secret name, exact location and opaque `version_id` into the suppression config. The accepted sighting remains visible as suppressed. A new value under that name, another location, or another workspace salt remains an active sighting. Expiry replays old evidence without requiring a new write to the source. Malformed and legacy unversioned rules raise a warning and suppress nothing. Proof: `tests/test_leak_coverage.py` (rotation, exact path, duplicate names in files/SQLite, salt change, malformed shapes, expiry and incremental value discovery). Detection still covers known values only; it does not discover every unknown secret shape or search all deleted Git history.

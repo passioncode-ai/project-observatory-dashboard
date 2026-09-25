@@ -121,3 +121,7 @@ key at the old location is read with a note until you move it.
 `store/raw/leak-scan.json` gains `coverage`, `suppressed` and `suppression_problems`. An entry in
 `not_scanned` may carry `"unreadable": true`. The optional `config/leak_suppressions.json` is new, and
 nothing is created for it.
+
+## Unreleased: suppression identity (PB-032 follow-up)
+
+Leak sightings gain an optional `version_id` (HMAC under the workspace fingerprint salt). Suppressions require this identifier and an exact location; 0.3.11 name/substring-only rules are refused with a warning until explicitly replaced. No existing suppression is broadened or silently migrated. Without the salt, detection still reports sightings and suppression is unavailable. File offsets are reset when known values change. Changes to effective suppression rules, including expiry, replay files and the companion database. The private state gains `values_digest` and `suppressions_digest`; old state causes a complete first pass.
