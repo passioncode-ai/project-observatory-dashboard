@@ -183,7 +183,8 @@ Rotation changes the local slot; provider revocation is a separate action.
 A file the scan could not open is listed as unread and raises a warning. It is never counted as
 clean. When a sighting is known and accepted, for example a synthetic value a fixture prints on
 purpose, record the decision in `config/leak_suppressions.json`:
-`{"suppressions": [{"secret": "<project>/<NAME>", "where": "<part of the path>", "reason": "…", "expires_on": "YYYY-MM-DD"}]}`.
+`{"suppressions": [{"secret": "<project>/<NAME>", "where": "<complete sighting location>", "version_id": "<copy from the sighting>", "reason": "…", "expires_on": "YYYY-MM-DD"}]}`.
+The `secret`, complete `where` (including the SQLite column when present), and `version_id` must match the sighting in `store/raw/leak-scan.json` exactly. The version is an opaque workspace-keyed HMAC, never the credential value. A replacement value or a different location needs a new decision. Legacy rules without a version are reported as invalid and do not suppress anything. Without the workspace fingerprint salt, sightings remain visible and cannot be suppressed. Changing or expiring a rule rechecks existing files and SQLite content on the next scan.
 A suppressed sighting is still shown along with its reason. A rule without a reason or an expiry date
 is not applied, and neither is an expired one; both are reported.
 
