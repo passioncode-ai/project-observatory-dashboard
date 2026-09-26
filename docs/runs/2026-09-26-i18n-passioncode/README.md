@@ -96,7 +96,16 @@ recorded in the release receipt appended below.
 - passioncode.ai: PR [#4](https://github.com/passioncode-ai/passioncode-ai.github.io/pull/4) merged as
   `c277b7b`; `npm run check` and `npm run build` PASS on merged `main`.
 
-**Still open:** deploy `site/` (Cloudflare Pages `project-observatory`) and passioncode.ai (Worker
-`passioncode-ai`). Both need an authenticated Wrangler session on this machine (`npx wrangler login`,
-a human browser step); the deploy commands are in `docs/site/DEPLOY.md` and the site repository's
-`docs/DEPLOYMENT.md`. Then verify the served bytes and record the deployment ids here.
+## Deployment receipt (2026-09-27)
+
+- **observatory.sshlg.me:** `site/` from `main` at `9f63b6d` (fresh anonymous clone,
+  `docs/site/check.py --self-test` PASS) deployed with Wrangler 4.135.0 to Cloudflare Pages project
+  `project-observatory`, branch `main`; deployment `8199220c` (`https://8199220c.project-observatory.pages.dev`).
+  Ten served files on the custom domain equal the source bytes (pages, CSS, JS, mark, `llms.txt`, both
+  images, `404.html`); an unknown path returns HTTP 404; the header reads "by PassionCode.ai".
+- **passioncode.ai:** already deployed from the site repository's `main` by its own session after
+  PR #4 merged. Checked on 2026-09-27: `/`, `/observatory/` and `/switchboard/` served bytes equal a
+  build of that `main`, and the Observatory assets match.
+
+Nothing from this run remains open except the advisory items 4–5 above (brand-string registry rows;
+accepting the Xcode license on this machine so two git-dependent suites run locally).
