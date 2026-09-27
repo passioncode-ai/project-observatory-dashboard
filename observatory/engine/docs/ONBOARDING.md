@@ -144,6 +144,47 @@ selection and a budget before enabling reasoning or embeddings. On macOS,
 jobs only after explicit scheduler opt-in; Linux can run the CLI under a
 supervisor chosen by the user. Do not create duplicate writers for one home.
 
+## The machine: what runs, where the disk goes, cleanup
+
+With `features.machine_watch` on, each tick surveys the machine the estate runs
+on and the Machine page shows it; `project-observatory full machine` prints the
+same summary.
+
+- **Processes by origin.** Every process is grouped by the nearest ancestor
+  that explains it: an agent session (Claude Code, Codex), a launchd job, a
+  simulator (by device name), an application bundle, the system, or
+  `detached` — a process whose parent is launchd and which nothing else
+  explains, often a server that outlived its session. A process whose working
+  directory is inside a project is attributed to it. `full machine --explain
+  PID` says why one process runs; with [witr](https://github.com/pranshuparmar/witr)
+  installed (`brew install witr`) it adds the service, port and file detail.
+  Neither a process's environment nor its full command line is ever kept.
+- **Memory**: physical, compressed, swap; the largest origins.
+- **Disk**: free space on the home volume and the places in
+  `config/machine.json` — caches, simulators, VM disks, histories — each with
+  how its space comes back. Sizing is re-done every `every_hours`.
+- **Git hygiene**: every registered checkout's worktrees (clean, dirty,
+  missing, in use, idle days) and branches (merged, patch-merged, pushed,
+  unique).
+
+With `features.auto_cleanup` also on, the tick removes what loses nothing:
+branches merged into the default branch or identical to their upstream, clean
+worktrees nobody has touched for a week, stale worktree records, and git-ignored
+build output of projects idle for a month (thresholds and protected branch
+names in `config/cleanup.json`). Each target is re-checked when acted on, and
+each removal is a line in `store/logs/cleanup.jsonl` with what brings it back.
+The rest needs a person:
+
+```sh
+project-observatory full cleanup                          # the plan; removes nothing
+project-observatory full cleanup --apply                  # the auto tier, now
+project-observatory full cleanup --apply --include manual # also unique branches and dirty worktrees, archived first
+```
+
+The manual tier writes a thin git bundle per branch and a patch plus a tarball
+of untracked files per worktree under `<home>/archive/cleanup/<date>/` before
+removing anything.
+
 ## Organizations and resources
 
 An estate that serves more than one owner keeps each owner's analytics, design

@@ -21,8 +21,9 @@ The capability definitions and effects come from `../fabric-agent.json`:
 | `project.timeline` | `none` | `observatory_timeline` |
 | `project.record` | `draft` | `observatory_record`, `observatory_propose`, `observatory_recall` |
 
-The full server also exposes `observatory_credentials`, `observatory_search` and
-`observatory_findings`: nine tools in total, defined in `../mcp/server.py`.
+The full server also exposes `observatory_credentials`, `observatory_search`,
+`observatory_findings` and `observatory_machine`: ten tools in total, defined in
+`../mcp/server.py`.
 Credential inventory returns names and metadata, not stored values. Recording
 and proposal tools write private local memory; they do not authorize provider
 changes or deployment.

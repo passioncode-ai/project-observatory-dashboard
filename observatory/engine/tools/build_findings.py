@@ -1499,6 +1499,16 @@ def collect() -> list[dict]:
     out.extend(google_findings.findings(_gdoc, TODAY))
     # WHOSE ACCOUNT a property sits in, against the organization of the project
     # it measures (organizations.json); silent when that file is not configured.
+    # THE MACHINE: disk, memory, detached servers, idle worktrees and branches,
+    # what the cleanup removed. Silent when the survey has never run.
+    import machine_findings
+    _mc = {}
+    for _f in (paths.config_file("machine.json"), paths.ROOT / "defaults" / "machine.json"):
+        try:
+            _mc = json.loads(_f.read_text(encoding="utf-8")); break
+        except (OSError, ValueError):
+            continue
+    out.extend(machine_findings.findings(paths.SCRATCH, paths.STATE / "logs", _mc))
     import organizations
     _pj = paths.REGISTRY / "projects.json"
     out.extend(google_findings.organization_findings(
@@ -2482,7 +2492,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "mcp.own_unregistered", "subject": "estate:mcp", "severity": "warning",
                 "title": "the observatory's own MCP server is declared in no agent",
-                "detail": ("`mcp/server.py` serves nine tools — recall, credentials by "
+                "detail": ("`mcp/server.py` serves ten tools — recall, credentials by "
                            "name, proposals — and none of them is reachable until an "
                            "agent's config names the server (credentials audit G14)."),
                 "action": "claude mcp add observatory --scope user -- "

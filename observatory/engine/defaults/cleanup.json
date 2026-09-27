@@ -1,0 +1,18 @@
+{
+ "_why": "What tools/cleanup.py may remove, and after how long. AUTO classes lose nothing — merged commits live on the default branch, pushed ones on the remote, build output is regenerated — and run on every tick when `features.auto_cleanup` is true. MANUAL classes hold the only copy of somebody's work; `full cleanup --apply` archives them first (bundle, patch, tarball), and never on a tick. A name matching `protect` is never touched.",
+ "max_actions_per_run": 200,
+ "protect": ["keep/*", "release/*", "hotfix/*", "develop", "staging", "production"],
+ "auto": {
+  "merged_branch_idle_days": 7,
+  "pushed_branch_idle_days": 30,
+  "clean_worktree_idle_days": 7,
+  "build_artifacts_project_idle_days": 30
+ },
+ "manual": {
+  "unique_branch_idle_days": 14,
+  "dirty_worktree_idle_days": 7
+ },
+ "artifact_dirs": ["node_modules", ".next", ".turbo", ".nuxt", ".svelte-kit", ".parcel-cache", ".expo",
+                   "target", "DerivedData", "Pods", ".gradle", "build", "dist", ".output", ".wrangler",
+                   "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"]
+}

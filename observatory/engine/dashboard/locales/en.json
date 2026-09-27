@@ -58,6 +58,10 @@
   "one": "{n} open leak",
   "other": "{n} open leaks"
  },
+ "{n} origins": {
+  "one": "{n} origin",
+  "other": "{n} origins"
+ },
  "{n} projects": {
   "one": "{n} project",
   "other": "{n} projects"

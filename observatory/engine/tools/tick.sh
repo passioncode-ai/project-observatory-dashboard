@@ -214,6 +214,12 @@ step "leaks" "$PY" tools/scan_leaks.py
 
 
 step "scrub-companion" "$PY" tools/scrub_companion.py
+# THE MACHINE: what runs, where memory and disk went, which worktrees and branches
+# outlived their work — then the cleanup's auto tier, which removes only what
+# loses nothing (tools/cleanup.py) and only with features.auto_cleanup on.
+step "machine" "$PY" collectors/scan_machine.py "$SCRATCH/machine.json"
+step "git-hygiene" "$PY" collectors/scan_git_hygiene.py "$SCRATCH/git-hygiene.json"
+step "cleanup" "$PY" tools/cleanup.py --auto
 "$PY" collectors/merge.py          "$SCRATCH"             >/dev/null 2>&1 || bail merge 1 "merge failed — stopping, the registry is not rewritten"
 "$PY" collectors/emit_registry.py  "$SCRATCH"             >/dev/null 2>&1 || bail emit 1 "emit failed or REFUSED a wholesale change — the registry keeps the last good version"
 

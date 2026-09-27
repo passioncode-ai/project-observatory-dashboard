@@ -3,6 +3,29 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.6.0 — 2026-09-27
+
+### Added
+
+- **The Machine page and `full machine`.** Processes grouped by origin — agent session, launchd job,
+  simulator device, application, system, detached — with memory, CPU and project attribution; memory
+  and swap; free disk and the largest cache, simulator, VM and history locations from
+  `config/machine.json`, each with how its space comes back. `full machine --explain PID` says why a
+  process runs, using witr when it is installed. A process is never stored with its environment or full
+  command line.
+- **Git hygiene**: every registered checkout's worktrees and branches, classified (merged, patch-merged,
+  pushed, unique; clean, dirty, missing, in use, idle days).
+- **Cleanup.** `features.auto_cleanup` removes on each tick only what loses nothing — merged or pushed
+  branches, clean idle worktrees, stale worktree records, build output of idle projects — re-checking
+  every target when it acts and journalling each removal. `full cleanup --apply --include manual` also
+  removes unique branches and dirty worktrees after bundling and archiving them.
+- `observatory_machine` (MCP, read-only): the same summary for agents, with `explainPid`.
+- Findings: `machine.disk_low`, `machine.memory_pressure`, `machine.heavy_origin`,
+  `machine.detached_servers`, `machine.stale`, `git.idle_dirty_worktrees`, `git.idle_unique_branches`,
+  `cleanup.done`.
+- `features.machine_watch` gates the three new tick steps (`machine`, `git-hygiene`, `cleanup`); both
+  features default to off.
+
 ## 0.5.0 — 2026-09-27
 
 ### Added
