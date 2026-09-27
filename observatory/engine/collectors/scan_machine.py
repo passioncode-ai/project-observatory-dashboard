@@ -316,6 +316,35 @@ def volume() -> dict:
             "free_percent": round(100 * st.free / st.total, 1) if st.total else None}
 
 
+def swap_on_disk() -> dict | None:
+    """Memory written to disk. On macOS the swap files live on the VM volume,
+    which shares the APFS container with the data volume — so swap growth IS free
+    space shrinking, and a disk that fills while nothing is being written is often
+    this (measured 2026-09-27: 15 GB of swap files, the main cause of a 11 GB fall
+    in free space in one evening). One stat per file; never a `du`."""
+    folder = pathlib.Path("/System/Volumes/VM") if sys.platform == "darwin" else None
+    total, files = 0, 0
+    if folder and folder.is_dir():
+        try:
+            for entry in os.scandir(folder):
+                if entry.name.startswith("swapfile") and entry.is_file(follow_symlinks=False):
+                    total += entry.stat(follow_symlinks=False).st_size
+                    files += 1
+        except OSError:
+            return None
+        return {"path": str(folder), "gb": round(total / 1073741824, 2), "files": files}
+    try:
+        rows = open("/proc/swaps").read().splitlines()[1:]
+    except OSError:
+        return None
+    for row in rows:
+        parts = row.split()
+        if len(parts) >= 3 and parts[1] == "file":
+            total += int(parts[2]) * 1024
+            files += 1
+    return {"path": "/proc/swaps", "gb": round(total / 1073741824, 2), "files": files} if files else None
+
+
 def size_kb(path: pathlib.Path, timeout: float) -> int | None:
     """One `du -skx`: -x stays on the path's own file system, so a mounted
     simulator image or VM volume is not counted as the host disk's usage. du
@@ -383,6 +412,10 @@ def survey_disk(previous: dict | None, force: bool) -> dict:
             old = prev[loc["path"]]
             rows.append({**base, "gb": old["gb"], "measured_at": old.get("measured_at") or
                          ((previous or {}).get("disk") or {}).get("measured_at")})
+    swap = swap_on_disk()
+    if swap and swap["gb"] > 0:
+        rows.append({"path": swap["path"], "kind": "swap", "label": "Swap files (memory written to disk)",
+                     "reclaim": "memory", "gb": swap["gb"], "measured_at": now()})
     rows.sort(key=lambda r: -r["gb"])
     pending = len([1 for loc, _p in wanted if loc["path"] not in measured and loc["path"] not in prev])
     out.update({"locations": rows, "measured_at": now(), "measured_now": len(measured), "never_measured": pending})

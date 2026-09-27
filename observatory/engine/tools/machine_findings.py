@@ -55,6 +55,10 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
             locs = (machine.get("disk") or {}).get("locations") or []
             named = "; ".join(f"{l['label']} {l['gb']} GB" + (f" (`{l['command']}`)" if l.get("command") else "")
                               for l in locs[:LISTED])
+            swap = next((l for l in locs if l.get("kind") == "swap"), None)
+            if swap and swap["gb"] >= 2:
+                named += (f". {swap['gb']} GB of it is swap — memory the machine wrote to this same disk; "
+                          f"closing what holds the most memory gives that space back")
             out.append({"type": "machine.disk_low", "subject": "machine",
                         "severity": "critical" if pct < crit else "warning",
                         "title": f"{vol.get('free_gb')} GB free on the disk ({pct}%)",

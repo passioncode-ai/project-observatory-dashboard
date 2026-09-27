@@ -3,6 +3,17 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.6.2 — 2026-09-27
+
+### Added
+
+- **Swap is a disk row.** On macOS the swap files live on the VM volume, which shares the APFS
+  container with the data volume, so memory pressure shrinks free disk. The machine survey now
+  measures them (one `stat` per file; `/proc/swaps` on Linux) as "Swap files (memory written to
+  disk)" on the Machine page, and `machine.disk_low` says how much of the shortfall is swap. Found
+  the evening 0.6.0 shipped: 15 GB of swap was most of an 11 GB fall in free space that no measured
+  place explained.
+
 ## 0.6.1 — 2026-09-27
 
 ### Fixed

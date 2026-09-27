@@ -164,7 +164,8 @@ same summary.
   `config/machine.json` — caches, simulators, VM disks, histories — each with
   how its space comes back. Each place is re-sized every `every_hours`, within
   `disk_budget_seconds` per tick (oldest first; the rest keep their last number),
-  and `du -x` never counts a mounted image as the host disk.
+  and `du -x` never counts a mounted image as the host disk. Swap files are a row too: on
+  macOS they share the disk's container, so memory pressure is disk pressure.
 - **Git hygiene**: every registered checkout's worktrees (clean, dirty,
   missing, in use, idle days) and branches (merged, patch-merged, pushed,
   unique).

@@ -144,7 +144,7 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
 
 #: Values the page translates through `t(...)` with a variable argument — named
 #: here so the catalog test can see them (see DYNAMIC_IDS in tests/test_i18n.py).
-DYNAMIC = ("cache", "toolchain", "build", "simulator", "vm", "worktrees", "user",
+DYNAMIC = ("cache", "toolchain", "build", "simulator", "vm", "worktrees", "user", "swap", "memory",
            "regenerable", "command", "history", "manual", "auto", "clean", "dirty", "missing", "unreadable",
            "branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts",
            "branch-unique", "worktree-dirty", "removed", "pruned", "skipped", "failed")
