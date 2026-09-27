@@ -435,7 +435,7 @@ PUBLIC_SOURCE_ONLY = {
     "all": "historical composite includes private development gates; use local or the opt-in tick",
 }
 WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migrate-local", "open", "agent",
-                      "workspace-backup", "upgrade", "restore"}
+                      "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase"}
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -445,9 +445,12 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   check [runner options]       isolated synthetic regression suites; no live providers
   check-portable               the same explicit portable regression runner
   backup                       historical SQLite-only backup
-  workspace-backup             full private snapshot (requires --writers-stopped)
+  workspace-backup             full private snapshot (requires --writers-stopped);
+                               encrypted into the backups root once a passphrase is set
+  backup-passphrase set|status|show  the passphrase that encrypts backups (stdin)
+  backups status|migrate|decrypt     where backups go; move legacy copies; decrypt one
   upgrade                      preview; --apply requires --writers-stopped
-  restore SNAPSHOT             restore into a new empty workspace
+  restore SNAPSHOT             restore a snapshot dir or encrypted .obsnap into a new empty workspace
   tick                         configured cycle; scheduler must be explicitly enabled
 
 Local excludes metric plugins, provider collectors, secret scans and model calls.

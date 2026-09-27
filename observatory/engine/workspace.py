@@ -387,6 +387,7 @@ def doctor(base: Path) -> dict:
             "features": doc.get("features", {}),
             "interface": {"locale": doc.get("interface", {}).get("locale", "en")},
             "coverage_warnings": coverage_warnings(doc),
+            "backups": __import__("backup_vault").status(base),
             # PB-132: a dead or interrupted tick cannot report itself.
             "tick": _tick_health(base, doc),
             "credentials": "values are never returned", "network_calls": 0}
@@ -411,12 +412,22 @@ def main(argv: list[str]) -> int:
     migration.add_argument("--apply", action="store_true")
     migration.add_argument("--writers-stopped", action="store_true")
     conf = sub.add_parser("configure")
-    conf.add_argument("section", choices=["sources", "integrations", "features", "interface"])
+    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage"])
     conf.add_argument("name")
     conf.add_argument("value")
+    phrase = sub.add_parser("backup-passphrase")
+    phrase.add_argument("action", choices=["set", "status", "show"])
+    backups = sub.add_parser("backups")
+    backups.add_argument("action", choices=["status", "migrate", "decrypt"])
+    backups.add_argument("file", nargs="?", type=Path)
+    backups.add_argument("output", nargs="?", type=Path)
     a = ap.parse_args(argv)
     try:
         base = config.home()
+        if a.command == "backup-passphrase":
+            return _passphrase_command(base, a.action)
+        if a.command == "backups":
+            return _backups_command(base, a)
         if a.command == "init":
             result = initialize(base)
         elif a.command == "version":
@@ -435,7 +446,14 @@ def main(argv: list[str]) -> int:
             doc = config.load(base)
             if not re_safe_name(a.name):
                 raise config.ConfigurationError("Invalid configuration name")
-            if a.section == "interface":
+            if a.section == "storage":
+                if a.name not in config.STORAGE_SETTINGS:
+                    raise config.ConfigurationError(f"Unknown storage setting: {a.name}; known: {', '.join(config.STORAGE_SETTINGS)}")
+                value = Path(a.value).expanduser()
+                if not value.is_absolute():
+                    raise config.ConfigurationError("Storage path must be absolute")
+                value = str(value)
+            elif a.section == "interface":
                 choices = config.INTERFACE_SETTINGS.get(a.name)
                 if choices is None:
                     raise config.ConfigurationError(f"Unknown interface setting: {a.name}; known: {', '.join(config.INTERFACE_SETTINGS)}")
@@ -464,6 +482,67 @@ def main(argv: list[str]) -> int:
     except (config.ConfigurationError, OSError, sqlite3.Error) as exc:
         print(f"Observatory: {exc}", file=__import__('sys').stderr)
         return 2
+
+
+def _passphrase_command(base: Path, action: str) -> int:
+    """`set` reads stdin (a terminal gets a hidden prompt, twice); `show` prints only
+    to a terminal, because a value printed into a pipe lands in whatever captures
+    it — an agent transcript outlives the backup it protects."""
+    import backup_vault
+    config.validate_workspace(base, required=True)
+    if action == "status":
+        print(json.dumps({"passphrase": "configured" if backup_vault.passphrase(base) else "missing",
+                          "file": str(backup_vault.passphrase_file(base))}, indent=2))
+        return 0
+    if action == "show":
+        if not sys.stdout.isatty():
+            print("Observatory: refusing to print the backup passphrase anywhere but a terminal", file=sys.stderr)
+            return 2
+        value = backup_vault.passphrase(base)
+        if not value:
+            print("Observatory: no backup passphrase is configured", file=sys.stderr)
+            return 2
+        print(value)
+        return 0
+    if sys.stdin.isatty():
+        import getpass
+        value = getpass.getpass("New backup passphrase: ")
+        if value != getpass.getpass("Repeat it: "):
+            print("Observatory: the two entries differ; nothing was changed", file=sys.stderr)
+            return 2
+    else:
+        value = sys.stdin.readline().rstrip("\n")
+    file = backup_vault.set_passphrase(base, value)
+    print(json.dumps({"status": "configured", "file": str(file),
+                      "next": "keep this passphrase outside this machine; a restore elsewhere needs it"}, indent=2))
+    return 0
+
+
+def _backups_command(base: Path, a) -> int:
+    import backup_vault
+    config.validate_workspace(base, required=True)
+    if a.action == "status":
+        result = backup_vault.status(base)
+    elif a.action == "migrate":
+        with lock(base):
+            result = backup_vault.migrate(base)
+    else:
+        if not a.file or not a.output:
+            raise config.ConfigurationError("Usage: backups decrypt FILE OUTPUT")
+        if a.output.exists():
+            raise config.ConfigurationError("Decrypt output must not exist")
+        secret = backup_vault.require_passphrase(base, prompt=True)
+        header = backup_vault.verify_file(a.file, secret)
+        if header.get("content") == "tar+gzip":
+            stage = backup_vault.extract_tree(a.file, a.output.resolve().parent, secret)
+            os.rename(stage, a.output)
+        else:
+            fd = os.open(a.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as out:
+                backup_vault.decrypt_to(a.file, out, secret)
+        result = {"status": "decrypted", "kind": header.get("kind"), "output": str(a.output)}
+    print(json.dumps(result, indent=2))
+    return 0
 
 
 def re_safe_name(value: str) -> bool:

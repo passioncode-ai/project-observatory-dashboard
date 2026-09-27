@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "project-observatory"
-version = "0.4.0"
+version = "0.4.1"
 description = "A local observation layer for agent-operated projects"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -42,7 +42,7 @@ project-observatory = "observatory.cli:main"
 packages = ["observatory"]
 
 [project.optional-dependencies]
-full = ["mcp==2.2.0", "jsonschema==4.26.0", "sqlite-vec==0.1.9", "google-auth==2.58.0"]
+full = ["mcp==2.2.0", "jsonschema==4.26.0", "sqlite-vec==0.1.9", "google-auth==2.58.0", "cryptography==50.0.1"]
 
 [tool.setuptools.package-data]
 observatory = ["engine/**/*", "engine/skill/.claude-plugin/*.json", "engine/skill/plugins/*/.claude-plugin/*.json"]

@@ -240,6 +240,49 @@ snapshot directory to `full restore`. Never point old code at newer data to
 simulate a downgrade. [COMPATIBILITY.md](COMPATIBILITY.md) specifies supported
 formats, failure handling, backup exclusions and the tested migration matrix.
 
+### Encrypted backups off this disk
+
+Every copy the engine keeps — the daily database copy, `workspace-backup`
+snapshots and the snapshot `upgrade --apply` takes first — is written to one
+**backups root**, encrypted, once a passphrase is configured:
+
+```sh
+project-observatory full backup-passphrase set     # stdin; a terminal prompts twice
+project-observatory full backups status            # root, which rule chose it, what exists
+project-observatory full backups migrate           # move the newest legacy copies there, encrypted
+```
+
+The root is chosen in this order: `OBSERVATORY_BACKUPS`, then
+`project-observatory full configure storage backups /absolute/path`, then the
+platform default — on macOS `~/Documents/Project Observatory/Backups`, which
+iCloud Desktop & Documents syncs off the machine; elsewhere `<home>/backups`.
+Each workspace writes into its own subfolder (`<home-name>-<instance>`), so two
+workspaces sharing one root never rotate each other's files. Three artifacts
+per kind are kept (`observatory-db-*.obsdb`, `snapshot-*.obsnap`,
+`before-upgrade-*.obsnap`); a new one is decrypted in full before anything
+older is pruned.
+
+The format is `OBSENC1`: AES-256-GCM in authenticated chunks, key derived from
+the passphrase by scrypt (N=2^17, r=8, p=1), header bound as associated data,
+last chunk flagged — a truncated, reordered, extended or re-headed file fails
+to decrypt instead of decrypting to less. A snapshot includes `secrets/`,
+which is why nothing reaches the root unencrypted: **without a passphrase,
+copies stay inside the workspace, plaintext, on this disk only**, and `full
+doctor` says so under `backups.warnings`.
+
+The passphrase lives in `<home>/secrets/backup-passphrase` (mode 600).
+`backup-passphrase show` prints it only to a terminal. Keep a copy outside the
+machine: restoring elsewhere needs it, and nothing can recover it.
+
+```sh
+# On another machine: the passphrase from the environment or a prompt
+OBSERVATORY_BACKUP_PASSPHRASE=… project-observatory --home NEW_EMPTY_HOME full restore snapshot-….obsnap
+project-observatory full backups decrypt observatory-db-….obsdb ./copy.db
+```
+
+`workspace-backup --output DIR` still writes a plaintext snapshot directory
+where you name it; that is an explicit choice and it is not encrypted.
+
 For an original installation whose state lived beside source, set a new home
 and run `full migrate-local ORIGINAL_DIRECTORY` to preview. Apply requires
 `--apply --writers-stopped`. It leaves the original in place and does not start

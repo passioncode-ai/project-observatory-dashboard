@@ -3,6 +3,32 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.4.1 — 2026-09-27
+
+### Added
+
+- **Encrypted backups off this disk.** One backups root for every copy the engine keeps: the daily
+  database copy, `workspace-backup` snapshots and the snapshot `upgrade --apply` takes first. On macOS
+  it defaults to `~/Documents/Project Observatory/Backups` (iCloud Desktop & Documents carries it off
+  the machine); elsewhere to `<home>/backups`. Override with `OBSERVATORY_BACKUPS` or
+  `full configure storage backups PATH`. Everything written there is encrypted — AES-256-GCM in
+  authenticated chunks, scrypt-derived key — with a passphrase set by `full backup-passphrase set`.
+- `full backups status|migrate|decrypt`; `full restore` accepts an encrypted `.obsnap` file, taking the
+  passphrase from `OBSERVATORY_BACKUP_PASSPHRASE` or a terminal prompt.
+- `storage` in `config/settings.json` (`{"backups": "/absolute/path"}`). Releases before 0.4.1 ignore it.
+- `full doctor` reports `backups`: root, the rule that chose it, whether it is encrypted, the newest
+  artifact per kind, and warnings — never the passphrase.
+
+### Changed
+
+- **Snapshots rotate.** Three per kind are kept, locally and in the root. Before this release
+  `<home>/backups` grew by one snapshot per upgrade and per manual backup, with no limit.
+- Without a passphrase nothing leaves the workspace: copies stay where they were, unencrypted, and
+  `doctor` warns. A plaintext copy never reaches the backups root.
+- The tick asks `tools/backup_store.py --due` whether a daily copy is due, instead of searching one
+  directory for one file name; the copy may now live in either place.
+- `cryptography` is a declared dependency of the `full` extra (it was already in the lock file).
+
 ## 0.4.0 — 2026-09-26
 
 Project Observatory is now a PassionCode.ai product. The repository lives at
