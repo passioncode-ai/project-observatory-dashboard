@@ -449,8 +449,8 @@
       "path": "dashboard/machine_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "966d4240013b41786f9b18d2470f151d08893f04b9039a538afc94c8021b8757",
-      "bytes": 9196
+      "export_sha256": "dd23af31a42bb482bf0048dec5eeba94ac87690db723506f421ccd3f9e317916",
+      "bytes": 9365
     },
     {
       "path": "dashboard/shell.py",

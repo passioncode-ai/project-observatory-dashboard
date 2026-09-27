@@ -13,6 +13,11 @@ import html
 from i18n import Translator
 
 ROWS = 20
+#: Attributes built outside the f-strings: Python 3.11 allows no backslash and no
+#: reused quote inside an f-string expression, and the engine supports 3.11.
+NUM = ' class="num"'
+EMPTY = ' class="empty"'
+HEADING = ' class="machine-h"'
 
 
 def _e(v) -> str:
@@ -25,13 +30,13 @@ def _gb(mb) -> str:
 
 def _table(t: Translator, caption: str, heads: list[tuple[str, bool]], rows: list[list[str]], empty: str) -> str:
     """One card: a heading, a table with labelled cells (narrow screens stack them)."""
-    head = t.mark(caption, tag="h2", attrs=' class="machine-h"')
+    head = t.mark(caption, tag="h2", attrs=HEADING)
     if not rows:
-        return f'<section class="card panel">{head}{t.mark(empty, tag="p", attrs=" class=\"empty\"")}</section>'
-    th = "".join(f'<th scope="col"{" class=\"num\"" if num else ""}>{t.mark(h)}</th>' for h, num in heads)
+        return f'<section class="card panel">{head}{t.mark(empty, tag="p", attrs=EMPTY)}</section>'
+    th = "".join(f'<th scope="col"{NUM if num else ""}>{t.mark(h)}</th>' for h, num in heads)
     body = []
     for r in rows:
-        cells = "".join(f'<td{" class=\"num\"" if num else ""} data-label="{_e(t(h))}">{c}</td>'
+        cells = "".join(f'<td{NUM if num else ""} data-label="{_e(t(h))}">{c}</td>'
                         for (h, num), c in zip(heads, r))
         body.append(f"<tr>{cells}</tr>")
     return (f'<section class="card panel">{head}<table><thead><tr>{th}</tr></thead>'
@@ -132,7 +137,7 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     degraded = m.get("degraded") or []
     if degraded:
         items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span> — {_e(d.get("reason"))}</li>' for d in degraded)
-        parts.append(f'<section class="card panel">{t.mark("Not measured", tag="h2", attrs=" class=\"machine-h\"")}<ul>{items}</ul></section>')
+        parts.append(f'<section class="card panel">{t.mark("Not measured", tag="h2", attrs=HEADING)}<ul>{items}</ul></section>')
     parts.append("</section>")
     return "".join(parts)
 
