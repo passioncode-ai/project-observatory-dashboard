@@ -73,11 +73,31 @@ def _python_ids(path: Path) -> tuple[set[str], str]:
     return ids, template
 
 
+def machine_page_ids() -> set[str]:
+    """The Machine page's ids: `t`/`mark` literals, every literal passed to
+    `_table` (caption, column heads, empty text) and the values it translates
+    through a variable (`machine_page.DYNAMIC`)."""
+    tree = ast.parse((DASH / "machine_page.py").read_text(encoding="utf-8"))
+    ids, _ = _python_ids(DASH / "machine_page.py")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_table":
+            for arg in node.args[1:]:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    ids.add(arg.value)
+                elif isinstance(arg, ast.List):
+                    ids |= {e.elts[0].value for e in arg.elts
+                            if isinstance(e, ast.Tuple) and isinstance(e.elts[0], ast.Constant)}
+    sys.path.insert(0, str(DASH))
+    import machine_page
+    return ids | set(machine_page.DYNAMIC)
+
+
 def source_ids() -> set[str]:
     """Every message id named in the dashboard's code and static markup."""
     ids, template = _python_ids(DASH / "build_dashboard.py")
     shell_ids, _ = _python_ids(DASH / "shell.py")
     ids |= shell_ids
+    ids |= machine_page_ids()
     literal = r'(["\'])((?:\\.|(?!\1).)+?)\1'
     for m in re.finditer(r"\bT\(\s*" + literal, template):
         ids.add(m.group(2).replace('\\"', '"').replace("\\'", "'"))

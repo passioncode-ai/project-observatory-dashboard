@@ -11,7 +11,7 @@ revision and cannot satisfy the manifest, which pins the revision as a schema
 None of that is reconstructed here — the SDK owns the wire, and this file owns
 the tools.
 
-Seven tools read. Two write, and they write only PROPOSALS: `observatory_record`
+Eight tools read. Two write, and they write only PROPOSALS: `observatory_record`
 appends to the append-only ledger in state `proposed`, and
 `observatory_propose` queues a registry change without touching
 `registry/*.json`. Neither can approve its own proposal, and neither invents a
@@ -51,7 +51,7 @@ server = MCPServer(
     # served and two of them write — and the gateway's own comment repeated the
     # same claim in Russian.
     instructions=(
-        "Seven tools read and two write.\n"
+        "Eight tools read and two write.\n"
         "READ: `observatory_status` surveys the current scope; a requested scan pin "
         "is reported as unsupported in degraded. `observatory_project` answers about "
         "one project; `observatory_timeline` returns its commit history; "
@@ -61,7 +61,10 @@ server = MCPServer(
         "alone when a spend guardrail is reached, saying so in `degraded`; "
         "`observatory_credentials` names what a project can authenticate with and "
         "CANNOT return a value — use the `use` command it hands back instead of "
-        "opening the file, because a transcript outlives the key it quotes.\n"
+        "opening the file, because a transcript outlives the key it quotes; "
+        "`observatory_machine` shows what runs by origin, memory, disk, idle worktrees "
+        "and branches and the cleanup plan, and with `explainPid` why one process "
+        "runs — never its environment or full command line.\n"
         "WRITE: `observatory_record` and `observatory_propose` append to the ledger. "
         "Everything they write lands `proposed` with confidence below 1 and NOTHING "
         "here can promote it — that is the operator's act or a second independent "
@@ -247,6 +250,27 @@ def observatory_credentials(
     value elsewhere.
     """
     return survey_mod.credentials(projectId)
+
+
+@server.tool()
+def observatory_machine(
+    explainPid: Annotated[int | None, Field(validation_alias=AliasChoices("explainPid", "explain_pid", "pid"),
+                                            description="A process id to explain: its origin, ancestry, and "
+                                                        "witr's service/port detail when witr is installed")] = None,
+) -> dict[str, Any]:
+    """The machine this estate runs on: processes grouped by ORIGIN (agent
+    session, launchd job, simulator, app, detached), memory and swap, free disk
+    and the largest cache/VM/history locations, worktrees and branches by class,
+    and the cleanup plan with its journal.
+
+    Read-only. It never kills a process or deletes a file: the auto tier of the
+    cleanup runs in the tick when the operator enabled it, and anything that
+    holds unique work only through `full cleanup --apply --include manual`.
+    A process is reported by executable and script, never by its environment or
+    full command line, because either can carry a credential.
+    """
+    import machine_view
+    return machine_view.summary(explainPid)
 
 
 @server.tool()

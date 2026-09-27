@@ -346,6 +346,10 @@ FEATURE_STEPS = {
     "sweep": "fixture_cleanup", "retention": "retention",
     "project-into-vault": "wiki_projection", "projection": "wiki_projection",
     "scrub-companion": "companion_remediation", "registry": "registry_history",
+    # The machine survey (processes, memory, disk, worktrees, branches) and the
+    # cleanup that acts on it. `cleanup` runs its auto tier only when
+    # features.auto_cleanup is ALSO true; with it off, the step writes the plan.
+    "machine": "machine_watch", "git-hygiene": "machine_watch", "cleanup": "machine_watch",
 }
 
 

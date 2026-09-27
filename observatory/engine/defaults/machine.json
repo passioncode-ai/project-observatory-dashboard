@@ -1,0 +1,29 @@
+{
+ "_why": "Where disk goes outside the projects folder, and what each place is. `~` is the user's home; a missing path is skipped, never an error. `reclaim` says how the space comes back: `regenerable` (a tool rebuilds it on demand), `command` (the tool's own cleanup, named in `command`), `history` (someone's record — never deleted by the observatory), `manual` (needs a person). Measured every `every_hours`, because sizing a large tree takes minutes. Thresholds raise findings; nothing here deletes anything.",
+ "every_hours": 12,
+ "free_space_warning_percent": 15,
+ "free_space_critical_percent": 5,
+ "memory_group_warning_mb": 4096,
+ "locations": [
+  {"path": "~/Library/Caches", "kind": "cache", "label": "Application caches (macOS)", "reclaim": "regenerable"},
+  {"path": "~/.cache", "kind": "cache", "label": "Tool caches", "reclaim": "regenerable"},
+  {"path": "~/.npm", "kind": "cache", "label": "npm cache", "reclaim": "command", "command": "npm cache clean --force"},
+  {"path": "~/Library/pnpm/store", "kind": "cache", "label": "pnpm store", "reclaim": "command", "command": "pnpm store prune"},
+  {"path": "~/.cache/uv", "kind": "cache", "label": "uv cache", "reclaim": "command", "command": "uv cache prune"},
+  {"path": "~/.gradle/caches", "kind": "cache", "label": "Gradle caches", "reclaim": "regenerable"},
+  {"path": "~/.cargo/registry", "kind": "cache", "label": "Cargo registry", "reclaim": "regenerable"},
+  {"path": "~/.rustup/toolchains", "kind": "toolchain", "label": "Rust toolchains", "reclaim": "command", "command": "rustup toolchain list"},
+  {"path": "~/Library/Developer/Xcode/DerivedData", "kind": "build", "label": "Xcode DerivedData", "reclaim": "regenerable"},
+  {"path": "/Library/Developer/CoreSimulator", "kind": "simulator", "label": "iOS simulator runtimes", "reclaim": "command", "command": "xcrun simctl runtime list"},
+  {"path": "~/Library/Developer/CoreSimulator", "kind": "simulator", "label": "Simulator devices", "reclaim": "command", "command": "xcrun simctl delete unavailable"},
+  {"path": "~/Library/Android/sdk", "kind": "toolchain", "label": "Android SDK", "reclaim": "manual"},
+  {"path": "~/Library/Group Containers/HUAQ24HBR6.dev.orbstack", "kind": "vm", "label": "OrbStack VM disk", "reclaim": "command", "command": "docker system df"},
+  {"path": "~/Library/Containers/com.docker.docker", "kind": "vm", "label": "Docker Desktop VM disk", "reclaim": "command", "command": "docker system df"},
+  {"path": "~/.codex/worktrees", "kind": "worktrees", "label": "Codex worktrees", "reclaim": "manual"},
+  {"path": "~/.codex/sessions", "kind": "history", "label": "Codex sessions", "reclaim": "history"},
+  {"path": "~/.codex/archived_sessions", "kind": "history", "label": "Codex archived sessions", "reclaim": "history"},
+  {"path": "~/.claude/projects", "kind": "history", "label": "Claude Code transcripts", "reclaim": "history"},
+  {"path": "~/Library/Caches/com.openai.codex", "kind": "cache", "label": "Codex app update downloads", "reclaim": "regenerable"},
+  {"path": "~/Downloads", "kind": "user", "label": "Downloads", "reclaim": "manual"}
+ ]
+}

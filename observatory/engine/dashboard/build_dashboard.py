@@ -861,12 +861,19 @@ def build():
                           } for d in DOMAINS],
                           "updated": pdoc.get("updated_on", ""),
                           "measured": store["health"].get("last_scan", "")}
+    # THE MACHINE, read from what the tick's machine/git-hygiene/cleanup steps
+    # wrote; only the Machine page carries it (shell.slice_for).
+    try:
+        import machine_view
+        PAYLOAD["machine"] = machine_view.summary()
+    except Exception as exc:  # noqa: BLE001 — a page, not a crash
+        PAYLOAD["machine"] = {"degraded": [{"source": "machine", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
     build.last_payload = PAYLOAD                                                  
     payload = json.dumps(PAYLOAD, ensure_ascii=False)
     locale = build_locale()
     t = i18n.Translator(locale)
     title = "Projects — the operator's registry"
-    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "")
+    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "").replace("__MACHINE__", "")
             .replace("__TITLE__", html.escape(t(title)))
             .replace("__PAGE_TITLE__", "")
             .replace("__H1__", t.mark(title, tag="h1"))
@@ -1348,7 +1355,13 @@ body[data-page]:not([data-page="health"]) #queue-s { display: none; }
 body[data-page]:not([data-page="projects"]) #reading,
 body[data-page]:not([data-page="projects"]) #dups-s { display: none; }
 body[data-page="index"] #out, body[data-page="findings"] #out, body[data-page="health"] #out,
-body[data-page="index"] #panel, body[data-page="findings"] #panel, body[data-page="health"] #panel { display: none; }
+body[data-page="machine"] #out, body[data-page="machine"] #list-tools,
+body[data-page="index"] #panel, body[data-page="findings"] #panel, body[data-page="health"] #panel,
+body[data-page="machine"] #panel { display: none; }
+/* The Machine page: server-rendered cards (dashboard/machine_page.py). */
+.machine-h { font: 600 var(--t-section) var(--font-ui); margin: 0 0 var(--space-3); }
+#machine thead th.num { text-align: right; }
+.machine-at, .machine-hint { color: var(--muted); font-size: var(--t-label); margin-top: var(--space-3); }
 body[data-page="findings"] .flist.folded .finfo, body[data-page="findings"] .flist.folded .fwarning { display: block; }
 /* The index page puts the inventory tiles first and the work tiles after
  * them. */
@@ -1495,6 +1508,7 @@ __NAV__
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <section id="panel" class="card panel" role="dialog" aria-labelledby="panel-title" hidden></section>
 __CARDS__
+__MACHINE__
 <div id="list-tools" class="list-tools"></div>
 <main id="out" aria-live="polite"></main>
 

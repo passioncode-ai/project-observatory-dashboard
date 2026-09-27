@@ -398,6 +398,8 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(config.SOURCE / "tools"))
         module = __import__("dashboard_open" if argv[0] == "open" else "agent_plugin")
         return module.main(argv[1:])
+    if argv and argv[0] in {"machine", "cleanup"}:
+        return machine_command(argv[0], argv[1:])
     if argv and argv[0] in {"workspace-backup", "upgrade", "restore"}:
         import workspace_upgrade
         return workspace_upgrade.main(["backup" if argv[0] == "workspace-backup" else argv[0], *argv[1:]])
@@ -482,6 +484,38 @@ def main(argv: list[str]) -> int:
     except (config.ConfigurationError, OSError, sqlite3.Error) as exc:
         print(f"Observatory: {exc}", file=__import__('sys').stderr)
         return 2
+
+
+def machine_command(name: str, argv: list[str]) -> int:
+    """`machine [--disk] [--explain PID]` surveys and prints; `cleanup [--apply]
+    [--include manual]` refreshes the git survey, then plans or acts."""
+    config.validate_workspace(config.home(), required=True)
+    for sub in ("collectors", "tools"):
+        sys.path.insert(0, str(config.SOURCE / sub))
+    import paths
+    import scan_machine
+    if name == "machine":
+        if "--explain" in argv:
+            try:
+                pid = int(argv[argv.index("--explain") + 1])
+            except (IndexError, ValueError):
+                print("Observatory: --explain takes a process id", file=sys.stderr)
+                return 2
+            print(json.dumps(scan_machine.explain(pid), indent=1, ensure_ascii=False))
+            return 0
+        out = paths.SCRATCH / "machine.json"
+        scan_machine.main(["scan_machine.py", str(out), *(["--disk"] if "--disk" in argv else [])])
+        doc = json.loads(out.read_text(encoding="utf-8"))
+        print(json.dumps({"memory": doc["memory"], "volume": doc["disk"]["volume"],
+                          "largest_origins": doc["processes"].get("groups", [])[:12],
+                          "largest_locations": (doc["disk"].get("locations") or [])[:12],
+                          "page": "projects-dashboard.html → Machine"}, indent=1, ensure_ascii=False))
+        return 0
+    import scan_git_hygiene
+    import cleanup
+    scan_git_hygiene.main(["scan_git_hygiene.py", str(paths.SCRATCH / "git-hygiene.json")])
+    args = ["cleanup.py"] + (["--apply"] if "--apply" in argv else []) + (["manual"] if "manual" in argv else [])
+    return cleanup.main(args)
 
 
 def _passphrase_command(base: Path, action: str) -> int:

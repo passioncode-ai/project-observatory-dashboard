@@ -37,6 +37,7 @@ PAGES: tuple[tuple[str, str, str], ...] = (
     ("mcp",      "MCP",       "table"),
     ("traffic",  "Traffic",   "table"),
     ("health",   "Health",    "health"),
+    ("machine",  "Machine",   "machine"),
 )
 #: THE QUESTION EACH PAGE ANSWERS, in the reader's words (IS-01/IS-02; backlog
 #: D-03). Nine pages shared one `<title>` and one `<h1>` until 2026-09-14: a
@@ -54,6 +55,7 @@ QUESTIONS: dict[str, str] = {
     "mcp":      "Agent servers, connections and reachability.",
     "traffic":  "Product audiences, data sources and linked projects.",
     "health":   "Observer state, data freshness and the decision queue.",
+    "machine":  "What runs on this machine, where memory and disk go, and what was cleaned.",
 }
 #: The product's name is never translated (docs/brand/locales/*.md).
 TITLE_SUFFIX = "Project Observatory"
@@ -69,7 +71,7 @@ NAV_GROUPS = (
     ("work", "Work", ("index", "projects", "findings")),
     ("infrastructure", "Infrastructure", ("heroku", "domains", "traffic")),
     ("access", "Access", ("creds", "env", "mcp")),
-    ("system", "System", ("health",)),
+    ("system", "System", ("health", "machine")),
 )
 OVERVIEW_FINDINGS_LIMIT = 8
 
@@ -85,6 +87,12 @@ def brand_html(t: Translator) -> str:
     return ('<a class="brand" href="index.html">'
             f'<img class="brand-mark" src="{ICON}" width="32" height="32" alt="">'
             f'<span class="brand-name"><strong>{TITLE_SUFFIX}</strong>{family}</span></a>')
+
+
+def _machine(payload: dict, t: Translator) -> str:
+    """The Machine page's body, rendered at build time (dashboard/machine_page.py)."""
+    import machine_page
+    return machine_page.machine_html(payload, t)
 
 
 def locale_switch_html(t: Translator) -> str:
@@ -230,7 +238,7 @@ def slice_for(page: str, payload: dict) -> dict:
     # small enough to ride everywhere, which is what the projects column and the
     # project panel read.
     heavy = {"env": "env", "heroku": "heroku", "creds": "creds", "mcp": "mcp",
-             "google": "traffic"}
+             "google": "traffic", "machine": "machine"}
     out = dict(payload)
     # WHAT PRODUCTION HOLDS is read by exactly the two pages that can say
     # something about it: the Heroku row and the ENV row.
@@ -345,4 +353,5 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
             .replace("__SUB__", t.mark(QUESTIONS[page]) if page in QUESTIONS else "")
             .replace("__NAV__", nav_html(page, counts, t))
             .replace("__CARDS__", cards_html(payload, counts, t) if page == "index" else "")
+            .replace("__MACHINE__", _machine(payload, t) if page == "machine" else "")
             .replace("__DATA__", data.replace("</", "<\\/")))
