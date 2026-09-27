@@ -21,8 +21,8 @@ WHAT IT NEVER KEEPS. A command line can carry a token (`--api-key=…`,
 `?token=…`), and witr's JSON carries the whole environment. Neither is stored:
 a process is kept as its executable and, for an interpreter, the script it runs.
 
-    scan_machine.py OUT.json            survey (disk sizes reused while fresh)
-    scan_machine.py OUT.json --disk     re-measure disk locations now
+    scan_machine.py OUT.json            survey; disk places sized within a time budget, oldest first
+    scan_machine.py OUT.json --disk     size every place now, with the larger manual budget
     scan_machine.py --explain PID       why this process is running (witr if installed)
 """
 from __future__ import annotations
@@ -316,46 +316,76 @@ def volume() -> dict:
             "free_percent": round(100 * st.free / st.total, 1) if st.total else None}
 
 
-def size_kb(path: pathlib.Path, timeout: int = 900) -> int | None:
-    out = run(["du", "-sk", str(path)], timeout=timeout)
-    if out is None:
-        # du exits non-zero when one file is unreadable but still prints a total.
-        try:
-            p = subprocess.run(["du", "-sk", str(path)], capture_output=True, text=True, timeout=timeout)
-            out = p.stdout
-        except (OSError, subprocess.SubprocessError):
-            return None
+def size_kb(path: pathlib.Path, timeout: float) -> int | None:
+    """One `du -skx`: -x stays on the path's own file system, so a mounted
+    simulator image or VM volume is not counted as the host disk's usage. du
+    exits non-zero when one entry is unreadable yet still prints the total, so
+    the total is read regardless; a timeout means "not measured", never zero."""
     try:
-        return int(out.split()[0])
+        p = subprocess.run(["du", "-skx", str(path)], capture_output=True, text=True, timeout=max(1.0, timeout))
+    except subprocess.TimeoutExpired:
+        return None
+    except (OSError, subprocess.SubprocessError):
+        return None
+    try:
+        return int(p.stdout.split()[0])
     except (IndexError, ValueError):
         return None
 
 
+def _stamp_age(stamp: str | None) -> float:
+    try:
+        return time.time() - datetime.strptime(stamp or "", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return float("inf")
+
+
 def survey_disk(previous: dict | None, force: bool) -> dict:
+    """Size the configured places within a time BUDGET per run.
+
+    WHY A BUDGET. Sizing is `du` over trees of millions of files; on a machine
+    under memory pressure with simulators running, one location took minutes and
+    the whole survey held the tick for over twenty (measured 2026-09-27). So
+    each run measures the places whose numbers are oldest first, stops when
+    `disk_budget_seconds` is spent, and keeps every other place's last number
+    with its own `measured_at`. A place that never fits is reported, not guessed.
+    `--disk` (the operator, at a terminal) takes `disk_budget_seconds_manual`."""
     cfg = machine_config()
-    every = float(cfg.get("every_hours", 12))
-    prev = (previous or {}).get("disk") or {}
-    fresh = prev.get("measured_at") and not force and \
-        time.time() - datetime.strptime(prev["measured_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp() < every * 3600
+    every = float(cfg.get("every_hours", 12)) * 3600
+    budget = float(cfg.get("disk_budget_seconds_manual" if force else "disk_budget_seconds", 900 if force else 90))
+    per = float(cfg.get("disk_location_timeout_seconds", 60))
+    prev = {r["path"]: r for r in ((previous or {}).get("disk") or {}).get("locations") or [] if isinstance(r, dict)}
     out = {"volume": volume(), "thresholds": {k: cfg.get(k) for k in ("free_space_warning_percent", "free_space_critical_percent")}}
-    if fresh:
-        out.update({k: prev[k] for k in ("locations", "measured_at") if k in prev})
-        out["reused"] = True
-        return out
-    rows, degraded = [], []
+    wanted = []
     for loc in cfg.get("locations") or []:
         path = pathlib.Path(os.path.expanduser(loc["path"]))
-        if not path.exists():
-            continue
-        kb = size_kb(path)
+        if path.exists():
+            wanted.append((loc, path))
+    due = sorted((x for x in wanted if force or _stamp_age(prev.get(x[0]["path"], {}).get("measured_at")) >= every),
+                 key=lambda x: -_stamp_age(prev.get(x[0]["path"], {}).get("measured_at")))
+    started, measured, degraded = time.monotonic(), {}, []
+    for loc, path in due:
+        left = budget - (time.monotonic() - started)
+        if left <= 1:
+            break
+        kb = size_kb(path, min(per, left))
         if kb is None:
-            degraded.append({"source": loc["path"], "reason": "could not be sized (timeout or permission)"})
+            degraded.append({"source": loc["path"], "reason": f"not sized within {min(per, left):.0f} s; the last number is kept"})
             continue
-        rows.append({**{k: loc[k] for k in ("path", "kind", "label", "reclaim") if k in loc},
-                     **({"command": loc["command"]} if loc.get("command") else {}),
-                     "gb": round(kb / 1048576, 2)})
+        measured[loc["path"]] = {"gb": round(kb / 1048576, 2), "measured_at": now()}
+    rows = []
+    for loc, _path in wanted:
+        base = {**{k: loc[k] for k in ("path", "kind", "label", "reclaim") if k in loc},
+                **({"command": loc["command"]} if loc.get("command") else {})}
+        if loc["path"] in measured:
+            rows.append({**base, **measured[loc["path"]]})
+        elif loc["path"] in prev and "gb" in prev[loc["path"]]:
+            old = prev[loc["path"]]
+            rows.append({**base, "gb": old["gb"], "measured_at": old.get("measured_at") or
+                         ((previous or {}).get("disk") or {}).get("measured_at")})
     rows.sort(key=lambda r: -r["gb"])
-    out.update({"locations": rows, "measured_at": now()})
+    pending = len([1 for loc, _p in wanted if loc["path"] not in measured and loc["path"] not in prev])
+    out.update({"locations": rows, "measured_at": now(), "measured_now": len(measured), "never_measured": pending})
     if degraded:
         out["degraded"] = degraded
     return out
@@ -413,7 +443,8 @@ def main(argv: list[str]) -> int:
     p = doc["processes"]
     print(f"machine: {p.get('count', 0)} processes in {len(p.get('groups') or [])} origins; "
           f"free {doc['disk']['volume']['free_gb']} GB ({doc['disk']['volume']['free_percent']}%); "
-          f"disk locations {'reused' if doc['disk'].get('reused') else 'measured'}")
+          f"disk places sized now {doc['disk'].get('measured_now', 0)} of {len(doc['disk'].get('locations') or [])}"
+          + (f", {len(doc['disk']['degraded'])} over time" if doc['disk'].get('degraded') else ""))
     return 0
 
 

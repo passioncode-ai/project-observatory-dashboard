@@ -115,6 +115,59 @@ class Origins(unittest.TestCase):
         self.assertEqual(out["witr"]["source"]["Type"], "launchd")
 
 
+class DiskBudget(Base):
+    def config(self, **extra):
+        places = []
+        for name in ("a", "b", "c"):
+            (self.base / name).mkdir()
+            places.append({"path": str(self.base / name), "kind": "cache", "label": name, "reclaim": "regenerable"})
+        (self.home / "config/machine.json").write_text(json.dumps({"every_hours": 12, "disk_budget_seconds": 2,
+                                                                   "disk_location_timeout_seconds": 5,
+                                                                   "locations": places, **extra}))
+
+    def test_budget_oldest_first_and_previous_kept(self):
+        import scan_machine as sm
+        self.config()
+        prev = {"disk": {"locations": [
+            {"path": str(self.base / "a"), "gb": 1.0, "measured_at": "2026-01-01T00:00:00Z"},
+            {"path": str(self.base / "b"), "gb": 2.0, "measured_at": "2026-01-02T00:00:00Z"},
+            {"path": str(self.base / "c"), "gb": 3.0, "measured_at": "2026-01-03T00:00:00Z"}]}}
+        calls = []
+        def slow(path, timeout):
+            calls.append(Path(path).name)
+            time.sleep(0.6)
+            return 1048576 * 9
+        with patch.object(sm, "size_kb", side_effect=slow):
+            out = sm.survey_disk(prev, force=False)
+        self.assertEqual(calls, ["a", "b"])                     # oldest first, stops at the budget
+        rows = {Path(r["path"]).name: r for r in out["locations"]}
+        self.assertEqual(rows["a"]["gb"], 9.0)
+        self.assertEqual(rows["c"]["gb"], 3.0)                  # not re-measured: last number kept
+        self.assertEqual(rows["c"]["measured_at"], "2026-01-03T00:00:00Z")
+        self.assertEqual(out["measured_now"], 2)
+
+    def test_timeout_is_reported_not_zero(self):
+        import scan_machine as sm
+        self.config(disk_budget_seconds=30)
+        prev = {"disk": {"locations": [{"path": str(self.base / "a"), "gb": 4.0, "measured_at": "2026-01-01T00:00:00Z"}]}}
+        with patch.object(sm, "size_kb", return_value=None):
+            out = sm.survey_disk(prev, force=False)
+        self.assertEqual({Path(r["path"]).name: r["gb"] for r in out["locations"]}, {"a": 4.0})
+        self.assertEqual(len(out["degraded"]), 3)
+
+    def test_du_stays_on_one_file_system(self):
+        import scan_machine as sm
+        seen = {}
+        def fake(cmd, **kw):
+            seen["cmd"] = cmd
+            return subprocess.CompletedProcess(cmd, 1, stdout="42\t/x\n", stderr="denied")
+        with patch.object(sm.subprocess, "run", side_effect=fake):
+            self.assertEqual(sm.size_kb(Path("/x"), 5), 42)     # a partial total still counts
+        self.assertEqual(seen["cmd"][:2], ["du", "-skx"])
+        with patch.object(sm.subprocess, "run", side_effect=subprocess.TimeoutExpired("du", 5)):
+            self.assertIsNone(sm.size_kb(Path("/x"), 5))
+
+
 class Estate(Base):
     """One repository with every class the hygiene survey knows."""
 

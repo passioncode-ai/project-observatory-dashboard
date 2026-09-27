@@ -162,7 +162,9 @@ same summary.
 - **Memory**: physical, compressed, swap; the largest origins.
 - **Disk**: free space on the home volume and the places in
   `config/machine.json` — caches, simulators, VM disks, histories — each with
-  how its space comes back. Sizing is re-done every `every_hours`.
+  how its space comes back. Each place is re-sized every `every_hours`, within
+  `disk_budget_seconds` per tick (oldest first; the rest keep their last number),
+  and `du -x` never counts a mounted image as the host disk.
 - **Git hygiene**: every registered checkout's worktrees (clean, dirty,
   missing, in use, idle days) and branches (merged, patch-merged, pushed,
   unique).
