@@ -1454,8 +1454,8 @@
       "path": "tests/test_i18n.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2160af259c8967c5a7472cbb9049e2ba214830aa8469ab648e0e1c87d2c1c25c",
-      "bytes": 16755
+      "export_sha256": "d894c071e5fd6d673224c597aa0dcd090daf6107a094908835b47e934b652b1a",
+      "bytes": 17309
     },
     {
       "path": "tests/test_identity_map.py",
