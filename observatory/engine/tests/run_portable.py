@@ -35,7 +35,7 @@ BOUNDARY = (
     'workspace', 'workspace_upgrade', 'workspace_boundaries', 'dashboard_shell',
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'dashboard_portability',
-    'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault',
+    'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations',
 )
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
@@ -47,11 +47,12 @@ ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py',
     'identity_map.py', 'leak_register.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'workspace.py',
-    'workspace_upgrade.py', 'backup_vault.py', 'tmp.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
+    'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'tmp.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
 )
 SKILL_FILES = (
     'skill/plugins/observatory-log/skills/handling-secrets/SKILL.md',
     'skill/plugins/observatory-log/skills/explaining-changes/SKILL.md',
+    'skill/plugins/observatory-log/skills/tracking-resources/SKILL.md',
     'skill/plugins/observatory-log/.claude-plugin/plugin.json',
     'skill/plugins/observatory-log/hooks/hooks.json',
 )

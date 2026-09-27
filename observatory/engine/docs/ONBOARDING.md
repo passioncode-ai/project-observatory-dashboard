@@ -144,6 +144,48 @@ selection and a budget before enabling reasoning or embeddings. On macOS,
 jobs only after explicit scheduler opt-in; Linux can run the CLI under a
 supervisor chosen by the user. Do not create duplicate writers for one home.
 
+## Organizations and resources
+
+An estate that serves more than one owner keeps each owner's analytics, design
+files and clouds in that owner's accounts. `config/organizations.json` says
+which owner a project has and where that owner's accounts are; every project in
+the registry then carries `organization`, `organization_source` and
+`organization_why`, and `observatory_project` answers with the destination:
+
+```json
+{"organizations": {
+   "company": {"label": "Company", "ga4_account": "accounts/100",
+               "figma": {"team": "Company Design", "project": "Builder"},
+               "match": {"repository_owners": ["company-org"], "products": ["product:suite"]}},
+   "person":  {"label": "Person", "default": true, "ga4_account": "accounts/200",
+               "ga4_legacy_accounts": {"accounts/300": ["properties/31"]},
+               "figma": {"team": "Personal"}}},
+ "projects": {"project:partner-app": {"organization": "person", "why": "…"}}}
+```
+
+The first answer wins: a declaration (`projects` here, or `organization` in
+`project_overrides.json`), then a `match` rule on repository owner or product,
+then `external` when every repository owner is outside the estate
+(`ownership.json`), then the `default` organization. Two organizations matching
+one project is reported as a `conflict` and assigns neither. An empty file turns
+the feature off.
+
+Agents read the destination at session start: the Claude Code plugin prints the
+project's organization, its Google Analytics account and Figma team, and the
+duty to report what they create. The `tracking-resources` skill makes that duty
+explicit. A resource — an analytics property or tracker, a Firebase or Google
+Cloud project, a server, database, DNS zone, cloud, payment or app-store
+account, a Figma file — is reported with `observatory_propose` and
+`{"resources": [{"kind", "identifier", "account", "url", "note"}]}`. Accepting
+it appends to the project's list in `project_overrides.json`; it never replaces
+what another proposal added.
+
+The findings board checks Google Analytics against the split: a property whose
+account is not its project's organization's `ga4_account`
+(`analytics.property_wrong_account`), a new property in a legacy account
+(`analytics.legacy_account_property`), and an organization's account no service
+account can read (`analytics.organization_account_unreadable`).
+
 ## Upgrade, back up, restore
 
 Stop every writer, including old executables and background jobs. A lock in a

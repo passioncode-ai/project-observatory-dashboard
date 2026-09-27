@@ -1495,8 +1495,15 @@ def collect() -> list[dict]:
     # it cannot join is a count with the names beside it.
     import google_findings
     _gd = paths.REGISTRY / "google-properties.json"
-    out.extend(google_findings.findings(
-        json.loads(_gd.read_text(encoding="utf-8")) if _gd.is_file() else None, TODAY))
+    _gdoc = json.loads(_gd.read_text(encoding="utf-8")) if _gd.is_file() else None
+    out.extend(google_findings.findings(_gdoc, TODAY))
+    # WHOSE ACCOUNT a property sits in, against the organization of the project
+    # it measures (organizations.json); silent when that file is not configured.
+    import organizations
+    _pj = paths.REGISTRY / "projects.json"
+    out.extend(google_findings.organization_findings(
+        _gdoc, json.loads(_pj.read_text(encoding="utf-8")).get("projects", []) if _pj.is_file() else [],
+        organizations.load()))
     # WHO ASKS FOR SECRETS, AND HOW OFTEN. The keyserver's journal is written on
     # every reveal, and a journal read by nothing can hold a burst of reveals of
     # one variable that no row on this board ever names.

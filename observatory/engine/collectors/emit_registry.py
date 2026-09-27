@@ -9,6 +9,8 @@ SP=Path(sys.argv[1]) if len(sys.argv)>1 else paths.SCRATCH; INV=paths.REGISTRY
 M=json.load(open(SP/"model.json")); repos=M["repositories"]; projs=M["projects"]
 ID_OVERRIDE=identity.ID_OVERRIDE                                        
 OVERRIDES=json.load(open(paths.config_file('project_overrides.json')))["projects"]
+import organizations
+ORGS=organizations.Assigner()
 REPO_STATUS=json.load(open(paths.config_file('repo_status.json')))["repositories"]
 REPO_OVERRIDES=json.load(open(paths.config_file('repo_overrides.json')))["repositories"]
 import atomic
@@ -313,6 +315,14 @@ for key in sorted(projs):
             if k=="why": continue
             e[k]=sorted(set(e.get(k) or [])|set(v)) if k=="source_refs" else v
         e["curated_fields"]=sorted(k for k in ov if k!="why")
+    # THE ORGANIZATION, after the curated overrides so an accepted proposal's
+    # `organization` wins, and absent entirely when organizations.json is not
+    # configured — a workspace that never set it up sees no new field.
+    _org = ORGS.assign(e)
+    if _org:
+        e["organization"] = _org["organization"]
+        e["organization_source"] = _org["source"]
+        e["organization_why"] = _org["why"]
     if p["sites"]: e["sites"]=p["sites"]
     if p.get("local_only"): e["local_only"]=p["local_only"]
     # `prev` is now read for ONE purpose: to say out loud when measurement has

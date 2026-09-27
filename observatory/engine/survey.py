@@ -222,6 +222,16 @@ def _project_view(p: dict, repos: dict, members: dict) -> dict:
                       "confidence": s["confidence"], "evidence": list(s["evidence"])})
     if sites:
         view["sites"] = sites
+    # WHOSE ACCOUNTS. An agent about to create an analytics property, a cloud
+    # project or a design file reads the destination here instead of recalling
+    # it from a conversation; `resources` is what has been recorded as created.
+    if p.get("organization_source"):
+        import organizations
+        view["organization"] = {"name": p.get("organization"), "source": p["organization_source"],
+                                "why": p.get("organization_why", ""),
+                                **organizations.Assigner().destinations(p.get("organization"))}
+    if p.get("resources"):
+        view["resources"] = [dict(r) for r in p["resources"] if isinstance(r, dict)]
     return view
 
 

@@ -1,0 +1,5 @@
+{
+ "_why": "Which organization each project belongs to, and where that organization's accounts are (Google Analytics, Figma). Empty means the feature is off: no project carries an organization. See docs/ONBOARDING.md, 'Organizations and resources'.",
+ "organizations": {},
+ "projects": {}
+}

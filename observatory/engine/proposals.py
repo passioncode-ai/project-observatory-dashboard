@@ -58,6 +58,13 @@ def _fields(name: str, key: str) -> set[str]:
     return out - PROVENANCE
 
 
+#: Fields a project proposal may always carry, even before any override row has
+#: used them: the organization split and the resource inventory are how agents
+#: report what they created, and "the operator adds the first row by hand" would
+#: leave the first agent with nowhere to report it. Their shape is checked here.
+STRUCTURED = {"project:": {"organization", "resources"}}
+
+
 def appliable() -> dict[str, set[str]]:
     """{target prefix: the fields an accepted proposal can actually change}.
 
@@ -66,7 +73,8 @@ def appliable() -> dict[str, set[str]]:
     that has never been used, and the operator adding the first row by hand is
     what teaches this function the field.
     """
-    return {prefix: _fields(name, key) for prefix, (name, key) in LANDS_IN.items()}
+    return {prefix: _fields(name, key) | STRUCTURED.get(prefix, set())
+            for prefix, (name, key) in LANDS_IN.items()}
 
 
 def refusal(target_id: str, patch: dict, evidence: list) -> str:
@@ -95,6 +103,21 @@ def refusal(target_id: str, patch: dict, evidence: list) -> str:
         return (f"nothing has ever been overridden for a {prefix.rstrip(':')}, so "
                 f"this function cannot tell which fields are appliable. The "
                 f"operator adds the first row by hand")
+    if "resources" in patch:
+        import organizations
+        rows = patch["resources"]
+        if not isinstance(rows, list) or not rows:
+            return "`resources` must be a non-empty list of resource objects"
+        for row in rows:
+            problem = organizations.resource_problem(row)
+            if problem:
+                return problem
+    if "organization" in patch:
+        import organizations
+        known = set((organizations.load().get("organizations") or {})) | {"external"}
+        if patch["organization"] not in known:
+            return (f"organization must be one of: {', '.join(sorted(known))} "
+                    "(configured in organizations.json)")
     unknown = sorted(set(patch) - allowed)
     if unknown:
         return (f"{', '.join(unknown)} cannot be applied: an accepted proposal "

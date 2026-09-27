@@ -3,6 +3,26 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.5.0 — 2026-09-27
+
+### Added
+
+- **Organizations.** `config/organizations.json` declares the owners an estate serves, where each
+  keeps its Google Analytics properties and Figma files, and how a project is matched to one
+  (repository owner, product membership, explicit declaration, `external`, default). Every project
+  carries `organization`, `organization_source` and `organization_why`; `observatory_project` adds the
+  destination (`ga4Account`, `figmaTeam`, `figmaProject`). Two matching owners is a reported conflict,
+  never a guess. An empty file (the new default) changes nothing.
+- **Resources.** `observatory_propose` accepts `organization` and `resources` for any project, without
+  waiting for an operator to hand-write the first row. A resource has a closed `kind` vocabulary
+  (analytics, Firebase/Google Cloud, server, database, DNS zone, cloud/payment/app-store account,
+  Figma file, other) and a stable `identifier`; accepting it APPENDS to the project's list.
+- **The SessionStart line** names the project's organization, its GA account and Figma team, how many
+  resources are recorded, and the duty to report new ones. The `tracking-resources` skill in the
+  `observatory-log` plugin (0.12.0) makes that duty explicit.
+- Three analytics findings: a property in another organization's account, a new property in a legacy
+  account, an organization's account no service account reads.
+
 ## 0.4.1 — 2026-09-27
 
 ### Added
