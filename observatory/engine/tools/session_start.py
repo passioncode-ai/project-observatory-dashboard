@@ -161,7 +161,36 @@ def state_line(p: dict) -> str:
     bits.append(t("{crit} critical / {warn} warning", crit=crit, warn=warn) if (crit or warn) else t("no findings"))
     bits.append(t("keys by name: {total} (registry {vault}, .env {env})", total=vault + env_keys, vault=vault, env=env_keys))
     bits.append(t("activity {date}", date=last))
-    return " · ".join(bits) + f" · use_secret.py names {name} · projects.html#project:{pid.split(':', 1)[-1]}"
+    tail = f" · use_secret.py names {name} · projects.html#project:{pid.split(':', 1)[-1]}"
+    return " · ".join(bits) + tail + organization_line(p, t)
+
+
+def organization_line(p: dict, t) -> str:
+    """Whose accounts this project uses, and the standing duty to report what is
+    created. On its own line, because it is an instruction rather than a status:
+    every session in a watched project reads it before its first turn."""
+    if not p.get("organization_source"):
+        return ""
+    import organizations
+    org = p.get("organization")
+    if p["organization_source"] == "conflict":
+        head = t("organization unresolved: {why} — ask the operator before creating accounts",
+                 why=p.get("organization_why", ""))
+    elif org == "external":
+        return "\n" + t("organization: external — not the estate's accounts; create nothing on its behalf")
+    else:
+        d = organizations.Assigner().destinations(org)
+        where = []
+        if d.get("ga4Account"):
+            where.append(t("GA {account}", account=d["ga4Account"]))
+        if d.get("figmaTeam"):
+            where.append(t("Figma {team}", team=d["figmaTeam"] + ("/" + d["figmaProject"] if d.get("figmaProject") else "")))
+        head = t("organization: {name}", name=d.get("label") or org) + (" → " + ", ".join(where) if where else "")
+    n = len([r for r in p.get("resources") or [] if isinstance(r, dict)])
+    duty = t("resources recorded: {n}. Anything you create for it — analytics, Firebase/Google Cloud, "
+             "servers, cloud or payment accounts, Figma files — is reported with observatory_propose "
+             "{\"resources\": [...]} in the same turn", n=n)
+    return "\n" + head + " · " + duty
 
 
 def unknown_line(top: pathlib.Path, remote: str, session_id: str) -> str:

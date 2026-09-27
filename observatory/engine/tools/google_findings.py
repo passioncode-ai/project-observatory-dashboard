@@ -119,3 +119,74 @@ def findings(doc: dict | None, today: str = "") -> list[dict]:
                 "action": "`./observatory.py google --force`, or the refresh button on the traffic page",
             })
     return out
+
+
+def organization_findings(doc: dict | None, projects: list[dict], orgs_doc: dict) -> list[dict]:
+    """Where a property sits against whose project it measures.
+
+    The organization split (organizations.json) says which Google Analytics
+    account each owner's properties belong in. Three things break it, and each
+    was seen before this rule existed: a property left in the other owner's
+    account after the product changed hands (Screen2Shot, 2026-09-27), a new
+    property created in an account kept only for one legacy site, and an owner's
+    account the service account cannot read — which makes the first two
+    invisible rather than absent.
+    """
+    orgs = (orgs_doc or {}).get("organizations") or {}
+    if not doc or not orgs:
+        return []
+    props = doc.get("properties") or []
+    by_id = {p["id"]: p for p in projects if isinstance(p, dict) and p.get("id")}
+    out: list[dict] = []
+
+    for prop in props:
+        pid, account = prop.get("project"), prop.get("account")
+        project = by_id.get(pid or "")
+        if not project or not account or project.get("organization_source") in (None, "conflict", "external"):
+            continue
+        org = orgs.get(project.get("organization") or "") or {}
+        expected = org.get("ga4_account")
+        if expected and account != expected and account not in (org.get("ga4_legacy_accounts") or {}):
+            out.append({
+                "type": "analytics.property_wrong_account",
+                "subject": pid,
+                "severity": "warning",
+                "title": (f"{prop.get('name') or prop.get('property')} sits in "
+                          f"{prop.get('account_name') or account}, not in {org.get('label') or project['organization']}'s account"),
+                "detail": (f"{prop.get('property')} measures {pid}, whose organization is "
+                           f"{project['organization']} ({project.get('organization_source')}: "
+                           f"{project.get('organization_why', '')}). That organization's properties "
+                           f"belong in {expected}; this one is in {account}."),
+                "action": (f"move the property to {expected} in Google Analytics (Admin → Property "
+                           f"settings → Move property), or correct the project's organization"),
+            })
+
+    for org_name, org in orgs.items():
+        for legacy, allowed in ((org or {}).get("ga4_legacy_accounts") or {}).items():
+            extra = [p for p in props if p.get("account") == legacy and p.get("property") not in (allowed or [])]
+            if extra:
+                out.append({
+                    "type": "analytics.legacy_account_property",
+                    "subject": "estate:analytics",
+                    "severity": "warning",
+                    "title": f"{len(extra)} new propert{'y' if len(extra) == 1 else 'ies'} in legacy account {legacy}",
+                    "detail": (f"{_listed(sorted(p.get('name') or p.get('property') for p in extra))}. "
+                               f"{legacy} is kept only for {', '.join(allowed or []) or 'what it already holds'}; "
+                               f"new properties belong in their owner's account."),
+                    "action": f"move them to their owner's account, or list them under ga4_legacy_accounts in organizations.json",
+                })
+
+    readable = {a.get("account") for a in doc.get("accounts") or []}
+    for org_name, org in orgs.items():
+        expected = (org or {}).get("ga4_account")
+        if expected and expected not in readable:
+            out.append({
+                "type": "analytics.organization_account_unreadable",
+                "subject": "estate:analytics",
+                "severity": "warning",
+                "title": f"{(org or {}).get('label') or org_name}'s analytics account {expected} is not readable",
+                "detail": ("No service account this machine holds reads it, so a property there is "
+                           "invisible here and the two checks above cannot see a misplaced one."),
+                "action": f"grant a service account read access to {expected}",
+            })
+    return out

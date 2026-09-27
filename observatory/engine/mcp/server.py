@@ -471,7 +471,15 @@ def observatory_propose(
     targetId: Annotated[str, Field(validation_alias=AliasChoices("targetId", "target_id"), min_length=1,
                          description="What to change: 'project:<slug>', 'repository:<owner>/<name>' "
                                      "or 'domain:<fqdn>'")],
-    patch: Annotated[dict[str, Any], Field(description="The fields to change, as an object")],
+    patch: Annotated[dict[str, Any], Field(description="The fields to change, as an object. To report "
+                                                       "something you created for a project — an analytics "
+                                                       "property or tracker, a Firebase/Google Cloud project, a "
+                                                       "server, a cloud or payment account, a Figma file — send "
+                                                       "{\"resources\": [{\"kind\": \"ga4-property\", \"identifier\": "
+                                                       "\"properties/123\", \"account\": \"accounts/456\", \"url\": …, "
+                                                       "\"note\": …}]}; it is appended, never replacing what "
+                                                       "is recorded. `organization` names whose accounts the "
+                                                       "project uses.")],
     evidence: Annotated[list[dict[str, Any]] | None,
                         Field(description="What justifies it. A patch with no evidence is a guess.")] = None,
 ) -> dict[str, Any]:

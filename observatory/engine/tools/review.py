@@ -461,6 +461,12 @@ def cmd_proposal_accept(conn, args) -> int:
     doc = json.loads(f.read_text(encoding="utf-8"))
     before = doc[key].get(row["target_id"], {})
     merged = {**before, **patch}
+    if "resources" in patch:
+        # APPEND, never replace: two agents each reporting what they created
+        # propose against the same starting list, and a plain overwrite would let
+        # the second acceptance silently drop the first one's resource.
+        import organizations
+        merged["resources"] = organizations.merge_resources(before.get("resources") or [], patch["resources"])
     # PROVENANCE, written by the decision rather than proposed by the caller.
     # The next reader of this file needs to know who suggested it, on what, and
     # when a person agreed — otherwise an override is a value with no argument

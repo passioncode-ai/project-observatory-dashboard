@@ -177,6 +177,11 @@ SESSION_HOOK_IDS = {
     "activity {date}",
     "folder {name} is not in the registry — the next tick picks it up (if the schedule is on), or now: project-observatory full local",
     "{path} is outside the configured projects folder — the observatory does not scan it; recorded in sessions-seen.jsonl. To observe it, move it into the projects folder or change sources.projects",
+    # organization_line(): whose accounts the project uses, and the duty to report resources.
+    "organization unresolved: {why} — ask the operator before creating accounts",
+    "organization: external — not the estate's accounts; create nothing on its behalf",
+    "GA {account}", "Figma {team}", "organization: {name}",
+    "resources recorded: {n}. Anything you create for it — analytics, Firebase/Google Cloud, servers, cloud or payment accounts, Figma files — is reported with observatory_propose {\"resources\": [...]} in the same turn",
 }
 
 
