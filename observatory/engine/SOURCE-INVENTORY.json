@@ -293,8 +293,8 @@
       "path": "collectors/scan_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8a5ad3610088d059acb82002737e497169f79b91a59137374bd5b8a3d33b7f97",
-      "bytes": 18088
+      "export_sha256": "702bb8220f92aa299d530940b9ff2e25953afbfd259a297f31fd61e70f9a5f68",
+      "bytes": 20234
     },
     {
       "path": "collectors/scan_mcp.py",
@@ -369,7 +369,7 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "a679520ac25ad876bce4f6ab50d0d07ee00f9f7ca59c5dd8b030598300464b60",
+      "export_sha256": "0eb35d85641763a055bf702a29bf67ada0459d11cfe511844c69c6fc5c7980e3",
       "bytes": 8477,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
@@ -576,8 +576,8 @@
       "path": "defaults/machine.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "535106b173c41af56ad5cd3fc8dba5c51dcc2d56a083c624d340835677bd4e69",
-      "bytes": 3113
+      "export_sha256": "cdba01cf7d742cab6555ba2be0db82b8b633fcbac1a05113bf3043f737803493",
+      "bytes": 3559
     },
     {
       "path": "defaults/models.json",
@@ -672,15 +672,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "a501b3963614d1bda837bc01185298a25d3b3f80a875ef78a71837834597ffd3",
+      "export_sha256": "dff981e0bdf60af7a1874dc85ad336b8f8131b69f18d9a7a5ae65e5098d46e13",
       "bytes": 10148,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "eb3c84ca7c3516c5b14232b3907e6298c2878bcab6b264f8161b928742ca14aa",
-      "bytes": 16040,
+      "export_sha256": "13b672d767a62959982487ac288e2ba704966f316c58b1be894e8944ecbc6cfe",
+      "bytes": 16195,
       "upstream_modified": true
     },
     {
@@ -1552,8 +1552,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b4060a5a054cf5bdd9c9499dd63c5e5b41768a1108abe79c9532d3942a61813e",
-      "bytes": 16835
+      "export_sha256": "992fdf4dc39fbfb8e481bc7d4784f719f62183a19527198a6d247f56a8416fc0",
+      "bytes": 19696
     },
     {
       "path": "tests/test_mcp_wire.py",

@@ -3,6 +3,19 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.6.1 — 2026-09-27
+
+### Fixed
+
+- **The machine survey no longer holds the tick.** Disk places are sized within a time budget per run
+  (`disk_budget_seconds`, 90 by default; `disk_location_timeout_seconds` per place), oldest
+  measurement first; a place not reached keeps its last number and its own `measured_at`, and one
+  that does not fit is reported, never shown as zero. `full machine --disk` uses
+  `disk_budget_seconds_manual`. Measured on the machine that found it: the first 0.6.0 survey held a
+  tick for 23 minutes under memory pressure; 0.6.1 sizes the same 19 places in 44 seconds.
+- `du` runs with `-x`: a mounted simulator image or VM volume is no longer counted as the host disk's
+  usage, and a timed-out `du` is no longer run a second time.
+
 ## 0.6.0 — 2026-09-27
 
 ### Added
