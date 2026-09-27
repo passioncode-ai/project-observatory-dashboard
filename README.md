@@ -96,7 +96,7 @@ project-observatory full workspace-backup --writers-stopped
 project-observatory full upgrade --apply --writers-stopped
 ```
 
-Read [compatibility and recovery](docs/COMPATIBILITY.md) before upgrading. The original `full backup` retains its database-only meaning. `workspace-backup` covers the managed workspace; externally referenced stores require separate backups.
+Read [compatibility and recovery](docs/COMPATIBILITY.md) before upgrading. The original `full backup` retains its database-only meaning. `workspace-backup` covers the managed workspace; externally referenced stores require separate backups. With a passphrase set (`full backup-passphrase set`), every backup is encrypted into one backups root — on macOS `~/Documents/Project Observatory/Backups` by default, so iCloud carries it off the machine; see [encrypted backups](docs/ONBOARDING.md#encrypted-backups-off-this-disk).
 
 **Existing 0.1 commands remain available.** `project-observatory init`, `scan`, `serve`, `secret`, `leaks` and the other original commands keep their previous namespace and state format. They are documented in the [0.1 compatibility guide](docs/PORTABLE-0.1.md). The full engine has a separate default home; it never silently reinterprets the portable workspace. [CLI contract](observatory/engine/docs/CLI-COMPATIBILITY.md).
 

@@ -5,7 +5,7 @@ import os
 import re
 from pathlib import Path
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 CONFIG_VERSION = 1
 WORKSPACE_VERSION = 1
 SOURCE = Path(__file__).resolve().parent
@@ -87,6 +87,10 @@ def validate_workspace(base: Path | None = None, *, required: bool = False) -> d
 #: English is the default; `locale` is read by the dashboard (dashboard/i18n.py).
 INTERFACE_SETTINGS = {"locale": ("en", "ru")}
 
+#: What `storage` in settings.json may hold. `backups` is the root encrypted
+#: backups are written to (backup_vault.root_info); an absolute path.
+STORAGE_SETTINGS = ("backups",)
+
 def interface_locale(base: Path | None = None) -> str:
     """The dashboard's language for this workspace: `interface.locale`, else English."""
     return load(base).get("interface", {}).get("locale", "en")
@@ -122,6 +126,16 @@ def load(base: Path | None = None) -> dict:
             raise ConfigurationError(f"Unknown interface setting: {key}")
         if value not in INTERFACE_SETTINGS[key]:
             raise ConfigurationError(f"Interface {key} must be one of: {', '.join(INTERFACE_SETTINGS[key])}")
+    # STORAGE is optional and ignored by releases before 0.4.1 (they never read it),
+    # so setting a backups root keeps the workspace readable by an older reader.
+    storage = doc.get("storage", {})
+    if not isinstance(storage, dict):
+        raise ConfigurationError("Configuration storage must be an object")
+    for key, value in storage.items():
+        if key not in STORAGE_SETTINGS:
+            raise ConfigurationError(f"Unknown storage setting: {key}")
+        if not isinstance(value, str) or not Path(value).expanduser().is_absolute():
+            raise ConfigurationError(f"Storage {key} must be an absolute path")
     required = doc.get("must_understand", [])
     if not isinstance(required, list) or required:
         raise ConfigurationError("Configuration requires unsupported capabilities")

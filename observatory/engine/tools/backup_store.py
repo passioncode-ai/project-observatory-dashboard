@@ -61,9 +61,77 @@ def take(db: pathlib.Path, stamp: str) -> pathlib.Path:
     return dest
 
 
+def encrypted(db: pathlib.Path, secret: str, base: pathlib.Path) -> int:
+    """With a passphrase: copy via the SQLite backup API into the store, encrypt
+    that copy into the backups root, drop the plaintext. The legacy plaintext
+    copies beside the database go only after an encrypted one is proven."""
+    import backup_vault
+    root = backup_vault.root_info(base)["path"]
+    when = backup_vault.stamp()
+    dest = root / f"{backup_vault.DB_KIND}-{when}{backup_vault.DB_SUFFIX}"
+    if dest.exists():
+        print(f"backup {dest.name} already exists")
+        return 0
+    plain = take(db, "encrypting-" + when)
+    try:
+        if plain.stat().st_size == 0:
+            print("the copy came out empty; nothing was encrypted or pruned", file=sys.stderr)
+            return 1
+        backup_vault.encrypt_file(plain, dest, secret, kind=backup_vault.DB_KIND)
+    finally:
+        for suffix in ("",) + COMPANIONS:
+            pathlib.Path(str(plain) + suffix).unlink(missing_ok=True)
+    dropped = backup_vault.rotate(root, backup_vault.DB_KIND, backup_vault.DB_SUFFIX)
+    legacy = existing(db.parent)
+    for old in legacy:
+        for suffix in ("",) + COMPANIONS:
+            pathlib.Path(str(old) + suffix).unlink(missing_ok=True)
+    kept = len(backup_vault.artifacts(root, backup_vault.DB_KIND, backup_vault.DB_SUFFIX))
+    print(f"backup {dest.name}: encrypted into {root}, {kept} kept"
+          + (f", pruned {len(dropped)}" if dropped else "")
+          + (f", removed {len(legacy)} unencrypted legacy copies" if legacy else ""))
+    return 0
+
+
+def due(db: pathlib.Path, base: pathlib.Path, hours: int = 24) -> bool:
+    """No copy — encrypted in the root, or legacy beside the database — younger than `hours`."""
+    import backup_vault, time
+    newest = [p.stat().st_mtime for p in existing(db.parent)]
+    try:
+        root = backup_vault.root_info(base)["path"]
+        newest += [p.stat().st_mtime for p in backup_vault.artifacts(root, backup_vault.DB_KIND, backup_vault.DB_SUFFIX)]
+    except Exception:  # noqa: BLE001 — an unreadable root means: take one
+        pass
+    return not newest or time.time() - max(newest) > hours * 3600
+
+
 def main(argv: list[str]) -> int:
     db = paths.DB
     store = db.parent
+    import backup_vault
+    import configuration
+    base = configuration.home()
+    if "--due" in argv:  # the tick's question: exit 0 when a copy is due, 1 when not
+        return 0 if (db.is_file() and due(db, base)) else 1
+    if "--if-due" in argv and db.is_file() and not due(db, base):
+        print("backup not due: a copy younger than 24 hours exists")
+        return 0
+    if "--list" not in argv and db.is_file():
+        secret = backup_vault.passphrase(base)
+        if secret:
+            try:
+                return encrypted(db, secret, base)
+            except (OSError, backup_vault.BackupError) as exc:
+                # The root is unreachable — on macOS a background job is often
+                # refused ~/Documents by privacy controls (TCC). A day without any
+                # copy is worse than a day with a local one, so take the local
+                # copy, and still exit non-zero: the off-disk backup did NOT happen.
+                print(f"encrypted backup failed ({type(exc).__name__}: {exc}); taking a local "
+                      "unencrypted copy instead. If this is a privacy refusal, grant the Python "
+                      "that runs the tick access to the folder, or choose another root with "
+                      "`full configure storage backups PATH`", file=sys.stderr)
+                local(db)
+                return 1
     if "--list" in argv:
         rows = existing(store)
         if not rows:
@@ -78,6 +146,12 @@ def main(argv: list[str]) -> int:
         # where nothing is wrong.
         print("no store to back up", file=sys.stderr)
         return 0
+    return local(db)
+
+
+def local(db: pathlib.Path) -> int:
+    """The unencrypted copy beside the database: no passphrase, or a root that failed."""
+    store = db.parent
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%MZ")
     # SAME STAMP, SAME DAY: a second run inside one minute would otherwise take
     # a second copy and push a good one out of the window.

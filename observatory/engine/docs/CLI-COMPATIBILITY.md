@@ -87,6 +87,11 @@ It is not repurposed. `workspace-backup` creates a full private workspace snapsh
 workspace. Mutating backup/upgrade operations require the documented
 `--writers-stopped` declaration because older and external writers do not obey
 new locks. No command activates a scheduler while restoring.
+Since 0.4.1 `restore` also accepts an encrypted `.obsnap` file, and the default
+`workspace-backup` output is exported encrypted to the backups root when a
+passphrase is configured; an explicit `--output DIR` keeps its plaintext meaning.
+`backups` and `backup-passphrase` are new workspace commands; nothing existing
+was renamed. [`backup_vault.py`](../backup_vault.py) implements the root and format.
 [`WORKSPACE_COMMANDS`](../observatory.py), [`workspace.main`](../workspace.py),
 and [`workspace_upgrade.py`](../workspace_upgrade.py) implement the separation.
 

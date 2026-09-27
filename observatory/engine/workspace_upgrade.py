@@ -17,6 +17,7 @@ import sys
 import tempfile
 import uuid
 
+import backup_vault
 import configuration as config
 import workspace
 from store import compatibility
@@ -222,12 +223,22 @@ def _snapshot(base: Path, output: Path) -> dict:
 
 
 def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = False) -> dict:
+    """An explicit --output is honoured as a plaintext directory, exactly as before.
+    Without one the snapshot is staged under <home>/backups and then handed to
+    backup_vault: exported encrypted to the backups root when a passphrase is
+    configured, otherwise kept locally under rotation."""
     managed_layout(base)
     preflight(base)  # unknown versions refuse before locks or other writes
     require_stopped(writers_stopped)
+    explicit = output is not None
     output = output or base / 'backups' / ('snapshot-' + uuid.uuid4().hex)
     with operation_lock(base):
-        return _snapshot(base, output)
+        result = _snapshot(base, output)
+        if explicit:
+            result['encrypted'] = False
+            return result
+        result.update(backup_vault.after_snapshot(base, Path(result['snapshot']), 'snapshot'))
+        return result
 
 
 def safe_relative(value: object) -> str:
@@ -294,6 +305,18 @@ def verify_snapshot(source: Path) -> dict:
 
 
 def restore(source: Path, destination: Path) -> dict:
+    """A snapshot directory, or an encrypted `.obsnap` file from the backups root.
+
+    The encrypted file is authenticated in full and decrypted beside the new home;
+    the passphrase comes from OBSERVATORY_BACKUP_PASSPHRASE or a terminal prompt,
+    because a new machine has no workspace to keep it in yet."""
+    if source.is_file() and not source.is_symlink():
+        secret = backup_vault.require_passphrase(destination, prompt=True)
+        stage = backup_vault.extract_tree(source.resolve(), destination.resolve().parent, secret)
+        try:
+            return restore(stage, destination)
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
     workspace.reject_symlinks(source)
     workspace.reject_symlinks(destination)
     source, destination = source.resolve(), destination.resolve()
@@ -413,8 +436,14 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
             committed = True
             # Cleanup cannot turn a committed upgrade into an attempted rollback.
             shutil.rmtree(rollback,ignore_errors=True)
-            return {'status':'upgraded','version':config.VERSION,'snapshot':receipt['snapshot'],
-                    'files_updated':len(changed),'scheduler_activated':False}
+            # Nor can the backup export: the upgrade is done, the snapshot exists
+            # either way, and the result says where it ended up and why.
+            try:
+                backup = backup_vault.after_snapshot(base,Path(receipt['snapshot']),'before-upgrade')
+            except Exception as exc:  # noqa: BLE001 — reported, never raised past a commit
+                backup = {'snapshot':receipt['snapshot'],'encrypted':False,'export_error':f'{type(exc).__name__}: {exc}'}
+            return {'status':'upgraded','version':config.VERSION,'snapshot':backup['snapshot'],
+                    'files_updated':len(changed),'scheduler_activated':False,'backup':backup}
         except BaseException:
             if committed:
                 raise

@@ -174,7 +174,10 @@ fi
 
 
 
-if [ -z "$(find "$DB_DIR" -maxdepth 1 -name "observatory.db.backup-*" -type f -mmin -1440 -print 2>/dev/null)" ]; then
+# The daily copy may live in the backups root (encrypted, outside this disk) or
+# beside the database (no passphrase yet); only Python knows where the root is,
+# so the due check is the script's, not a `find` over one of the two places.
+if "$PY" tools/backup_store.py --due >/dev/null 2>&1; then
   log "backup: taking a daily copy of the store"
   step "backup" "$PY" tools/backup_store.py
 fi
