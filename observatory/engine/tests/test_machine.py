@@ -116,6 +116,14 @@ class Origins(unittest.TestCase):
 
 
 class DiskBudget(Base):
+    def setUp(self):
+        super().setUp()
+        import scan_machine as sm
+        # Hermetic: the host's own swap files must never enter a synthetic survey.
+        stub = patch.object(sm, "swap_on_disk", return_value=None)
+        stub.start()
+        self.addCleanup(stub.stop)
+
     def config(self, **extra):
         places = []
         for name in ("a", "b", "c"):
@@ -154,6 +162,18 @@ class DiskBudget(Base):
             out = sm.survey_disk(prev, force=False)
         self.assertEqual({Path(r["path"]).name: r["gb"] for r in out["locations"]}, {"a": 4.0})
         self.assertEqual(len(out["degraded"]), 3)
+
+    def test_swap_is_a_disk_row(self):
+        import scan_machine as sm
+        self.config(disk_budget_seconds=30)
+        with patch.object(sm, "size_kb", return_value=1048576), \
+                patch.object(sm, "swap_on_disk", return_value={"path": "/vm", "gb": 15.0, "files": 3}):
+            out = sm.survey_disk(None, force=False)
+        swap = [r for r in out["locations"] if r["kind"] == "swap"]
+        self.assertEqual(swap[0]["gb"], 15.0)
+        self.assertEqual(out["locations"][0]["kind"], "swap")          # the largest row first
+        with patch.object(sm, "size_kb", return_value=1048576), patch.object(sm, "swap_on_disk", return_value=None):
+            self.assertFalse([r for r in sm.survey_disk(None, force=False)["locations"] if r["kind"] == "swap"])
 
     def test_du_stays_on_one_file_system(self):
         import scan_machine as sm
@@ -313,7 +333,8 @@ class Findings(Base):
                                                              {"origin": "detached:npm:some-mcp", "processes": 2, "rss_mb": 300},
                                                              {"origin": "detached:helperd", "processes": 1, "rss_mb": 50}]},
                                     "disk": {"volume": {"free_gb": 10, "free_percent": 3},
-                                             "locations": [{"label": "Caches", "gb": 30, "command": "clean it"}]}})
+                                             "locations": [{"label": "Caches", "gb": 30, "command": "clean it"},
+                                                           {"label": "Swap files", "kind": "swap", "gb": 15.0}]}})
         self.write("git-hygiene.json", {"checkouts": [{"repository": "repository:e/a", "worktrees": [
             {"path": "/w/old", "state": "dirty", "idle_days": 30}, {"path": "/w/today", "state": "dirty", "idle_days": 0}],
             "branches": [{"name": "b", "class": "unique", "idle_days": 40}]}]})
@@ -322,6 +343,7 @@ class Findings(Base):
                                                   "memory_group_warning_mb": 4096}, now)}
         self.assertEqual(out["machine.disk_low"]["severity"], "critical")
         self.assertIn("clean it", out["machine.disk_low"]["detail"])
+        self.assertIn("15.0 GB of it is swap", out["machine.disk_low"]["detail"])
         self.assertIn("simulator:Phone", out["machine.memory_pressure"]["detail"])
         self.assertIn("machine.heavy_origin", out)
         self.assertIn("npm:some-mcp", out["machine.detached_servers"]["detail"])
