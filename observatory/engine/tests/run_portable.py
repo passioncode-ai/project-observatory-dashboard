@@ -35,7 +35,7 @@ BOUNDARY = (
     'workspace', 'workspace_upgrade', 'workspace_boundaries', 'dashboard_shell',
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'dashboard_portability',
-    'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'machine', 'local_folders', 'config_locations',
+    'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'machine', 'local_folders', 'config_locations', 'dashboard_stop',
 )
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
