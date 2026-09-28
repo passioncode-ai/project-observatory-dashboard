@@ -3,6 +3,7 @@
 
     ./tools/cloudflare.py stash            # admin token on stdin, once per account
     ./tools/cloudflare.py issue --preset analytics [--project project:x]
+    ./tools/cloudflare.py issue --preset dns-edit --zone example.com --vault PROJECT/ENV/NAME
     ./tools/cloudflare.py list
     ./tools/cloudflare.py ping
     ./tools/cloudflare.py rotate <label>   # or --leaked, for every open leak
@@ -41,8 +42,11 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -64,6 +68,19 @@ PRESETS: dict[str, dict] = {
         # from a domain to the thing that serves it, and from there to a project.
         "groups": ("Zone Read", "Analytics Read", "DNS Read"),
         "why": "reads zone request counters and DNS targets for the observatory's dashboard",
+    },
+    # DNS WRITE, ONE ZONE, INTO THE VAULT. A project that must point a hostname
+    # at its host (a Pages custom domain, a CNAME to a PaaS) needs exactly
+    # "edit records in this zone" — not the account, not a second zone. The
+    # token is scoped to the zone's own resource id, named after the zone so a
+    # second issue ROLLS it, verified by reading that zone's records, and
+    # delivered to a vault slot rather than to the analytics plugin's folder:
+    # a writer's token is a project's credential, used through use_secret.py.
+    "dns-edit": {
+        "name": "observatory-dns-edit {zone} (managed)",
+        "groups": ("Zone Read", "DNS Write"),
+        "why": "edits DNS records in one zone for the project named by the vault slot",
+        "scope": "zone",
     },
 }
 
@@ -308,20 +325,25 @@ def existing_token(admin: str, account_id: str, name: str) -> str | None:
     return None
 
 
-def mint(admin: str, account_id: str, preset: dict) -> tuple[str, str]:
-    """(token id, value) — rolling an existing one rather than adding a twin."""
+def mint(admin: str, account_id: str, preset: dict,
+         resources: dict | None = None, name: str | None = None) -> tuple[str, str]:
+    """(token id, value) — rolling an existing one rather than adding a twin.
+
+    `resources` narrows the grant (a zone preset passes its one zone); `name`
+    is the token's name when the preset's own is a template."""
     ids = group_ids(admin, account_id, preset["groups"])
-    tid = existing_token(admin, account_id, preset["name"])
+    name = name or preset["name"]
+    resources = resources or {f"com.cloudflare.api.account.{account_id}": "*"}
+    policies = [{"effect": "allow", "resources": resources,
+                 "permission_groups": [{"id": i} for i in ids]}]
+    tid = existing_token(admin, account_id, name)
     if tid:
         # GRANTS FOLLOW THE PRESET. Rolling reissues the value and keeps the
         # policies as they were — so a preset that grew a permission would roll
         # tokens that never gain it. The policy is rewritten first, then rolled;
         # the token's id, name and every reader stay put.
         _request(f"/accounts/{account_id}/tokens/{tid}", admin,
-                 {"name": preset["name"], "status": "active",
-                  "policies": [{"effect": "allow",
-                                "resources": {f"com.cloudflare.api.account.{account_id}": "*"},
-                                "permission_groups": [{"id": i} for i in ids]}]},
+                 {"name": name, "status": "active", "policies": policies},
                  method="PUT")
         # PUT, not POST: the account-owned roll endpoint refuses POST with
         # "Method POST not available for that URI" — found the first time a
@@ -332,10 +354,7 @@ def mint(admin: str, account_id: str, preset: dict) -> tuple[str, str]:
             raise RuntimeError("cloudflare rolled the token but returned no value")
         return tid, value
     d = _request(f"/accounts/{account_id}/tokens", admin,
-                 {"name": preset["name"],
-                  "policies": [{"effect": "allow",
-                                "resources": {f"com.cloudflare.api.account.{account_id}": "*"},
-                                "permission_groups": [{"id": i} for i in ids]}]})
+                 {"name": name, "policies": policies})
     res = d.get("result") or {}
     if not res.get("value"):
         raise RuntimeError("cloudflare created the token but returned no value")
@@ -463,6 +482,12 @@ def cmd_issue(preset_key: str, account_label: str | None, project: str | None) -
         print(f"unknown preset {preset_key!r} — have: {', '.join(PRESETS)}",
               file=sys.stderr)
         return 2
+    if preset.get("scope") == "zone":
+        # A zone-scoped writer filed where the analytics plugin reads would be a
+        # DNS-write credential in a folder a read-only plugin loads.
+        print(f"refused: preset {preset_key!r} is zone-scoped and goes to a vault slot — "
+              f"use --zone and --vault", file=sys.stderr)
+        return 2
     if project and not project.startswith("project:"):
         project = f"project:{project}"
     try:
@@ -479,6 +504,89 @@ def cmd_issue(preset_key: str, account_label: str | None, project: str | None) -
     # behind one stash must land as three files the plugin can tell apart.
     return install_issued(value, slug(account["name"]), account, preset_key,
                           project, rolled, stash=stash_label)
+
+
+def zone_id_of(admin: str, account_id: str, zone: str) -> str:
+    """The zone's id inside THIS account — a same-named zone elsewhere is not it."""
+    rows = _request(f"/zones?name={urllib.parse.quote(zone)}&account.id={account_id}",
+                    admin).get("result", [])
+    hit = [z for z in rows if z.get("name") == zone]
+    if not hit:
+        raise RuntimeError(f"account {account_id} holds no zone named {zone!r}")
+    return hit[0]["id"]
+
+
+def parse_vault_target(target: str | None) -> tuple[str, str, str]:
+    """PROJECT/ENV/NAME, validated by the vault's own rules before anything is
+    minted: a token issued for a slot the vault then refuses is a live
+    credential with nowhere to go."""
+    parts = (target or "").split("/")
+    if len(parts) != 3 or not all(parts):
+        raise ValueError("--vault must be PROJECT/ENV/NAME")
+    sys.path.insert(0, str(ROOT / "tools"))
+    import vault
+    try:
+        vault.validate_names(*parts)
+    except vault.VaultBoundaryError as exc:
+        raise ValueError(f"--vault {exc}") from None
+    return parts[0], parts[1], parts[2]
+
+
+def deliver_to_vault(value: str, project: str, env: str, name: str) -> None:
+    """Through the vault's own door, value on stdin — never argv, never a print.
+
+    `--force` because a re-issue ROLLS the token: the slot's old value is
+    already dead at Cloudflare, so there is no history worth keeping. The
+    child's output is withheld; a parse error can echo its input."""
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "vault.py"), "put",
+                        project, env, name, "--force"],
+                       input=value + "\n", capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        raise RuntimeError(f"vault refused the slot {project}/{env}/{name} "
+                           f"(exit {r.returncode}); child output withheld")
+
+
+def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
+                   account_label: str | None, wait: float = 2.0) -> int:
+    """Issue a zone-scoped token (DNS edit) into a vault slot."""
+    preset = PRESETS[preset_key]
+    if not zone or not target:
+        print(f"refused: preset {preset_key!r} needs --zone and --vault PROJECT/ENV/NAME",
+              file=sys.stderr)
+        return 2
+    try:
+        project, env, name = parse_vault_target(target)
+    except ValueError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    try:
+        _stash, admin, account = find_account(account_label)
+        zid = zone_id_of(admin, account["id"], zone)
+        token_name = preset["name"].format(zone=zone)
+        rolled = existing_token(admin, account["id"], token_name) is not None
+        _tid, value = mint(admin, account["id"], preset,
+                           resources={f"com.cloudflare.api.account.zone.{zid}": "*"},
+                           name=token_name)
+        # A fresh token can take a moment to be honoured at the edge; the
+        # value is delivered only once it has proved it can read the zone.
+        for attempt in range(5):
+            try:
+                _request(f"/zones/{zid}/dns_records?per_page=1", value)
+                break
+            except RuntimeError:
+                if attempt == 4:
+                    raise RuntimeError(f"the issued token cannot read {zone}'s records") from None
+                time.sleep(wait)
+        deliver_to_vault(value, project, env, name)
+    except RuntimeError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    _journal("rotate" if rolled else "issue", f"{project}/{env}/{name}",
+             preset=preset_key, zone=zone, account=account["name"])
+    print(f"  {project}/{env}/{name}: {'rolled' if rolled else 'issued'} — "
+          f"{', '.join(preset['groups'])} on {zone} only; "
+          f"use: tools/use_secret.py run {project} {name} --env {env} -- <command>")
+    return 0
 
 
 def cmd_install(value: str) -> int:
@@ -697,6 +805,8 @@ def main() -> int:
     p_issue.add_argument("--preset", default="analytics", choices=sorted(PRESETS))
     p_issue.add_argument("--account", help="which stashed admin token to issue from")
     p_issue.add_argument("--project", help="the project this token serves")
+    p_issue.add_argument("--zone", help="zone presets: the one zone the token may touch")
+    p_issue.add_argument("--vault", help="zone presets: the slot PROJECT/ENV/NAME it is delivered to")
     sub.add_parser("list", help="what exists, with dates — never values")
     sub.add_parser("ping", help="can every token still do its job")
     p_rot = sub.add_parser("rotate", help="roll a token's value in place")
@@ -718,6 +828,8 @@ def main() -> int:
             return 2
         return cmd_install(sys.stdin.read().strip())
     if a.cmd == "issue":
+        if PRESETS[a.preset].get("scope") == "zone":
+            return cmd_issue_zone(a.preset, a.zone, a.vault, a.account)
         return cmd_issue(a.preset, a.account, a.project)
     if a.cmd == "list":
         return cmd_list()
