@@ -572,8 +572,9 @@ def sandbox_env(base: Path, home: Path, **extra) -> dict:
 
 def start_server(env: dict, port: int, **pipes) -> subprocess.Popen:
     pipes = pipes or {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE}
+    # faulthandler lets a late server be asked where it is stuck (SIGABRT dumps every thread).
     return subprocess.Popen([sys.executable, str(ROOT / "tools/serverd.py"), "--run", "--port", str(port)],
-                            cwd=ROOT, env=env, **pipes)
+                            cwd=ROOT, env={**env, "PYTHONFAULTHANDLER": "1"}, **pipes)
 
 
 def get(port: int, path: str, headers: dict | None = None):
@@ -611,16 +612,20 @@ def wait_ready(port: int, proc: subprocess.Popen, timeout: float = 20) -> None:
 
 
 def _drain(proc: subprocess.Popen) -> str:
-    """Stop the server and return the tail of what it printed (pipes only)."""
+    """Stop the server and return the tail of what it printed (pipes only).
+
+    A live server gets SIGABRT, so faulthandler prints every thread's stack first."""
     if proc.poll() is None:
-        proc.terminate()
+        proc.send_signal(signal.SIGABRT)
     try:
         out, err = proc.communicate(timeout=10)
     except (subprocess.TimeoutExpired, ValueError):
         proc.kill()
         return "(no output: the server did not exit)"
     text = ((out or b"") + (err or b"")).decode(errors="replace")
-    return text[-1500:] or "(nothing)"
+    # Python 3.14 adds the C stack to the dump; the Python frames are the part to read.
+    text = "\n".join(line for line in text.splitlines() if not line.startswith("  Binary file"))
+    return text[-4000:] or "(nothing)"
 
 
 def stop_server(proc: subprocess.Popen) -> None:
