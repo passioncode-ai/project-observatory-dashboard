@@ -74,6 +74,7 @@ import os
 import pathlib
 import plistlib
 import signal
+import socketserver
 import socket
 import subprocess
 import sys
@@ -469,6 +470,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._json({"error": "GET only — this server changes nothing"}, 405)
 
 
+class LoopbackServer(http.server.ThreadingHTTPServer):
+    """ThreadingHTTPServer without the reverse lookup in server_bind().
+
+    http.server.HTTPServer.server_bind() calls socket.getfqdn(host) between bind() and
+    listen(). A Mac with a slow or broken resolver stalls there with the port bound but
+    not listening, so a probe neither connects nor is refused. A loopback service knows
+    its own name.
+    """
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
+
+
 def serve(port: int) -> int:
     """Lock, token, bind, beat — in that order, and the order is the point.
 
@@ -489,7 +506,7 @@ def serve(port: int) -> int:
         print(f"events token: {problem}", file=sys.stderr)
     RUNTIME = Runtime(token, problem)
     try:
-        srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        srv = LoopbackServer(("127.0.0.1", port), Handler)
     except OSError as exc:
         print(f"Cannot listen on 127.0.0.1:{port}: {exc.strerror or exc}. "
               f"Another program holds the port; pass --port.", file=sys.stderr)

@@ -47,6 +47,12 @@ the access model [ACCESS.md](ACCESS.md) already states for this server. No POST 
      the lock for the next start.
    - `full open --serve` on another port now says which address already serves the workspace:
      `test_a_workspace_already_served_names_its_address`.
+   - **The bind asks no resolver.** `http.server.HTTPServer.server_bind()` calls
+     `socket.getfqdn()` between `bind()` and `listen()`; on the macOS CI runner that stalled for
+     longer than 20 s with the port bound but silent (connects timed out instead of being
+     refused). `LoopbackServer` in `tools/serverd.py` and in `observatory/dashboard.py` names
+     itself `127.0.0.1` instead: `test_binding_never_asks_the_resolver`,
+     `test_dashboard_binds_without_asking_the_resolver`.
 2. **The well-known document is answered from memory.** The heartbeat thread computes a
    snapshot (`service_health.snapshot`) every 20 seconds; the route reads it under a lock and
    never calls the `/health` computation. Registry documents are parsed again only when their

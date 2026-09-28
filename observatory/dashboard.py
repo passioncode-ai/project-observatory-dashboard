@@ -5,6 +5,7 @@ import html
 import http.server
 import json
 from pathlib import Path
+import socketserver
 
 from .core import latest, read_json, write_private
 
@@ -70,9 +71,19 @@ def handler(state: Path):
     return Handler
 
 
+class LoopbackServer(http.server.ThreadingHTTPServer):
+    """ThreadingHTTPServer without the reverse lookup HTTPServer.server_bind() makes between
+    bind() and listen(): a slow resolver would leave the port bound but silent."""
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name, self.server_port = host, port
+
+
 def serve(state: Path, port: int) -> None:
     latest(state)
-    with http.server.ThreadingHTTPServer(("127.0.0.1", port), handler(state)) as server:
+    with LoopbackServer(("127.0.0.1", port), handler(state)) as server:
         print(json.dumps({"url": f"http://127.0.0.1:{server.server_address[1]}", "mode": "read-only"}), flush=True)
         try:
             server.serve_forever()

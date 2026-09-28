@@ -393,7 +393,7 @@ class StartupOrder(Sandbox):
         with mock.patch.object(self.serverd.fs, "hold_single_instance", side_effect=SystemExit(75)), \
                 mock.patch.object(self.serverd.fs, "ensure_token", side_effect=lambda p: calls.append("token")), \
                 mock.patch.object(self.serverd, "heartbeat", side_effect=lambda: calls.append("heartbeat")), \
-                mock.patch.object(self.serverd.http.server, "ThreadingHTTPServer",
+                mock.patch.object(self.serverd, "LoopbackServer",
                                   side_effect=lambda *a, **k: calls.append("bind")):
             with self.assertRaises(SystemExit) as stop:
                 self.serverd.serve(free_port())
@@ -422,11 +422,32 @@ class StartupOrder(Sandbox):
                 mock.patch.object(self.serverd.fs, "ensure_token",
                                   side_effect=lambda p: calls.append("token") or "t" * 43), \
                 mock.patch.object(self.serverd, "heartbeat", side_effect=lambda: {"leaks": {}}), \
-                mock.patch.object(self.serverd.http.server, "ThreadingHTTPServer", Server), \
+                mock.patch.object(self.serverd, "LoopbackServer", Server), \
                 mock.patch.object(self.serverd.signal, "signal"):
             self.assertEqual(self.serverd.serve(free_port()), 0)
         self.assertEqual(calls[:4], ["lock", "token", "bind", "serve"])
         self.assertEqual(calls[-1], "release")
+
+
+class NoResolverAtBind(Sandbox):
+    """http.server's server_bind() asks the resolver for the host's FQDN; on a Mac with a
+    slow or broken resolver that stalls the bind with the socket bound but not listening,
+    so the port neither answers nor refuses (seen on the macOS CI runner: ETIMEDOUT)."""
+
+    def test_binding_never_asks_the_resolver(self):
+        import threading
+        with mock.patch("socket.getfqdn", side_effect=AssertionError("resolver asked at bind")):
+            srv = self.serverd.LoopbackServer(("127.0.0.1", 0), self.serverd.Handler)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            self.serverd.RUNTIME = self.serverd.Runtime("t" * 43)
+            self.assertEqual(get(port, "/.well-known/fabric-service")[0], 200)
+            self.assertEqual(srv.server_name, "127.0.0.1")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            self.serverd.RUNTIME = None
 
 
 class CheapWellKnown(Sandbox):

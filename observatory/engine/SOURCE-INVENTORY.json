@@ -1551,8 +1551,8 @@
       "path": "tests/test_fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e65fc9f54a4421c9a2bd8cd2ed9bbf19cef07cde60fb60eccfeff49c431d07a0",
-      "bytes": 42749
+      "export_sha256": "4f53d611db29ede4cebda11ee32c171cd622ae59d485802ca1ee1a15f703cba7",
+      "bytes": 43721
     },
     {
       "path": "tests/test_fingerprints.py",
@@ -2399,8 +2399,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "01ff2ebeec7c0fee17a90d8eaf10f1fad92f72cee6d4f75efcaf35ef71b11026",
-      "bytes": 30761,
+      "export_sha256": "4d286c32d59db7466aee8ccea46e59535752b950f76c542173e4ebc1dd9db2dc",
+      "bytes": 31377,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
