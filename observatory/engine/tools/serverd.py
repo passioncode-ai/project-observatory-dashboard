@@ -71,7 +71,7 @@ try:
 except ImportError:
     import install_launchd
 LABEL = install_launchd.instance_label("server")
-PLIST = pathlib.Path.home() / "Library/LaunchAgents" / f"{LABEL}.plist"
+PLIST = install_launchd.plist_path(LABEL)
 #: Sync states that mean work exists on this disk only. Mirrors the board's
 #: `AT_RISK`; spelled here because the daemon must not import the findings
 #: builder (it reads receipts the builder writes — a cycle).
