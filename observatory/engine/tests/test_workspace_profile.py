@@ -189,6 +189,37 @@ class Profile(unittest.TestCase):
         self.assertIn("config/models.json", included)
         self.assertIn("config/retention.json", included)
 
+    def test_a_path_in_a_documentation_field_drops_the_field_not_the_file(self):
+        # The operator's model chain carried a prose `*_note` and a `*_source` pointer
+        # naming files on their own machine. Excluding the whole file for that left a
+        # second machine with an empty chain and zero spending ceilings: the agent
+        # layer silently off. Only documentation fields may be dropped this way.
+        user = self.base / "user"
+        models = json.loads((self.a / "config/models.json").read_text())
+        models["wallet"]["source_note"] = "figures come from " + str(user / "wallet.md")
+        models.setdefault("embedding", {})["contract_source"] = str(user / "contract.json")
+        self.write(self.a, "models.json", models)
+        doc = self.export()
+        self.assertIn("config/models.json", {row["item"] for row in doc["included"]})
+        exported = doc["files"]["models.json"]
+        self.assertEqual(exported["chain"], [{"model": "example-provider/example-model-large", "role": "primary"}])
+        self.assertEqual(exported["wallet"]["daily_ceiling"], 1.5)
+        self.assertNotIn("source_note", exported["wallet"])
+        self.assertNotIn("contract_source", exported["embedding"])
+        self.assertNotIn(str(user), json.dumps(doc))
+        dropped = [row for row in doc["excluded"] if row["item"].startswith("config/models.json#")]
+        self.assertEqual(sorted(row["item"] for row in dropped),
+                         ["config/models.json#embedding.contract_source", "config/models.json#wallet.source_note"])
+        self.assertTrue(all("documentation" in row["reason"] for row in dropped))
+
+    def test_a_path_in_a_functional_field_still_excludes_the_file(self):
+        models = json.loads((self.a / "config/models.json").read_text())
+        models["wallet"]["ledger_file"] = str(self.base / "user" / "ledger.json")
+        self.write(self.a, "models.json", models)
+        doc = self.export()
+        self.assertNotIn("config/models.json", {row["item"] for row in doc["included"]})
+        self.assertNotIn("models.json", doc["files"])
+
     def test_export_is_versioned_and_hashed(self):
         doc = self.export()
         self.assertEqual((doc["kind"], doc["format_version"], doc["engine_version"]),
