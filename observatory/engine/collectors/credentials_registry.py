@@ -210,6 +210,14 @@ def _plugin_readers() -> dict[str, str]:
         if not script:
             continue
         for req in doc.get("requires") or []:
+            # The public manifests name their credential as `secret:NAME`,
+            # relative to the configured store, so that shape IS the name. Only
+            # checking `path:` left every plugin secret with no reader.
+            if req.startswith("secret:"):
+                name = pathlib.PurePosixPath(req[7:])
+                if len(name.parts) == 1 and name.name not in {"", ".", ".."}:
+                    out[name.name] = f"plugins/{script}"
+                continue
             if not req.startswith("path:"):
                 continue
             target = pathlib.Path(req[5:]).expanduser()
