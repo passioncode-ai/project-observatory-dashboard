@@ -28,6 +28,14 @@ Credential inventory returns names and metadata, not stored values. Recording
 and proposal tools write private local memory; they do not authorize provider
 changes or deployment.
 
+**Three MCP resources, and they are protocol surface rather than contract
+surface.** `observatory://estate` (JSON), `observatory://project/{project_id}`
+(JSON, one URI per project — the address a renderer holds) and
+`observatory://dashboard` (`text/html`) are served by `../mcp/server.py`. The
+pinned contract defines no resource concept and no rendering capability, so the
+manifest declares neither; a host that relies on these resources relies on MCP,
+not on the contract.
+
 Schemas live in `schemas/`, with fictional requests in `fixtures/`. Published
 schema URLs are pinned to the release selected by the lock. An application patch
 release does not silently move that schema pin.

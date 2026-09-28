@@ -18,6 +18,8 @@ from __future__ import annotations
 import pathlib, re, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+# Run as `dashboard/audit_pack.py`, sys.path[0] is dashboard/; `paths` lives one level up.
+sys.path.insert(0, str(ROOT))
 import paths
 PAGE = paths.DASHBOARD_HTML
 EMOJI = re.compile(r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF]")

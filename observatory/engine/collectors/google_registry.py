@@ -11,7 +11,7 @@ same join the domains and the Cloudflare zones already use.
 
 FIVE RULES, IN EVIDENCE ORDER, and each row carries the one that made it:
 
-    declared     the operator's `plugins/config/ga4_properties.json` — a human
+    declared     the workspace's `config/ga4_properties.json` — a human
                  decision outranks a measurement, and it is how a property whose
                  host this estate does not own gets attached anyway
     stream-host  a web stream's host resolves to a project through the registry
@@ -100,7 +100,7 @@ def match(prop: dict, declared: dict, host_owner, names: dict[str, str]) -> tupl
     """(project id, rule, evidence) for one property."""
     d = declared.get(prop["property"])
     if d and d.get("project"):
-        return d["project"], "declared", f"collectors/… ga4_properties.json: {d.get('_why', 'operator')}"
+        return d["project"], "declared", f"{paths.config_label('ga4_properties.json')}: {d.get('_why', 'operator')}"
     if d and d.get("host"):
         owner = host_owner(d["host"])
         if owner:

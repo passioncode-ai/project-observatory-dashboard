@@ -11,7 +11,7 @@ description: >-
   same turn. NOT for secrets (handling-secrets) or for code changes inside the repository.
 license: MIT
 metadata:
-  version: "0.12.0"
+  version: "0.12.1"
 compatibility: >-
   Requires a full Project Observatory installation with organizations.json
   configured; the observatory MCP server or its local CLI. Creating the resource

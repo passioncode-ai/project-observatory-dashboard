@@ -29,6 +29,16 @@ already holds, so the same inputs always produce the same rows.
 """
 from __future__ import annotations
 
+
+def _config_label(name: str) -> str:
+    """The workspace-relative name of a configuration file.
+
+    Imported late: these rule modules are loaded by `tools/build_findings.py`,
+    which has already resolved the workspace, and importing `paths` at module
+    load would resolve it again for every test that imports a rule alone."""
+    import paths
+    return paths.config_label(name)
+
 #: Listed by name up to this many, as everywhere else on this board.
 LISTED = 6
 
@@ -82,7 +92,7 @@ def unclaimed(creds: list[dict]) -> list[dict]:
                    f"credential is one nobody will dare rotate, because the blast "
                    f"radius is unknown — which is the state a shared account drifts "
                    f"into on its own."),
-        "action": ("add a row to collectors/credential_owners.json with the evidence "
+        "action": (f"add a row to {_config_label('credential_owners.json')} with the evidence "
                    "that proves who uses it; a row without evidence is refused"),
     }]
 

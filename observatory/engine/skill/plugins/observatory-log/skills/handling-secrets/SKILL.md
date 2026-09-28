@@ -9,7 +9,7 @@ description: >-
   provider permissions or choosing a project's authentication architecture.
 license: MIT
 metadata:
-  version: "0.12.0"
+  version: "0.12.1"
 compatibility: >-
   Requires an initialized full Project Observatory installation, Python 3.11+
   and local shell access on macOS or Linux. Provider operations additionally
@@ -29,7 +29,7 @@ names. Never ask the user to paste a credential into the conversation.
 2. Select the user's initialized `OBSERVATORY_HOME`. Run
    `python3 "$OBSERVATORY_ROOT/observatory.py" doctor`. A missing workspace
    needs the documented onboarding before secret operations.
-3. Run `python3 "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.12.0`.
+3. Run `python3 "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.12.1`.
    If stale, read the installed skill once and follow its compatible commands.
    Do not turn an unavailable version check into a retry loop.
 4. Inspect names using `tools/use_secret.py names PROJECT` or `tools/vault.py
@@ -83,6 +83,12 @@ Cloudflare and OpenRouter have separate tools, `cloudflare.py` and
 They require an explicitly configured integration and the user's own admin or
 provisioning credential. They do not make a new user inherit the author's
 accounts, budgets or tokens. Limit issuance and revocation to the task's scope.
+
+A project that must edit DNS in one zone (a custom domain, a CNAME to its host)
+gets `cloudflare.py issue --preset dns-edit --zone <zone> --vault <project>/<env>/<NAME>`:
+Zone Read and DNS Write on that zone only, verified against its records and
+delivered to the vault slot on stdin; a second issue rolls the same token. Not
+an account-wide DNS token, and never the admin token in a script.
 
 By default, slots live under the private workspace's `secrets/projects/`.
 An explicitly configured `sources.secret_store` or `OBSERVATORY_VAULT_DIR`

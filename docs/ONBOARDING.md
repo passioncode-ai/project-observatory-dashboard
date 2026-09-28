@@ -16,25 +16,31 @@ Initialization, doctor, migration and upgrade check this before workspace writes
 The isolated regression is
 `observatory/engine/tests/test_workspace_upgrade.py::WorkspaceUpgrade::test_missing_sqlite_extension_support_refuses_before_writes`.
 
-On macOS, [Homebrew Python](https://formulae.brew.sh/formula/python@3.14)
-provides a supported installation path:
+**Choose the interpreter explicitly.** The package declares
+`requires-python = ">=3.11"`. The `python3` that ships with macOS is 3.9, and
+pip run from it does not say so: it fails with a `ResolutionImpossible` about
+the locked dependencies. On macOS,
+[Homebrew Python](https://formulae.brew.sh/formula/python@3.14) provides a
+supported installation path; on Linux, name any Python 3.11+ your distribution
+provides. Both check lines fail with a message rather than later, inside pip:
 
 ```sh
-brew install python@3.14
-"$(brew --prefix python@3.14)/bin/python3.14" -m venv .venv
-. .venv/bin/activate
-python -c "import sqlite3; c=sqlite3.connect(':memory:'); c.enable_load_extension(True); c.enable_load_extension(False)"
+brew install python@3.14                                 # macOS
+PYTHON="$(brew --prefix python@3.14)/bin/python3.14"     # on Linux, e.g. PYTHON=python3.12
+"$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else "Python 3.11 or newer is required; this is " + sys.version.split()[0])'
+"$PYTHON" -c "import sqlite3; c=sqlite3.connect(':memory:'); c.enable_load_extension(True); c.enable_load_extension(False)"
 ```
 
-Install the full package and its pinned dependencies in that environment using
-the release installation instructions, then run the full doctor command.
+The second line raising `AttributeError` means this build cannot load
+sqlite-vec; choose another interpreter.
 
 ## Start without credentials
 
-From a checkout of the public release:
+From a checkout of the public release, with `PYTHON` chosen and checked as
+above:
 
 ```sh
-python3 -m venv .venv
+"$PYTHON" -m venv .venv
 . .venv/bin/activate
 python -m pip install -c requirements-full.lock '.[full]'
 export OBSERVATORY_HOME="$HOME/.local/share/project-observatory-full"
@@ -133,8 +139,17 @@ collector without its source reports nothing rather than failing.
 
 ## Enter credentials locally
 
-For project slots, the full engine's `tools/vault.py put PROJECT ENV NAME`
-accepts the value only on stdin. Prefer a human-controlled hidden prompt or a
+The engine's tools below are files inside the installed engine, not CLI
+subcommands. Run them with the environment's `python` and the same
+`OBSERVATORY_HOME` as the CLI; `project-observatory full-path` prints the
+engine directory:
+
+```sh
+python "$(project-observatory full-path)/tools/vault.py" put PROJECT ENV NAME   # the value on stdin
+```
+
+`ENV` is one of `local`, `stage` or `prod`, and `NAME` is UPPER_SNAKE_CASE.
+The command accepts the value only on stdin. Prefer a human-controlled hidden prompt or a
 pipe from an already authenticated provider tool. Do not put a secret in a chat,
 command argument, test fixture or tracked file. Read the installed
 `handling-secrets` skill before an agent works with these commands.
@@ -162,15 +177,16 @@ every row; later ticks read only rows added since, per table, and record where t
 `store/scrub-watermark.json`. That file identifies the value set by an HMAC under the workspace's
 salt, so it holds nothing a value could be recovered from. A complete pass runs again when the set of
 known values changes, a week after the last complete pass, when a table was emptied or recreated, or
-on `tools/scrub_companion.py --full`. A row edited in place between complete passes is caught by the
+on `python "$(project-observatory full-path)/tools/scrub_companion.py" --full`. A row edited in place between complete passes is caught by the
 weekly pass, not sooner.
 
 The leak scan reads the companion's database the same way: transcripts from their last offset, the
 database from its last rowid per table (in `store/raw/leak-scan-state.json`), with the same reasons
 for a complete pass. So a sighting is reported once, by the tick that first reads it, and stays on
-record in the leak register until it is settled. `tools/scan_leaks.py --full` reads everything again.
+record in the leak register until it is settled. `python "$(project-observatory full-path)/tools/scan_leaks.py" --full` reads everything again.
 
-**A local provider key** (`tools/install_key.py --for observatory`, stdin only) is kept at
+**A local provider key** (`python "$(project-observatory full-path)/tools/install_key.py" --for observatory`,
+stdin only) is kept at
 `store/.openrouter-key`, or under `OBSERVATORY_STATE` when you redirect the state. After such a
 redirect, a key left at the old `store/` location is still read, with a note saying where it
 belongs, and is never moved for you. If a key exists in both places, reading refuses and names both
@@ -181,9 +197,24 @@ files, rather than guessing which one is current. Remove the one you no longer u
 The complete MCP server uses stdio. Configure a Python executable from the
 installed virtual environment, the engine's `mcp/server.py` as its argument,
 and `OBSERVATORY_HOME` for the selected private workspace. Detect MCP support
-in the chosen agent rather than assuming it from the product name. The optional
-`observatory-log` plugin adds Claude Code hooks; other hosts can use the CLI
-and MCP without those hooks.
+in the chosen agent rather than assuming it from the product name.
+
+For Claude Code, with the environment active and `OBSERVATORY_HOME` exported,
+this line declares it for your user (the first scan raises
+`mcp.own_unregistered` until some agent does, and that finding's action prints
+the same line with this workspace's values filled in):
+
+```sh
+claude mcp add observatory --scope user -e OBSERVATORY_HOME="$OBSERVATORY_HOME" -- \
+  "$(python -c 'import sys; print(sys.executable)')" "$(project-observatory full-path)/mcp/server.py"
+claude mcp list | grep observatory     # Connected
+```
+
+Restart open Claude Code sessions afterwards; they read their MCP servers at
+start.
+
+The optional `observatory-log` plugin adds Claude Code hooks; other hosts can
+use the CLI and MCP without those hooks.
 
 For Claude Code, run `project-observatory full agent install`. It adds the
 GitHub marketplace `passioncode-ai/project-observatory-dashboard`, installs
@@ -202,23 +233,42 @@ how to create one. Open it explicitly with `project-observatory full open` (loca
 `project-observatory full open --serve` (loopback server, needed for the keys
 page's live actions).
 
+The server `--serve` starts runs detached, so closing the terminal does not end
+it. Stop it with the same port:
+
+```sh
+project-observatory full open --stop              # or: --stop --port PORT, if you served on another port
+```
+
+`--stop` ends only a server that serves this workspace and that `--serve`
+started. A server installed as an always-on agent with `serverd.py --install`
+is restarted by launchd, so `--stop` refuses it and names
+`python "$(project-observatory full-path)/tools/serverd.py" --uninstall`, which
+stops it and keeps it off.
+
 ## Enable background or paid actions deliberately
 
 Settings under `features` control scheduler, agent interpretation, embeddings,
 notifications, retention, fixture cleanup, wiki projection, memory remediation
 and private registry history. Their default is disabled. Configure model
-selection and a budget before enabling reasoning or embeddings. On macOS,
-`tools/install_launchd.py` and `tools/serverd.py` install workspace-specific
-jobs only after explicit scheduler opt-in; Linux can run the CLI under a
+selection and a budget before enabling reasoning or embeddings. On macOS the
+two launchd installers write workspace-specific jobs only after the scheduler
+is explicitly enabled; Linux can run `project-observatory full tick` under a
 supervisor chosen by the user. Do not create duplicate writers for one home.
+
+```sh
+project-observatory full configure features scheduler true
+ENGINE="$(project-observatory full-path)"
+python "$ENGINE/tools/install_launchd.py" install      # the tick, every 30 minutes; status | uninstall | run-now
+python "$ENGINE/tools/serverd.py" --install            # the always-on dashboard server; --status | --uninstall
+```
 
 A launchd job does not inherit your shell. The installer writes the directories
 of the `PATH` it runs with (absolute, existing, writable by no other account;
 group-writable only when you or root own it, as Homebrew's directories are)
 followed by the system directories into the job, so tools such as `claude`,
 `heroku` or `gh` resolve as they do in your terminal. After installing a tool
-in a new directory, run `tools/install_launchd.py install` and
-`tools/serverd.py --install` again.
+in a new directory, run both installers above again.
 
 ## The machine: what runs, where the disk goes, cleanup
 
@@ -308,6 +358,12 @@ account can read (`analytics.organization_account_unreadable`).
 
 ## Upgrade, back up, restore
 
+From 0.7.0 on, `project-observatory full update --apply` does everything in this section for an
+installed release in one command — fetch, verify, stop the jobs, snapshot,
+install, upgrade, verify, restart, and roll back on failure; see
+[Staying in step](#staying-in-step). The steps below are the same work by hand, for a
+source checkout or a scheduler this engine did not install.
+
 Stop every writer, including old executables and background jobs. A lock in a
 new version cannot constrain an old process that does not know that lock.
 
@@ -376,6 +432,99 @@ and run `full migrate-local ORIGINAL_DIRECTORY` to preview. Apply requires
 `--apply --writers-stopped`. It leaves the original in place and does not start
 services. Verify external source paths, enabled features, credentials, registry
 counts and database health before choosing which installation becomes active.
+
+## Second machine
+
+Two operators, or one operator on two Macs, run the same engine version and the
+same functional configuration; each machine keeps its own paths, credentials and
+estate. On the new machine:
+
+1. **Install the same release.** From the release page, save `project_observatory-X.Y.Z-py3-none-any.whl`
+   and `SHA256SUMS`, check the digest, and install the wheel
+   into the Python environment from [SQLite runtime prerequisite](#sqlite-runtime-prerequisite):
+
+   ```sh
+   shasum -a 256 -c SHA256SUMS --ignore-missing
+   python -m pip install 'project_observatory-X.Y.Z-py3-none-any.whl[full]'
+   ```
+
+   A machine that already has 0.7.0 or later installed moves to the exact version
+   with `project-observatory full update --version X.Y.Z --apply`. Releases before 0.7.0
+   have no `update` command: move such a machine to 0.7.0 once by hand, as in
+   [Upgrade, back up, restore](#upgrade-back-up-restore) (stop the writers, install the
+   verified wheel, `full upgrade --apply --writers-stopped`, start the jobs again), and
+   use `full update` from then on.
+2. **Create the workspace:** `project-observatory full init`.
+3. **Import the profile.** On the first machine, `project-observatory full profile
+   export observatory-profile.json` writes the portable configuration: integrations,
+   features, the dashboard language, `models.json` and the policy files that hold no
+   paths, accounts or project names. Every included and excluded item is listed in the
+   file with its reason; `sources`, `storage`, secrets, the registry, the store,
+   credential annotations and account ids never are. Carry the file across, then:
+
+   ```sh
+   project-observatory full profile import observatory-profile.json          # preview: the diff
+   project-observatory full profile import observatory-profile.json --apply
+   ```
+
+   Import refuses a profile made by a newer engine (run `full update` first), a format
+   it does not know, and a file whose sha256 no longer matches its content. It keeps
+   every local field the profile does not name and never touches `sources` or
+   `features.scheduler`.
+4. **Connect what the import report lists.** `connect_on_this_machine` names each enabled
+   integration's missing source (`coverage_warnings`, the same check `full doctor` runs)
+   and the credential or CLI login it needs here. Set sources with `full configure sources
+   NAME PATH` and enter credentials as in [Enter credentials locally](#enter-credentials-locally).
+5. **Connect the agent:** `project-observatory full agent install`.
+6. **Scheduler, deliberately:** `full configure features scheduler true`, then
+   `tools/install_launchd.py install` and `tools/serverd.py --install` from
+   `project-observatory full-path`, as in
+   [Enable background or paid actions deliberately](#enable-background-or-paid-actions-deliberately).
+   Scheduling is a per-machine decision, which is why a profile does not carry it.
+
+## Staying in step
+
+After each release, on both machines:
+
+```sh
+project-observatory full update --check     # 0 up to date, 10 update available, 3 could not look
+project-observatory full update             # preview: current, target, what --apply does
+project-observatory full update --apply
+```
+
+`--apply` downloads the wheel and `SHA256SUMS` from the GitHub release and installs only
+when the wheel matches both GitHub's published asset digest and its `SHA256SUMS` line.
+It keeps a verified wheel of the running release for rollback (under
+`backups/engine-releases/`, cached by every update, or downloaded from that release) and
+refuses without one unless `--no-rollback` is given. It stops this workspace's launchd
+tick and server if they are loaded (unless `--writers-stopped` says you stopped your own
+scheduler; a foreground `open --serve` is yours to stop), snapshots the workspace, installs
+the wheel with its `full` extra using the running interpreter's pip (or `uv pip`), runs the
+new release's `upgrade --apply --writers-stopped` in a new process, verifies the installed
+version, its pinned dependencies and `doctor`, and starts again exactly the jobs it
+stopped. Any failure after the install reinstalls the rollback wheel; if the workspace had
+already been upgraded, the pre-update snapshot is restored at the same path and the changed
+copy is kept beside it as `<home>.failed-update-…`. Every step is a line in
+`store/logs/update.jsonl`.
+
+It refuses a downgrade, the same version without `--reinstall`, and a source checkout or
+editable install (update those with Git). `--version X.Y.Z` pins the target; `--repository
+OWNER/NAME` and `--api-url URL` (or `OBSERVATORY_RELEASE_REPOSITORY`,
+`OBSERVATORY_RELEASE_API`) select a fork or a mirror. Only HTTPS is accepted, except to
+this machine.
+
+| Exit | `--check` | `--apply` |
+|---|---|---|
+| 0 | up to date, or this machine is ahead of the target | updated |
+| 1 | — | failed after the install began; rolled back (`rolled_back`, `workspace_restored`) |
+| 2 | refused: no such release, bad arguments | refused before any change: verification, downgrade, unsafe state |
+| 3 | could not look: network, rate limit, a release without its assets (`degraded`) | could not look (network, rate limit), before any change |
+| 4 | — | rollback incomplete; `human_steps` says what to run |
+| 5 | — | updated, but a stopped job did not start; `services_not_restarted` has the command |
+| 10 | a newer installable release exists | — |
+
+Anonymous GitHub API requests are limited to 60 an hour per address; a `--check` from a
+scheduler every few hours stays far below it.
 
 ## Choose the dashboard's language
 

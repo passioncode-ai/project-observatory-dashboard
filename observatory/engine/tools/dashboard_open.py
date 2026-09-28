@@ -5,7 +5,8 @@ Without --serve the pages open straight from the workspace as files; they are
 self-contained and need no server. With --serve a loopback-only server is
 started (or an already running one is reused) and the page opens at
 http://127.0.0.1:PORT/ - the live verbs on the keys page need it.
-Nothing is sent anywhere; the server binds 127.0.0.1 only.
+Nothing is sent anywhere; the server binds 127.0.0.1 only. The server runs
+detached, so closing the terminal does not end it; --stop does.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
@@ -60,8 +62,8 @@ def healthy(port: int, timeout: float = 3.0) -> dict | None:
     return None
 
 
-def served_workspace(port: int, timeout: float = 30.0) -> str | None:
-    """The workspace a running server reports in /health (None if it does not say)."""
+def health_document(port: int, timeout: float = 30.0) -> dict:
+    """What a running server reports in /health; empty when it says nothing."""
     import http.client
     try:
         c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
@@ -70,8 +72,83 @@ def served_workspace(port: int, timeout: float = 30.0) -> str | None:
         doc = json.loads(r.read().decode("utf-8")) if r.status == 200 else {}
         c.close()
     except (OSError, ValueError):
-        return None
-    return doc.get("workspace") if isinstance(doc, dict) else None
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def served_workspace(port: int, timeout: float = 30.0) -> str | None:
+    """The workspace a running server reports in /health (None if it does not say)."""
+    return health_document(port, timeout).get("workspace")
+
+
+def _is_this_server(pid: int) -> bool:
+    """Is `pid` this engine's own `serverd.py --run`?
+
+    /health is an HTTP answer and anything bound to the port can claim a pid,
+    so the process table decides before any signal is sent. Only the command
+    is compared, in memory, and it is never printed or kept.
+    """
+    try:
+        command = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True,
+                                 text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return str(ROOT / "tools/serverd.py") in command and "--run" in command
+
+
+def _always_on() -> bool:
+    """Is this workspace's server installed as a launchd agent (`serverd.py --install`)?
+
+    Such a server has KeepAlive: a signal would only restart it, so stopping it
+    is `serverd.py --uninstall`, which keeps it off."""
+    try:
+        from tools import install_launchd
+    except ImportError:
+        import install_launchd
+    label = install_launchd.instance_label("server")
+    return (Path.home() / "Library/LaunchAgents" / f"{label}.plist").is_file()
+
+
+def stop_server(port: int, wait: float = 10.0) -> dict:
+    """Stop the server this workspace started on `port` with `--serve`.
+
+    Refuses rather than guesses: a server of another workspace, a pid that is
+    not this engine's serverd, and an always-on agent are each left running
+    with the reason. Nothing answering is not an error; the state asked for
+    already holds.
+    """
+    configuration.validate_workspace(required=True)
+    paths = _paths()
+    result = {"port": port, "stopped": False}
+    if not healthy(port):
+        result["reason"] = f"no Observatory server answers on 127.0.0.1:{port}"
+        return result
+    doc = health_document(port)
+    served, pid = doc.get("workspace"), doc.get("pid")
+    if served != str(paths.HOME):
+        raise configuration.ConfigurationError(
+            f"127.0.0.1:{port} serves another workspace ({served or 'unknown'}); "
+            f"stop it from that workspace")
+    if _always_on():
+        import shlex
+        uninstall = " ".join(shlex.quote(x) for x in (sys.executable, str(ROOT / "tools/serverd.py"), "--uninstall"))
+        raise configuration.ConfigurationError(
+            "this workspace's server is installed as an always-on agent and would be "
+            f"restarted; `{uninstall}` stops it and keeps it off")
+    if not isinstance(pid, int) or pid <= 1 or not _is_this_server(pid):
+        raise configuration.ConfigurationError(
+            f"the process reported on 127.0.0.1:{port} is not this engine's dashboard "
+            f"server; nothing was signalled")
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        if not healthy(port, timeout=1.0):
+            result.update(stopped=True, pid=pid)
+            return result
+        time.sleep(0.2)
+    raise configuration.ConfigurationError(
+        f"the dashboard server (pid {pid}) was asked to stop and still answers on "
+        f"127.0.0.1:{port} after {wait:.0f}s")
 
 
 def _tail(path: Path, lines: int = 8) -> str:
@@ -145,7 +222,9 @@ def open_dashboard(*, serve: bool, port: int, rebuild: bool, browser: bool) -> d
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="project-observatory full open", description=__doc__.splitlines()[0])
-    ap.add_argument("--serve", action="store_true", help="serve on 127.0.0.1 instead of opening files")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--serve", action="store_true", help="serve on 127.0.0.1 instead of opening files")
+    mode.add_argument("--stop", action="store_true", help="stop the server --serve started on --port")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--rebuild", action="store_true", help="rebuild the pages before opening")
     ap.add_argument("--no-browser", action="store_true", help="print the address only")
@@ -154,8 +233,11 @@ def main(argv: list[str] | None = None) -> int:
         print("Observatory: port must be between 1 and 65535", file=sys.stderr)
         return 2
     try:
-        result = open_dashboard(serve=a.serve, port=a.port, rebuild=a.rebuild,
-                                browser=not a.no_browser)
+        if a.stop:
+            result = stop_server(a.port)
+        else:
+            result = open_dashboard(serve=a.serve, port=a.port, rebuild=a.rebuild,
+                                    browser=not a.no_browser)
     except configuration.ConfigurationError as exc:
         print(f"Observatory: {exc}", file=sys.stderr)
         return 2

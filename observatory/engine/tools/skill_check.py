@@ -57,7 +57,10 @@ def shipped_version(skill: str) -> str | None:
         return None
     for line in f.read_text(encoding="utf-8").splitlines():
         if line.strip().startswith("version:"):
-            return line.split(":", 1)[1].strip()
+            # The frontmatter quotes the scalar (`version: "0.12.0"`). Kept, the
+            # quotes made every report parse against (0,), so even the current
+            # version read as AHEAD and the handshake could never say OK.
+            return line.split(":", 1)[1].strip().strip("\"'")
     return None
 
 

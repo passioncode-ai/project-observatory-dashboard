@@ -109,9 +109,8 @@ def _tier_vocabulary() -> list[dict]:
     """
     out = [{"id": t["id"], "maxDays": t.get("max_days"), "means": t.get("means", "")}
            for t in activity.tiers()]
-    cfg = activity.config()
     out.append({"id": activity.unknown_id(), "maxDays": None,
-                "means": cfg.get("unknown_note", "")})
+                "means": activity.unknown_means()})
     return out
 
 

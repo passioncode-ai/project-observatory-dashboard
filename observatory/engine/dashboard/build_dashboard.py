@@ -2142,7 +2142,7 @@ function detail(id) {
       ? `<ul class="dlist">${r.products.map(p => `<li>${E(p.name)} — ${E(p.role)}` +
           (p.kind === "suggested" ? ` <span class="anchor">${T("suggested by a shared domain, not a decision")}</span>` : "") +
           `</li>`).join("")}</ul>`
-      : `<p class="none">${T("part of no product — group it in collectors/products.json")}</p>`}
+      : `<p class="none">${T("part of no product — group it in {file}", {file: "config/products.json"})}</p>`}
     <h3>${T("What happened")}</h3>
     ${gone || list(r.timeline, T("no commits in the window"),
       c => `<li><span class="mono">${E(c.at)}</span> ${E(c.what)}
@@ -2156,7 +2156,7 @@ function detail(id) {
     <h3>${T("Analytics")}</h3>
     ${(() => {
       const tr = (D.traffic || {})[r.id];
-      if (!tr) return `<p class="none">${T("no Google Analytics property is linked to this project — name it in {file} if there is one", {file: "plugins/config/ga4_properties.json"})}</p>`;
+      if (!tr) return `<p class="none">${T("no Google Analytics property is linked to this project — name it in {file} if there is one", {file: "config/ga4_properties.json"})}</p>`;
       return `<ul class="dlist">` + (tr.properties || []).map(g =>
         `<li><b>${g.users_30d == null ? T("not measured") : NUM(g.users_30d)}</b> — ${T("users summed across properties, 30 days")}${g.unknown_properties ? " · " + T("not measured: {n}", {n: g.unknown_properties}) : ""} · ` +
         `${T("{n} sessions", {n: Number(g.sessions_30d || 0)})} — ${E(g.name || "")}` +

@@ -12,10 +12,16 @@ Version 0.2 brings the original engine into the public distribution: project and
 
 The complete engine supports macOS and Linux, Python 3.11+ and SQLite 3.37+ with loadable-extension support. Git and Node.js are needed for the complete local checks. On macOS, use an extension-enabled Python build such as Homebrew Python; some bundled builds cannot load sqlite-vec. The [onboarding guide](docs/ONBOARDING.md) checks this before setup.
 
+The package requires Python 3.11 or newer (`requires-python = ">=3.11"`). The `python3` that ships with macOS is 3.9, and pip run from it fails with a misleading `ResolutionImpossible` about the locked dependencies rather than naming the interpreter, so choose the interpreter explicitly and check it before creating the environment:
+
 ```sh
 git clone https://github.com/passioncode-ai/project-observatory-dashboard.git
 cd project-observatory-dashboard
-python3 -m venv .venv
+brew install python@3.14                                 # macOS; on Linux any Python 3.11+ works
+PYTHON="$(brew --prefix python@3.14)/bin/python3.14"     # on Linux, e.g. PYTHON=python3.12
+"$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else "Python 3.11 or newer is required; this is " + sys.version.split()[0])'
+"$PYTHON" -c 'import sqlite3; c = sqlite3.connect(":memory:"); c.enable_load_extension(True)'   # AttributeError here: this build cannot load sqlite-vec
+"$PYTHON" -m venv .venv
 . .venv/bin/activate
 python -m pip install -c requirements-full.lock '.[full]'
 export OBSERVATORY_HOME="$HOME/.local/share/project-observatory-full"
@@ -33,6 +39,7 @@ Use an existing directory you own in place of `$HOME/projects`. The first run ne
 observatory                              # the short name; with no arguments it opens the dashboard
 project-observatory full open            # builds the pages if needed, opens them as local files
 project-observatory full open --serve    # serves them on 127.0.0.1:47311 (needed for the keys page's live actions)
+project-observatory full open --stop     # stops that server; it runs detached, so closing the terminal does not
 ```
 
 ### Choose the dashboard's language
@@ -86,7 +93,7 @@ Known-value scanning cannot find unknown or transformed values. A copied value i
 
 ## Updates preserve supported contracts
 
-The Python package is updated by reinstalling it (`python -m pip install -U -c requirements-full.lock '.[full]'` from an updated checkout, or the release wheel), followed by `project-observatory full upgrade`. The Claude Code plugin updates itself when auto-update is on; see `full agent status`.
+An installed release is updated with `project-observatory full update --apply`: the wheel is verified against GitHub's digest and `SHA256SUMS`, the workspace is upgraded, and a failure rolls back ([staying in step](docs/ONBOARDING.md#staying-in-step)). A source checkout is updated with Git and reinstalled (`python -m pip install -U -c requirements-full.lock '.[full]'`), followed by `project-observatory full upgrade`. `full profile export` / `import` carries the functional configuration to a [second machine](docs/ONBOARDING.md#second-machine). The Claude Code plugin updates itself when auto-update is on; see `full agent status`.
 
 Application versions, workspace/config formats, database migrations, plugin API and tool schemas have separate compatibility rules. Newer unsupported state is refused. Updates preserve optional settings, back up SQLite including committed WAL data, and support restore into a separate home.
 
