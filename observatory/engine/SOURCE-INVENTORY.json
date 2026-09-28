@@ -2536,6 +2536,13 @@
       "bytes": 8786
     },
     {
+      "path": "tests/test_step_references.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "cb98ea742f3fdc16593b2b63c7ca63a43ec472e151fcc9e03bd39119849acec2",
+      "bytes": 4250
+    },
+    {
       "path": "tests/test_store_faults.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -3460,7 +3467,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 431,
+  "file_count": 432,
   "excluded": [
     "git-history",
     "operator-registries",
