@@ -222,9 +222,12 @@ def run(step: str, cmd: list[str], work: pathlib.Path) -> dict:
     env_before = dict(os.environ)
     (work / "raw").mkdir(parents=True, exist_ok=True)
     (work / "state").mkdir(parents=True, exist_ok=True)
-    for f in (ROOT / "store").glob("*.json"):
+    # FROM THE WORKSPACE, not from beside the code: the engine keeps its store
+    # under the selected state, so the source tree holds no data to copy and a
+    # sandbox seeded from it traces every step against nothing.
+    for f in paths.STATE.glob("*.json"):
         shutil.copy2(f, work / "state" / f.name)
-    for f in (ROOT / "store/raw").glob("*"):
+    for f in paths.SCRATCH.glob("*"):
         if f.is_file():
             shutil.copy2(f, work / "raw" / f.name)
     # THE STORE TOO, and it is not an optimisation. A step's file access is
@@ -233,11 +236,11 @@ def run(step: str, cmd: list[str], work: pathlib.Path) -> dict:
     # came back clean about a step that reads the wallet and four plugin
     # receipts in real life. A sandbox that changes which branch runs measures
     # the sandbox (2026-09-09).
-    if (ROOT / "store/observatory.db").is_file():
-        shutil.copy2(ROOT / "store/observatory.db", work / "t.db")
+    if paths.DB.is_file():
+        shutil.copy2(paths.DB, work / "t.db")
     shutil.copytree(paths.REGISTRY, work / "registry", dirs_exist_ok=True)
-    if (ROOT / "collectors/finding_acks.json").is_file():
-        shutil.copy2(ROOT / "collectors/finding_acks.json", work / "acks.json")
+    if paths.FINDING_ACKS.is_file():
+        shutil.copy2(paths.FINDING_ACKS, work / "acks.json")
     env = dict(os.environ)
     env.update({"OBSERVATORY_DB": str(work / "t.db"),
                 "OBSERVATORY_SCRATCH": str(work / "raw"),
