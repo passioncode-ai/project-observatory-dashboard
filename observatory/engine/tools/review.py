@@ -480,8 +480,11 @@ def cmd_proposal_accept(conn, args) -> int:
         conn.execute("UPDATE proposals SET status='accepted', decided_by=?,"
                      " decided_note=?, decided_at=? WHERE id=?",
                      (L.OPERATOR, args.why, L._now(), row["id"]))
+    # The file actually written, not a checkout-relative name: curation lives in
+    # the selected workspace, and a receipt naming another file sends the
+    # operator to diff the wrong one.
     print(f"accepted {row['id']}: {', '.join(sorted(patch))} -> "
-          f"{paths.config_label(name)}#{row['target_id']}")
+          f"{f}#{row['target_id']}")
     print("The registry changes on the next emit, not now — `./observatory.py "
           "emit` applies it, and the diff is what you commit.")
     return 0
