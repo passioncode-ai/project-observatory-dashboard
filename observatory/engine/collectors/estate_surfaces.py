@@ -346,7 +346,7 @@ def suggested_products(projects: list[dict], domains: list[dict],
             "domains": sorted({h for hs in members.values() for h in hs}),
             "why": (f"{len(members)} projects claim hosts under {apex}; a shared "
                     f"registrable domain is the cheapest sign of one product — promote "
-                    f"or dismiss in collectors/products.json"),
+                    f"or dismiss in {paths.config_label('products.json')}"),
             "source_refs": SRC,
         })
     return out
@@ -376,14 +376,14 @@ def products_document(projects: list[dict], domains: list[dict], obs_date: str
         "schema_version": 1, "updated_on": obs_date,
         "note": ("Several projects, folders and domains that are one thing to a user. "
                  "`kind: curated` rows are the operator's decisions from "
-                 "collectors/products.json and carry `part_of` edges; `kind: suggested` "
+                 f"{paths.config_label('products.json')} and carry `part_of` edges; `kind: suggested` "
                  "rows are derived from a shared registrable domain and carry none — "
                  "an inference labelled as one."),
         "roles": roles, "products": rows,
         # A curated member this registry does not hold: dropped from the row,
         # named here — absent is not zero, and a silent drop is a member nobody
         # notices vanishing.
-        "degraded": [{"source": "collectors/products.json", "reason": m} for m in missing],
+        "degraded": [{"source": paths.config_label("products.json"), "reason": m} for m in missing],
         "totals": {"products": len(rows),
                    "curated": sum(1 for r in rows if r["kind"] == "curated"),
                    "suggested": sum(1 for r in rows if r["kind"] == "suggested"),

@@ -4,8 +4,9 @@
 Same service account as the Search Console plugin — one Google credential on
 this machine, two readers. GA4 adds one thing GSC does not need: a MAPPING
 FILE, because properties are numeric ids that no registry host can be derived
-from. Copy `plugins/config/ga4_properties.example.json` to
-`plugins/config/ga4_properties.json`:
+from. The mapping is the workspace's `config/ga4_properties.json`, which `full
+init` seeds from the shipped default `defaults/ga4_properties.json` (an empty
+list). Add one row per property:
 
     {"properties": [
         {"property": "properties/<PROPERTY_ID>", "host": "example.com"},
@@ -34,9 +35,9 @@ import google_auth
 import hostmap                                                                  
 
 KEY_FILE = paths.source_path("secret_store", paths.SECRETS) / 'google-service-account.json'
-# `plugins/config/`, not `plugins/`: the runner reads EVERY `plugins/*.json`
-# as a manifest, so a data file beside them is reported as five missing
-# manifest fields (measured 2026-09-12).
+# The workspace's config, never beside the plugins: the runner reads EVERY
+# `plugins/*.json` as a manifest, so a data file there is reported as five
+# missing manifest fields (measured 2026-09-12).
 MAP_FILE = paths.config_file("ga4_properties.json")
 SCOPE = "https://www.googleapis.com/auth/analytics.readonly"
 
@@ -111,7 +112,7 @@ def main() -> int:
         return 0
     mapping = json.loads(MAP_FILE.read_text(encoding="utf-8")).get("properties", [])
     if not mapping:
-        print("plugins/ga4_properties.json declares no properties", file=sys.stderr)
+        print(f"{paths.config_label('ga4_properties.json')} declares no properties", file=sys.stderr)
         return 0
     tok = token()
     day = yesterday()

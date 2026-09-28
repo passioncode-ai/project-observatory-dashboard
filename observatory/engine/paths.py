@@ -27,6 +27,19 @@ def config_file(name: str) -> Path:
         raise configuration.ConfigurationError("Configuration name must be a filename")
     return CONFIG / name
 
+def config_label(name: str) -> str:
+    """How a message names a configuration file: relative to the workspace.
+
+    Operator-facing text used to name the predecessor's `collectors/<name>`, a
+    folder an installed engine does not have. Deriving the label from
+    `config_file` keeps every message on the one location the engine reads.
+    """
+    path = config_file(name)
+    try:
+        return path.relative_to(HOME).as_posix()
+    except ValueError:
+        return str(path)
+
 REGISTRY = setting_path("OBSERVATORY_REGISTRY", HOME / "registry")
 configuration.validate_registries(REGISTRY)
 RAW = REGISTRY / "_raw"

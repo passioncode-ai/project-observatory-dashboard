@@ -560,8 +560,8 @@ def declared_alive_measured_dead(projects: list[dict]) -> list[dict]:
                    f"nobody maintains stops being read at all."),
         "action": ("open docs/dashboard/projects.html?f=drift — the table comes up "
                    "narrowed to these rows; archive what is finished in "
-                   "collectors/project_overrides.json, or accept that lifecycle "
-                   "means nothing here and say so"),
+                   f"{paths.config_label('project_overrides.json')}, or accept that "
+                   "lifecycle means nothing here and say so"),
     }]
 
 
@@ -2005,7 +2005,7 @@ def collect() -> list[dict]:
                               f"{name!r} was — if the folder was renamed the new name "
                               f"is a project here, and if it was deleted deliberately, "
                               f"{name!r} belongs in "
-                              f"collectors/session_name_exclusions.json saying so")
+                              f"{paths.config_label('session_name_exclusions.json')} saying so")
             elif verdict == "folder-exists-unmatched":
                 detail = (f"the work touched {where}, which still exists — so the "
                           f"name is a spelling this estate uses for work that "
@@ -2025,8 +2025,8 @@ def collect() -> list[dict]:
                           "nothing here can say which of the three cases it is. "
                           "That is a gap in the evidence, not a verdict.")
                 action = (f"add it to the registry, or add {name!r} to "
-                          f"collectors/session_name_exclusions.json with the reason "
-                          f"it is not a project here")
+                          f"{paths.config_label('session_name_exclusions.json')} with the "
+                          f"reason it is not a project here")
             out.append({
                 "type": "work.unattributed", "subject": f"session-name:{name}",
                 # A LOST PROJECT IS THE LOUDEST OF THE THREE, whatever its
@@ -2437,9 +2437,10 @@ def collect() -> list[dict]:
                            "omission. " + " | ".join(parts)
                            + " Sources: " + listed(_unmapped, 2)),
                 "action": ("none for the decided; a word for the pending and the "
-                           "unclassified — one line each in collectors/host_boundary.json, "
+                           "unclassified — one line each in "
+                           f"{paths.config_label('host_boundary.json')}, "
                            "or adopt the host onto a project when work begins here"),
-                "evidence": ["store/raw/plugins.json#note", "collectors/host_boundary.json"]})
+                "evidence": ["store/raw/plugins.json#note", paths.config_label("host_boundary.json")]})
 
     # THE MCP SERVERS THE AGENTS ARE TOLD TO REACH. The gateway
     # that held them is off; each agent's own config holds them now, and these
@@ -4156,7 +4157,7 @@ def main(argv: list[str]) -> int:
                  "appended: a finding whose cause is gone must disappear. "
                  "`first_seen` is the only value carried forward; delete this file "
                  "and every finding looks new today. Operator acknowledgements live "
-                 "in collectors/finding_acks.json, outside the rebuild."),
+                 f"in {paths.config_label('finding_acks.json')}, outside the rebuild."),
         # WHEN THE CONTENT LAST CHANGED, not when this ran. It used to be
         # `now()` unconditionally, and that one field made the whole registry
         # differ from itself on every tick: `git diff` was never empty, so the
