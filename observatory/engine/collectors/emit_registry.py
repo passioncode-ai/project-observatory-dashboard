@@ -214,8 +214,8 @@ for k in sorted(repos):
         e["source_refs"]=sorted(set(e["source_refs"])|{"SRC-0007"})
         # The network probe cites itself. `sync`, `remote_head` and
         # `remote_checked_on` are `git ls-remote` answers, not filesystem facts,
-        # and they rode under SRC-0007 — "Filesystem scan of ~/DATA" — on 87
-        # repositories until this line.
+        # and they rode under SRC-0007, the filesystem scan of the projects
+        # directory, on every repository that had them until this line.
         if any(e["local"].get(f) for f in ("sync", "remote_head", "remote_checked_on")):
             e["source_refs"]=sorted(set(e["source_refs"])|{"SRC-0010"})
     # A Bitbucket repository's default branch comes from `ls-remote` too: no API
