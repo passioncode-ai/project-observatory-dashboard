@@ -98,7 +98,7 @@ NEW_SOURCES = [
     ("SRC-0014", "The machine's credential surfaces, read for METADATA only and never for values: OpenRouter's provisioning listing (name, the provider's own label, limit, usage, reset, disabled), tools/vault.py's slot paths and meta.json beside each value, and its leaks.jsonl register. Answers WHAT CREDENTIALS EXIST, WHICH PROJECTS MAY USE THEM and WHAT HAS LEAKED AND NOT BEEN ROTATED.", ["registry:credentials.json"]),
     ("SRC-0013", "Heroku Platform API v3 through the CLI's own session token (`heroku auth:token`, never stored): every application the account and its teams can see, with its formation, dynos, add-ons and release history, plus the Deploy tab\'s GitHub link from kolkrabbi. Answers WHERE A PROJECT IS RUNNING and what leaving it running costs — a fact no other source here holds.", ["registry:heroku-apps.json"]),
     ("SRC-0015", "Every inventoried `.env` under the configured project directory, read by collectors/scan_env.py for NAMES and never for values: the file, its project, its mode, its git state, and each variable\'s name and class. The value is read to decide the class and then dropped; the one derivation that survives it is a salted fingerprint kept in the gitignored scan, which is what lets `shared_with` be MEASURED rather than declared. Answers WHAT EACH PROJECT HOLDS LOCALLY, WHAT BREAKS IF A VALUE IS ROTATED and WHERE AN EMPTY SLOT COULD BE FILLED FROM.", ["registry:env-inventory.json"]),
-    ("SRC-0016", "Cloudflare zone listings through the narrow tokens `tools/cloudflare.py` issues (Zone Read, one per account), joined at emit time to the domain registry, the projects' sites and the operator's boundary and claim files; and the operator's curated product groupings in collectors/products.json with the groupings suggested from shared registrable domains. Answers WHICH DOMAINS THE ESTATE HOLDS, whose surface each is, and what several projects are one product.", ["registry:cloudflare-zones.json", "registry:products.json"]),
+    ("SRC-0016", "Cloudflare zone listings through the narrow tokens `tools/cloudflare.py` issues (Zone Read, one per account), joined at emit time to the domain registry, the projects' sites and the operator's boundary and claim files; and the operator's curated product groupings in " + paths.config_label("products.json") + " with the groupings suggested from shared registrable domains. Answers WHICH DOMAINS THE ESTATE HOLDS, whose surface each is, and what several projects are one product.", ["registry:cloudflare-zones.json", "registry:products.json"]),
     ("SRC-0017", "The MCP declarations in each agent's own config (~/.claude.json with its project scopes, ~/.cursor/mcp.json, ~/.config/opencode/opencode.json) plus what `claude mcp list` reports for plugins and claude.ai connectors — read for names, transports, targets without query strings and the PRESENCE of a key, never a value. Answers WHICH MCP SERVERS THE AGENTS ARE TOLD TO REACH and whether Claude reached them.", ["registry:mcp-servers.json"]),
     ("SRC-0018", "Heroku\'s config-vars endpoint through the same CLI session token, read by collectors/scan_remote_env.py: the endpoint answers with names AND values in one object and has no names-only form, so the values are TRANSIT — classified, fingerprinted with the machine-local salt collectors/scan_env.py uses, and dropped. The fingerprints stay in the gitignored scan beside the vault\'s own retired-value fingerprints; the document built from them carries only the verdict. Answers WHAT PRODUCTION IS CONFIGURED WITH, whether it matches this machine, and whether a value the vault has already rotated away is still deployed.", ["registry:remote-env.json"]),
     ("SRC-0019", "Google Analytics Admin and Data APIs, and Search Console, through the service accounts in the machine\'s secret store: every account and property the credential can see, each property\'s own declared web hosts and app bundle ids, thirty days of active users, sessions and views, and the Search Console sites. The credential signs a JWT and never leaves the collector; what is recorded is the account\'s public `client_email`. Answers WHICH PRODUCTS PEOPLE ACTUALLY USE, and joins each property to a project by what the property declares about itself rather than by a hand-written map.", ["registry:google-properties.json"]),
@@ -214,8 +214,8 @@ for k in sorted(repos):
         e["source_refs"]=sorted(set(e["source_refs"])|{"SRC-0007"})
         # The network probe cites itself. `sync`, `remote_head` and
         # `remote_checked_on` are `git ls-remote` answers, not filesystem facts,
-        # and they rode under SRC-0007 — "Filesystem scan of ~/DATA" — on 87
-        # repositories until this line.
+        # and they rode under SRC-0007, the filesystem scan of the projects
+        # directory, on every repository that had them until this line.
         if any(e["local"].get(f) for f in ("sync", "remote_head", "remote_checked_on")):
             e["source_refs"]=sorted(set(e["source_refs"])|{"SRC-0010"})
     # A Bitbucket repository's default branch comes from `ls-remote` too: no API
@@ -471,7 +471,7 @@ _pdoc, _pedges, _perrors = estate_surfaces.products_document(out_projs, _domains
 if _perrors:
     # A curated file with a wrong project id or an unknown role is refused
     # whole: emitting half of an operator's grouping is a grouping nobody made.
-    sys.exit("collectors/products.json refused:\n  " + "\n  ".join(_perrors))
+    sys.exit(paths.config_label("products.json") + " refused:\n  " + "\n  ".join(_perrors))
 for e in _pedges:
     add_rel(e["id"], e["type"], e["from"], e["to"], e["source_refs"], e.get("rule"))
     relations[-1]["role"] = e["role"]
@@ -774,11 +774,11 @@ if LIVE_SRC.is_file():
 # and the only sign was a project total falling from 44 to 43.
 if cleared:
     print(f"CLEARED by measurement — {len(cleared)} field(s) that had a value now have none. "
-          f"If one of these was curated, its home is collectors/project_overrides.json:")
+          f"If one of these was curated, its home is {paths.config_label('project_overrides.json')}:")
     for line in cleared[:10]:
         print(f"  {line}")
 if cleared_repos:
     print(f"CLEARED on repositories — {len(cleared_repos)} field(s); a curated one belongs in "
-          f"collectors/repo_overrides.json:")
+          f"{paths.config_label('repo_overrides.json')}:")
     for line in cleared_repos[:10]:
         print(f"  {line}")

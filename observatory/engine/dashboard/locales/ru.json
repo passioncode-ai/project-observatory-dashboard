@@ -523,7 +523,7 @@
  "outside the estate": "вне эстейта",
  "over a year": "больше года",
  "owners": "владельцев",
- "part of no product — group it in collectors/products.json": "ни в один продукт не входит — сгруппировать: collectors/products.json",
+ "part of no product — group it in {file}": "ни в один продукт не входит — сгруппировать: {file}",
  "partial": "частично",
  "paying for nothing": "платит впустую",
  "ping": "пинг",

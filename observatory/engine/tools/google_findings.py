@@ -17,6 +17,16 @@ NO TIMESTAMP INSIDE A FINDING: the dates quoted are the document's.
 """
 from __future__ import annotations
 
+
+def _config_label(name: str) -> str:
+    """The workspace-relative name of a configuration file.
+
+    Imported late: these rule modules are loaded by `tools/build_findings.py`,
+    which has already resolved the workspace, and importing `paths` at module
+    load would resolve it again for every test that imports a rule alone."""
+    import paths
+    return paths.config_label(name)
+
 #: Named by name up to this many, as everywhere else on this board.
 LISTED = 6
 #: A scan older than this is stale enough that the page should say so. Analytics
@@ -66,8 +76,8 @@ def findings(doc: dict | None, today: str = "") -> list[dict]:
                        f"else runs them or they are not being worked on; the point of the "
                        f"row is that the biggest number in this estate should not be the "
                        f"one nothing claims."),
-            "action": ("name the project in plugins/config/ga4_properties.json, or say "
-                       "the host is somebody else's in collectors/host_boundary.json — "
+            "action": (f"name the project in {_config_label('ga4_properties.json')}, or say "
+                       f"the host is somebody else's in {_config_label('host_boundary.json')} — "
                        "either answer silences this row"),
         })
 

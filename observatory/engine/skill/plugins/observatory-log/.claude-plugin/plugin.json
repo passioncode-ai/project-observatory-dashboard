@@ -3,7 +3,7 @@
   "name": "observatory-log",
   "displayName": "Observatory Log",
   "description": "Records what changed in a watched project at the end of every turn, and asks for the one thing a diff cannot contain: why.",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "license": "MIT",
   "author": {
     "name": "Sergey Sheleg",

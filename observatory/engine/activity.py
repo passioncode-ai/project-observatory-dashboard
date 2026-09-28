@@ -54,6 +54,17 @@ def unknown_id() -> str:
     return config()["unknown_id"]
 
 
+#: What the unmeasured tier means when the configuration carries no note of its
+#: own. The shipped defaults have none, and an empty meaning left the one tier
+#: a legend most needs to explain as the one it could not.
+UNKNOWN_MEANS = ("no measurable last-activity date — not the same as cold, "
+                 "which would assert an absence that was never measured")
+
+
+def unknown_means() -> str:
+    return config().get("unknown_note") or UNKNOWN_MEANS
+
+
 def tier_ids() -> list[str]:
     return [t["id"] for t in tiers()] + [unknown_id()]
 
@@ -89,7 +100,7 @@ def describe(tier: str) -> str:
     for t in tiers():
         if t["id"] == tier:
             return t["means"]
-    return config().get("unknown_note", "") if tier == unknown_id() else ""
+    return unknown_means() if tier == unknown_id() else ""
 
 
 if __name__ == "__main__":

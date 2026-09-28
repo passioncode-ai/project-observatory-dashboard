@@ -173,9 +173,15 @@ MUTATIONS: list[dict] = [
                  '      "id": "relation:example-app:implemented-by:example-org-example-app",'),
      "why": "the third form of one mistake — a sibling absorbed because its "
             "folder was MENTIONED in a note"},
-    {"trap": "T31", "subject": "registry", "file": "projects.json",
-     "patch_dir": lambda w: _forget(w, "example-app"),
-     "why": "a folder on disk that reaches the registry by no anchor at all"},
+    # The defect itself, not its footprint: deleting a registry row is undone
+    # by the next emit, so the mutation restores the merge predicate that
+    # dropped every Git folder from the local-only pass, and the guard drives
+    # scan, merge and emit over a synthetic checkout with no remote.
+    {"trap": "T31", "subject": "source", "file": "collectors/merge.py",
+     "find": 'if l["is_git"] and nwo(l.get("remote")): continue',
+     "replace": 'if l["is_git"]: continue',
+     "guard": "tests/test_local_folders.py::test_t31_a_folder_on_disk_is_never_silently_absent",
+     "why": "a remoteless Git checkout is dropped by the old local-folder predicate"},
 
     # ── the rules that live in code ───────────────────────────────────────
     {"trap": "T5", "subject": "source", "file": "collectors/emit_registry.py",

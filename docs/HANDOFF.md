@@ -54,7 +54,43 @@ lock, well-known document, token-guarded events feed, descriptor from the instal
 `agent/fabric-service`, unreleased. Entry point and the next task:
 [runs/2026-09-28-fabric-service](runs/2026-09-28-fabric-service/README.md).
 
-**Status 2026-09-26 (evening):** 0.4.0 — English/Russian dashboard, the PassionCode
+**Current status, 2026-09-28: 0.6.3.** The package installs the short name `observatory`
+beside `project-observatory`, and either name with no arguments opens the dashboard of the
+workspace in `OBSERVATORY_HOME` ([CHANGELOG](../CHANGELOG.md#063--2026-09-28)). 0.6.3 has no
+run receipt of its own; the receipts of the releases before it are the entry points:
+
+| Receipt | Releases | What it covers |
+|---|---|---|
+| [runs/2026-09-27-machine](runs/2026-09-27-machine/README.md) | 0.6.0–0.6.2 | machine survey (processes by origin, memory, disk, swap), git hygiene, `full cleanup`, the Machine page |
+| [runs/2026-09-27-backups-and-organizations](runs/2026-09-27-backups-and-organizations/README.md) | 0.4.1, 0.5.0 | encrypted backups off the disk; organizations and resources; `observatory-log` 0.12.0 |
+
+Contributors work from [AGENTS.md](../AGENTS.md): what this repository is, the exact checks,
+the privacy rules and the merge flow.
+
+**Next tasks for a contributor** (this repository and synthetic fixtures only):
+
+1. **The `analytics.stale` remedy names a command the step runner refuses**
+   (`./observatory.py google --force` answers "step arguments are not accepted here"). Fix the
+   remedy text or let the step take `--force`, with a test that runs the printed remedy.
+   Open since the 0.5.0 receipt.
+2. `test_schema_compatibility.test_many_concurrent_first_opens` failed once under heavy memory
+   pressure and passed on re-run: give it a load-independent assertion or a longer timeout.
+3. `project-observatory full update`, the command the release cycle in AGENTS.md ends with, is
+   being built in its own change; until it lands, a machine installs the new wheel into its
+   environment and runs `full upgrade` (a preview; `--apply --writers-stopped` applies it).
+
+**Next tasks for the operator only** (they need the operator's machine, accounts or decision;
+no contributor can do them):
+
+1. Free disk on the operator's machine: the machine receipt names the VM disk, swap and
+   simulators as the causes. The observatory reports and never stops a process.
+2. Keep the backup passphrase outside the machine (`full backup-passphrase show` in a terminal).
+3. Configure the GA4 account and Figma team of the one organization that has neither.
+4. Decide whether `features.companion_remediation` stays on while the companion's database is
+   absent.
+5. Review the idle unique branches: `full cleanup --apply --include manual` bundles them first.
+
+**Status 2026-09-26 (evening), history below, newest first:** 0.4.0 — English/Russian dashboard, the PassionCode
 design system and the move to `passioncode-ai`. Entry point and open work:
 [runs/2026-09-26-i18n-passioncode](runs/2026-09-26-i18n-passioncode/README.md).
 

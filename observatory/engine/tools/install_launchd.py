@@ -20,8 +20,12 @@ def instance_label(kind: str) -> str:
     return f"org.project-observatory.{digest}.{kind}"
 
 
+def plist_path(label: str) -> pathlib.Path:
+    return pathlib.Path.home() / "Library/LaunchAgents" / f"{label}.plist"
+
+
 LABEL = instance_label("tick")
-PLIST = pathlib.Path.home() / "Library/LaunchAgents" / f"{LABEL}.plist"
+PLIST = plist_path(LABEL)
 LOG_DIR = paths.STATE / "logs"
 
 
@@ -110,6 +114,39 @@ def build(interval: int) -> dict:
 def run(*args: str) -> tuple[int, str]:
     p = subprocess.run(args, capture_output=True, text=True)
     return p.returncode, (p.stdout + p.stderr).strip()
+
+
+def managed_jobs() -> list[dict]:
+    """This workspace's two launchd jobs: the tick (here) and the server (tools/serverd.py).
+
+    `full update` stops and restarts exactly these. Their labels come from the
+    workspace path, so another workspace's jobs on the same account are never named."""
+    server = instance_label("server")
+    return [{"name": "tick", "label": LABEL, "plist": str(PLIST)},
+            {"name": "server", "label": server, "plist": str(plist_path(server))}]
+
+
+def _launchctl(*args: str, timeout: int = 60) -> tuple[int, str]:
+    try:
+        p = subprocess.run(["launchctl", *args], capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 125, type(exc).__name__
+    return p.returncode, (p.stdout + p.stderr).strip()
+
+
+def job_loaded(label: str) -> bool:
+    return _launchctl("print", f"gui/{uid()}/{label}")[0] == 0
+
+
+def stop_job(label: str) -> tuple[bool, str]:
+    """Boot the job out, leaving its plist on disk so start_job can bring it back."""
+    code, out = _launchctl("bootout", f"gui/{uid()}/{label}")
+    return code == 0 or not job_loaded(label), out
+
+
+def start_job(plist: str) -> tuple[bool, str]:
+    code, out = _launchctl("bootstrap", f"gui/{uid()}", plist)
+    return code == 0, out
 
 
 def main() -> int:

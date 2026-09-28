@@ -30,25 +30,97 @@ LEGACY = (
     'project_identity',
     'sessions',
     'env_page', 'metric_labels', 'hosting_groups', 'action_outcomes', 'workspace_redesign', 'google_identity', 'i18n',
+    # Ported suites, first batch: they run over the synthetic estate above.
+    'absent_fields', 'agent_faults', 'api_listings', 'caller_identity', 'clone_sync',
+    'companion', 'companion_hook', 'dark_domain_cost', 'docs_current', 'export_scope',
+    'filesystem_scan', 'finding_rules', 'heroku', 'interpretation_contract', 'keyserver',
+    'page_omission', 'plugin_reporting', 'projection_mirror', 'queue_order', 'rdap_keys',
+    'recall', 'recount', 'release_cadence', 'remedy_fits', 'render_surface', 'review_queue',
+    'serverd', 'stale_is_expected', 'store_modes', 'tick_standdown', 'trace_opens',
+    'two_surfaces', 'work_tiles',
+
+    # Merged from the parallel port streams.
+    'agent', 'agent_queue', 'blank_page', 'budget_subject', 'dashboard_store', 'erasure_bytes', 'estate_history', 'footprint', 'index', 'key_shape', 'project_surface', 'projection', 'reclaimable_pressure', 'temporary_block', 'traps', 'write_surface',
 )
 BOUNDARY = (
     'workspace', 'workspace_upgrade', 'workspace_boundaries', 'dashboard_shell',
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'dashboard_portability',
-    'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'machine',
+    'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'machine', 'local_folders', 'config_locations', 'dashboard_stop',
+    'engine_update', 'workspace_profile',
+    # Ported suites, first batch: each builds its own temporary workspace.
+    'delta_fold', 'mcp_inventory', 'openrouter_keys', 'scan_ids', 'secrets', 'signature',
+    'skill_check', 'use_secret', 'validator_rules',
+
+    # Merged from the parallel port streams.
+    'cause_and_symptom', 'collector_state', 'corroboration', 'credentials', 'curation_paths', 'degradations', 'domain_probe', 'google', 'handoff', 'install_key', 'ledger_export', 'mechanical_confidence', 'notification', 'portfolio_review', 'project_secrets', 'publish_contract', 'recovery', 'reveals', 'session_start', 'tick', 'tick_failures', 'trap_efficacy', 'trap_map', 'unpublished_work', 'wire_survives', 'witness',
     'fabric_service',
 )
+# Suites and helpers ported by the second port stream.
+BOUNDARY += (
+    'activity',
+    'at_stake',
+    'backup_store',
+    'checkout_subject',
+    'companion_faults',
+    'conformance_receipt',
+    'dead_data',
+    'delivery',
+    'emit_purity',
+    'env_inventory',
+    'estate_surfaces',
+    'fixture_sweep',
+    'foreign_vocabulary',
+    'freshness',
+    'gate_purity',
+    'gate_skips',
+    'git_locale',
+    'horizon',
+    'indexer_load',
+    'interpretation',
+    'key',
+    'ledger_pointer',
+    'lost_projects',
+    'merge_membership',
+    'no_silent_truncation',
+    'pipeline',
+    'plugin_pair',
+    'policy_residue',
+    'registry_shape',
+    'rollup_sessions',
+    'scrub',
+    'search_path',
+    'shared_ancestry',
+    'side_effect_attribution',
+    'skill',
+    'skip_site_kinds',
+    'stale_collapse',
+    'store_faults',
+    'store_integrity',
+    'tick_repo',
+    'unobservable',
+)
+# The step list's own guard: every file it names exists, every suite it names runs.
+BOUNDARY += ('step_references',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
            'dashboard_fixture.py', 'emitter_fixture.py', 'session_fixture.py', 'surface_fixture.py',
-           'env_tab_check.js', 'action_outcome_check.mjs', 'check_service.py')
+           'env_tab_check.js', 'action_outcome_check.mjs',
+           'own_project.py', 'tick_reader.py', 'validator_fixture.py', 'check_service.py',
+    # Merged from the parallel port streams.
+    'concurrency.py', 'merge_fixture.py', 'probe_fixture.py',
+)
+# Suites and helpers ported by the second port stream.
+HELPERS += (
+    'watched_repo.py',
+)
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', 'tools')
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py',
     'identity_map.py', 'leak_register.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'workspace.py',
-    'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'tmp.py',
+    'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'fabric_service.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
 )
 SKILL_FILES = (
@@ -57,6 +129,16 @@ SKILL_FILES = (
     'skill/plugins/observatory-log/skills/tracking-resources/SKILL.md',
     'skill/plugins/observatory-log/.claude-plugin/plugin.json',
     'skill/plugins/observatory-log/hooks/hooks.json',
+    # The companion suites drive the hook scripts themselves.
+    'skill/plugins/observatory-log/hooks/record-turn.sh',
+    'skill/plugins/observatory-log/hooks/ask-why.py',
+
+    # Merged from the parallel port streams.
+    'skill/plugins/observatory-log/hooks/session-start.sh',
+)
+# Suites and helpers ported by the second port stream.
+SKILL_FILES += (
+    'skill/.claude-plugin/marketplace.json',
 )
 NOT_RUN = (
     {'scope': 'live-provider-acceptance', 'status': 'NOT_RUN',
@@ -76,6 +158,8 @@ def copy_source(target: Path) -> None:
     selected.add(ROOT / 'plugins/README.md')
     selected.add(ROOT / 'fabric/FABRIC-CONFORMANCE.md')
     selected.add(ROOT / 'store/schema.sql')
+    # The documentation suite checks the engine's own shipped docs.
+    selected |= set((ROOT / 'docs').glob('*.md'))
     for folder in RUNTIME_DIRS:
         selected |= {p for p in (ROOT / folder).rglob('*')
                      if p.suffix in {'.py', '.sh', '.js', '.css', '.html', '.svg'}

@@ -84,8 +84,9 @@ jobs:
       - name: Installed full engine without the lock file
         shell: bash
         run: |
-          # Users often run `pip install project-observatory[full]` without -c; newer
-          # transitive releases must not break the MCP wire or the pages.
+          # The package is not published on PyPI; an install from the built wheel's
+          # `[full]` extra without `-c requirements-full.lock` resolves newer
+          # transitive releases, and they must not break the MCP wire or the pages.
           runtime_root="$(mktemp -d)"
           runtime_root="$(cd "$runtime_root" && pwd -P)"
           python -m venv "$runtime_root/venv"

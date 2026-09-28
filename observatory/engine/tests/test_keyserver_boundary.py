@@ -100,6 +100,23 @@ class KeyserverBoundaryTests(unittest.TestCase):
         self.assertNotIn("\n", forged)
         self.assertLessEqual(len(forged), 80)
 
+    def test_the_audit_names_the_caller(self):
+        # The caller header travels into the audit row as a label, and the row
+        # says so itself: whoever reads the journal later must not take
+        # `caller` for an authenticated identity. The only thing the server
+        # proved is that the request carried this workspace's token.
+        def echo(body):
+            keyserver.audit("fixture.echo", "fixture-subject", {})
+            return {"caller": keyserver._CALLER.get()}
+        with patch.dict(keyserver.ACTIONS, {"probe": echo}):
+            code, _, body = self.request(headers={"X-Observatory-Caller": "session:abc"})
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(body)["caller"], "session:abc")
+        receipt = json.loads(keyserver.AUDIT.read_text().splitlines()[-1])
+        self.assertEqual(receipt["caller"], "session:abc")
+        self.assertIs(receipt["caller_verified"], False)
+        self.assertEqual(receipt["principal"], "local-token-holder")
+
     def test_a_cors_preflight_is_never_granted(self):
         # A cross-origin page can send the token header only after a preflight;
         # the keyserver answers none, so the browser never sends the action.

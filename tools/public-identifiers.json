@@ -68,6 +68,14 @@
     {
       "token": "project-observatory-contract",
       "reason": "the public Fabric contract repository (passioncode-ai/project-observatory-contract), named in the 0.4.0 handoff"
+    },
+    {
+      "token": "project-observatory-dashboard",
+      "reason": "this public repository's own name: package URLs, the plugin marketplace, the README and every install instruction"
+    },
+    {
+      "token": "org-index",
+      "reason": "the organisation's repository map, linked from AGENTS.md so contributors can find it; private, readable by organisation members, and its name names no project"
     }
   ]
 }

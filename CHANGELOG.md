@@ -27,6 +27,84 @@ while the major version is 0, a minor release may change behaviour and says so h
     `ProcessType`. `--uninstall` removes the descriptor too. SIGTERM now drains and exits 0.
   - `fabric-agent.json` revision 5 names the descriptor under the extension key.
 
+### Fixed
+
+- **Both servers bind without a reverse DNS lookup.** `http.server`'s `server_bind()` calls
+  `socket.getfqdn()` between `bind()` and `listen()`; with a slow resolver (the macOS CI runner)
+  the port stayed bound but silent for longer than 20 s, so a probe neither connected nor was
+  refused. `serverd` and the portable `observatory` dashboard now name themselves `127.0.0.1`.
+- **A failed heartbeat no longer leaves the server `starting` forever.** A full disk or a failing
+  collector becomes a `heartbeat` or `health` row in `degraded`, and the snapshot is still
+  refreshed.
+
+## 0.7.1 — 2026-09-28
+
+### Fixed
+
+- **`full profile export` carried no model chain from a real workspace.** A policy file
+  was excluded whole when any value held a machine path, and the operator's `models.json`
+  had one in two prose fields (`wallet.source_note`, `embedding.contract_source`). The
+  second machine then got an empty chain and zero spending ceilings, and its agent layer
+  was off without saying so. Now, when only documentation fields (keys ending in `_note`
+  or `_source` with a string value, which the engine never reads) hold a path or a token,
+  those fields are dropped and listed in `excluded`, and the file travels. A path in any
+  other field still excludes the file.
+
+## 0.7.0 — 2026-09-28
+
+A second machine can now run exactly the same Observatory as the first and stay in step with it.
+Every install is a tagged release of this repository; the engine code that still lived only in
+the private predecessor has come across.
+
+### Added
+
+- **`full update`** installs a GitHub release with no manual steps. `--check` exits 0 (up to
+  date), 10 (a newer release) or 3 (could not look: never reported as up to date). `--apply`
+  installs the wheel only when it matches both the release's `SHA256SUMS` line and GitHub's own
+  asset digest. It then stops this workspace's launchd jobs, snapshots the workspace, installs
+  with the running interpreter (the `[full]` extra included), runs the new release's `upgrade
+  --apply` in a fresh process, checks version, pins and `doctor`, and restarts only the jobs it
+  stopped. On failure it reinstalls the previous verified wheel, which is kept under
+  `backups/engine-releases/`, and restores the snapshot. It refuses downgrades, source
+  checkouts and editable installs. Steps are logged to `store/logs/update.jsonl`.
+- **`full profile export | import`** moves the functional configuration between machines:
+  integrations, features (except the scheduler), interface language, the model chain and the
+  machine-independent policy files. It never carries sources, paths, secrets, registry, store,
+  account ids or credential annotations, and a value shaped like a path, email or token is
+  refused on both export and import. Import previews by default, applies atomically under the
+  workspace lock, refuses a profile from a newer engine, and lists which enabled integrations
+  still need sources or logins on this machine.
+- **`full open --stop`** ends the dashboard server that `open --serve` started for this
+  workspace, and only that one.
+- **Cloudflare `dns-edit` preset**: `tools/cloudflare.py issue --preset dns-edit --zone Z --vault
+  P/E/N` mints a token scoped to one zone (Zone Read + DNS Write), verifies it against that zone
+  and delivers it into a vault slot over stdin. The handling-secrets skill routes to it
+  (`observatory-log` 0.12.1).
+- **The historical engine suites.** 130 suites exported with the engine on 2026-09-23 but left
+  behind now run in `full check`, adapted to synthetic workspaces: 192 suites, up from 62.
+  `test_step_references` fails if the step list names a file that does not exist (124 of 206
+  did) or a suite the portable runner does not run.
+- `AGENTS.md` for agents, with `CLAUDE.md` importing it, and a link to the organisation map.
+
+### Fixed
+
+- Operator messages named `collectors/<file>`; curated files live in the workspace's `config/`.
+- keyserver audit rows now state that the caller is a token holder, not a verified identity.
+- Trap T31 mutates the merge rule that decides whether a remote-less checkout is dropped.
+- `mcp.own_unregistered` suggests a registration command that runs as written.
+- Findings had no remedy for the merge's `github`, `wiki` and `identity` degradations.
+- `skill_check` kept YAML quotes around the shipped version, so it never reported OK.
+- `trace_opens` seeded its sandbox from the source tree instead of the workspace.
+- Plugin `secret:NAME` readers and the default meaning of an unknown activity tier.
+- `dashboard/audit_pack.py` could not import `paths` when run as a script.
+- `review accept-proposal` named a checkout-relative file instead of the one it wrote.
+- `skip_sites.survey()` crashed on a directory outside the program tree.
+- `registry_shape` described `degraded` notices instead of records on a small estate.
+- The dashboard purity allowlist was missing the machine page added in 0.6.0.
+- README selects a supported interpreter explicitly; stock macOS `python3` (3.9) stops with a
+  message instead of a misleading resolver error. Every ONBOARDING command runs as written.
+- CODEOWNERS named an organisation, which GitHub rejects; it names the `contributors` team.
+
 ## 0.6.3 — 2026-09-28
 
 ### Added

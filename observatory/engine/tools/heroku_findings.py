@@ -31,6 +31,16 @@ the registry already holds — the day of a deploy — never the moment this ran
 from __future__ import annotations
 from datetime import date
 
+
+def _config_label(name: str) -> str:
+    """The workspace-relative name of a configuration file.
+
+    Imported late: these rule modules are loaded by `tools/build_findings.py`,
+    which has already resolved the workspace, and importing `paths` at module
+    load would resolve it again for every test that imports a rule alone."""
+    import paths
+    return paths.config_label(name)
+
 #: How old a snapshot may be before the estate rows stop being built from it.
 #: `tools/tick.sh` refreshes the scan when it is older than 24h, so anything past
 #: two days means the tick has not run or the scan refused — and rows built from
@@ -137,7 +147,7 @@ def orphan_app(apps: list[dict]) -> list[dict]:
                    f"application's git remote — so an orphan means neither exists, "
                    f"not that nobody looked."),
         "action": ("open the Heroku page and filter to “no project”; where you know "
-                   "the answer, add it to collectors/heroku_links.json with the "
+                   f"the answer, add it to {_config_label('heroku_links.json')} with the "
                    "evidence that proves it"),
     }
     return [row]

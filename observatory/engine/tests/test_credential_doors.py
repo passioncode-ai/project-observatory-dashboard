@@ -254,6 +254,139 @@ def test_cf_external_tokens_are_recorded_and_never_rolled_here() -> None:
           (d / "foreign").is_file(), "")
 
 
+def _cf_with_admin(m):
+    m.ADMIN_STORE = pathlib.Path(tmpdir.mkdtemp()).resolve() / "cloudflare-admin"
+    m.ADMIN_STORE.mkdir(parents=True)
+    private_io.write(m.ADMIN_STORE / "acct", "admin-token\n")
+    private_io.write(m.ADMIN_STORE / "acct.meta.json", json.dumps(
+        {"account_id": "a1", "account_name": "Acct"}))
+
+
+def _dns_fake(m, log, existing=None, verify_fails=0):
+    state = {"verify_fails": verify_fails}
+
+    def fake(path, token, payload=None, method=None):
+        log.append((method or ("POST" if payload is not None else "GET"), path, token, payload))
+        if "permission_groups" in path:
+            return {"result": [{"id": "g1", "name": "Zone Read", "scopes": ["com.cloudflare.api.account.zone"]},
+                               {"id": "g4", "name": "DNS Write", "scopes": ["com.cloudflare.api.account.zone"]}]}
+        if path.startswith("/zones?name=example.com&account.id=a1"):
+            return {"result": [{"id": "z1", "name": "example.com"}]}
+        if path.startswith("/zones?name="):
+            return {"result": []}
+        if path.endswith("/tokens?per_page=50"):
+            return {"result": [{"id": "t-dns", "name": existing}] if existing else []}
+        if path == "/accounts/a1/tokens" and method is None and payload is not None:
+            return {"result": {"id": "t-new", "value": "dns-value-" + "y" * 30}}
+        if path.endswith("/tokens/t-dns") and method == "PUT":
+            return {"result": {"id": "t-dns"}}
+        if path.endswith("/tokens/t-dns/value"):
+            return {"result": "dns-rolled-" + "z" * 29}
+        if path.startswith("/zones/z1/dns_records"):
+            if state["verify_fails"]:
+                state["verify_fails"] -= 1
+                raise RuntimeError("cloudflare answered HTTP 403; provider response withheld")
+            return {"result": []}
+        raise AssertionError(f"unexpected call {path}")
+    m._request = fake
+
+
+def test_cf_dns_preset_is_scoped_to_one_zone_and_lands_in_the_vault() -> None:
+    """A writer's token touches one zone and is delivered to a vault slot —
+    never printed, never filed where the analytics plugin reads."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    log, delivered = [], []
+    _dns_fake(m, log)
+    m.deliver_to_vault = lambda value, p, e, n: delivered.append((value, p, e, n))
+    m._journal = lambda *a, **k: None
+    m.token_dir = lambda: (_ for _ in ()).throw(AssertionError("zone presets never reach the plugin folder"))
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_zone("dns-edit", "example.com", "proj/prod/CF_DNS", None, wait=0)
+    check("dns-edit issues", rc == 0, str(rc))
+    create = [p for meth, path, tok, p in log if path == "/accounts/a1/tokens" and p]
+    pol = create[0]["policies"][0] if create else {}
+    check("the grant is the zone's own resource, not the account",
+          pol.get("resources") == {"com.cloudflare.api.account.zone.z1": "*"}, str(pol))
+    check("with exactly Zone Read and DNS Write",
+          [g["id"] for g in pol.get("permission_groups", [])] == ["g1", "g4"], str(pol))
+    check("named after the zone, so a second issue rolls it",
+          bool(create) and create[0]["name"] == "observatory-dns-edit example.com (managed)", str(create))
+    check("verified with the NEW token against that zone",
+          any(path.startswith("/zones/z1/dns_records") and tok.startswith("dns-value-")
+              for _m, path, tok, _p in log), "")
+    check("delivered to the named slot",
+          delivered == [("dns-value-" + "y" * 30, "proj", "prod", "CF_DNS")], str(delivered))
+    check("and the value is never printed", "dns-value-" not in out.getvalue(), out.getvalue())
+
+
+def test_cf_dns_preset_rolls_refuses_and_never_misfiles() -> None:
+    m = cf(); _cf_with_admin(m)
+    log, delivered = [], []
+    _dns_fake(m, log, existing="observatory-dns-edit example.com (managed)", verify_fails=2)
+    m.deliver_to_vault = lambda value, p, e, n: delivered.append(value)
+    m._journal = lambda *a, **k: None
+    rc = m.cmd_issue_zone("dns-edit", "example.com", "proj/prod/CF_DNS", None, wait=0)
+    check("a second issue ROLLS the zone's token", rc == 0 and delivered == ["dns-rolled-" + "z" * 29],
+          f"{rc} {delivered}")
+    check("and waits out a token the edge has not honoured yet",
+          sum(1 for _m, p, _t, _pl in log if p.startswith("/zones/z1/dns_records")) == 3, "")
+
+    log2, delivered2 = [], []
+    _dns_fake(m, log2)
+    m.deliver_to_vault = lambda value, p, e, n: delivered2.append(value)
+    check("a zone outside the account is refused",
+          m.cmd_issue_zone("dns-edit", "other.org", "proj/prod/CF_DNS", None, wait=0) == 1
+          and not delivered2, str(delivered2))
+    check("without --vault nothing is minted",
+          m.cmd_issue_zone("dns-edit", "example.com", None, None) == 2, "")
+    check("a malformed slot is refused",
+          m.cmd_issue_zone("dns-edit", "example.com", "proj/production/X", None) == 2, "")
+    check("a slot name the vault would refuse is refused before minting",
+          m.cmd_issue_zone("dns-edit", "example.com", "proj/prod/lower-case", None) == 2, "")
+    check("the analytics path refuses a zone preset instead of filing it for the plugin",
+          m.cmd_issue("dns-edit", None, None) == 2, "")
+    check("and nothing was minted by any refusal",
+          not any(p == "/accounts/a1/tokens" and pl for _m, p, _t, pl in log2), str(log2))
+
+
+def test_cf_dns_delivery_goes_through_the_vault_on_stdin() -> None:
+    """The slot is written by the vault's own `put`, value on stdin, and a
+    refusal names the slot without the child's output."""
+    m = cf()
+    calls = []
+
+    class Done:
+        def __init__(self, code):
+            self.returncode = code
+            self.stdout = self.stderr = "ECHOED-INPUT"
+
+    def run(argv, **kw):
+        calls.append((argv, kw))
+        return Done(0 if len(calls) == 1 else 3)
+    original = m.subprocess.run
+    m.subprocess.run = run
+    try:
+        m.deliver_to_vault("synthetic-" + "v" * 30, "proj", "prod", "CF_DNS")
+        argv, kw = calls[0]
+        check("the vault's put is invoked for the slot",
+              argv[1].endswith("tools/vault.py") and argv[2:] == ["put", "proj", "prod", "CF_DNS", "--force"],
+              str(argv))
+        check("the value travels on stdin, not argv",
+              kw.get("input", "").strip() == "synthetic-" + "v" * 30
+              and not any("synthetic-" in str(a) for a in argv), "")
+        try:
+            m.deliver_to_vault("synthetic-" + "v" * 30, "proj", "prod", "CF_DNS")
+            check("a vault refusal is raised", False, "no exception")
+        except RuntimeError as exc:
+            check("a vault refusal names the slot and withholds the child's output",
+                  "proj/prod/CF_DNS" in str(exc) and "ECHOED-INPUT" not in str(exc)
+                  and "synthetic-" not in str(exc), str(exc))
+    finally:
+        m.subprocess.run = original
+
+
 # ─────────────────────────── openrouter ──────────────────────────────────────
 
 def orr():
@@ -452,6 +585,9 @@ if __name__ == "__main__":
                test_cf_stash_finds_accounts_through_memberships_when_accounts_is_empty,
                test_cf_issue_rolls_rather_than_duplicating,
                test_cf_external_tokens_are_recorded_and_never_rolled_here,
+               test_cf_dns_preset_is_scoped_to_one_zone_and_lands_in_the_vault,
+               test_cf_dns_preset_rolls_refuses_and_never_misfiles,
+               test_cf_dns_delivery_goes_through_the_vault_on_stdin,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,

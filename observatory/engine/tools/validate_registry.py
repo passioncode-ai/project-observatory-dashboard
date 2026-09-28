@@ -273,10 +273,9 @@ def main():
 
     # PROVENANCE IS CHECKED FOR TRUTH, NOT ONLY FOR RESOLUTION. Every rule above
     # asks whether a reference points at a source that exists. None asked whether
-    # it points at the source that did the measuring — so 87 repositories carried
+    # it points at the source that did the measuring — so every repository with
     # `local.sync` and `local.remote_head`, produced by `git ls-remote` over the
-    # network, citing SRC-0007, whose description begins "Filesystem scan of
-    # ~/DATA on this machine".
+    # network, cited SRC-0007, the filesystem scan of the projects directory.
     #
     # A source now declares `evidence_for`, and this is the converse: a record
     # carrying one of those fields must cite that source. It is a NECESSARY

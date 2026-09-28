@@ -232,8 +232,11 @@ def survey(where: pathlib.Path | None = None) -> list[dict]:
             src = f.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
+        # A directory outside the program tree (a planted fixture tree, say) is
+        # named as given rather than crashing on `relative_to`.
+        name = str(f.relative_to(ROOT)) if f.is_relative_to(ROOT) else str(f)
         for row in site_kinds(src):
-            out.append({"file": str(f.relative_to(ROOT)), **row})
+            out.append({"file": name, **row})
     return out
 
 

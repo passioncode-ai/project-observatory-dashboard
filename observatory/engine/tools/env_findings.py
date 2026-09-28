@@ -29,6 +29,16 @@ already holds.
 """
 from __future__ import annotations
 
+
+def _config_label(name: str) -> str:
+    """The workspace-relative name of a configuration file.
+
+    Imported late: these rule modules are loaded by `tools/build_findings.py`,
+    which has already resolved the workspace, and importing `paths` at module
+    load would resolve it again for every test that imports a rule alone."""
+    import paths
+    return paths.config_label(name)
+
 #: Listed by name up to this many, as everywhere else on this board.
 LISTED = 6
 
@@ -139,7 +149,7 @@ def shared_secret(doc: dict) -> list[dict]:
                      "must hold, at the same moment. The widest: "
                    + _listed(widest["projects"]) + "."),
         "action": ("open the ENV tab, and where a group is genuinely one account, "
-                   "record it in collectors/credential_owners.json with these sites "
+                   f"record it in {_config_label('credential_owners.json')} with these sites "
                    "as the evidence — equal values prove equality, not intent"),
     }]
 
