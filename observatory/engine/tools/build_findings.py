@@ -565,6 +565,19 @@ def declared_alive_measured_dead(projects: list[dict]) -> list[dict]:
     }]
 
 
+def mcp_registration_command() -> str:
+    """The line that declares this engine's MCP server to Claude Code, runnable as written.
+
+    This interpreter, this engine's `mcp/server.py` and this workspace, quoted
+    for a shell: the server resolves its workspace from `OBSERVATORY_HOME`, and
+    an installed engine has no checkout or `.venv` beside it to point at.
+    """
+    import shlex
+    return " ".join(["claude mcp add observatory --scope user",
+                     "-e", shlex.quote(f"OBSERVATORY_HOME={paths.HOME}"), "--",
+                     shlex.quote(sys.executable), shlex.quote(str(ROOT / "mcp/server.py"))])
+
+
 def unobservable_projects(projects: list[dict], related: set) -> list[dict]:
     """A project with no folder and no repository — nothing to watch.
 
@@ -2496,8 +2509,7 @@ def collect() -> list[dict]:
                 "detail": ("`mcp/server.py` serves ten tools — recall, credentials by "
                            "name, proposals — and none of them is reachable until an "
                            "agent's config names the server (credentials audit G14)."),
-                "action": "claude mcp add observatory --scope user -- "
-                          "<checkout>/.venv/bin/python <checkout>/mcp/server.py",
+                "action": mcp_registration_command(),
                 "evidence": ["registry/mcp-servers.json#own_declared"]})
 
     # A LEAKED SECRET THAT NOBODY ROTATED. `tools/vault.py leak` is the rule

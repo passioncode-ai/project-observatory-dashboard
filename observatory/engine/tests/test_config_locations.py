@@ -40,7 +40,9 @@ projects = [{"name": "alpha-web", "lifecycle": "active", "activity_tier": "dorma
 rows = build_findings.declared_alive_measured_dead(projects)
 print(json.dumps({"label": paths.config_label("project_overrides.json"),
                   "file": str(paths.config_file("project_overrides.json")),
-                  "home": str(paths.HOME), "action": rows[0]["action"]}))
+                  "home": str(paths.HOME), "action": rows[0]["action"],
+                  "mcp": build_findings.mcp_registration_command(),
+                  "python": sys.executable}))
 """
 
 
@@ -91,6 +93,20 @@ class ConfigLocations(unittest.TestCase):
         action = self.probe()["action"]
         self.assertIn("config/project_overrides.json", action)
         self.assertNotIn("collectors/", action)
+
+    def test_the_mcp_registration_line_runs_as_written(self):
+        # The first scan raises `mcp.own_unregistered`; its action is the line a
+        # person pastes, so it names this interpreter, this engine and this
+        # workspace rather than a checkout layout an installed engine lacks.
+        import shlex
+        got = self.probe()
+        argv = shlex.split(got["mcp"])
+        self.assertEqual(argv[:6], ["claude", "mcp", "add", "observatory", "--scope", "user"])
+        self.assertEqual(argv[6:8], ["-e", "OBSERVATORY_HOME=" + got["home"]])
+        self.assertEqual(argv[8], "--")
+        self.assertEqual(argv[9], got["python"])
+        self.assertEqual(Path(argv[10]), ROOT / "mcp/server.py")
+        self.assertTrue(Path(argv[10]).is_file())
 
     def test_no_operator_message_names_the_predecessor_layout(self):
         hits = []
