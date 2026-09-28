@@ -2,7 +2,18 @@
 
 Start with the [onboarding](docs/ONBOARDING.md), [compatibility policy](docs/COMPATIBILITY.md)
 and [security boundary](SECURITY.md). Code, tests and defaults must be usable
-without the author's accounts, projects or paths.
+without the author's accounts, projects or paths. Agents working here also read
+[AGENTS.md](AGENTS.md).
+
+The complete checks need:
+
+- **Python 3.11 or newer** with loadable SQLite extensions (`requires-python` in
+  `pyproject.toml`; choosing the interpreter is in the onboarding guide);
+- **Node.js 22**: CI pins `node-version: '22'` (`.github/workflows/check.yml`) for the
+  dashboard's page checks; other majors are not tested;
+- **Git 2.17 or newer**: `full cleanup` calls `git worktree remove`
+  (`observatory/engine/tools/cleanup.py`), which Git added in 2.17. CI runs the hosted
+  runners' current Git, so older releases are not exercised.
 
 ```sh
 python -m pip install -c requirements-full.lock '.[full]'
@@ -54,9 +65,11 @@ the page script. To add or change a string:
 - add the Russian to `locales/ru.json`, with the same `{placeholders}`; a count takes
   a plural object (`one`, `few`, `many`, `other` in Russian, `one`, `other` in `en.json`);
 - when one English text needs two Russian forms, give it a context: `domain@@not measured`;
-- run `python -m unittest observatory/engine/tests/test_i18n.py` (from `observatory/engine`),
-  which fails on a missing or unused translation, mismatched placeholders, incomplete plural
-  forms or Russian text left in the sources.
+- run `project-observatory full check --suite i18n` from any directory. It runs
+  `observatory/engine/tests/test_i18n.py` in a sandbox with its own synthetic workspace, and
+  fails on a missing or unused translation, mismatched placeholders, incomplete plural forms or
+  Russian text left in the sources. (Running the file directly with `python -m unittest` also
+  needs an initialized `OBSERVATORY_HOME`: its page-build cases emit a registry first.)
 
 Finding texts written by the rules in `tools/*_findings.py` are data in English, not
 interface strings. The PassionCode design tokens in `dashboard/brand/` are vendored
