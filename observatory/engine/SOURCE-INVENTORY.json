@@ -850,7 +850,7 @@
       "path": "fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "84ff6542e591463cfef980d5da86d8a9c2f425934141a9af47cebd9c8932cf22",
+      "export_sha256": "3c4a0e41b46359a44ef0d1a82c92c0d52983d3745f254ca8a5e3132d12976759",
       "bytes": 26574
     },
     {
@@ -1312,8 +1312,8 @@
       "path": "tests/check_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f39d2b9f3c46041fe1b5ee3ea755dccae2525352fcc221b3eeebf472ad9819d8",
-      "bytes": 17319
+      "export_sha256": "7cfa6dc965641334575e939771dfe10d5fd7e02eecf5bf1ba1dbb4642e4cca3a",
+      "bytes": 18936
     },
     {
       "path": "tests/dashboard_fixture.py",
@@ -1551,8 +1551,8 @@
       "path": "tests/test_fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7c9b8159ccce3d31d85e45a9762f03afe60994e73eff1ee6d5149a7f250f9251",
-      "bytes": 39720
+      "export_sha256": "4dd1492a1c47719e38733159507baaf3227668541a03ec69010bed0cac9fe45f",
+      "bytes": 41524
     },
     {
       "path": "tests/test_fingerprints.py",
@@ -2399,8 +2399,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "973d4ff243e1050d43356eb40fbc322b5fa989d7c74a3fe427c64c1b72f8141b",
-      "bytes": 29280,
+      "export_sha256": "01ff2ebeec7c0fee17a90d8eaf10f1fad92f72cee6d4f75efcaf35ef71b11026",
+      "bytes": 30761,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
