@@ -16,25 +16,31 @@ Initialization, doctor, migration and upgrade check this before workspace writes
 The isolated regression is
 `observatory/engine/tests/test_workspace_upgrade.py::WorkspaceUpgrade::test_missing_sqlite_extension_support_refuses_before_writes`.
 
-On macOS, [Homebrew Python](https://formulae.brew.sh/formula/python@3.14)
-provides a supported installation path:
+**Choose the interpreter explicitly.** The package declares
+`requires-python = ">=3.11"`. The `python3` that ships with macOS is 3.9, and
+pip run from it does not say so: it fails with a `ResolutionImpossible` about
+the locked dependencies. On macOS,
+[Homebrew Python](https://formulae.brew.sh/formula/python@3.14) provides a
+supported installation path; on Linux, name any Python 3.11+ your distribution
+provides. Both check lines fail with a message rather than later, inside pip:
 
 ```sh
-brew install python@3.14
-"$(brew --prefix python@3.14)/bin/python3.14" -m venv .venv
-. .venv/bin/activate
-python -c "import sqlite3; c=sqlite3.connect(':memory:'); c.enable_load_extension(True); c.enable_load_extension(False)"
+brew install python@3.14                                 # macOS
+PYTHON="$(brew --prefix python@3.14)/bin/python3.14"     # on Linux, e.g. PYTHON=python3.12
+"$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else "Python 3.11 or newer is required; this is " + sys.version.split()[0])'
+"$PYTHON" -c "import sqlite3; c=sqlite3.connect(':memory:'); c.enable_load_extension(True); c.enable_load_extension(False)"
 ```
 
-Install the full package and its pinned dependencies in that environment using
-the release installation instructions, then run the full doctor command.
+The second line raising `AttributeError` means this build cannot load
+sqlite-vec; choose another interpreter.
 
 ## Start without credentials
 
-From a checkout of the public release:
+From a checkout of the public release, with `PYTHON` chosen and checked as
+above:
 
 ```sh
-python3 -m venv .venv
+"$PYTHON" -m venv .venv
 . .venv/bin/activate
 python -m pip install -c requirements-full.lock '.[full]'
 export OBSERVATORY_HOME="$HOME/.local/share/project-observatory-full"
@@ -133,8 +139,17 @@ collector without its source reports nothing rather than failing.
 
 ## Enter credentials locally
 
-For project slots, the full engine's `tools/vault.py put PROJECT ENV NAME`
-accepts the value only on stdin. Prefer a human-controlled hidden prompt or a
+The engine's tools below are files inside the installed engine, not CLI
+subcommands. Run them with the environment's `python` and the same
+`OBSERVATORY_HOME` as the CLI; `project-observatory full-path` prints the
+engine directory:
+
+```sh
+python "$(project-observatory full-path)/tools/vault.py" put PROJECT ENV NAME   # the value on stdin
+```
+
+`ENV` is one of `local`, `stage` or `prod`, and `NAME` is UPPER_SNAKE_CASE.
+The command accepts the value only on stdin. Prefer a human-controlled hidden prompt or a
 pipe from an already authenticated provider tool. Do not put a secret in a chat,
 command argument, test fixture or tracked file. Read the installed
 `handling-secrets` skill before an agent works with these commands.
@@ -162,15 +177,16 @@ every row; later ticks read only rows added since, per table, and record where t
 `store/scrub-watermark.json`. That file identifies the value set by an HMAC under the workspace's
 salt, so it holds nothing a value could be recovered from. A complete pass runs again when the set of
 known values changes, a week after the last complete pass, when a table was emptied or recreated, or
-on `tools/scrub_companion.py --full`. A row edited in place between complete passes is caught by the
+on `python "$(project-observatory full-path)/tools/scrub_companion.py" --full`. A row edited in place between complete passes is caught by the
 weekly pass, not sooner.
 
 The leak scan reads the companion's database the same way: transcripts from their last offset, the
 database from its last rowid per table (in `store/raw/leak-scan-state.json`), with the same reasons
 for a complete pass. So a sighting is reported once, by the tick that first reads it, and stays on
-record in the leak register until it is settled. `tools/scan_leaks.py --full` reads everything again.
+record in the leak register until it is settled. `python "$(project-observatory full-path)/tools/scan_leaks.py" --full` reads everything again.
 
-**A local provider key** (`tools/install_key.py --for observatory`, stdin only) is kept at
+**A local provider key** (`python "$(project-observatory full-path)/tools/install_key.py" --for observatory`,
+stdin only) is kept at
 `store/.openrouter-key`, or under `OBSERVATORY_STATE` when you redirect the state. After such a
 redirect, a key left at the old `store/` location is still read, with a note saying where it
 belongs, and is never moved for you. If a key exists in both places, reading refuses and names both
@@ -181,9 +197,24 @@ files, rather than guessing which one is current. Remove the one you no longer u
 The complete MCP server uses stdio. Configure a Python executable from the
 installed virtual environment, the engine's `mcp/server.py` as its argument,
 and `OBSERVATORY_HOME` for the selected private workspace. Detect MCP support
-in the chosen agent rather than assuming it from the product name. The optional
-`observatory-log` plugin adds Claude Code hooks; other hosts can use the CLI
-and MCP without those hooks.
+in the chosen agent rather than assuming it from the product name.
+
+For Claude Code, with the environment active and `OBSERVATORY_HOME` exported,
+this line declares it for your user (the first scan raises
+`mcp.own_unregistered` until some agent does, and that finding's action prints
+the same line with this workspace's values filled in):
+
+```sh
+claude mcp add observatory --scope user -e OBSERVATORY_HOME="$OBSERVATORY_HOME" -- \
+  "$(python -c 'import sys; print(sys.executable)')" "$(project-observatory full-path)/mcp/server.py"
+claude mcp list | grep observatory     # Connected
+```
+
+Restart open Claude Code sessions afterwards; they read their MCP servers at
+start.
+
+The optional `observatory-log` plugin adds Claude Code hooks; other hosts can
+use the CLI and MCP without those hooks.
 
 For Claude Code, run `project-observatory full agent install`. It adds the
 GitHub marketplace `passioncode-ai/project-observatory-dashboard`, installs
@@ -202,23 +233,42 @@ how to create one. Open it explicitly with `project-observatory full open` (loca
 `project-observatory full open --serve` (loopback server, needed for the keys
 page's live actions).
 
+The server `--serve` starts runs detached, so closing the terminal does not end
+it. Stop it with the same port:
+
+```sh
+project-observatory full open --stop              # or: --stop --port PORT, if you served on another port
+```
+
+`--stop` ends only a server that serves this workspace and that `--serve`
+started. A server installed as an always-on agent with `serverd.py --install`
+is restarted by launchd, so `--stop` refuses it and names
+`python "$(project-observatory full-path)/tools/serverd.py" --uninstall`, which
+stops it and keeps it off.
+
 ## Enable background or paid actions deliberately
 
 Settings under `features` control scheduler, agent interpretation, embeddings,
 notifications, retention, fixture cleanup, wiki projection, memory remediation
 and private registry history. Their default is disabled. Configure model
-selection and a budget before enabling reasoning or embeddings. On macOS,
-`tools/install_launchd.py` and `tools/serverd.py` install workspace-specific
-jobs only after explicit scheduler opt-in; Linux can run the CLI under a
+selection and a budget before enabling reasoning or embeddings. On macOS the
+two launchd installers write workspace-specific jobs only after the scheduler
+is explicitly enabled; Linux can run `project-observatory full tick` under a
 supervisor chosen by the user. Do not create duplicate writers for one home.
+
+```sh
+project-observatory full configure features scheduler true
+ENGINE="$(project-observatory full-path)"
+python "$ENGINE/tools/install_launchd.py" install      # the tick, every 30 minutes; status | uninstall | run-now
+python "$ENGINE/tools/serverd.py" --install            # the always-on dashboard server; --status | --uninstall
+```
 
 A launchd job does not inherit your shell. The installer writes the directories
 of the `PATH` it runs with (absolute, existing, writable by no other account;
 group-writable only when you or root own it, as Homebrew's directories are)
 followed by the system directories into the job, so tools such as `claude`,
 `heroku` or `gh` resolve as they do in your terminal. After installing a tool
-in a new directory, run `tools/install_launchd.py install` and
-`tools/serverd.py --install` again.
+in a new directory, run both installers above again.
 
 ## The machine: what runs, where the disk goes, cleanup
 

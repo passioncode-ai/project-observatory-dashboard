@@ -12,10 +12,16 @@ Version 0.2 brings the original engine into the public distribution: project and
 
 The complete engine supports macOS and Linux, Python 3.11+ and SQLite 3.37+ with loadable-extension support. Git and Node.js are needed for the complete local checks. On macOS, use an extension-enabled Python build such as Homebrew Python; some bundled builds cannot load sqlite-vec. The [onboarding guide](docs/ONBOARDING.md) checks this before setup.
 
+The package requires Python 3.11 or newer (`requires-python = ">=3.11"`). The `python3` that ships with macOS is 3.9, and pip run from it fails with a misleading `ResolutionImpossible` about the locked dependencies rather than naming the interpreter, so choose the interpreter explicitly and check it before creating the environment:
+
 ```sh
 git clone https://github.com/passioncode-ai/project-observatory-dashboard.git
 cd project-observatory-dashboard
-python3 -m venv .venv
+brew install python@3.14                                 # macOS; on Linux any Python 3.11+ works
+PYTHON="$(brew --prefix python@3.14)/bin/python3.14"     # on Linux, e.g. PYTHON=python3.12
+"$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else "Python 3.11 or newer is required; this is " + sys.version.split()[0])'
+"$PYTHON" -c 'import sqlite3; c = sqlite3.connect(":memory:"); c.enable_load_extension(True)'   # AttributeError here: this build cannot load sqlite-vec
+"$PYTHON" -m venv .venv
 . .venv/bin/activate
 python -m pip install -c requirements-full.lock '.[full]'
 export OBSERVATORY_HOME="$HOME/.local/share/project-observatory-full"
