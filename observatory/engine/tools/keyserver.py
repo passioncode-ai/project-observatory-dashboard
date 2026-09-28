@@ -176,7 +176,12 @@ def audit(action: str, subject: str, detail: dict) -> None:
     AUDIT.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     row = {"at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "action": action, "subject": subject,
-           "caller": _CALLER.get(), "by": os.environ.get("USER", "unknown"), **detail}
+           "caller": _CALLER.get(), "by": os.environ.get("USER", "unknown"), **detail,
+           # `caller` is what the client declared; the server authenticated
+           # only possession of this workspace's token. The row says so, after
+           # `detail` so no action can overwrite it, and a later reader never
+           # mistakes the label for a verified identity.
+           "caller_verified": False, "principal": "local-token-holder"}
     # Free-text fields are not journalled. Scrub recognizable value shapes in
     # labels too; a user can paste a credential into any textbox by mistake.
     value_shape = re.compile(r"sk-[A-Za-z0-9_-]{12,}|[A-Za-z0-9_+/=-]{40,}")
