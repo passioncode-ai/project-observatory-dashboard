@@ -30,20 +30,31 @@ LEGACY = (
     'project_identity',
     'sessions',
     'env_page', 'metric_labels', 'hosting_groups', 'action_outcomes', 'workspace_redesign', 'google_identity', 'i18n',
+    # Ported suites, first batch: they run over the synthetic estate above.
+    'absent_fields', 'agent_faults', 'api_listings', 'caller_identity', 'clone_sync',
+    'companion', 'companion_hook', 'dark_domain_cost', 'docs_current', 'export_scope',
+    'filesystem_scan', 'finding_rules', 'heroku', 'interpretation_contract', 'keyserver',
+    'page_omission', 'plugin_reporting', 'projection_mirror', 'queue_order', 'rdap_keys',
+    'recall', 'recount', 'release_cadence', 'remedy_fits', 'render_surface', 'review_queue',
+    'serverd', 'stale_is_expected', 'store_modes', 'tick_standdown', 'trace_opens',
+    'two_surfaces', 'work_tiles',
 )
 BOUNDARY = (
     'workspace', 'workspace_upgrade', 'workspace_boundaries', 'dashboard_shell',
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'dashboard_portability',
     'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'machine', 'local_folders', 'config_locations', 'dashboard_stop',
-    'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'machine',
     'engine_update', 'workspace_profile',
+    # Ported suites, first batch: each builds its own temporary workspace.
+    'delta_fold', 'mcp_inventory', 'openrouter_keys', 'scan_ids', 'secrets', 'signature',
+    'skill_check', 'use_secret', 'validator_rules',
 )
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
            'dashboard_fixture.py', 'emitter_fixture.py', 'session_fixture.py', 'surface_fixture.py',
-           'env_tab_check.js', 'action_outcome_check.mjs')
+           'env_tab_check.js', 'action_outcome_check.mjs',
+           'own_project.py', 'tick_reader.py', 'validator_fixture.py')
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', 'tools')
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
@@ -57,6 +68,9 @@ SKILL_FILES = (
     'skill/plugins/observatory-log/skills/tracking-resources/SKILL.md',
     'skill/plugins/observatory-log/.claude-plugin/plugin.json',
     'skill/plugins/observatory-log/hooks/hooks.json',
+    # The companion suites drive the hook scripts themselves.
+    'skill/plugins/observatory-log/hooks/record-turn.sh',
+    'skill/plugins/observatory-log/hooks/ask-why.py',
 )
 NOT_RUN = (
     {'scope': 'live-provider-acceptance', 'status': 'NOT_RUN',
@@ -76,6 +90,8 @@ def copy_source(target: Path) -> None:
     selected.add(ROOT / 'plugins/README.md')
     selected.add(ROOT / 'fabric/FABRIC-CONFORMANCE.md')
     selected.add(ROOT / 'store/schema.sql')
+    # The documentation suite checks the engine's own shipped docs.
+    selected |= set((ROOT / 'docs').glob('*.md'))
     for folder in RUNTIME_DIRS:
         selected |= {p for p in (ROOT / folder).rglob('*')
                      if p.suffix in {'.py', '.sh', '.js', '.css', '.html', '.svg'}
