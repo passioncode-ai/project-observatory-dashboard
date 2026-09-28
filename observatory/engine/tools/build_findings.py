@@ -969,12 +969,27 @@ MERGE_REMEDY = {
     "transfer": "check that `gh` is authenticated for the PATH the tick runs "
                 "with, then `./observatory.py merge`",
     "ownership": "decide whether the organisation is yours — add it to "
-                 "`OWNED_ORGS` in `collectors/merge.py` and re-run "
+                 "`organizations` in the workspace's `config/ownership.json` "
+                 "(read as `OWNED_ORGS` by `collectors/merge.py`) and re-run "
                  "`./observatory.py merge emit`, or leave it and its projects "
                  "stay `external`",
+    # The merge's own coverage sources. Each is emitted when an input the
+    # merge reads was never produced, so the cure is to produce that input —
+    # without an entry here they fell to the unknown-class text below, which
+    # tells the reader there is nothing to run when there is.
+    "github": "run the repository listing (`project-observatory full scan-gh`, "
+              "which needs an authenticated `gh`), then `project-observatory full "
+              "local`; until then remote repositories are not counted",
+    "wiki": "point `sources.wiki` in the workspace settings at the notes folder, "
+            "run `project-observatory full scan-vault`, then `project-observatory "
+            "full local` — or leave it unset and project notes stay unmeasured",
+    "identity": "pin a stable name for each colliding project in the workspace's "
+                "`config/identity_overrides.json`, then re-run "
+                "`project-observatory full local`; the suffixed keys are only a "
+                "placeholder",
 }
 
-#: What a source nobody has written a remedy for gets. NOT one of the two above:
+#: What a source nobody has written a remedy for gets. NOT one of those above:
 #: a wrong prescription is followed, and the only evidence it was wrong is that
 #: nothing changed.
 MERGE_REMEDY_UNKNOWN = ("read the reason above — this degradation's class has no "
