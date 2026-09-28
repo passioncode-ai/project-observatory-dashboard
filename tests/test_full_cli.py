@@ -55,3 +55,48 @@ class FullLauncherTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class BareCommand(unittest.TestCase):
+    """`observatory` / `project-observatory` with no arguments opens the dashboard."""
+
+    def test_bare_opens_the_dashboard_of_an_initialized_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "workspace"
+            home.mkdir()
+            (home / "workspace.json").write_text("{}")
+            with patch.dict(os.environ, {"OBSERVATORY_HOME": str(home)}), \
+                    patch("observatory.full_cli.run", return_value=0) as run:
+                self.assertEqual(cli.main([]), 0)
+            run.assert_called_once_with(["open"], None)
+
+    def test_home_without_a_command_opens_that_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "elsewhere"
+            home.mkdir()
+            (home / "workspace.json").write_text("{}")
+            with patch("observatory.full_cli.run", return_value=0) as run:
+                self.assertEqual(cli.main(["--home", str(home)]), 0)
+            run.assert_called_once_with(["open"], str(home))
+
+    def test_bare_without_a_workspace_says_where_to_start(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = io.StringIO()
+            with patch.dict(os.environ, {"OBSERVATORY_HOME": str(Path(tmp) / "absent")}), \
+                    patch("observatory.full_cli.run") as run, patch("sys.stdout", out):
+                self.assertEqual(cli.main([]), 0)
+            run.assert_not_called()
+            self.assertIn("full init", out.getvalue())
+            self.assertIn("demo", out.getvalue())
+
+    def test_short_name_is_an_installed_entry_point(self):
+        text = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+        import re
+        self.assertRegex(text, r'(?m)^observatory = "observatory\.cli:main"$')
+        self.assertRegex(text, r'(?m)^project-observatory = "observatory\.cli:main"$')
+
+    def test_program_name_follows_the_command_typed(self):
+        with patch("sys.argv", ["/usr/local/bin/observatory"]):
+            self.assertEqual(cli.parser().prog, "observatory")
+        with patch("sys.argv", ["/usr/local/bin/project-observatory"]):
+            self.assertEqual(cli.parser().prog, "project-observatory")

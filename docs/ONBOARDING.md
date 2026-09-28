@@ -196,7 +196,9 @@ replaced. Restart sessions after installing or updating: a running session may
 still hold older instructions. Installing the Python package inserts nothing
 into any agent configuration; only this explicit command does.
 
-Open the dashboard with `project-observatory full open` (local files) or
+`observatory` (the short name of `project-observatory`) with no arguments opens the
+dashboard of the workspace in `OBSERVATORY_HOME`, or the default one; with no workspace yet it says
+how to create one. Open it explicitly with `project-observatory full open` (local files) or
 `project-observatory full open --serve` (loopback server, needed for the keys
 page's live actions).
 

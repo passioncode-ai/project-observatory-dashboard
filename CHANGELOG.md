@@ -3,6 +3,17 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.6.3 — 2026-09-28
+
+### Added
+
+- **`observatory`**, the short name: the package installs it beside `project-observatory`, same
+  commands.
+- **With no arguments, either name opens the dashboard** of the complete engine's workspace
+  (`OBSERVATORY_HOME`, or the default one; `--home PATH` selects another) — `full open`, which
+  builds the pages if needed. With no workspace it prints where to start (`full init`, `demo`)
+  instead of an argument error. Every existing command parses as before.
+
 ## 0.6.2 — 2026-09-27
 
 ### Added

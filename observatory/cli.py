@@ -90,11 +90,21 @@ def demo(state: Path) -> dict:
             "sample_directory": str(directory), "next": "Run serve with the same --home to open the local overview."}
 
 
+#: The names the package installs; `observatory` is the short one (0.6.3).
+PROGRAMS = ("observatory", "project-observatory")
+
+
+def program() -> str:
+    name = os.path.basename(sys.argv[0]) if sys.argv and sys.argv[0] else ""
+    return name if name in PROGRAMS else "project-observatory"
+
+
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="project-observatory", description="Local observation for agent-operated projects. No implicit scans or provider requests.")
+    p = argparse.ArgumentParser(prog=program(), description="Local observation for agent-operated projects. "
+                                "No implicit scans or provider requests. With no arguments, opens the dashboard.")
     p.add_argument("--version", action="version", version=__version__)
     p.add_argument("--home", help="Private state directory (otherwise OBSERVATORY_HOME or ~/.local/share/project-observatory)")
-    cmds = p.add_subparsers(dest="cmd", required=True)
+    cmds = p.add_subparsers(dest="cmd")
     for name in ("init", "doctor", "demo", "scan", "status", "dashboard", "export"):
         cmds.add_parser(name)
     serve = cmds.add_parser("serve")
@@ -126,9 +136,32 @@ def parser() -> argparse.ArgumentParser:
     return p
 
 
+def open_dashboard(explicit_home: str | None = None) -> int:
+    """No arguments: open the complete engine's dashboard when a workspace exists,
+    otherwise say where to start. Nothing is scanned or requested either way —
+    `full open` builds the pages from what the workspace already holds."""
+    from .full_cli import full_home, run
+    try:
+        home = full_home(explicit_home)
+    except Exception as exc:  # noqa: BLE001 — an unusable home is reported, not raised
+        print(f"{program()}: {exc}", file=sys.stderr)
+        return 2
+    if (home / "workspace.json").is_file():
+        return run(["open"], explicit_home)
+    name = program()
+    print(f"No Project Observatory workspace at {home}.\n"
+          f"  {name} full init        create one, then `{name} full onboard` for the next steps\n"
+          f"  {name} demo             see a synthetic estate first\n"
+          f"  {name} --home PATH ...  or OBSERVATORY_HOME=PATH to use a workspace elsewhere\n"
+          f"Once it exists, `{name}` on its own opens the dashboard.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     global _OUTPUT_STATE
     args = parser().parse_args(argv)
+    if args.cmd is None:
+        return open_dashboard(args.home)
     if args.cmd == "full-path":
         from .full_cli import engine_path
         print(engine_path())

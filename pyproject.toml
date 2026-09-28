@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "project-observatory"
-version = "0.6.2"
+version = "0.6.3"
 description = "A local observation layer for agent-operated projects"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -37,6 +37,7 @@ Security = "https://github.com/passioncode-ai/project-observatory-dashboard/secu
 
 [project.scripts]
 project-observatory = "observatory.cli:main"
+observatory = "observatory.cli:main"
 
 [tool.setuptools]
 packages = ["observatory"]
