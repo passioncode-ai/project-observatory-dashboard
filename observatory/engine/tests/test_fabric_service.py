@@ -591,6 +591,7 @@ def get(port: int, path: str, headers: dict | None = None):
 def wait_ready(port: int, proc: subprocess.Popen, timeout: float = 20) -> None:
     """Until the well-known document answers with a status past `starting`."""
     deadline = time.monotonic() + timeout
+    last = "no answer yet"
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             err = proc.stderr.read().decode() if proc.stderr else ""
@@ -599,10 +600,27 @@ def wait_ready(port: int, proc: subprocess.Popen, timeout: float = 20) -> None:
             code, _h, body = get(port, "/.well-known/fabric-service")
             if code == 200 and json.loads(body)["status"] != "starting":
                 return
-        except OSError:
-            pass
+            last = f"HTTP {code}: {body[:600].decode(errors='replace')}"
+        except OSError as exc:
+            last = f"{type(exc).__name__}: {exc}"
         time.sleep(0.1)
-    raise AssertionError("server did not become ready")
+    # A timeout on a slow runner must say where the server was, not only that it was late.
+    output = _drain(proc)
+    raise AssertionError(f"server did not become ready in {timeout:g}s; last answer: {last}; "
+                         f"server output: {output}")
+
+
+def _drain(proc: subprocess.Popen) -> str:
+    """Stop the server and return the tail of what it printed (pipes only)."""
+    if proc.poll() is None:
+        proc.terminate()
+    try:
+        out, err = proc.communicate(timeout=10)
+    except (subprocess.TimeoutExpired, ValueError):
+        proc.kill()
+        return "(no output: the server did not exit)"
+    text = ((out or b"") + (err or b"")).decode(errors="replace")
+    return text[-1500:] or "(nothing)"
 
 
 def stop_server(proc: subprocess.Popen) -> None:

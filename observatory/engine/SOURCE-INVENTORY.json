@@ -1551,8 +1551,8 @@
       "path": "tests/test_fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4dd1492a1c47719e38733159507baaf3227668541a03ec69010bed0cac9fe45f",
-      "bytes": 41524
+      "export_sha256": "225a703e7a9cdc884358d448ce2a98cc4c2dcce52eff58ee5ce175e60569e18f",
+      "bytes": 42338
     },
     {
       "path": "tests/test_fingerprints.py",
