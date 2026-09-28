@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/service-well-known.schema.json",
+  "title": "Local service well-known document (fabric-service/0.1)",
+  "type": "object",
+  "required": [
+    "protocol",
+    "service",
+    "process",
+    "status",
+    "degraded",
+    "surfaces"
+  ],
+  "properties": {
+    "protocol": {
+      "$ref": "service-common.schema.json#/$defs/protocol"
+    },
+    "service": {
+      "type": "object",
+      "required": [
+        "id",
+        "instance",
+        "name",
+        "version",
+        "build"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "service-common.schema.json#/$defs/serviceId"
+        },
+        "instance": {
+          "$ref": "service-common.schema.json#/$defs/instance"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "version": {
+          "$ref": "common.schema.json#/$defs/semver"
+        },
+        "build": {
+          "type": "object",
+          "properties": {
+            "commit": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{7,40}$"
+            },
+            "digest": {
+              "$ref": "common.schema.json#/$defs/sha256"
+            },
+            "dirty": {
+              "type": "boolean"
+            },
+            "builtAt": {
+              "$ref": "common.schema.json#/$defs/timestamp"
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "commit"
+              ],
+              "properties": {
+                "commit": true
+              }
+            },
+            {
+              "required": [
+                "digest"
+              ],
+              "properties": {
+                "digest": true
+              }
+            }
+          ],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "process": {
+      "type": "object",
+      "required": [
+        "pid",
+        "startedAt"
+      ],
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "startedAt": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "enum": [
+        "starting",
+        "ready",
+        "degraded",
+        "stopping"
+      ]
+    },
+    "degraded": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": [
+          "source",
+          "reason"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "array",
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "required": [
+          "label",
+          "value"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "value": {
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "maxLength": 40
+              }
+            ]
+          },
+          "attention": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "surfaces": {
+      "type": "object",
+      "required": [
+        "events"
+      ],
+      "properties": {
+        "dashboard": {
+          "type": "object",
+          "required": [
+            "path",
+            "login"
+          ],
+          "properties": {
+            "path": {
+              "$ref": "service-common.schema.json#/$defs/originPath"
+            },
+            "login": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "mcp": {
+          "type": "object",
+          "required": [
+            "path",
+            "transport"
+          ],
+          "properties": {
+            "path": {
+              "$ref": "service-common.schema.json#/$defs/originPath"
+            },
+            "transport": {
+              "const": "streamable-http"
+            }
+          },
+          "additionalProperties": false
+        },
+        "events": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "$ref": "service-common.schema.json#/$defs/originPath"
+            },
+            "stream": {
+              "$ref": "service-common.schema.json#/$defs/originPath"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "update": {
+      "type": "object",
+      "required": [
+        "available"
+      ],
+      "properties": {
+        "available": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/semver"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    }
+  },
+  "additionalProperties": false
+}

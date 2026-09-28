@@ -679,8 +679,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "463ccadec73fd69a0a887757d2b9d295abb522a3eb2b53ba625a4f4167e48888",
-      "bytes": 16302,
+      "export_sha256": "78bb3aaf2fb19f402717b82ba1884d5727de7d5de26ab419a7380683d15c0779",
+      "bytes": 16870,
       "upstream_modified": true
     },
     {
@@ -703,8 +703,9 @@
     {
       "path": "fabric-agent.json",
       "source_sha256": "47102010501764ba9275f011f8f6d13250f619bc1d855312eecd53af23647e34",
-      "export_sha256": "47102010501764ba9275f011f8f6d13250f619bc1d855312eecd53af23647e34",
-      "bytes": 12070
+      "export_sha256": "b494cef0ff0ed23e92ddd9e370a24c0ee931cbc96dd3f4d6f3766482059ad181",
+      "bytes": 12233,
+      "upstream_modified": true
     },
     {
       "path": "fabric-contract.lock.json",
@@ -715,8 +716,8 @@
     {
       "path": "fabric/FABRIC-CONFORMANCE.md",
       "source_sha256": "8353184efa4e9f48a2b464028d7366b975bf217c42b7736ab404f06e188a4fc8",
-      "export_sha256": "fb76f490894d68bc434bcdaa4a5b586f96b33f36551050c8d869f64590c5256c",
-      "bytes": 4866,
+      "export_sha256": "eedb53fe10a24009d001c45d426d25a87f6da56c619757c65a6f9da60f2d8ef3",
+      "bytes": 5748,
       "upstream_modified": true
     },
     {
@@ -802,6 +803,55 @@
       "source_sha256": "76143ded9d41661dd81c0d2e841cb611995c6a0be48a6d1ba503e1573f8329f2",
       "export_sha256": "76143ded9d41661dd81c0d2e841cb611995c6a0be48a6d1ba503e1573f8329f2",
       "bytes": 2574
+    },
+    {
+      "path": "fabric/service-schemas/README.md",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "9e25ea89bd0794673ccd9082900ce388463f4e8fc8dc06b33e3abb738c60d0b8",
+      "bytes": 497
+    },
+    {
+      "path": "fabric/service-schemas/common.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f652f48b5dcb9127af6f6cd5376960f01c0bb2e5aa6f4c48da48e40c425b025c",
+      "bytes": 2358
+    },
+    {
+      "path": "fabric/service-schemas/service-common.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "3477169eff687d30f72b162631dead9d0f6e53b620ae097e43c65a678b381cb6",
+      "bytes": 893
+    },
+    {
+      "path": "fabric/service-schemas/service-descriptor.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "1b0756c5f4f5e1e1bcd705a0f516595a77e317566a93f56e7a0dbb846e7737e6",
+      "bytes": 4538
+    },
+    {
+      "path": "fabric/service-schemas/service-events-page.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "03f4f4b63635e5f7fef47bd40994b14c08792bc0e3a55339f4fda6b59585e6b9",
+      "bytes": 1599
+    },
+    {
+      "path": "fabric/service-schemas/service-well-known.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "dfb6bb106af74e4e4223295d9f32a84af768e123e17b00261b116073dc3b4216",
+      "bytes": 5497
+    },
+    {
+      "path": "fabric_service.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "84ff6542e591463cfef980d5da86d8a9c2f425934141a9af47cebd9c8932cf22",
+      "bytes": 26574
     },
     {
       "path": "identity.py",
@@ -1067,6 +1117,27 @@
       "bytes": 4744
     },
     {
+      "path": "service_events.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "00b4370705fecbb021f267f25cbb94d0edd5bad7bd65b5344f6e6142e5fd64f0",
+      "bytes": 14672
+    },
+    {
+      "path": "service_health.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ad7efcdcd9195801414f8028465128c3f199a70daf26aac6ce70ceef5894d6dd",
+      "bytes": 9193
+    },
+    {
+      "path": "service_identity.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "31e9418ae61692601fc4e063418d6fdb82299eaebc732cff41934965694fad4d",
+      "bytes": 9413
+    },
+    {
       "path": "skill/.claude-plugin/marketplace.json",
       "source_sha256": "68a99261f346d399ff411a8bbe6cb46d7b169e6ef030d84f7b92c41a2f797c57",
       "export_sha256": "11312718a419584423c140700cb7309f21a8149ffb1b52f614f01c9e6b6bfaa2",
@@ -1238,6 +1309,13 @@
       "bytes": 2550
     },
     {
+      "path": "tests/check_service.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f39d2b9f3c46041fe1b5ee3ea755dccae2525352fcc221b3eeebf472ad9819d8",
+      "bytes": 17319
+    },
+    {
       "path": "tests/dashboard_fixture.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -1288,8 +1366,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "1600efb9c68dc35101b3f7b649c9aac57570cad43de41821b4677c5542b1cc45",
-      "bytes": 10689,
+      "export_sha256": "c1c27fbe36b1e9ae3613ba30398685f8433ba9935921d06e98b5ff846c9b8f8e",
+      "bytes": 10866,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -1468,6 +1546,13 @@
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
       "upstream_modified": true
+    },
+    {
+      "path": "tests/test_fabric_service.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7c9b8159ccce3d31d85e45a9762f03afe60994e73eff1ee6d5149a7f250f9251",
+      "bytes": 39720
     },
     {
       "path": "tests/test_fingerprints.py",
@@ -2037,8 +2122,8 @@
       "path": "tools/dashboard_open.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c3f8efa90a43f72c9e99c2b170e25ff86f897bbc59907c50de907c171e5c24cb",
-      "bytes": 6533
+      "export_sha256": "9435001eca5d09f863f03564d29ec5ed187c4df81893ca7f8b3068c1fe1ff18d",
+      "bytes": 7289
     },
     {
       "path": "tools/env_findings.py",
@@ -2314,8 +2399,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "3b39287cbd9459270e7f52d65ae0a24eba8571385a31a43d74353a791fd2ed10",
-      "bytes": 18866,
+      "export_sha256": "973d4ff243e1050d43356eb40fbc322b5fa989d7c74a3fe427c64c1b72f8141b",
+      "bytes": 29280,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
@@ -2479,15 +2564,15 @@
     {
       "path": "workspace_upgrade.py",
       "source_sha256": "d9816f9711b69badae87382cbae34e5a303e0942823587aecf4361026828277d",
-      "export_sha256": "995552f5743f00d0c1ffda90a894ad41b0783b55b462248251853a7f8980f495",
-      "bytes": 22796,
+      "export_sha256": "4fcf535854d712ac5068e05d67d070062d9523fbbbf4c62ab122ffde20b66802",
+      "bytes": 22812,
       "python_comments_removed": 5,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
       "upstream_modified": true
     }
   ],
-  "file_count": 292,
+  "file_count": 304,
   "excluded": [
     "git-history",
     "operator-registries",

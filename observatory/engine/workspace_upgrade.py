@@ -36,7 +36,7 @@ def digest(file: Path) -> str:
 
 
 def excluded(path: Path) -> bool:
-    return (any(p in EXCLUDED_DIRS for p in path.parts) or path.name in {'.workspace.lock', 'tick.lock'}
+    return (any(p in EXCLUDED_DIRS for p in path.parts) or path.name in {'.workspace.lock', 'tick.lock', 'service.lock'}
             or path.name.endswith(('.upgrade.lock', '-shm')))
 
 

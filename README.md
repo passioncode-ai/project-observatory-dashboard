@@ -69,6 +69,7 @@ project-observatory full agent uninstall # removes the plugin and only the setti
 | Where are credentials used or copied? | Named slots, environment metadata, known-value scans, rotation and movement records | [vault](observatory/engine/tools/vault.py), [scanner](observatory/engine/tools/scan_leaks.py) |
 | Can another agent inspect the same facts? | MCP tools and resources, input/output schemas, proposal authority checks | [MCP server](observatory/engine/mcp/server.py), [wire contract](observatory/engine/fabric/FABRIC-CONFORMANCE.md) |
 | Can it observe continuously? | Explicitly enabled workspace-specific scheduling and optional model interpretation | [scheduler](observatory/engine/tools/install_launchd.py), [agent](observatory/engine/agent/observe.py) |
+| Can a local host watch it? | The always-on server speaks `fabric-service/0.1`: one copy per workspace, a well-known identity and health document, a token-guarded events feed, a descriptor written by its installer | [server](observatory/engine/tools/serverd.py), [design](docs/design/FABRIC-SERVICE.md) |
 
 Optional integrations include GitHub, Bitbucket, Cloudflare, Heroku, Google analytics/search, domain observations, agent sessions and a local knowledge base. Connecting one does not connect all of them. Model calls, remote environment reads, notifications and remediation are opt-in. See [onboarding](docs/ONBOARDING.md) for settings and credential entry.
 

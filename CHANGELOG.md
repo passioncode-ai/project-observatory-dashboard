@@ -3,6 +3,30 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Added
+
+- **The always-on server speaks `fabric-service/0.1`**, the Fabric Agent Contract's local service
+  extension, so a host such as Fabric Dashboards can find and watch it without knowing it in
+  advance ([design](docs/design/FABRIC-SERVICE.md)):
+  - `GET /.well-known/fabric-service` — who answers (`project-observatory`, instance `default` or
+    `ws-<sha16>` per workspace), which build (commit or package digest), pid and start time,
+    `status` and `degraded` from the collectors and the tick verdict, and four tiles: projects,
+    open findings, open leaks, last tick. Answered from memory; `/health` is unchanged.
+  - `GET /fabric/v1/events?after=&limit=` — the event store as sentences with a cursor: grouped
+    commits ("3 commits in Fabric by …"), agent sessions, findings opened (`notify: true`) and
+    resolved, each linking to its project or finding. Requires the workspace's new
+    `service.token` (mode 600) as `Authorization: Bearer`.
+  - **One copy per workspace.** `serverd.py --run` locks `service.lock` in the workspace before
+    anything else; a second copy exits 75 naming the holder. `full open --serve` on another port
+    now says which address already serves the workspace.
+  - `serverd.py --install` writes the service descriptor (claiming the port, refusing one another
+    service declares) before the plist, uses bootout-wait-bootstrap with retries and waits until
+    the server answers as itself; the plist gains `ThrottleInterval`, `ExitTimeOut` and
+    `ProcessType`. `--uninstall` removes the descriptor too. SIGTERM now drains and exits 0.
+  - `fabric-agent.json` revision 5 names the descriptor under the extension key.
+
 ## 0.6.3 — 2026-09-28
 
 ### Added

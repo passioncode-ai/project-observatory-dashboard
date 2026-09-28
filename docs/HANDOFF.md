@@ -49,7 +49,12 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
-**Status 2026-09-26 (evening), newest first:** 0.4.0 — English/Russian dashboard, the PassionCode
+**Status 2026-09-28, newest first:** the always-on server speaks `fabric-service/0.1` (instance
+lock, well-known document, token-guarded events feed, descriptor from the installer) on branch
+`agent/fabric-service`, unreleased. Entry point and the next task:
+[runs/2026-09-28-fabric-service](runs/2026-09-28-fabric-service/README.md).
+
+**Status 2026-09-26 (evening):** 0.4.0 — English/Russian dashboard, the PassionCode
 design system and the move to `passioncode-ai`. Entry point and open work:
 [runs/2026-09-26-i18n-passioncode](runs/2026-09-26-i18n-passioncode/README.md).
 
