@@ -40,6 +40,11 @@ class DashboardStop(unittest.TestCase):
                 proc.wait(timeout=10)
         self.tmp.cleanup()
 
+    @staticmethod
+    def fresh_paths():
+        """`paths` resolves the workspace at import; each in-process case gets its own."""
+        return patch.dict(sys.modules, {k: v for k, v in sys.modules.items() if k != "paths"}, clear=True)
+
     def env(self, name: str) -> dict[str, str]:
         return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(self.base / "user"),
                 "LANG": "C.UTF-8", "LC_ALL": "C", "PYTHONDONTWRITEBYTECODE": "1",
@@ -107,7 +112,7 @@ class DashboardStop(unittest.TestCase):
         env = self.workspace("home")
         bystander = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         self.servers.append(bystander)
-        with patch.dict(os.environ, env, clear=True):
+        with patch.dict(os.environ, env, clear=True), self.fresh_paths():
             sys.path.insert(0, str(ROOT / "tools"))
             import dashboard_open
             with patch.object(dashboard_open, "healthy", return_value={"status": 302}), \
@@ -117,6 +122,20 @@ class DashboardStop(unittest.TestCase):
                     dashboard_open.stop_server(free_port())
         self.assertIn("not this engine's dashboard server", str(ctx.exception))
         self.assertIsNone(bystander.poll())
+
+    def test_an_always_on_server_is_refused_with_the_command_that_stops_it(self):
+        # launchd's KeepAlive would restart a signalled server; the refusal
+        # names the uninstall command instead of pretending to have stopped it.
+        env = self.workspace("home")
+        port = free_port()
+        proc = self.serve(env, port)
+        with patch.dict(os.environ, env, clear=True), self.fresh_paths():
+            import dashboard_open
+            with patch.object(dashboard_open, "_always_on", return_value=True):
+                with self.assertRaises(dashboard_open.configuration.ConfigurationError) as ctx:
+                    dashboard_open.stop_server(port)
+        self.assertIn("tools/serverd.py --uninstall", str(ctx.exception))
+        self.assertIsNone(proc.poll(), "an always-on server is left to its uninstall command")
 
     def test_serve_and_stop_are_exclusive(self):
         env = self.workspace("home")

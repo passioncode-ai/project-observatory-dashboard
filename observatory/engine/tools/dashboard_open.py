@@ -130,9 +130,11 @@ def stop_server(port: int, wait: float = 10.0) -> dict:
             f"127.0.0.1:{port} serves another workspace ({served or 'unknown'}); "
             f"stop it from that workspace")
     if _always_on():
+        import shlex
+        uninstall = " ".join(shlex.quote(x) for x in (sys.executable, str(ROOT / "tools/serverd.py"), "--uninstall"))
         raise configuration.ConfigurationError(
             "this workspace's server is installed as an always-on agent and would be "
-            "restarted; `tools/serverd.py --uninstall` stops it and keeps it off")
+            f"restarted; `{uninstall}` stops it and keeps it off")
     if not isinstance(pid, int) or pid <= 1 or not _is_this_server(pid):
         raise configuration.ConfigurationError(
             f"the process reported on 127.0.0.1:{port} is not this engine's dashboard "
