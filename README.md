@@ -39,6 +39,7 @@ Use an existing directory you own in place of `$HOME/projects`. The first run ne
 observatory                              # the short name; with no arguments it opens the dashboard
 project-observatory full open            # builds the pages if needed, opens them as local files
 project-observatory full open --serve    # serves them on 127.0.0.1:47311 (needed for the keys page's live actions)
+project-observatory full open --stop     # stops that server; it runs detached, so closing the terminal does not
 ```
 
 ### Choose the dashboard's language

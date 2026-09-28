@@ -440,7 +440,7 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
   local                        filesystem → registry → events → findings → dashboard
-  open [--serve]               open the dashboard in a browser (builds it if needed)
+  open [--serve|--stop]        open the dashboard in a browser (builds it if needed); stop the server
   agent install|status|uninstall  Claude Code plugin; install turns auto-update on
   check [runner options]       isolated synthetic regression suites; no live providers
   check-portable               the same explicit portable regression runner
