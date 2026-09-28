@@ -96,7 +96,7 @@ was renamed. Since 0.6.0 `machine` and `cleanup` are too; `cleanup` without
 [`WORKSPACE_COMMANDS`](../observatory.py), [`workspace.main`](../workspace.py),
 and [`workspace_upgrade.py`](../workspace_upgrade.py) implement the separation.
 
-In the release after 0.6.3 `update` and `profile` became workspace commands; nothing existing was
+In 0.7.0 `update` and `profile` became workspace commands; nothing existing was
 renamed and `upgrade` keeps its meaning (the workspace half only). `update` previews
 by default, `--check` exits 0 (up to date), 10 (update available) or 3 (could not
 look), and `--apply` installs a GitHub release only when the wheel matches both the

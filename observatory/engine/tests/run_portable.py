@@ -99,6 +99,8 @@ BOUNDARY += (
     'tick_repo',
     'unobservable',
 )
+# The step list's own guard: every file it names exists, every suite it names runs.
+BOUNDARY += ('step_references',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
