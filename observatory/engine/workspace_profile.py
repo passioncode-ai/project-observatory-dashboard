@@ -179,6 +179,38 @@ def leaks(value, pointer: str = "") -> list[tuple[str, str]]:
     return out
 
 
+# Prose written for the reader of a config file, never read by the engine: a key
+# ending in `_note` or `_source` whose value is a string. When only such fields
+# hold a machine path or a token, the field is dropped and the file still travels;
+# excluding the whole file for a comment would leave the other machine without
+# the policy itself (a model chain with no models). Bare `note` and `why` are not
+# on this list: code reads those.
+DOC_SUFFIXES = ("_note", "_source")
+
+
+def _documentation_pointer(doc, pointer: str) -> bool:
+    parts = pointer.strip("/").split("/")
+    if not parts or not parts[-1].endswith(DOC_SUFFIXES):
+        return False
+    node = doc
+    for part in parts:
+        if isinstance(node, list) and part.isdigit() and int(part) < len(node):
+            node = node[int(part)]
+        elif isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            return False
+    return isinstance(node, str)
+
+
+def _drop(doc, pointer: str) -> None:
+    *parents, last = pointer.strip("/").split("/")
+    node = doc
+    for part in parents:
+        node = node[int(part)] if isinstance(node, list) else node[part]
+    del node[last]
+
+
 def canonical_sha256(doc: dict) -> str:
     body = {k: v for k, v in doc.items() if k != "sha256"}
     text = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -256,6 +288,13 @@ def build(base: Path) -> dict:
             continue
         doc = config.read_json(path)
         found = leaks(doc)
+        if found and all(_documentation_pointer(doc, where) for where, _ in found):
+            for where, kind in sorted(found, reverse=True):
+                _drop(doc, where)
+                excluded.append({"item": f"config/{path.name}#{_where(where)}",
+                                 "reason": f"a documentation field holding {_describe(kind)}; "
+                                           "the field stays on this machine, the file travels"})
+            found = leaks(doc)
         if found:
             where, kind = found[0]
             excluded.append({"item": f"config/{path.name}",

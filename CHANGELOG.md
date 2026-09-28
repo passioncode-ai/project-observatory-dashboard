@@ -3,6 +3,19 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.7.1 — 2026-09-28
+
+### Fixed
+
+- **`full profile export` carried no model chain from a real workspace.** A policy file
+  was excluded whole when any value held a machine path, and the operator's `models.json`
+  had one in two prose fields (`wallet.source_note`, `embedding.contract_source`). The
+  second machine then got an empty chain and zero spending ceilings, and its agent layer
+  was off without saying so. Now, when only documentation fields (keys ending in `_note`
+  or `_source` with a string value, which the engine never reads) hold a path or a token,
+  those fields are dropped and listed in `excluded`, and the file travels. A path in any
+  other field still excludes the file.
+
 ## 0.7.0 — 2026-09-28
 
 A second machine can now run exactly the same Observatory as the first and stay in step with it.
