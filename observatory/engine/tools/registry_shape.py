@@ -107,6 +107,32 @@ def _fields(records: list[dict]) -> dict:
     return dict(sorted(out.items()))
 
 
+#: Lists a document carries ABOUT itself rather than as its records: where the
+#: facts came from, and what could not be measured. On an estate with more
+#: degradations than repositories, "the longest list" of `repositories.json` was
+#: its `degraded` list, and the published shape described the notices instead of
+#: the repositories.
+NOT_RECORDS = ("degraded", "source_refs")
+
+
+def record_key(name: str, doc: dict) -> str | None:
+    """The key holding a document's records.
+
+    The list named after the document wins (`repositories` in
+    `repositories.json`). Otherwise the longest list that is not provenance or
+    a degradation notice, and only then the longest list of all.
+    """
+    lists = [(k, v) for k, v in doc.items() if isinstance(v, list)]
+    if not lists:
+        return None
+    stem = pathlib.Path(name).stem
+    for k, _ in lists:
+        if k == stem or k == stem.replace("-", "_"):
+            return k
+    records = [kv for kv in lists if kv[0] not in NOT_RECORDS] or lists
+    return max(records, key=lambda kv: len(kv[1]))[0]
+
+
 def shapes() -> dict:
     """One entry per registry document: record count, fields, nested blocks."""
     out: dict[str, dict] = {}
@@ -128,8 +154,7 @@ def shapes() -> dict:
         # and "first" picked the provenance and reported zero records — an
         # arbitrary rule producing a confident wrong answer, which is the defect
         # this whole file exists to reduce.
-        lists = [(k, v) for k, v in doc.items() if isinstance(v, list)]
-        key = max(lists, key=lambda kv: len(kv[1]))[0] if lists else None
+        key = record_key(path.name, doc)
         if key is None:
             out[path.name] = {"records": 1, "collection": "",
                               "fields": _fields([doc]), "nested": {}}
