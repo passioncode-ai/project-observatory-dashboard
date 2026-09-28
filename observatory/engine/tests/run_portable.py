@@ -38,6 +38,9 @@ LEGACY = (
     'recall', 'recount', 'release_cadence', 'remedy_fits', 'render_surface', 'review_queue',
     'serverd', 'stale_is_expected', 'store_modes', 'tick_standdown', 'trace_opens',
     'two_surfaces', 'work_tiles',
+
+    # Merged from the parallel port streams.
+    'agent', 'agent_queue', 'blank_page', 'budget_subject', 'dashboard_store', 'erasure_bytes', 'estate_history', 'footprint', 'index', 'key_shape', 'project_surface', 'projection', 'reclaimable_pressure', 'temporary_block', 'traps', 'write_surface',
 )
 BOUNDARY = (
     'workspace', 'workspace_upgrade', 'workspace_boundaries', 'dashboard_shell',
@@ -48,13 +51,19 @@ BOUNDARY = (
     # Ported suites, first batch: each builds its own temporary workspace.
     'delta_fold', 'mcp_inventory', 'openrouter_keys', 'scan_ids', 'secrets', 'signature',
     'skill_check', 'use_secret', 'validator_rules',
+
+    # Merged from the parallel port streams.
+    'cause_and_symptom', 'collector_state', 'corroboration', 'credentials', 'curation_paths', 'degradations', 'domain_probe', 'google', 'handoff', 'install_key', 'ledger_export', 'mechanical_confidence', 'notification', 'portfolio_review', 'project_secrets', 'publish_contract', 'recovery', 'reveals', 'session_start', 'tick', 'tick_failures', 'trap_efficacy', 'trap_map', 'unpublished_work', 'wire_survives', 'witness',
 )
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
            'dashboard_fixture.py', 'emitter_fixture.py', 'session_fixture.py', 'surface_fixture.py',
            'env_tab_check.js', 'action_outcome_check.mjs',
-           'own_project.py', 'tick_reader.py', 'validator_fixture.py')
+           'own_project.py', 'tick_reader.py', 'validator_fixture.py',
+    # Merged from the parallel port streams.
+    'concurrency.py', 'merge_fixture.py', 'probe_fixture.py',
+)
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', 'tools')
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
@@ -71,6 +80,9 @@ SKILL_FILES = (
     # The companion suites drive the hook scripts themselves.
     'skill/plugins/observatory-log/hooks/record-turn.sh',
     'skill/plugins/observatory-log/hooks/ask-why.py',
+
+    # Merged from the parallel port streams.
+    'skill/plugins/observatory-log/hooks/session-start.sh',
 )
 NOT_RUN = (
     {'scope': 'live-provider-acceptance', 'status': 'NOT_RUN',
