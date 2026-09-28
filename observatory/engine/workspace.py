@@ -398,6 +398,12 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(config.SOURCE / "tools"))
         module = __import__("dashboard_open" if argv[0] == "open" else "agent_plugin")
         return module.main(argv[1:])
+    if argv and argv[0] == "update":
+        import engine_update
+        return engine_update.main(argv[1:])
+    if argv and argv[0] == "profile":
+        import workspace_profile
+        return workspace_profile.main(argv[1:])
     if argv and argv[0] in {"machine", "cleanup"}:
         return machine_command(argv[0], argv[1:])
     if argv and argv[0] in {"workspace-backup", "upgrade", "restore"}:

@@ -435,7 +435,8 @@ PUBLIC_SOURCE_ONLY = {
     "all": "historical composite includes private development gates; use local or the opt-in tick",
 }
 WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migrate-local", "open", "agent",
-                      "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup"}
+                      "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup",
+                      "update", "profile"}
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -451,6 +452,12 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   backups status|migrate|decrypt     where backups go; move legacy copies; decrypt one
   upgrade                      preview; --apply requires --writers-stopped
   restore SNAPSHOT             restore a snapshot dir or encrypted .obsnap into a new empty workspace
+  update [--version X.Y.Z] [--check|--apply]  move to a published release: verified,
+                               workspace upgraded, rolled back on failure; --check exits 10
+                               when an update exists, 3 when it could not look
+  profile export [FILE] | import FILE [--apply]  the portable functional configuration:
+                               integrations, features, language, models, policy files;
+                               never sources, secrets or the registry
   machine [--disk] [--explain PID]   processes by origin, memory, disk; why one process runs
   cleanup [--apply [--include manual]]  plan, or remove what loses nothing; manual tier archives first
   tick                         configured cycle; scheduler must be explicitly enabled

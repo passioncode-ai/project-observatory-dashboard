@@ -232,6 +232,11 @@ account can read (`analytics.organization_account_unreadable`).
 
 ## Upgrade, back up, restore
 
+For an installed release, `project-observatory full update --apply` does this
+section in one verified, reversible command, and `full profile export` / `import`
+carries the functional configuration to a second machine. The public
+documentation, "Second machine" and "Staying in step", has the details and exit codes.
+
 Stop every writer, including old executables and background jobs. A lock in a
 new version cannot constrain an old process that does not know that lock.
 

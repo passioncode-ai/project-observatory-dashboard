@@ -96,6 +96,22 @@ was renamed. Since 0.6.0 `machine` and `cleanup` are too; `cleanup` without
 [`WORKSPACE_COMMANDS`](../observatory.py), [`workspace.main`](../workspace.py),
 and [`workspace_upgrade.py`](../workspace_upgrade.py) implement the separation.
 
+In the release after 0.6.3 `update` and `profile` became workspace commands; nothing existing was
+renamed and `upgrade` keeps its meaning (the workspace half only). `update` previews
+by default, `--check` exits 0 (up to date), 10 (update available) or 3 (could not
+look), and `--apply` installs a GitHub release only when the wheel matches both the
+asset digest and `SHA256SUMS`, stops and restarts this workspace's launchd jobs
+through `tools/install_launchd.py` (`managed_jobs`, `stop_job`, `start_job`), runs
+the new release's `upgrade --apply --writers-stopped` in a new process and rolls back
+on failure (exit 1, or 4 when a person must finish it, 5 when a job did not restart).
+`profile export` writes profile format 1 (`kind`, `format_version`, `engine_version`,
+`sha256` over the canonical JSON of every other field); `profile import` previews and
+refuses an unknown format, a newer engine's profile and a damaged hash.
+[`engine_update.py`](../engine_update.py), [`workspace_profile.py`](../workspace_profile.py);
+tests [`test_engine_update.py`](../tests/test_engine_update.py) and
+[`test_workspace_profile.py`](../tests/test_workspace_profile.py), both in the
+portable runner's list.
+
 Future workspace/configuration/registry formats and unknown database migrations
 are refused rather than guessed. Existing migration IDs are preserved, pending
 migrations apply atomically, and SQLite backups include committed WAL data.

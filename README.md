@@ -93,7 +93,7 @@ Known-value scanning cannot find unknown or transformed values. A copied value i
 
 ## Updates preserve supported contracts
 
-The Python package is updated by reinstalling it (`python -m pip install -U -c requirements-full.lock '.[full]'` from an updated checkout, or the release wheel), followed by `project-observatory full upgrade`. The Claude Code plugin updates itself when auto-update is on; see `full agent status`.
+An installed release is updated with `project-observatory full update --apply`: the wheel is verified against GitHub's digest and `SHA256SUMS`, the workspace is upgraded, and a failure rolls back ([staying in step](docs/ONBOARDING.md#staying-in-step)). A source checkout is updated with Git and reinstalled (`python -m pip install -U -c requirements-full.lock '.[full]'`), followed by `project-observatory full upgrade`. `full profile export` / `import` carries the functional configuration to a [second machine](docs/ONBOARDING.md#second-machine). The Claude Code plugin updates itself when auto-update is on; see `full agent status`.
 
 Application versions, workspace/config formats, database migrations, plugin API and tool schemas have separate compatibility rules. Newer unsupported state is refused. Updates preserve optional settings, back up SQLite including committed WAL data, and support restore into a separate home.
 

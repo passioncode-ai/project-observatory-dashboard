@@ -358,6 +358,12 @@ account can read (`analytics.organization_account_unreadable`).
 
 ## Upgrade, back up, restore
 
+`project-observatory full update --apply` does everything in this section for an
+installed release in one command — fetch, verify, stop the jobs, snapshot,
+install, upgrade, verify, restart, and roll back on failure; see
+[Staying in step](#staying-in-step). The steps below are the same work by hand, for a
+source checkout or a scheduler this engine did not install.
+
 Stop every writer, including old executables and background jobs. A lock in a
 new version cannot constrain an old process that does not know that lock.
 
@@ -426,6 +432,95 @@ and run `full migrate-local ORIGINAL_DIRECTORY` to preview. Apply requires
 `--apply --writers-stopped`. It leaves the original in place and does not start
 services. Verify external source paths, enabled features, credentials, registry
 counts and database health before choosing which installation becomes active.
+
+## Second machine
+
+Two operators, or one operator on two Macs, run the same engine version and the
+same functional configuration; each machine keeps its own paths, credentials and
+estate. On the new machine:
+
+1. **Install the same release.** From the release page, save `project_observatory-X.Y.Z-py3-none-any.whl`
+   and `SHA256SUMS`, check the digest, and install the wheel
+   into the Python environment from [SQLite runtime prerequisite](#sqlite-runtime-prerequisite):
+
+   ```sh
+   shasum -a 256 -c SHA256SUMS --ignore-missing
+   python -m pip install 'project_observatory-X.Y.Z-py3-none-any.whl[full]'
+   ```
+
+   A machine that already has an older release installed moves to the exact version
+   with `project-observatory full update --version X.Y.Z --apply`.
+2. **Create the workspace:** `project-observatory full init`.
+3. **Import the profile.** On the first machine, `project-observatory full profile
+   export observatory-profile.json` writes the portable configuration: integrations,
+   features, the dashboard language, `models.json` and the policy files that hold no
+   paths, accounts or project names. Every included and excluded item is listed in the
+   file with its reason; `sources`, `storage`, secrets, the registry, the store,
+   credential annotations and account ids never are. Carry the file across, then:
+
+   ```sh
+   project-observatory full profile import observatory-profile.json          # preview: the diff
+   project-observatory full profile import observatory-profile.json --apply
+   ```
+
+   Import refuses a profile made by a newer engine (run `full update` first), a format
+   it does not know, and a file whose sha256 no longer matches its content. It keeps
+   every local field the profile does not name and never touches `sources` or
+   `features.scheduler`.
+4. **Connect what the import report lists.** `connect_on_this_machine` names each enabled
+   integration's missing source (`coverage_warnings`, the same check `full doctor` runs)
+   and the credential or CLI login it needs here. Set sources with `full configure sources
+   NAME PATH` and enter credentials as in [Enter credentials locally](#enter-credentials-locally).
+5. **Connect the agent:** `project-observatory full agent install`.
+6. **Scheduler, deliberately:** `full configure features scheduler true`, then
+   `tools/install_launchd.py install` and `tools/serverd.py --install` from
+   `project-observatory full-path`, as in
+   [Enable background or paid actions deliberately](#enable-background-or-paid-actions-deliberately).
+   Scheduling is a per-machine decision, which is why a profile does not carry it.
+
+## Staying in step
+
+After each release, on both machines:
+
+```sh
+project-observatory full update --check     # 0 up to date, 10 update available, 3 could not look
+project-observatory full update             # preview: current, target, what --apply does
+project-observatory full update --apply
+```
+
+`--apply` downloads the wheel and `SHA256SUMS` from the GitHub release and installs only
+when the wheel matches both GitHub's published asset digest and its `SHA256SUMS` line.
+It keeps a verified wheel of the running release for rollback (under
+`backups/engine-releases/`, cached by every update, or downloaded from that release) and
+refuses without one unless `--no-rollback` is given. It stops this workspace's launchd
+tick and server if they are loaded (unless `--writers-stopped` says you stopped your own
+scheduler; a foreground `open --serve` is yours to stop), snapshots the workspace, installs
+the wheel with its `full` extra using the running interpreter's pip (or `uv pip`), runs the
+new release's `upgrade --apply --writers-stopped` in a new process, verifies the installed
+version, its pinned dependencies and `doctor`, and starts again exactly the jobs it
+stopped. Any failure after the install reinstalls the rollback wheel; if the workspace had
+already been upgraded, the pre-update snapshot is restored at the same path and the changed
+copy is kept beside it as `<home>.failed-update-…`. Every step is a line in
+`store/logs/update.jsonl`.
+
+It refuses a downgrade, the same version without `--reinstall`, and a source checkout or
+editable install (update those with Git). `--version X.Y.Z` pins the target; `--repository
+OWNER/NAME` and `--api-url URL` (or `OBSERVATORY_RELEASE_REPOSITORY`,
+`OBSERVATORY_RELEASE_API`) select a fork or a mirror. Only HTTPS is accepted, except to
+this machine.
+
+| Exit | `--check` | `--apply` |
+|---|---|---|
+| 0 | up to date, or this machine is ahead of the target | updated |
+| 1 | — | failed after the install began; rolled back (`rolled_back`, `workspace_restored`) |
+| 2 | refused: no such release, bad arguments | refused before any change: verification, downgrade, unsafe state |
+| 3 | could not look: network, rate limit, a release without its assets (`degraded`) | could not look (network, rate limit), before any change |
+| 4 | — | rollback incomplete; `human_steps` says what to run |
+| 5 | — | updated, but a stopped job did not start; `services_not_restarted` has the command |
+| 10 | a newer installable release exists | — |
+
+Anonymous GitHub API requests are limited to 60 an hour per address; a `--check` from a
+scheduler every few hours stays far below it.
 
 ## Choose the dashboard's language
 
