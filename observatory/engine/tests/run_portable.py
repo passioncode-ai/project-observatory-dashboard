@@ -55,6 +55,50 @@ BOUNDARY = (
     # Merged from the parallel port streams.
     'cause_and_symptom', 'collector_state', 'corroboration', 'credentials', 'curation_paths', 'degradations', 'domain_probe', 'google', 'handoff', 'install_key', 'ledger_export', 'mechanical_confidence', 'notification', 'portfolio_review', 'project_secrets', 'publish_contract', 'recovery', 'reveals', 'session_start', 'tick', 'tick_failures', 'trap_efficacy', 'trap_map', 'unpublished_work', 'wire_survives', 'witness',
 )
+# Suites and helpers ported by the second port stream.
+BOUNDARY += (
+    'activity',
+    'at_stake',
+    'backup_store',
+    'checkout_subject',
+    'companion_faults',
+    'conformance_receipt',
+    'dead_data',
+    'delivery',
+    'emit_purity',
+    'env_inventory',
+    'estate_surfaces',
+    'fixture_sweep',
+    'foreign_vocabulary',
+    'freshness',
+    'gate_purity',
+    'gate_skips',
+    'git_locale',
+    'horizon',
+    'indexer_load',
+    'interpretation',
+    'key',
+    'ledger_pointer',
+    'lost_projects',
+    'merge_membership',
+    'no_silent_truncation',
+    'pipeline',
+    'plugin_pair',
+    'policy_residue',
+    'registry_shape',
+    'rollup_sessions',
+    'scrub',
+    'search_path',
+    'shared_ancestry',
+    'side_effect_attribution',
+    'skill',
+    'skip_site_kinds',
+    'stale_collapse',
+    'store_faults',
+    'store_integrity',
+    'tick_repo',
+    'unobservable',
+)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -63,6 +107,10 @@ HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'own_project.py', 'tick_reader.py', 'validator_fixture.py',
     # Merged from the parallel port streams.
     'concurrency.py', 'merge_fixture.py', 'probe_fixture.py',
+)
+# Suites and helpers ported by the second port stream.
+HELPERS += (
+    'watched_repo.py',
 )
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', 'tools')
 ROOT_FILES = (
@@ -83,6 +131,10 @@ SKILL_FILES = (
 
     # Merged from the parallel port streams.
     'skill/plugins/observatory-log/hooks/session-start.sh',
+)
+# Suites and helpers ported by the second port stream.
+SKILL_FILES += (
+    'skill/.claude-plugin/marketplace.json',
 )
 NOT_RUN = (
     {'scope': 'live-provider-acceptance', 'status': 'NOT_RUN',
