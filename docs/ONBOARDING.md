@@ -358,7 +358,7 @@ account can read (`analytics.organization_account_unreadable`).
 
 ## Upgrade, back up, restore
 
-`project-observatory full update --apply` does everything in this section for an
+From 0.7.0 on, `project-observatory full update --apply` does everything in this section for an
 installed release in one command — fetch, verify, stop the jobs, snapshot,
 install, upgrade, verify, restart, and roll back on failure; see
 [Staying in step](#staying-in-step). The steps below are the same work by hand, for a
@@ -448,8 +448,12 @@ estate. On the new machine:
    python -m pip install 'project_observatory-X.Y.Z-py3-none-any.whl[full]'
    ```
 
-   A machine that already has an older release installed moves to the exact version
-   with `project-observatory full update --version X.Y.Z --apply`.
+   A machine that already has 0.7.0 or later installed moves to the exact version
+   with `project-observatory full update --version X.Y.Z --apply`. Releases before 0.7.0
+   have no `update` command: move such a machine to 0.7.0 once by hand, as in
+   [Upgrade, back up, restore](#upgrade-back-up-restore) (stop the writers, install the
+   verified wheel, `full upgrade --apply --writers-stopped`, start the jobs again), and
+   use `full update` from then on.
 2. **Create the workspace:** `project-observatory full init`.
 3. **Import the profile.** On the first machine, `project-observatory full profile
    export observatory-profile.json` writes the portable configuration: integrations,
