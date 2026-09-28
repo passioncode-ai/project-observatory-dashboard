@@ -1,6 +1,6 @@
-# Vendored from passioncode-ai/fabric-agent-adapter dfd11dad72fe (fabric-agent-adapter 0.4.0),
+# Vendored from passioncode-ai/fabric-agent-adapter aaaa93f97577 (fabric-agent-adapter 0.4.0),
 # plugins/fabric-agent-adapter/skills/building-fabric-services/scripts/check_service.py,
-# upstream sha256 631252216502baf24fdfe6d7f5e0c40fbd7dff81d7711ff7ab22e4399cb61589 (the bytes below this header).
+# upstream sha256 f25aa81f9d4b1dcc175b2243e6c5bf6f5bd9ce9ca9481a476f785544a0bc3762 (the bytes below this header).
 # Do not edit here: update the kit upstream and copy it again (tests/test_fabric_service.py checks the digest).
 #!/usr/bin/env python3
 """Live conformance probe for a fabric-service/0.1 service.
@@ -224,11 +224,7 @@ class Probe:
         life = self.d.get("lifecycle") or {}
         data = fs.expand(str((self.d.get("paths") or {}).get("data", "~/")))
         inside = subprocess.run(["git", "-C", str(data), "rev-parse", "--show-toplevel"], capture_output=True, text=True) if data.is_dir() and shutil.which("git") else None
-        if inside is None:
-            self.add("state.outside-code", "NOT_RUN", "data directory %s missing or git absent" % data)
-        else:
-            self.add("state.outside-code", "FAIL" if inside.returncode == 0 else "PASS",
-                     ("data lives in repository %s" % inside.stdout.strip()) if inside.returncode == 0 else "%s is not inside a repository" % data)
+        self.state_rule(data, inside)
         self.lock_rule(data)
         if life.get("manager") != "launchd":
             self.add("lifecycle.launchd", "NOT_RUN", "lifecycle.manager is %s" % life.get("manager"))
@@ -267,6 +263,31 @@ class Probe:
             self.add("lifecycle.one-copy", "PASS" if same else "FAIL",
                      "launchd pid %s, answering pid %s" % (match.group(1), served))
 
+    def state_rule(self, data: Path, inside: Optional[subprocess.CompletedProcess]) -> None:
+        """State must not live in the service's CODE: its own checkout or a release.
+
+        A repository that exists to version the data itself (a registry, a plan) is
+        a store, not code; deleting the service's checkout does not touch it."""
+        rule = "state.outside-code"
+        if "/releases/" in str(data):
+            self.add(rule, "FAIL", "%s is inside a release directory" % data)
+            return
+        if inside is None:
+            self.add(rule, "NOT_RUN", "data directory %s missing or git absent" % data)
+            return
+        if inside.returncode != 0:
+            self.add(rule, "PASS", "%s is not inside a repository" % data)
+            return
+        top = inside.stdout.strip()
+        remote = subprocess.run(["git", "-C", top, "remote", "get-url", "origin"], capture_output=True, text=True)
+        source = str((self.d.get("source") or {}).get("repository") or "")
+        if not source:
+            self.add(rule, "NOT_RUN", "data is inside repository %s and the descriptor names no source.repository to tell code from data" % top)
+        elif remote.returncode == 0 and same_repository(remote.stdout.strip(), source):
+            self.add(rule, "FAIL", "data lives in the service's own code checkout %s (%s)" % (top, source))
+        else:
+            self.add(rule, "PASS", "data is in repository %s, which is not the service's code (%s)" % (top, remote.stdout.strip() or "no remote"))
+
     def lock_rule(self, data: Path) -> None:
         lock = data / "service.lock"
         if not lock.exists():
@@ -300,6 +321,17 @@ class Probe:
             self.login_rules()
         self.lifecycle_rules()
         return self.results
+
+
+def same_repository(a: str, b: str) -> bool:
+    """git@github.com:o/r.git, https://github.com/o/r and github.com/o/r are one repository."""
+    def norm(u: str) -> str:
+        u = u.strip().lower()
+        u = re.sub(r"^git@([^:]+):", r"\1/", u)
+        u = re.sub(r"^[a-z+]+://", "", u)
+        u = re.sub(r"^[^@/]+@", "", u)
+        return re.sub(r"\.git$", "", u).rstrip("/")
+    return bool(a and b) and norm(a) == norm(b)
 
 
 def locate(target: Optional[str], descriptor: Optional[str], services_dir: Path) -> Path:

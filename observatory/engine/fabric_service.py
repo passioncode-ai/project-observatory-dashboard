@@ -1,4 +1,4 @@
-# Vendored from passioncode-ai/fabric-agent-adapter dfd11dad72fe (fabric-agent-adapter 0.4.0),
+# Vendored from passioncode-ai/fabric-agent-adapter aaaa93f97577 (fabric-agent-adapter 0.4.0),
 # plugins/fabric-agent-adapter/skills/building-fabric-services/scripts/fabric_service.py,
 # upstream sha256 3331b9ad5baa5721d0bdc148284dfc88572bb9a22231d292b969f7bd918f2eb5 (the bytes below this header).
 # Do not edit here: update the kit upstream and copy it again (tests/test_fabric_service.py checks the digest).

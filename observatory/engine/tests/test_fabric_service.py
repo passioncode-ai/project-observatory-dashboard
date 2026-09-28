@@ -467,6 +467,36 @@ class CheapWellKnown(Sandbox):
         self.assertEqual(schema_errors("service-well-known.schema.json", doc), [])
 
 
+class BeatFailures(Sandbox):
+    """A failing heartbeat or health snapshot becomes a degraded source, never an endless `starting`.
+
+    Found 2026-09-29: the live server's heartbeat raised ENOSPC on a full disk, and on a
+    macOS CI runner the first beat never produced a snapshot, so the well-known document
+    said `starting` for good because refresh() only ran after a successful heartbeat()."""
+
+    def test_a_heartbeat_that_raises_still_refreshes_and_names_the_failure(self):
+        rt = self.serverd.Runtime("t" * 43)
+        with mock.patch.object(self.serverd, "heartbeat", side_effect=OSError(28, "No space left on device")):
+            self.serverd.beat_once(rt)
+        doc = rt.well_known()
+        self.assertNotEqual(doc["status"], "starting")
+        self.assertIn("heartbeat", [d["source"] for d in doc["degraded"]])
+        self.assertEqual(schema_errors("service-well-known.schema.json", doc), [])
+        with mock.patch.object(self.serverd, "heartbeat", return_value={"leaks": {"register": False}}):
+            self.serverd.beat_once(rt)
+        self.assertNotIn("heartbeat", [d["source"] for d in rt.well_known()["degraded"]], "a recovered heartbeat clears its row")
+
+    def test_a_health_snapshot_that_raises_is_degraded_not_starting(self):
+        rt = self.serverd.Runtime("t" * 43)
+        with mock.patch.object(self.serverd, "heartbeat", return_value={"leaks": {"register": False}}), \
+                mock.patch.object(self.health, "snapshot", side_effect=RuntimeError("store unreadable")):
+            self.serverd.beat_once(rt)
+        doc = rt.well_known()
+        self.assertEqual(doc["status"], "degraded")
+        self.assertIn("health", [d["source"] for d in doc["degraded"]])
+        self.assertEqual(schema_errors("service-well-known.schema.json", doc), [])
+
+
 # --- installer -----------------------------------------------------------------------
 
 class Installer(Sandbox):

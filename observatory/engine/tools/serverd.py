@@ -250,20 +250,40 @@ class Runtime:
         self.token_problem = token_problem
         self._status = "starting"
         self._snapshot: dict | None = None
+        self._failures: dict[str, str] = {}  # source -> reason, until that source works again
         self._lock = threading.Lock()
 
     def _own_degraded(self) -> list[dict]:
+        rows = []
         if self.token_problem:
-            return [{"source": "service-token",
-                     "reason": f"the events feed is off: {self.token_problem}"[:300]}]
-        return []
+            rows.append({"source": "service-token",
+                         "reason": f"the events feed is off: {self.token_problem}"[:300]})
+        rows += [{"source": k, "reason": v[:300]} for k, v in sorted(self._failures.items())]
+        return rows
 
-    def refresh(self, leaks: dict | None = None) -> dict:
-        snap = service_health.snapshot(leaks if leaks is not None else refresh_leaks(),
-                                       extra_degraded=self._own_degraded())
+    def note_failure(self, source: str, reason: str | None) -> None:
+        """Record (or with None, clear) a failing part; it shows in `degraded` until cleared."""
+        with self._lock:
+            if reason:
+                self._failures[source] = reason
+            else:
+                self._failures.pop(source, None)
+
+    def refresh(self, leaks: dict | None = None) -> dict | None:
+        """Rebuild the snapshot. A failure is a degraded source, never an endless `starting`."""
+        try:
+            snap = service_health.snapshot(leaks if leaks is not None else refresh_leaks(),
+                                           extra_degraded=self._own_degraded())
+        except Exception as exc:  # noqa: BLE001 — the answer must stay truthful, not stuck
+            self.note_failure("health", f"the health snapshot failed: {type(exc).__name__}: {exc}")
+            with self._lock:
+                if self._status == "starting":
+                    self._status = "degraded"
+            return None
+        self.note_failure("health", None)
         with self._lock:
             self._snapshot = snap
-            if self._status == "starting":
+            if self._status in ("starting", "degraded"):
                 self._status = "ready"
         return snap
 
@@ -274,7 +294,8 @@ class Runtime:
     def well_known(self) -> dict:
         with self._lock:
             snap, status = self._snapshot, self._status
-        degraded = snap["degraded"] if snap else self._own_degraded()
+        own = self._own_degraded()
+        degraded = (snap["degraded"] + [d for d in own if d not in snap["degraded"]]) if snap else own
         return fs.build_well_known(
             service_id=service_identity.SERVICE_ID, instance=self.instance,
             name=service_identity.NAME, version=VERSION, build=self.build,
@@ -284,6 +305,20 @@ class Runtime:
 
 #: Set by `serve()`; None in a process that only imports this module.
 RUNTIME: Runtime | None = None
+
+
+def beat_once(runtime: Runtime) -> None:
+    """One heartbeat cycle. The snapshot is refreshed whether or not the receipt could be
+    written, so a full disk or a bad collector costs a degraded row, not the answer."""
+    leaks = None
+    try:
+        doc = heartbeat()
+        leaks = doc.get("leaks")
+        runtime.note_failure("heartbeat", None)
+    except Exception as exc:  # noqa: BLE001 — the beat survives a bad cycle
+        print(f"heartbeat: {type(exc).__name__}: {exc}", file=sys.stderr)
+        runtime.note_failure("heartbeat", f"the heartbeat receipt could not be written: {type(exc).__name__}: {exc}")
+    runtime.refresh(leaks)
 
 
 def local_request(host: str, origin: str | None, fetch_site: str | None, port: int) -> bool:
@@ -464,12 +499,7 @@ def serve(port: int) -> int:
 
     def beat():
         while not stop.is_set():
-            try:
-                doc = heartbeat()
-                RUNTIME.refresh(doc.get("leaks"))
-            except Exception as exc:                       # noqa: BLE001 — the
-                print(f"heartbeat: {type(exc).__name__}: {exc}",  # beat survives
-                      file=sys.stderr)                     # a bad cycle
+            beat_once(RUNTIME)
             stop.wait(REFRESH_SECONDS)
 
     def on_term(_signum, _frame):
