@@ -122,8 +122,11 @@ there are no findings.
 
 Nothing outside the workspace is read until you name it. Each source is a path set with
 `project-observatory full configure sources NAME PATH`; `full doctor` lists every enabled
-integration or feature whose source is unset or missing under `coverage_warnings`, because a
-collector without its source reports nothing rather than failing.
+integration or feature whose source is unset, missing (a path deleted after it was configured)
+or of the wrong kind under `coverage_warnings`, because a collector without its source reports
+nothing rather than failing. Each row carries two exact commands: `fix`
+(`project-observatory full configure sources NAME PATH`) and `disable`
+(`project-observatory full configure integrations NAME false`, or `features` for a feature).
 
 | Source | What it points at | Read by |
 |---|---|---|
@@ -132,7 +135,7 @@ collector without its source reports nothing rather than failing.
 | `mcp_config_root` | the home directory whose agent configs declare MCP servers | `mcp` integration |
 | `wiki` | a Markdown knowledge base, e.g. an Obsidian vault | `wiki` integration, `wiki_projection` |
 | `secret_store` | a private directory of provider credentials and project slots (`projects/`) | vault, OpenRouter, Google, Cloudflare analytics |
-| `companion_home`, `companion_db` | a memory companion's home and database (claude-mem) | `companion_remediation` |
+| `companion_home`, `companion_db` | a memory companion's home and database file (claude-mem) | `sessions` integration (`companion_db`), `companion_remediation` |
 | `gateway_root` | an optional directory whose `bin/` holds a credential backup script | `vault.py backup` |
 | `domain_export` | a registrar's domain CSV export | `domains` integration |
 | `secrets` | overrides where the workspace keeps its own credential files | provider tools |

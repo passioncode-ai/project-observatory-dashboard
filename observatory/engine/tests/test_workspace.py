@@ -70,6 +70,53 @@ class WorkspaceTests(unittest.TestCase):
         warnings = json.loads(self.run_cli('doctor').stdout)['coverage_warnings']
         self.assertTrue(any(w['source'] == 'sessions' and 'does not exist' in w['problem'] for w in warnings))
 
+    def test_doctor_names_a_configured_source_that_was_deleted_with_its_fix(self):
+        # The sessions collector reads the companion's database: pointed at a file
+        # that is gone, every tick logs DEGRADED, so doctor must not stay silent.
+        self.run_cli('init')
+        db = self.base / 'companion.db'
+        db.write_bytes(b'')
+        transcripts = self.base / 'transcripts'
+        transcripts.mkdir()
+        self.run_cli('configure', 'integrations', 'sessions', 'true')
+        self.run_cli('configure', 'sources', 'sessions', str(transcripts))
+        self.run_cli('configure', 'sources', 'companion_db', str(db))
+        self.assertEqual(json.loads(self.run_cli('doctor').stdout)['coverage_warnings'], [])
+        db.unlink()
+        warnings = json.loads(self.run_cli('doctor').stdout)['coverage_warnings']
+        rows = [w for w in warnings if w['source'] == 'companion_db']
+        self.assertEqual(len(rows), 1, warnings)
+        row = rows[0]
+        self.assertEqual(row['integration'], 'sessions')
+        self.assertIn('does not exist', row['problem'])
+        self.assertEqual(row['fix'], 'project-observatory full configure sources companion_db PATH')
+        self.assertEqual(row['disable'], 'project-observatory full configure integrations sessions false')
+        # Both advertised commands are real: each one clears the warning.
+        self.run_cli(*row['disable'].split()[2:])
+        self.assertEqual(json.loads(self.run_cli('doctor').stdout)['coverage_warnings'], [])
+        self.run_cli('configure', 'integrations', 'sessions', 'true')
+        db.write_bytes(b'')
+        self.run_cli(*row['fix'].replace('PATH', str(db)).split()[2:])
+        self.assertEqual(json.loads(self.run_cli('doctor').stdout)['coverage_warnings'], [])
+
+    def test_doctor_names_a_directory_where_the_companion_database_file_should_be(self):
+        self.run_cli('init')
+        self.run_cli('configure', 'integrations', 'sessions', 'true')
+        self.run_cli('configure', 'sources', 'sessions', str(self.base))
+        self.run_cli('configure', 'sources', 'companion_db', str(self.base))
+        warnings = json.loads(self.run_cli('doctor').stdout)['coverage_warnings']
+        self.assertTrue(any(w['source'] == 'companion_db' and 'not a file' in w['problem'] for w in warnings), warnings)
+
+    def test_a_missing_feature_source_names_the_feature_switch(self):
+        self.run_cli('init')
+        self.run_cli('configure', 'features', 'companion_remediation', 'true')
+        self.run_cli('configure', 'sources', 'companion_home', str(self.base / 'gone-home'))
+        warnings = json.loads(self.run_cli('doctor').stdout)['coverage_warnings']
+        row = next(w for w in warnings if w['source'] == 'companion_home')
+        self.assertIn('does not exist', row['problem'])
+        self.assertEqual(row['fix'], 'project-observatory full configure sources companion_home PATH')
+        self.assertEqual(row['disable'], 'project-observatory full configure features companion_remediation false')
+
     def test_future_config_and_workspace_refused_without_mutation(self):
         self.run_cli('init')
         for relative, field, value in [('config/settings.json','schema_version',99),('workspace.json','minimum_writer','99.0.0')]:
