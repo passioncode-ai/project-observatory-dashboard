@@ -1409,26 +1409,6 @@
       "upstream_modified": true
     },
     {
-      "path": "tests/run_portable.py",
-      "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "4fd60375980e31d099e9155a2d2cffbf36501ca5d0414a43b37fa33a10b53d31",
-      "bytes": 14437,
-      "python_comments_removed": 3,
-      "python_docstrings_removed": 2,
-      "tool_descriptions_retained": 0,
-      "upstream_modified": true
-    },
-    {
-      "path": "tests/run_portable.py",
-      "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "4fd60375980e31d099e9155a2d2cffbf36501ca5d0414a43b37fa33a10b53d31",
-      "bytes": 14437,
-      "python_comments_removed": 3,
-      "python_docstrings_removed": 2,
-      "tool_descriptions_retained": 0,
-      "upstream_modified": true
-    },
-    {
       "path": "tests/session_fixture.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -1664,8 +1644,8 @@
       "path": "tests/test_conformance_receipt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "492d2bc0f621d617e1157a4d7db69e098c338a0e07590bed0741164e0fe0848c",
-      "bytes": 21547
+      "export_sha256": "2b9387143d5d23061fa011ece8a06cd756c95b42747c9c600d54415a526bc0d9",
+      "bytes": 21719
     },
     {
       "path": "tests/test_corroboration.py",
@@ -3572,7 +3552,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 446,
+  "file_count": 444,
   "excluded": [
     "git-history",
     "operator-registries",
