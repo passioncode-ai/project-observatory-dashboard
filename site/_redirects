@@ -1,0 +1,5 @@
+# observatory.sshlg.me is retired as a product page: the home page moved to
+# PassionCode.ai for good. The field notes, their assets and the 404 page stay here.
+/ https://passioncode.ai/observatory/ 301
+/index.html https://passioncode.ai/observatory/ 301
+/index https://passioncode.ai/observatory/ 301
