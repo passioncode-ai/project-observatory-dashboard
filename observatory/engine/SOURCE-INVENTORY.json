@@ -369,7 +369,7 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "1f63a930eee58c67578a34458b3a9ae3d3f621803bedf733344444b0582ab445",
+      "export_sha256": "71a3b3ca0d3444fc7beaa939883f92a5333e489f047d27eef67832d571eef46a",
       "bytes": 8477,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
@@ -672,7 +672,7 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "51dec3184e52155434a3ff28830ce4aa2659ce26e9054444d01b38eec353f092",
+      "export_sha256": "73a0f16047cd24909d1221ccd9bc57270a2442891e907a8e7f0797753436754c",
       "bytes": 10148,
       "upstream_modified": true
     },

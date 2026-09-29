@@ -3,7 +3,7 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.8.0 — 2026-09-29
 
 ### Added
 
