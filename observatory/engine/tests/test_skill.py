@@ -198,11 +198,180 @@ def test_declared_tools_exist() -> None:
           f"missing {named_hook - served}")
 
 
+# --- front matter: strict YAML, checked offline ---------------------------------
+# Claude Code parses a SKILL.md front matter with a strict YAML parser, and one
+# that fails to parse loads the skill with EMPTY metadata: no name, no
+# description, so it never triggers, and nothing says so at runtime. An unquoted
+# `: ` inside a plain scalar is the classic way in (a sibling plugin shipped one
+# and its own validator missed it). PyYAML is not a dependency of this engine,
+# so this reads the subset of YAML the shipped skills use and refuses anything
+# outside it: stricter than YAML, never looser. `claude plugin validate --strict`
+# in CI is the second, real parser.
+
+KEY = re.compile(r"^(?P<indent> *)(?P<key>[A-Za-z0-9_-]+):(?P<rest>.*)$")
+BLOCK = re.compile(r"^[>|][+-]?$")
+DOUBLE = re.compile(r'^"(?:[^"\\]|\\.)*"$')
+SINGLE = re.compile(r"^'(?:[^']|'')*'$")
+PLAIN_START = set("-?:,[]{}#&*!|>'\"%@`")
+
+
+def _plain_problem(value: str) -> str | None:
+    if value[0] in PLAIN_START:
+        return f"a plain scalar may not start with {value[0]!r}; quote it or use a block scalar (>-)"
+    if ": " in value or value.endswith(":"):
+        return "an unquoted ': ' inside a plain scalar is a mapping to YAML; quote it or use >-"
+    if " #" in value:
+        return "an unquoted ' #' starts a YAML comment and truncates the value; quote it or use >-"
+    return None
+
+
+def front_matter(text: str) -> tuple[dict, list[str]]:
+    """(top-level fields, problems) for a SKILL.md, under the strict subset above."""
+    lines = text.split("\n")
+    if not lines or lines[0].rstrip() != "---":
+        return {}, ["the file does not open with a --- front matter line"]
+    try:
+        end = next(i for i in range(1, len(lines)) if lines[i].rstrip() == "---")
+    except StopIteration:
+        return {}, ["the front matter is never closed with ---"]
+    body, fields, problems, seen = lines[1:end], {}, [], {}
+    i, parent = 0, None
+    while i < len(body):
+        line, n = body[i], i + 2
+        if not line.strip() or line.lstrip().startswith("#"):
+            i += 1
+            continue
+        if "\t" in line:
+            problems.append(f"line {n}: a tab; YAML indentation is spaces only")
+            i += 1
+            continue
+        m = KEY.match(line)
+        if not m:
+            problems.append(f"line {n}: not `key: value` — {line.strip()[:60]!r}")
+            i += 1
+            continue
+        indent, key, rest = len(m.group("indent")), m.group("key"), m.group("rest")
+        if indent == 0:
+            parent = key
+        elif parent is None or indent != 2:
+            problems.append(f"line {n}: unexpected indentation of {key!r}")
+        scope = seen.setdefault(parent if indent else None, set())
+        if key in scope:
+            problems.append(f"line {n}: duplicate key {key!r}")
+        scope.add(key)
+        if rest and not rest.startswith(" "):
+            problems.append(f"line {n}: no space after the colon of {key!r}")
+        value = rest.strip()
+        i += 1
+        if not value:
+            if indent == 0:
+                fields[key] = {}
+            continue
+        if BLOCK.match(value):
+            parts = []
+            while i < len(body) and (not body[i].strip() or len(body[i]) - len(body[i].lstrip()) > indent):
+                parts.append(body[i].strip())
+                i += 1
+            if not any(parts):
+                problems.append(f"line {n}: the block scalar of {key!r} is empty")
+            joiner = " " if value.startswith(">") else "\n"
+            folded = joiner.join(p for p in parts if p) if joiner == " " else "\n".join(parts)
+            result = folded.strip()
+        elif value.startswith('"'):
+            if not DOUBLE.match(value):
+                problems.append(f"line {n}: {key!r} opens a double-quoted string it does not close on the line")
+            result = value[1:-1]
+        elif value.startswith("'"):
+            if not SINGLE.match(value):
+                problems.append(f"line {n}: {key!r} opens a single-quoted string it does not close on the line")
+            result = value[1:-1].replace("''", "'")
+        else:
+            why = _plain_problem(value)
+            if why:
+                problems.append(f"line {n}: {key!r}: {why}")
+            result = value
+        if indent == 0:
+            fields[key] = result
+        elif isinstance(fields.get(parent), dict):
+            fields[parent][key] = result
+    return fields, problems
+
+
+def skill_problems(path: pathlib.Path) -> list[str]:
+    fields, problems = front_matter(path.read_text(encoding="utf-8"))
+    for required in ("name", "description"):
+        if not isinstance(fields.get(required), str) or not fields.get(required):
+            problems.append(f"{required} is missing or not a string")
+    if fields.get("name") != path.parent.name:
+        problems.append(f"name {fields.get('name')!r} differs from the directory {path.parent.name!r}")
+    if len(str(fields.get("description", ""))) > 1024:
+        problems.append(f"description is {len(fields['description'])} characters; the limit is 1024")
+    if not isinstance(fields.get("metadata"), dict) or not fields["metadata"].get("version"):
+        problems.append("metadata.version is missing")
+    return problems
+
+
+PLANTED = {
+    "an unquoted ': ' in a plain description":
+        "---\nname: alpha\ndescription: Use when: the build breaks\n---\n",
+    "an unquoted ' #' in a plain description":
+        "---\nname: alpha\ndescription: Use for issue #12 and #13\n---\n",
+    "a block scalar line that falls back to column 0":
+        "---\nname: alpha\ndescription: >-\n  Use when the\nbuild breaks\n---\n",
+    "an unclosed double quote":
+        '---\nname: alpha\ndescription: "Use when the build breaks\n---\n',
+    "a duplicate key":
+        "---\nname: alpha\nname: beta\ndescription: x\n---\n",
+    "a tab for indentation":
+        "---\nname: alpha\nmetadata:\n\tversion: \"1\"\n---\n",
+    "a front matter never closed":
+        "---\nname: alpha\ndescription: x\n",
+}
+
+
+def test_front_matter_is_strict_yaml() -> None:
+    skills = sorted((PLUGIN / "skills").glob("*/SKILL.md"))
+    check("the plugin ships skills to check", len(skills) >= 3, str(skills))
+    for skill in skills:
+        problems = skill_problems(skill)
+        check(f"{skill.parent.name}: front matter parses under the strict subset", not problems,
+              "; ".join(problems))
+    for label, text in PLANTED.items():
+        _, problems = front_matter(text)
+        check(f"a planted defect is refused: {label}", bool(problems), text)
+    fields, problems = front_matter('---\nname: alpha\ndescription: "Use when: quoted"\n'
+                                    "metadata:\n  version: \"1.0.0\"\n---\n")
+    check("the same colon inside quotes is fine",
+          not problems and fields["description"] == "Use when: quoted"
+          and fields["metadata"] == {"version": "1.0.0"}, f"{fields} {problems}")
+    fields, problems = front_matter("---\nname: alpha\ndescription: >-\n  Use when: the build\n"
+                                    "  breaks - fix it\n---\n")
+    check("and inside a folded block scalar",
+          not problems and fields["description"] == "Use when: the build breaks - fix it", f"{fields} {problems}")
+
+
+def test_tracking_resources_records_and_hands_creation_to_its_owners() -> None:
+    """tracking-resources records a resource; it does not create one. Its old
+    triggers ("new Figma file", «новый файл в Figma», "add analytics") were the
+    creation requests themselves, so it competed with the skills that create the
+    file or wire the tracking and could win the turn without creating anything."""
+    fields, problems = front_matter((PLUGIN / "skills/tracking-resources/SKILL.md").read_text(encoding="utf-8"))
+    desc = str(fields.get("description", ""))
+    check("the description parses", not problems, "; ".join(problems))
+    for trigger in ('"new Figma file"', "«новый файл в Figma»", '"add analytics"', "«подключи аналитику»"):
+        check(f"a creation request is no longer a trigger: {trigger}", trigger not in desc, desc)
+    check("it says it is the step AFTER creating", "after" in desc.lower(), desc)
+    check("and names the skills that create or wire instead",
+          "NOT for creating the Figma file itself (figma-create-new-file" in desc and "ad-tracking" in desc, desc)
+    check("and stays within the 1024-character limit", len(desc) <= 1024, str(len(desc)))
+
+
 if __name__ == "__main__":
     print("companion plugin — observatory-log\n")
     for fn in (test_t8_no_session_start, test_hook_never_blocks,
                test_hook_is_silent_when_not_its_business, test_hook_asks_for_the_why,
-               test_version_sync, test_declared_tools_exist):
+               test_version_sync, test_declared_tools_exist, test_front_matter_is_strict_yaml,
+               test_tracking_resources_records_and_hands_creation_to_its_owners):
         fn()
     print()
     if FAILURES:

@@ -1,17 +1,21 @@
 ---
 name: tracking-resources
 description: >-
-  Use whenever an agent creates, connects or moves anything outside the repository
-  for a watched project — a Google Analytics property or other analytics tracker,
-  a Firebase or Google Cloud project, a server, database, DNS zone, cloud, payment
-  or app-store account, a Figma file: "add analytics", "create a Firebase project",
-  "set up a server", "new Figma file", «подключи аналитику», «создай Firebase»,
-  «подними сервер», «новый файл в Figma». Reads whose accounts the project uses
-  before creating, and records what was created through Project Observatory in the
-  same turn. NOT for secrets (handling-secrets) or for code changes inside the repository.
+  Use right after an agent has created, connected or moved something outside the
+  repository for a watched project — an analytics property or tracker, a Firebase
+  or Google Cloud project, a server, database, DNS zone, cloud, payment or
+  app-store account, a Figma file — to record it through Project Observatory in the
+  same turn, and just before creating one to read whose account it belongs in.
+  Triggers - "record the new resource" / «запиши новый ресурс», "we created a
+  Firebase project" / «создали проект Firebase», "log the new server" / «запиши
+  новый сервер», "which account should this go in" / «в какой аккаунт это
+  создать». NOT for creating the Figma file itself (figma-create-new-file,
+  figma-use), wiring analytics or pixels (ad-tracking), provisioning the resource
+  with the provider's own tools, secrets (handling-secrets) or code changes inside
+  the repository.
 license: MIT
 metadata:
-  version: "0.12.1"
+  version: "0.12.2"
 compatibility: >-
   Requires a full Project Observatory installation with organizations.json
   configured; the observatory MCP server or its local CLI. Creating the resource
@@ -27,6 +31,11 @@ wrong place, and one nobody can find when it breaks or bills.
 
 **This is not optional.** Creating or connecting a resource and not recording it
 leaves the task unfinished.
+
+This skill records; it does not create. The resource itself is made with the
+tool that owns it — the Figma skills for a design file, ad-tracking for analytics
+and pixels, the provider's own CLI or console for the rest — and this skill runs
+around that step: before it to pick the account, after it to record the result.
 
 ## Before creating anything
 

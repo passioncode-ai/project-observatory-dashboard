@@ -40,6 +40,16 @@ class PluginManifestTest(unittest.TestCase):
                     versions[skill.parent.name] = line.split(":", 1)[1].strip().strip('"')
         self.assertEqual(len(set(versions.values())), 1, versions)
 
+    def test_schema_urls_resolve(self):
+        # Measured with curl on 2026-09-29: claude-code-plugin.json answers 404;
+        # these two answer 200 (after one redirect to www.schemastore.org) and
+        # each schema's own $id is exactly this address.
+        plugin = load(ENGINE_SKILL / "plugins/observatory-log/.claude-plugin/plugin.json")
+        self.assertEqual(plugin.get("$schema"), "https://json.schemastore.org/claude-code-plugin-manifest.json")
+        for path in (ROOT / ".claude-plugin/marketplace.json", ENGINE_SKILL / ".claude-plugin/marketplace.json"):
+            self.assertEqual(load(path).get("$schema"), "https://json.schemastore.org/claude-code-marketplace.json",
+                             path)
+
     def test_homepage_is_this_repository(self):
         plugin = load(ENGINE_SKILL / "plugins/observatory-log/.claude-plugin/plugin.json")
         self.assertEqual(plugin["homepage"], "https://github.com/passioncode-ai/project-observatory-dashboard")

@@ -15,7 +15,7 @@ description: >-
   decision with different evidence.
 license: MIT
 metadata:
-  version: "0.12.1"
+  version: "0.12.2"
 compatibility: >-
   Requires an initialized full Project Observatory installation to persist
   records. Uses its MCP server when available in the current host; the bundled
