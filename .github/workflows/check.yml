@@ -48,6 +48,25 @@ jobs:
           python tools/update_inventory.py --check
           python -m pip wheel --no-deps . --wheel-dir dist
           python tools/check_package.py dist/*.whl
+      - name: Claude Code validates the plugin and both marketplaces strictly
+        # Claude Code's own parser: manifests, hooks and every SKILL.md front matter.
+        # One matrix row is enough (the check reads files, not the interpreter),
+        # and it stays inside the required `test` job so a failure blocks a merge.
+        # The version is pinned so a CLI release cannot change the verdict unseen;
+        # the engine's own strict front-matter check (tests/test_skill.py) also
+        # refuses what this CLI accepts, such as an unquoted ': ' in a description.
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.14'
+        shell: bash
+        env:
+          CLAUDE_CODE_VERSION: '2.1.284'
+          DISABLE_AUTOUPDATER: '1'
+        run: |
+          npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+          export CLAUDE_CONFIG_DIR="$(mktemp -d)"
+          claude --version
+          for dir in . observatory/engine/skill observatory/engine/skill/plugins/observatory-log; do
+            claude plugin validate --strict "$dir"
+          done
       - name: Public tree and complete Git blob history
         # HEAD only: another open pull request must not fail this one; each PR scans its own history.
         run: python tools/check_public_release.py --history --history-ref HEAD
