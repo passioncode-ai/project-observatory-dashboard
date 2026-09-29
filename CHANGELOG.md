@@ -3,6 +3,29 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.8.2 — 2026-09-29
+
+### Changed
+
+- **License.** From 0.8.2 Project Observatory is source-available, not open source. It is
+  offered under `PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0`,
+  at the user's choice. Individuals and noncommercial organisations may use, change and
+  share it for noncommercial purposes. Any company may use it, and change it, for its own
+  internal operations. Distributing it commercially, or building it into a product or
+  service provided to others, needs a separate commercial license (contact@passioncode.ai).
+  Copyright: Siarhei Sheleh. **Versions up to and including 0.8.1 were released under the
+  MIT License and remain available under MIT.** Contributions are accepted under
+  [CLA.md](CLA.md).
+- Package, plugin and marketplace metadata name PassionCode.ai as author and owner; the
+  project homepage is https://passioncode.ai/observatory/. Security and conduct reports go
+  through GitHub private vulnerability reporting or contact@passioncode.ai.
+- observatory.sshlg.me is no longer a product page: `/` redirects to
+  passioncode.ai/observatory/, and the field notes stay where they were.
+
+### Companion plugin 0.12.3
+
+- License and author metadata as above; no behaviour change.
+
 ## 0.8.1 — 2026-09-29
 
 ### Fixed
