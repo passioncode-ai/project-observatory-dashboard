@@ -90,6 +90,13 @@ Zone Read and DNS Write on that zone only, verified against its records and
 delivered to the vault slot on stdin; a second issue rolls the same token. Not
 an account-wide DNS token, and never the admin token in a script.
 
+A project whose Worker keeps data in D1 and must write it from a machine
+(`wrangler d1 execute --remote`) gets `cloudflare.py issue --preset d1-edit
+--account <slug> --vault <project>/<env>/<NAME>`: D1 Write on that one account,
+verified by listing its databases, delivered on stdin; a second issue rolls the
+same token. The result prints the account id — an account-owned token cannot
+find its account by itself, so pass it as `CLOUDFLARE_ACCOUNT_ID`.
+
 By default, slots live under the private workspace's `secrets/projects/`.
 An explicitly configured `sources.secret_store` or `OBSERVATORY_VAULT_DIR`
 can select a separate private store. Such external stores are excluded from
