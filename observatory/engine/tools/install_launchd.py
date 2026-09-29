@@ -65,11 +65,30 @@ def launch_path(current: str | None = None) -> str:
     return os.pathsep.join(out)
 
 
+#: Numeric limits a tick step reads from its environment. launchd starts the job
+#: with the plist's environment only, so a limit raised in the shell that installs
+#: the job must travel in the plist. Seconds, 1 to 3600, and nothing else: see
+#: `build()` for why no key ever goes here. collectors/scan_mcp.py reads the first.
+TICK_LIMITS = ("OBSERVATORY_MCP_PROBE_TIMEOUT",)
+
+
+def _seconds(value: str) -> bool:
+    try:
+        return 1 <= float(value) <= 3600
+    except ValueError:
+        return False
+
+
 def environment() -> dict[str, str]:
     # OBSERVATORY_PYTHON: tick.sh runs every step with the interpreter that
     # installed this engine, not whatever python3 is first on PATH.
-    return {"PATH": launch_path(), "OBSERVATORY_PYTHON": sys.executable,
-            "HOME": str(pathlib.Path.home()), "OBSERVATORY_HOME": str(paths.HOME)}
+    env = {"PATH": launch_path(), "OBSERVATORY_PYTHON": sys.executable,
+           "HOME": str(pathlib.Path.home()), "OBSERVATORY_HOME": str(paths.HOME)}
+    for name in TICK_LIMITS:
+        value = os.environ.get(name, "").strip()
+        if value and _seconds(value):
+            env[name] = value
+    return env
 
 
 def prepare_logs(names: tuple[str, ...], directory: pathlib.Path = LOG_DIR) -> None:

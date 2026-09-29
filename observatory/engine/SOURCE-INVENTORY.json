@@ -299,8 +299,8 @@
     {
       "path": "collectors/scan_mcp.py",
       "source_sha256": "58a2a009691699174de96ef0a878d1679a0d7a0da53d220f5a1fccae52d4678f",
-      "export_sha256": "cb7a418b3bdb5a821fd700963465d8db61a0377959b63854c21a9da8efd5a1b4",
-      "bytes": 9498,
+      "export_sha256": "4c509ebd53559588d3d3a20ec75fc5c7ab7a2aa37d6d2286db59e26075a36e63",
+      "bytes": 12285,
       "python_comments_removed": 14,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
@@ -2127,8 +2127,8 @@
       "path": "tests/test_mcp_inventory.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "01f17c40a3453c9136b3222dd1ae375cb9500dff69a04e1b81b3a4262b3ac922",
-      "bytes": 6809
+      "export_sha256": "5bc3745f41c3ff5239aefd77f75a5d1a39819a154aa0279809b4788af8df85b4",
+      "bytes": 12356
     },
     {
       "path": "tests/test_mcp_wire.py",
@@ -3178,8 +3178,8 @@
     {
       "path": "tools/install_launchd.py",
       "source_sha256": "c0e56088fc4d10b81a9af377b0f97de4dabe6107c2d05fe5f8f2f4f9ca9adc23",
-      "export_sha256": "57358b20176830dbf4b150b633e2d55a254c6820fffce0bdda6b043836404267",
-      "bytes": 8472,
+      "export_sha256": "78755c13a0bd4eabad1c72f767a74df0dee0eabce3b2441cbd886608802da422",
+      "bytes": 9139,
       "python_comments_removed": 8,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,

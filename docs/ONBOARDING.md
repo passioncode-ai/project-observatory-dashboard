@@ -107,7 +107,7 @@ and token provisioning are different permissions.
 | `google` | Analytics property and search inventory | The user's service account files and resource grants |
 | `domains` | Domain observations | Explicit domain export and network access |
 | `mcp` | Configured server inventory | Explicit `sources.mcp_config_root` |
-| `sessions` | Local agent activity | Explicit `sources.sessions` |
+| `sessions` | Local agent activity | Explicit `sources.sessions` and `sources.companion_db` |
 | `wiki` | Knowledge-base inventory | Explicit `sources.wiki` |
 | `openrouter` | Key and usage inventory | A locally supplied provider credential |
 | `remote_env` | Compare deployed environment metadata | Explicit opt-in to provider environment reads |
@@ -139,6 +139,14 @@ nothing rather than failing. Each row carries two exact commands: `fix`
 | `gateway_root` | an optional directory whose `bin/` holds a credential backup script | `vault.py backup` |
 | `domain_export` | a registrar's domain CSV export | `domains` integration |
 | `secrets` | overrides where the workspace keeps its own credential files | provider tools |
+
+The `mcp` integration reads the declarations from the agent configs and asks
+`claude mcp list` whether Claude reaches them. That command health-checks every
+server before it prints, so it gets up to 180 seconds; on a machine with many
+servers raise the limit with `OBSERVATORY_MCP_PROBE_TIMEOUT` (seconds, 1 to 3600),
+set in the shell that runs `tools/install_launchd.py install` so the scheduled tick carries it.
+A probe that still runs out of time is degraded, not failed: servers it reported
+keep their verdict and the rest are `not-probed`.
 
 ## Enter credentials locally
 

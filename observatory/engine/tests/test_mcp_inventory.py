@@ -110,11 +110,121 @@ def test_the_projection_ids_rows_and_keeps_other_agents_unprobed() -> None:
           doc["own_declared"] is False)
 
 
+STUB = """#!{py}
+import sys, time
+print("docs-server: https://mcp.docs.example.com/mcp (HTTP) - \u2714 Connected", flush=True)
+time.sleep({sleep})
+print("slow-server: https://mcp.slow.example.com/mcp (HTTP) - \u2714 Connected", flush=True)
+"""
+
+
+def stub_claude(directory: pathlib.Path, sleep: float) -> None:
+    fake = directory / "claude"
+    fake.write_text(STUB.format(py=sys.executable, sleep=sleep), encoding="utf-8")
+    fake.chmod(0o755)
+
+
+def test_the_probe_timeout_is_configurable_and_generous_by_default() -> None:
+    import os
+    m = load("collectors/scan_mcp.py", "scan_mcp")
+    saved = os.environ.pop(m.PROBE_TIMEOUT_ENV, None)
+    try:
+        value, note = m.probe_timeout()
+        check("the default outlasts a CLI that health-checks many servers", value >= 180 and note is None,
+              f"{value} {note}")
+        os.environ[m.PROBE_TIMEOUT_ENV] = "300"
+        check("the environment raises it", m.probe_timeout() == (300.0, None), str(m.probe_timeout()))
+        for bad in ("soon", "0", "-5", "99999"):
+            os.environ[m.PROBE_TIMEOUT_ENV] = bad
+            value, note = m.probe_timeout()
+            check(f"an unusable value {bad!r} falls back to the default and says so",
+                  value == m.DEFAULT_PROBE_TIMEOUT and note and m.PROBE_TIMEOUT_ENV in note, f"{value} {note}")
+    finally:
+        os.environ.pop(m.PROBE_TIMEOUT_ENV, None)
+        if saved is not None:
+            os.environ[m.PROBE_TIMEOUT_ENV] = saved
+
+
+def test_a_probe_that_runs_out_of_time_keeps_what_it_heard_and_says_so() -> None:
+    import os
+    import tempfile
+    m = load("collectors/scan_mcp.py", "scan_mcp")
+    saved_path = os.environ.get("PATH", "")
+    with tempfile.TemporaryDirectory() as tmp:
+        stub_claude(pathlib.Path(tmp), sleep=30)
+        os.environ["PATH"] = tmp + os.pathsep + saved_path
+        try:
+            probe, why, complete = m.claude_probe(timeout=2)
+        finally:
+            os.environ["PATH"] = saved_path
+    check("a timeout is not a crash and not a complete answer", complete is False and why is not None, str(why))
+    check("the reason names the limit and the variable that raises it",
+          why is not None and "2 s" in why and m.PROBE_TIMEOUT_ENV in why, str(why))
+    check("servers reported before the cut keep their verdict",
+          probe.get("docs-server", {}).get("status") == "connected", str(probe))
+    rows = [{"name": "docs-server", "agent": "claude", "scope": "user"},
+            {"name": "slow-server", "agent": "claude", "scope": "user"},
+            {"name": "docs-server", "agent": "cursor", "scope": "user"}]
+    m.attribute_liveness(rows, probe, complete)
+    live = {(r["agent"], r["name"]): r["liveness"] for r in rows}
+    check("a server the cut-off list never reached is not-probed, never not-listed",
+          live[("claude", "slow-server")] == "not-probed", str(live))
+    check("the one it reached is connected", live[("claude", "docs-server")] == "connected", str(live))
+    check("and Cursor still borrows nothing", live[("cursor", "docs-server")] == "not-probed", str(live))
+    full = [{"name": "gone-server", "agent": "claude", "scope": "user"}]
+    m.attribute_liveness(full, {"docs-server": {"status": "connected", "plugin": None, "detail": "x"}}, True)
+    check("a complete list that omits a declared server still says not-listed",
+          full[0]["liveness"] == "not-listed", str(full))
+
+
+def test_a_probe_that_finishes_in_time_is_complete() -> None:
+    import os
+    import tempfile
+    m = load("collectors/scan_mcp.py", "scan_mcp")
+    saved_path = os.environ.get("PATH", "")
+    with tempfile.TemporaryDirectory() as tmp:
+        stub_claude(pathlib.Path(tmp), sleep=0)
+        os.environ["PATH"] = tmp + os.pathsep + saved_path
+        try:
+            probe, why, complete = m.claude_probe(timeout=60)
+        finally:
+            os.environ["PATH"] = saved_path
+    check("both servers are heard and nothing is degraded",
+          complete is True and why is None and set(probe) == {"docs-server", "slow-server"}, f"{probe} {why}")
+
+
+def test_the_scheduled_tick_carries_a_raised_limit() -> None:
+    """launchd starts the tick with the plist's environment only, so a limit raised
+    in the shell that installs the job must travel in it, and nothing else extra."""
+    import os
+    m = load("collectors/scan_mcp.py", "scan_mcp")
+    sys.path.insert(0, str(ROOT / "tools"))
+    launchd = load("tools/install_launchd.py", "install_launchd")
+    saved = os.environ.pop(m.PROBE_TIMEOUT_ENV, None)
+    try:
+        check("no limit set, no variable in the plist",
+              m.PROBE_TIMEOUT_ENV not in launchd.build(1800)["EnvironmentVariables"])
+        os.environ[m.PROBE_TIMEOUT_ENV] = "400"
+        env = launchd.build(1800)["EnvironmentVariables"]
+        check("a raised limit reaches the scheduled tick", env.get(m.PROBE_TIMEOUT_ENV) == "400", str(env))
+        os.environ[m.PROBE_TIMEOUT_ENV] = "not-a-number"
+        env = launchd.build(1800)["EnvironmentVariables"]
+        check("an unusable value is not written into the plist", m.PROBE_TIMEOUT_ENV not in env, str(env))
+    finally:
+        os.environ.pop(m.PROBE_TIMEOUT_ENV, None)
+        if saved is not None:
+            os.environ[m.PROBE_TIMEOUT_ENV] = saved
+
+
 if __name__ == "__main__":
     print("the MCP inventory — declarations as facts, verdicts attributed, never a token\n")
     for fn in (test_a_declaration_becomes_facts_and_never_a_value,
                test_claudes_verdict_is_parsed_and_attributed,
-               test_the_projection_ids_rows_and_keeps_other_agents_unprobed):
+               test_the_projection_ids_rows_and_keeps_other_agents_unprobed,
+               test_the_probe_timeout_is_configurable_and_generous_by_default,
+               test_a_probe_that_runs_out_of_time_keeps_what_it_heard_and_says_so,
+               test_a_probe_that_finishes_in_time_is_complete,
+               test_the_scheduled_tick_carries_a_raised_limit):
         fn()
     print()
     if FAILURES:
