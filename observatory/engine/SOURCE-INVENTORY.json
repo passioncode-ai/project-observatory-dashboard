@@ -694,8 +694,8 @@
       "path": "engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "810da438c57fc0e5915bca2bfe1e5a3eabe4ca37b131bd7b354b74588b4c6eb3",
-      "bytes": 47838
+      "export_sha256": "168ecd3c39cf5cd5100fac65813ab614299811ec07d99ecd974d83e96eaf4bfd",
+      "bytes": 48603
     },
     {
       "path": "estate.py",
@@ -1488,8 +1488,8 @@
       "path": "tests/test_agent_plugin.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9307687b311683b49d365cdbef3a6aa7b37304759095c3f3d3c5774502200c28",
-      "bytes": 11934
+      "export_sha256": "60aff323fbe2109fde326c7bf42a8a379e0314199ee0240db7405534997718a6",
+      "bytes": 18155
     },
     {
       "path": "tests/test_agent_queue.py",
@@ -1793,8 +1793,8 @@
       "path": "tests/test_engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b57a9f57a607b4db812ac8979a761b1b2b035bfaac16c69ff26ef56a867dbeea",
-      "bytes": 31227
+      "export_sha256": "424b41d7cdc3d5e155f85fd4f8d4d5026de3b0e4fa46f780a4b16f84d12c634e",
+      "bytes": 32696
     },
     {
       "path": "tests/test_env_inventory.py",
@@ -2961,8 +2961,8 @@
       "path": "tools/agent_plugin.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fc79766d956223d6e90b4231d27afc2026dc414c692d1eb7e9cfaaf427142c9e",
-      "bytes": 10667
+      "export_sha256": "3b1605bbe3a333ef662edcfaa366e31321b6ef5ed480d0371be6002d15353f26",
+      "bytes": 17921
     },
     {
       "path": "tools/audit_vault_links.py",

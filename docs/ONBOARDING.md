@@ -223,8 +223,13 @@ GitHub marketplace `passioncode-ai/project-observatory-dashboard`, installs
 Claude Code's user settings for the hooks. `full agent status` shows the
 installed and shipped versions and anything the hooks would miss; `full agent
 uninstall` reverses it. A directory-sourced marketplace from an earlier setup is
-replaced. Restart sessions after installing or updating: a running session may
-still hold older instructions. Installing the Python package inserts nothing
+replaced. When another channel already installs and enables the plugin under
+its own id (the PassionCode launcher installs `observatory-log@passioncode`),
+`install` leaves that copy alone, adds no second id (two copies would fire every
+hook twice) and writes only the hook environment; `status` names the managing
+channel, and `uninstall` keeps the environment that copy still reads. Restart
+sessions after installing or updating: a running session may still hold older
+instructions. Installing the Python package inserts nothing
 into any agent configuration; only this explicit command does.
 
 `observatory` (the short name of `project-observatory`) with no arguments opens the
