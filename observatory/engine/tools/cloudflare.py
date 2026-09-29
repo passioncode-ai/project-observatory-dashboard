@@ -4,6 +4,7 @@
     ./tools/cloudflare.py stash            # admin token on stdin, once per account
     ./tools/cloudflare.py issue --preset analytics [--project project:x]
     ./tools/cloudflare.py issue --preset dns-edit --zone example.com --vault PROJECT/ENV/NAME
+    ./tools/cloudflare.py issue --preset d1-edit --account <slug> --vault PROJECT/ENV/NAME
     ./tools/cloudflare.py list
     ./tools/cloudflare.py ping
     ./tools/cloudflare.py rotate <label>   # or --leaked, for every open leak
@@ -82,7 +83,26 @@ PRESETS: dict[str, dict] = {
         "why": "edits DNS records in one zone for the project named by the vault slot",
         "scope": "zone",
     },
+    # D1 WRITE, ONE ACCOUNT, INTO THE VAULT. A project whose Worker keeps its
+    # data in D1 needs a machine that can write that database — `wrangler d1
+    # execute --remote` from a signing machine or a scheduled agent — and
+    # nothing else: not Workers deploys, not DNS, not a second account. D1 has
+    # no per-database grant, so the account is the narrowest resource there is.
+    # The token is named after its SLOT, so each project's writer rolls on its
+    # own, and it is verified by listing the account's databases with the NEW
+    # value before the vault ever holds it.
+    "d1-edit": {
+        "name": "observatory-d1-edit {slot} (managed)",
+        "groups": ("D1 Write",),
+        "level": "account",
+        "why": "writes the D1 databases of one account for the project named by the vault slot",
+        "scope": "account-vault",
+    },
 }
+
+#: Presets whose token is a project's credential, delivered to a vault slot —
+#: never filed in the folder the read-only analytics plugin loads.
+VAULT_SCOPES = ("zone", "account-vault")
 
 
 def token_dir() -> pathlib.Path:
@@ -299,17 +319,25 @@ def read_meta(path: pathlib.Path) -> dict:
     return doc
 
 
-def group_ids(admin: str, account_id: str, wanted: tuple[str, ...]) -> list[str]:
-    """Ids for the named permission groups in THIS account.
+def _group_level(g: dict) -> str:
+    scopes = json.dumps(g.get("scopes", ""))
+    return "zone" if "zone" in scopes else "account"
+
+
+def group_ids(admin: str, account_id: str, wanted: tuple[str, ...],
+              level: str = "zone") -> list[str]:
+    """Ids for the named permission groups in THIS account, at ONE level.
 
     By name, never by id: Cloudflare's group ids differ per account, and a
-    hardcoded one silently grants the wrong right on the second account.
+    hardcoded one silently grants the wrong right on the second account. By
+    level too: the catalogue carries same-named groups for zones and for the
+    account, and a policy may not mix levels on one resource.
     """
     groups = _request(f"/accounts/{account_id}/tokens/permission_groups?per_page=500",
                       admin).get("result", [])
     found: dict[str, str] = {}
     for g in groups:
-        if g.get("name") in wanted and "zone" in json.dumps(g.get("scopes", "")):
+        if g.get("name") in wanted and _group_level(g) == level:
             found.setdefault(g["name"], g["id"])
     missing = [n for n in wanted if n not in found]
     if missing:
@@ -331,7 +359,7 @@ def mint(admin: str, account_id: str, preset: dict,
 
     `resources` narrows the grant (a zone preset passes its one zone); `name`
     is the token's name when the preset's own is a template."""
-    ids = group_ids(admin, account_id, preset["groups"])
+    ids = group_ids(admin, account_id, preset["groups"], preset.get("level", "zone"))
     name = name or preset["name"]
     resources = resources or {f"com.cloudflare.api.account.{account_id}": "*"}
     policies = [{"effect": "allow", "resources": resources,
@@ -482,11 +510,12 @@ def cmd_issue(preset_key: str, account_label: str | None, project: str | None) -
         print(f"unknown preset {preset_key!r} — have: {', '.join(PRESETS)}",
               file=sys.stderr)
         return 2
-    if preset.get("scope") == "zone":
-        # A zone-scoped writer filed where the analytics plugin reads would be a
-        # DNS-write credential in a folder a read-only plugin loads.
-        print(f"refused: preset {preset_key!r} is zone-scoped and goes to a vault slot — "
-              f"use --zone and --vault", file=sys.stderr)
+    if preset.get("scope") in VAULT_SCOPES:
+        # A writer filed where the analytics plugin reads would be a write
+        # credential in a folder a read-only plugin loads.
+        print(f"refused: preset {preset_key!r} is a writer and goes to a vault slot — "
+              f"use --vault" + (" and --zone" if preset["scope"] == "zone" else ""),
+              file=sys.stderr)
         return 2
     if project and not project.startswith("project:"):
         project = f"project:{project}"
@@ -550,6 +579,9 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
                    account_label: str | None, wait: float = 2.0) -> int:
     """Issue a zone-scoped token (DNS edit) into a vault slot."""
     preset = PRESETS[preset_key]
+    if preset.get("scope") != "zone":
+        print(f"refused: preset {preset_key!r} is not zone-scoped", file=sys.stderr)
+        return 2
     if not zone or not target:
         print(f"refused: preset {preset_key!r} needs --zone and --vault PROJECT/ENV/NAME",
               file=sys.stderr)
@@ -586,6 +618,50 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
     print(f"  {project}/{env}/{name}: {'rolled' if rolled else 'issued'} — "
           f"{', '.join(preset['groups'])} on {zone} only; "
           f"use: tools/use_secret.py run {project} {name} --env {env} -- <command>")
+    return 0
+
+
+def cmd_issue_account(preset_key: str, target: str | None, account_label: str | None,
+                      wait: float = 2.0) -> int:
+    """Issue an account-scoped writer (D1 edit) into a vault slot."""
+    preset = PRESETS[preset_key]
+    if preset.get("scope") != "account-vault":
+        print(f"refused: preset {preset_key!r} is not an account-to-vault preset", file=sys.stderr)
+        return 2
+    if not target:
+        print(f"refused: preset {preset_key!r} needs --vault PROJECT/ENV/NAME", file=sys.stderr)
+        return 2
+    try:
+        project, env, name = parse_vault_target(target)
+    except ValueError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    try:
+        _stash, admin, account = find_account(account_label)
+        token_name = preset["name"].format(slot=f"{project}/{env}/{name}")
+        rolled = existing_token(admin, account["id"], token_name) is not None
+        _tid, value = mint(admin, account["id"], preset, name=token_name)
+        for attempt in range(5):
+            try:
+                _request(f"/accounts/{account['id']}/d1/database?per_page=1", value)
+                break
+            except RuntimeError:
+                if attempt == 4:
+                    raise RuntimeError("the issued token cannot list this account's "
+                                       "D1 databases") from None
+                time.sleep(wait)
+        deliver_to_vault(value, project, env, name)
+    except RuntimeError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    _journal("rotate" if rolled else "issue", f"{project}/{env}/{name}",
+             preset=preset_key, account=account["name"])
+    # An account-owned token cannot call /memberships, which is how wrangler
+    # finds an account a config does not name — so the id travels with the use.
+    print(f"  {project}/{env}/{name}: {'rolled' if rolled else 'issued'} — "
+          f"{', '.join(preset['groups'])} on account {account['name']} only; "
+          f"use: CLOUDFLARE_ACCOUNT_ID={account['id']} "
+          f"tools/use_secret.py run {project} {name} --env {env} -- <command>")
     return 0
 
 
@@ -806,7 +882,7 @@ def main() -> int:
     p_issue.add_argument("--account", help="which stashed admin token to issue from")
     p_issue.add_argument("--project", help="the project this token serves")
     p_issue.add_argument("--zone", help="zone presets: the one zone the token may touch")
-    p_issue.add_argument("--vault", help="zone presets: the slot PROJECT/ENV/NAME it is delivered to")
+    p_issue.add_argument("--vault", help="writer presets: the slot PROJECT/ENV/NAME it is delivered to")
     sub.add_parser("list", help="what exists, with dates — never values")
     sub.add_parser("ping", help="can every token still do its job")
     p_rot = sub.add_parser("rotate", help="roll a token's value in place")
@@ -828,8 +904,15 @@ def main() -> int:
             return 2
         return cmd_install(sys.stdin.read().strip())
     if a.cmd == "issue":
-        if PRESETS[a.preset].get("scope") == "zone":
+        scope = PRESETS[a.preset].get("scope")
+        if scope == "zone":
             return cmd_issue_zone(a.preset, a.zone, a.vault, a.account)
+        if scope == "account-vault":
+            if a.zone:
+                print(f"refused: preset {a.preset!r} is account-scoped; --zone does not apply",
+                      file=sys.stderr)
+                return 2
+            return cmd_issue_account(a.preset, a.vault, a.account)
         return cmd_issue(a.preset, a.account, a.project)
     if a.cmd == "list":
         return cmd_list()

@@ -387,6 +387,99 @@ def test_cf_dns_delivery_goes_through_the_vault_on_stdin() -> None:
         m.subprocess.run = original
 
 
+def _d1_fake(m, log, existing=None, verify_fails=0):
+    state = {"verify_fails": verify_fails}
+
+    def fake(path, token, payload=None, method=None):
+        log.append((method or ("POST" if payload is not None else "GET"), path, token, payload))
+        if "permission_groups" in path:
+            # Same name at two levels is how this catalogue is shaped; only the
+            # account-level one may be granted on an account resource.
+            return {"result": [{"id": "gz", "name": "D1 Write", "scopes": ["com.cloudflare.api.account.zone"]},
+                               {"id": "g5", "name": "D1 Write", "scopes": ["com.cloudflare.api.account"]}]}
+        if path.endswith("/tokens?per_page=50"):
+            return {"result": [{"id": "t-d1", "name": existing}] if existing else []}
+        if path == "/accounts/a1/tokens" and method is None and payload is not None:
+            return {"result": {"id": "t-new", "value": "d1-value-" + "y" * 31}}
+        if path.endswith("/tokens/t-d1") and method == "PUT":
+            return {"result": {"id": "t-d1"}}
+        if path.endswith("/tokens/t-d1/value"):
+            return {"result": "d1-rolled-" + "z" * 30}
+        if path.startswith("/accounts/a1/d1/database"):
+            if state["verify_fails"]:
+                state["verify_fails"] -= 1
+                raise RuntimeError("cloudflare answered HTTP 403; provider response withheld")
+            return {"result": []}
+        raise AssertionError(f"unexpected call {path}")
+    m._request = fake
+
+
+def test_cf_d1_preset_is_scoped_to_one_account_and_lands_in_the_vault() -> None:
+    """A worker's database writer: D1 Write on one account, named after the
+    vault slot so each project's token rolls on its own, verified by listing
+    that account's databases with the NEW token, delivered on stdin."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    log, delivered = [], []
+    _d1_fake(m, log)
+    m.deliver_to_vault = lambda value, p, e, n: delivered.append((value, p, e, n))
+    m._journal = lambda *a, **k: None
+    m.token_dir = lambda: (_ for _ in ()).throw(AssertionError("vault presets never reach the plugin folder"))
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_account("d1-edit", "proj/prod/CLOUDFLARE_API_TOKEN", None, wait=0)
+    check("d1-edit issues", rc == 0, str(rc))
+    create = [p for meth, path, tok, p in log if path == "/accounts/a1/tokens" and p]
+    pol = create[0]["policies"][0] if create else {}
+    check("the grant is the one account, not every account the admin reaches",
+          pol.get("resources") == {"com.cloudflare.api.account.a1": "*"}, str(pol))
+    check("with exactly the ACCOUNT-level D1 Write group",
+          [g["id"] for g in pol.get("permission_groups", [])] == ["g5"], str(pol))
+    check("named after the slot, so a second issue rolls it",
+          bool(create) and create[0]["name"] == "observatory-d1-edit proj/prod/CLOUDFLARE_API_TOKEN (managed)",
+          str(create))
+    check("verified with the NEW token against the account's databases",
+          any(path.startswith("/accounts/a1/d1/database") and tok.startswith("d1-value-")
+              for _m, path, tok, _p in log), "")
+    check("delivered to the named slot",
+          delivered == [("d1-value-" + "y" * 31, "proj", "prod", "CLOUDFLARE_API_TOKEN")], str(delivered))
+    check("the use line names the account id wrangler needs",
+          "CLOUDFLARE_ACCOUNT_ID=a1" in out.getvalue(), out.getvalue())
+    check("and the value is never printed", "d1-value-" not in out.getvalue(), out.getvalue())
+
+
+def test_cf_d1_preset_rolls_refuses_and_never_misfiles() -> None:
+    m = cf(); _cf_with_admin(m)
+    log, delivered = [], []
+    _d1_fake(m, log, existing="observatory-d1-edit proj/prod/CLOUDFLARE_API_TOKEN (managed)", verify_fails=2)
+    m.deliver_to_vault = lambda value, p, e, n: delivered.append(value)
+    m._journal = lambda *a, **k: None
+    rc = m.cmd_issue_account("d1-edit", "proj/prod/CLOUDFLARE_API_TOKEN", None, wait=0)
+    check("a second issue ROLLS the slot's token", rc == 0 and delivered == ["d1-rolled-" + "z" * 30],
+          f"{rc} {delivered}")
+    check("and waits out a token the edge has not honoured yet",
+          sum(1 for _m, p, _t, _pl in log if p.startswith("/accounts/a1/d1/database")) == 3, "")
+
+    log2, delivered2 = [], []
+    _d1_fake(m, log2, verify_fails=9)
+    m.deliver_to_vault = lambda value, p, e, n: delivered2.append(value)
+    check("a token that never proves it can read D1 is not delivered",
+          m.cmd_issue_account("d1-edit", "proj/prod/CLOUDFLARE_API_TOKEN", None, wait=0) == 1
+          and not delivered2, str(delivered2))
+    log3 = []
+    _d1_fake(m, log3)
+    check("without --vault nothing is minted",
+          m.cmd_issue_account("d1-edit", None, None) == 2, "")
+    check("a slot name the vault would refuse is refused before minting",
+          m.cmd_issue_account("d1-edit", "proj/prod/lower-case", None) == 2, "")
+    check("the analytics path refuses a vault preset instead of filing it for the plugin",
+          m.cmd_issue("d1-edit", None, None) == 2, "")
+    check("the zone path refuses an account preset",
+          m.cmd_issue_zone("d1-edit", "example.com", "proj/prod/X", None) == 2, "")
+    check("and nothing was minted by any refusal",
+          not any(p == "/accounts/a1/tokens" and pl for _m, p, _t, pl in log3), str(log3))
+
+
 # ─────────────────────────── openrouter ──────────────────────────────────────
 
 def orr():
@@ -588,6 +681,8 @@ if __name__ == "__main__":
                test_cf_dns_preset_is_scoped_to_one_zone_and_lands_in_the_vault,
                test_cf_dns_preset_rolls_refuses_and_never_misfiles,
                test_cf_dns_delivery_goes_through_the_vault_on_stdin,
+               test_cf_d1_preset_is_scoped_to_one_account_and_lands_in_the_vault,
+               test_cf_d1_preset_rolls_refuses_and_never_misfiles,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,
