@@ -76,6 +76,14 @@
     {
       "token": "org-index",
       "reason": "the organisation's repository map, linked from AGENTS.md so contributors can find it; private, readable by organisation members, and its name names no project"
+    },
+    {
+      "token": "figma",
+      "reason": "a third-party design product the tracking-resources skill names so that agents route Figma file creation to Figma's own skills"
+    },
+    {
+      "token": "firebase",
+      "reason": "a third-party Google product the tracking-resources skill names as a resource to record"
     }
   ]
 }

@@ -3,6 +3,46 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.8.1 — 2026-09-29
+
+### Fixed
+
+- **`full agent` fought a launcher that installs the same plugin.** `status` looked only for
+  `observatory-log@observatory-log`, so a copy installed under another marketplace id (the
+  PassionCode launcher's `observatory-log@passioncode`) read as "plugin not installed", and
+  `install` added a second copy: every hook fired twice until the launcher removed it again.
+  Any installed and enabled `observatory-log@<marketplace>` is now the plugin. `status` is ok
+  and names the managing channel, `install` writes only the hook environment
+  (`OBSERVATORY_ROOT`, `OBSERVATORY_HOME`, `OBSERVATORY_PYTHON`) and adds no second id,
+  `uninstall` keeps the environment that copy still reads, and two enabled copies are
+  reported with the command that removes one. `full update` suggests `full agent install`
+  only when the engine's own channel manages the plugin.
+- **`full doctor` was silent when a configured source had been deleted.** The `sessions`
+  integration reads the companion database, but `companion_db` was not among its needs, so a
+  deleted database left `coverage_warnings: []` while every tick logged DEGRADED. A missing
+  path, or a directory where the database file should be, is now a warning, and every warning
+  carries `fix` (`full configure sources NAME PATH`) and `disable`
+  (`full configure integrations|features NAME false`).
+- **`scan-mcp` timed out on machines with many MCP servers.** `claude mcp list` health-checks
+  each server before printing. The limit is now 180 s (was 120), `OBSERVATORY_MCP_PROBE_TIMEOUT`
+  raises it (1–3600 s), and `install_launchd.py` carries it into the tick's plist. A probe that
+  still runs out of time is degraded: servers reported before the cut keep their verdict, the
+  rest are `not-probed`.
+- The dashboard builder no longer uses the deprecated `datetime.utcnow()`.
+
+### Companion plugin 0.12.2
+
+- `tracking-resources` no longer triggers on creation requests ("new Figma file", "add
+  analytics"). It is the record-after step, and names the skills that create or wire instead.
+- `plugin.json` points at a schema that resolves (`claude-code-plugin-manifest.json`).
+- The engine's plugin suite checks every shipped SKILL.md front matter as strict YAML. An
+  unquoted `: ` in a description, which `claude plugin validate --strict` accepts, now fails it.
+
+### CI
+
+- `claude plugin validate --strict` runs on the root marketplace, the engine marketplace and
+  the plugin (Claude Code pinned; ubuntu-latest / Python 3.14 row of the required `test` job).
+
 ## 0.8.0 — 2026-09-29
 
 ### Added
