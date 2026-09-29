@@ -601,6 +601,31 @@ def test_the_server_serves_the_pages_and_refuses_the_rest() -> None:
         p.wait(timeout=10)
 
 
+def test_the_server_heartbeat_age_needs_no_deprecated_clock() -> None:
+    """`datetime.utcnow()` is deprecated since Python 3.12 and warns on every build;
+    the age of the server's heartbeat is the same number from an aware clock."""
+    import datetime as dt
+    import warnings
+    import build_dashboard as bd
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        at = dt.datetime(2026, 1, 1, 0, 0, 0, tzinfo=dt.timezone.utc)
+        check("ninety seconds after the stamp reads 90",
+              bd.heartbeat_age_s("2026-01-01T00:00:00Z", now=at + dt.timedelta(seconds=90)) == 90)
+        fresh = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        age = bd.heartbeat_age_s(fresh)
+        check("a stamp written just now is a small whole number of seconds, from the real clock",
+              isinstance(age, int) and 0 <= age < 60, repr(age))
+        try:
+            bd.heartbeat_age_s("yesterday")
+            refused = False
+        except ValueError:
+            refused = True
+        check("a stamp in another shape is refused as before", refused)
+    src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
+    check("the builder calls no naive UTC clock", "utcnow(" not in src)
+
+
 if __name__ == "__main__":
     print("the split dashboard — navigation first, one page's data per page\n")
     for fn in (test_the_pages_exist_and_the_index_is_small,
@@ -617,7 +642,8 @@ if __name__ == "__main__":
                test_every_table_says_what_narrowed_it,
                test_the_findings_page_is_a_working_surface,
                test_the_panel_is_a_dialog_that_keeps_the_keyboard,
-               test_the_server_serves_the_pages_and_refuses_the_rest):
+               test_the_server_serves_the_pages_and_refuses_the_rest,
+               test_the_server_heartbeat_age_needs_no_deprecated_clock):
         fn()
     print()
     if FAILURES:
