@@ -617,7 +617,7 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
              preset=preset_key, zone=zone, account=account["name"])
     print(f"  {project}/{env}/{name}: {'rolled' if rolled else 'issued'} — "
           f"{', '.join(preset['groups'])} on {zone} only; "
-          f"use: tools/use_secret.py run {project} {name} --env {env} -- <command>")
+          f"use: tools/use_secret.py run --env {env} {project} {name} -- <command>")
     return 0
 
 
@@ -661,7 +661,7 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
     print(f"  {project}/{env}/{name}: {'rolled' if rolled else 'issued'} — "
           f"{', '.join(preset['groups'])} on account {account['name']} only; "
           f"use: CLOUDFLARE_ACCOUNT_ID={account['id']} "
-          f"tools/use_secret.py run {project} {name} --env {env} -- <command>")
+          f"tools/use_secret.py run --env {env} {project} {name} -- <command>")
     return 0
 
 

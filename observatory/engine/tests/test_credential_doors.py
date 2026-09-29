@@ -319,6 +319,10 @@ def test_cf_dns_preset_is_scoped_to_one_zone_and_lands_in_the_vault() -> None:
     check("delivered to the named slot",
           delivered == [("dns-value-" + "y" * 30, "proj", "prod", "CF_DNS")], str(delivered))
     check("and the value is never printed", "dns-value-" not in out.getvalue(), out.getvalue())
+    # `run` takes its names as a remainder, so a flag after them is part of the
+    # command: the line printed on 2026-09-29 put --env last and was refused.
+    check("the printed use line puts --env before the positionals",
+          "use_secret.py run --env prod proj CF_DNS -- " in out.getvalue(), out.getvalue())
 
 
 def test_cf_dns_preset_rolls_refuses_and_never_misfiles() -> None:
@@ -446,6 +450,8 @@ def test_cf_d1_preset_is_scoped_to_one_account_and_lands_in_the_vault() -> None:
     check("the use line names the account id wrangler needs",
           "CLOUDFLARE_ACCOUNT_ID=a1" in out.getvalue(), out.getvalue())
     check("and the value is never printed", "d1-value-" not in out.getvalue(), out.getvalue())
+    check("the printed use line puts --env before the positionals",
+          "use_secret.py run --env prod proj CLOUDFLARE_API_TOKEN -- " in out.getvalue(), out.getvalue())
 
 
 def test_cf_d1_preset_rolls_refuses_and_never_misfiles() -> None:
