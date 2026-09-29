@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/service-events-page.schema.json",
+  "title": "Local service events page (fabric-service/0.1)",
+  "type": "object",
+  "required": ["events", "cursor"],
+  "properties": {
+    "events": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/event" } },
+    "cursor": { "oneOf": [{ "type": "string", "minLength": 1, "maxLength": 128 }, { "type": "null" }] }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "event": {
+      "type": "object",
+      "required": ["id", "at", "kind", "level", "text"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "at": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "kind": { "type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*){0,5}$" },
+        "level": { "enum": ["info", "notice", "warning", "error"] },
+        "text": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "subject": {
+          "type": "object",
+          "required": ["type", "id"],
+          "properties": {
+            "type": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+            "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "label": { "type": "string", "maxLength": 120 }
+          },
+          "additionalProperties": false
+        },
+        "link": { "$ref": "service-common.schema.json#/$defs/originPath" },
+        "notify": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

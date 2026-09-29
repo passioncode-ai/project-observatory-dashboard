@@ -286,6 +286,14 @@ class ObservatoryTest(unittest.TestCase):
         with self.assertRaises(core.ObservatoryError):
             core.validate_report(report)
 
+    def test_dashboard_binds_without_asking_the_resolver(self):
+        # HTTPServer.server_bind() calls socket.getfqdn() before listen(); a slow resolver on a
+        # Mac leaves the port bound but silent (seen on the macOS CI runner).
+        with patch("socket.getfqdn", side_effect=AssertionError("resolver asked at bind")):
+            server = dashboard.LoopbackServer(("127.0.0.1", 0), dashboard.handler(self.state))
+        server.server_close()
+        self.assertEqual(server.server_name, "127.0.0.1")
+
     def test_http_rejects_rebinding_origin_prefix_and_writes(self):
         server = dashboard.http.server.ThreadingHTTPServer(("127.0.0.1", 0), dashboard.handler(self.state))
         thread = threading.Thread(target=server.serve_forever, daemon=True)

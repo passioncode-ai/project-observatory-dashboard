@@ -2,8 +2,8 @@
   "contractVersion": "0.1.0",
   "provider": {
     "id": "https://github.com/ssheleg/project-observatory-open-source",
-    "revision": 4,
-    "contentHash": "sha256:caf7842fafd7220dc4dcc92007b7816d3ca72b16549015717c196b17b92955c1",
+    "revision": 5,
+    "contentHash": "sha256:cfab02755023d998700fe99654a295a674ab50ea15ea3b9d8a0167a3700925fa",
     "createdAt": "2026-09-03T13:22:35Z",
     "createdBy": "https://github.com/ssheleg",
     "name": "Project Observatory",
@@ -14,7 +14,12 @@
     "supportedContractVersions": [
       "0.1.0"
     ],
-    "description": "Local project inventory and agent memory with configurable private data sources. Bundled schemas describe wire compatibility; external host admission is unverified."
+    "description": "Local project inventory and agent memory with configurable private data sources. Bundled schemas describe wire compatibility; external host admission is unverified.",
+    "extensions": {
+      "https://fabric.passioncode.ai/agent-contract/extensions/service/0.1": {
+        "descriptor": "project-observatory.default"
+      }
+    }
   },
   "capabilities": [
     {
@@ -130,7 +135,7 @@
           }
         ]
       },
-      "description": "Everything known about ONE project: identity and membership rules, the weekly activity series, the latest measurement of every plugin metric, the conclusions the observatory has drawn (each with the state that qualifies it), and the findings open against the project or its repositories. Every section degrades on its own \u2014 a store that will not open does not remove the registry's half of the answer."
+      "description": "Everything known about ONE project: identity and membership rules, the weekly activity series, the latest measurement of every plugin metric, the conclusions the observatory has drawn (each with the state that qualifies it), and the findings open against the project or its repositories. Every section degrades on its own — a store that will not open does not remove the registry's half of the answer."
     },
     {
       "id": "https://github.com/ssheleg/project-observatory-open-source/capabilities/project.timeline",

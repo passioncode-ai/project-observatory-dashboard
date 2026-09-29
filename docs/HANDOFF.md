@@ -49,6 +49,11 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
+**Status 2026-09-28, newest first:** the always-on server speaks `fabric-service/0.1` (instance
+lock, well-known document, token-guarded events feed, descriptor from the installer) on branch
+`agent/fabric-service`, unreleased. Entry point and the next task:
+[runs/2026-09-28-fabric-service](runs/2026-09-28-fabric-service/README.md).
+
 **Current status, 2026-09-28: 0.6.3.** The package installs the short name `observatory`
 beside `project-observatory`, and either name with no arguments opens the dashboard of the
 workspace in `OBSERVATORY_HOME` ([CHANGELOG](../CHANGELOG.md#063--2026-09-28)). 0.6.3 has no

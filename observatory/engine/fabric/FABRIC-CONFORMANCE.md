@@ -2,7 +2,7 @@
 
 Project Observatory publishes a self-contained local MCP profile at
 https://github.com/ssheleg/project-observatory-open-source. The provider manifest
-is revision 4. `fabric-contract.lock.json` selects profile `observatory-local-mcp`
+is revision 5. `fabric-contract.lock.json` selects profile `observatory-local-mcp`
 version `1.0.0` and schema release `v0.2.0`; `fabric-agent.json` retains contract
 version `0.1.0`. These are separate version axes.
 
@@ -39,6 +39,18 @@ not on the contract.
 Schemas live in `schemas/`, with fictional requests in `fixtures/`. Published
 schema URLs are pinned to the release selected by the lock. An application patch
 release does not silently move that schema pin.
+
+## Local service extension
+
+Revision 5 adds one key under `provider.extensions`:
+`https://fabric.passioncode.ai/agent-contract/extensions/service/0.1` with the value
+`{"descriptor": "project-observatory.default"}`. It names the `fabric-service/0.1` descriptor
+that `tools/serverd.py --install` writes for the standard workspace; another workspace's
+descriptor carries its own instance, `ws-<sha16>`. Discovery grants nothing: the descriptor makes
+the always-on server visible to a local host and does not replace admission or binding. The
+server's well-known document, events feed, lock and installer are described, with their tests,
+in the repository's [service design](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/FABRIC-SERVICE.md); the bundled service schemas in
+`service-schemas/` are copied from the contract and used by those tests.
 
 ## Checks that can be reproduced
 

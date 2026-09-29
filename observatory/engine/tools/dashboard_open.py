@@ -178,6 +178,18 @@ def start_server(port: int, wait: float = 45.0) -> dict:
         if beat:
             return beat
         code = proc.poll()
+        if code == 75:
+            # EX_TEMPFAIL from the instance lock: this workspace already has a
+            # server, on another port. Say where it answers instead of "exited".
+            try:
+                running = json.loads((paths.SCRATCH / "serverd.json").read_text(encoding="utf-8")).get("port")
+            except (OSError, ValueError, AttributeError):
+                running = None
+            where = f"http://127.0.0.1:{running}/" if running else "another port"
+            raise configuration.ConfigurationError(
+                f"This workspace is already served by another server process ({where}); "
+                f"open that address, or pass --port {running} to reuse it. "
+                f"Last lines of {log}:\n{_tail(log)}")
         if code is not None:
             raise configuration.ConfigurationError(
                 f"The dashboard server exited with code {code} before answering; "

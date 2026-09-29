@@ -54,6 +54,7 @@ BOUNDARY = (
 
     # Merged from the parallel port streams.
     'cause_and_symptom', 'collector_state', 'corroboration', 'credentials', 'curation_paths', 'degradations', 'domain_probe', 'google', 'handoff', 'install_key', 'ledger_export', 'mechanical_confidence', 'notification', 'portfolio_review', 'project_secrets', 'publish_contract', 'recovery', 'reveals', 'session_start', 'tick', 'tick_failures', 'trap_efficacy', 'trap_map', 'unpublished_work', 'wire_survives', 'witness',
+    'fabric_service',
 )
 # Suites and helpers ported by the second port stream.
 BOUNDARY += (
@@ -106,7 +107,7 @@ HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
            'dashboard_fixture.py', 'emitter_fixture.py', 'session_fixture.py', 'surface_fixture.py',
            'env_tab_check.js', 'action_outcome_check.mjs',
-           'own_project.py', 'tick_reader.py', 'validator_fixture.py',
+           'own_project.py', 'tick_reader.py', 'validator_fixture.py', 'check_service.py',
     # Merged from the parallel port streams.
     'concurrency.py', 'merge_fixture.py', 'probe_fixture.py',
 )
@@ -119,7 +120,8 @@ ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py',
     'identity_map.py', 'leak_register.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'workspace.py',
-    'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
+    'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
+    'fabric_service.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
 )
 SKILL_FILES = (
     'skill/plugins/observatory-log/skills/handling-secrets/SKILL.md',
@@ -163,7 +165,8 @@ def copy_source(target: Path) -> None:
                      if p.suffix in {'.py', '.sh', '.js', '.css', '.html', '.svg'}
                      and '__pycache__' not in p.parts}
     # The dashboard's catalogs and the vendored brand manifest are data it reads.
-    for folder in ('defaults', 'plugins', 'fabric/fixtures', 'fabric/schemas', 'dashboard/locales', 'dashboard/brand'):
+    for folder in ('defaults', 'plugins', 'fabric/fixtures', 'fabric/schemas', 'fabric/service-schemas',
+                   'dashboard/locales', 'dashboard/brand'):
         selected |= set((ROOT / folder).glob('*.json'))
     for source in sorted(selected):
         if not source.is_file():

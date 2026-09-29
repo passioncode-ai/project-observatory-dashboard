@@ -143,6 +143,13 @@ selection and a budget before enabling reasoning or embeddings. On macOS,
 `tools/install_launchd.py` and `tools/serverd.py` install workspace-specific
 jobs only after explicit scheduler opt-in; Linux can run the CLI under a
 supervisor chosen by the user. Do not create duplicate writers for one home.
+On macOS, `tools/serverd.py --install` also writes a `fabric-service/0.1`
+descriptor (`project-observatory.<instance>.json`, in
+`~/Library/Application Support/ai.passioncode.fabric/services/` or
+`FABRIC_SERVICES_DIR`) so a local host such as Fabric Dashboards can find the
+server; `--uninstall` removes it. The server keeps one copy per workspace
+(`service.lock`; a second copy exits 75) and creates `service.token` for its
+events feed. See the [service design](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/FABRIC-SERVICE.md).
 
 ## The machine: what runs, where the disk goes, cleanup
 

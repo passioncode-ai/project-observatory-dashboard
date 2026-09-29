@@ -63,7 +63,10 @@ before protected actions. The keyserver requires a local token for credential
 operations and rejects malformed requests before provider effects. UI pages and
 local overview endpoints still expose private metadata to processes able to
 reach them. Do not reverse-proxy these services onto a public network or treat
-them as a multi-tenant service.
+them as a multi-tenant service. The always-on dashboard server's events feed
+(`/fabric/v1/events`) requires the workspace's `service.token` (mode 600) as
+`Authorization: Bearer`; its pages and its `/.well-known/fabric-service` identity
+document stay open to local reads. See [the service design](docs/design/FABRIC-SERVICE.md).
 
 The retained 0.1 `serve` command remains a separate read-only local overview,
 without the full keyserver's reveal or provisioning features. Its child-secret
