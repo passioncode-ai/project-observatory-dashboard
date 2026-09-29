@@ -13,9 +13,9 @@ description: >-
   message, a PR description or a changelog, and NOT for changing the typed
   registry — a registry change is `observatory_propose`, which is a different
   decision with different evidence.
-license: MIT
+license: PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0
 metadata:
-  version: "0.12.2"
+  version: "0.12.3"
 compatibility: >-
   Requires an initialized full Project Observatory installation to persist
   records. Uses its MCP server when available in the current host; the bundled

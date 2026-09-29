@@ -3,11 +3,11 @@
   "name": "observatory-log",
   "displayName": "Observatory Log",
   "description": "Records what changed in a watched project at the end of every turn, and asks for the one thing a diff cannot contain: why.",
-  "version": "0.12.2",
-  "license": "MIT",
+  "version": "0.12.3",
+  "license": "PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0",
   "author": {
-    "name": "Sergey Sheleg",
-    "url": "https://sshlg.me/"
+    "name": "PassionCode.ai",
+    "url": "https://passioncode.ai/"
   },
   "homepage": "https://github.com/passioncode-ai/project-observatory-dashboard",
   "keywords": [

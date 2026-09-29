@@ -5,6 +5,22 @@ and [security boundary](SECURITY.md). Code, tests and defaults must be usable
 without the author's accounts, projects or paths. Agents working here also read
 [AGENTS.md](AGENTS.md).
 
+## License and contributor agreement
+
+Project Observatory is source-available, not open source.
+Source-available under PolyForm Noncommercial or Internal Use; commercial license on request.
+The terms are in [LICENSE](LICENSE); a commercial license is available from
+<contact@passioncode.ai>. Versions up to and including v0.8.1 were released under the MIT
+License, and those releases remain available under MIT.
+
+Contributions are accepted under the [Contributor License Agreement](CLA.md) ([CLA.md](CLA.md)).
+It lets PassionCode.ai keep offering the software under both source-available licenses and
+under separate commercial licenses; you keep the copyright in your contribution. Opening a pull
+request and ticking the CLA box in the pull request template is how you agree to it. A pull
+request without the ticked box is not merged.
+
+## Checks
+
 The complete checks need:
 
 - **Python 3.11 or newer** with loadable SQLite extensions (`requires-python` in

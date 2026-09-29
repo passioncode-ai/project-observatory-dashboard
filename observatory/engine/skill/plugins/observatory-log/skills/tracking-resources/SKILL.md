@@ -13,9 +13,9 @@ description: >-
   figma-use), wiring analytics or pixels (ad-tracking), provisioning the resource
   with the provider's own tools, secrets (handling-secrets) or code changes inside
   the repository.
-license: MIT
+license: PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0
 metadata:
-  version: "0.12.2"
+  version: "0.12.3"
 compatibility: >-
   Requires a full Project Observatory installation with organizations.json
   configured; the observatory MCP server or its local CLI. Creating the resource
