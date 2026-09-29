@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "project-observatory"
-version = "0.8.1"
+version = "0.8.2"
 description = "A local observation layer for agent-operated projects"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0"
 license-files = ["LICENSE"]
-authors = [{name = "Project Observatory contributors"}]
+authors = [{name = "PassionCode.ai", email = "contact@passioncode.ai"}]
 dependencies = []
 keywords = ["observability", "developer-tools", "agents", "claude-code", "mcp", "dashboard", "secrets"]
 classifiers = [
@@ -29,7 +29,7 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://observatory.sshlg.me/"
+Homepage = "https://passioncode.ai/observatory/"
 Source = "https://github.com/passioncode-ai/project-observatory-dashboard"
 Changelog = "https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/CHANGELOG.md"
 Issues = "https://github.com/passioncode-ai/project-observatory-dashboard/issues"

@@ -12,8 +12,7 @@ code**: the public engine, its Python package `project-observatory`, the compani
 plugin `observatory-log` and the public website. Engine changes land here first and ship from
 here.
 
-The private predecessor, `passioncode-ai/project-observatory`, holds one operator's tooling and
-data only. It is not developed as an engine: do not port changes to it, do not copy its history,
+The private predecessor repository holds one operator's tooling and data only. It is not developed as an engine: do not port changes to it, do not copy its history,
 documents or data here, and do not cite its records.
 
 The organisation's map of repositories is
@@ -28,7 +27,7 @@ organisation members).
 | `observatory/engine/skill/` | the `observatory-log` plugin; `.claude-plugin/` at the root publishes it |
 | `tests/` | root tests: launcher, packaging, release gates, version and plugin consistency |
 | `tools/` | release tooling: privacy gate, package checker, source inventory, demo estate |
-| `site/`, `docs/site/` | the public website and its checks; it never reads a workspace |
+| `site/`, `docs/site/` | the retired website (a redirect to the product page plus the field-notes article) and its checks; it never reads a workspace |
 | `docs/` | onboarding, compatibility, security boundary, UX scenarios, run receipts |
 
 ## Build and test
@@ -95,7 +94,11 @@ This repository is public, and so is its Git history, commit messages included.
 2. Open a pull request against `main`. Three checks are required: the `test` job of
    `observatory-release-check` on each matrix row (ubuntu-latest with Python 3.11,
    ubuntu-latest with 3.14, macos-latest with 3.14).
-3. `main` keeps a linear history and refuses force-pushes, so a pull request merges by squash
+3. The code is source-available (PolyForm Noncommercial or Internal Use, see `LICENSE`), and
+   contributions are accepted under [CLA.md](CLA.md): the pull request template's CLA box is
+   ticked by the contributor, never by an agent on a person's behalf. Describe the product as
+   source-available; only releases up to and including v0.8.1 were MIT.
+4. `main` keeps a linear history and refuses force-pushes, so a pull request merges by squash
    or rebase, never by a merge commit. `.github/CODEOWNERS` requests the review.
 
 Do not bump the version, edit `CHANGELOG.md` or tag in a feature pull request unless it is the

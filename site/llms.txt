@@ -1,20 +1,26 @@
 # Project Observatory
 
-The complete local observation engine for agent-operated projects, from
-PassionCode.ai (https://passioncode.ai/) and part of the ssheleg harness. The local
-dashboard speaks English by default and Russian by choice. Public code; per-user private configuration, project registry,
-SQLite history and credentials. Includes CLI, local dashboards, MCP, metrics,
-provider adapters and optional scheduler. Integrations are individually enabled.
-The original portable 0.1 CLI remains available as a separate compatibility mode.
+A local dashboard for the projects your agents work on, from PassionCode.ai
+(https://passioncode.ai/). This host is retired as a product page: its home page
+redirects to https://passioncode.ai/observatory/, and it keeps serving the field
+notes. The local dashboard speaks English by default and Russian by choice.
+Public source; per-user private configuration, project registry, SQLite history and
+credentials. Includes CLI, local dashboards, MCP, metrics, provider adapters and
+optional scheduler. Integrations are individually enabled. The original portable
+0.1 CLI remains available as a separate compatibility mode.
 
+Source-available under PolyForm Noncommercial or Internal Use; commercial license on
+request (contact@passioncode.ai). Versions up to and including v0.8.1 were released
+under the MIT License and remain available under MIT.
+
+- Product page: https://passioncode.ai/observatory/
 - Source: https://github.com/passioncode-ai/project-observatory-dashboard
+- License: https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/LICENSE
 - Onboarding: https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/ONBOARDING.md
 - Compatibility: https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/COMPATIBILITY.md
 - Security: https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/SECURITY.md
 - Field notes: https://observatory.sshlg.me/field-notes/
 - PassionCode.ai: https://passioncode.ai/ (Switchboard: https://passioncode.ai/switchboard/)
-- Skills: https://skills.sshlg.me/
-- Harness: https://skills.sshlg.me/harness/
 
 Historical case: 202 value-replacement events, 66 in claude-mem SQLite and 136 in
 Chroma SQLite. These are not unique credentials, incidents or vendor vulnerabilities.

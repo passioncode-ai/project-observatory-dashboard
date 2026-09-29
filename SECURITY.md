@@ -97,8 +97,8 @@ explicitly identified as a separately reviewed historical observation.
 
 ## Report an issue privately
 
-Use this repository's private vulnerability-reporting channel. If unavailable,
-contact the maintainer through [sshlg.me](https://sshlg.me/) before sharing
+Use this repository's [private vulnerability-reporting channel](https://github.com/passioncode-ai/project-observatory-dashboard/security/advisories/new).
+If it is unavailable, write to <contact@passioncode.ai> before sharing
 sensitive details. Public issues may describe the class and a synthetic
 reproduction. Never attach a real key, inventory, log, private path or customer
 identifier, and do not test another person's accounts to demonstrate a report.

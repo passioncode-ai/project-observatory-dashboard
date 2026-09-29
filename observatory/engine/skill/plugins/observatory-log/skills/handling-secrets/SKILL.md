@@ -7,9 +7,9 @@ description: >-
   Keeps credential values out of prompts and command arguments, uses named slots,
   and records changes without copying values into reports. NOT for granting
   provider permissions or choosing a project's authentication architecture.
-license: MIT
+license: PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0
 metadata:
-  version: "0.12.2"
+  version: "0.12.3"
 compatibility: >-
   Requires an initialized full Project Observatory installation, Python 3.11+
   and local shell access on macOS or Linux. Provider operations additionally
@@ -29,7 +29,7 @@ names. Never ask the user to paste a credential into the conversation.
 2. Select the user's initialized `OBSERVATORY_HOME`. Run
    `python3 "$OBSERVATORY_ROOT/observatory.py" doctor`. A missing workspace
    needs the documented onboarding before secret operations.
-3. Run `python3 "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.12.2`.
+3. Run `python3 "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.12.3`.
    If stale, read the installed skill once and follow its compatible commands.
    Do not turn an unavailable version check into a retry loop.
 4. Inspect names using `tools/use_secret.py names PROJECT` or `tools/vault.py

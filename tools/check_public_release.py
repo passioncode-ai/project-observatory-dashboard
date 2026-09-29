@@ -31,7 +31,7 @@ def public_identifiers(path: Path = PUBLIC_IDENTIFIERS) -> set[str]:
         out.add(entry["token"].strip().lower())
     return out
 ALLOWED_TOP = {".github", ".claude-plugin", "observatory", "tests", "tools", "docs", "site"}
-ALLOWED_ROOT = {".gitignore", "LICENSE", "README.md", "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "CHANGELOG.md", "pyproject.toml", "AGENTS.md", "CLAUDE.md", "requirements-full.lock"}
+ALLOWED_ROOT = {".gitignore", "LICENSE", "CLA.md", "README.md", "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "CHANGELOG.md", "pyproject.toml", "AGENTS.md", "CLAUDE.md", "requirements-full.lock"}
 SKIP = {".git", ".venv", "__pycache__", "node_modules", "build", "dist"}
 PUBLIC_IMAGES = {
     "site/assets/credential-copies-cartoon.png": {"8b69fe6ffcf44a4d5f8a32622d5c4d9d847d539c8c673c49fadf132c518be30c"},

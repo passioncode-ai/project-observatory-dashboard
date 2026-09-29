@@ -87,4 +87,4 @@ python -m unittest discover -s tests -v
 
 The tests create temporary projects, a local bare Git remote, fictional credentials and SQLite stores. They do not use cloud accounts or the user's project inventory. See [CONTRIBUTING.md](../CONTRIBUTING.md), [SECURITY.md](../SECURITY.md), [migration acceptance criteria](MIGRATION.md), and the [handoff](HANDOFF.md). Public marketing lives in `site/`; generated dashboards belong in private state and must never be deployed.
 
-MIT licensed. Source and website examples are synthetic unless explicitly identified as a separately reviewed observation.
+Source-available under PolyForm Noncommercial or Internal Use; commercial license on request ([LICENSE](../LICENSE)). Versions up to and including v0.8.1 were released under the MIT License and remain available under MIT. Source and website examples are synthetic unless explicitly identified as a separately reviewed observation.
