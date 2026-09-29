@@ -1,6 +1,6 @@
 # Project Observatory
 
-**Your projects. Back in view.** A local dashboard for the projects your agents work on. See what changed, what needs attention and where known API keys left a copy. In English or Russian. Project Observatory is a source-available tool from [PassionCode.ai](https://passioncode.ai/) ([product page](https://passioncode.ai/observatory/)), beside [Switchboard](https://passioncode.ai/switchboard/).
+**Your projects. Back in view.** A local dashboard for the projects your agents work on. See what changed, what needs attention and where known API keys left a copy. In English or Russian. Project Observatory is a source-available tool from [PassionCode.ai](https://passioncode.ai/) ([product page](https://passioncode.ai/observatory/)), beside [Fabric Switchboard](https://passioncode.ai/switchboard/). It is Fabric-compatible — its server speaks `fabric-service/0.1` — and works without Fabric.
 
 ![The Project Observatory overview page: findings from critical to info, project and activity counters, and a card per section, in the PassionCode dark theme](site/assets/dashboard-overview-en.png)
 
