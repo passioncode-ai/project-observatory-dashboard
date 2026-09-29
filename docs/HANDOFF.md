@@ -19,7 +19,7 @@ onboarding, website and launch material.
 - Public site describes the full release; canonical [article](../site/field-notes/index.html),
   generated cover and [social drafts](content/README.md). Social accounts were not posted to.
 - Skills remains the family site's primary entry. Harness is its separate section;
-  Observatory observes projects, Asset Foundry is explicitly in development.
+  Observatory observes projects.
 
 ## Module and task packets
 
