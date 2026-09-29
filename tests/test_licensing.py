@@ -113,5 +113,36 @@ class ContributionTermsTest(unittest.TestCase):
         self.assertIn("python tools/check_public_release.py --history", template)
 
 
+class CurrentWordingTest(unittest.TestCase):
+    """Documents that describe the product as it is now. Dated receipts under
+    docs/runs/, docs/releases/, docs/seo/ and the published posts in docs/content/
+    record what was true when they were written and are left as they are."""
+
+    CURRENT = ("README.md", "CONTRIBUTING.md", "AGENTS.md", "SECURITY.md", "CODE_OF_CONDUCT.md",
+               "docs/PORTABLE-0.1.md", "docs/HANDOFF.md", "docs/site/DEPLOY.md",
+               "site/index.html", "site/404.html", "site/llms.txt")
+
+    def test_no_current_document_calls_the_product_open_source_or_mit(self):
+        for path in self.CURRENT:
+            body = text(path)
+            # "source-available, not open source" is an accurate use of the phrase, and
+            # `project-observatory-open-source` is the repository's former name.
+            self.assertIsNone(re.search(r"(?i)(?<!not )(?<!observatory-)open[- ]source", body), path)
+            self.assertIsNone(re.search(r"\bMIT licensed\b|·\s*MIT\b|opensource\.org/license/mit", body), path)
+
+    def test_readme_states_the_license_and_the_mit_history(self):
+        readme = text("README.md")
+        self.assertIn(SHORT_LINE, readme)
+        self.assertIn("v0.8.1", readme)
+        self.assertNotIn("Version 0.2 brings", readme)
+
+    def test_contacts_are_organisational(self):
+        for path in ("SECURITY.md", "CODE_OF_CONDUCT.md"):
+            body = text(path)
+            self.assertIn("contact@passioncode.ai", body, path)
+            self.assertIn("security/advisories/new", body, path)
+            self.assertNotIn("sshlg.me", body, path)
+
+
 if __name__ == "__main__":
     unittest.main()

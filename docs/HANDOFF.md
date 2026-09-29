@@ -1,6 +1,7 @@
 # Full-system release handoff
 
-Objective: distribute the complete Project Observatory engine as open source while
+Objective: distribute the complete Project Observatory engine as public source code (MIT up to
+v0.8.1; source-available under PolyForm Noncommercial or Internal Use from then on) while
 each user retains their own private projects, credentials and runtime state; retain
 older CLI contracts, provide future upgrade/restore safeguards, and publish accurate
 onboarding, website and launch material.

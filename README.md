@@ -1,12 +1,12 @@
 # Project Observatory
 
-**See what changed across your projects, what needs attention, and where agent work left a trace.** Project Observatory is an open-source tool from [PassionCode.ai](https://passioncode.ai/), available today beside [Switchboard](https://passioncode.ai/switchboard/), and the local observation component of the [ssheleg harness](https://skills.sshlg.me/harness/). Skills guide the work; Observatory records and checks the state around it.
+**Your projects. Back in view.** A local dashboard for the projects your agents work on. See what changed, what needs attention and where known API keys left a copy. In English or Russian. Project Observatory is a source-available tool from [PassionCode.ai](https://passioncode.ai/) ([product page](https://passioncode.ai/observatory/)), beside [Switchboard](https://passioncode.ai/switchboard/).
 
 ![The Project Observatory overview page: findings from critical to info, project and activity counters, and a card per section, in the PassionCode dark theme](site/assets/dashboard-overview-en.png)
 
 <sub>The real dashboard, rendered by `tools/demo_estate.py` over a fictional company's projects — no workspace, registry or key was read. Also in [Russian](docs/images/dashboard-overview-ru.png); the [projects page](docs/images/dashboard-projects-en.png).</sub>
 
-Version 0.2 brings the original engine into the public distribution: project and repository inventory, findings, history, metrics, a local dashboard, MCP, credential tools and optional provider integrations. Every user supplies their own project paths, accounts and keys. Private operational data and Git history are excluded from the source distribution.
+The distribution is the complete engine: project and repository inventory, findings, history, metrics, a local dashboard, MCP, credential tools and optional provider integrations. Every user supplies their own project paths, accounts and keys. Private operational data and Git history are excluded from the source distribution. Releases and their notes are on the [releases page](https://github.com/passioncode-ai/project-observatory-dashboard/releases); what changed in each is in the [changelog](CHANGELOG.md).
 
 ## Start with your own workspace
 
@@ -80,7 +80,7 @@ project-observatory full agent uninstall # removes the plugin and only the setti
 
 Optional integrations include GitHub, Bitbucket, Cloudflare, Heroku, Google analytics/search, domain observations, agent sessions and a local knowledge base. Connecting one does not connect all of them. Model calls, remote environment reads, notifications and remediation are opt-in. See [onboarding](docs/ONBOARDING.md) for settings and credential entry.
 
-The local dashboard is private. The public `site/` is a separate marketing artifact and cannot read your workspace. Deploying the website must never upload generated dashboard pages, registries, keys or transcripts.
+The local dashboard is private. The public `site/` is a separate static artifact and cannot read your workspace: it serves the [field notes](https://observatory.sshlg.me/field-notes/) and redirects its former home page to the [product page](https://passioncode.ai/observatory/). Deploying the website must never upload generated dashboard pages, registries, keys or transcripts.
 
 ## Code is shared. State is yours.
 
@@ -121,9 +121,6 @@ Checks use synthetic projects and credentials. Real provider acceptance, externa
 
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Migration map](docs/MIGRATION.md) · [Release handoff](docs/HANDOFF.md)
 
-MIT licensed. Part of [PassionCode.ai](https://passioncode.ai/) — the design system is [PassionCode 1.0.0](https://passioncode.ai/design-system/).
-
-
 ### Repository name and existing installations
 
 The repository moved to the PassionCode.ai organization as `passioncode-ai/project-observatory-dashboard` in 0.4.0 (it was `ssheleg/project-observatory-dashboard`, and before that `ssheleg/project-observatory-open-source`).
@@ -134,3 +131,10 @@ and `project-observatory full agent install` moves the plugin marketplace to the
 Published v0.2.0 Fabric schema identifiers retain their original URLs and content
 hashes. Do not rewrite them in an existing installation. GitHub redirects the old
 repository path; verify pinned URL resolution before removing any compatibility URL.
+
+## License
+
+Source-available under PolyForm Noncommercial or Internal Use; commercial license on request.
+Individuals and noncommercial organisations may use, change and share it for noncommercial purposes; any company may use and change it for its own internal operations. Distributing it commercially, or building it into a product or service provided to others, needs a separate commercial license from <contact@passioncode.ai>. The terms are in [LICENSE](LICENSE); contributions are accepted under the [CLA](CLA.md). Versions up to and including v0.8.1 were released under the MIT License, and those releases remain available under MIT.
+
+Part of [PassionCode.ai](https://passioncode.ai/) — the design system is [PassionCode 1.0.0](https://passioncode.ai/design-system/). Observatory is also the observation component of the [ssheleg harness](https://skills.sshlg.me/harness/): skills guide the work; Observatory records and checks the state around it.
