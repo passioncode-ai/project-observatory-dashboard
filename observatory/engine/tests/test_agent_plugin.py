@@ -175,6 +175,105 @@ class AgentPluginTests(unittest.TestCase):
         self.assertIn("not on PATH", p.stderr)
 
 
+    # --- another channel manages the plugin -----------------------------------
+    # A launcher (for instance the PassionCode one, marketplace `passioncode`) can
+    # install this same plugin under its own id. A second copy under the engine's
+    # id would fire every hook twice, and the launcher removes it again later.
+
+    def plant(self, installed: dict, enabled: dict, known: dict | None = None, env: dict | None = None):
+        plugins = self.claude_home / "plugins"; plugins.mkdir(exist_ok=True)
+        (plugins / "installed_plugins.json").write_text(json.dumps(
+            {"version": 2, "plugins": {k: [{"scope": "user", "version": v}] for k, v in installed.items()}}))
+        (plugins / "known_marketplaces.json").write_text(json.dumps(known or {
+            "passioncode": {"source": {"source": "directory", "path": "/opt/example/passioncode"}}}))
+        doc = {"enabledPlugins": enabled, "theme": "dark"}
+        if env is not None:
+            doc["env"] = env
+        (self.claude_home / "settings.json").write_text(json.dumps(doc))
+
+    def shipped(self) -> str:
+        return self.env["FAKE_VERSION"]
+
+    def plugin_calls(self) -> list[str]:
+        log = self.claude_home / "calls.log"
+        return log.read_text().splitlines() if log.exists() else []
+
+    def test_status_is_ok_when_the_launcher_manages_the_plugin(self):
+        self.run_cli("agent", "install")          # learn the hook env this workspace wants
+        wanted = {k: self.settings()["env"][k] for k in ("OBSERVATORY_ROOT", "OBSERVATORY_HOME", "OBSERVATORY_PYTHON")}
+        (self.claude_home / "calls.log").unlink()
+        self.plant({"observatory-log@passioncode": self.shipped()}, {"observatory-log@passioncode": True}, env=wanted)
+        status = self.run_cli("agent", "status")
+        self.assertTrue(status["ok"], status["problems"])
+        self.assertEqual(status["plugin"], "observatory-log@passioncode")
+        self.assertEqual(status["installed_version"], self.shipped())
+        self.assertIn("passioncode launcher", status["managed_by"])
+        self.assertEqual(self.plugin_calls(), [], "status never calls the CLI")
+
+    def test_install_leaves_a_launcher_managed_plugin_alone_but_writes_the_hook_env(self):
+        self.plant({"observatory-log@passioncode": self.shipped()}, {"observatory-log@passioncode": True})
+        before = self.run_cli("agent", "status", code=1)
+        self.assertNotIn("not installed", " ".join(before["problems"]))
+        self.assertTrue(all("in Claude Code settings" in p for p in before["problems"]), before["problems"])
+        out = self.run_cli("agent", "install")
+        self.assertEqual(out["status"], "managed-elsewhere")
+        self.assertEqual(out["plugin"], "observatory-log@passioncode")
+        self.assertIn("passioncode launcher", " ".join(out["steps"]))
+        self.assertEqual(self.plugin_calls(), [], "no marketplace add, no plugin install")
+        s = self.settings()
+        self.assertEqual(s["theme"], "dark")
+        self.assertNotIn("observatory-log@observatory-log", s["enabledPlugins"], "no second id")
+        self.assertNotIn("observatory-log", s.get("extraKnownMarketplaces", {}))
+        self.assertEqual(s["env"]["OBSERVATORY_HOME"], str(self.home), "the hooks still need the env")
+        self.assertEqual(Path(s["env"]["OBSERVATORY_ROOT"]), ROOT)
+        after = self.run_cli("agent", "status")
+        self.assertTrue(after["ok"], after["problems"])
+
+    def test_a_version_the_launcher_has_not_updated_yet_is_a_note_not_a_failure(self):
+        self.plant({"observatory-log@passioncode": "0.0.1"}, {"observatory-log@passioncode": True})
+        self.run_cli("agent", "install")
+        status = self.run_cli("agent", "status")
+        self.assertTrue(status["ok"], status["problems"])
+        self.assertIn("0.0.1", " ".join(status["notes"]))
+        self.assertIn("passioncode launcher", " ".join(status["notes"]))
+        self.assertEqual(self.plugin_calls(), [])
+
+    def test_any_other_marketplace_is_named_as_the_managing_channel(self):
+        self.plant({"observatory-log@example-market": self.shipped()}, {"observatory-log@example-market": True},
+                   known={"example-market": {"source": {"source": "github", "repo": "example-org/market"}}})
+        out = self.run_cli("agent", "install")
+        self.assertEqual(out["status"], "managed-elsewhere")
+        self.assertIn("example-market marketplace", out["managed_by"])
+        self.assertEqual(self.plugin_calls(), [])
+
+    def test_a_disabled_copy_elsewhere_does_not_stop_the_engine_installing_its_own(self):
+        self.plant({"observatory-log@passioncode": self.shipped()}, {"observatory-log@passioncode": False})
+        out = self.run_cli("agent", "install")
+        self.assertEqual(out["status"], "installed")
+        self.assertIn("plugin install observatory-log@observatory-log", self.plugin_calls())
+        self.assertTrue(self.run_cli("agent", "status")["ok"])
+
+    def test_two_enabled_copies_are_a_problem_and_install_adds_nothing(self):
+        self.plant({"observatory-log@passioncode": self.shipped(), "observatory-log@observatory-log": self.shipped()},
+                   {"observatory-log@passioncode": True, "observatory-log@observatory-log": True})
+        self.run_cli("agent", "install")
+        self.assertEqual(self.plugin_calls(), [])
+        status = self.run_cli("agent", "status", code=1)
+        joined = " ".join(status["problems"])
+        self.assertIn("installed twice", joined)
+        self.assertIn("claude plugin uninstall observatory-log@observatory-log", joined)
+
+    def test_uninstall_keeps_the_hook_env_a_launcher_managed_plugin_needs(self):
+        self.plant({"observatory-log@passioncode": self.shipped()}, {"observatory-log@passioncode": True})
+        self.run_cli("agent", "install")
+        out = self.run_cli("agent", "uninstall")
+        s = self.settings()
+        self.assertTrue(s["enabledPlugins"]["observatory-log@passioncode"], "the launcher's copy is not ours")
+        self.assertEqual(s["env"]["OBSERVATORY_HOME"], str(self.home))
+        self.assertIn("passioncode launcher", " ".join(out["steps"]))
+        self.assertNotIn("uninstall observatory-log@passioncode", " ".join(self.plugin_calls()))
+
+
 class OpenDashboardTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

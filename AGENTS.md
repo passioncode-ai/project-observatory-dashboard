@@ -47,6 +47,7 @@ project-observatory full check                         # every engine suite, eac
 python tools/update_inventory.py --check               # engine files match SOURCE-INVENTORY.json
 python -m pip wheel --no-deps . --wheel-dir dist
 python tools/check_package.py dist/*.whl
+claude plugin validate --strict .                      # and observatory/engine/skill, and its plugins/observatory-log
 python tools/check_public_release.py --history --history-ref HEAD
 python docs/site/check.py --self-test
 python tools/build_article.py --check
@@ -54,6 +55,8 @@ node tools/check_site_interactions.cjs
 git diff --exit-code                                   # the checks left no tracked change
 ```
 
+- The `claude plugin validate --strict` step runs on the ubuntu-latest / Python 3.14 row only,
+  with the Claude Code version pinned in the workflow (`npm install -g @anthropic-ai/claude-code@VERSION`).
 - One engine suite: `project-observatory full check --suite NAME` (repeatable), `NAME` being
   `test_NAME.py` under `observatory/engine/tests/`.
 - A new engine suite is listed in `SUITES` of `observatory/engine/tests/run_portable.py`:

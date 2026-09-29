@@ -424,6 +424,35 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(rows[-1]["event"], "updated")
         self.assertTrue(all("at" in r and "event" in r for r in rows))
 
+    def plant_plugin(self, plugin_id: str):
+        claude = self.base / "user" / ".claude"
+        (claude / "plugins").mkdir(parents=True, exist_ok=True)
+        (claude / "plugins" / "installed_plugins.json").write_text(json.dumps(
+            {"version": 2, "plugins": {plugin_id: [{"scope": "user", "version": "0.0.1"}]}}))
+        (claude / "settings.json").write_text(json.dumps({"enabledPlugins": {plugin_id: True}}))
+
+    def test_next_step_leaves_a_launcher_managed_plugin_to_its_launcher(self):
+        self.plant_plugin("observatory-log@passioncode")
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0, doc)
+        self.assertIn("Restart Claude Code sessions", doc["next"])
+        self.assertNotIn("agent install", doc["next"], "a second copy would fight the launcher")
+        self.assertIn("passioncode launcher", doc["next"])
+
+    def test_next_step_suggests_agent_install_for_the_engines_own_plugin(self):
+        self.plant_plugin("observatory-log@observatory-log")
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0, doc)
+        self.assertIn("full agent install", doc["next"])
+
+    def test_next_step_without_a_plugin_only_restarts_sessions(self):
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(doc["next"], "Restart Claude Code sessions")
+
     def test_services_not_loaded_nothing_is_stopped(self):
         self.services.state = {"tick": False, "server": False}
         self.gh.publish(NEWER)

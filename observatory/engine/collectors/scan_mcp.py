@@ -21,9 +21,19 @@ Liveness comes from Claude Code's own probe (`claude mcp list`), parsed for the
 servers this scan knows; Cursor and opencode have no equivalent probe, so their
 rows say `liveness: not-probed` rather than borrowing Claude's answer for a
 different process.
+
+THE PROBE IS SLOW BY DESIGN. `claude mcp list` health-checks every server it
+knows before it prints, so a machine with many servers (plugins and claude.ai
+connectors included) can take minutes. The limit defaults to
+DEFAULT_PROBE_TIMEOUT seconds and is raised with OBSERVATORY_MCP_PROBE_TIMEOUT.
+A probe that runs out of time is degraded, not fatal: the declarations are still
+read from the configs, the servers the CLI reported before the cut keep their
+verdict, and every other Claude server is `not-probed` — never `not-listed`,
+because a cut-off list proves nothing about what it would have named.
 """
 from __future__ import annotations
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -46,6 +56,27 @@ SOURCES = {
 #: The observatory's own server, which must be declared somewhere or its nine
 #: tools are unreachable (credentials audit G14).
 OWN_SERVER = "observatory"
+#: Seconds `claude mcp list` may take. 60 and then 120 were measured too short on
+#: machines with many servers; the CLI checks each one before printing.
+DEFAULT_PROBE_TIMEOUT = 180
+PROBE_TIMEOUT_ENV = "OBSERVATORY_MCP_PROBE_TIMEOUT"
+PROBE_TIMEOUT_MAX = 3600
+
+
+def probe_timeout() -> tuple[float, str | None]:
+    """(seconds, note): the configured limit, or the default with a note saying why."""
+    raw = os.environ.get(PROBE_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return float(DEFAULT_PROBE_TIMEOUT), None
+    try:
+        value = float(raw)
+    except ValueError:
+        value = float("nan")
+    if not (1 <= value <= PROBE_TIMEOUT_MAX):   # NaN fails this comparison too
+        return (float(DEFAULT_PROBE_TIMEOUT),
+                f"{PROBE_TIMEOUT_ENV}={raw!r} is not a number of seconds between 1 and "
+                f"{PROBE_TIMEOUT_MAX}; used {DEFAULT_PROBE_TIMEOUT}")
+    return value, None
 
 
 def now() -> str:
@@ -123,17 +154,16 @@ def read_declarations() -> list[dict]:
 LINE = re.compile(r"^(?P<name>.+?): (?P<target>.*?) - (?P<mark>✔|✘|!) (?P<status>.+)$")
 
 
-def claude_probe() -> tuple[dict[str, dict], str | None]:
-    """name -> {status, plugin, target} from `claude mcp list`, or ({}, why)."""
-    if not shutil.which("claude"):
-        return {}, "claude CLI not on PATH"
-    try:
-        p = subprocess.run(["claude", "mcp", "list"], capture_output=True, text=True,
-                           timeout=120)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return {}, f"claude mcp list: {type(exc).__name__}"
+def _text(value) -> str:
+    """TimeoutExpired carries raw bytes even when the run asked for text."""
+    if value is None:
+        return ""
+    return value.decode("utf-8", "replace") if isinstance(value, bytes) else value
+
+
+def parse_probe(text: str) -> dict[str, dict]:
     out: dict[str, dict] = {}
-    for raw in (p.stdout + p.stderr).splitlines():
+    for raw in text.splitlines():
         m = LINE.match(raw.strip())
         if not m:
             continue
@@ -147,9 +177,47 @@ def claude_probe() -> tuple[dict[str, dict], str | None]:
             plugin, name = "claude.ai", name[len("claude.ai "):]
         out[name] = {"status": status, "plugin": plugin,
                      "detail": m.group("status").strip()[:60]}
+    return out
+
+
+def claude_probe(timeout: float | None = None) -> tuple[dict[str, dict], str | None, bool]:
+    """(name -> {status, plugin, detail}, why degraded or None, whether the list is complete)."""
+    if not shutil.which("claude"):
+        return {}, "claude CLI not on PATH", False
+    if timeout is None:
+        timeout, _ = probe_timeout()
+    try:
+        p = subprocess.run(["claude", "mcp", "list"], capture_output=True, text=True,
+                           timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        heard = parse_probe(_text(exc.stdout) + _text(exc.stderr))
+        return heard, (f"claude mcp list did not finish within {timeout:g} s (it health-checks every "
+                       f"server before printing); {len(heard)} server(s) reported before the cut, the "
+                       f"rest are not-probed — raise {PROBE_TIMEOUT_ENV} (seconds) on this machine"), False
+    except OSError as exc:
+        return {}, f"claude mcp list: {type(exc).__name__}", False
+    out = parse_probe(p.stdout + p.stderr)
     if not out:
-        return {}, "claude mcp list answered with nothing this scan could parse"
-    return out, None
+        return {}, "claude mcp list answered with nothing this scan could parse", False
+    return out, None, True
+
+
+def attribute_liveness(rows: list[dict], probe: dict[str, dict], complete: bool) -> None:
+    """Give each declaration Claude's verdict where Claude gave one, and say why not elsewhere."""
+    for r in rows:
+        if r.get("name") is None:
+            continue
+        if r["agent"] == "claude" and r["name"] in probe:
+            r["liveness"] = probe[r["name"]]["status"]
+            r["liveness_detail"] = probe[r["name"]]["detail"]
+        elif r["agent"] == "claude" and probe and complete and r["scope"].startswith("project:"):
+            # `claude mcp list` reports only the servers active in ITS cwd; a
+            # server scoped to another project is out of view, not down.
+            r["liveness"] = "not-probed"
+        elif r["agent"] == "claude" and probe and complete:
+            r["liveness"] = "not-listed"
+        else:
+            r["liveness"] = "not-probed"
 
 
 def main(argv: list[str]) -> int:
@@ -161,22 +229,11 @@ def main(argv: list[str]) -> int:
         print(__doc__, file=sys.stderr)
         return 2
     rows = read_declarations()
-    probe, why = claude_probe()
-    degraded = [{"source": "claude mcp list", "reason": why}] if why else []
-    for r in rows:
-        if r.get("name") is None:
-            continue
-        if r["agent"] == "claude" and r["name"] in probe:
-            r["liveness"] = probe[r["name"]]["status"]
-            r["liveness_detail"] = probe[r["name"]]["detail"]
-        elif r["agent"] == "claude" and probe and r["scope"].startswith("project:"):
-            # `claude mcp list` reports only the servers active in ITS cwd; a
-            # server scoped to another project is out of view, not down.
-            r["liveness"] = "not-probed"
-        elif r["agent"] == "claude" and probe:
-            r["liveness"] = "not-listed"
-        else:
-            r["liveness"] = "not-probed"
+    timeout, note = probe_timeout()
+    probe, why, complete = claude_probe(timeout)
+    degraded = [{"source": PROBE_TIMEOUT_ENV, "reason": note}] if note else []
+    degraded += [{"source": "claude mcp list", "reason": why}] if why else []
+    attribute_liveness(rows, probe, complete)
     # Servers Claude reaches that no config here declares: plugin-shipped and
     # claude.ai connectors. Recorded as their own rows so the inventory is the
     # whole picture, never a subset that looks whole.

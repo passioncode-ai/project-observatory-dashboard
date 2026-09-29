@@ -337,8 +337,12 @@ def migrate_local(source: Path, target: Path, apply: bool) -> dict:
 # `sessions` source the leak scan reads 4 targets instead of every transcript.
 # doctor names that instead of letting a quiet collector look healthy.
 # The same table is documented in docs/ONBOARDING.md, "Sources".
+# The `sessions` integration's collector (collectors/scan_sessions.py) reads the
+# companion's database, `companion_db`; the `sessions` transcripts are what the
+# leak scan reads beside it. Without `companion_db` here, a database deleted after
+# configuration made every tick log DEGRADED while doctor reported nothing.
 SOURCE_NEEDS = {
-    ("integrations", "sessions"): ("sessions",),
+    ("integrations", "sessions"): ("sessions", "companion_db"),
     ("integrations", "mcp"): ("mcp_config_root",),
     ("integrations", "wiki"): ("wiki",),
     ("integrations", "openrouter"): ("secret_store",),
@@ -350,8 +354,18 @@ SOURCE_NEEDS = {
 }
 
 
+#: Sources that must be a regular file: the collector opens a database, so a
+#: directory at that path reads as nothing just like a missing file.
+SOURCE_FILES = frozenset({"companion_db"})
+
+
 def coverage_warnings(doc: dict) -> list[dict]:
-    """Enabled switches whose sources are unconfigured or missing (names and paths only)."""
+    """Enabled switches whose sources are unconfigured or missing (names and paths only).
+
+    Every row carries both ways out as exact commands: `fix` points the source at
+    a path, `disable` turns the switch off, because a collector left enabled
+    without its source degrades on every tick.
+    """
     sources = doc.get("sources", {})
     out = []
     for (section, name), needed in SOURCE_NEEDS.items():
@@ -359,12 +373,19 @@ def coverage_warnings(doc: dict) -> list[dict]:
             continue
         for source in needed:
             value = sources.get(source)
+            fix = {"fix": f"project-observatory full configure sources {source} PATH",
+                   "disable": f"project-observatory full configure {section} {name} false"}
             if not value:
                 out.append({section[:-1]: name, "source": source,
-                            "problem": "not configured; the collector reads nothing from it",
-                            "fix": f"project-observatory full configure sources {source} PATH"})
-            elif not Path(value).expanduser().exists():
-                out.append({section[:-1]: name, "source": source, "problem": f"{value} does not exist"})
+                            "problem": "not configured; the collector reads nothing from it", **fix})
+                continue
+            path = Path(value).expanduser()
+            if not path.exists():
+                out.append({section[:-1]: name, "source": source,
+                            "problem": f"{value} does not exist; the collector reads nothing from it", **fix})
+            elif source in SOURCE_FILES and not path.is_file():
+                out.append({section[:-1]: name, "source": source,
+                            "problem": f"{value} is not a file; the collector reads nothing from it", **fix})
     return out
 
 

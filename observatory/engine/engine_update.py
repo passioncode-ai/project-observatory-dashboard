@@ -138,6 +138,24 @@ def default_repository() -> str:
     return agent_plugin.REPOSITORY
 
 
+def plugin_advice() -> str:
+    """What to do about the companion plugin once the engine is updated.
+
+    `full agent install` is advice only when the engine's own channel manages the
+    plugin: a launcher that installs it under its own marketplace id keeps it
+    updated itself, and a second copy under the engine's id would fire every hook
+    twice. The update has already succeeded, so a failure here falls back to the
+    generic line instead of failing the report.
+    """
+    generic = "Restart Claude Code sessions and `project-observatory full agent install` if the plugin is used"
+    try:
+        sys.path.insert(0, str(config.SOURCE / "tools"))
+        import agent_plugin
+        return agent_plugin.update_advice()
+    except Exception:  # noqa: BLE001 — advice, never a reason to fail a finished update
+        return generic
+
+
 def release_source(repository: str | None = None, api: str | None = None) -> tuple[str, str]:
     repo = repository or os.environ.get(REPOSITORY_ENV) or default_repository()
     base = (api or os.environ.get(API_ENV) or DEFAULT_API).rstrip("/")
@@ -906,7 +924,7 @@ class Transaction:
             report["services_not_restarted"] = failed
             report["human_steps"] = [f["fix"] for f in failed]
         self.step("updated", services_not_restarted=[f["service"] for f in failed])
-        report["next"] = "Restart Claude Code sessions and `project-observatory full agent install` if the plugin is used"
+        report["next"] = plugin_advice()
         return (EXIT_SERVICES if failed else EXIT_OK), report
 
 

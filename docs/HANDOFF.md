@@ -37,6 +37,7 @@ no private operational ancestry. Original installed services were not switched.
 
 ## Published release and deployment
 
+- Website, 2026-09-29: source `dc0c00b` (#78, the landing no longer names a personal agent), Cloudflare Pages production deployment `d0c9dbe0-32e4-449b-922a-801502181efd`. Both hosts served bytes identical to `site/index.html` after propagation; an unknown path returns 404; CSP and frame headers present.
 - [0.2.0 release](https://github.com/passioncode-ai/project-observatory-dashboard/releases/tag/v0.2.0): source `fb8d692416da63323d29ae4f89ab71f5c5ba3faa`, inspected wheel and SHA256SUMS. Downloaded release assets match the reviewed archive.
 - [Engine CI](https://github.com/ssheleg/project-observatory-open-source/actions/runs/35599940689): Linux Python 3.11/3.14 and macOS Python 3.14 all pass.
 - [Website compatibility correction](https://github.com/ssheleg/project-observatory-open-source/commit/c773b5d483a75e7c79fce520a97d4a85c1d6a300): content-versioned CSS/JS prevents previous browser caches breaking new pages; eight static negative probes pass. [CI](https://github.com/ssheleg/project-observatory-open-source/actions/runs/35600519090) passes all platforms.

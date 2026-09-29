@@ -194,6 +194,17 @@ def _digest(conn) -> dict:
             "first_erase_on": first.strftime("%Y-%m-%d") if first else None}
 
 
+def heartbeat_age_s(stamp: str, now: datetime | None = None) -> int:
+    """Whole seconds since a `%Y-%m-%dT%H:%M:%SZ` stamp, from an aware UTC clock.
+
+    Replaces the naive `datetime.utcnow` clock, deprecated since Python 3.12;
+    the number is the same. A stamp in any other shape raises ValueError, as
+    strptime always did.
+    """
+    at = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return int(((now or datetime.now(timezone.utc)) - at).total_seconds())
+
+
 def from_store() -> dict:
     """What the STORE knows, or an honest emptiness.
 
@@ -378,13 +389,11 @@ def from_store() -> dict:
         # absent (never ran here / turned off) — the page says which, because
         # "no row" would read as "no server exists" on a machine where one is
         # supposed to be up.
-        import datetime as _dt
         sd = paths.SCRATCH / "serverd.json"
         if sd.is_file():
             try:
                 beat = json.loads(sd.read_text(encoding="utf-8"))
-                at = _dt.datetime.strptime(beat.get("at", ""), "%Y-%m-%dT%H:%M:%SZ")
-                age_s = int((_dt.datetime.utcnow() - at).total_seconds())
+                age_s = heartbeat_age_s(beat.get("at", ""))
                 out["health"]["server_age_s"] = age_s
                 out["health"]["server_port"] = beat.get("port")
                 out["health"]["server_uptime_s"] = beat.get("uptime_s")

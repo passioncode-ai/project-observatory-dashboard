@@ -107,7 +107,7 @@ and token provisioning are different permissions.
 | `google` | Analytics property and search inventory | The user's service account files and resource grants |
 | `domains` | Domain observations | Explicit domain export and network access |
 | `mcp` | Configured server inventory | Explicit `sources.mcp_config_root` |
-| `sessions` | Local agent activity | Explicit `sources.sessions` |
+| `sessions` | Local agent activity | Explicit `sources.sessions` and `sources.companion_db` |
 | `wiki` | Knowledge-base inventory | Explicit `sources.wiki` |
 | `openrouter` | Key and usage inventory | A locally supplied provider credential |
 | `remote_env` | Compare deployed environment metadata | Explicit opt-in to provider environment reads |
@@ -122,8 +122,11 @@ there are no findings.
 
 Nothing outside the workspace is read until you name it. Each source is a path set with
 `project-observatory full configure sources NAME PATH`; `full doctor` lists every enabled
-integration or feature whose source is unset or missing under `coverage_warnings`, because a
-collector without its source reports nothing rather than failing.
+integration or feature whose source is unset, missing (a path deleted after it was configured)
+or of the wrong kind under `coverage_warnings`, because a collector without its source reports
+nothing rather than failing. Each row carries two exact commands: `fix`
+(`project-observatory full configure sources NAME PATH`) and `disable`
+(`project-observatory full configure integrations NAME false`, or `features` for a feature).
 
 | Source | What it points at | Read by |
 |---|---|---|
@@ -132,10 +135,18 @@ collector without its source reports nothing rather than failing.
 | `mcp_config_root` | the home directory whose agent configs declare MCP servers | `mcp` integration |
 | `wiki` | a Markdown knowledge base, e.g. an Obsidian vault | `wiki` integration, `wiki_projection` |
 | `secret_store` | a private directory of provider credentials and project slots (`projects/`) | vault, OpenRouter, Google, Cloudflare analytics |
-| `companion_home`, `companion_db` | a memory companion's home and database (claude-mem) | `companion_remediation` |
+| `companion_home`, `companion_db` | a memory companion's home and database file (claude-mem) | `sessions` integration (`companion_db`), `companion_remediation` |
 | `gateway_root` | an optional directory whose `bin/` holds a credential backup script | `vault.py backup` |
 | `domain_export` | a registrar's domain CSV export | `domains` integration |
 | `secrets` | overrides where the workspace keeps its own credential files | provider tools |
+
+The `mcp` integration reads the declarations from the agent configs and asks
+`claude mcp list` whether Claude reaches them. That command health-checks every
+server before it prints, so it gets up to 180 seconds; on a machine with many
+servers raise the limit with `OBSERVATORY_MCP_PROBE_TIMEOUT` (seconds, 1 to 3600),
+set in the shell that runs `tools/install_launchd.py install` so the scheduled tick carries it.
+A probe that still runs out of time is degraded, not failed: servers it reported
+keep their verdict and the rest are `not-probed`.
 
 ## Enter credentials locally
 
@@ -223,8 +234,13 @@ GitHub marketplace `passioncode-ai/project-observatory-dashboard`, installs
 Claude Code's user settings for the hooks. `full agent status` shows the
 installed and shipped versions and anything the hooks would miss; `full agent
 uninstall` reverses it. A directory-sourced marketplace from an earlier setup is
-replaced. Restart sessions after installing or updating: a running session may
-still hold older instructions. Installing the Python package inserts nothing
+replaced. When another channel already installs and enables the plugin under
+its own id (the PassionCode launcher installs `observatory-log@passioncode`),
+`install` leaves that copy alone, adds no second id (two copies would fire every
+hook twice) and writes only the hook environment; `status` names the managing
+channel, and `uninstall` keeps the environment that copy still reads. Restart
+sessions after installing or updating: a running session may still hold older
+instructions. Installing the Python package inserts nothing
 into any agent configuration; only this explicit command does.
 
 `observatory` (the short name of `project-observatory`) with no arguments opens the
