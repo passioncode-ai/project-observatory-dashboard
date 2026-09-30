@@ -369,7 +369,7 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "c5bf34d63ef038eb178ffc1b64abf613f746f8dcff8da3387d68ad27e89afcbe",
+      "export_sha256": "30ba3ddd77de545808e635345ce562279c44a3ac43fb4ec7fb6196ad29344a10",
       "bytes": 8477,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
@@ -672,7 +672,7 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "dc0ed26decbab43392a2a520392d643fd5ff86b8919c9a536b2138eb867dd28b",
+      "export_sha256": "b6439dd453805721a6b429006717464c145e16f874e6078aa8b56a49ea47ebd8",
       "bytes": 10148,
       "upstream_modified": true
     },
@@ -987,8 +987,8 @@
       "path": "interop.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "eddb5e68a9c8bcb47efaedab679c0e9cce7eab39d4d0e5d099f9ed428d8f3f32",
-      "bytes": 13243
+      "export_sha256": "cb2100ac4819defc66711ed4024cd9f71039835a3a54b6265b91c158095571e2",
+      "bytes": 14147
     },
     {
       "path": "jobs.py",
@@ -2164,8 +2164,8 @@
       "path": "tests/test_interop.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "acfdc49b5b33dbe7e8620979c0064fe5b8e899596682b5e79fed286721cd0e7f",
-      "bytes": 22155
+      "export_sha256": "180a696d0666e124d4295c888559607108ce454784089a8f736b6a9d3265024e",
+      "bytes": 22930
     },
     {
       "path": "tests/test_interpretation.py",

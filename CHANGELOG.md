@@ -3,6 +3,19 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.9.1 — 2026-09-30
+
+### Fixed
+
+- **Claude Code could not list any of the MCP server's tools in 0.9.0.** It refuses a whole
+  `tools/list` answer ("tools fetch failed — Handler returned an invalid result") when one
+  tool's `outputSchema` is not an object schema at its root, and two were rooted in `oneOf`:
+  `project.record`'s published v0.2.0 output schema and the job-tool union of
+  `machine.mcp.refresh`. Both are now served with `"type": "object"` added at the root; every
+  branch of both is an object, so they accept exactly what they did. A test holds every served
+  tool to an object-rooted input and output schema. Restart Claude Code sessions after the
+  update.
+
 ## 0.9.0 — 2026-09-30
 
 ### Added
