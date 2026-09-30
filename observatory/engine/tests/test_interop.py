@@ -177,13 +177,16 @@ class CapabilitiesAsTools(Workspace):
                 if job:
                     # DEC-0017 (OQ-0006): oneOf[result envelope, job handle], self-contained,
                     # exactly the contract's jobToolOutputSchema(output) — written out here.
-                    self.assertEqual(as_dict(tool.output_schema), {"oneOf": [
+                    self.assertEqual(as_dict(tool.output_schema), {"type": "object", "oneOf": [
                         {"type": "object", "required": ENVELOPE_REQUIRED,
                          "properties": {"output": bundled(cap["outputSchema"])}},
-                        JOB_HANDLE]}, "FAC-SEM-017 for a job tool")
+                        JOB_HANDLE]}, "FAC-SEM-017 for a job tool, object-rooted for MCP clients")
                 else:
-                    self.assertEqual(as_dict(tool.output_schema),
-                                     bundled(cap["outputSchema"]), "FAC-SEM-017: output schema is the published one")
+                    published = bundled(cap["outputSchema"])
+                    if published.get("type") != "object":
+                        published = {"type": "object", **published}
+                    self.assertEqual(as_dict(tool.output_schema), published,
+                                     "FAC-SEM-017: output schema is the published one, object-rooted")
                 ann = tool.annotations
                 if cap["effect"] == "none":
                     self.assertTrue(ann.read_only_hint)
@@ -192,6 +195,14 @@ class CapabilitiesAsTools(Workspace):
                     self.assertIs(ann.destructive_hint, cap["effect"] in {"delete", "merge", "deploy", "change-policy"})
         for name in ("fabric.job.get", "fabric.job.cancel", "observatory_status", "observatory_record"):
             self.assertIn(name, tools, "job tools beside the capabilities, and the old tools kept")
+        # What an MCP client requires of every tool: an object schema at the root of
+        # both schemas. Claude Code refuses the whole listing otherwise, so one tool
+        # rooted in `oneOf` made all eighteen unreachable in 0.9.0.
+        for name, tool in tools.items():
+            with self.subTest(tool=name):
+                self.assertEqual(as_dict(tool.input_schema).get("type"), "object")
+                if tool.output_schema is not None:
+                    self.assertEqual(as_dict(tool.output_schema).get("type"), "object")
 
     def test_the_vendored_contract_schemas_are_the_recorded_bytes(self):
         import hashlib

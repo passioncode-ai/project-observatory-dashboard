@@ -89,6 +89,15 @@ code (`@server.capability` handlers in `mcp/server.py`).
 
 ## Limits, stated
 
+- **Two served output schemas carry one keyword the published bytes do not.** MCP clients require
+  an object schema at the root of a tool's `outputSchema`; Claude Code 2.1.285 refuses the whole
+  tool list otherwise ("Handler returned an invalid result"), which made every tool unreachable
+  in 0.9.0. `project.record`'s v0.2.0 output schema and the DEC-0017 job-tool union are both
+  rooted in `oneOf`, so they are served with `"type": "object"` added at the root
+  (`interop.object_rooted`); every branch is an object, so the accepted values are unchanged. A
+  strict byte comparison under FAC-SEM-017 sees the added keyword; the contract's union needs
+  the same root to be usable by that client.
+
 - **C3.4 (c), trace ids on events: nothing to carry.** DEC-0017 (OQ-0007) rules that only an
   event about traced work carries `traceId`/`spanId`, and one about untraced work must not
   invent them. The feed is a view over commits, agent sessions and findings, none of which a

@@ -182,6 +182,20 @@ def mcp_capabilities(doc: Mapping[str, Any] | None = None) -> list[dict]:
     return [c for c in doc.get("capabilities", []) if (c.get("profile") or {}).get("kind") == "mcp"]
 
 
+def object_rooted(schema: dict) -> dict:
+    """The schema with `"type": "object"` at its root, added when it is missing.
+
+    MCP clients require a tool's `outputSchema` to be an object schema at the root:
+    Claude Code 2.1.285 refuses the whole `tools/list` answer ("tools fetch failed —
+    Handler returned an invalid result") when one tool's schema is rooted in `oneOf`,
+    and so every tool of the server becomes unreachable (measured 2026-09-30 on 0.9.0).
+    Two served schemas are such unions: `project.record`'s published v0.2.0 output and
+    the DEC-0017 job-tool union. Every branch of both is an object, so the added
+    keyword changes no value they accept; it is the one difference from the published
+    bytes, stated in docs/design/FABRIC-INTEROP.md and put to the contract."""
+    return schema if schema.get("type") == "object" else {"type": "object", **schema}
+
+
 def tool_definitions(doc: Mapping[str, Any] | None = None) -> list[dict]:
     """One MCP tool per `mcp` capability, with the capability's own schemas.
 
@@ -195,7 +209,7 @@ def tool_definitions(doc: Mapping[str, Any] | None = None) -> list[dict]:
             "name": cap["name"],
             "description": cap.get("description") or cap["name"],
             "inputSchema": bundled(cap["inputSchema"]),
-            "outputSchema": job_tool_output_schema(output) if is_job(cap) else output,
+            "outputSchema": object_rooted(job_tool_output_schema(output) if is_job(cap) else output),
             "annotations": annotations(cap),
             "meta": {INTEROP_KEY: {"capability": cap["id"], "effect": cap["effect"],
                                    **({"job": True} if is_job(cap) else {})}},
