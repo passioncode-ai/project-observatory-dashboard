@@ -3,6 +3,48 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.9.0 — 2026-09-30
+
+### Added
+
+- **`machine.mcp.inventory`**: every MCP server the agent configs on this machine declare —
+  Claude Code (user and project scopes, plugins, claude.ai connectors), Cursor, OpenCode,
+  Codex, Gemini CLI and Kiro — by name, with the configs that declare it, its transport
+  (`stdio`, `streamable-http`, `sse`) and whether it answered the last probe, and when. Names
+  and verdicts only: no URL, command line, header or environment value is read into it. An
+  absent or unreadable config and an inventory older than the tick allows are named in
+  `degraded`. Enable it with `full configure sources mcp_config_root "$HOME"` and
+  `full configure integrations mcp true` (#84).
+- **`fabric-interop/0.1`** on the MCP server: every Fabric capability is also a tool of its
+  own name — `estate.survey`, `project.detail`, `project.timeline`, `project.record`,
+  `machine.mcp.inventory`, `machine.mcp.refresh` — taking and returning exactly its
+  published schemas; `_meta.traceparent` continues as a child span; `machine.mcp.refresh`
+  takes a new inventory as a job followed with `fabric.job.get` and stopped with
+  `fabric.job.cancel`, whose result is the contract's full result envelope with its trace.
+  Built against fabric-agent-contract `9cd778e` (DEC-0017) and fabric-agent-adapter 0.5.0,
+  whose kit and conformance probe are vendored. The ten `observatory_*` tools are
+  unchanged (#85). Design and limits: `docs/design/FABRIC-INTEROP.md`.
+- `tools/serverd.py --install` writes a per-install manifest (this interpreter, the server,
+  the workspace) and the service descriptor points at it; the server keeps it current after
+  an update. `mcp/server.py` accepts `--home PATH`.
+- The README quick start registers the MCP server with Claude Code (`claude mcp add …`).
+
+### Changed
+
+- The Fabric manifest is revision 7 (profile 1.2.0). The v0.2.0 schema identifiers are
+  unchanged; the new schemas are published at `v0.9.0`, and the contract lock pins each file
+  to the release that publishes it.
+
+### Fixed
+
+- **A URL's `user:password@` part reached the MCP scan file.** Only the query string was
+  dropped; the user-info now is too, and it counts as a key in the URL.
+- `observatory_status` skipped the value check for a `scope` object: `{"scope": {"kind":
+  "owner"}}` surveyed the whole estate instead of answering `missing value`.
+- `publish_contract.py --local-manifest` named the virtual environment's base interpreter
+  (resolved through its symbolic link), so the server it described could not import its
+  packages.
+
 ## 0.8.2 — 2026-09-29
 
 ### Changed
