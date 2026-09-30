@@ -49,13 +49,13 @@ On this branch, Python 3.14, a fresh virtual environment with `'.[full]'` from t
   (PolyForm SPDX in the manifests, non-AGPL LICENSE, missing commercial licence). Green after the
   change.
 - `python -m unittest discover -s tests`: 81 tests, OK, exit 0.
-- `project-observatory full check`: see the PR; result recorded below.
+- `project-observatory full check`: 196 suites, status PASS (`synthetic-offline`), exit 0.
 - `python -m compileall -q observatory`, `python tools/update_inventory.py --check`,
   `pip wheel` + `python tools/check_package.py` (483 archive files, 0 failures; METADATA carries
   `License-Expression: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial` and both license files),
   `claude plugin validate --strict` on the three plugin roots, `docs/site/check.py --self-test`,
   `tools/build_article.py --check`, `node tools/check_site_interactions.cjs`: each exit 0.
-- `python tools/check_public_release.py --history --history-ref HEAD`: see below.
+- `python tools/check_public_release.py --history --history-ref HEAD`: passed, 599 files and 1968 history blobs, 0 findings, exit 0; `compileall` on Python 3.11: exit 0.
 - org-index `scripts/check_format.py --offline --repo project-observatory-dashboard` in a scratch
   layout of sibling clones: 6 findings on `main` (F2 F4 F5 F7 F8 F11) → 0 on this branch.
 
