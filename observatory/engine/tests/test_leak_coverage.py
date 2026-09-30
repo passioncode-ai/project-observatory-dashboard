@@ -19,7 +19,10 @@ import scan_env  # noqa: E402
 import scan_leaks as L  # noqa: E402
 
 SECRET = "synthetic-value-" + "d" * 24
-TODAY = datetime.date.today()
+# The scanner judges expiry against the UTC date (scan_leaks.py), so the fixtures
+# must too: a local date runs a day ahead between local and UTC midnight east of
+# Greenwich, and "expired yesterday" was then still valid today.
+TODAY = datetime.datetime.now(datetime.timezone.utc).date()
 
 
 class Coverage(unittest.TestCase):
