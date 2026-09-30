@@ -33,6 +33,26 @@ project-observatory full doctor
 
 Use an existing directory you own in place of `$HOME/projects`. The first run needs no provider credentials. An agent can guide the setup: give it the [onboarding prompt](docs/AGENT-ONBOARDING.md), or run `project-observatory full onboard`.
 
+### Drive it over MCP
+
+The engine's MCP server speaks stdio. Declare it to Claude Code for your user, with the same `OBSERVATORY_HOME` (the virtual environment still active):
+
+```sh
+claude mcp add observatory --scope user -e OBSERVATORY_HOME="$OBSERVATORY_HOME" -- \
+  "$(python -c 'import sys; print(sys.executable)')" "$(project-observatory full-path)/mcp/server.py"
+claude mcp list | grep observatory     # observatory: … - ✔ Connected
+```
+
+Restart open Claude Code sessions; they read their MCP servers at start. Every answer carries a `degraded` list naming what could not be read. To let `machine.mcp.inventory` list the MCP servers your agents declare (Claude Code, Cursor, OpenCode, Codex, Gemini CLI, Kiro — names and transports only, never a URL, header or key), point the scan at your home and take one:
+
+```sh
+project-observatory full configure sources mcp_config_root "$HOME"
+project-observatory full configure integrations mcp true
+project-observatory full scan-mcp
+```
+
+Other agents take the same command line; [connect an agent](docs/ONBOARDING.md#connect-an-agent) has the details.
+
 ### Open the dashboard
 
 ```sh

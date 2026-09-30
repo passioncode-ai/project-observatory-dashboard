@@ -6,16 +6,26 @@
 WHY. The gateway that used to hold every MCP declaration in one place was
 switched off on 2026-09-14; declarations now live in each agent's own config
 (`~/.claude.json` and its project scopes, `~/.cursor/mcp.json`,
-`~/.config/opencode/opencode.json`) plus the plugins Claude Code ships. Nothing
+`~/.config/opencode/opencode.json`, `~/.codex/config.toml`, `~/.gemini/settings.json`,
+`~/.kiro/settings/mcp.json`) plus the plugins Claude Code ships. Nothing
 tracked them, so a server declared in one agent and not another, a server that
 had stopped answering, or a token sitting in a URL were all invisible until a
 session failed. The operator's rule: MCP works without the gateway AND is
              
 
 WHAT IS NEVER WRITTEN. A URL is recorded as scheme+host+path with its QUERY
-STRING DROPPED, and a header or env block as a boolean — `claude mcp list`
+STRING and its USER-INFO (`user:password@`) DROPPED, arguments as a count, and a
+header or env block as a boolean — `claude mcp list`
 itself echoes `?token=…` verbatim, which is how one reached a transcript today.
 This file reports THAT a key is in a URL (a finding) and never the key.
+
+EVERY SOURCE IS ACCOUNTED FOR. `sources` records each config as `read`, `absent`
+or `unreadable` (with the error's kind, never its message, which can quote the
+line it failed on). An unreadable one also degrades the scan; an absent one does
+not, since a machine without Cursor is not a partial scan — but
+`machine.mcp.inventory` names both to its caller. Each declaration carries `wire`,
+the MCP transport (stdio, streamable-http, sse) in the agent's own convention,
+beside the older two-value `transport` the registry keeps.
 
 Liveness comes from Claude Code's own probe (`claude mcp list`), parsed for the
 servers this scan knows; Cursor and opencode have no equivalent probe, so their
@@ -48,11 +58,25 @@ import paths  # per-user configuration and private state
 import atomic                                                       # noqa: E402
 
 HOME = paths.source_path("mcp_config_root", paths.HOME / "disabled/mcp")
-SOURCES = {
-    "claude": HOME / ".claude.json",
-    "cursor": HOME / ".cursor/mcp.json",
-    "opencode": HOME / ".config/opencode/opencode.json",
+#: Where each agent keeps its user-level MCP declarations, relative to the home the
+#: workspace names. The key is the agent as this scan (and the registry ids built
+#: from it) has always spelled it; `mcp_inventory.AGENT_KINDS` maps it to the
+#: runner-catalogue kind a host joins on.
+AGENT_FILES = {
+    "claude": ".claude.json",
+    "cursor": ".cursor/mcp.json",
+    "opencode": ".config/opencode/opencode.json",
+    "codex": ".codex/config.toml",
+    "gemini": ".gemini/settings.json",
+    "kiro": ".kiro/settings/mcp.json",
 }
+
+
+def sources_for(home: pathlib.Path) -> dict[str, pathlib.Path]:
+    return {agent: home / rel for agent, rel in AGENT_FILES.items()}
+
+
+SOURCES = sources_for(HOME)
 #: The observatory's own server, which must be declared somewhere or its nine
 #: tools are unreachable (credentials audit G14).
 OWN_SERVER = "observatory"
@@ -84,17 +108,67 @@ def now() -> str:
 
 
 def safe_url(url: str) -> tuple[str, bool]:
-    """(url without its query, whether a query was present)."""
+    """(url without its query and without any user:password, whether either was present).
+
+    The user-info part of a URL is a credential exactly as a query string is:
+    a URL of the form `https://user:<password>` + `@host/mcp` reached this file intact until 2026-09-30,
+    because only the query was dropped."""
     try:
         s = urlsplit(url)
+        host = s.hostname or ""
+        port = s.port
     except ValueError:
-        return url.split("?")[0], "?" in url
-    return urlunsplit((s.scheme, s.netloc, s.path, "", "")), bool(s.query)
+        # Unparseable: keep only the scheme rather than guess which part of the
+        # rest is safe to show, and count it as keyed — the safe side.
+        scheme = url.split("://", 1)[0] if "://" in url else ""
+        return (scheme + "://…" if scheme.isalpha() else "…"), True
+    netloc = f"[{host}]" if ":" in host else host
+    if port:
+        netloc += f":{port}"
+    keyed = bool(s.query) or s.username is not None or s.password is not None
+    return urlunsplit((s.scheme, netloc, s.path, "", "")), keyed
 
 
-def classify(name: str, cfg: dict) -> dict:
-    """One declaration -> the facts a registry can hold. No values."""
-    url = cfg.get("url") or ""
+#: The `type` spellings the six agents use, mapped to the three MCP transports.
+WIRE_BY_TYPE = {
+    "stdio": "stdio", "local": "stdio",
+    "http": "streamable-http", "streamable-http": "streamable-http",
+    "streamablehttp": "streamable-http", "remote": "streamable-http",
+    "sse": "sse",
+}
+
+
+def wire_of(agent: str, cfg: dict) -> str | None:
+    """The MCP transport a declaration uses: stdio, streamable-http or sse.
+
+    An explicit `type` wins. Otherwise each agent's own convention decides: Gemini
+    CLI reads `httpUrl` as streamable HTTP and a bare `url` as SSE; every other
+    agent here treats a bare `url` as streamable HTTP (Cursor and opencode fall
+    back to SSE on their own, which is the client's negotiation, not the
+    declaration). A `command` is stdio."""
+    declared = str(cfg.get("type") or "").strip().lower()
+    if declared in WIRE_BY_TYPE:
+        return WIRE_BY_TYPE[declared]
+    if agent == "gemini":
+        if cfg.get("httpUrl"):
+            return "streamable-http"
+        if cfg.get("url"):
+            return "sse"
+    if cfg.get("url") or cfg.get("httpUrl"):
+        return "streamable-http"
+    if cfg.get("command"):
+        return "stdio"
+    return None
+
+
+def classify(name: str, cfg: dict, agent: str = "claude") -> dict:
+    """One declaration -> the facts a registry can hold. No values.
+
+    Only names and booleans leave this function: the URL loses its query and its
+    user-info, a header block and an environment block become "is there a key",
+    and arguments become a count. That is the whole redaction, and it happens
+    here, at the reader, so nothing downstream ever holds a value to leak."""
+    url = cfg.get("url") or cfg.get("httpUrl") or ""
     cmd = cfg.get("command") or ""
     # opencode spells a stdio server as `command: ["npx", "-y", …]`; Claude and
     # Cursor as `command` + `args`. One shape here: the executable, then args.
@@ -102,50 +176,112 @@ def classify(name: str, cfg: dict) -> dict:
     if isinstance(cmd, list):
         extra_args = [str(a) for a in cmd[1:]]
         cmd = str(cmd[0]) if cmd else ""
+    cmd = str(cmd)
     transport = (cfg.get("type") or ("http" if url else "stdio")).lower()
     if transport in ("remote", "sse", "streamable-http"):
         transport = "http"
-    target, key_in_url = (safe_url(url) if url else (pathlib.Path(cmd).name if cmd else "", False))
-    headers = cfg.get("headers") or {}
-    keyed_header = any(k.lower() in ("authorization", "x-api-key", "x-observatory-token")
-                       or "key" in k.lower() or "token" in k.lower() for k in headers)
-    env = cfg.get("env") or {}
-    keyed_env = any(re.search(r"(KEY|TOKEN|SECRET|PASS)", k, re.I) for k in env)
+    if transport == "local":
+        transport = "stdio"
+    target, key_in_url = (safe_url(str(url)) if url else (pathlib.Path(cmd).name if cmd else "", False))
+    # Codex keeps static headers in `http_headers`, headers filled from the
+    # environment in `env_http_headers`, and a bearer token's VARIABLE NAME in
+    # `bearer_token_env_var`; any of them means the key travels in a header.
+    headers = {**(cfg.get("headers") if isinstance(cfg.get("headers"), dict) else {}),
+               **(cfg.get("http_headers") if isinstance(cfg.get("http_headers"), dict) else {}),
+               **(cfg.get("env_http_headers") if isinstance(cfg.get("env_http_headers"), dict) else {})}
+    keyed_header = bool(cfg.get("bearer_token_env_var")) or any(
+        k.lower() in ("authorization", "x-api-key", "x-observatory-token")
+        or "key" in k.lower() or "token" in k.lower() for k in map(str, headers))
+    # opencode names its block `environment`; the others `env`.
+    env = {**(cfg.get("env") if isinstance(cfg.get("env"), dict) else {}),
+           **(cfg.get("environment") if isinstance(cfg.get("environment"), dict) else {})}
+    keyed_env = any(re.search(r"(KEY|TOKEN|SECRET|PASS)", str(k), re.I) for k in env)
     args = extra_args + [str(a) for a in (cfg.get("args") or [])]
     return {
-        "name": name, "transport": transport, "target": target,
+        "name": name, "transport": transport, "wire": wire_of(agent, cfg), "target": target,
         "command": pathlib.Path(cmd).name if cmd else None,
         "args_count": len(args),
         "key_in_url": key_in_url,
         "key_in_header": keyed_header, "key_in_env": keyed_env,
         "command_present": (bool(shutil.which(cmd) or pathlib.Path(cmd).is_file())
                             if cmd else None),
+        # Switched off in its own config: opencode `enabled: false`, Codex
+        # `enabled = false`, Kiro and Gemini `disabled: true`.
+        "disabled": cfg.get("enabled") is False or cfg.get("disabled") is True,
     }
 
 
-def read_declarations() -> list[dict]:
+def _tilde(path: pathlib.Path | str, home: pathlib.Path) -> str:
+    """A path under the scanned home, spelled `~/…`, so no absolute home reaches a file."""
+    text, root = str(path), str(home)
+    if text == root:
+        return "~"
+    return "~/" + text[len(root):].lstrip("/") if text.startswith(root.rstrip("/") + "/") else text
+
+
+def _load(agent: str, path: pathlib.Path) -> dict:
+    if path.suffix == ".toml":
+        import tomllib
+        with path.open("rb") as fh:
+            return tomllib.load(fh)
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _table(agent: str, doc: dict) -> dict:
+    if agent == "opencode":
+        table = doc.get("mcp")
+    elif agent == "codex":
+        table = doc.get("mcp_servers")
+    else:
+        table = doc.get("mcpServers")
+    return table if isinstance(table, dict) else {}
+
+
+def read_sources(home: pathlib.Path | None = None) -> tuple[list[dict], list[dict]]:
+    """(declarations, sources): every server each agent's config names, and what
+    became of each config file — `read`, `absent` or `unreadable`.
+
+    A file that is missing or does not parse is RECORDED, never skipped in
+    silence: an inventory that quietly lacks one agent reads as that agent
+    declaring nothing. The reason names the error's kind only; a parser's message
+    can quote the line it choked on, and that line can be a key."""
+    home = HOME if home is None else home
     rows: list[dict] = []
-    for agent, path in SOURCES.items():
+    sources: list[dict] = []
+    for agent, path in sources_for(home).items():
+        shown = _tilde(path, home)
         if not path.is_file():
+            sources.append({"agent": agent, "file": shown, "state": "absent"})
             continue
         try:
-            doc = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            rows.append({"agent": agent, "name": None, "error": f"{type(exc).__name__}"})
+            doc = _load(agent, path)
+            if not isinstance(doc, dict):
+                raise ValueError("not an object")
+        except (OSError, ValueError) as exc:     # JSONDecodeError and TOMLDecodeError are ValueErrors
+            reason = f"unreadable: {type(exc).__name__}"
+            sources.append({"agent": agent, "file": shown, "state": "unreadable", "reason": reason})
+            rows.append({"agent": agent, "name": None, "error": type(exc).__name__, "declared_in": shown})
             continue
-        table = doc.get("mcpServers") if agent != "opencode" else doc.get("mcp")
-        for name, cfg in (table or {}).items():
+        sources.append({"agent": agent, "file": shown, "state": "read"})
+        for name, cfg in _table(agent, doc).items():
             if isinstance(cfg, dict):
-                rows.append({**classify(name, cfg), "agent": agent, "scope": "user",
-                             "declared_in": str(path).replace(str(HOME), "~")})
+                rows.append({**classify(str(name), cfg, agent), "agent": agent, "scope": "user",
+                             "declared_in": shown})
         if agent == "claude":
             for proj, pcfg in (doc.get("projects") or {}).items():
+                if not isinstance(pcfg, dict):
+                    continue
                 for name, cfg in (pcfg.get("mcpServers") or {}).items():
                     if isinstance(cfg, dict):
-                        rows.append({**classify(name, cfg), "agent": agent,
-                                     "scope": f"project:{proj.replace(str(HOME), '~')}",
-                                     "declared_in": "~/.claude.json#projects"})
-    return rows
+                        rows.append({**classify(str(name), cfg, agent), "agent": agent,
+                                     "scope": f"project:{_tilde(proj, home)}",
+                                     "declared_in": f"{shown}#projects"})
+    return rows, sources
+
+
+def read_declarations() -> list[dict]:
+    """The declarations alone, for callers that predate `read_sources`."""
+    return read_sources()[0]
 
 
 # `plugin:<plugin>:<server>: https://… - ✔ Connected` — the name itself holds
@@ -176,8 +312,24 @@ def parse_probe(text: str) -> dict[str, dict]:
         elif name.startswith("claude.ai "):
             plugin, name = "claude.ai", name[len("claude.ai "):]
         out[name] = {"status": status, "plugin": plugin,
-                     "detail": m.group("status").strip()[:60]}
+                     "detail": m.group("status").strip()[:60],
+                     "wire": probe_wire(m.group("target"))}
     return out
+
+
+def probe_wire(target: str) -> str:
+    """The transport a `claude mcp list` line shows, read and then thrown away.
+
+    The CLI prints a remote server as `<url> (HTTP)` or `<url> (SSE)` and a stdio
+    one as its command line. Only the transport is kept: the target itself can
+    carry `?token=…` or a `--api-key` argument, which is exactly what must not
+    reach a file."""
+    t = target.strip()
+    if t.endswith("(SSE)"):
+        return "sse"
+    if t.endswith("(HTTP)") or re.match(r"^https?://", t):
+        return "streamable-http"
+    return "stdio"
 
 
 def claude_probe(timeout: float | None = None) -> tuple[dict[str, dict], str | None, bool]:
@@ -220,6 +372,48 @@ def attribute_liveness(rows: list[dict], probe: dict[str, dict], complete: bool)
             r["liveness"] = "not-probed"
 
 
+def scan(home: pathlib.Path | None = None, probe=None) -> dict:
+    """The whole scan as one document: declarations, liveness, sources, degraded.
+
+    `probe` is the liveness source, `claude_probe` unless a caller hands in its
+    own (the tests do, so no suite ever runs the real CLI)."""
+    home = HOME if home is None else home
+    rows, sources = read_sources(home)
+    note = None
+    if probe is None:
+        timeout, note = probe_timeout()
+        probe = lambda: claude_probe(timeout)                      # noqa: E731
+    heard, why, complete = probe()
+    degraded = [{"source": PROBE_TIMEOUT_ENV, "reason": note}] if note else []
+    degraded += [{"source": "claude mcp list", "reason": why}] if why else []
+    # An unreadable config is a hole in the inventory, so it degrades the scan. An
+    # ABSENT one does not: it is an agent that is not set up here, and a service
+    # reporting itself degraded for every agent a machine lacks would never be
+    # healthy. It is still recorded in `sources`, and `machine.mcp.inventory`
+    # names it to its caller.
+    degraded += [{"source": f"{s['agent']}:{s['file']}", "reason": s["reason"]}
+                 for s in sources if s["state"] == "unreadable"]
+    attribute_liveness(rows, heard, complete)
+    # Servers Claude reaches that no config here declares: plugin-shipped and
+    # claude.ai connectors. Recorded as their own rows so the inventory is the
+    # whole picture, never a subset that looks whole.
+    declared = {r["name"] for r in rows if r.get("name")}
+    for name, pr in heard.items():
+        if name not in declared and pr["plugin"]:
+            rows.append({"name": name, "agent": "claude",
+                         "scope": f"plugin:{pr['plugin']}" if pr["plugin"] != "claude.ai" else "claude.ai",
+                         "declared_in": "plugin" if pr["plugin"] != "claude.ai" else "claude.ai connector",
+                         "transport": None, "wire": pr.get("wire"), "target": None, "command": None,
+                         "args_count": 0, "key_in_url": False, "key_in_header": False,
+                         "key_in_env": False, "command_present": None, "disabled": False,
+                         "liveness": pr["status"], "liveness_detail": pr["detail"]})
+    rows.sort(key=lambda r: (r.get("agent") or "", r.get("name") or ""))
+    return {"scanned_at": now(), "servers": rows, "sources": sources,
+            "own_server": OWN_SERVER,
+            "own_declared": any(r.get("name") == OWN_SERVER for r in rows),
+            "degraded": degraded}
+
+
 def main(argv: list[str]) -> int:
     import configuration
     if not configuration.enabled("mcp"):
@@ -228,30 +422,9 @@ def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(__doc__, file=sys.stderr)
         return 2
-    rows = read_declarations()
-    timeout, note = probe_timeout()
-    probe, why, complete = claude_probe(timeout)
-    degraded = [{"source": PROBE_TIMEOUT_ENV, "reason": note}] if note else []
-    degraded += [{"source": "claude mcp list", "reason": why}] if why else []
-    attribute_liveness(rows, probe, complete)
-    # Servers Claude reaches that no config here declares: plugin-shipped and
-    # claude.ai connectors. Recorded as their own rows so the inventory is the
-    # whole picture, never a subset that looks whole.
-    declared = {r["name"] for r in rows if r.get("name")}
-    for name, pr in probe.items():
-        if name not in declared and pr["plugin"]:
-            rows.append({"name": name, "agent": "claude",
-                         "scope": f"plugin:{pr['plugin']}" if pr["plugin"] != "claude.ai" else "claude.ai",
-                         "declared_in": "plugin" if pr["plugin"] != "claude.ai" else "claude.ai connector",
-                         "transport": None, "target": None, "command": None, "args_count": 0,
-                         "key_in_url": False, "key_in_header": False, "key_in_env": False,
-                         "command_present": None,
-                         "liveness": pr["status"], "liveness_detail": pr["detail"]})
-    rows.sort(key=lambda r: (r.get("agent") or "", r.get("name") or ""))
-    atomic.write_json(argv[1], {"scanned_at": now(), "servers": rows,
-                                "own_server": OWN_SERVER,
-                                "own_declared": any(r.get("name") == OWN_SERVER for r in rows),
-                                "degraded": degraded})
+    doc = scan()
+    rows, degraded = doc["servers"], doc["degraded"]
+    atomic.write_json(argv[1], doc)
     by = {}
     for r in rows:
         by[r.get("liveness", "?")] = by.get(r.get("liveness", "?"), 0) + 1

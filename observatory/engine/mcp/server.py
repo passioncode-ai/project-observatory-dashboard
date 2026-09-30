@@ -11,7 +11,7 @@ revision and cannot satisfy the manifest, which pins the revision as a schema
 None of that is reconstructed here — the SDK owns the wire, and this file owns
 the tools.
 
-Eight tools read. Two write, and they write only PROPOSALS: `observatory_record`
+Nine tools read. Two write, and they write only PROPOSALS: `observatory_record`
 appends to the append-only ledger in state `proposed`, and
 `observatory_propose` queues a registry change without touching
 `registry/*.json`. Neither can approve its own proposal, and neither invents a
@@ -30,6 +30,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from pydantic import AliasChoices, Field                                                        
 from mcp.server import MCPServer                                                  
+from mcp.types import ToolAnnotations
 
 import paths                                                                      
 import proposals                                                                  
@@ -51,7 +52,7 @@ server = MCPServer(
     # served and two of them write — and the gateway's own comment repeated the
     # same claim in Russian.
     instructions=(
-        "Eight tools read and two write.\n"
+        "Nine tools read and two write.\n"
         "READ: `observatory_status` surveys the current scope; a requested scan pin "
         "is reported as unsupported in degraded. `observatory_project` answers about "
         "one project; `observatory_timeline` returns its commit history; "
@@ -64,7 +65,10 @@ server = MCPServer(
         "opening the file, because a transcript outlives the key it quotes; "
         "`observatory_machine` shows what runs by origin, memory, disk, idle worktrees "
         "and branches and the cleanup plan, and with `explainPid` why one process "
-        "runs — never its environment or full command line.\n"
+        "runs — never its environment or full command line; `machine.mcp.inventory` lists "
+        "every MCP server the agent configs on this machine declare, by name, with where "
+        "each is declared, its transport and whether it answered the last probe — never a "
+        "URL, command line, header or environment value.\n"
         "WRITE: `observatory_record` and `observatory_propose` append to the ledger. "
         "Everything they write lands `proposed` with confidence below 1 and NOTHING "
         "here can promote it — that is the operator's act or a second independent "
@@ -271,6 +275,24 @@ def observatory_machine(
     """
     import machine_view
     return machine_view.summary(explainPid)
+
+
+@server.tool(name="machine.mcp.inventory",
+             annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True))
+def machine_mcp_inventory() -> dict[str, Any]:
+    """Every MCP server this machine's agent configs declare — by name, never by value.
+
+    This is the `machine.mcp.inventory` capability declared in fabric-agent.json,
+    and the tool carries the capability's name. It answers from the last
+    inventory the observatory took (the tick takes one every run):
+    Claude Code (user and project scopes, plugins, claude.ai connectors), Cursor,
+    OpenCode, Codex, Gemini CLI and Kiro. Each server says which configs declare
+    it, its transport (stdio, streamable-http, sse) and whether it answered the
+    last probe, with that probe's time. An absent or unreadable config, and an
+    inventory older than the tick allows, are named in `degraded`.
+    """
+    import mcp_inventory
+    return mcp_inventory.inventory()
 
 
 @server.tool()

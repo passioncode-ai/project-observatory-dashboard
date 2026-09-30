@@ -238,12 +238,13 @@ def test_the_ceiling_message_does_not_blame_the_wrong_spender() -> None:
 
 def test_the_served_instructions_describe_the_served_surface() -> None:
     src = (ROOT / "mcp/server.py").read_text(encoding="utf-8")
-    tools = src.count("@server.tool()")
-    # TEN SINCE `observatory_machine` (nine since `observatory_credentials`). The count is asserted
+    tools = src.count("@server.tool(")
+    # ELEVEN SINCE `machine.mcp.inventory` (ten since `observatory_machine`, nine since
+    # `observatory_credentials`). The count is asserted
     # rather than the names because the instructions below are what an LLM client
     # reads to decide what to call, and a tool that exists while the string says
     # otherwise is the drift this test was written for.
-    check("the server serves ten tools", tools == 10, str(tools))
+    check("the server serves eleven tools", tools == 11, str(tools))
     block = src.split("instructions=(", 1)[1].split("),", 1)[0]
     check("the instructions no longer claim read-only", "Read-only" not in block)
     check("they state that two tools write", "WRITE:" in block)

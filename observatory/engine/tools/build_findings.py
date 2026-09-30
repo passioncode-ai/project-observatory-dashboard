@@ -2521,7 +2521,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "mcp.own_unregistered", "subject": "estate:mcp", "severity": "warning",
                 "title": "the observatory's own MCP server is declared in no agent",
-                "detail": ("`mcp/server.py` serves ten tools — recall, credentials by "
+                "detail": ("`mcp/server.py` serves eleven tools — recall, credentials by "
                            "name, proposals — and none of them is reachable until an "
                            "agent's config names the server (credentials audit G14)."),
                 "action": mcp_registration_command(),

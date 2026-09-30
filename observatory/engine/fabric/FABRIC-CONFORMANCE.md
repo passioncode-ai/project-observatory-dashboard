@@ -2,9 +2,20 @@
 
 Project Observatory publishes a self-contained local MCP profile at
 https://github.com/ssheleg/project-observatory-open-source. The provider manifest
-is revision 5. `fabric-contract.lock.json` selects profile `observatory-local-mcp`
-version `1.0.0` and schema release `v0.2.0`; `fabric-agent.json` retains contract
-version `0.1.0`. These are separate version axes.
+is revision 6. `fabric-contract.lock.json` selects profile `observatory-local-mcp`
+version `1.1.0`; `fabric-agent.json` retains contract version `0.1.0`. These are
+separate version axes.
+
+**Two schema releases, one pin per file.** The lock's `releases` lists, for every
+bundled schema and fixture, the one release tag that published it: the first eight
+schemas and six fixtures at `v0.2.0`, under the repository's address at the time
+(`ssheleg/project-observatory-open-source`, which GitHub redirects), and the
+`machine.mcp.inventory` schemas and fixture at `v0.9.0`, under
+`passioncode-ai/project-observatory-dashboard`. Published identifiers are never
+rewritten, so a capability added later is pinned to the release that adds it
+instead of moving the old ones. `tools/publish_contract.py --local` refuses a file
+listed under no release or under two, a URI no release publishes, and a schema
+whose `$id` is not its own pinned address.
 
 This profile preserves existing MCP tool names, input aliases and JSON schema
 field shapes. External Fabric host admission is **unverified**. The repository
@@ -20,10 +31,35 @@ The capability definitions and effects come from `../fabric-agent.json`:
 | `project.detail` | `none` | `observatory_project` |
 | `project.timeline` | `none` | `observatory_timeline` |
 | `project.record` | `draft` | `observatory_record`, `observatory_propose`, `observatory_recall` |
+| `machine.mcp.inventory` | `none` | `machine.mcp.inventory` |
 
 The full server also exposes `observatory_credentials`, `observatory_search`,
-`observatory_findings` and `observatory_machine`: ten tools in total, defined in
+`observatory_findings` and `observatory_machine`: eleven tools in total, defined in
 `../mcp/server.py`.
+
+## `machine.mcp.inventory` and contract C6
+
+The Fabric agent-registry contracts (locked 2026-09-29, section C6) fix the answer as
+`{servers: [{name, declaredIn: [{agent, file}], transport, answers, checkedAt}],
+inventoryAt}`. The observatory serves exactly those fields and adds, all optional to a
+reader of C6:
+
+| Addition | Why |
+|---|---|
+| `degraded` | every observatory answer carries one: an absent or unreadable agent config, a probe that did not finish, and an inventory older than the tick's staleness bound are named there |
+| `sources` | each agent config read, with `read`, `absent` or `unreadable`, so a host can say how complete the list is |
+| `servers[].status`, `declaredIn[].status` | `connected`, `needs-auth`, `failed`, `not-listed`, `not-probed`, `disabled`: `answers` alone cannot tell "asked to sign in" from "up", or "switched off" from "never probed" |
+| `declaredIn[].scope`, `declaredIn[].disabled` | a Claude Code project scope, plugin or claude.ai connector, and a server switched off in its own config |
+
+Choices C6 leaves open, stated: `agent` is the runner-catalogue kind (`claude-code`,
+`cursor-agent`, `opencode`, `codex`, `gemini-cli`, `kiro`); `file` is home-relative
+(`~/.claude.json`) and null for a server a plugin or connector ships; servers are
+grouped by name and transport, so one name declared with two transports is two rows;
+`needs-auth` counts as `answers: true` (the server answered, asking for
+authorization); `checkedAt` is the probe's time and null when nothing probed the
+server; `transport` is null only when neither the declaration nor a probe line said.
+Liveness comes from Claude Code's own probe, so a server only another agent declares
+answers `null`. Project-scoped `.mcp.json` files inside repositories are not read.
 Credential inventory returns names and metadata, not stored values. Recording
 and proposal tools write private local memory; they do not authorize provider
 changes or deployment.

@@ -2,8 +2,8 @@
   "contractVersion": "0.1.0",
   "provider": {
     "id": "https://github.com/ssheleg/project-observatory-open-source",
-    "revision": 5,
-    "contentHash": "sha256:cfab02755023d998700fe99654a295a674ab50ea15ea3b9d8a0167a3700925fa",
+    "revision": 6,
+    "contentHash": "sha256:dceb6c1ac5f7d303b8d89e4016e9a1f57b74b83e053890df8c62bc6db2cb17e7",
     "createdAt": "2026-09-03T13:22:35Z",
     "createdBy": "https://github.com/ssheleg",
     "name": "Project Observatory",
@@ -225,6 +225,49 @@
           }
         ]
       }
+    },
+    {
+      "id": "https://github.com/ssheleg/project-observatory-open-source/capabilities/machine.mcp.inventory",
+      "name": "machine.mcp.inventory",
+      "inputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.9.0/observatory/engine/fabric/schemas/mcp-inventory-input.schema.json",
+      "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.9.0/observatory/engine/fabric/schemas/mcp-inventory-output.schema.json",
+      "effect": "none",
+      "idempotency": "supported",
+      "dataClasses": [
+        "project-internal"
+      ],
+      "profile": {
+        "kind": "mcp",
+        "protocolRevision": "2026-07-28",
+        "connection": {
+          "mode": "stdio",
+          "executableRef": "observatory-install:mcp-server",
+          "args": [
+            "--stdio"
+          ]
+        },
+        "requiredFeatures": [
+          "tool:machine.mcp.inventory"
+        ],
+        "probes": [
+          {
+            "id": "mcp-inventory-names-and-degrades",
+            "description": "A bounded probe against an explicitly selected synthetic fixture workspace, which takes no inventory of its own.",
+            "inputFixture": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.9.0/observatory/engine/fabric/fixtures/mcp-inventory-input.json",
+            "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.9.0/observatory/engine/fabric/schemas/mcp-inventory-output.schema.json",
+            "timeoutMs": 30000,
+            "sideEffectCeiling": "none",
+            "assertions": [
+              "result validates against mcp-inventory-output.schema.json",
+              "degraded is present, even when empty",
+              "a server row carries only name, declaredIn, transport, answers, status and checkedAt",
+              "an empty server list always comes with a degraded row saying why",
+              "registry git status and ledger max revision are unchanged after the call"
+            ]
+          }
+        ]
+      },
+      "description": "Every MCP server the agent configs on this machine declare (Claude Code user and project scopes and its plugins, Cursor, OpenCode, Codex, Gemini CLI, Kiro), by name, with the configs that declare it, its transport and whether it answered the last probe, and when. Names and verdicts only: no URL, command line, header or environment value is read into the answer. Read from the last inventory the observatory took; an absent or unreadable config, and an inventory older than the tick allows, are named in degraded."
     }
   ]
 }

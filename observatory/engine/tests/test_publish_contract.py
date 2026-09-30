@@ -58,8 +58,39 @@ def test_the_bundled_contract_is_consistent() -> None:
     failures = pc.local_failures()
     check("the shipped manifest, hash, URIs and schema ids agree", failures == [], str(failures)[:300])
     uris = pc.manifest_uris()
-    check("every manifest URI names the pinned schema release",
-          bool(uris) and all(u.startswith(pc.PREFIX) for u in uris), str(uris)[:200])
+    check("every manifest URI names a file of one pinned schema release",
+          bool(uris) and all(pc.resolve(u) in pc.staged() for u in uris), str(uris)[:200])
+    old = [u for u in uris if u.startswith(pc.PREFIX)]
+    check("the v0.2.0 identifiers keep their published address",
+          len(old) >= 14 and all("/ssheleg/project-observatory-open-source/v0.2.0/" in u for u in old),
+          f"{len(old)} of {len(uris)}")
+
+
+def test_each_bundled_file_belongs_to_exactly_one_release() -> None:
+    pc = load()
+    files = pc.staged()
+    check("the shipped lock places every bundled file in one release", pc.release_failures(files) == [],
+          str(pc.release_failures(files))[:300])
+    lock = json.loads(json.dumps(pc.LOCK))
+    was = pc.LOCK
+    try:
+        moved = lock["releases"][1]["files"][0]
+        lock["releases"][0]["files"].append(moved)
+        pc.LOCK = lock
+        got = pc.release_failures(files)
+        check("a file listed under two releases is refused", any("2 releases" in f for f in got), str(got)[:200])
+        lock = json.loads(json.dumps(was))
+        lock["releases"][1]["files"].pop()
+        pc.LOCK = lock
+        got = pc.release_failures(files)
+        check("a bundled file no release publishes is refused", any("0 releases" in f for f in got), str(got)[:200])
+        lock = json.loads(json.dumps(was))
+        lock["releases"][1]["release"] = "next"
+        pc.LOCK = lock
+        got = pc.release_failures(files)
+        check("a release that is not a version tag is refused", any("version tag" in f for f in got), str(got)[:200])
+    finally:
+        pc.LOCK = was
 
 
 def _with_manifest(pc, doc: dict) -> list[str]:
@@ -156,6 +187,7 @@ if __name__ == "__main__":
     print("the wire contract — bundled, consistent, and never published from here\n")
     for fn in (test_the_publishable_set_is_stated_once_and_is_the_contract_surface,
                test_the_bundled_contract_is_consistent,
+               test_each_bundled_file_belongs_to_exactly_one_release,
                test_a_drifted_manifest_is_refused,
                test_publishing_is_refused_and_the_local_copy_stays_private):
         fn()
