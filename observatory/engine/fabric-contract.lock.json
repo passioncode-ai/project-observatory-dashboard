@@ -1,6 +1,6 @@
 {
   "profile": "observatory-local-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "schemaRelease": "v0.2.0",
   "repository": "https://github.com/ssheleg/project-observatory-open-source",
   "schemas": [
@@ -11,7 +11,40 @@
     "fabric/schemas/project-timeline-input.schema.json",
     "fabric/schemas/project-timeline-output.schema.json",
     "fabric/schemas/record-input.schema.json",
-    "fabric/schemas/record-output.schema.json"
+    "fabric/schemas/record-output.schema.json",
+    "fabric/schemas/mcp-inventory-input.schema.json",
+    "fabric/schemas/mcp-inventory-output.schema.json"
+  ],
+  "releases": [
+    {
+      "release": "v0.2.0",
+      "repository": "ssheleg/project-observatory-open-source",
+      "files": [
+        "fixtures/admission-input.json",
+        "fixtures/degradation-input.json",
+        "fixtures/name-inference-input.json",
+        "fixtures/project-detail-input.json",
+        "fixtures/project-timeline-input.json",
+        "fixtures/record-input.json",
+        "schemas/capability-input.schema.json",
+        "schemas/capability-output.schema.json",
+        "schemas/project-detail-input.schema.json",
+        "schemas/project-detail-output.schema.json",
+        "schemas/project-timeline-input.schema.json",
+        "schemas/project-timeline-output.schema.json",
+        "schemas/record-input.schema.json",
+        "schemas/record-output.schema.json"
+      ]
+    },
+    {
+      "release": "v0.9.0",
+      "repository": "passioncode-ai/project-observatory-dashboard",
+      "files": [
+        "fixtures/mcp-inventory-input.json",
+        "schemas/mcp-inventory-input.schema.json",
+        "schemas/mcp-inventory-output.schema.json"
+      ]
+    }
   ],
   "externalHostAdmission": "unverified",
   "compatibility": "Existing MCP tool names and JSON schema field shapes are retained. This is a local profile, not external conformance certification."

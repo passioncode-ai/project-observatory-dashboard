@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.9.0/observatory/engine/fabric/schemas/mcp-inventory-input.schema.json",
+  "title": "machine.mcp.inventory — input",
+  "description": "No arguments: the answer is the last inventory the observatory took, with its time.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {}
+}

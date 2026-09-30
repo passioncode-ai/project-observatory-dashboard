@@ -71,7 +71,7 @@ a referer are labels at most.
 
 - **Local users are trusted.** Any process running as the operator's user can read the token file.
   The model separates this machine from the web, not one local process from another.
-- **The MCP server has no per-tool scope.** An agent that can start it can call all ten tools. Its
+- **The MCP server has no per-tool scope.** An agent that can start it can call all eleven tools. Its
   writes are bounded by rule 5, not by who the agent is.
 - **The dashboard server's GET data is visible to any local process.** It holds names and verdicts,
   never values (`tools/check_secrets.py` enforces this on every gate run).

@@ -88,7 +88,7 @@ and token provisioning are different permissions.
 | `heroku` | Hosting inventory | Local authentication for the intended Heroku account |
 | `google` | Analytics property and search inventory | The user's service account files and resource grants |
 | `domains` | Domain observations | Explicit domain export and network access |
-| `mcp` | Configured server inventory | Explicit `sources.mcp_config_root` |
+| `mcp` | The MCP servers the agent configs on this machine declare (Claude Code, Cursor, OpenCode, Codex, Gemini CLI, Kiro), served as `machine.mcp.inventory` | Explicit `sources.mcp_config_root` |
 | `sessions` | Local agent activity | Explicit `sources.sessions` |
 | `wiki` | Knowledge-base inventory | Explicit `sources.wiki` |
 | `openrouter` | Key and usage inventory | A locally supplied provider credential |

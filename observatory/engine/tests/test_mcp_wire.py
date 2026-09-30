@@ -31,7 +31,8 @@ STARTUP_BUDGET_SECONDS = float(os.environ.get("OBSERVATORY_MCP_STARTUP_BUDGET", 
 _mcp_session.DISCOVER_TIMEOUT_SECONDS = max(_mcp_session.DISCOVER_TIMEOUT_SECONDS, STARTUP_BUDGET_SECONDS)                                                        
 
 REQUIRED = ["observatory_status", "observatory_project", "observatory_timeline",
-            "observatory_recall", "observatory_record", "observatory_propose"]
+            "observatory_recall", "observatory_record", "observatory_propose",
+            "machine.mcp.inventory"]
 FAILURES: list[str] = []
 
 
@@ -112,6 +113,20 @@ async def run() -> None:
             check("timeline: an empty store degrades honestly rather than returning silence",
                   data["events"] == [] and
                   any("empty" in d["reason"] for d in data["degraded"]), str(data)[:160])
+
+            # The MCP inventory: this synthetic workspace takes none, so the answer
+            # must be empty AND say why — never an empty list that reads as "no servers".
+            inv_tool = next(t for t in listed.tools if t.name == "machine.mcp.inventory")
+            check("inventory: the tool is read-only", bool(inv_tool.annotations and inv_tool.annotations.read_only_hint))
+            res = await session.call_tool("machine.mcp.inventory", {})
+            data = payload(res)
+            import jsonschema
+            schema = json.loads((ROOT / "fabric/schemas/mcp-inventory-output.schema.json").read_text())
+            errors = [e.message for e in jsonschema.Draft202012Validator(schema).iter_errors(data)]
+            check("inventory: the answer validates against its published schema", not errors, str(errors)[:160])
+            check("inventory: no scan means an empty list with a reason",
+                  data["servers"] == [] and data["inventoryAt"] is None and bool(data["degraded"]),
+                  str(data)[:160])
 
             res = await session.call_tool("observatory_status", {"kind": "owner"})
             data = payload(res)

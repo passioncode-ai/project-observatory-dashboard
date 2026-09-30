@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.9.0/observatory/engine/fabric/schemas/mcp-inventory-output.schema.json",
+  "title": "machine.mcp.inventory — output",
+  "description": "Every MCP server an agent config on this machine declares, by name, with where it is declared, its transport and whether it answered the last probe. Names, file locations and verdicts only: no URL, command line, header, argument or environment value is part of this shape, and none is ever read into it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "servers",
+    "inventoryAt",
+    "degraded"
+  ],
+  "properties": {
+    "servers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/server"
+      }
+    },
+    "inventoryAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "When the inventory was taken. Null when this machine has never been scanned; `degraded` then says why."
+    },
+    "sources": {
+      "type": "array",
+      "description": "Every agent config this inventory reads, and what became of it.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "agent",
+          "file",
+          "state"
+        ],
+        "properties": {
+          "agent": {
+            "$ref": "#/$defs/agent"
+          },
+          "file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "enum": [
+              "read",
+              "absent",
+              "unreadable"
+            ]
+          }
+        }
+      }
+    },
+    "degraded": {
+      "type": "array",
+      "description": "Every source that could not be read, or was read but is out of date. An empty list asserts full coverage.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "reason"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "agent": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}$",
+      "description": "The runner-catalogue kind of the agent whose config declares the server: claude-code, cursor-agent, opencode, codex, gemini-cli, kiro."
+    },
+    "status": {
+      "enum": [
+        "connected",
+        "needs-auth",
+        "failed",
+        "not-listed",
+        "not-probed",
+        "disabled"
+      ],
+      "description": "connected / needs-auth / failed: the verdict of the agent's own probe. not-listed: the probe ran completely and this server was not among what it loaded. not-probed: no probe covers this declaration. disabled: switched off in its own config."
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "declaredIn",
+        "transport",
+        "answers",
+        "checkedAt"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "declaredIn": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "agent",
+              "file"
+            ],
+            "properties": {
+              "agent": {
+                "$ref": "#/$defs/agent"
+              },
+              "file": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The config file, home-relative (`~/…`). Null for a server a Claude Code plugin or a claude.ai connector ships, which no config file on this machine declares."
+              },
+              "scope": {
+                "type": "string",
+                "description": "user, project:<path>, plugin:<plugin> or claude.ai."
+              },
+              "status": {
+                "$ref": "#/$defs/status"
+              },
+              "disabled": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "transport": {
+          "enum": [
+            "stdio",
+            "streamable-http",
+            "sse",
+            null
+          ],
+          "description": "Null only when no declaration says and no probe line showed it."
+        },
+        "answers": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "true: the server answered the last probe (needs-auth counts: it answered, asking for authorization). false: it did not. null: nothing probed it."
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "checkedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "description": "When `answers` was measured; null when it was not."
+        }
+      }
+    }
+  }
+}

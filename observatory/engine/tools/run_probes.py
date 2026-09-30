@@ -27,10 +27,10 @@ CAPS = MANIFEST["capabilities"]
 
 def source_of(uri: str) -> pathlib.Path:
     """Resolve only this release's allowlisted bundled schemas and fixtures."""
-    from publish_contract import PREFIX, staged
-    if not uri.startswith(PREFIX):
-        raise AssertionError("Probe URI does not belong to this bundled release")
-    relative = uri[len(PREFIX):]
+    from publish_contract import resolve, staged
+    relative = resolve(uri)
+    if relative is None:
+        raise AssertionError("Probe URI does not belong to a bundled release")
     if relative not in staged():
         raise AssertionError("Probe URI is outside the bundled allowlist")
     return ROOT / "fabric" / relative
@@ -320,6 +320,38 @@ def assess_timeline(data: dict, OUT_SCHEMA: dict) -> list[dict]:
     return a
 
 
+#: The only fields an inventory server row may carry. A row with anything else
+#: is carrying something the capability does not publish, which is how a URL or
+#: a header value would travel.
+MCP_SERVER_FIELDS = {"name", "declaredIn", "transport", "answers", "status", "checkedAt"}
+
+
+def assess_mcp_inventory(data: dict, OUT_SCHEMA: dict) -> list[dict]:
+    """`machine.mcp.inventory` — names and verdicts only, and coverage named."""
+    a: list[dict] = []
+
+    def say(text: str, ok: bool, note: str = "") -> None:
+        a.append({"assertion": text, "verdict": "PASS" if ok else "FAIL", "note": note})
+
+    clean = {k: v for k, v in data.items() if not k.startswith("_")}
+    try:
+        jsonschema.validate(clean, OUT_SCHEMA)
+        schema_ok, schema_note = True, ""
+    except jsonschema.ValidationError as exc:
+        schema_ok, schema_note = False, str(exc).splitlines()[0][:180]
+    say("result validates against mcp-inventory-output.schema.json", schema_ok, schema_note)
+    say("degraded is present, even when empty", isinstance(clean.get("degraded"), list),
+        str(type(clean.get("degraded")).__name__))
+    servers = clean.get("servers") or []
+    extra = sorted({k for s in servers for k in s} - MCP_SERVER_FIELDS)
+    say("a server row carries only name, declaredIn, transport, answers, status and checkedAt",
+        not extra, f"{len(servers)} server(s); unexpected fields: {extra}")
+    say("an empty server list always comes with a degraded row saying why",
+        bool(servers) or bool(clean.get("degraded")),
+        f"{len(servers)} server(s), {len(clean.get('degraded') or [])} degraded row(s)")
+    return a
+
+
 def assess(pid: str, data: dict, OUT_SCHEMA: dict, requested: dict | None = None) -> list[dict]:
     """One verdict per declared assertion, in declaration order."""
     a: list[dict] = []
@@ -517,6 +549,7 @@ async def run_write_capability(cap: dict) -> tuple[list[dict], str]:
 READ_ASSESSORS = {
     "detail-carries-every-section": assess_detail,
     "timeline-answers-in-camel-case-with-parsed-payloads": assess_timeline,
+    "mcp-inventory-names-and-degrades": assess_mcp_inventory,
 }
 
 
@@ -581,6 +614,8 @@ async def run() -> dict:
             "contractCommit": lock.get("commit"),
             "localProfile": lock.get("profile"),
             "schemaRelease": lock.get("schemaRelease"),
+            "schemaReleases": [r.get("release") for r in lock.get("releases", [])]
+                              or [lock.get("schemaRelease")],
             "externalHostAdmission": "unverified",
             "providerRevision": MANIFEST["provider"].get("revision"),
             "probes": receipts}

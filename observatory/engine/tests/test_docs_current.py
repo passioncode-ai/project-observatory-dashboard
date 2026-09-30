@@ -283,11 +283,12 @@ def test_rule4_reads_the_probes_where_they_actually_live() -> None:
     at_top = sum(len(c.get("probes") or []) for c in m["capabilities"])
     in_profile = sum(len((c.get("profile") or {}).get("probes") or [])
                      for c in m["capabilities"])
-    # SIX: `estate.survey`'s three required tools were split into three
-    # capabilities because two of them could not satisfy one output schema.
+    # SEVEN: six since `estate.survey`'s three required tools were split into three
+    # capabilities because two of them could not satisfy one output schema, and
+    # the seventh is `machine.mcp.inventory`'s.
     # The literal is deliberate — a probe added without being published fails.
     check("the manifest keeps probes under profile, not at the top",
-          at_top == 0 and in_profile == 6, f"top={at_top} profile={in_profile}")
+          at_top == 0 and in_profile == 7, f"top={at_top} profile={in_profile}")
     src = (ROOT / "tools/check_docs.py").read_text(encoding="utf-8")
     check("the rule reads them there", '(cap.get("profile") or {}).get("probes"' in src)
     check("and refuses an empty set rather than calling it agreement",

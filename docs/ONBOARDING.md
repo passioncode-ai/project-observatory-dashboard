@@ -106,7 +106,7 @@ and token provisioning are different permissions.
 | `heroku` | Hosting inventory | Local authentication for the intended Heroku account |
 | `google` | Analytics property and search inventory | The user's service account files and resource grants |
 | `domains` | Domain observations | Explicit domain export and network access |
-| `mcp` | Configured server inventory | Explicit `sources.mcp_config_root` |
+| `mcp` | The MCP servers the agent configs on this machine declare (Claude Code, Cursor, OpenCode, Codex, Gemini CLI, Kiro), served as `machine.mcp.inventory` | Explicit `sources.mcp_config_root` |
 | `sessions` | Local agent activity | Explicit `sources.sessions` and `sources.companion_db` |
 | `wiki` | Knowledge-base inventory | Explicit `sources.wiki` |
 | `openrouter` | Key and usage inventory | A locally supplied provider credential |
@@ -140,8 +140,13 @@ nothing rather than failing. Each row carries two exact commands: `fix`
 | `domain_export` | a registrar's domain CSV export | `domains` integration |
 | `secrets` | overrides where the workspace keeps its own credential files | provider tools |
 
-The `mcp` integration reads the declarations from the agent configs and asks
-`claude mcp list` whether Claude reaches them. That command health-checks every
+The `mcp` integration reads the declarations from the agent configs under
+`mcp_config_root` — `~/.claude.json` (user and project scopes), `~/.cursor/mcp.json`,
+`~/.config/opencode/opencode.json`, `~/.codex/config.toml`, `~/.gemini/settings.json`
+and `~/.kiro/settings/mcp.json` — for names, transports and whether a key is present,
+never a value, and asks `claude mcp list` whether Claude reaches them. A config that is
+absent or does not parse is recorded as such, and the `machine.mcp.inventory` MCP tool
+names it in `degraded`. That command health-checks every
 server before it prints, so it gets up to 180 seconds; on a machine with many
 servers raise the limit with `OBSERVATORY_MCP_PROBE_TIMEOUT` (seconds, 1 to 3600),
 set in the shell that runs `tools/install_launchd.py install` so the scheduled tick carries it.
