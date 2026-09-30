@@ -1989,8 +1989,8 @@
     {
       "path": "tests/test_events.py",
       "source_sha256": "7d0f05229f1bdbefe750d5cb9b668669a85cc3b2eefc08aa7ccbe29ad7c3a465",
-      "export_sha256": "08ced4d6a3b0d0273fb17d76bfd9905f15dc097b6ffdebba10865050c96ba530",
-      "bytes": 10707,
+      "export_sha256": "393060c1460a98514361c2580328f86a68484516eb359f3493d5cd240385e570",
+      "bytes": 10713,
       "python_comments_removed": 22,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
@@ -2730,8 +2730,8 @@
       "path": "tests/test_shared_ancestry.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "80b9e22f87d45d92b4ca4b8e534361d9b08e8eadafbf44ce183b14edbec5d04d",
-      "bytes": 7159
+      "export_sha256": "3ff65bb8963eafc079e8d99456c787b1badb943ab5755cbb0250560e41ff47ee",
+      "bytes": 7171
     },
     {
       "path": "tests/test_side_effect_attribution.py",
