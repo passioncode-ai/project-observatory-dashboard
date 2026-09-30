@@ -118,6 +118,15 @@ its own slot. When a preset's groups are unknown, `cloudflare.py groups
 --account <slug> --match "<words>"` lists the catalogue's names and levels,
 read-only and without ids.
 
+A Fabric Inbox server's own token is `--preset fabric-inbox-server --account
+<slug> --vault <project>/<env>/<NAME>`; a token for one more account whose
+domains that server reads is `--preset fabric-inbox-account` issued from THAT
+account. Each carries the product's own permission list as two policies —
+account-level groups on the account, zone-level groups (Zone Read, Email
+Routing Rules, Zone Settings, DNS Write) on every zone of that account only —
+is verified by listing the account's Workers, and is named after its slot.
+The other-account token makes no storage and no sign-in there.
+
 By default, slots live under the private workspace's `secrets/projects/`.
 An explicitly configured `sources.secret_store` or `OBSERVATORY_VAULT_DIR`
 can select a separate private store. Such external stores are excluded from
