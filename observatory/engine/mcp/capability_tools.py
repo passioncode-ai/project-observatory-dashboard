@@ -47,18 +47,26 @@ class Answer:
 
 Handler = Callable[[dict, interop.Span], "Answer | dict"]
 
+#: `fabric.job.get` / `fabric.job.cancel` arguments and answer, inline and
+#: self-contained — the shapes of the contract's `interop-job-request.schema.json`
+#: and `interop-job.schema.json` (tests validate real answers against those files).
+JOB_ID = {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"}
 JOB_INPUT = {"type": "object", "additionalProperties": False, "required": ["id"],
-             "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 128}}}
-JOB_STATUS = {"enum": list(jobs.STATES)}
+             "properties": {"id": JOB_ID, "inputResponses": {"type": "object"}}}
 JOB_OUTPUT = {
     "type": "object", "additionalProperties": False, "required": ["job"],
     "properties": {"job": {
         "type": "object", "additionalProperties": False, "required": ["id", "status", "updatedAt"],
-        "properties": {"id": {"type": "string"}, "status": JOB_STATUS,
-                       "statusMessage": {"type": "string"}, "updatedAt": {"type": "string"},
-                       "pollIntervalMs": {"type": "integer", "minimum": 1},
-                       "inputRequests": {"type": "object"}, "result": interop.ENVELOPE_SCHEMA,
-                       "error": {"type": "object"}}}}}
+        "properties": {"id": JOB_ID, "status": {"enum": list(jobs.STATES)},
+                       "statusMessage": {"type": "string", "maxLength": 500},
+                       "updatedAt": {"type": "string", "format": "date-time"},
+                       "pollIntervalMs": {"type": "integer", "minimum": 100, "maximum": 3600000},
+                       "inputRequests": {"type": "object"},
+                       "result": {"type": "object", "required": list(interop.ENVELOPE_REQUIRED)},
+                       "error": {"type": "object", "required": ["code", "message"],
+                                 "properties": {"code": {"type": ["integer", "string"]},
+                                                "message": {"type": "string", "minLength": 1},
+                                                "data": True}}}}}}
 
 
 def _text(value: Any) -> TextContent:
@@ -163,6 +171,14 @@ class InteropServer(MCPServer):
         if interop.is_job(cap):
             doc, joined = await anyio.to_thread.run_sync(lambda: jobs.start(name, span.record()))
             handle = {"job": {"id": doc["id"], "status": doc["status"]}}
+            if doc["status"] != "working":
+                # The runner could not start: the handle would lie about a job that
+                # is already over, so the answer is the job's own error.
+                return _error((doc.get("error") or {}).get("code") or "job-failed",
+                              (doc.get("error") or {}).get("message") or "the job did not start", span)
+            bad = _first_error(out_v, handle) if out_v is not None else None
+            if bad:
+                return _error("output-schema-violation", bad, span)
             notes = (["a job of this capability was already running; this is its handle"]
                      if joined else [])
             job_span = interop.Span.from_record(doc["trace"]) if doc.get("trace") else span

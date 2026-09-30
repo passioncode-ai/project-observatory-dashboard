@@ -44,7 +44,7 @@ the two job tools that is eighteen tools, all defined through `../mcp/server.py`
 The Fabric agent-registry contracts (locked 2026-09-29, section C3) define how agents
 are called through Fabric's hub. The manifest declares the extension
 (`provider.extensions["https://fabric.passioncode.ai/agent-contract/extensions/interop/0.1"] = {}`),
-and the server keeps its rules; each is proved in `../tests/test_interop.py` (13 cases)
+and the server keeps its rules; each is proved in `../tests/test_interop.py` (14 cases)
 and `../tests/test_mcp_wire.py`, and the reading behind each choice is in the
 repository's [interop design](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/FABRIC-INTEROP.md):
 
@@ -56,12 +56,18 @@ repository's [interop design](https://github.com/passioncode-ai/project-observat
   `destructiveHint: false` explicitly, since MCP defaults it to true.
 - **C3.2** `machine.mcp.refresh` declares `"job": true` and answers
   `{"job": {"id", "status": "working"}}`; `fabric.job.get` and `fabric.job.cancel`
-  answer `{"job": {id, status, statusMessage?, updatedAt, pollIntervalMs?, result?,
-  error?}}`. Its tool publishes no `outputSchema` (a handle is not the output) and names
-  the result's output schema in its `_meta`. MCP Tasks are not offered.
+  answer the contract's `interop-job.schema.json`. Its tool's `outputSchema` is the
+  DEC-0017 union `oneOf[result envelope, job handle]` around the capability's output
+  schema; the result is the full result envelope with `output`, `usage` and `trace`.
+  MCP Tasks are not offered.
 - **C3.4** a request's `_meta.traceparent` becomes a child span; every answer carries
-  its span back in `_meta.traceparent` (and `tracestate`), answers about a job carry the
-  job's, and a job hands a child span to the process it runs as `TRACEPARENT`.
+  its span back in `_meta.traceparent` (and `tracestate`); answers about a job carry the
+  job's, equal to the envelope's `trace` (FAC-SEM-022); a job hands a child span to the
+  process it runs as `TRACEPARENT`. No event on the feed is about traced work, so none
+  carries a trace pair (DEC-0017, OQ-0007).
+
+The contract schemas these answers are validated against are vendored in
+`interop-schemas/` from fabric-agent-contract commit `9cd778eb6f14` (DEC-0017).
 
 ## Per-install manifest
 

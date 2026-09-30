@@ -555,13 +555,12 @@ async def probe_refresh_job(session, cap: dict, args: dict, out_schema: dict) ->
     say("fabric.job.get reaches completed within the probe timeout", job.get("status") == "completed",
         f"status={job.get('status')} error={job.get('error')}")
     result = job.get("result") or {}
-    problems = []
-    for schema, value, what in ((interop.ENVELOPE_SCHEMA, result, "envelope"),
-                                (out_schema, result.get("output"), "output")):
-        try:
-            jsonschema.validate(value, schema)
-        except jsonschema.ValidationError as exc:
-            problems.append(f"{what}: {str(exc).splitlines()[0][:140]}")
+    problems = [f"job answer: {e.message[:140]}" for e in
+                interop.contract_validator("interop-job.schema.json").iter_errors({"job": job})][:3]
+    try:
+        jsonschema.validate(result.get("output"), out_schema)
+    except jsonschema.ValidationError as exc:
+        problems.append(f"output: {str(exc).splitlines()[0][:140]}")
     say("the completed result is an envelope whose output validates against mcp-inventory-output.schema.json",
         bool(result) and not problems, "; ".join(problems))
     stranger = await session.call_tool(interop.JOB_GET, {"id": "job-" + "0" * 32})

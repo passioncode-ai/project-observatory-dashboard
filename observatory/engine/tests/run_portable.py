@@ -107,7 +107,7 @@ HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
            'dashboard_fixture.py', 'emitter_fixture.py', 'session_fixture.py', 'surface_fixture.py',
            'env_tab_check.js', 'action_outcome_check.mjs',
-           'own_project.py', 'tick_reader.py', 'validator_fixture.py', 'check_service.py', 'mcp_config_fixture.py',
+           'own_project.py', 'tick_reader.py', 'validator_fixture.py', 'check_service.py', 'fabric_interop.py', 'mcp_config_fixture.py',
     # Merged from the parallel port streams.
     'concurrency.py', 'merge_fixture.py', 'probe_fixture.py',
 )
@@ -157,6 +157,7 @@ def copy_source(target: Path) -> None:
     selected |= {ROOT / 'tests' / name for name in HELPERS}
     selected.add(ROOT / 'plugins/README.md')
     selected.add(ROOT / 'fabric/FABRIC-CONFORMANCE.md')
+    selected.add(ROOT / 'fabric/interop-schemas/README.md')
     selected.add(ROOT / 'store/schema.sql')
     # The documentation suite checks the engine's own shipped docs.
     selected |= set((ROOT / 'docs').glob('*.md'))
@@ -166,6 +167,7 @@ def copy_source(target: Path) -> None:
                      and '__pycache__' not in p.parts}
     # The dashboard's catalogs and the vendored brand manifest are data it reads.
     for folder in ('defaults', 'plugins', 'fabric/fixtures', 'fabric/schemas', 'fabric/service-schemas',
+                   'fabric/interop-schemas',
                    'dashboard/locales', 'dashboard/brand'):
         selected |= set((ROOT / folder).glob('*.json'))
     for source in sorted(selected):

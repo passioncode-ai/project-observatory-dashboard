@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/interop-request-meta.schema.json",
+  "title": "fabric-interop/0.1 request _meta (trace context)",
+  "type": "object",
+  "required": [
+    "traceparent"
+  ],
+  "properties": {
+    "traceparent": {
+      "$ref": "interop-common.schema.json#/$defs/traceparent"
+    },
+    "tracestate": {
+      "$ref": "interop-common.schema.json#/$defs/tracestate"
+    },
+    "baggage": {
+      "type": "string",
+      "maxLength": 8192
+    }
+  },
+  "additionalProperties": true
+}

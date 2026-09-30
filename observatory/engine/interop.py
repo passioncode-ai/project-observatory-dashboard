@@ -185,29 +185,60 @@ def mcp_capabilities(doc: Mapping[str, Any] | None = None) -> list[dict]:
 def tool_definitions(doc: Mapping[str, Any] | None = None) -> list[dict]:
     """One MCP tool per `mcp` capability, with the capability's own schemas.
 
-    A job capability's tool answers with a job handle, which its output schema
-    does not describe, so its tool publishes no `outputSchema` and names where the
-    RESULT's output is described instead — in the tool's `_meta`, under the
-    interop key. A client that validates structured content against an
-    `outputSchema` would otherwise reject every job handle."""
+    A job capability's tool answers with a job handle (or, had it finished at once,
+    the result envelope), so its `outputSchema` is the contract's union around the
+    capability's output schema (DEC-0017, OQ-0006): what it returns always conforms."""
     tools = []
     for cap in mcp_capabilities(doc):
-        tool: dict[str, Any] = {
+        output = bundled(cap["outputSchema"])
+        tools.append({
             "name": cap["name"],
             "description": cap.get("description") or cap["name"],
             "inputSchema": bundled(cap["inputSchema"]),
+            "outputSchema": job_tool_output_schema(output) if is_job(cap) else output,
             "annotations": annotations(cap),
             "meta": {INTEROP_KEY: {"capability": cap["id"], "effect": cap["effect"],
-                                   **({"job": True, "resultOutputSchema": cap["outputSchema"]}
-                                      if is_job(cap) else {})}},
-        }
-        if not is_job(cap):
-            tool["outputSchema"] = bundled(cap["outputSchema"])
-        tools.append(tool)
+                                   **({"job": True} if is_job(cap) else {})}},
+        })
     return tools
 
 
 # ─────────────────────────── C3.2 the result envelope ───────────────────────────
+
+CONTRACT_VERSION = "0.1.0"
+#: The vendored contract schemas (fabric-agent-contract, DEC-0017), for validation.
+CONTRACT_SCHEMAS = ROOT / "fabric" / "interop-schemas"
+#: What the contract's result envelope requires of a job result (DEC-0017, OQ-0002):
+#: the full `result.schema.json` plus `output` and `usage`.
+ENVELOPE_REQUIRED = ["id", "contractVersion", "outcome", "done", "proof", "scope", "notVerified",
+                     "artifacts", "createdAt", "producer", "output", "usage"]
+#: The job handle, inline — the shape of the contract's `interop-job-handle.schema.json`.
+JOB_HANDLE_SCHEMA: dict[str, Any] = {
+    "type": "object", "required": ["job"], "additionalProperties": False,
+    "properties": {"job": {"type": "object", "required": ["id", "status"], "additionalProperties": False,
+                           "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 128,
+                                                 "pattern": "^[A-Za-z0-9._:-]+$"},
+                                          "status": {"const": "working"}}}}}
+
+
+def job_tool_output_schema(output: Any) -> dict:
+    """DEC-0017 (OQ-0006): a job-backed tool's `outputSchema` is the self-contained union
+    `oneOf[result envelope, job handle]`, so its structured content always conforms. The
+    exact shape of the contract's `jobToolOutputSchema(output)`; the manifest's capability
+    keeps the pure output schema."""
+    return {"oneOf": [{"type": "object", "required": list(ENVELOPE_REQUIRED), "properties": {"output": output}},
+                      JOB_HANDLE_SCHEMA]}
+
+
+def contract_validator(name: str):
+    """A validator for one vendored contract schema, its `$ref`s resolved locally (never fetched)."""
+    import jsonschema
+    from referencing import Registry, Resource
+    docs = {p.name: json.loads(p.read_text(encoding="utf-8")) for p in CONTRACT_SCHEMAS.glob("*.schema.json")}
+    registry = Registry().with_resources([(d["$id"], Resource.from_contents(d)) for d in docs.values()])
+    return jsonschema.Draft202012Validator(docs[name], registry=registry,
+                                           format_checker=jsonschema.FormatChecker())
+
 
 def producer(doc: Mapping[str, Any] | None = None) -> dict:
     """The DEC-0011 `revisionRef` of this provider: id, revision, content hash."""
@@ -216,56 +247,33 @@ def producer(doc: Mapping[str, Any] | None = None) -> dict:
     return {"id": p["id"], "revision": p["revision"], "contentHash": p["contentHash"]}
 
 
-#: The result envelope as this agent emits it: contract C3.2 with the DEC-0011
-#: item shapes of the Fabric Agent Contract's `result.schema.json` (0.1.0) for
-#: `done`, `proof` and `notVerified`. `scope` is narrowed to what a callee knows.
-#: Kept here until the contract publishes its own interop schemas (AR-1.1).
-ENVELOPE_SCHEMA: dict[str, Any] = {
-    "type": "object", "additionalProperties": False,
-    "required": ["done", "proof", "scope", "notVerified", "output", "usage"],
-    "properties": {
-        "done": {"type": "array", "items": {
-            "type": "object", "additionalProperties": False, "required": ["claimId", "statement"],
-            "properties": {"claimId": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]{1,63}$"},
-                           "statement": {"type": "string", "minLength": 1}}}},
-        "proof": {"type": "array", "items": {
-            "type": "object", "additionalProperties": False,
-            "required": ["claimIds", "kind", "uri", "producer", "capturedAt", "classification"],
-            "properties": {
-                "claimIds": {"type": "array", "minItems": 1, "uniqueItems": True, "items": {"type": "string"}},
-                "kind": {"type": "string", "pattern": "^[a-z][a-z0-9./-]+$"},
-                "uri": {"type": "string", "minLength": 1},
-                "producer": {"type": "object", "additionalProperties": False,
-                             "required": ["id", "revision", "contentHash"],
-                             "properties": {"id": {"type": "string"}, "revision": {"type": "integer", "minimum": 1},
-                                            "contentHash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}},
-                "capturedAt": {"type": "string"},
-                "classification": {"enum": ["public", "project-internal", "confidential", "personal",
-                                            "credential", "regulated"]}}}},
-        "scope": {"type": "object", "additionalProperties": False, "required": ["writeScopes"],
-                  "properties": {"writeScopes": {"type": "array", "uniqueItems": True,
-                                                 "items": {"type": "string", "minLength": 1}}}},
-        "notVerified": {"type": "array", "items": {
-            "type": "object", "additionalProperties": False, "required": ["claim", "reason"],
-            "properties": {"claim": {"type": "string", "minLength": 1},
-                           "reason": {"type": "string", "minLength": 1}}}},
-        "output": {},
-        "usage": {"type": "object", "additionalProperties": False,
-                  "required": ["inputTokens", "outputTokens", "wallMs"],
-                  "properties": {k: {"type": "integer", "minimum": 0} for k in
-                                 ("inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "wallMs")}
-                  | {"costUsd": {"type": "number", "minimum": 0}}}}}
+def envelope(*, job_id: str, capability: str, span: Span, output: Any, done: list[dict], proof: list[dict],
+             not_verified: list[dict], write_scopes: list[str], wall_ms: int, created_at: str) -> dict:
+    """The full result envelope a job result is (C3.2; DEC-0017 OQ-0002, OQ-0003).
 
+    `trace` is the job's span and is authoritative for the stored result: every
+    answer about the job carries the same traceparent in `_meta` (FAC-SEM-022).
 
-def envelope(*, output: Any, done: list[dict], proof: list[dict], not_verified: list[dict],
-             write_scopes: list[str], wall_ms: int) -> dict:
-    """The result envelope of C3.2.
-
-    `scope` carries only `writeScopes`: the project, run, node and binding of the
-    contract's result envelope are the HOST's identifiers, which a tool call does
-    not hand the provider — inventing them would be a claim about someone else's
-    run. No model runs in the observatory's jobs, so every token count is zero,
-    stated rather than omitted."""
-    return {"done": done, "proof": proof, "scope": {"writeScopes": write_scopes},
-            "notVerified": not_verified, "output": output,
-            "usage": {"inputTokens": 0, "outputTokens": 0, "wallMs": int(wall_ms)}}
+    `scope` names the observatory's own identifiers. The contract requires the
+    project, run, node and binding, but those are the HOST's, and a tool call does
+    not hand them to the provider; so the envelope says what the observatory knows
+    — the subject it observed (this machine), this job as the run, the capability
+    as the node, this provider revision as the binding — each under a URN a host
+    cannot mistake for one of its own. `outcome` is `partial` when something is not
+    verified (a degraded source), `succeeded` otherwise. No model runs in these
+    jobs, so every token count is zero, stated rather than omitted."""
+    me = producer()
+    body: dict[str, Any] = {
+        "id": f"urn:observatory:result:{job_id}",
+        "contractVersion": CONTRACT_VERSION,
+        "outcome": "partial" if not_verified else "succeeded",
+        "done": done, "proof": proof,
+        "scope": {"project": "urn:observatory:subject:machine", "run": f"urn:observatory:job:{job_id}",
+                  "node": f"urn:observatory:capability:{capability}", "binding": me,
+                  "writeScopes": write_scopes},
+        "notVerified": not_verified, "artifacts": [], "createdAt": created_at, "producer": me,
+        "output": output,
+        "usage": {"inputTokens": 0, "outputTokens": 0, "wallMs": int(wall_ms)},
+        "trace": {"traceparent": span.traceparent, **({"tracestate": span.tracestate} if span.tracestate else {})},
+    }
+    return body

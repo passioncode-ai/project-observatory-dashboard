@@ -73,8 +73,10 @@ def refresh(job: dict) -> dict:
                       "classification": "project-internal"})
     not_verified = [{"claim": f"{d['source']} is covered", "reason": d["reason"]}
                     for d in answer.get("degraded", [])]
-    return interop.envelope(output=answer, done=done, proof=proof, not_verified=not_verified,
-                            write_scopes=["observatory:store/raw/mcp.json"], wall_ms=wall_ms)
+    return interop.envelope(job_id=job["id"], capability=job["capability"], span=span, output=answer,
+                            done=done, proof=proof, not_verified=not_verified,
+                            write_scopes=["observatory:store/raw/mcp.json"], wall_ms=wall_ms,
+                            created_at=jobs.now_iso())
 
 
 WORK = {"machine.mcp.refresh": refresh}

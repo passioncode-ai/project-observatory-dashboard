@@ -122,7 +122,7 @@ class Sandbox(unittest.TestCase):
 class VendoredKit(unittest.TestCase):
     def test_kit_and_probe_are_the_upstream_bytes(self):
         """The header records the upstream digest; an edit here would drift from the kit."""
-        for path in (ROOT / "fabric_service.py", PROBE):
+        for path in (ROOT / "fabric_service.py", PROBE, ROOT / "tests/fabric_interop.py"):
             lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
             self.assertTrue(lines[0].startswith("# Vendored from passioncode-ai/fabric-agent-adapter"), path)
             recorded = lines[2].split("upstream sha256 ", 1)[1].split()[0]
@@ -820,6 +820,9 @@ class RunningServer(unittest.TestCase):
             import paths
             importlib.reload(paths)
             importlib.reload(service_identity)
+            # As the installer does: the per-install manifest first, so the
+            # probe's interop.manifest-link reads a manifest naming THIS descriptor.
+            service_identity.write_installed_manifest()
             fs.write_descriptor(service_identity.descriptor(self.port))
             target = f"project-observatory.{service_identity.instance()}"
         out = subprocess.run([sys.executable, str(PROBE), target, "--json"], cwd=ROOT, env=self.env,
@@ -830,8 +833,14 @@ class RunningServer(unittest.TestCase):
         self.assertEqual(failed, {})
         self.assertEqual(out.returncode, 0)
         not_run = {k for k, v in verdicts.items() if v["verdict"] == "NOT_RUN"}
-        self.assertEqual(not_run, {"login.single-use", "lifecycle.launchd"},
-                         "the dashboard declares no login and this descriptor has no supervisor")
+        self.assertEqual(not_run, {"login.single-use", "lifecycle.launchd",
+                                   "interop.well-known-capabilities", "interop.tools-match",
+                                   "interop.job-tools", "interop.unknown-job", "interop.trace-propagation"},
+                         "the dashboard declares no login, this descriptor has no supervisor, and the MCP "
+                         "server is stdio, so the probe's MCP-over-HTTP rules have no surface to call "
+                         "(tests/test_interop.py checks them over stdio)")
+        self.assertEqual(verdicts["interop.manifest-link"]["verdict"], "PASS")
+        self.assertEqual(verdicts["interop.events-trace"]["verdict"], "PASS")
         self.assertEqual(verdicts["lifecycle.instance-lock"]["verdict"], "PASS")
         self.assertEqual(verdicts["events.page"]["verdict"], "PASS")
         # The probe's own table, kept in the log as the receipt. Prefixed so the

@@ -1,12 +1,12 @@
 # The MCP server speaks fabric-interop/0.1
 
 Status: implemented on branch `agent/fabric-interop`. The protocol is `fabric-interop/0.1`, section
-C3 of the Fabric agent-registry contracts (locked 2026-09-29, in the Fabric repository), whose
-normative home is to be the Fabric Agent Contract's `interop.md` (plan row AR-1.1, not yet
-published). Until the contract publishes its schemas, the job and envelope shapes below are the
-observatory's reading of C3, kept in `observatory/engine/interop.py` (`ENVELOPE_SCHEMA`) and
-`observatory/engine/mcp/capability_tools.py` (`JOB_INPUT`, `JOB_OUTPUT`). Every rule names the test
-that proves it: `observatory/engine/tests/test_interop.py` (suite `interop`) and
+C3 of the Fabric agent-registry contracts (locked 2026-09-29), whose normative home is the Fabric
+Agent Contract's `docs/specification/interop.md` at commit `9cd778eb6f14` — DEC-0016 with the
+operator's rulings DEC-0017 (OQ-0001…0007). The contract schemas this server is held to are
+vendored, byte for byte, in `observatory/engine/fabric/interop-schemas/` (digests in its README,
+checked by a test). Every rule names the test that proves it:
+`observatory/engine/tests/test_interop.py` (suite `interop`) and
 `observatory/engine/tests/test_mcp_wire.py` (suite `mcp_wire`).
 
 ## What it is
@@ -29,8 +29,9 @@ code (`@server.capability` handlers in `mcp/server.py`).
 
 1. **A capability is a tool of its name with its published schemas** (C3.1, FAC-SEM-017). The
    listing is built from the manifest and the bundled schema files, never from a Python
-   signature; a job capability's tool publishes no `outputSchema`, since it answers a handle, and
-   names the result's output schema in its `_meta` under the interop key.
+   signature. A job capability's tool serves, as DEC-0017 (OQ-0006) rules, the self-contained
+   union `oneOf[result envelope, job handle]` around the capability's output schema — exactly
+   the contract's `jobToolOutputSchema(output)` — so its structured content always conforms.
    - `test_every_mcp_capability_is_a_tool_with_its_published_schemas` compares the schemas a
      client receives with the bundled files, and the annotations with the declared effect;
      `test_the_served_instructions_describe_the_served_surface` (suite `wire_contract`) requires a
@@ -54,8 +55,13 @@ code (`@server.capability` handlers in `mcp/server.py`).
      `test_a_job_runs_to_a_result_envelope_on_the_callers_trace` (the stand-in `claude` writes the
      trace it was started with).
 4. **Jobs** (C3.2). `machine.mcp.refresh` answers `{"job": {"id", "status": "working"}}`;
-   `fabric.job.get` follows it to `completed` with the result envelope (`done`, `proof`, `scope`,
-   `notVerified`, `output`, `usage`), `fabric.job.cancel` stops it.
+   `fabric.job.get` follows it to `completed`, `fabric.job.cancel` stops it. Every answer is
+   validated against the contract's `interop-job.schema.json`: `result` exactly when completed,
+   `error` (`{code, message}`) exactly when failed. The result is the FULL result envelope
+   (DEC-0017, OQ-0002): `id`, `contractVersion`, `outcome`, `done`, `proof`, `scope`,
+   `notVerified`, `artifacts`, `createdAt`, `producer`, `output`, `usage` — and `trace`, the job's
+   span, which is authoritative (OQ-0003); every answer about the job carries the same
+   traceparent in `_meta`, as FAC-SEM-022 requires.
    - an id never issued, or malformed, is `unknown-job` and creates nothing:
      `test_an_id_never_issued_is_unknown_and_never_a_fresh_job`;
    - a job outlives the server that started it — its record is a file and its work a detached
@@ -83,14 +89,20 @@ code (`@server.capability` handlers in `mcp/server.py`).
 
 ## Limits, stated
 
-- **C3.4 (c), trace ids on events, is not implemented.** `fabric-service/0.1`'s events-page schema
-  (`service-events-page.schema.json`) allows no property beyond `id, at, kind, level, text,
-  subject, link, notify` on an event, so a `traceId` would make the feed fail the protocol and its
-  probe. No event on the feed is caused by a traced request today either: the feed is a view over
-  commits, sessions and findings. The contract needs to admit the two fields first.
-- **C3.6, `surfaces.mcp.capabilities` in the well-known document, is not served.** The well-known
-  schema's `surfaces.mcp` requires `transport: streamable-http` and admits no other key, and this
-  MCP server is stdio.
+- **C3.4 (c), trace ids on events: nothing to carry.** DEC-0017 (OQ-0007) rules that only an
+  event about traced work carries `traceId`/`spanId`, and one about untraced work must not
+  invent them. The feed is a view over commits, agent sessions and findings, none of which a
+  traced request causes, so no event carries a pair. A job does not publish events.
+- **C3.6, `surfaces.mcp.capabilities` in the well-known document, is not served**, and neither
+  are the probe's MCP rules over HTTP: this MCP server is stdio, the always-on HTTP server has no
+  `/mcp` surface, so `check_service.py`'s `interop.tools-match`, `interop.job-tools`,
+  `interop.unknown-job` and `interop.trace-propagation` report NOT_RUN ("no MCP surface"). The
+  rules themselves are checked over stdio by `test_interop.py`.
+- **`scope` in the envelope names the observatory's own identifiers.** The contract requires the
+  project, run, node and binding, which are the host's and which a tool call does not carry; the
+  envelope uses `urn:observatory:subject:machine`, `urn:observatory:job:<id>`,
+  `urn:observatory:capability:<name>` and this provider's revision, so a host cannot mistake them
+  for its own.
 - **MCP Tasks are not offered.** The SDK in use (`mcp` 2.2.0) implements no Tasks extension, and the
   contract makes the job handle the default.
 - **No capability elicits input**, so C3.3 and FAC-SEM-018 have nothing to apply to; `input_required`
@@ -98,7 +110,8 @@ code (`@server.capability` handlers in `mcp/server.py`).
 - **The envelope's `scope` carries `writeScopes` only.** The contract's result envelope also names
   the host's project, run, node and binding, which a tool call does not give the provider.
 - **Usage is zero tokens.** No model runs in these jobs; `wallMs` is measured.
-- **The fabric-service conformance probe does not check interop.** The kit's `check_service.py`
-  (vendored, and upstream at the time of writing) knows the `fabric-service/0.1` rules only; the
-  interop rules above are checked by this repository's own tests until the adapter's probe gains
-  them (plan row AR-1.6).
+- **The adapter's probe and this server.** fabric-agent-adapter v0.5.0's `check_service.py` adds
+  seven `interop.*` rules; against this server `interop.manifest-link` (the per-install manifest
+  names this descriptor) and `interop.events-trace` apply, and the four that call MCP over HTTP
+  report NOT_RUN, as above. v0.5.0 predates DEC-0017 (its kit still serves a job tool's plain
+  output schema); this server follows the contract, not the kit.

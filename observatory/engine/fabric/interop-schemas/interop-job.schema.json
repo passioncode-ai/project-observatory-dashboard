@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/interop-job.schema.json",
+  "title": "fabric-interop/0.1 job state (fabric.job.get / fabric.job.cancel)",
+  "type": "object",
+  "required": [
+    "job"
+  ],
+  "properties": {
+    "job": {
+      "$ref": "#/$defs/job"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "job": {
+      "type": "object",
+      "required": [
+        "id",
+        "status",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "interop-common.schema.json#/$defs/jobId"
+        },
+        "status": {
+          "$ref": "interop-common.schema.json#/$defs/jobStatus"
+        },
+        "statusMessage": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "updatedAt": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "pollIntervalMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 3600000
+        },
+        "inputRequests": {
+          "$ref": "interop-common.schema.json#/$defs/inputRequests"
+        },
+        "result": {
+          "$ref": "interop-result.schema.json"
+        },
+        "error": {
+          "$ref": "interop-common.schema.json#/$defs/error"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "completed"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "result"
+            ],
+            "properties": {
+              "result": true
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "result"
+              ],
+              "properties": {
+                "result": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "error"
+            ],
+            "properties": {
+              "error": true
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "input_required"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "inputRequests"
+            ],
+            "properties": {
+              "inputRequests": true
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "inputRequests"
+              ],
+              "properties": {
+                "inputRequests": true
+              }
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    }
+  }
+}

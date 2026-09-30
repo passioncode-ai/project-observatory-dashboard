@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/interop-job-handle.schema.json",
+  "title": "fabric-interop/0.1 job handle (structuredContent of a job-capable tool)",
+  "type": "object",
+  "required": [
+    "job"
+  ],
+  "properties": {
+    "job": {
+      "type": "object",
+      "required": [
+        "id",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "interop-common.schema.json#/$defs/jobId"
+        },
+        "status": {
+          "const": "working"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

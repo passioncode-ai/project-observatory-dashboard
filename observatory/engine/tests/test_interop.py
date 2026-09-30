@@ -19,6 +19,7 @@ does not know yet:
 """
 from __future__ import annotations
 import asyncio
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -49,6 +50,21 @@ PARENT_TRACE = "4bf92f3577b34da6a3ce929d0e0e4736"
 PARENT_SPAN = "00f067aa0ba902b7"
 TRACEPARENT = f"00-{PARENT_TRACE}-{PARENT_SPAN}-01"
 VALID = re.compile(r"^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$")
+
+
+ENVELOPE_REQUIRED = ["id", "contractVersion", "outcome", "done", "proof", "scope", "notVerified",
+                     "artifacts", "createdAt", "producer", "output", "usage"]
+JOB_HANDLE = {"type": "object", "required": ["job"], "additionalProperties": False,
+              "properties": {"job": {"type": "object", "required": ["id", "status"], "additionalProperties": False,
+                                     "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 128,
+                                                           "pattern": "^[A-Za-z0-9._:-]+$"},
+                                                    "status": {"const": "working"}}}}}
+
+
+def contract(name: str):
+    """A validator for a vendored fabric-agent-contract schema."""
+    import interop
+    return interop.contract_validator(name)
 
 
 def bundled(uri: str) -> dict:
@@ -121,21 +137,26 @@ class Workspace(unittest.TestCase):
             await asyncio.sleep(job.get("pollIntervalMs", 500) / 1000 / 4)
 
 
-class _Session:
-    def __init__(self, params):
-        self.params = params
+def live_members(pgid: int) -> list[str]:
+    """Processes of a group that still run. A member that exited but was not yet
+    reaped by its parent is a zombie: Linux still counts it in the group, so
+    `killpg(pgid, 0)` succeeds there although nothing runs."""
+    out = subprocess.run(["ps", "-A", "-o", "pid=,pgid=,stat="], capture_output=True, text=True, timeout=10)
+    rows = [line.split() for line in out.stdout.splitlines()]
+    return [r[0] for r in rows if len(r) >= 3 and r[1] == str(pgid) and not r[2].startswith("Z")]
 
-    async def __aenter__(self):
-        self._client = stdio_client(self.params)
-        read, write = await self._client.__aenter__()
-        self._session = ClientSession(read, write)
-        s = await self._session.__aenter__()
-        await s.discover()
-        return s
 
-    async def __aexit__(self, *exc):
-        await self._session.__aexit__(*exc)
-        await self._client.__aexit__(*exc)
+@contextlib.asynccontextmanager
+async def _Session(params):
+    """One server over stdio, discovered, as nested `async with` blocks.
+
+    Nested, not entered by hand: an exception raised inside a hand-entered pair
+    left the SDK's task groups waiting on each other, so a failing assertion hung
+    the suite until the runner's timeout instead of failing."""
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as s:
+            await s.discover()
+            yield s
 
 
 class CapabilitiesAsTools(Workspace):
@@ -154,8 +175,12 @@ class CapabilitiesAsTools(Workspace):
                                  bundled(cap["inputSchema"]), "FAC-SEM-017: input schema is the published one")
                 job = (cap.get("extensions") or {}).get(KEY, {}).get("job") is True
                 if job:
-                    self.assertIsNone(tool.output_schema, "a job tool answers a handle, not the output")
-                    self.assertEqual(tool.meta[KEY]["resultOutputSchema"], cap["outputSchema"])
+                    # DEC-0017 (OQ-0006): oneOf[result envelope, job handle], self-contained,
+                    # exactly the contract's jobToolOutputSchema(output) — written out here.
+                    self.assertEqual(as_dict(tool.output_schema), {"oneOf": [
+                        {"type": "object", "required": ENVELOPE_REQUIRED,
+                         "properties": {"output": bundled(cap["outputSchema"])}},
+                        JOB_HANDLE]}, "FAC-SEM-017 for a job tool")
                 else:
                     self.assertEqual(as_dict(tool.output_schema),
                                      bundled(cap["outputSchema"]), "FAC-SEM-017: output schema is the published one")
@@ -167,6 +192,16 @@ class CapabilitiesAsTools(Workspace):
                     self.assertIs(ann.destructive_hint, cap["effect"] in {"delete", "merge", "deploy", "change-policy"})
         for name in ("fabric.job.get", "fabric.job.cancel", "observatory_status", "observatory_record"):
             self.assertIn(name, tools, "job tools beside the capabilities, and the old tools kept")
+
+    def test_the_vendored_contract_schemas_are_the_recorded_bytes(self):
+        import hashlib
+        folder = ROOT / "fabric/interop-schemas"
+        recorded = dict(re.findall(r"^\| `([^`]+)` \| `([0-9a-f]{64})` \|$",
+                                   (folder / "README.md").read_text(encoding="utf-8"), re.M))
+        files = {p.name for p in folder.glob("*.schema.json")}
+        self.assertEqual(set(recorded), files)
+        for name in files:
+            self.assertEqual(hashlib.sha256((folder / name).read_bytes()).hexdigest(), recorded[name], name)
 
     def test_the_manifest_declares_the_interop_extension(self):
         self.assertIn(KEY, MANIFEST["provider"]["extensions"])
@@ -272,8 +307,14 @@ class Jobs(Workspace):
         self.assertEqual(job["status"], "completed", job)
         self.assertEqual(VALID.match(res.meta["traceparent"]).group(1), PARENT_TRACE,
                          "every answer about the job carries the job's trace")
-        import interop
-        jsonschema.validate(job["result"], interop.ENVELOPE_SCHEMA)
+        errors = [e.message for e in contract("interop-job.schema.json").iter_errors({"job": job})]
+        self.assertEqual(errors, [], "the answer is the contract's interop-job shape, envelope included")
+        self.assertEqual([e.message for e in contract("interop-job-tool-output.schema.json")
+                          .iter_errors(payload(start))], [], "the handle conforms to the job tool's union")
+        self.assertEqual(job["result"]["trace"]["traceparent"], res.meta["traceparent"],
+                         "FAC-SEM-022: the answer's traceparent is the envelope's")
+        self.assertEqual(job["result"]["trace"]["traceparent"], start.meta["traceparent"],
+                         "the envelope's trace is the span of the call that started the job")
         jsonschema.validate(job["result"]["output"], bundled(
             next(c for c in MANIFEST["capabilities"] if c["name"] == "machine.mcp.refresh")["outputSchema"]))
         self.assertEqual(job["result"]["usage"]["inputTokens"], 0)
@@ -290,8 +331,9 @@ class Jobs(Workspace):
         async def go():
             async with self.session() as s:
                 out = []
-                for job_id, want in (("job-" + "a" * 32, "unknown-job"), ("../../etc/passwd", "unknown-job"),
-                                     ("job-short", "unknown-job"), ("", "invalid-input")):
+                for job_id, want in (("job-" + "a" * 32, "unknown-job"), ("probe-unknown-0a1b2c", "unknown-job"),
+                                     ("job-short", "unknown-job"), ("../../etc/passwd", "invalid-input"),
+                                     ("", "invalid-input")):
                     out.append((want, await s.call_tool("fabric.job.get", {"id": job_id}),
                                 await s.call_tool("fabric.job.cancel", {"id": job_id})))
                 return out
@@ -340,9 +382,7 @@ class SlowJobs(Workspace):
                 cancelled = payload(await s.call_tool("fabric.job.cancel", {"id": job_id}))["job"]
                 gone = False
                 for _ in range(100):
-                    try:
-                        os.killpg(pid, 0)
-                    except OSError:
+                    if not live_members(pid):
                         gone = True
                         break
                     await asyncio.sleep(0.1)

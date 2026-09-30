@@ -120,8 +120,10 @@ the access model [ACCESS.md](ACCESS.md) already states for this server. No POST 
      `test_install_writes_the_descriptor_then_the_plist`.
 10. **The protocol's own probe passes.** The kit's `check_service.py`, vendored unedited, runs
     against a live server in a temporary workspace: 0 FAIL, and NOT_RUN only for
-    `login.single-use` (the dashboard declares no login) and `lifecycle.launchd` (the test
-    descriptor has no supervisor).
+    `login.single-use` (the dashboard declares no login), `lifecycle.launchd` (the test
+    descriptor has no supervisor) and the five `interop.*` rules that need an MCP surface over
+    HTTP, which this stdio server does not have ([FABRIC-INTEROP.md](FABRIC-INTEROP.md));
+    `interop.manifest-link` and `interop.events-trace` PASS.
     - `test_the_conformance_probe_passes`; the kit's and the probe's bytes are checked against
       the digests in their headers by `test_kit_and_probe_are_the_upstream_bytes`.
 
@@ -129,9 +131,9 @@ the access model [ACCESS.md](ACCESS.md) already states for this server. No POST 
 
 | File | Upstream |
 |---|---|
-| `observatory/engine/fabric_service.py` | `passioncode-ai/fabric-agent-adapter` `dfd11dad72fe`, `building-fabric-services/scripts/fabric_service.py` |
-| `observatory/engine/tests/check_service.py` | the same commit, `scripts/check_service.py` |
-| `observatory/engine/fabric/service-schemas/*.schema.json` | `passioncode-ai/fabric-agent-contract` `cc9ed2d`, `schemas/` |
+| `observatory/engine/fabric_service.py` | `passioncode-ai/fabric-agent-adapter` `f31c2b2792f7` (v0.5.0), `building-fabric-services/scripts/fabric_service.py` |
+| `observatory/engine/tests/check_service.py`, `observatory/engine/tests/fabric_interop.py` | the same commit, `scripts/check_service.py` and `scripts/fabric_interop.py` (the probe imports it) |
+| `observatory/engine/fabric/service-schemas/*.schema.json` | `passioncode-ai/fabric-agent-contract` `9cd778eb6f14` (first copied at `cc9ed2d`), `schemas/` |
 
 Never edit them here: update upstream, copy again, and the digest test says whether the copy is
 whole.

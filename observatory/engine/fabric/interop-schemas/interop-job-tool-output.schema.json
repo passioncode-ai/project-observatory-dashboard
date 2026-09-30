@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/interop-job-tool-output.schema.json",
+  "title": "fabric-interop/0.1 structuredContent of a job-backed tool: the result envelope or the job handle (DEC-0017)",
+  "oneOf": [
+    {
+      "$ref": "interop-result.schema.json"
+    },
+    {
+      "$ref": "interop-job-handle.schema.json"
+    }
+  ]
+}
