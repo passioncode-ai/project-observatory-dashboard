@@ -1281,15 +1281,15 @@
     {
       "path": "skill/.claude-plugin/marketplace.json",
       "source_sha256": "68a99261f346d399ff411a8bbe6cb46d7b169e6ef030d84f7b92c41a2f797c57",
-      "export_sha256": "2a82023cb2752f1ca004b985d59c6a5c44a184e30c71a57ab17c6460b719e00a",
-      "bytes": 961,
+      "export_sha256": "fbdcde8a5024db813521d424b3d11513d0becea3203909bb906073a13e1b500a",
+      "bytes": 941,
       "upstream_modified": true
     },
     {
       "path": "skill/plugins/observatory-log/.claude-plugin/plugin.json",
       "source_sha256": "1f267b5383edab6b68302df81f1790f73ebf2ef0a5e697bff81778bc0e9b31f2",
-      "export_sha256": "fe5ece1767c0b68a390b393374e72a62ae4d2168452c23021556bc292f487b68",
-      "bytes": 646,
+      "export_sha256": "ef46d7e6be5cef25ea41dd661d5feb74e7dd37ee74dc1aa913836b3df2e6a636",
+      "bytes": 626,
       "upstream_modified": true
     },
     {
@@ -1327,23 +1327,23 @@
     {
       "path": "skill/plugins/observatory-log/skills/explaining-changes/SKILL.md",
       "source_sha256": "1a0b0708fc8a17a9bc1c45d89c59aeb44330147e77bc0e5e2262f197b97d31d4",
-      "export_sha256": "469a93944bf855cf60503ec0a210e046b16b301c2340058fd370709cc3fde293",
-      "bytes": 5471,
+      "export_sha256": "0b04a8a9e9fd74d81e7ca769e3546064f3fb4e10f0dd5ddc2bfed62d4473ed11",
+      "bytes": 5451,
       "upstream_modified": true
     },
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "1c9a9bd15057076b95a4fedbec0b3559b9a697633843098ebb4992ba89fa9eda",
-      "bytes": 7163,
+      "export_sha256": "ce281dbbe4959d81f09065c4a0d51071909b3f33b7ade89c8ea8cadcfe706e43",
+      "bytes": 7143,
       "upstream_modified": true
     },
     {
       "path": "skill/plugins/observatory-log/skills/tracking-resources/SKILL.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5b9fa35289909e61767c88c5c1a487688e16f065c6894b2d321e4da5be06ed3a",
-      "bytes": 4638
+      "export_sha256": "aa03c29105b48833c43bd3f786cfa66957dc538ceec892447ef6a3a368d803bd",
+      "bytes": 4618
     },
     {
       "path": "store/compatibility.py",

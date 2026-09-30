@@ -1,11 +1,15 @@
 """The repository states one license, in every place a reader or a tool looks for it.
 
-From v0.8.2 the code is source-available: PolyForm Noncommercial 1.0.0 or PolyForm
-Internal Use 1.0.0, at the user's option, with commercial licenses on request.
-Releases up to and including v0.8.1 were published under MIT and stay MIT. A
-manifest that still says MIT, a README that still says "open source" or a LICENSE
-that lost that sentence would each tell a reader something false, so each is a test.
+From the release after v0.9.1 the code is open source under the GNU Affero General Public
+License v3.0 only, or available under a commercial license from PassionCode.ai
+(`AGPL-3.0-only OR LicenseRef-PassionCode-Commercial`, the organisation's knowledge base,
+knowledge/licensing.md). Earlier releases
+keep their license: v0.8.2 to v0.9.1 PolyForm Noncommercial or Internal Use, v0.8.1 and
+earlier MIT. A manifest that still names PolyForm, a README that still calls the current
+version source-available or a LICENSE that is not the unmodified AGPL text would each tell a
+reader something false, so each is a test.
 """
+import hashlib
 import importlib.util
 import json
 import re
@@ -15,10 +19,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "observatory/engine/skill"
-EXPRESSION = "PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0"
-MIT_HISTORY = ("Versions up to and including v0.8.1 of this repository were released under the MIT "
-               "License; those releases remain available under MIT.")
-SHORT_LINE = "Source-available under PolyForm Noncommercial or Internal Use; commercial license on request."
+EXPRESSION = "AGPL-3.0-only OR LicenseRef-PassionCode-Commercial"
+#: The unmodified AGPL-3.0 text from gnu.org, as the organisation's knowledge base
+#: (fabric-workspace knowledge/repository-standard.md, rule F7) pins it.
+AGPL_SHA256 = "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+SHORT_LINE = "Open source under the [GNU AGPL-3.0](LICENSE)."
+HISTORY = ("Versions up to and including v0.9.1 were released under PolyForm Noncommercial or "
+           "Internal Use (v0.8.2–v0.9.1) and the MIT License (v0.8.1 and earlier); those releases "
+           "keep their licence.")
 PUBLISHER = {"name": "PassionCode.ai", "url": "https://passioncode.ai/"}
 
 
@@ -31,19 +39,17 @@ def load(path: Path) -> dict:
 
 
 class LicenseFileTest(unittest.TestCase):
-    def test_license_carries_both_polyform_texts_and_the_mit_history(self):
-        body = text("LICENSE")
-        self.assertNotIn("__MIT_HISTORY__", body)
-        self.assertIn(MIT_HISTORY, body)
-        self.assertIn("Copyright (c) 2026 Siarhei Sheleh", body)
-        self.assertIn("Required Notice: Copyright (c) 2026 Siarhei Sheleh (https://passioncode.ai)", body)
-        for title, url in (("# PolyForm Noncommercial License 1.0.0",
-                            "<https://polyformproject.org/licenses/noncommercial/1.0.0>"),
-                           ("# PolyForm Internal Use License 1.0.0",
-                            "<https://polyformproject.org/licenses/internal-use/1.0.0>")):
-            self.assertIn(title + "\n\n" + url, body)
+    def test_license_is_the_unmodified_agpl_text(self):
+        body = (ROOT / "LICENSE").read_bytes()
+        self.assertEqual(hashlib.sha256(body).hexdigest(), AGPL_SHA256)
+        self.assertTrue(body.startswith(b"                    GNU AFFERO GENERAL PUBLIC LICENSE\n"))
+
+    def test_commercial_license_offers_the_dual_licence(self):
+        body = text("COMMERCIAL-LICENSE.md")
+        self.assertTrue(body.startswith("# Commercial license\n"))
+        self.assertIn(f"SPDX: `{EXPRESSION}`", body)
         self.assertIn("contact@passioncode.ai", body)
-        self.assertNotIn("Permission is hereby granted, free of charge", body)
+        self.assertIn("[CLA.md](CLA.md)", body)
 
 
 class PackageMetadataTest(unittest.TestCase):
@@ -53,7 +59,7 @@ class PackageMetadataTest(unittest.TestCase):
     def test_pyproject_uses_the_spdx_expression(self):
         project = self.pyproject["project"]
         self.assertEqual(project["license"], EXPRESSION)
-        self.assertEqual(project["license-files"], ["LICENSE"])
+        self.assertEqual(project["license-files"], ["LICENSE", "COMMERCIAL-LICENSE.md"])
         self.assertNotIn("License :: OSI Approved", " ".join(project.get("classifiers", [])))
 
     def test_build_backend_understands_license_expressions(self):
@@ -100,11 +106,13 @@ class ContributionTermsTest(unittest.TestCase):
         privacy = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(privacy)
         self.assertTrue(privacy.allowed_path(Path("CLA.md")))
+        self.assertTrue(privacy.allowed_path(Path("COMMERCIAL-LICENSE.md")))
 
     def test_contributing_accepts_contributions_under_the_cla(self):
         contributing = text("CONTRIBUTING.md")
         self.assertIn("[CLA.md](CLA.md)", contributing)
-        self.assertIn(SHORT_LINE, contributing)
+        self.assertIn(EXPRESSION, contributing)
+        self.assertIn("](COMMERCIAL-LICENSE.md)", contributing)
 
     def test_pull_request_template_asks_for_the_cla(self):
         template = text(".github/PULL_REQUEST_TEMPLATE.md")
@@ -122,18 +130,22 @@ class CurrentWordingTest(unittest.TestCase):
                "docs/PORTABLE-0.1.md", "docs/HANDOFF.md", "docs/site/DEPLOY.md",
                "site/index.html", "site/404.html", "site/llms.txt")
 
-    def test_no_current_document_calls_the_product_open_source_or_mit(self):
+    def test_no_current_document_calls_the_product_source_available_or_mit(self):
         for path in self.CURRENT:
             body = text(path)
-            # "source-available, not open source" is an accurate use of the phrase, and
-            # `project-observatory-open-source` is the repository's former name.
-            self.assertIsNone(re.search(r"(?i)(?<!not )(?<!observatory-)open[- ]source", body), path)
+            # "released under PolyForm … (v0.8.2–v0.9.1)" names a past release and is true;
+            # a sentence that calls the product source-available now is not.
+            self.assertIsNone(re.search(r"(?i)source[- ]available", body), path)
+            self.assertIsNone(re.search(r"(?i)PolyForm-Noncommercial|LicenseRef-PolyForm", body), path)
             self.assertIsNone(re.search(r"\bMIT licensed\b|·\s*MIT\b|opensource\.org/license/mit", body), path)
 
-    def test_readme_states_the_license_and_the_mit_history(self):
+    def test_readme_states_the_license_and_its_history(self):
         readme = text("README.md")
-        self.assertIn(SHORT_LINE, readme)
-        self.assertIn("v0.8.1", readme)
+        section = readme.split("\n## License\n", 1)[1]
+        self.assertIn(SHORT_LINE, section)
+        self.assertIn("[commercial license](COMMERCIAL-LICENSE.md)", section)
+        self.assertIn("contact@passioncode.ai", section)
+        self.assertIn(HISTORY, section)
         self.assertNotIn("Version 0.2 brings", readme)
 
     def test_contacts_are_organisational(self):

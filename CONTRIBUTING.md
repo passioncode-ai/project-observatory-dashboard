@@ -7,15 +7,15 @@ without the author's accounts, projects or paths. Agents working here also read
 
 ## License and contributor agreement
 
-Project Observatory is source-available, not open source.
-Source-available under PolyForm Noncommercial or Internal Use; commercial license on request.
-The terms are in [LICENSE](LICENSE); a commercial license is available from
-<contact@passioncode.ai>. Versions up to and including v0.8.1 were released under the MIT
-License, and those releases remain available under MIT.
+Project Observatory is open source under the [GNU AGPL-3.0](LICENSE) (`AGPL-3.0-only`), and
+PassionCode.ai also offers it under a [commercial license](COMMERCIAL-LICENSE.md) for use that does
+not meet the AGPL's terms (<contact@passioncode.ai>). SPDX:
+`AGPL-3.0-only OR LicenseRef-PassionCode-Commercial`. Versions up to and including v0.9.1 were
+released under PolyForm Noncommercial or Internal Use (v0.8.2–v0.9.1) and the MIT License (v0.8.1
+and earlier); those releases keep their licence.
 
 Contributions are accepted under the [Contributor License Agreement](CLA.md) ([CLA.md](CLA.md)).
-It lets PassionCode.ai keep offering the software under both source-available licenses and
-under separate commercial licenses; you keep the copyright in your contribution. Opening a pull
+It lets PassionCode.ai offer every contribution under the AGPL and under the commercial license; you keep the copyright in your contribution. Opening a pull
 request and ticking the CLA box in the pull request template is how you agree to it. A pull
 request without the ticked box is not merged.
 

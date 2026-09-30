@@ -24,7 +24,8 @@ def check(wheel: Path) -> dict:
         distribution = re.sub(r"[-_.]+", "_", project["name"])
         metadata_root = distribution + "-" + project["version"] + ".dist-info"
         metadata_names = {metadata_root + "/" + name for name in
-                          ("METADATA", "WHEEL", "RECORD", "entry_points.txt", "top_level.txt", "LICENSE", "licenses/LICENSE")}
+                          ("METADATA", "WHEEL", "RECORD", "entry_points.txt", "top_level.txt", "LICENSE", "licenses/LICENSE",
+                           "licenses/COMMERCIAL-LICENSE.md")}
         for required in ("METADATA", "WHEEL", "RECORD"):
             if metadata_root + "/" + required not in names:
                 failures.append("missing package metadata: " + required)

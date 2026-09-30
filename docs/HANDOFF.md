@@ -1,7 +1,8 @@
 # Full-system release handoff
 
 Objective: distribute the complete Project Observatory engine as public source code (MIT up to
-v0.8.1; source-available under PolyForm Noncommercial or Internal Use from then on) while
+v0.8.1, PolyForm Noncommercial or Internal Use for v0.8.2–v0.9.1, and `AGPL-3.0-only OR
+LicenseRef-PassionCode-Commercial` from then on) while
 each user retains their own private projects, credentials and runtime state; retain
 older CLI contracts, provide future upgrade/restore safeguards, and publish accurate
 onboarding, website and launch material.
@@ -51,7 +52,12 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
-**Status 2026-09-30, newest first:** 0.9.1 — `machine.mcp.inventory` (every MCP server the agent
+**Status 2026-09-30, licence and repository standard (unreleased on `main`):** the code is
+`AGPL-3.0-only OR LicenseRef-PassionCode-Commercial` from the next release; v0.9.1 and earlier
+keep PolyForm or MIT. README and AGENTS.md follow the organisation's repository standard. Entry
+point and the next task: [runs/2026-09-30-standard-agpl](runs/2026-09-30-standard-agpl/README.md).
+
+**Status 2026-09-30:** 0.9.1 — `machine.mcp.inventory` (every MCP server the agent
 configs declare, by name) and `fabric-interop/0.1` on the MCP server (capability tools, trace
 context, jobs). Entry point and the next task:
 [runs/2026-09-30-mcp-inventory-interop](runs/2026-09-30-mcp-inventory-interop/README.md).
