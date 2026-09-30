@@ -59,7 +59,7 @@
     },
     {
       "token": "switchboard",
-      "reason": "PassionCode's public source-available tool, named on the website beside Observatory"
+      "reason": "PassionCode's public open-source tool, named on the website beside Observatory"
     },
     {
       "token": "fabric-switchboard",
@@ -72,6 +72,10 @@
     {
       "token": "project-observatory-dashboard",
       "reason": "this public repository's own name: package URLs, the plugin marketplace, the README and every install instruction"
+    },
+    {
+      "token": "fabric-workspace",
+      "reason": "the organisation's knowledge base (fabric-workspace/knowledge), which AGENTS.md sends every contributor to first; private, readable by organisation members"
     },
     {
       "token": "org-index",

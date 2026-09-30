@@ -1,7 +1,15 @@
-# AGENTS.md
+# Working in project-observatory-dashboard
 
-Instructions for coding agents working in this repository. People read
-[CONTRIBUTING.md](CONTRIBUTING.md) first; everything there applies to agents too.
+## Read first
+
+1. The PassionCode.ai knowledge base — `fabric-workspace/knowledge/` in your clone (org-index
+   `scripts/clone_all.sh` makes it) or https://wiki.passioncode.ai/knowledge — at least its
+   [README](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/README.md),
+   vision, principles and how-to-work.
+2. This file, then the organization's
+   [CONTRIBUTING.md](https://github.com/passioncode-ai/.github/blob/main/CONTRIBUTING.md) and this
+   repository's [CONTRIBUTING.md](CONTRIBUTING.md); everything there applies to agents too.
+
 `CLAUDE.md` holds one line, `@AGENTS.md`, so Claude Code reads this same file: it imports
 `AGENTS.md` only through that line, and one file cannot drift from a copy of itself.
 
@@ -29,6 +37,15 @@ organisation members).
 | `tools/` | release tooling: privacy gate, package checker, source inventory, demo estate |
 | `site/`, `docs/site/` | the retired website (a redirect to the product page plus the field-notes article) and its checks; it never reads a workspace |
 | `docs/` | onboarding, compatibility, security boundary, UX scenarios, run receipts |
+
+## Commands
+
+| What | Command |
+|---|---|
+| Install | `python -m pip install -c requirements-full.lock '.[full]'` (in a Python 3.11+ virtual environment) |
+| Test (the gate) | `python -m unittest discover -s tests -v && project-observatory full check`, then the rest of the list below |
+| Build | `python -m pip wheel --no-deps . --wheel-dir dist && python tools/check_package.py dist/*.whl` |
+| MCP (register + proving call) | `claude mcp add observatory --scope user -e OBSERVATORY_HOME="$OBSERVATORY_HOME" -- "$(python -c 'import sys; print(sys.executable)')" "$(project-observatory full-path)/mcp/server.py"`, then `observatory_status` answers with an empty `degraded` list ([README → MCP](README.md#mcp)) |
 
 ## Build and test
 
@@ -94,10 +111,13 @@ This repository is public, and so is its Git history, commit messages included.
 2. Open a pull request against `main`. Three checks are required: the `test` job of
    `observatory-release-check` on each matrix row (ubuntu-latest with Python 3.11,
    ubuntu-latest with 3.14, macos-latest with 3.14).
-3. The code is source-available (PolyForm Noncommercial or Internal Use, see `LICENSE`), and
+3. The code is open source under `AGPL-3.0-only OR LicenseRef-PassionCode-Commercial`
+   ([LICENSE](LICENSE), [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md); the knowledge base's
+   [licensing](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/licensing.md) page), and
    contributions are accepted under [CLA.md](CLA.md): the pull request template's CLA box is
-   ticked by the contributor, never by an agent on a person's behalf. Describe the product as
-   source-available; only releases up to and including v0.8.1 were MIT.
+   ticked by the contributor, never by an agent on a person's behalf. Releases up to and
+   including v0.9.1 keep the licence they shipped with (PolyForm Noncommercial or Internal Use
+   from v0.8.2, MIT up to v0.8.1); describe the current version as AGPL or commercial.
 4. `main` keeps a linear history and refuses force-pushes, so a pull request merges by squash
    or rebase, never by a merge commit. `.github/CODEOWNERS` requests the review.
 
@@ -124,3 +144,11 @@ tasks are the operator's and which a contributor can take.
    asset and compare its digest with the one inspected by `tools/check_package.py`.
 4. Every machine then runs `project-observatory full update`.
 5. Record the release in `docs/runs/<date>-<slug>/`.
+
+## After work
+
+In the same run: update this repository's docs with the change; if a cross-repository fact changed
+(a product, a version, a plan row, a principle), update the page in `fabric-workspace/knowledge/`
+that owns it; land both; publish (`node scripts/workspace.mjs sync` from a Fabric checkout) or
+leave it to the scheduled sync. Leave a handoff with the exact next task — here, the run record
+in `docs/runs/<date>-<slug>/README.md` and the pointer in [docs/HANDOFF.md](docs/HANDOFF.md).

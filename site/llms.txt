@@ -9,9 +9,10 @@ credentials. Includes CLI, local dashboards, MCP, metrics, provider adapters and
 optional scheduler. Integrations are individually enabled. The original portable
 0.1 CLI remains available as a separate compatibility mode.
 
-Source-available under PolyForm Noncommercial or Internal Use; commercial license on
-request (contact@passioncode.ai). Versions up to and including v0.8.1 were released
-under the MIT License and remain available under MIT.
+Open source under the GNU AGPL-3.0; a commercial license is available for use that
+does not meet the AGPL's terms (contact@passioncode.ai). Versions up to and including
+v0.9.1 were released under PolyForm Noncommercial or Internal Use (v0.8.2-v0.9.1) and
+the MIT License (v0.8.1 and earlier); those releases keep their licence.
 
 - Product page: https://passioncode.ai/observatory/
 - Source: https://github.com/passioncode-ai/project-observatory-dashboard

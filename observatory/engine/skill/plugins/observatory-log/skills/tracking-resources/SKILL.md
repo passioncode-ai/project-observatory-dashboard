@@ -13,7 +13,7 @@ description: >-
   figma-use), wiring analytics or pixels (ad-tracking), provisioning the resource
   with the provider's own tools, secrets (handling-secrets) or code changes inside
   the repository.
-license: PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0
+license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
   version: "0.12.3"
 compatibility: >-

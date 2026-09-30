@@ -7,7 +7,7 @@ description: >-
   Keeps credential values out of prompts and command arguments, uses named slots,
   and records changes without copying values into reports. NOT for granting
   provider permissions or choosing a project's authentication architecture.
-license: PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0
+license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
   version: "0.12.3"
 compatibility: >-

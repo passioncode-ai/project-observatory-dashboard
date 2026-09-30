@@ -1,6 +1,6 @@
 # Project Observatory
 
-**Your projects. Back in view.** A local dashboard for the projects your agents work on. See what changed, what needs attention and where known API keys left a copy. In English or Russian. Project Observatory is a source-available tool from [PassionCode.ai](https://passioncode.ai/) ([product page](https://passioncode.ai/observatory/)), beside [Fabric Switchboard](https://passioncode.ai/switchboard/). It is Fabric-compatible — its server speaks `fabric-service/0.1` and its MCP `fabric-interop/0.1` — and works without Fabric.
+**Your projects. Back in view.** A local dashboard for the projects your agents work on. See what changed, what needs attention and where known API keys left a copy. In English or Russian. Project Observatory is an open-source tool from [PassionCode.ai](https://passioncode.ai/) ([product page](https://passioncode.ai/observatory/)), beside [Fabric Switchboard](https://passioncode.ai/switchboard/). It is Fabric-compatible — its server speaks `fabric-service/0.1` and its MCP `fabric-interop/0.1` — and works without Fabric.
 
 ![The Project Observatory overview page: findings from critical to info, project and activity counters, and a card per section, in the PassionCode dark theme](site/assets/dashboard-overview-en.png)
 
@@ -8,39 +8,53 @@
 
 The distribution is the complete engine: project and repository inventory, findings, history, metrics, a local dashboard, MCP, credential tools and optional provider integrations. Every user supplies their own project paths, accounts and keys. Private operational data and Git history are excluded from the source distribution. Releases and their notes are on the [releases page](https://github.com/passioncode-ai/project-observatory-dashboard/releases); what changed in each is in the [changelog](CHANGELOG.md).
 
-## Start with your own workspace
+## Quick start for a new teammate
 
-The complete engine supports macOS and Linux, Python 3.11+ and SQLite 3.37+ with loadable-extension support. Git and Node.js are needed for the complete local checks. On macOS, use an extension-enabled Python build such as Homebrew Python; some bundled builds cannot load sqlite-vec. The [onboarding guide](docs/ONBOARDING.md) checks this before setup.
+The complete engine supports macOS and Linux, Python 3.11+ and SQLite 3.37+ with loadable-extension support. The `python3` that ships with macOS is 3.9, and pip run from it fails with a misleading `ResolutionImpossible` rather than naming the interpreter, so choose an extension-enabled interpreter such as Homebrew Python explicitly; the [onboarding guide](docs/ONBOARDING.md#sqlite-runtime-prerequisite) checks this. Every machine runs a tagged release, the same wheel byte for byte ([staying in step](docs/ONBOARDING.md#staying-in-step)).
 
-The package requires Python 3.11 or newer (`requires-python = ">=3.11"`). The `python3` that ships with macOS is 3.9, and pip run from it fails with a misleading `ResolutionImpossible` about the locked dependencies rather than naming the interpreter, so choose the interpreter explicitly and check it before creating the environment:
+### Install
+
+The latest release's wheel, checked against its `SHA256SUMS`, into a virtual environment of its own:
 
 ```sh
-git clone https://github.com/passioncode-ai/project-observatory-dashboard.git
-cd project-observatory-dashboard
-brew install python@3.14                                 # macOS; on Linux any Python 3.11+ works
-PYTHON="$(brew --prefix python@3.14)/bin/python3.14"     # on Linux, e.g. PYTHON=python3.12
-"$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else "Python 3.11 or newer is required; this is " + sys.version.split()[0])'
-"$PYTHON" -c 'import sqlite3; c = sqlite3.connect(":memory:"); c.enable_load_extension(True)'   # AttributeError here: this build cannot load sqlite-vec
-"$PYTHON" -m venv .venv
-. .venv/bin/activate
-python -m pip install -c requirements-full.lock '.[full]'
-export OBSERVATORY_HOME="$HOME/.local/share/project-observatory-full"
+V=$(curl -s https://api.github.com/repos/passioncode-ai/project-observatory-dashboard/releases/latest \
+    | python3 -c 'import json,sys;print(json.load(sys.stdin)["tag_name"][1:])')
+mkdir -p ~/observatory-release && cd ~/observatory-release
+base=https://github.com/passioncode-ai/project-observatory-dashboard/releases/download/v$V
+curl -sSLO "$base/project_observatory-$V-py3-none-any.whl" && curl -sSLO "$base/SHA256SUMS"
+shasum -a 256 -c SHA256SUMS --ignore-missing                 # → OK
+PYTHON="$(brew --prefix python@3.14)/bin/python3.14"         # on Linux, e.g. PYTHON=python3.12
+"$PYTHON" -c 'import sqlite3; c = sqlite3.connect(":memory:"); c.enable_load_extension(True)'   # AttributeError: this build cannot load sqlite-vec
+"$PYTHON" -m venv ~/.local/share/project-observatory-venv
+~/.local/share/project-observatory-venv/bin/python -m pip install "project_observatory-$V-py3-none-any.whl[full]"
+export PATH="$HOME/.local/share/project-observatory-venv/bin:$PATH"
+```
+
+Later releases arrive with `project-observatory full update --apply`, verified and reversible.
+
+### Configure
+
+```sh
+export OBSERVATORY_HOME="$HOME/.local/share/project-observatory-full"   # your private workspace
 project-observatory full init
-project-observatory full configure sources projects "$HOME/projects"
+project-observatory full configure sources projects "$HOME/projects"   # a directory you own
 project-observatory full local
 project-observatory full doctor
 ```
 
-Use an existing directory you own in place of `$HOME/projects`. The first run needs no provider credentials. An agent can guide the setup: give it the [onboarding prompt](docs/AGENT-ONBOARDING.md), or run `project-observatory full onboard`.
+The first run needs no key; the workspace is wherever `OBSERVATORY_HOME` points. Integrations are switched on one by one (`full configure integrations NAME true` — `github`, `cloudflare`, `openrouter`, …), and a credential they need goes into your own vault as a named slot, the value on stdin only ([enter credentials locally](docs/ONBOARDING.md#enter-credentials-locally)). A teammate taking the organisation's settings imports its profile instead (org-index `ONBOARDING.md` §5). An agent can guide the setup: give it the [onboarding prompt](docs/AGENT-ONBOARDING.md), or run `project-observatory full onboard`.
 
-### Drive it over MCP
+### MCP
 
-The engine's MCP server speaks stdio. Declare it to Claude Code for your user, with the same `OBSERVATORY_HOME` (the virtual environment still active):
+The engine's MCP server speaks stdio. Register it for your user with the same `OBSERVATORY_HOME`, then make one call:
 
 ```sh
 claude mcp add observatory --scope user -e OBSERVATORY_HOME="$OBSERVATORY_HOME" -- \
   "$(python -c 'import sys; print(sys.executable)')" "$(project-observatory full-path)/mcp/server.py"
 claude mcp list | grep observatory     # observatory: … - ✔ Connected
+claude -p "Call observatory_status once and reply OK with the number of projects and its degraded list" \
+  --allowedTools mcp__observatory__observatory_status
+# → OK 1 degraded=[]   (one project under the configured source; an empty degraded list is full coverage)
 ```
 
 Restart open Claude Code sessions; they read their MCP servers at start. Every answer carries a `degraded` list naming what could not be read. To let `machine.mcp.inventory` list the MCP servers your agents declare (Claude Code, Cursor, OpenCode, Codex, Gemini CLI, Kiro — names and transports only, never a URL, header or key), point the scan at your home and take one:
@@ -52,6 +66,22 @@ project-observatory full scan-mcp
 ```
 
 Other agents take the same command line; [connect an agent](docs/ONBOARDING.md#connect-an-agent) has the details.
+
+### Develop
+
+Run from source and run the gate — the commands CI runs are listed in order in [AGENTS.md](AGENTS.md#build-and-test):
+
+```sh
+git clone https://github.com/passioncode-ai/project-observatory-dashboard.git
+cd project-observatory-dashboard
+"$PYTHON" -m venv .venv && . .venv/bin/activate        # $PYTHON chosen as under Install
+python -m pip install -c requirements-full.lock '.[full]'
+python -m unittest discover -s tests -v
+project-observatory full check
+python tools/check_public_release.py --history
+```
+
+## Use it
 
 ### Open the dashboard
 
@@ -132,13 +162,7 @@ Read [compatibility and recovery](docs/COMPATIBILITY.md) before upgrading. The o
 
 ## Verify and contribute
 
-```sh
-python -m unittest discover -s tests -v
-project-observatory full check
-python tools/check_public_release.py --history
-```
-
-Checks use synthetic projects and credentials. Real provider acceptance, external host admission and real credential rotation are separate checks and are reported as untested by the offline suite. The [source inventory](observatory/engine/SOURCE-INVENTORY.json) records the reviewed export; it is not a guarantee that a pattern scanner can recognize every private fact.
+The gate is under [Develop](#develop). Checks use synthetic projects and credentials. Real provider acceptance, external host admission and real credential rotation are separate checks and are reported as untested by the offline suite. The [source inventory](observatory/engine/SOURCE-INVENTORY.json) records the reviewed export; it is not a guarantee that a pattern scanner can recognize every private fact.
 
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Migration map](docs/MIGRATION.md) · [Release handoff](docs/HANDOFF.md)
 
@@ -155,7 +179,9 @@ repository path; verify pinned URL resolution before removing any compatibility 
 
 ## License
 
-Source-available under PolyForm Noncommercial or Internal Use; commercial license on request.
-Individuals and noncommercial organisations may use, change and share it for noncommercial purposes; any company may use and change it for its own internal operations. Distributing it commercially, or building it into a product or service provided to others, needs a separate commercial license from <contact@passioncode.ai>. The terms are in [LICENSE](LICENSE); contributions are accepted under the [CLA](CLA.md). Versions up to and including v0.8.1 were released under the MIT License, and those releases remain available under MIT.
+Open source under the [GNU AGPL-3.0](LICENSE). A [commercial license](COMMERCIAL-LICENSE.md) is
+available for use that does not meet the AGPL's terms — contact@passioncode.ai.
+Versions up to and including v0.9.1 were released under PolyForm Noncommercial or Internal Use (v0.8.2–v0.9.1) and the MIT License (v0.8.1 and earlier); those releases keep their licence.
+Contributions are accepted under the [CLA](CLA.md).
 
 Part of [PassionCode.ai](https://passioncode.ai/) — the design system is [PassionCode 1.0.0](https://passioncode.ai/design-system/). Observatory is also the observation component of the [ssheleg harness](https://skills.sshlg.me/harness/): skills guide the work; Observatory records and checks the state around it.
