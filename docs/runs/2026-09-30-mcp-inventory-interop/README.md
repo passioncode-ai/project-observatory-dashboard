@@ -64,7 +64,11 @@ a stale per-install manifest not refreshed on start; the root `"type": "object"`
    session now (55–71 s on CI).
 4. **A failing assertion hung `test_interop.py` until the timeout**: its session helper entered
    the SDK's context managers by hand. They are nested now.
-5. `publish_contract.py --local-manifest` named the base interpreter behind a virtual
+5. **One macOS CI run of the docs-only #88 failed `conformance_receipt`** ("and the restored
+   receipt passes"); the other run of the same commit and six parallel local runs passed. The
+   assertion printed only the tail of the probe output, which is its last PASS lines, so the cause
+   could not be read. It now prints the failing assertions and their notes; the flake stays open.
+6. `publish_contract.py --local-manifest` named the base interpreter behind a virtual
    environment's `python`; `observatory_status` skipped the value check for a scope object. Both
    fixed with tests.
 
