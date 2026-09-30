@@ -454,48 +454,50 @@ def params_for(scratch: pathlib.Path | None) -> StdioServerParameters:
                                  args=[str(ROOT / "mcp/server.py")], cwd=str(ROOT), env=env)
 
 
-async def run_read_capability(cap: dict) -> list[dict]:
-    """A second read capability, against the LIVE store and asserting no write.
+async def probe_read_capability(session, cap: dict) -> list[dict]:
+    """The probes of one read capability, against the LIVE store and asserting no write.
 
     The registry fingerprint and the ledger's highest revision are taken around
     every call, because `effect: none` is a claim and a probe that does not
     check it is a claim repeated.
-    """
+
+    ONE SERVER FOR EVERY READ CAPABILITY. Each used to start its own, and with six
+    capabilities the conformance suite, which runs the probes several times,
+    crossed the portable runner's 120 s budget on a loaded CI machine (measured
+    2026-09-30). A read capability's probe needs no server of its own: it asserts
+    what the call wrote, which a shared server does not change."""
     out_schema = schema_for(cap)
     receipts = []
-    async with stdio_client(params_for(None)) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.discover()
-            for probe in cap["profile"]["probes"]:
-                args = local_fixture(probe["inputFixture"])
-                before = (registry_fingerprint(), ledger_max_revision())
-                if probe["id"] in JOB_PROBES:
-                    results = await JOB_PROBES[probe["id"]](session, cap, args, out_schema)
-                else:
-                    data = await call_tool_for(session, cap, args)
-                after = (registry_fingerprint(), ledger_max_revision())
-                # A THIRD READING, with no call between it and the second. It is
-                # what tells "the call wrote" from "the tick wrote while the call
-                # ran" — see `side_effect_verdict`.
-                later = (registry_fingerprint(), ledger_max_revision())
-                if probe["id"] not in JOB_PROBES:
-                    assessor = READ_ASSESSORS[probe["id"]]
-                    results = (assessor(data, out_schema, args) if assessor is assess_detail
-                               else assessor(data, out_schema))
-                # THE MANIFEST'S OWN WORDING, verbatim. The first version
-                # appended a sentence of its own — "the call wrote nothing:
-                # `effect: none`" — which `coverage()` correctly reported as
-                # evaluated-but-not-declared: a probe checking more than the
-                # published prose says is a contract that understates itself,
-                # and `tests/test_conformance_receipt.py` failed on it the same
-                # minute. The assertion is declared beside the others now.
-                results.append(side_effect_verdict(before, after, later))
-                cov = coverage(probe, results)
-                receipts.append({
-                    "probe": probe["id"], "capability": cap["name"],
-                    "inputFixture": probe["inputFixture"],
-                    "sideEffectCeiling": probe["sideEffectCeiling"],
-                    **cov, "assertions": results})
+    for probe in cap["profile"]["probes"]:
+        args = local_fixture(probe["inputFixture"])
+        before = (registry_fingerprint(), ledger_max_revision())
+        if probe["id"] in JOB_PROBES:
+            results = await JOB_PROBES[probe["id"]](session, cap, args, out_schema)
+        else:
+            data = await call_tool_for(session, cap, args)
+        after = (registry_fingerprint(), ledger_max_revision())
+        # A THIRD READING, with no call between it and the second. It is
+        # what tells "the call wrote" from "the tick wrote while the call
+        # ran" — see `side_effect_verdict`.
+        later = (registry_fingerprint(), ledger_max_revision())
+        if probe["id"] not in JOB_PROBES:
+            assessor = READ_ASSESSORS[probe["id"]]
+            results = (assessor(data, out_schema, args) if assessor is assess_detail
+                       else assessor(data, out_schema))
+        # THE MANIFEST'S OWN WORDING, verbatim. The first version
+        # appended a sentence of its own — "the call wrote nothing:
+        # `effect: none`" — which `coverage()` correctly reported as
+        # evaluated-but-not-declared: a probe checking more than the
+        # published prose says is a contract that understates itself,
+        # and `tests/test_conformance_receipt.py` failed on it the same
+        # minute. The assertion is declared beside the others now.
+        results.append(side_effect_verdict(before, after, later))
+        cov = coverage(probe, results)
+        receipts.append({
+            "probe": probe["id"], "capability": cap["name"],
+            "inputFixture": probe["inputFixture"],
+            "sideEffectCeiling": probe["sideEffectCeiling"],
+            **cov, "assertions": results})
     return receipts
 
 
@@ -570,7 +572,7 @@ async def probe_refresh_job(session, cap: dict, args: dict, out_schema: dict) ->
     return a
 
 
-#: probe id -> the job assessor for it (`run_read_capability` dispatches on this first).
+#: probe id -> the job assessor for it (`probe_read_capability` dispatches on this first).
 JOB_PROBES = {"mcp-refresh-runs-as-a-job": probe_refresh_job}
 
 
@@ -653,8 +655,8 @@ async def run() -> dict:
                     **coverage(probe, results),
                     "assertions": results,
                 })
-    for cap in read_caps[1:]:
-        receipts.extend(await run_read_capability(cap))
+            for cap in read_caps[1:]:
+                receipts.extend(await probe_read_capability(session, cap))
     for cap in write_caps:
         extra, _ = await run_write_capability(cap)
         receipts.extend(extra)

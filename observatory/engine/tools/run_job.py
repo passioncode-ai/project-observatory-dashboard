@@ -48,6 +48,18 @@ def refresh(job: dict) -> dict:
     started = time.monotonic()
     out = paths.SCRATCH / "mcp.json"
     env = {**os.environ, **span.child().env()}
+    import configuration
+    if not configuration.enabled("mcp"):
+        # The collector would print "not configured" and write nothing; the
+        # inventory says the integration is disabled. No process to start.
+        answer = mcp_inventory.inventory()
+        return interop.envelope(job_id=job["id"], capability=job["capability"], span=span, output=answer,
+                                done=[{"claimId": "MCP-INVENTORY", "statement": "took no inventory: the mcp "
+                                                                                "integration is disabled"}],
+                                proof=[], not_verified=[{"claim": f"{d['source']} is covered", "reason": d["reason"]}
+                                                        for d in answer.get("degraded", [])],
+                                write_scopes=[], wall_ms=int((time.monotonic() - started) * 1000),
+                                created_at=jobs.now_iso())
     jobs.update(job["id"], statusMessage="reading agent configs and probing their MCP servers")
     try:
         proc = subprocess.run([sys.executable, str(ROOT / "collectors/scan_mcp.py"), str(out)],
