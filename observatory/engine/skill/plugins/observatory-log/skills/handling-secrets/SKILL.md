@@ -97,6 +97,16 @@ verified by listing its databases, delivered on stdin; a second issue rolls the
 same token. The result prints the account id — an account-owned token cannot
 find its account by itself, so pass it as `CLOUDFLARE_ACCOUNT_ID`.
 
+A project that must put and read objects in one R2 bucket (an off-site backup)
+gets `cloudflare.py issue --preset r2-bucket --account <slug> --bucket <name>
+[--jurisdiction eu] [--expire-days 30] --vault <project>/<env>/<PREFIX>`.
+The door creates the bucket if it is missing and sets its lifecycle through a
+setup token that it deletes before returning. It then grants Bucket Item Write on that
+bucket's resource only. Before anything is delivered, the S3 pair must prove a
+put, a get and a delete, and must be refused a bucket list. It lands in three
+slots on stdin: `<PREFIX>_ACCESS_KEY_ID`, `<PREFIX>_SECRET_ACCESS_KEY` and
+`<PREFIX>_ENDPOINT`. A second issue rolls the same token and keeps the key id.
+
 By default, slots live under the private workspace's `secrets/projects/`.
 An explicitly configured `sources.secret_store` or `OBSERVATORY_VAULT_DIR`
 can select a separate private store. Such external stores are excluded from
