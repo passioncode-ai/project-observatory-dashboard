@@ -195,6 +195,14 @@
             },
             "transport": {
               "const": "streamable-http"
+            },
+            "capabilities": {
+              "type": "array",
+              "maxItems": 256,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "common.schema.json#/$defs/capabilityName"
+              }
             }
           },
           "additionalProperties": false

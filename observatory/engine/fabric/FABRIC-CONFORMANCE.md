@@ -2,15 +2,15 @@
 
 Project Observatory publishes a self-contained local MCP profile at
 https://github.com/ssheleg/project-observatory-open-source. The provider manifest
-is revision 6. `fabric-contract.lock.json` selects profile `observatory-local-mcp`
-version `1.1.0`; `fabric-agent.json` retains contract version `0.1.0`. These are
+is revision 7. `fabric-contract.lock.json` selects profile `observatory-local-mcp`
+version `1.2.0`; `fabric-agent.json` retains contract version `0.1.0`. These are
 separate version axes.
 
 **Two schema releases, one pin per file.** The lock's `releases` lists, for every
 bundled schema and fixture, the one release tag that published it: the first eight
 schemas and six fixtures at `v0.2.0`, under the repository's address at the time
 (`ssheleg/project-observatory-open-source`, which GitHub redirects), and the
-`machine.mcp.inventory` schemas and fixture at `v0.9.0`, under
+`machine.mcp.inventory` and `machine.mcp.refresh` schemas and fixtures at `v0.9.0`, under
 `passioncode-ai/project-observatory-dashboard`. Published identifiers are never
 rewritten, so a capability added later is pinned to the release that adds it
 instead of moving the old ones. `tools/publish_contract.py --local` refuses a file
@@ -25,17 +25,58 @@ does not ship a private external contract or claim external certification.
 
 The capability definitions and effects come from `../fabric-agent.json`:
 
-| Capability | Effect | MCP tools required by the capability |
-| --- | --- | --- |
-| `estate.survey` | `none` | `observatory_status` |
-| `project.detail` | `none` | `observatory_project` |
-| `project.timeline` | `none` | `observatory_timeline` |
-| `project.record` | `draft` | `observatory_record`, `observatory_propose`, `observatory_recall` |
-| `machine.mcp.inventory` | `none` | `machine.mcp.inventory` |
+| Capability | Effect | Served as (fabric-interop/0.1) | Older tools required by the capability |
+| --- | --- | --- | --- |
+| `estate.survey` | `none` | `estate.survey` | `observatory_status` |
+| `project.detail` | `none` | `project.detail` | `observatory_project` |
+| `project.timeline` | `none` | `project.timeline` | `observatory_timeline` |
+| `project.record` | `draft` | `project.record` | `observatory_record`, `observatory_propose`, `observatory_recall` |
+| `machine.mcp.inventory` | `none` | `machine.mcp.inventory` | — |
+| `machine.mcp.refresh` | `none`, job | `machine.mcp.refresh`, then `fabric.job.get` / `fabric.job.cancel` | — |
 
-The full server also exposes `observatory_credentials`, `observatory_search`,
-`observatory_findings` and `observatory_machine`: eleven tools in total, defined in
-`../mcp/server.py`.
+The ten `observatory_*` tools stay, unchanged, for hosts that call them; the full
+server also exposes `observatory_credentials`, `observatory_search`,
+`observatory_findings` and `observatory_machine`. With the six capability tools and
+the two job tools that is eighteen tools, all defined through `../mcp/server.py`.
+
+## fabric-interop/0.1
+
+The Fabric agent-registry contracts (locked 2026-09-29, section C3) define how agents
+are called through Fabric's hub. The manifest declares the extension
+(`provider.extensions["https://fabric.passioncode.ai/agent-contract/extensions/interop/0.1"] = {}`),
+and the server keeps its rules; each is proved in `../tests/test_interop.py` (14 cases)
+and `../tests/test_mcp_wire.py`, and the reading behind each choice is in the
+repository's [interop design](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/FABRIC-INTEROP.md):
+
+- **C3.1** every `mcp` capability is a tool of the same name whose `inputSchema` and
+  `outputSchema` are the bundled published files, compared byte for byte over the wire
+  (FAC-SEM-017). Arguments are validated against the input schema and answers against
+  the output schema; an answer the schema does not describe leaves as `isError`.
+  Annotations: `effect: none` → `readOnlyHint`; a non-destructive write says
+  `destructiveHint: false` explicitly, since MCP defaults it to true.
+- **C3.2** `machine.mcp.refresh` declares `"job": true` and answers
+  `{"job": {"id", "status": "working"}}`; `fabric.job.get` and `fabric.job.cancel`
+  answer the contract's `interop-job.schema.json`. Its tool's `outputSchema` is the
+  DEC-0017 union `oneOf[result envelope, job handle]` around the capability's output
+  schema; the result is the full result envelope with `output`, `usage` and `trace`.
+  MCP Tasks are not offered.
+- **C3.4** a request's `_meta.traceparent` becomes a child span; every answer carries
+  its span back in `_meta.traceparent` (and `tracestate`); answers about a job carry the
+  job's, equal to the envelope's `trace` (FAC-SEM-022); a job hands a child span to the
+  process it runs as `TRACEPARENT`. No event on the feed is about traced work, so none
+  carries a trace pair (DEC-0017, OQ-0007).
+
+The contract schemas these answers are validated against are vendored in
+`interop-schemas/` from fabric-agent-contract commit `9cd778eb6f14` (DEC-0017).
+
+## Per-install manifest
+
+`tools/serverd.py --install` writes `$OBSERVATORY_HOME/config/fabric-agent.json`
+(mode 600) before the service descriptor, and the descriptor's `fabricManifest` points
+at it: the same manifest with this installation's interpreter and `mcp/server.py` as
+the stdio connection, the workspace as `--home` (a stdio connection carries arguments,
+not an environment) and the service extension naming this workspace's own descriptor.
+The portable manifest stays a template.
 
 ## `machine.mcp.inventory` and contract C6
 

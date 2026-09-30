@@ -32,7 +32,8 @@ _mcp_session.DISCOVER_TIMEOUT_SECONDS = max(_mcp_session.DISCOVER_TIMEOUT_SECOND
 
 REQUIRED = ["observatory_status", "observatory_project", "observatory_timeline",
             "observatory_recall", "observatory_record", "observatory_propose",
-            "machine.mcp.inventory"]
+            "machine.mcp.inventory", "estate.survey", "project.detail", "project.timeline",
+            "project.record", "machine.mcp.refresh", "fabric.job.get", "fabric.job.cancel"]
 FAILURES: list[str] = []
 
 
@@ -181,6 +182,49 @@ async def run() -> None:
             check("propose: lands as proposed", prop.get("status") == "proposed", str(prop)[:140])
             check("propose: registry/projects.json is untouched",
                   (__import__("paths").REGISTRY / "projects.json").stat().st_mtime_ns == before)
+
+            # ---- the capability tools (fabric-interop/0.1): the same answers under
+            # the capability names, with the published schemas enforced both ways ----
+            res = await session.call_tool("estate.survey", {"scope": {"kind": "project", "value": SYNTHETIC_PROJECT}},
+                                          meta={"traceparent": "00-" + "1" * 32 + "-" + "2" * 16 + "-01"})
+            data = payload(res)
+            check("estate.survey: one project, under the capability's own name",
+                  not res.is_error and data["counts"]["projects"] == 1, str(data)[:160])
+            check("estate.survey: the answer is a child span of the caller's trace",
+                  (res.meta or {}).get("traceparent", "").startswith("00-" + "1" * 32 + "-")
+                  and "-" + "2" * 16 + "-" not in (res.meta or {}).get("traceparent", ""), str(res.meta))
+            res = await session.call_tool("estate.survey", {"scope": {"kind": "owner"}})
+            check("estate.survey: an owner scope without its value is refused, not surveyed whole",
+                  bool(res.is_error) and "missing value" in res.content[0].text, res.content[0].text[:160])
+            res = await session.call_tool("observatory_status", {"scope": {"kind": "owner"}})
+            check("observatory_status: the scope OBJECT is checked too (it used to survey the whole estate)",
+                  payload(res).get("error") == "missing value", str(payload(res))[:160])
+            res = await session.call_tool("project.detail", {"projectId": SYNTHETIC_PROJECT, "timelineLimit": 2})
+            check("project.detail: the project, validated against its schema",
+                  not res.is_error and payload(res)["project"]["id"] == SYNTHETIC_PROJECT, str(payload(res))[:160])
+            res = await session.call_tool("project.timeline", {"projectId": SYNTHETIC_PROJECT, "limit": 3})
+            check("project.timeline: answers, with degraded", not res.is_error and "degraded" in payload(res),
+                  str(payload(res))[:160])
+            res = await session.call_tool("project.timeline", {"project_id": SYNTHETIC_PROJECT})
+            check("project.timeline: the snake-case alias of the old tool is not the published input",
+                  bool(res.is_error) and "invalid-input" in res.content[0].text, res.content[0].text[:160])
+            res = await session.call_tool("project.record", {
+                "owner": "agent:wire-test", "statement": "the capability tool wrote this",
+                "projectId": "project:observatory-wire-test"})
+            check("project.record: a note lands as proposed", payload(res).get("state") == "proposed",
+                  str(payload(res))[:160])
+            res = await session.call_tool("project.record", {"statement": "no owner"})
+            check("project.record: a missing owner is refused by the published schema",
+                  bool(res.is_error) and "invalid-input" in res.content[0].text, res.content[0].text[:160])
+            res = await session.call_tool("project.record", {
+                "owner": "agent:wire-test", "targetId": "project:not-in-the-registry-yet",
+                "patch": {"description": "proposed"}, "evidence": [{"uri": "test:wire"}]})
+            check("project.record: a proposal keeps its warning, in the text channel",
+                  payload(res).get("status") == "proposed" and "warning" not in payload(res)
+                  and any("not in the registry" in c.text for c in res.content[1:]), str(res.content)[:200])
+            res = await session.call_tool("project.record", {"owner": "operator", "statement": "forged"})
+            check("project.record: the operator's authority is refused, as an error answer",
+                  bool(res.is_error) and "owner refused" in res.content[0].text, res.content[0].text[:160])
 
             res = await session.call_tool("observatory_status", {"kind": "owner", "value": "example"})
             data = payload(res)

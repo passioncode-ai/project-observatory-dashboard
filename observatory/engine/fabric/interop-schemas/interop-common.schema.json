@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/interop-common.schema.json",
+  "title": "fabric-interop/0.1 common definitions",
+  "$defs": {
+    "traceparent": {
+      "type": "string",
+      "pattern": "^(?!ff)[0-9a-f]{2}-(?!0{32})[0-9a-f]{32}-(?!0{16})[0-9a-f]{16}-[0-9a-f]{2}$"
+    },
+    "tracestate": {
+      "type": "string",
+      "maxLength": 8192
+    },
+    "jobId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "jobStatus": {
+      "enum": [
+        "working",
+        "input_required",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "requestKey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]{1,64}$"
+    },
+    "primitiveField": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "array"
+          ]
+        }
+      }
+    },
+    "inputRequest": {
+      "type": "object",
+      "required": [
+        "method",
+        "params"
+      ],
+      "properties": {
+        "method": {
+          "const": "elicitation/create"
+        },
+        "params": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "message",
+                "requestedSchema"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "form"
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "requestedSchema": {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "properties"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "object"
+                    },
+                    "properties": {
+                      "type": "object",
+                      "maxProperties": 32,
+                      "additionalProperties": {
+                        "$ref": "#/$defs/primitiveField"
+                      }
+                    },
+                    "required": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "mode",
+                "message",
+                "url"
+              ],
+              "properties": {
+                "mode": {
+                  "const": "url"
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "inputRequests": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 16,
+      "propertyNames": {
+        "$ref": "#/$defs/requestKey"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/inputRequest"
+      }
+    },
+    "inputResponse": {
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "accept",
+            "decline",
+            "cancel"
+          ]
+        },
+        "content": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "inputResponses": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 16,
+      "propertyNames": {
+        "$ref": "#/$defs/requestKey"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/inputResponse"
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,63}$"
+            }
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "data": true
+      },
+      "additionalProperties": false
+    },
+    "trace": {
+      "type": "object",
+      "required": [
+        "traceparent"
+      ],
+      "properties": {
+        "traceparent": {
+          "$ref": "#/$defs/traceparent"
+        },
+        "tracestate": {
+          "$ref": "#/$defs/tracestate"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

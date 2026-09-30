@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/result.schema.json",
+  "title": "Fabric invocation result envelope",
+  "type": "object",
+  "required": [
+    "id",
+    "contractVersion",
+    "outcome",
+    "done",
+    "proof",
+    "scope",
+    "notVerified",
+    "artifacts",
+    "createdAt",
+    "producer"
+  ],
+  "properties": {
+    "id": {
+      "$ref": "common.schema.json#/$defs/uri"
+    },
+    "contractVersion": {
+      "const": "0.1.0"
+    },
+    "outcome": {
+      "enum": [
+        "succeeded",
+        "partial",
+        "failed",
+        "cancelled",
+        "blocked"
+      ]
+    },
+    "done": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "claimId",
+          "statement"
+        ],
+        "properties": {
+          "claimId": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_-]{1,63}$"
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "proof": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "claimIds",
+          "kind",
+          "uri",
+          "producer",
+          "capturedAt",
+          "classification"
+        ],
+        "properties": {
+          "claimIds": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "kind": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9./-]+$"
+          },
+          "uri": {
+            "$ref": "common.schema.json#/$defs/uri"
+          },
+          "producer": {
+            "$ref": "common.schema.json#/$defs/revisionRef"
+          },
+          "capturedAt": {
+            "$ref": "common.schema.json#/$defs/timestamp"
+          },
+          "classification": {
+            "$ref": "common.schema.json#/$defs/dataClass"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "scope": {
+      "type": "object",
+      "required": [
+        "project",
+        "run",
+        "node",
+        "binding",
+        "writeScopes"
+      ],
+      "properties": {
+        "project": {
+          "$ref": "common.schema.json#/$defs/uri"
+        },
+        "run": {
+          "$ref": "common.schema.json#/$defs/uri"
+        },
+        "node": {
+          "$ref": "common.schema.json#/$defs/uri"
+        },
+        "binding": {
+          "$ref": "common.schema.json#/$defs/revisionRef"
+        },
+        "writeScopes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "notVerified": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "claim",
+          "reason"
+        ],
+        "properties": {
+          "claim": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/artifact"
+      }
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/uri"
+      }
+    },
+    "usage": {
+      "$ref": "common.schema.json#/$defs/usage"
+    },
+    "output": true,
+    "trace": {
+      "$ref": "interop-common.schema.json#/$defs/trace"
+    },
+    "createdAt": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "producer": {
+      "$ref": "common.schema.json#/$defs/revisionRef"
+    },
+    "extensions": {
+      "$ref": "common.schema.json#/$defs/extensions"
+    }
+  },
+  "additionalProperties": false
+}

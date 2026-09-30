@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.9.0/observatory/engine/fabric/schemas/mcp-refresh-input.schema.json",
+  "title": "machine.mcp.refresh — input",
+  "description": "No arguments. Re-reads every agent config and asks Claude Code to probe the MCP servers it knows, which can take minutes. The call answers a job (fabric-interop/0.1); the finished job's result envelope carries, as its output, a machine.mcp.inventory answer.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {}
+}

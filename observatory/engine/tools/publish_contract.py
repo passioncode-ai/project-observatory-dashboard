@@ -159,6 +159,36 @@ def cmd_check() -> int:
     return 1 if failures else 0
 
 
+SERVICE_KEY = "https://fabric.passioncode.ai/agent-contract/extensions/service/0.1"
+
+
+def installed_manifest(instance: str | None = None) -> dict:
+    """The manifest with THIS installation's connection: interpreter, server, workspace.
+
+    The portable manifest's `observatory-install:mcp-server` is a template a host
+    cannot run. This copy names the interpreter and `mcp/server.py` by absolute
+    path and passes the workspace as `--home`, because a manifest's stdio
+    connection has arguments and no environment. With `instance`, the service
+    extension names this workspace's own descriptor (`project-observatory.<instance>`)
+    instead of the standard one the portable manifest ships. The content hash is
+    recomputed; the copy holds machine paths and is never published."""
+    doc = copy.deepcopy(json.loads(MANIFEST.read_text()))
+    home = str(configuration.home().absolute())
+    for cap in doc["capabilities"]:
+        cap["profile"]["connection"] = {
+            # absolute(), NOT resolve(): a virtual environment's `python` is a
+            # symbolic link to the base interpreter, and resolving it names an
+            # interpreter without this environment's packages — a manifest
+            # whose server dies on its first import.
+            "mode": "stdio", "executableRef": Path(sys.executable).absolute().as_uri(),
+            "args": [str(ROOT / "mcp/server.py"), "--stdio", "--home", home]}
+    if instance is not None:
+        doc["provider"].setdefault("extensions", {})[SERVICE_KEY] = {
+            "descriptor": f"project-observatory.{instance}"}
+    doc["provider"]["contentHash"] = compute(doc)
+    return doc
+
+
 def local_manifest(destination: Path) -> None:
     base = configuration.home().absolute()
     destination = destination.expanduser().absolute()
@@ -168,13 +198,7 @@ def local_manifest(destination: Path) -> None:
         raise configuration.ConfigurationError("Local manifest must remain beneath OBSERVATORY_HOME")
     if destination.exists():
         raise configuration.ConfigurationError("Local manifest destination already exists")
-    doc = copy.deepcopy(json.loads(MANIFEST.read_text()))
-    for cap in doc["capabilities"]:
-        cap["profile"]["connection"] = {
-            "mode": "stdio", "executableRef": Path(sys.executable).resolve().as_uri(),
-            "args": [str(ROOT / "mcp/server.py"), "--stdio"]}
-    doc["provider"]["contentHash"] = compute(doc)
-    workspace.write_json(destination, doc)
+    workspace.write_json(destination, installed_manifest())
 
 
 def main(argv=None) -> int:

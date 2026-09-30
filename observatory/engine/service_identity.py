@@ -206,6 +206,58 @@ def doctor_command() -> list[str] | None:
     return [str(script), "--home", str(paths.HOME), "full", "doctor"]
 
 
+def installed_manifest_path() -> Path:
+    return paths.CONFIG / "fabric-agent.json"
+
+
+def write_installed_manifest() -> Path:
+    """The per-install manifest the descriptor points at, written by the installer.
+
+    Rewritten on every install — the interpreter or the engine may have moved —
+    atomically, mode 600, never through a symbolic link."""
+    sys.path.insert(0, str(paths.ROOT / "tools"))
+    import atomic
+    from publish_contract import installed_manifest
+    target = installed_manifest_path()
+    if target.is_symlink():
+        raise OSError(f"{target} is a symbolic link")
+    atomic.write_json(target, installed_manifest(instance()), indent=2)
+    target.chmod(0o600)
+    return target
+
+
+def refresh_installed_manifest() -> str | None:
+    """Rewrite the per-install manifest when it exists and no longer matches this code.
+
+    An update installs a new engine into the same environment and restarts the
+    server without re-running the installer, so the manifest the descriptor points
+    at would keep the OLD release's capabilities and hash. The server rewrites it
+    when it starts, after its lock. Nothing is created where the installer wrote
+    nothing. Returns a problem sentence, or None."""
+    target = installed_manifest_path()
+    if not target.is_file() or target.is_symlink():
+        return None
+    sys.path.insert(0, str(paths.ROOT / "tools"))
+    try:
+        from publish_contract import installed_manifest
+        wanted = installed_manifest(instance())
+        try:
+            current = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            current = None
+        if current != wanted:
+            write_installed_manifest()
+    except (OSError, ValueError, configuration.ConfigurationError) as exc:
+        return f"the per-install manifest could not be refreshed: {type(exc).__name__}"
+    return None
+
+
+def manifest_path() -> Path:
+    """The manifest a host reads: this installation's when the installer wrote one."""
+    installed = installed_manifest_path()
+    return installed if installed.is_file() and not installed.is_symlink() else paths.ROOT / "fabric-agent.json"
+
+
 def descriptor(port: int, *, label: str | None = None, plist: Path | None = None,
                installed_by: str | None = None) -> dict:
     """The installation record a host reads. launchd when a label is given, else `none`."""
@@ -223,7 +275,7 @@ def descriptor(port: int, *, label: str | None = None, plist: Path | None = None
         "paths": {"data": str(data_dir()), "config": str(paths.CONFIG),
                   "logs": [str(p) for p in log_files()]},
         "source": {"repository": REPOSITORY},
-        "fabricManifest": str(paths.ROOT / "fabric-agent.json"),
+        "fabricManifest": str(manifest_path()),
         "installedAt": fs.now_iso(),
         "installedBy": installed_by or f"tools/serverd.py --install (project-observatory {configuration.VERSION})",
     }

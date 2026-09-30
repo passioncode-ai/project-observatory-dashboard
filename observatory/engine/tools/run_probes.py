@@ -18,6 +18,14 @@ import jsonschema
 from mcp import ClientSession, StdioServerParameters                               
 from mcp.client.stdio import stdio_client                                          
 import mcp.types as mtypes                                                         
+import mcp.client.session as _mcp_session
+
+# The SDK gives `server/discover` a fixed 10 s. A probe run starts one server per
+# capability, each a fresh interpreter; on a loaded machine the first answer can
+# take longer than an installed server ever does. The start gets its own budget;
+# every later request keeps the SDK default.
+_mcp_session.DISCOVER_TIMEOUT_SECONDS = max(
+    _mcp_session.DISCOVER_TIMEOUT_SECONDS, float(os.environ.get("OBSERVATORY_MCP_STARTUP_BUDGET", "60")))
 import atomic
 import paths                                                                       
 
@@ -446,44 +454,50 @@ def params_for(scratch: pathlib.Path | None) -> StdioServerParameters:
                                  args=[str(ROOT / "mcp/server.py")], cwd=str(ROOT), env=env)
 
 
-async def run_read_capability(cap: dict) -> list[dict]:
-    """A second read capability, against the LIVE store and asserting no write.
+async def probe_read_capability(session, cap: dict) -> list[dict]:
+    """The probes of one read capability, against the LIVE store and asserting no write.
 
     The registry fingerprint and the ledger's highest revision are taken around
     every call, because `effect: none` is a claim and a probe that does not
     check it is a claim repeated.
-    """
+
+    ONE SERVER FOR EVERY READ CAPABILITY. Each used to start its own, and with six
+    capabilities the conformance suite, which runs the probes several times,
+    crossed the portable runner's 120 s budget on a loaded CI machine (measured
+    2026-09-30). A read capability's probe needs no server of its own: it asserts
+    what the call wrote, which a shared server does not change."""
     out_schema = schema_for(cap)
     receipts = []
-    async with stdio_client(params_for(None)) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.discover()
-            for probe in cap["profile"]["probes"]:
-                args = local_fixture(probe["inputFixture"])
-                before = (registry_fingerprint(), ledger_max_revision())
-                data = await call_tool_for(session, cap, args)
-                after = (registry_fingerprint(), ledger_max_revision())
-                # A THIRD READING, with no call between it and the second. It is
-                # what tells "the call wrote" from "the tick wrote while the call
-                # ran" — see `side_effect_verdict`.
-                later = (registry_fingerprint(), ledger_max_revision())
-                assessor = READ_ASSESSORS[probe["id"]]
-                results = (assessor(data, out_schema, args) if assessor is assess_detail
-                           else assessor(data, out_schema))
-                # THE MANIFEST'S OWN WORDING, verbatim. The first version
-                # appended a sentence of its own — "the call wrote nothing:
-                # `effect: none`" — which `coverage()` correctly reported as
-                # evaluated-but-not-declared: a probe checking more than the
-                # published prose says is a contract that understates itself,
-                # and `tests/test_conformance_receipt.py` failed on it the same
-                # minute. The assertion is declared beside the others now.
-                results.append(side_effect_verdict(before, after, later))
-                cov = coverage(probe, results)
-                receipts.append({
-                    "probe": probe["id"], "capability": cap["name"],
-                    "inputFixture": probe["inputFixture"],
-                    "sideEffectCeiling": probe["sideEffectCeiling"],
-                    **cov, "assertions": results})
+    for probe in cap["profile"]["probes"]:
+        args = local_fixture(probe["inputFixture"])
+        before = (registry_fingerprint(), ledger_max_revision())
+        if probe["id"] in JOB_PROBES:
+            results = await JOB_PROBES[probe["id"]](session, cap, args, out_schema)
+        else:
+            data = await call_tool_for(session, cap, args)
+        after = (registry_fingerprint(), ledger_max_revision())
+        # A THIRD READING, with no call between it and the second. It is
+        # what tells "the call wrote" from "the tick wrote while the call
+        # ran" — see `side_effect_verdict`.
+        later = (registry_fingerprint(), ledger_max_revision())
+        if probe["id"] not in JOB_PROBES:
+            assessor = READ_ASSESSORS[probe["id"]]
+            results = (assessor(data, out_schema, args) if assessor is assess_detail
+                       else assessor(data, out_schema))
+        # THE MANIFEST'S OWN WORDING, verbatim. The first version
+        # appended a sentence of its own — "the call wrote nothing:
+        # `effect: none`" — which `coverage()` correctly reported as
+        # evaluated-but-not-declared: a probe checking more than the
+        # published prose says is a contract that understates itself,
+        # and `tests/test_conformance_receipt.py` failed on it the same
+        # minute. The assertion is declared beside the others now.
+        results.append(side_effect_verdict(before, after, later))
+        cov = coverage(probe, results)
+        receipts.append({
+            "probe": probe["id"], "capability": cap["name"],
+            "inputFixture": probe["inputFixture"],
+            "sideEffectCeiling": probe["sideEffectCeiling"],
+            **cov, "assertions": results})
     return receipts
 
 
@@ -495,6 +509,10 @@ async def call_tool_for(session, cap: dict, args: dict) -> dict:
     receipt about the wrong subject.
     """
     features = [f for f in cap["profile"]["requiredFeatures"] if f.startswith("tool:")]
+    # A capability served under its own name (fabric-interop/0.1) may also
+    # require the job tools; the tool it is PROBED through is the one of its name.
+    if f"tool:{cap['name']}" in features:
+        features = [f"tool:{cap['name']}"]
     if len(features) != 1:
         raise AssertionError(
             f"{cap['name']} declares {len(features)} tools; a read capability probed "
@@ -509,6 +527,53 @@ async def call_tool_for(session, cap: dict, args: dict) -> dict:
     # that still rewrote the input would be measuring this runner.
     res = await session.call_tool(name, dict(args))
     return json.loads(res.content[0].text)
+
+
+async def probe_refresh_job(session, cap: dict, args: dict, out_schema: dict) -> list[dict]:
+    """`machine.mcp.refresh`: the job-handle path of fabric-interop/0.1, end to end.
+
+    The handle, `fabric.job.get` until the job is terminal (bounded by the
+    probe's own `timeoutMs`), the result envelope and its output, and the
+    refusal of an id this agent never issued."""
+    import interop
+    a: list[dict] = []
+
+    def say(text: str, ok: bool, note: str = "") -> None:
+        a.append({"assertion": text, "verdict": "PASS" if ok else "FAIL", "note": note})
+
+    probe = cap["profile"]["probes"][0]
+    res = await session.call_tool(cap["name"], dict(args))
+    handle = (json.loads(res.content[0].text) if res.content else {}).get("job") or {}
+    say("the call answers a job handle whose status is working",
+        not res.is_error and handle.get("status") == "working" and bool(handle.get("id")), str(handle)[:160])
+    job, deadline = {}, asyncio.get_running_loop().time() + probe["timeoutMs"] / 1000
+    while handle.get("id"):
+        got = await session.call_tool(interop.JOB_GET, {"id": handle["id"]})
+        job = (json.loads(got.content[0].text) if got.content else {}).get("job") or {}
+        if job.get("status") in ("completed", "failed", "cancelled") \
+                or asyncio.get_running_loop().time() > deadline:
+            break
+        await asyncio.sleep(0.25)
+    say("fabric.job.get reaches completed within the probe timeout", job.get("status") == "completed",
+        f"status={job.get('status')} error={job.get('error')}")
+    result = job.get("result") or {}
+    problems = [f"job answer: {e.message[:140]}" for e in
+                interop.contract_validator("interop-job.schema.json").iter_errors({"job": job})][:3]
+    try:
+        jsonschema.validate(result.get("output"), out_schema)
+    except jsonschema.ValidationError as exc:
+        problems.append(f"output: {str(exc).splitlines()[0][:140]}")
+    say("the completed result is an envelope whose output validates against mcp-inventory-output.schema.json",
+        bool(result) and not problems, "; ".join(problems))
+    stranger = await session.call_tool(interop.JOB_GET, {"id": "job-" + "0" * 32})
+    body = stranger.content[0].text if stranger.content else ""
+    say("fabric.job.get for an id this agent never issued answers isError with unknown-job",
+        bool(stranger.is_error) and "unknown-job" in body, body[:120])
+    return a
+
+
+#: probe id -> the job assessor for it (`probe_read_capability` dispatches on this first).
+JOB_PROBES = {"mcp-refresh-runs-as-a-job": probe_refresh_job}
 
 
 async def run_write_capability(cap: dict) -> tuple[list[dict], str]:
@@ -590,8 +655,8 @@ async def run() -> dict:
                     **coverage(probe, results),
                     "assertions": results,
                 })
-    for cap in read_caps[1:]:
-        receipts.extend(await run_read_capability(cap))
+            for cap in read_caps[1:]:
+                receipts.extend(await probe_read_capability(session, cap))
     for cap in write_caps:
         extra, _ = await run_write_capability(cap)
         receipts.extend(extra)

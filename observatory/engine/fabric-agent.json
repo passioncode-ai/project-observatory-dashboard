@@ -2,8 +2,8 @@
   "contractVersion": "0.1.0",
   "provider": {
     "id": "https://github.com/ssheleg/project-observatory-open-source",
-    "revision": 6,
-    "contentHash": "sha256:dceb6c1ac5f7d303b8d89e4016e9a1f57b74b83e053890df8c62bc6db2cb17e7",
+    "revision": 7,
+    "contentHash": "sha256:10085b2b2014e3e7ad8ebe4de73487798ef9aac531c018a2b20c89248f457c1d",
     "createdAt": "2026-09-03T13:22:35Z",
     "createdBy": "https://github.com/ssheleg",
     "name": "Project Observatory",
@@ -18,7 +18,8 @@
     "extensions": {
       "https://fabric.passioncode.ai/agent-contract/extensions/service/0.1": {
         "descriptor": "project-observatory.default"
-      }
+      },
+      "https://fabric.passioncode.ai/agent-contract/extensions/interop/0.1": {}
     }
   },
   "capabilities": [
@@ -268,6 +269,56 @@
         ]
       },
       "description": "Every MCP server the agent configs on this machine declare (Claude Code user and project scopes and its plugins, Cursor, OpenCode, Codex, Gemini CLI, Kiro), by name, with the configs that declare it, its transport and whether it answered the last probe, and when. Names and verdicts only: no URL, command line, header or environment value is read into the answer. Read from the last inventory the observatory took; an absent or unreadable config, and an inventory older than the tick allows, are named in degraded."
+    },
+    {
+      "id": "https://github.com/ssheleg/project-observatory-open-source/capabilities/machine.mcp.refresh",
+      "name": "machine.mcp.refresh",
+      "inputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.9.0/observatory/engine/fabric/schemas/mcp-refresh-input.schema.json",
+      "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.9.0/observatory/engine/fabric/schemas/mcp-inventory-output.schema.json",
+      "effect": "none",
+      "idempotency": "supported",
+      "dataClasses": [
+        "project-internal"
+      ],
+      "profile": {
+        "kind": "mcp",
+        "protocolRevision": "2026-07-28",
+        "connection": {
+          "mode": "stdio",
+          "executableRef": "observatory-install:mcp-server",
+          "args": [
+            "--stdio"
+          ]
+        },
+        "requiredFeatures": [
+          "tool:machine.mcp.refresh",
+          "tool:fabric.job.get",
+          "tool:fabric.job.cancel"
+        ],
+        "probes": [
+          {
+            "id": "mcp-refresh-runs-as-a-job",
+            "description": "A bounded probe against an explicitly selected synthetic fixture workspace, which configures no agent config to read.",
+            "inputFixture": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.9.0/observatory/engine/fabric/fixtures/mcp-refresh-input.json",
+            "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.9.0/observatory/engine/fabric/schemas/mcp-inventory-output.schema.json",
+            "timeoutMs": 60000,
+            "sideEffectCeiling": "none",
+            "assertions": [
+              "the call answers a job handle whose status is working",
+              "fabric.job.get reaches completed within the probe timeout",
+              "the completed result is an envelope whose output validates against mcp-inventory-output.schema.json",
+              "fabric.job.get for an id this agent never issued answers isError with unknown-job",
+              "registry git status and ledger max revision are unchanged after the call"
+            ]
+          }
+        ]
+      },
+      "extensions": {
+        "https://fabric.passioncode.ai/agent-contract/extensions/interop/0.1": {
+          "job": true
+        }
+      },
+      "description": "Take a new MCP inventory now: re-read every agent config and ask Claude Code to probe the servers it knows. The probe health-checks each server and can take minutes, so the call answers a job; the finished job's result envelope carries a machine.mcp.inventory answer as its output. A refresh already running is joined, not started twice. Observation only: nothing outside the observatory's own scan file changes."
     }
   ]
 }

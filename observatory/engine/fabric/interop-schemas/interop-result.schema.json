@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/interop-result.schema.json",
+  "title": "fabric-interop/0.1 job result: the full result envelope, with the output and usage required (DEC-0017)",
+  "allOf": [
+    {
+      "$ref": "result.schema.json"
+    },
+    {
+      "type": "object",
+      "required": [
+        "output",
+        "usage"
+      ],
+      "properties": {
+        "output": true,
+        "usage": true
+      }
+    }
+  ]
+}

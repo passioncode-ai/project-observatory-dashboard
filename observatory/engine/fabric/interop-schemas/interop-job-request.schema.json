@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/interop-job-request.schema.json",
+  "title": "fabric-interop/0.1 fabric.job.get / fabric.job.cancel arguments",
+  "type": "object",
+  "required": [
+    "id"
+  ],
+  "properties": {
+    "id": {
+      "$ref": "interop-common.schema.json#/$defs/jobId"
+    },
+    "inputResponses": {
+      "$ref": "interop-common.schema.json#/$defs/inputResponses"
+    }
+  },
+  "additionalProperties": false
+}

@@ -505,6 +505,11 @@ def serve(port: int) -> int:
         problem = str(exc) if isinstance(exc, fs.ServiceError) else f"{type(exc).__name__}: {exc.strerror}"
         print(f"events token: {problem}", file=sys.stderr)
     RUNTIME = Runtime(token, problem)
+    # After the lock: an update restarts this server without re-running the
+    # installer, and the manifest the descriptor points at must describe THIS code.
+    stale = service_identity.refresh_installed_manifest()
+    if stale:
+        print(stale, file=sys.stderr)
     try:
         srv = LoopbackServer(("127.0.0.1", port), Handler)
     except OSError as exc:
@@ -586,6 +591,9 @@ def install() -> int:
     install_launchd.prepare_logs(("serverd.err", "serverd.out"), paths.STATE / "logs")
     PLIST.parent.mkdir(parents=True, exist_ok=True)
     try:
+        # The manifest first: the descriptor points at it, and a host that reads
+        # the descriptor must find a manifest it can run, not the template.
+        service_identity.write_installed_manifest()
         where = fs.write_descriptor(service_identity.descriptor(PORT, label=LABEL, plist=PLIST))
     except (fs.ServiceError, OSError) as exc:
         print(f"Not installed: {exc}", file=sys.stderr)

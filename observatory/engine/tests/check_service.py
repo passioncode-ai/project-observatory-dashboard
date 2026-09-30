@@ -1,6 +1,6 @@
-# Vendored from passioncode-ai/fabric-agent-adapter aaaa93f97577 (fabric-agent-adapter 0.4.0),
+# Vendored from passioncode-ai/fabric-agent-adapter f31c2b2792f7 (fabric-agent-adapter 0.5.0),
 # plugins/fabric-agent-adapter/skills/building-fabric-services/scripts/check_service.py,
-# upstream sha256 f25aa81f9d4b1dcc175b2243e6c5bf6f5bd9ce9ca9481a476f785544a0bc3762 (the bytes below this header).
+# upstream sha256 a8cd790e0cfc1d1e7b87f6dffc2f61f198f88e32cf07b1a1e4083d2a156468b4 (the bytes below this header).
 # Do not edit here: update the kit upstream and copy it again (tests/test_fabric_service.py checks the digest).
 #!/usr/bin/env python3
 """Live conformance probe for a fabric-service/0.1 service.
@@ -12,6 +12,10 @@
 Every rule gets PASS, FAIL or NOT_RUN with its evidence. Exit 0 when nothing
 FAILs, 1 when something does, 2 on a usage error. The probe only reads, except
 that it redeems one login code it asked for itself (that creates one session).
+
+The interop.* rules (fabric-interop/0.1) read the manifest the descriptor names and
+the service's MCP surface: tools/list, and fabric.job.get for an id that does not
+exist. They never call a capability.
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import secrets
 import shutil
 import stat
 import subprocess
@@ -33,6 +38,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fabric_service as fs  # noqa: E402
+import fabric_interop as fi  # noqa: E402
 
 Result = Dict[str, str]
 
@@ -46,6 +52,8 @@ class Probe:
         self.results: List[Result] = []
         self.wk: Optional[Dict[str, Any]] = None
         self.token: Optional[str] = None
+        self.events: Optional[List[Dict[str, Any]]] = None
+        self.sent_traceparent: Optional[str] = None
         try:
             self.port = fs.port_of(str(descriptor.get("origin", "")))
         except fs.ServiceError:
@@ -188,6 +196,7 @@ class Probe:
         except (ValueError, KeyError, AssertionError):
             self.add("events.page", "FAIL", "not an events page")
             return
+        self.events = events
         bad = []
         for e in events:
             if e.get("level") not in fs.LEVELS or not re.match(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$", str(e.get("kind", ""))):
@@ -218,6 +227,170 @@ class Probe:
         ok = status1 in (302, 303) and "HttpOnly" in cookie and "SameSite=Strict" in cookie and status2 not in (302, 303)
         self.add("login.single-use", "PASS" if ok else "FAIL",
                  "first redeem HTTP %d (%s), second HTTP %d" % (status1, "cookie ok" if "HttpOnly" in cookie else "no HttpOnly cookie", status2))
+
+    # interop (fabric-interop/0.1) ----------------------------------------------------
+    # #region probe-interop — docs: plugins/fabric-agent-adapter/skills/building-fabric-services/references/interop.md#what-the-probe-checks
+    def mcp_call(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """One JSON-RPC request to the MCP surface, as a child of a fresh probe trace."""
+        path = (((self.wk or {}).get("surfaces") or {}).get("mcp") or {}).get("path", "/mcp")
+        self.sent_traceparent = fi.child_traceparent(None)
+        body = dict(params)
+        body["_meta"] = {"io.modelcontextprotocol/protocolVersion": fi.MCP_REVISION,
+                         "io.modelcontextprotocol/clientCapabilities": {}, "traceparent": self.sent_traceparent}
+        headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+                   "MCP-Protocol-Version": fi.MCP_REVISION}
+        headers.update(self.auth_headers())
+        message = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": body}).encode()
+        status, resp_headers, raw = self.request("POST", path, headers, message)
+        if status != 200:
+            raise OSError("HTTP %d from %s" % (status, path))
+        if resp_headers.get("content-type", "").startswith("text/event-stream"):
+            data = [line[5:].strip() for line in raw.decode().splitlines() if line.startswith("data:")]
+            raw = (data[-1] if data else "null").encode()
+        return json.loads(raw)
+
+    def load_manifest(self) -> Tuple[Optional[Dict[str, Any]], Optional[Path], str]:
+        named = self.d.get("fabricManifest")
+        if not named:
+            return None, None, "the descriptor names no fabricManifest"
+        try:
+            path = fs.expand(str(named))
+            return json.loads(path.read_text(encoding="utf-8")), path, str(path)
+        except (fs.ServiceError, OSError, ValueError) as exc:
+            return None, None, "manifest %s does not resolve: %s" % (named, exc)
+
+    def resolve_schema(self, manifest_path: Path, uri: str) -> Optional[Dict[str, Any]]:
+        """A schema named by URI, found by its $id among the JSON files beside the manifest. Nothing is fetched."""
+        for candidate in sorted(manifest_path.parent.glob("fabric/schemas/*.json")) + sorted(manifest_path.parent.glob("*.schema.json")):
+            try:
+                doc = json.loads(candidate.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(doc, dict) and doc.get("$id") == uri:
+                return doc
+        return None
+
+    def interop_rules(self) -> None:
+        manifest, manifest_path, where = self.load_manifest()
+        me = "%s.%s" % (self.d.get("id"), self.d.get("instance", "default"))
+        if manifest is None:
+            self.add("interop.manifest-link", "NOT_RUN" if not self.d.get("fabricManifest") else "FAIL", where)
+        else:
+            block = ((manifest.get("provider") or {}).get("extensions") or {}).get(fs.EXTENSION_KEY) or {}
+            named = block.get("descriptor")
+            self.add("interop.manifest-link", "PASS" if named == me else "FAIL",
+                     "%s names %s" % (where, named) if named else "%s carries no %s block naming %s" % (where, fs.EXTENSION_KEY, me))
+        capabilities = [c for c in (manifest or {}).get("capabilities", []) if isinstance(c, dict)]
+        names = {c.get("name") for c in capabilities}
+        mcp_surface = ((self.wk or {}).get("surfaces") or {}).get("mcp")
+        listed = (mcp_surface or {}).get("capabilities")
+        if listed is None or manifest is None:
+            self.add("interop.well-known-capabilities", "NOT_RUN", "no capability list on the MCP surface" if listed is None else where)
+        else:
+            extra = sorted(set(listed) - names)
+            self.add("interop.well-known-capabilities", "FAIL" if extra else "PASS",
+                     ("listed but not in the manifest: " + ", ".join(extra)) if extra else "%d listed, all in the manifest" % len(listed))
+        if not mcp_surface or not self.token:
+            for rule in ("interop.tools-match", "interop.job-tools", "interop.unknown-job", "interop.trace-propagation"):
+                self.add(rule, "NOT_RUN", "no MCP surface" if not mcp_surface else "no readable token")
+        else:
+            try:
+                listing = self.mcp_call("tools/list", {})
+            except (OSError, ValueError) as exc:
+                self.add("interop.tools-match", "FAIL", "tools/list failed: %s" % exc)
+                listing = None
+            if listing is not None:
+                sent = self.sent_traceparent
+                tools = {t.get("name"): t for t in (listing.get("result") or {}).get("tools", []) if isinstance(t, dict)}
+                self.tools_match_rule(capabilities, manifest_path, tools)
+                self.job_tools_rule(capabilities, tools)
+                self.unknown_job_rule(list(tools))
+                self.trace_rule(listing, sent)
+        self.events_trace_rule(self.events)
+
+    def tools_match_rule(self, capabilities: List[Dict[str, Any]], manifest_path: Optional[Path], tools: Dict[str, Any]) -> None:
+        """FAC-SEM-017: each mcp capability is served as the tool of its name, with its schemas and derived annotations."""
+        served = [c for c in capabilities if (c.get("profile") or {}).get("kind") == "mcp"]
+        if manifest_path is None or not served:
+            self.add("interop.tools-match", "NOT_RUN", "no manifest with an mcp capability")
+            return
+        problems, unresolved = [], []
+        for cap in served:
+            name = cap.get("name")
+            tool = tools.get(name)
+            if tool is None:
+                problems.append("%s is not served as a tool" % name)
+                continue
+            for side in ("inputSchema", "outputSchema"):
+                schema = self.resolve_schema(manifest_path, str(cap.get(side)))
+                if schema is None:
+                    unresolved.append("%s %s" % (name, cap.get(side)))
+                elif tool.get(side) != schema:
+                    problems.append("%s serves an %s that differs from %s" % (name, side, cap.get(side)))
+            annotations = tool.get("annotations") or {}
+            for hint, value in fi.expected_annotations(cap.get("effect", ""), cap.get("idempotency", "")).items():
+                if annotations.get(hint) is not value:
+                    problems.append("%s lacks %s (effect %s, idempotency %s)" % (name, hint, cap.get("effect"), cap.get("idempotency")))
+        if problems:
+            self.add("interop.tools-match", "FAIL", "; ".join(problems))
+        elif unresolved:
+            self.add("interop.tools-match", "NOT_RUN", "schemas not found beside the manifest: " + ", ".join(unresolved))
+        else:
+            self.add("interop.tools-match", "PASS", "%d capabilities served with their schemas and annotations" % len(served))
+
+    def job_tools_rule(self, capabilities: List[Dict[str, Any]], tools: Dict[str, Any]) -> None:
+        jobs = [c.get("name") for c in capabilities if ((c.get("extensions") or {}).get(fi.EXTENSION_KEY) or {}).get("job") is True]
+        if not jobs:
+            self.add("interop.job-tools", "NOT_RUN", "no capability declares job: true")
+            return
+        missing = [n for n in ("fabric.job.get", "fabric.job.cancel") if n not in tools]
+        self.add("interop.job-tools", "FAIL" if missing else "PASS",
+                 ("job capabilities %s, but %s not served" % (", ".join(jobs), " and ".join(missing))) if missing else "fabric.job.get and fabric.job.cancel served")
+
+    def unknown_job_rule(self, tool_names: List[str]) -> None:
+        """C3.2: an unknown id answers isError with unknown-job, never a fresh job."""
+        if "fabric.job.get" not in tool_names:
+            self.add("interop.unknown-job", "NOT_RUN", "fabric.job.get is not served")
+            return
+        probe_id = "probe-unknown-" + secrets.token_hex(6)
+        try:
+            answer = self.mcp_call("tools/call", {"name": "fabric.job.get", "arguments": {"id": probe_id}})
+        except (OSError, ValueError) as exc:
+            self.add("interop.unknown-job", "FAIL", "fabric.job.get failed: %s" % exc)
+            return
+        result = answer.get("result") or {}
+        ok = result.get("isError") is True and "unknown-job" in json.dumps(result)
+        self.add("interop.unknown-job", "PASS" if ok else "FAIL",
+                 "isError with unknown-job for %s" % probe_id if ok else "an unknown id did not answer isError with unknown-job")
+
+    def trace_rule(self, answer: Dict[str, Any], sent: Optional[str]) -> None:
+        """C3.4: work runs as a child span of the caller — same trace, new span."""
+        answered = fi.parse_traceparent(((answer.get("result") or {}).get("_meta") or {}).get("traceparent"))
+        mine = fi.parse_traceparent(sent)
+        if answered is None or mine is None:
+            self.add("interop.trace-propagation", "NOT_RUN", "the answer carries no _meta.traceparent (C3.4 does not require it)")
+        elif answered["trace_id"] == mine["trace_id"] and answered["span_id"] != mine["span_id"]:
+            self.add("interop.trace-propagation", "PASS", "answered as a child span of trace %s" % mine["trace_id"])
+        else:
+            self.add("interop.trace-propagation", "FAIL", "answered with trace %s span %s to a call in trace %s span %s"
+                     % (answered["trace_id"], answered["span_id"], mine["trace_id"], mine["span_id"]))
+
+    def events_trace_rule(self, events: Optional[List[Dict[str, Any]]]) -> None:
+        """C3.4 c: an event about traced work carries traceId and spanId together, well formed."""
+        if events is None:
+            self.add("interop.events-trace", "NOT_RUN", "no events page was read")
+            return
+        bad, traced = [], 0
+        for e in events:
+            has = ("traceId" in e, "spanId" in e)
+            if has == (False, False):
+                continue
+            traced += 1
+            if has != (True, True) or not fi.parse_traceparent("00-%s-%s-01" % (e.get("traceId"), e.get("spanId"))):
+                bad.append(str(e.get("id")))
+        self.add("interop.events-trace", "FAIL" if bad else "PASS",
+                 ("events with a broken trace pair: " + ", ".join(bad)) if bad else "%d of %d events traced, every pair whole" % (traced, len(events)))
+    # #endregion probe-interop
 
     # lifecycle ----------------------------------------------------------------
     def lifecycle_rules(self) -> None:
@@ -319,6 +492,7 @@ class Probe:
             self.network_rules()
             self.auth_rules()
             self.login_rules()
+            self.interop_rules()
         self.lifecycle_rules()
         return self.results
 

@@ -1,6 +1,6 @@
-# Vendored from passioncode-ai/fabric-agent-adapter aaaa93f97577 (fabric-agent-adapter 0.4.0),
+# Vendored from passioncode-ai/fabric-agent-adapter f31c2b2792f7 (fabric-agent-adapter 0.5.0),
 # plugins/fabric-agent-adapter/skills/building-fabric-services/scripts/fabric_service.py,
-# upstream sha256 3331b9ad5baa5721d0bdc148284dfc88572bb9a22231d292b969f7bd918f2eb5 (the bytes below this header).
+# upstream sha256 7250a7b0013892fd9af4f9f7bc4d15258629e740ff128b587344f2c6f050b0e3 (the bytes below this header).
 # Do not edit here: update the kit upstream and copy it again (tests/test_fabric_service.py checks the digest).
 #!/usr/bin/env python3
 """Reference kit for the fabric-service/0.1 local service extension.
@@ -19,12 +19,14 @@ import datetime as _dt
 import errno
 import hashlib
 import hmac
+import http.server
 import json
 import os
 from pathlib import Path
 import plistlib
 import re
 import secrets
+import socketserver
 import stat
 import subprocess
 import sys
@@ -48,6 +50,8 @@ _INSTANCE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _KIND = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){0,5}$")
 _ORIGIN = re.compile(r"^http://127\.0\.0\.1:([0-9]{3,5})$")
 _CODE = re.compile(r"^[A-Za-z0-9_-]{16,256}$")
+_TRACE_ID = re.compile(r"^(?!0{32}$)[0-9a-f]{32}$")
+_SPAN_ID = re.compile(r"^(?!0{16}$)[0-9a-f]{16}$")
 
 
 class ServiceError(Exception):
@@ -170,7 +174,7 @@ class InstanceLock:
 def _read_pid(path: Path) -> Optional[int]:
     try:
         text = path.read_text().strip()
-        return int(text) if text.isdigit() else None
+        return int(text) if re.fullmatch(r"[0-9]{1,10}", text, re.ASCII) else None
     except OSError:
         return None
 
@@ -240,6 +244,20 @@ def check_request(port: int, host: Optional[str], origin: Optional[str] = None,
 
 
 # --- descriptor --------------------------------------------------------------
+
+class LoopbackHTTPServer(http.server.ThreadingHTTPServer):
+    """ThreadingHTTPServer for a loopback service: threads are daemons, and the bind asks
+    no resolver. HTTPServer.server_bind() calls socket.getfqdn() between bind() and listen();
+    on a Mac with a slow resolver the port then stays bound but silent, so a host sees
+    neither an answer nor a refusal."""
+
+    daemon_threads = True
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name, self.server_port = host, port
+
 
 def descriptor_path(service_id: str, instance: str = "default", directory: Optional[Path] = None) -> Path:
     return (directory or services_dir()) / ("%s.%s.json" % (service_id, instance))
@@ -392,8 +410,12 @@ def build_well_known(*, service_id: str, instance: str, name: str, version: str,
 # --- events ------------------------------------------------------------------
 
 def make_event(event_id: Any, at: str, kind: str, level: str, text: str, *, subject: Optional[Dict[str, str]] = None,
-               link: Optional[str] = None, notify: bool = False) -> Dict[str, Any]:
-    """One activity event: one sentence a person reads, never a machine id."""
+               link: Optional[str] = None, notify: bool = False, trace_id: Optional[str] = None,
+               span_id: Optional[str] = None) -> Dict[str, Any]:
+    """One activity event: one sentence a person reads, never a machine id.
+
+    An event about traced work carries its trace as a pair, `trace_id` and `span_id`
+    (fabric-interop/0.1 C3.4 c); fabric_interop.trace_ids(traceparent) gives both."""
     if level not in LEVELS:
         raise ServiceError("level must be one of %s." % ", ".join(LEVELS))
     if not _KIND.match(kind):
@@ -403,6 +425,10 @@ def make_event(event_id: Any, at: str, kind: str, level: str, text: str, *, subj
         raise ServiceError("An event needs a sentence.")
     if link is not None and (not link.startswith("/") or link.startswith("//")):
         raise ServiceError("link must be a path on this service.")
+    if (trace_id is None) != (span_id is None):
+        raise ServiceError("An event carries traceId and spanId together, or neither.")
+    if trace_id is not None and not (_TRACE_ID.match(trace_id) and _SPAN_ID.match(str(span_id))):
+        raise ServiceError("traceId is 32 and spanId 16 lowercase hex characters, not all zeros.")
     event: Dict[str, Any] = {"id": str(event_id), "at": at, "kind": kind, "level": level, "text": text[:500]}
     if subject:
         event["subject"] = subject
@@ -410,6 +436,8 @@ def make_event(event_id: Any, at: str, kind: str, level: str, text: str, *, subj
         event["link"] = link
     if notify:
         event["notify"] = True
+    if trace_id is not None:
+        event["traceId"], event["spanId"] = trace_id, span_id
     return event
 
 

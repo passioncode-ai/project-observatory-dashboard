@@ -1,6 +1,6 @@
 {
   "profile": "observatory-local-mcp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "schemaRelease": "v0.2.0",
   "repository": "https://github.com/ssheleg/project-observatory-open-source",
   "schemas": [
@@ -13,7 +13,8 @@
     "fabric/schemas/record-input.schema.json",
     "fabric/schemas/record-output.schema.json",
     "fabric/schemas/mcp-inventory-input.schema.json",
-    "fabric/schemas/mcp-inventory-output.schema.json"
+    "fabric/schemas/mcp-inventory-output.schema.json",
+    "fabric/schemas/mcp-refresh-input.schema.json"
   ],
   "releases": [
     {
@@ -41,8 +42,10 @@
       "repository": "passioncode-ai/project-observatory-dashboard",
       "files": [
         "fixtures/mcp-inventory-input.json",
+        "fixtures/mcp-refresh-input.json",
         "schemas/mcp-inventory-input.schema.json",
-        "schemas/mcp-inventory-output.schema.json"
+        "schemas/mcp-inventory-output.schema.json",
+        "schemas/mcp-refresh-input.schema.json"
       ]
     }
   ],

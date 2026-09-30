@@ -122,7 +122,7 @@ class Sandbox(unittest.TestCase):
 class VendoredKit(unittest.TestCase):
     def test_kit_and_probe_are_the_upstream_bytes(self):
         """The header records the upstream digest; an edit here would drift from the kit."""
-        for path in (ROOT / "fabric_service.py", PROBE):
+        for path in (ROOT / "fabric_service.py", PROBE, ROOT / "tests/fabric_interop.py"):
             lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
             self.assertTrue(lines[0].startswith("# Vendored from passioncode-ai/fabric-agent-adapter"), path)
             recorded = lines[2].split("upstream sha256 ", 1)[1].split()[0]
@@ -401,6 +401,39 @@ class StartupOrder(Sandbox):
         self.assertEqual(calls, [], "nothing may happen before the lock")
         self.assertFalse((self.home / "service.token").exists())
 
+    def test_a_start_refreshes_a_stale_per_install_manifest_and_creates_none(self):
+        """An update restarts the server without the installer; the manifest must follow the code."""
+        class Lock:
+            def release(self):
+                pass
+
+        class Server:
+            def __init__(self, *a, **k):
+                pass
+            def serve_forever(self):
+                pass
+            def server_close(self):
+                pass
+            def shutdown(self):
+                pass
+        target = self.home / "config/fabric-agent.json"
+
+        def start():
+            with mock.patch.object(self.serverd.fs, "hold_single_instance", side_effect=lambda d: Lock()), \
+                    mock.patch.object(self.serverd.fs, "ensure_token", side_effect=lambda p: "t" * 43), \
+                    mock.patch.object(self.serverd, "heartbeat", side_effect=lambda: {"leaks": {}}), \
+                    mock.patch.object(self.serverd, "LoopbackServer", Server), \
+                    mock.patch.object(self.serverd.signal, "signal"):
+                self.assertEqual(self.serverd.serve(free_port()), 0)
+        start()
+        self.assertFalse(target.exists(), "nothing is created where the installer wrote nothing")
+        target.write_text(json.dumps({"provider": {"revision": 1}}))
+        start()
+        sys.path.insert(0, str(ROOT / "tools"))
+        from publish_contract import installed_manifest
+        self.assertEqual(json.loads(target.read_text()), installed_manifest(self.si.instance()))
+        self.assertEqual(os.stat(target).st_mode & 0o777, 0o600)
+
     def test_the_lock_comes_first_then_the_token_then_the_socket(self):
         calls = []
 
@@ -546,6 +579,22 @@ class Installer(Sandbox):
         self.assertEqual((plist["RunAtLoad"], plist["KeepAlive"], plist["ThrottleInterval"]), (True, True, 10))
         self.assertGreater(plist["ExitTimeOut"], self.serverd.EXIT_TIMEOUT)
         self.assertEqual(os.stat(self.serverd.PLIST).st_mode & 0o777, 0o600)
+        manifest = Path(doc["fabricManifest"])
+        self.assertEqual(manifest, self.home / "config/fabric-agent.json",
+                         "the descriptor points at this installation's manifest, not the template")
+        self.assertEqual(os.stat(manifest).st_mode & 0o777, 0o600)
+        installed = json.loads(manifest.read_text())
+        conn = {json.dumps(c["profile"]["connection"], sort_keys=True) for c in installed["capabilities"]}
+        self.assertEqual(len(conn), 1)
+        conn = json.loads(conn.pop())
+        self.assertEqual(conn["executableRef"], Path(sys.executable).absolute().as_uri())
+        self.assertEqual(conn["args"][-2:], ["--home", str(self.home)])
+        self.assertEqual(installed["provider"]["extensions"][
+            "https://fabric.passioncode.ai/agent-contract/extensions/service/0.1"]["descriptor"],
+            f"project-observatory.{self.si.instance()}")
+        sys.path.insert(0, str(ROOT / "tools"))
+        from fabric_hash import compute
+        self.assertEqual(installed["provider"]["contentHash"], compute(installed))
         token = self.home / "service.token"
         self.assertNotIn(b"service.token", self.serverd.PLIST.read_bytes(), "the plist names no token")
         self.assertFalse(token.exists(), "the installer never creates the token; the service does, after its lock")
@@ -771,6 +820,9 @@ class RunningServer(unittest.TestCase):
             import paths
             importlib.reload(paths)
             importlib.reload(service_identity)
+            # As the installer does: the per-install manifest first, so the
+            # probe's interop.manifest-link reads a manifest naming THIS descriptor.
+            service_identity.write_installed_manifest()
             fs.write_descriptor(service_identity.descriptor(self.port))
             target = f"project-observatory.{service_identity.instance()}"
         out = subprocess.run([sys.executable, str(PROBE), target, "--json"], cwd=ROOT, env=self.env,
@@ -781,8 +833,14 @@ class RunningServer(unittest.TestCase):
         self.assertEqual(failed, {})
         self.assertEqual(out.returncode, 0)
         not_run = {k for k, v in verdicts.items() if v["verdict"] == "NOT_RUN"}
-        self.assertEqual(not_run, {"login.single-use", "lifecycle.launchd"},
-                         "the dashboard declares no login and this descriptor has no supervisor")
+        self.assertEqual(not_run, {"login.single-use", "lifecycle.launchd",
+                                   "interop.well-known-capabilities", "interop.tools-match",
+                                   "interop.job-tools", "interop.unknown-job", "interop.trace-propagation"},
+                         "the dashboard declares no login, this descriptor has no supervisor, and the MCP "
+                         "server is stdio, so the probe's MCP-over-HTTP rules have no surface to call "
+                         "(tests/test_interop.py checks them over stdio)")
+        self.assertEqual(verdicts["interop.manifest-link"]["verdict"], "PASS")
+        self.assertEqual(verdicts["interop.events-trace"]["verdict"], "PASS")
         self.assertEqual(verdicts["lifecycle.instance-lock"]["verdict"], "PASS")
         self.assertEqual(verdicts["events.page"]["verdict"], "PASS")
         # The probe's own table, kept in the log as the receipt. Prefixed so the
