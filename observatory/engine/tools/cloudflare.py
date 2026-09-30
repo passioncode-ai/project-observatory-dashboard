@@ -5,6 +5,8 @@
     ./tools/cloudflare.py issue --preset analytics [--project project:x]
     ./tools/cloudflare.py issue --preset dns-edit --zone example.com --vault PROJECT/ENV/NAME
     ./tools/cloudflare.py issue --preset d1-edit --account <slug> --vault PROJECT/ENV/NAME
+    ./tools/cloudflare.py issue --preset r2-bucket --account <slug> --bucket NAME \
+        [--jurisdiction eu] [--expire-days 30] --vault PROJECT/ENV/PREFIX
     ./tools/cloudflare.py list
     ./tools/cloudflare.py ping
     ./tools/cloudflare.py rotate <label>   # or --leaked, for every open leak
@@ -39,6 +41,8 @@ nothing downstream has to learn a new name.
 from __future__ import annotations
 import argparse
 import datetime
+import hashlib
+import hmac
 import json
 import os
 import pathlib
@@ -98,11 +102,43 @@ PRESETS: dict[str, dict] = {
         "why": "writes the D1 databases of one account for the project named by the vault slot",
         "scope": "account-vault",
     },
+    # R2 OBJECTS, ONE BUCKET, INTO THE VAULT. An off-site backup needs to put
+    # and read objects in one bucket — not list the account's other buckets,
+    # not change a bucket's settings. `Bucket Item Write` scoped to the
+    # bucket's own resource is exactly that, and R2 turns the token into an S3
+    # key pair (id = token id, secret = sha256 of the value), so what reaches the
+    # vault is the pair a `curl --aws-sigv4` or an S3 SDK takes. Creating the
+    # bucket and its lifecycle is a DIFFERENT right (account-level Storage
+    # Write); that token is minted for the setup, used, and deleted before the
+    # command returns — see `R2_SETUP`. Before delivery the pair must prove a
+    # put, a get and a delete, and prove that listing buckets is REFUSED: a
+    # pair that can see the account's other buckets is not the one asked for.
+    "r2-bucket": {
+        "name": "observatory-r2-bucket {jurisdiction}/{bucket} (managed)",
+        "groups": ("Workers R2 Storage Bucket Item Write",),
+        "level": "bucket",
+        "why": "reads and writes the objects of one R2 bucket for the project named by the vault slot",
+        "scope": "bucket-vault",
+    },
 }
+
+#: The setup right for `r2-bucket`: create the bucket, set its lifecycle. Never
+#: delivered anywhere and never left behind — minted, used, deleted in one run.
+#: Not a preset: `issue --preset` cannot hand it out.
+R2_SETUP: dict = {
+    "name": "observatory-r2-setup (ephemeral)",
+    "groups": ("Workers R2 Storage Write",),
+    "level": "account",
+    "why": "creates one R2 bucket and sets its lifecycle; deleted before the command returns",
+}
+#: Jurisdictions this door will create a bucket in. `default` is Cloudflare's
+#: own placement; `eu` guarantees the objects stay in the EU.
+R2_JURISDICTIONS = ("default", "eu")
+R2_BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 
 #: Presets whose token is a project's credential, delivered to a vault slot —
 #: never filed in the folder the read-only analytics plugin loads.
-VAULT_SCOPES = ("zone", "account-vault")
+VAULT_SCOPES = ("zone", "account-vault", "bucket-vault")
 
 
 def token_dir() -> pathlib.Path:
@@ -130,7 +166,7 @@ def today() -> str:
 # ─────────────────────────── the wire ───────────────────────────────────────
 
 def _request(path: str, token: str, payload: dict | None = None,
-             method: str | None = None) -> dict:
+             method: str | None = None, headers: dict | None = None) -> dict:
     """One call, with the error stripped to endpoint and status.
 
     Never the headers, never the body we sent: a signed credential in an
@@ -140,7 +176,7 @@ def _request(path: str, token: str, payload: dict | None = None,
     req = urllib.request.Request(
         f"{API}{path}", data=data, method=method or ("POST" if data else "GET"),
         headers={"Authorization": f"Bearer {token}",
-                 "Content-Type": "application/json"})
+                 "Content-Type": "application/json", **(headers or {})})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read())
@@ -321,6 +357,10 @@ def read_meta(path: pathlib.Path) -> dict:
 
 def _group_level(g: dict) -> str:
     scopes = json.dumps(g.get("scopes", ""))
+    if "r2.bucket" in scopes:
+        # R2's object groups are granted on a BUCKET resource, and a policy may
+        # not put them on the account — a third level, not a kind of account.
+        return "bucket"
     return "zone" if "zone" in scopes else "account"
 
 
@@ -665,6 +705,222 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
     return 0
 
 
+
+# ─────────────────────────── R2: one bucket, S3 keys ─────────────────────────
+
+def r2_endpoint(account_id: str, jurisdiction: str) -> str:
+    """The S3 endpoint a bucket in this jurisdiction answers on."""
+    region = "" if jurisdiction == "default" else f".{jurisdiction}"
+    return f"https://{account_id}{region}.r2.cloudflarestorage.com"
+
+
+def r2_s3_keys(token_id: str, value: str) -> tuple[str, str]:
+    """(access key id, secret access key) — R2's documented derivation."""
+    return token_id, hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def sigv4_headers(method: str, url: str, access_key: str, secret: str, body: bytes,
+                  amz_date: str, region: str = "auto", service: str = "s3",
+                  extra: dict | None = None) -> dict:
+    """AWS Signature Version 4 for one request, header form, stdlib only.
+
+    Only what the door itself needs — a probe put, get, delete and a bucket
+    list — so no query-string canonicalisation beyond what those use. Tested
+    against AWS's published GET-object example."""
+    parts = urllib.parse.urlsplit(url)
+    payload_hash = hashlib.sha256(body).hexdigest()
+    headers = {"host": parts.netloc, "x-amz-content-sha256": payload_hash,
+               "x-amz-date": amz_date}
+    for k, v in (extra or {}).items():
+        headers[k.lower()] = v.strip()
+    signed = ";".join(sorted(headers))
+    canonical_headers = "".join(f"{k}:{headers[k]}\n" for k in sorted(headers))
+    query = "&".join(sorted(parts.query.split("&"))) if parts.query else ""
+    canonical = "\n".join([method, urllib.parse.quote(parts.path or "/", safe="/~"),
+                            query, canonical_headers, signed, payload_hash])
+    day = amz_date[:8]
+    scope = f"{day}/{region}/{service}/aws4_request"
+    to_sign = "\n".join(["AWS4-HMAC-SHA256", amz_date, scope,
+                          hashlib.sha256(canonical.encode("utf-8")).hexdigest()])
+    key = f"AWS4{secret}".encode("utf-8")
+    for piece in (day, region, service, "aws4_request"):
+        key = hmac.new(key, piece.encode("utf-8"), hashlib.sha256).digest()
+    signature = hmac.new(key, to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    out = {k: v for k, v in headers.items() if k != "host"}
+    out["Authorization"] = (f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, "
+                            f"SignedHeaders={signed}, Signature={signature}")
+    return out
+
+
+def _s3(method: str, url: str, access_key: str, secret: str,
+        body: bytes = b"") -> tuple[int, bytes]:
+    """(status, body) of one signed S3 call. An HTTP error is a status, not an
+    exception — the door's checks are about WHICH status came back — and no
+    header or credential ever reaches a message."""
+    amz_date = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    hdrs = sigv4_headers(method, url, access_key, secret, body, amz_date)
+    req = urllib.request.Request(url, data=body if method == "PUT" else None,
+                                 method=method, headers=hdrs)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        status = e.code
+        e.close()
+        return status, b""
+    except OSError as e:
+        raise RuntimeError(f"r2 unreachable: {type(e).__name__}") from None
+
+
+def r2_prove(endpoint: str, bucket: str, access_key: str, secret: str) -> str:
+    """An empty string if the pair can put, read back and delete an object in
+    THIS bucket and cannot list the account's buckets; else why not."""
+    key = f".observatory-probe/{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%S%f}"
+    url = f"{endpoint}/{bucket}/{key}"
+    body = os.urandom(16).hex().encode("ascii")
+    status, _ = _s3("PUT", url, access_key, secret, body)
+    if status != 200:
+        return f"a probe put answered HTTP {status}"
+    status, got = _s3("GET", url, access_key, secret)
+    if status != 200 or got != body:
+        return f"the probe read back as HTTP {status}" + ("" if status != 200 else ", different bytes")
+    status, _ = _s3("DELETE", url, access_key, secret)
+    if status not in (200, 204):
+        return f"the probe delete answered HTTP {status}"
+    status, _ = _s3("GET", f"{endpoint}/", access_key, secret)
+    if status == 200:
+        return "the pair can LIST the account's buckets — broader than one bucket"
+    return ""
+
+
+def r2_lifecycle(expire_days: int) -> dict:
+    """One rule over the whole bucket: objects expire, stale uploads abort."""
+    return {"rules": [{
+        "id": f"expire-after-{expire_days}-days",
+        "enabled": True,
+        "conditions": {"prefix": ""},
+        "deleteObjectsTransition": {"condition": {"type": "Age", "maxAge": expire_days * 86400}},
+        "abortMultipartUploadsTransition": {"condition": {"type": "Age", "maxAge": 86400}},
+    }]}
+
+
+def r2_setup_bucket(admin: str, account_id: str, bucket: str, jurisdiction: str,
+                    expire_days: int, wait: float = 2.0) -> bool:
+    """Create the bucket if it is missing and replace its lifecycle, with a
+    setup token that is deleted before this returns. True if it created one.
+
+    The admin token can mint tokens and nothing else; R2's own API needs
+    Storage Write, which is too broad to keep anywhere — so it lives for the
+    length of this function. A delete that fails is an error, not a warning:
+    a live account-wide storage writer nobody knows about is the thing this
+    door exists to prevent."""
+    tid, setup = mint(admin, account_id, R2_SETUP)
+    created = False
+    try:
+        hdr = {"cf-r2-jurisdiction": jurisdiction}
+        base = f"/accounts/{account_id}/r2/buckets"
+        for attempt in range(5):
+            try:
+                _request(f"{base}?per_page=1", setup, headers=hdr)
+                break
+            except RuntimeError:
+                if attempt == 4:
+                    raise RuntimeError("the setup token was never honoured for R2 — "
+                                       "is R2 enabled on this account?") from None
+                time.sleep(wait)
+        try:
+            _request(f"{base}/{bucket}", setup, headers=hdr)
+        except RuntimeError as exc:
+            if "HTTP 404" not in str(exc):
+                raise
+            _request(base, setup, {"name": bucket}, headers=hdr)
+            created = True
+        _request(f"{base}/{bucket}/lifecycle", setup, r2_lifecycle(expire_days),
+                 method="PUT", headers=hdr)
+        rules = (_request(f"{base}/{bucket}/lifecycle", setup, headers=hdr)
+                 .get("result") or {}).get("rules") or []
+        want = expire_days * 86400
+        if not any(((r.get("deleteObjectsTransition") or {}).get("condition") or {})
+                   .get("maxAge") == want for r in rules):
+            raise RuntimeError("the lifecycle rule did not read back as written")
+    finally:
+        try:
+            _request(f"/accounts/{account_id}/tokens/{tid}", admin, method="DELETE")
+        except RuntimeError as exc:
+            raise RuntimeError(f"the R2 setup token could not be deleted ({exc}) — "
+                               f"delete {R2_SETUP['name']!r} in the dashboard now") from None
+    return created
+
+
+def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
+                     expire_days: int, target: str | None, account_label: str | None,
+                     wait: float = 2.0) -> int:
+    """Issue a one-bucket R2 key pair into three vault slots.
+
+    `--vault PROJECT/ENV/PREFIX` names the slots PREFIX_ACCESS_KEY_ID,
+    PREFIX_SECRET_ACCESS_KEY and PREFIX_ENDPOINT — the three things an S3
+    client needs, delivered together or not at all."""
+    preset = PRESETS[preset_key]
+    if preset.get("scope") != "bucket-vault":
+        print(f"refused: preset {preset_key!r} is not a bucket preset", file=sys.stderr)
+        return 2
+    if not bucket or not target:
+        print(f"refused: preset {preset_key!r} needs --bucket and --vault PROJECT/ENV/PREFIX",
+              file=sys.stderr)
+        return 2
+    if not R2_BUCKET_RE.match(bucket):
+        print("refused: an R2 bucket name is 3–63 characters of a–z, 0–9 and '-', "
+              "starting and ending with a letter or digit", file=sys.stderr)
+        return 2
+    if jurisdiction not in R2_JURISDICTIONS:
+        print(f"refused: --jurisdiction is one of {', '.join(R2_JURISDICTIONS)}", file=sys.stderr)
+        return 2
+    if not 1 <= expire_days <= 3650:
+        print("refused: --expire-days is between 1 and 3650", file=sys.stderr)
+        return 2
+    try:
+        project, env, prefix = parse_vault_target(target)
+        slots = [f"{prefix}_{s}" for s in ("ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "ENDPOINT")]
+        for s in slots:
+            parse_vault_target(f"{project}/{env}/{s}")
+    except ValueError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    try:
+        _stash, admin, account = find_account(account_label)
+        created = r2_setup_bucket(admin, account["id"], bucket, jurisdiction, expire_days, wait)
+        token_name = preset["name"].format(jurisdiction=jurisdiction, bucket=bucket)
+        rolled = existing_token(admin, account["id"], token_name) is not None
+        resource = f"com.cloudflare.edge.r2.bucket.{account['id']}_{jurisdiction}_{bucket}"
+        tid, value = mint(admin, account["id"], preset, resources={resource: "*"},
+                          name=token_name)
+        access_key, secret = r2_s3_keys(tid, value)
+        endpoint = r2_endpoint(account["id"], jurisdiction)
+        why = ""
+        for attempt in range(5):
+            why = r2_prove(endpoint, bucket, access_key, secret)
+            if not why or "broader" in why:
+                break
+            time.sleep(wait)
+        if why:
+            raise RuntimeError(f"the issued pair failed its proof — {why}; nothing delivered")
+        for slot, v in zip(slots, (access_key, secret, endpoint)):
+            deliver_to_vault(v, project, env, slot)
+    except RuntimeError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    _journal("rotate" if rolled else "issue", f"{project}/{env}/{prefix}_*",
+             preset=preset_key, bucket=bucket, jurisdiction=jurisdiction,
+             expire_days=expire_days, account=account["name"])
+    print(f"  bucket {bucket} ({jurisdiction}): {'created' if created else 'already there'}, "
+          f"objects expire after {expire_days} days")
+    print(f"  {project}/{env}/{prefix}_{{ACCESS_KEY_ID,SECRET_ACCESS_KEY,ENDPOINT}}: "
+          f"{'rolled' if rolled else 'issued'} — {', '.join(preset['groups'])} on {bucket} only, "
+          f"proved by a put, a get and a delete, and refused a bucket list; "
+          f"use: tools/use_secret.py run --env {env} {project} "
+          f"{','.join(slots)} -- <command>")
+    return 0
+
 def cmd_install(value: str) -> int:
     """A narrow token minted ELSEWHERE, pasted in: verified the same way an
     issued one is, filed with a record marking it external — so `ping` watches
@@ -883,6 +1139,11 @@ def main() -> int:
     p_issue.add_argument("--project", help="the project this token serves")
     p_issue.add_argument("--zone", help="zone presets: the one zone the token may touch")
     p_issue.add_argument("--vault", help="writer presets: the slot PROJECT/ENV/NAME it is delivered to")
+    p_issue.add_argument("--bucket", help="r2-bucket: the one bucket the key pair may touch")
+    p_issue.add_argument("--jurisdiction", default="default", choices=R2_JURISDICTIONS,
+                         help="r2-bucket: where the bucket's objects must stay")
+    p_issue.add_argument("--expire-days", type=int, default=30,
+                         help="r2-bucket: lifecycle — objects are deleted after this many days")
     sub.add_parser("list", help="what exists, with dates — never values")
     sub.add_parser("ping", help="can every token still do its job")
     p_rot = sub.add_parser("rotate", help="roll a token's value in place")
@@ -907,6 +1168,13 @@ def main() -> int:
         scope = PRESETS[a.preset].get("scope")
         if scope == "zone":
             return cmd_issue_zone(a.preset, a.zone, a.vault, a.account)
+        if scope == "bucket-vault":
+            if a.zone:
+                print(f"refused: preset {a.preset!r} is bucket-scoped; --zone does not apply",
+                      file=sys.stderr)
+                return 2
+            return cmd_issue_bucket(a.preset, a.bucket, a.jurisdiction, a.expire_days,
+                                    a.vault, a.account)
         if scope == "account-vault":
             if a.zone:
                 print(f"refused: preset {a.preset!r} is account-scoped; --zone does not apply",

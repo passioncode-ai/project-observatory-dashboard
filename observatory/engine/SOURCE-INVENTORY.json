@@ -1334,8 +1334,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "ce281dbbe4959d81f09065c4a0d51071909b3f33b7ade89c8ea8cadcfe706e43",
-      "bytes": 7143,
+      "export_sha256": "f36540003fe78dc63f7e2afa1778794bf6d4f76ad212321fbf2978e7edfb564d",
+      "bytes": 7851,
       "upstream_modified": true
     },
     {
@@ -1812,8 +1812,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "97835e42e7b320ec1ea4621ddf19c517b5d70ec866de126361533376fe6de756",
-      "bytes": 36868,
+      "export_sha256": "6b1583db2f364b44eaf2f393e6457a0d1f733647a9260c1173536e6a0c673ed5",
+      "bytes": 49613,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -2216,8 +2216,8 @@
       "path": "tests/test_leak_coverage.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2e80ee6f7cc728d9f0a9f4abcf1c9d15a76cfaf6ca0e9c24ba8e227d4a0b6676",
-      "bytes": 3990
+      "export_sha256": "61a7d9fb81ee38e49e12d5d95bb7040e449fff904dc3554723510ff97cee43ca",
+      "bytes": 4248
     },
     {
       "path": "tests/test_leak_scan_incremental.py",
@@ -3206,8 +3206,8 @@
     {
       "path": "tools/cloudflare.py",
       "source_sha256": "554f7d6d0d677c887404479e33a84d40e76f022ecd49ce15e85cf409d5e6738f",
-      "export_sha256": "adb9c44e1d434a4371e637cddf6fbbc353d933b0228ce8563f8e183697fb6755",
-      "bytes": 42871,
+      "export_sha256": "23d3506871450cffb6da781b1d169a84fbce9c9861f0f6c319dd27e2d6e28d38",
+      "bytes": 56992,
       "python_comments_removed": 37,
       "python_docstrings_removed": 16,
       "tool_descriptions_retained": 0,

@@ -486,6 +486,216 @@ def test_cf_d1_preset_rolls_refuses_and_never_misfiles() -> None:
           not any(p == "/accounts/a1/tokens" and pl for _m, p, _t, pl in log3), str(log3))
 
 
+
+# AWS's documented SigV4 example credentials — public, and assembled from parts
+# so no line of this file carries a key-shaped literal.
+_AWS_EXAMPLE_ID = "AKIA" + "IOSFODNN7" + "EXAMPLE"
+_AWS_EXAMPLE_SECRET = "wJalrXUtnFEMI/K7MDENG/" + "bPxRfiCY" + "EXAMPLEKEY"
+
+
+def test_cf_sigv4_matches_the_published_aws_example() -> None:
+    """The door signs its own R2 probes; a signer that is subtly wrong would
+    make every proof fail — or, worse, pass against a lenient fake. AWS's
+    documented GET-object example is the oracle."""
+    import hashlib
+    m = cf()
+    h = m.sigv4_headers("GET", "https://examplebucket.s3.amazonaws.com/test.txt",
+                        _AWS_EXAMPLE_ID, _AWS_EXAMPLE_SECRET,
+                        b"", "20130524T000000Z", region="us-east-1",
+                        extra={"Range": "bytes=0-9"})
+    check("SigV4 reproduces AWS's published signature",
+          h["Authorization"].endswith(
+              "SignedHeaders=host;range;x-amz-content-sha256;x-amz-date, "
+              "Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41"),
+          h["Authorization"])
+    check("and R2's key pair is the token id and the sha256 of its value",
+          m.r2_s3_keys("tid", "value") == ("tid", hashlib.sha256(b"value").hexdigest()), "")
+    check("the EU endpoint carries the jurisdiction",
+          m.r2_endpoint("a1", "eu") == "https://a1.eu.r2.cloudflarestorage.com"
+          and m.r2_endpoint("a1", "default") == "https://a1.r2.cloudflarestorage.com", "")
+
+
+def _r2_fake(m, log, *, bucket_exists=False, existing=None, lifecycle_fails=False,
+             can_list=False, put_fails=0):
+    state = {"put_fails": put_fails, "lifecycle": None}
+    tokens = {}
+
+    def fake(path, token, payload=None, method=None, headers=None):
+        verb = method or ("POST" if payload is not None else "GET")
+        log.append((verb, path, token, payload, dict(headers or {})))
+        if "permission_groups" in path:
+            return {"result": [
+                {"id": "g-acct-write", "name": "Workers R2 Storage Write",
+                 "scopes": ["com.cloudflare.api.account"]},
+                {"id": "g-item-write", "name": "Workers R2 Storage Bucket Item Write",
+                 "scopes": ["com.cloudflare.edge.r2.bucket"]}]}
+        if path.endswith("/tokens?per_page=50"):
+            rows = [{"id": "t-bucket", "name": existing}] if existing else []
+            return {"result": rows + [{"id": i, "name": n} for i, n in tokens.items()]}
+        if path == "/accounts/a1/tokens" and verb == "POST":
+            name = payload["name"]
+            tid = "t-setup" if "setup" in name else "t-bucket-new"
+            tokens[tid] = name
+            prefix = "setup-value-" if "setup" in name else "bucket-value-"
+            return {"result": {"id": tid, "value": prefix + "q" * 28}}
+        if path == "/accounts/a1/tokens/t-bucket" and verb == "PUT":
+            return {"result": {"id": "t-bucket"}}
+        if path == "/accounts/a1/tokens/t-bucket/value":
+            return {"result": "bucket-rolled-" + "r" * 26}
+        if path == "/accounts/a1/tokens/t-setup" and verb == "DELETE":
+            tokens.pop("t-setup", None)
+            return {"result": {"id": "t-setup"}}
+        if path.startswith("/accounts/a1/r2/buckets"):
+            assert token.startswith("setup-value-"), "R2's API is only called with the setup token"
+            if path == "/accounts/a1/r2/buckets?per_page=1":
+                return {"result": {"buckets": []}}
+            if path == "/accounts/a1/r2/buckets/offsite-backups" and verb == "GET":
+                if bucket_exists:
+                    return {"result": {"name": "offsite-backups"}}
+                raise RuntimeError("cloudflare answered HTTP 404; provider response withheld")
+            if path == "/accounts/a1/r2/buckets" and verb == "POST":
+                return {"result": {"name": payload["name"]}}
+            if path.endswith("/lifecycle") and verb == "PUT":
+                if lifecycle_fails:
+                    raise RuntimeError("cloudflare answered HTTP 400; provider response withheld")
+                state["lifecycle"] = payload
+                return {"result": {}}
+            if path.endswith("/lifecycle") and verb == "GET":
+                return {"result": state["lifecycle"] or {"rules": []}}
+        raise AssertionError(f"unexpected call {verb} {path}")
+
+    def s3(method, url, access_key, secret, body=b""):
+        log.append(("S3 " + method, url, access_key, secret, {}))
+        if url.endswith(".r2.cloudflarestorage.com/"):
+            return (200 if can_list else 403), b""
+        if method == "PUT":
+            if state["put_fails"]:
+                state["put_fails"] -= 1
+                return 403, b""
+            state["probe"] = body
+            return 200, b""
+        if method == "GET":
+            return 200, state.get("probe", b"")
+        return 204, b""
+    m._request = fake
+    m._s3 = s3
+    return tokens
+
+
+def test_cf_r2_preset_issues_one_bucket_pair_into_the_vault() -> None:
+    """An off-site backup's writer: objects of ONE bucket, in the jurisdiction
+    asked, with the bucket and its lifecycle made by a setup token that does not
+    outlive the command, proved by a real put/get/delete, delivered as an S3
+    pair on stdin."""
+    import contextlib, hashlib, io
+    m = cf(); _cf_with_admin(m)
+    log, delivered = [], []
+    tokens = _r2_fake(m, log)
+    m.deliver_to_vault = lambda value, p, e, n: delivered.append((value, p, e, n))
+    m._journal = lambda *a, **k: None
+    m.token_dir = lambda: (_ for _ in ()).throw(AssertionError("vault presets never reach the plugin folder"))
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", 30, "proj/prod/OFFSITE", None, wait=0)
+    check("r2-bucket issues", rc == 0, f"{rc} {err.getvalue()}")
+    creates = [pl for verb, path, _t, pl, _h in log if verb == "POST" and path == "/accounts/a1/tokens"]
+    setup = next((pl for pl in creates if "setup" in pl["name"]), None)
+    item = next((pl for pl in creates if "setup" not in pl["name"]), None)
+    check("the setup token holds only account-level Storage Write",
+          bool(setup) and setup["policies"][0]["permission_groups"] == [{"id": "g-acct-write"}]
+          and setup["policies"][0]["resources"] == {"com.cloudflare.api.account.a1": "*"}, str(setup))
+    check("and it is deleted before the command returns",
+          "t-setup" not in tokens
+          and any(v == "DELETE" and p == "/accounts/a1/tokens/t-setup" for v, p, *_ in log), str(tokens))
+    bucket_calls = [(v, p, h) for v, p, _t, _pl, h in log if "/r2/buckets" in p]
+    check("every R2 call names the EU jurisdiction",
+          bool(bucket_calls) and all(h.get("cf-r2-jurisdiction") == "eu" for _v, _p, h in bucket_calls),
+          str(bucket_calls))
+    check("a missing bucket is created",
+          any(v == "POST" and p == "/accounts/a1/r2/buckets" for v, p, _h in bucket_calls), "")
+    life = next((pl for v, p, _t, pl, _h in log if v == "PUT" and p.endswith("/lifecycle")), {})
+    check("the lifecycle expires objects after the days asked",
+          life.get("rules", [{}])[0].get("deleteObjectsTransition", {}).get("condition")
+          == {"type": "Age", "maxAge": 30 * 86400}, str(life))
+    check("the bucket token is granted on that one bucket's resource, not the account",
+          bool(item) and item["policies"][0]["resources"]
+          == {"com.cloudflare.edge.r2.bucket.a1_eu_offsite-backups": "*"}
+          and item["policies"][0]["permission_groups"] == [{"id": "g-item-write"}], str(item))
+    check("named after jurisdiction and bucket, so a second issue rolls it",
+          bool(item) and item["name"] == "observatory-r2-bucket eu/offsite-backups (managed)", str(item))
+    secret = hashlib.sha256(("bucket-value-" + "q" * 28).encode()).hexdigest()
+    probes = [v for v, _url, ak, sk, _h in log if v.startswith("S3 ") and ak == "t-bucket-new" and sk == secret]
+    check("the NEW pair proved a put, a get, a delete and a refused bucket list",
+          probes == ["S3 PUT", "S3 GET", "S3 DELETE", "S3 GET"], str(probes))
+    check("three slots delivered: the S3 pair and the endpoint",
+          delivered == [("t-bucket-new", "proj", "prod", "OFFSITE_ACCESS_KEY_ID"),
+                        (secret, "proj", "prod", "OFFSITE_SECRET_ACCESS_KEY"),
+                        ("https://a1.eu.r2.cloudflarestorage.com", "proj", "prod", "OFFSITE_ENDPOINT")],
+          str(delivered))
+    printed = out.getvalue() + err.getvalue()
+    check("neither the token values nor the secret key are ever printed",
+          "bucket-value-" not in printed and "setup-value-" not in printed and secret not in printed, printed)
+    check("the use line puts --env before the positionals and names all three slots",
+          "use_secret.py run --env prod proj "
+          "OFFSITE_ACCESS_KEY_ID,OFFSITE_SECRET_ACCESS_KEY,OFFSITE_ENDPOINT -- " in printed, printed)
+
+
+def test_cf_r2_preset_refuses_and_cleans_up() -> None:
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    m._journal = lambda *a, **k: None
+
+    log, delivered = [], []
+    _r2_fake(m, log, can_list=True)
+    m.deliver_to_vault = lambda value, p, e, n: delivered.append(n)
+    with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+        rc = m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", 30, "proj/prod/OFFSITE", None, wait=0)
+    check("a pair that can list the account's buckets is never delivered",
+          rc == 1 and not delivered, f"{rc} {delivered}")
+
+    log2 = []
+    tokens2 = _r2_fake(m, log2, lifecycle_fails=True)
+    with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+        rc = m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", 30, "proj/prod/OFFSITE", None, wait=0)
+    check("a failed setup still deletes the setup token, and mints no bucket token",
+          rc == 1 and "t-setup" not in tokens2 and "t-bucket-new" not in tokens2, str(tokens2))
+
+    log3, delivered3 = [], []
+    _r2_fake(m, log3, bucket_exists=True,
+             existing="observatory-r2-bucket eu/offsite-backups (managed)", put_fails=2)
+    m.deliver_to_vault = lambda value, p, e, n: delivered3.append((value, n))
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc = m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", 30, "proj/prod/OFFSITE", None, wait=0)
+    check("a second issue ROLLS the bucket token and keeps its id as the access key",
+          rc == 0 and bool(delivered3) and delivered3[0] == ("t-bucket", "OFFSITE_ACCESS_KEY_ID"),
+          f"{rc} {delivered3}")
+    check("an existing bucket is not created again",
+          not any(v == "POST" and p == "/accounts/a1/r2/buckets" for v, p, *_ in log3), "")
+    check("and a pair the edge has not honoured yet is retried before it is judged",
+          sum(1 for v, *_ in log3 if v == "S3 PUT") == 3, "")
+
+    log4 = []
+    _r2_fake(m, log4)
+    with contextlib.redirect_stderr(io.StringIO()):
+        check("a bucket name R2 would refuse is refused before minting",
+              m.cmd_issue_bucket("r2-bucket", "Bad_Name", "eu", 30, "proj/prod/OFFSITE", None) == 2, "")
+        check("an unknown jurisdiction is refused",
+              m.cmd_issue_bucket("r2-bucket", "offsite-backups", "mars", 30, "proj/prod/OFFSITE", None) == 2, "")
+        check("an expiry outside 1…3650 days is refused",
+              m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", 0, "proj/prod/OFFSITE", None) == 2, "")
+        check("without --vault nothing is minted",
+              m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", 30, None, None) == 2, "")
+        check("a slot prefix the vault would refuse is refused before minting",
+              m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", 30, "proj/prod/lower", None) == 2, "")
+        check("the analytics path refuses the bucket preset",
+              m.cmd_issue("r2-bucket", None, None) == 2, "")
+        check("the account path refuses the bucket preset",
+              m.cmd_issue_account("r2-bucket", "proj/prod/X", None) == 2, "")
+    check("and no refusal minted anything",
+          not any(v == "POST" and p == "/accounts/a1/tokens" for v, p, *_ in log4), str(log4))
+    check("the setup right is not a preset anyone can issue",
+          "r2-setup" not in m.PRESETS and m.R2_SETUP["groups"] == ("Workers R2 Storage Write",), "")
+
 # ─────────────────────────── openrouter ──────────────────────────────────────
 
 def orr():
@@ -689,6 +899,9 @@ if __name__ == "__main__":
                test_cf_dns_delivery_goes_through_the_vault_on_stdin,
                test_cf_d1_preset_is_scoped_to_one_account_and_lands_in_the_vault,
                test_cf_d1_preset_rolls_refuses_and_never_misfiles,
+               test_cf_sigv4_matches_the_published_aws_example,
+               test_cf_r2_preset_issues_one_bucket_pair_into_the_vault,
+               test_cf_r2_preset_refuses_and_cleans_up,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,
