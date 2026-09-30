@@ -9,6 +9,7 @@
         [--jurisdiction eu] [--expire-days 30] --vault PROJECT/ENV/PREFIX
     ./tools/cloudflare.py issue --preset email-send --account <slug> --vault PROJECT/ENV/NAME
     ./tools/cloudflare.py issue --preset email-routing --zone example.com --vault PROJECT/ENV/NAME
+    ./tools/cloudflare.py issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
     ./tools/cloudflare.py list
     ./tools/cloudflare.py groups --account <slug> --match "email sending"
     ./tools/cloudflare.py ping
@@ -135,8 +136,11 @@ PRESETS: dict[str, dict] = {
     # EMAIL ROUTING RULES, ONE ZONE, INTO THE VAULT. Adding a rule that sends
     # one address to a Worker, without the power to change the zone's MX, DNS
     # or the routing settings themselves. Verified by listing the zone's rules.
+    # Named after the zone AND the slot: two projects routing mail in one zone
+    # hold two tokens, where a zone-only name would make the second issue roll
+    # the first project's token and kill the value its slot still holds.
     "email-routing": {
-        "name": "observatory-email-routing {zone} (managed)",
+        "name": "observatory-email-routing {zone} {slot} (managed)",
         "groups": ("Zone Read", "Email Routing Rules Write"),
         "why": "edits Email Routing rules in one zone for the project named by the vault slot",
         "scope": "zone",
@@ -674,7 +678,7 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
     try:
         _stash, admin, account = find_account(account_label)
         zid = zone_id_of(admin, account["id"], zone)
-        token_name = preset["name"].format(zone=zone)
+        token_name = preset["name"].format(zone=zone, slot=f"{project}/{env}/{name}")
         rolled = existing_token(admin, account["id"], token_name) is not None
         _tid, value = mint(admin, account["id"], preset,
                            resources={f"com.cloudflare.api.account.zone.{zid}": "*"},
