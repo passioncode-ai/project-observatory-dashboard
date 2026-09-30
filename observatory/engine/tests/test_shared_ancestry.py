@@ -47,7 +47,7 @@ def build_estate() -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
     elder = d / "zeta-elder"          # sorts after "alpha-younger"
     elder.mkdir()
     git("init", "-q", "-b", "main", ".", cwd=elder)
-    git("config", "user.email", "t@e.com", cwd=elder)
+    git("config", "user.email", "t@example.com", cwd=elder)
     git("config", "user.name", "T", cwd=elder)
     for i in range(3):
         (elder / "f").write_text(str(i))
@@ -56,7 +56,7 @@ def build_estate() -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
     younger = d / "alpha-younger"
     subprocess.run(["git", "clone", "-q", str(elder), str(younger)], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    git("config", "user.email", "t@e.com", cwd=younger)
+    git("config", "user.email", "t@example.com", cwd=younger)
     git("config", "user.name", "T", cwd=younger)
     (younger / "own").write_text("only here")
     git("add", "own", cwd=younger)

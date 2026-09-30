@@ -6,10 +6,6 @@
       "reason": "the author, credited in package metadata, the plugin manifests, the site and the articles"
     },
     {
-      "token": "nicegram",
-      "reason": "the author's public biography (docs/brand/facts.md), repeated in the articles"
-    },
-    {
       "token": "sshlg-skills",
       "reason": "the author's published skill family, cited as a public repository"
     },

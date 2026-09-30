@@ -87,7 +87,7 @@ def test_truncation_is_detected_against_a_real_repository() -> None:
     """Driven through git, not asserted about the source."""
     d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-depth-"))
     subprocess.run(["git", "init", "-q", "-b", "main", str(d)], check=True)
-    for k in ("user.email=t@e.com", "user.name=T"):
+    for k in ("user.email=t@example.com", "user.name=T"):
         subprocess.run(["git", "-C", str(d), "config", *k.split("=", 1)], check=True)
     for i in range(5):
         (d / "f").write_text(str(i))

@@ -10,7 +10,7 @@ Project Observatory grew out of that investigation.
 
 ## The projects I wanted to come back to
 
-I'm [Sergey Sheleg](https://sshlg.me/), a tech founder and product builder. I've spent 13 years building products, including co-founding Nicegram and leading Android development for the Ultimate Guitar app. These days, a lot of my work involves AI products and the agents I use to build them.
+I'm [Sergey Sheleg](https://sshlg.me/), a tech founder and product builder. I've spent 13 years building products, including co-founding a startup and leading Android development for the Ultimate Guitar app. These days, a lot of my work involves AI products and the agents I use to build them.
 
 After that much building, the hard part isn't always starting something new. It's remembering enough about something you already started to make a sensible decision about it.
 
