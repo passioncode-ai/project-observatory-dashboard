@@ -1792,8 +1792,8 @@
       "path": "tests/test_conformance_receipt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "76ecdd39de3174d9bc80f896e0577bfd188f4bf92457d5b0364e9cb936671c77",
-      "bytes": 21868
+      "export_sha256": "05db30d5b76795a6bf62e756bc1b2eee7a26f4d351c59f5e2a309850cba8a458",
+      "bytes": 22535
     },
     {
       "path": "tests/test_corroboration.py",

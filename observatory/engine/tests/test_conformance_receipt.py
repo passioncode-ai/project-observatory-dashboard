@@ -135,6 +135,16 @@ HOME = build_probe_home()
 RECEIPT = HOME / "store/probe-receipts.json"
 
 
+def failing_lines(p: subprocess.CompletedProcess) -> str:
+    """What failed, not the tail. The tail of a probe run is its last passing lines,
+    so a failure on a CI runner (macOS, 2026-09-30) was reported as "returns
+    RevisionConflict carrying the current revision" and nothing else could be read."""
+    lines = p.stdout.splitlines()
+    marked = [f"{line.strip()} {lines[i + 1].strip() if i + 1 < len(lines) and lines[i + 1].startswith(' ' * 10) else ''}"
+              for i, line in enumerate(lines) if line.lstrip().startswith("! ") or "FAIL" in line and "[" in line]
+    return (" | ".join(marked) or "no failing assertion printed")[:1200] + " || stderr: " + p.stderr[-400:]
+
+
 def probes(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run([PY, "tools/run_probes.py", "--fixture-home", str(HOME), *args],
                           cwd=ROOT, capture_output=True, text=True, timeout=900)
@@ -202,8 +212,7 @@ def test_a_receipt_from_another_contract_is_refused() -> None:
     # the output and skipped when it found one — and the record probe PRINTS
     # that word in a passing assertion, so the guard fired on every run and
     # this assertion was never made: a condition that matched prose.
-    check("and the restored receipt passes", p.returncode == 0,
-          (p.stdout + p.stderr)[-300:])
+    check("and the restored receipt passes", p.returncode == 0, failing_lines(p))
 
 
 def test_a_drifted_receipt_still_shows_the_run() -> None:
