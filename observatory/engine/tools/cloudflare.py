@@ -7,7 +7,10 @@
     ./tools/cloudflare.py issue --preset d1-edit --account <slug> --vault PROJECT/ENV/NAME
     ./tools/cloudflare.py issue --preset r2-bucket --account <slug> --bucket NAME \
         [--jurisdiction eu] [--expire-days 30] --vault PROJECT/ENV/PREFIX
+    ./tools/cloudflare.py issue --preset email-send --account <slug> --vault PROJECT/ENV/NAME
+    ./tools/cloudflare.py issue --preset email-routing --zone example.com --vault PROJECT/ENV/NAME
     ./tools/cloudflare.py list
+    ./tools/cloudflare.py groups --account <slug> --match "email sending"
     ./tools/cloudflare.py ping
     ./tools/cloudflare.py rotate <label>   # or --leaked, for every open leak
     ./tools/cloudflare.py revoke <label>
@@ -86,6 +89,7 @@ PRESETS: dict[str, dict] = {
         "groups": ("Zone Read", "DNS Write"),
         "why": "edits DNS records in one zone for the project named by the vault slot",
         "scope": "zone",
+        "probe": "/zones/{zone_id}/dns_records?per_page=1",
     },
     # D1 WRITE, ONE ACCOUNT, INTO THE VAULT. A project whose Worker keeps its
     # data in D1 needs a machine that can write that database — `wrangler d1
@@ -101,6 +105,42 @@ PRESETS: dict[str, dict] = {
         "level": "account",
         "why": "writes the D1 databases of one account for the project named by the vault slot",
         "scope": "account-vault",
+        "probe": "/accounts/{account_id}/d1/database?per_page=1",
+    },
+    # TRANSACTIONAL EMAIL, ONE ACCOUNT, INTO THE VAULT. An application that
+    # sends through Cloudflare Email Service's REST API needs Email Sending on
+    # the account that holds its sending domain — Cloudflare offers the group
+    # at the account level only (`groups` on 2026-09-30), so the account is the
+    # narrowest grant. Read joins Write so the holder can see its own
+    # suppression list; verified by listing it with the NEW value.
+    "email-send": {
+        "name": "observatory-email-send {slot} (managed)",
+        "groups": ("Email Sending Write", "Email Sending Read"),
+        "level": "account",
+        "why": "sends transactional email from one account's onboarded domains for the project named by the vault slot",
+        "scope": "account-vault",
+        "probe": "/accounts/{account_id}/email/sending/suppressions?per_page=1",
+    },
+    # WORKERS, ONE ACCOUNT, INTO THE VAULT. Deploying a Worker (an inbound
+    # email handler, a probe) and the KV namespace it writes — not Pages, not
+    # DNS, not routes. Verified by listing the account's scripts.
+    "workers-edit": {
+        "name": "observatory-workers-edit {slot} (managed)",
+        "groups": ("Workers Scripts Write", "Workers KV Storage Write"),
+        "level": "account",
+        "why": "deploys Workers and their KV namespaces on one account for the project named by the vault slot",
+        "scope": "account-vault",
+        "probe": "/accounts/{account_id}/workers/scripts",
+    },
+    # EMAIL ROUTING RULES, ONE ZONE, INTO THE VAULT. Adding a rule that sends
+    # one address to a Worker, without the power to change the zone's MX, DNS
+    # or the routing settings themselves. Verified by listing the zone's rules.
+    "email-routing": {
+        "name": "observatory-email-routing {zone} (managed)",
+        "groups": ("Zone Read", "Email Routing Rules Write"),
+        "why": "edits Email Routing rules in one zone for the project named by the vault slot",
+        "scope": "zone",
+        "probe": "/zones/{zone_id}/email/routing/rules?per_page=1",
     },
     # R2 OBJECTS, ONE BUCKET, INTO THE VAULT. An off-site backup needs to put
     # and read objects in one bucket — not list the account's other buckets,
@@ -617,7 +657,7 @@ def deliver_to_vault(value: str, project: str, env: str, name: str) -> None:
 
 def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
                    account_label: str | None, wait: float = 2.0) -> int:
-    """Issue a zone-scoped token (DNS edit) into a vault slot."""
+    """Issue a zone-scoped token (DNS edit, Email Routing rules) into a vault slot."""
     preset = PRESETS[preset_key]
     if preset.get("scope") != "zone":
         print(f"refused: preset {preset_key!r} is not zone-scoped", file=sys.stderr)
@@ -641,13 +681,15 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
                            name=token_name)
         # A fresh token can take a moment to be honoured at the edge; the
         # value is delivered only once it has proved it can read the zone.
+        probe = preset["probe"].format(zone_id=zid)
         for attempt in range(5):
             try:
-                _request(f"/zones/{zid}/dns_records?per_page=1", value)
+                _request(probe, value)
                 break
             except RuntimeError:
                 if attempt == 4:
-                    raise RuntimeError(f"the issued token cannot read {zone}'s records") from None
+                    raise RuntimeError(f"the issued token cannot do its read on {zone} "
+                                       f"({probe.split('?')[0].replace(zid, '<zone>')})") from None
                 time.sleep(wait)
         deliver_to_vault(value, project, env, name)
     except RuntimeError as exc:
@@ -663,7 +705,7 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
 
 def cmd_issue_account(preset_key: str, target: str | None, account_label: str | None,
                       wait: float = 2.0) -> int:
-    """Issue an account-scoped writer (D1 edit) into a vault slot."""
+    """Issue an account-scoped writer (D1, Email Sending, Workers) into a vault slot."""
     preset = PRESETS[preset_key]
     if preset.get("scope") != "account-vault":
         print(f"refused: preset {preset_key!r} is not an account-to-vault preset", file=sys.stderr)
@@ -681,14 +723,15 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
         token_name = preset["name"].format(slot=f"{project}/{env}/{name}")
         rolled = existing_token(admin, account["id"], token_name) is not None
         _tid, value = mint(admin, account["id"], preset, name=token_name)
+        probe = preset["probe"].format(account_id=account["id"])
         for attempt in range(5):
             try:
-                _request(f"/accounts/{account['id']}/d1/database?per_page=1", value)
+                _request(probe, value)
                 break
             except RuntimeError:
                 if attempt == 4:
-                    raise RuntimeError("the issued token cannot list this account's "
-                                       "D1 databases") from None
+                    raise RuntimeError("the issued token cannot do its read on this account "
+                                       f"({probe.split('?')[0].replace(account['id'], '<account>')})") from None
                 time.sleep(wait)
         deliver_to_vault(value, project, env, name)
     except RuntimeError as exc:
@@ -921,6 +964,33 @@ def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
           f"{','.join(slots)} -- <command>")
     return 0
 
+
+def cmd_groups(account_label: str | None, match: str | None) -> int:
+    """The account's permission-group catalogue, by NAME and LEVEL only.
+
+    A preset names its groups, and Cloudflare's permissions reference does not
+    always list a new product's (Email Sending was absent on 2026-09-30). This
+    reads the catalogue the admin sees — read-only — so a preset is written
+    from the provider's own names rather than a guess. Ids are withheld: a
+    policy is built by `mint`, never by pasting an id.
+    """
+    try:
+        _stash, admin, account = find_account(account_label)
+        groups = _request(f"/accounts/{account['id']}/tokens/permission_groups?per_page=500",
+                          admin).get("result", [])
+    except RuntimeError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    words = (match or "").lower().split()
+    rows = sorted({(g.get("name", ""), _group_level(g)) for g in groups
+                   if all(w in (g.get("name") or "").lower() for w in words)})
+    print(f"permission groups in {account['name']}"
+          + (f" matching {match!r}" if match else "") + f" ({len(rows)}):")
+    for name, level in rows:
+        print(f"  {level:8s} {name}")
+    return 0
+
+
 def cmd_install(value: str) -> int:
     """A narrow token minted ELSEWHERE, pasted in: verified the same way an
     issued one is, filed with a record marking it external — so `ping` watches
@@ -1145,6 +1215,9 @@ def main() -> int:
     p_issue.add_argument("--expire-days", type=int, default=30,
                          help="r2-bucket: lifecycle — objects are deleted after this many days")
     sub.add_parser("list", help="what exists, with dates — never values")
+    p_groups = sub.add_parser("groups", help="permission-group names and levels, for writing a preset")
+    p_groups.add_argument("--account", help="which reachable account's catalogue")
+    p_groups.add_argument("--match", help="words every listed name must contain")
     sub.add_parser("ping", help="can every token still do its job")
     p_rot = sub.add_parser("rotate", help="roll a token's value in place")
     p_rot.add_argument("label", nargs="?")
@@ -1184,6 +1257,8 @@ def main() -> int:
         return cmd_issue(a.preset, a.account, a.project)
     if a.cmd == "list":
         return cmd_list()
+    if a.cmd == "groups":
+        return cmd_groups(a.account, a.match)
     if a.cmd == "ping":
         return cmd_ping()
     if a.cmd == "rotate":

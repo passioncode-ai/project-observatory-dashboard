@@ -696,6 +696,101 @@ def test_cf_r2_preset_refuses_and_cleans_up() -> None:
     check("the setup right is not a preset anyone can issue",
           "r2-setup" not in m.PRESETS and m.R2_SETUP["groups"] == ("Workers R2 Storage Write",), "")
 
+
+def test_cf_groups_lists_names_and_levels_and_never_a_value() -> None:
+    """Choosing a preset's permission groups needs their exact NAMES, which
+    Cloudflare's docs do not always list (Email Sending was absent from the
+    permissions reference on 2026-09-30). `groups` asks the account's own
+    catalogue through the stashed admin, filtered, and prints names and levels
+    only — never an id that could be pasted into a policy by hand."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    log = []
+
+    def fake(path, token, payload=None, method=None):
+        log.append((method, path, token, payload))
+        if "permission_groups" in path:
+            return {"result": [
+                {"id": "g1", "name": "Email Sending Write", "scopes": ["com.cloudflare.api.account"]},
+                {"id": "g2", "name": "Email Sending Write", "scopes": ["com.cloudflare.api.account.zone"]},
+                {"id": "g3", "name": "D1 Write", "scopes": ["com.cloudflare.api.account"]}]}
+        raise AssertionError(f"unexpected call {path}")
+    m._request = fake
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_groups(None, "email sending")
+    text = out.getvalue()
+    check("groups answers", rc == 0, str(rc))
+    check("it names both levels of a same-named group",
+          "Email Sending Write" in text and "account" in text and "zone" in text, text)
+    check("the filter drops what does not match", "D1 Write" not in text, text)
+    check("no id and no admin value reach the output",
+          "g1" not in text and "g2" not in text and "admin-token" not in text, text)
+    check("it only reads", all(pl is None for _m, _p, _t, pl in log), str(log))
+
+
+def _preset_fake(m, log, groups, probe_prefix, value_prefix):
+    """A provider that offers `groups` (name, level) and answers `probe_prefix`."""
+    def fake(path, token, payload=None, method=None):
+        log.append((method or ("POST" if payload is not None else "GET"), path, token, payload))
+        if "permission_groups" in path:
+            return {"result": [{"id": f"id-{lvl}-{name}", "name": name,
+                                "scopes": ["com.cloudflare.api.account" + (".zone" if lvl == "zone" else "")]}
+                               for name, lvl in groups]}
+        if path.startswith("/zones?name=example.com&account.id=a1"):
+            return {"result": [{"id": "z1", "name": "example.com"}]}
+        if path.endswith("/tokens?per_page=50"):
+            return {"result": []}
+        if path == "/accounts/a1/tokens" and method is None and payload is not None:
+            return {"result": {"id": "t-new", "value": value_prefix + "y" * 30}}
+        if path.startswith(probe_prefix):
+            return {"result": []}
+        raise AssertionError(f"unexpected call {path}")
+    m._request = fake
+
+
+def test_cf_email_presets_grant_exactly_what_the_email_service_needs() -> None:
+    """Transactional email through Cloudflare Email Service: a
+    runtime SENDER on one account, a zone's ROUTING-rule writer, and a Workers
+    writer for an inbound probe — each its own narrow token, each verified by a
+    read its own grant allows, each delivered to a vault slot."""
+    import contextlib, io
+    cases = [
+        ("email-send", "account", ("Email Sending Write", "Email Sending Read"),
+         "/accounts/a1/email/sending/suppressions", "send-value-"),
+        ("workers-edit", "account", ("Workers Scripts Write", "Workers KV Storage Write"),
+         "/accounts/a1/workers/scripts", "wk-value-"),
+        ("email-routing", "zone", ("Zone Read", "Email Routing Rules Write"),
+         "/zones/z1/email/routing/rules", "rt-value-"),
+    ]
+    for preset, level, groups, probe, prefix in cases:
+        m = cf(); _cf_with_admin(m)
+        log, delivered = [], []
+        offered = [(g, level) for g in groups] + [(g, "zone" if level == "account" else "account") for g in groups]
+        _preset_fake(m, log, offered, probe, prefix)
+        m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append((value, p, e, n))
+        m._journal = lambda *a, **k: None
+        m.token_dir = lambda: (_ for _ in ()).throw(AssertionError("vault presets never reach the plugin folder"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = (m.cmd_issue_zone(preset, "example.com", "proj/prod/CF_X", None, wait=0) if level == "zone"
+                  else m.cmd_issue_account(preset, "proj/prod/CF_X", None, wait=0))
+        check(f"{preset} issues", rc == 0, str(rc))
+        create = [pl for _m, path, _t, pl in log if path == "/accounts/a1/tokens" and pl]
+        pol = create[0]["policies"][0] if create else {}
+        check(f"{preset} grants exactly its {level}-level groups",
+              [g["id"] for g in pol.get("permission_groups", [])] == [f"id-{level}-{g}" for g in groups],
+              str(pol))
+        want_res = ({"com.cloudflare.api.account.zone.z1": "*"} if level == "zone"
+                    else {"com.cloudflare.api.account.a1": "*"})
+        check(f"{preset} is scoped to one {level}", pol.get("resources") == want_res, str(pol))
+        check(f"{preset} is verified with the NEW token by its own read",
+              any(path.startswith(probe) and tok.startswith(prefix) for _m, path, tok, _p in log), str(log[-3:]))
+        check(f"{preset} lands in the named slot and is never printed",
+              [d[1:] for d in delivered] == [("proj", "prod", "CF_X")] and prefix not in out.getvalue(),
+              out.getvalue())
+
+
 # ─────────────────────────── openrouter ──────────────────────────────────────
 
 def orr():
@@ -902,6 +997,8 @@ if __name__ == "__main__":
                test_cf_sigv4_matches_the_published_aws_example,
                test_cf_r2_preset_issues_one_bucket_pair_into_the_vault,
                test_cf_r2_preset_refuses_and_cleans_up,
+               test_cf_groups_lists_names_and_levels_and_never_a_value,
+               test_cf_email_presets_grant_exactly_what_the_email_service_needs,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,
