@@ -797,7 +797,11 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
     # An account-owned token cannot call /memberships, which is how wrangler
     # finds an account a config does not name — so the id travels with the use.
     print(f"  {project}/{env}/{name}: {'rolled' if rolled else 'issued'} — "
-          f"{', '.join(preset['groups'])} on account {account['name']} only; "
+          f"{', '.join(preset['groups'])} on account {account['name']} only"
+          # A zone half is a real grant on every zone of that account; a line
+          # that stopped at "account only" would hide DNS Write from its reader.
+          + (f", and {', '.join(preset['zone_groups'])} on its zones"
+             if preset.get("zone_groups") else "") + "; "
           f"use: CLOUDFLARE_ACCOUNT_ID={account['id']} "
           f"tools/use_secret.py run --env {env} {project} {name} -- <command>")
     return 0

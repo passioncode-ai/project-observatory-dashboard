@@ -509,6 +509,67 @@ def test_cf_fabric_account_preset_grants_both_levels_on_one_account_into_the_vau
           and set(preset["groups"]) <= set(server["groups"]), str(server["groups"]))
 
 
+def test_cf_fabric_presets_refuse_what_they_do_not_grant() -> None:
+    """Both Fabric Inbox presets, ATTEMPTED where they must fail. The other
+    account's token makes no storage and no sign-in there; a catalogue that
+    offers a group only at the wrong level, or lacks the zone half, mints
+    nothing — a token with half its policy would pass its Workers read and
+    then fail the server later; the zone path, a refused slot and a missing
+    --vault are refused before minting; and the printed summary names the
+    zone-level grants, so no one reads "on account X only" and misses DNS Write."""
+    import contextlib, io
+    account = cf().PRESETS["fabric-inbox-account"]
+    server = cf().PRESETS["fabric-inbox-server"]
+    check("another account's token grants no storage and no sign-in",
+          not [g for g in account["groups"] + account["zone_groups"]
+               if g.startswith("Access:") or "R2" in g], str(account["groups"]))
+    check("its groups are exactly the server's minus storage and sign-in",
+          set(account["groups"]) == {g for g in server["groups"]
+                                     if not g.startswith("Access:") and "R2" not in g}, "")
+    for key in ("fabric-inbox-server", "fabric-inbox-account"):
+        preset = cf().PRESETS[key]
+        for label, catalogue in (
+                ("a group offered only at the wrong level",
+                 [(g, "zone") for g in preset["groups"]] + [(g, "zone") for g in preset["zone_groups"]]),
+                ("a catalogue without the zone half",
+                 [(g, "account") for g in preset["groups"]])):
+            m = cf(); _cf_with_admin(m)
+            log, delivered = [], []
+            _preset_fake(m, log, catalogue, "/accounts/a1/workers/scripts", "fab-")
+            m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append(value)
+            m._journal = lambda *a, **k: None
+            check(f"{key}: {label} is refused",
+                  m.cmd_issue_account(key, "fabric/prod/CF_A1", None, wait=0) == 1, "")
+            check(f"{key}: and nothing is minted or delivered",
+                  not any(p == "/accounts/a1/tokens" and pl for _m, p, _t, pl in log) and not delivered,
+                  str(log))
+        m = cf(); _cf_with_admin(m)
+        log = []
+        _preset_fake(m, log, [(g, "account") for g in preset["groups"]]
+                     + [(g, "zone") for g in preset["zone_groups"]], "/accounts/a1/workers/scripts", "fab-")
+        m.deliver_to_vault = lambda *a: None
+        m._journal = lambda *a, **k: None
+        check(f"{key}: the zone path refuses it",
+              m.cmd_issue_zone(key, "example.com", "fabric/prod/CF_A1", None) == 2, "")
+        check(f"{key}: a slot the vault would refuse is refused before minting",
+              m.cmd_issue_account(key, "fabric/prod/lower-case", None) == 2, "")
+        check(f"{key}: without --vault nothing is minted", m.cmd_issue_account(key, None, None) == 2, "")
+        check(f"{key}: no refusal minted anything",
+              not any(p == "/accounts/a1/tokens" and pl for _m, p, _t, pl in log), str(log))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = m.cmd_issue_account(key, "fabric/prod/CF_A1", None, wait=0)
+        create = [pl for _m, p, _t, pl in log if p == "/accounts/a1/tokens" and pl]
+        pols = create[0]["policies"] if create else []
+        check(f"{key}: grants exactly its groups, account half then zone half",
+              rc == 0 and [[g["id"] for g in pol["permission_groups"]] for pol in pols]
+              == [[f"id-account-{g}" for g in preset["groups"]],
+                  [f"id-zone-{g}" for g in preset["zone_groups"]]], str(pols))
+        check(f"{key}: the summary names the zone-level grants and never the value",
+              "DNS Write" in out.getvalue() and "zones" in out.getvalue() and "fab-" not in out.getvalue(),
+              out.getvalue())
+
+
 def test_cf_d1_preset_rolls_refuses_and_never_misfiles() -> None:
     m = cf(); _cf_with_admin(m)
     log, delivered = [], []
@@ -1146,6 +1207,7 @@ if __name__ == "__main__":
                test_cf_email_presets_refuse_what_they_do_not_grant,
                test_cf_email_routing_token_is_one_per_slot,
                test_cf_fabric_account_preset_grants_both_levels_on_one_account_into_the_vault,
+               test_cf_fabric_presets_refuse_what_they_do_not_grant,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,
