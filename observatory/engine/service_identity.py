@@ -226,6 +226,32 @@ def write_installed_manifest() -> Path:
     return target
 
 
+def refresh_installed_manifest() -> str | None:
+    """Rewrite the per-install manifest when it exists and no longer matches this code.
+
+    An update installs a new engine into the same environment and restarts the
+    server without re-running the installer, so the manifest the descriptor points
+    at would keep the OLD release's capabilities and hash. The server rewrites it
+    when it starts, after its lock. Nothing is created where the installer wrote
+    nothing. Returns a problem sentence, or None."""
+    target = installed_manifest_path()
+    if not target.is_file() or target.is_symlink():
+        return None
+    sys.path.insert(0, str(paths.ROOT / "tools"))
+    try:
+        from publish_contract import installed_manifest
+        wanted = installed_manifest(instance())
+        try:
+            current = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            current = None
+        if current != wanted:
+            write_installed_manifest()
+    except (OSError, ValueError, configuration.ConfigurationError) as exc:
+        return f"the per-install manifest could not be refreshed: {type(exc).__name__}"
+    return None
+
+
 def manifest_path() -> Path:
     """The manifest a host reads: this installation's when the installer wrote one."""
     installed = installed_manifest_path()

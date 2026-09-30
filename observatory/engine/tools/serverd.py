@@ -505,6 +505,11 @@ def serve(port: int) -> int:
         problem = str(exc) if isinstance(exc, fs.ServiceError) else f"{type(exc).__name__}: {exc.strerror}"
         print(f"events token: {problem}", file=sys.stderr)
     RUNTIME = Runtime(token, problem)
+    # After the lock: an update restarts this server without re-running the
+    # installer, and the manifest the descriptor points at must describe THIS code.
+    stale = service_identity.refresh_installed_manifest()
+    if stale:
+        print(stale, file=sys.stderr)
     try:
         srv = LoopbackServer(("127.0.0.1", port), Handler)
     except OSError as exc:

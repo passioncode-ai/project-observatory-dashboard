@@ -71,8 +71,12 @@ code (`@server.capability` handlers in `mcp/server.py`).
    `config/fabric-agent.json` first: this installation's interpreter (the virtual environment's,
    not the resolved base interpreter, which lacks the packages), `mcp/server.py`, `--home` with
    the workspace, and the service extension naming this workspace's descriptor.
+   An update restarts the server without re-running the installer, so the server rewrites that
+   manifest when it starts, after its lock, if the installer wrote one and it no longer matches
+   the running code.
    - `test_install_writes_the_descriptor_then_the_plist` (suite `fabric_service`),
-     `test_the_per_install_manifest_starts_a_server_for_its_own_workspace`.
+     `test_the_per_install_manifest_starts_a_server_for_its_own_workspace`,
+     `test_a_start_refreshes_a_stale_per_install_manifest_and_creates_none`.
 7. **The published probes run the job path.** `tools/run_probes.py` probes
    `mcp-refresh-runs-as-a-job` end to end, bounded by its `timeoutMs`; the conformance suite
    (`conformance_receipt`) runs every declared probe.

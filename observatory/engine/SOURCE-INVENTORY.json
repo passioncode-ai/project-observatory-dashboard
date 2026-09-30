@@ -1205,8 +1205,8 @@
       "path": "service_identity.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f7f8e277125a19628bec250d7437c39eefca06d42b1150c090423b062b30191d",
-      "bytes": 10382
+      "export_sha256": "b0cec46f722fd33e0c9dd8f2bddfd3338e35def6f6d7c7cbdf3468d303ef142f",
+      "bytes": 11568
     },
     {
       "path": "skill/.claude-plugin/marketplace.json",
@@ -1930,8 +1930,8 @@
       "path": "tests/test_fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0cc7ccfb5a578aee88491246ccb86350e57c9cce79788c54a4d0a3ad73f8a2e6",
-      "bytes": 44797
+      "export_sha256": "6fbfe21cec2963646da6b9dd846133f80feb1530f5fd6ee3cf11edbc1174fb8d",
+      "bytes": 46390
     },
     {
       "path": "tests/test_filesystem_scan.py",
@@ -3464,8 +3464,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "cf30692c0e125f7e988abfcd30ae9f2bd69b2ea1a976113d1a7eaec4d9238758",
-      "bytes": 31556,
+      "export_sha256": "7be90480691c92d19c940735203a2e753876642e450d89ec8d8b90b8615df011",
+      "bytes": 31826,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,

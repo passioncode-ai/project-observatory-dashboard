@@ -401,6 +401,39 @@ class StartupOrder(Sandbox):
         self.assertEqual(calls, [], "nothing may happen before the lock")
         self.assertFalse((self.home / "service.token").exists())
 
+    def test_a_start_refreshes_a_stale_per_install_manifest_and_creates_none(self):
+        """An update restarts the server without the installer; the manifest must follow the code."""
+        class Lock:
+            def release(self):
+                pass
+
+        class Server:
+            def __init__(self, *a, **k):
+                pass
+            def serve_forever(self):
+                pass
+            def server_close(self):
+                pass
+            def shutdown(self):
+                pass
+        target = self.home / "config/fabric-agent.json"
+
+        def start():
+            with mock.patch.object(self.serverd.fs, "hold_single_instance", side_effect=lambda d: Lock()), \
+                    mock.patch.object(self.serverd.fs, "ensure_token", side_effect=lambda p: "t" * 43), \
+                    mock.patch.object(self.serverd, "heartbeat", side_effect=lambda: {"leaks": {}}), \
+                    mock.patch.object(self.serverd, "LoopbackServer", Server), \
+                    mock.patch.object(self.serverd.signal, "signal"):
+                self.assertEqual(self.serverd.serve(free_port()), 0)
+        start()
+        self.assertFalse(target.exists(), "nothing is created where the installer wrote nothing")
+        target.write_text(json.dumps({"provider": {"revision": 1}}))
+        start()
+        sys.path.insert(0, str(ROOT / "tools"))
+        from publish_contract import installed_manifest
+        self.assertEqual(json.loads(target.read_text()), installed_manifest(self.si.instance()))
+        self.assertEqual(os.stat(target).st_mode & 0o777, 0o600)
+
     def test_the_lock_comes_first_then_the_token_then_the_socket(self):
         calls = []
 
