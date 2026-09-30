@@ -10,6 +10,8 @@
     ./tools/cloudflare.py issue --preset email-send --account <slug> --vault PROJECT/ENV/NAME
     ./tools/cloudflare.py issue --preset email-routing --zone example.com --vault PROJECT/ENV/NAME
     ./tools/cloudflare.py issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
+    ./tools/cloudflare.py issue --preset fabric-inbox-server --account <slug> --vault PROJECT/ENV/NAME
+    ./tools/cloudflare.py issue --preset fabric-inbox-account --account <slug> --vault PROJECT/ENV/NAME
     ./tools/cloudflare.py list
     ./tools/cloudflare.py groups --account <slug> --match "email sending"
     ./tools/cloudflare.py ping
@@ -163,6 +165,45 @@ PRESETS: dict[str, dict] = {
         "level": "bucket",
         "why": "reads and writes the objects of one R2 bucket for the project named by the vault slot",
         "scope": "bucket-vault",
+    },
+    # A FABRIC INBOX SERVER'S OWN TOKEN, INTO THE VAULT. The server manages its
+    # own account: its domains and their mail, its own updates (Workers, R2), its
+    # sign-in (Access apps, the email PIN), the service tokens its agent keys and
+    # relays sign in with. The list is TOKEN_PERMISSIONS in fabric-inbox's
+    # cloudflare-api.ts; verified by listing the account's Workers, since the
+    # server writes its own secrets with it.
+    "fabric-inbox-server": {
+        "name": "fabric-inbox server {slot} (managed)",
+        "groups": ("Workers Scripts Write", "Workers R2 Storage Write",
+                   "Access: Apps and Policies Write",
+                   "Access: Organizations, Identity Providers, and Groups Write",
+                   "Access: Service Tokens Write", "Account Settings Read",
+                   "Email Routing Addresses Write", "Email Routing Account Rules Read",
+                   "Email Sending Write"),
+        "level": "account",
+        "zone_groups": ("Zone Read", "Email Routing Rules Write", "Zone Settings Write", "DNS Write"),
+        "why": "the Fabric Inbox Worker manages its own account's domains, mail, sign-in and updates",
+        "scope": "account-vault",
+        "probe": "/accounts/{account_id}/workers/scripts?per_page=1",
+    },
+    # ONE MORE ACCOUNT FOR A FABRIC INBOX SERVER, INTO THE VAULT. A Fabric Inbox
+    # server runs in one account and reads another account's domains with a token
+    # made in THAT account (Worker secret CLOUDFLARE_API_TOKEN_<account id>): its
+    # zones, Email Routing and sending, and Workers Scripts for the relay the server
+    # installs there — no storage, no sign-in, which stay in the server's account.
+    # The list is ACCOUNT_TOKEN_PERMISSIONS in fabric-inbox's cloudflare-api.ts.
+    # Account-level groups on the account, zone-level ones on its zones: two
+    # policies, since one policy may not mix levels on one resource.
+    "fabric-inbox-account": {
+        "name": "fabric-inbox account {slot} (managed)",
+        "groups": ("Workers Scripts Write", "Account Settings Read",
+                   "Email Routing Addresses Write", "Email Routing Account Rules Read",
+                   "Email Sending Write"),
+        "level": "account",
+        "zone_groups": ("Zone Read", "Email Routing Rules Write", "Zone Settings Write", "DNS Write"),
+        "why": "lets a Fabric Inbox server in another account list, route and send from this account's domains",
+        "scope": "account-vault",
+        "probe": "/accounts/{account_id}/workers/scripts?per_page=1",
     },
 }
 
@@ -448,6 +489,13 @@ def mint(admin: str, account_id: str, preset: dict,
     resources = resources or {f"com.cloudflare.api.account.{account_id}": "*"}
     policies = [{"effect": "allow", "resources": resources,
                  "permission_groups": [{"id": i} for i in ids]}]
+    if preset.get("zone_groups"):
+        # Zone-level groups on every zone of the SAME account, as their own policy.
+        zone_ids = group_ids(admin, account_id, preset["zone_groups"], "zone")
+        policies.append({"effect": "allow",
+                         "resources": {f"com.cloudflare.api.account.{account_id}":
+                                       {"com.cloudflare.api.account.zone.*": "*"}},
+                         "permission_groups": [{"id": i} for i in zone_ids]})
     tid = existing_token(admin, account_id, name)
     if tid:
         # GRANTS FOLLOW THE PRESET. Rolling reissues the value and keeps the
@@ -709,7 +757,8 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
 
 def cmd_issue_account(preset_key: str, target: str | None, account_label: str | None,
                       wait: float = 2.0) -> int:
-    """Issue an account-scoped writer (D1, Email Sending, Workers) into a vault slot."""
+    """Issue an account-scoped writer (D1, Email Sending, Workers, a Fabric Inbox
+    account) into a vault slot."""
     preset = PRESETS[preset_key]
     if preset.get("scope") != "account-vault":
         print(f"refused: preset {preset_key!r} is not an account-to-vault preset", file=sys.stderr)
@@ -727,6 +776,8 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
         token_name = preset["name"].format(slot=f"{project}/{env}/{name}")
         rolled = existing_token(admin, account["id"], token_name) is not None
         _tid, value = mint(admin, account["id"], preset, name=token_name)
+        # The value reaches the vault only once it has proved, with its own
+        # rights, the one thing its reader needs first.
         probe = preset["probe"].format(account_id=account["id"])
         for attempt in range(5):
             try:

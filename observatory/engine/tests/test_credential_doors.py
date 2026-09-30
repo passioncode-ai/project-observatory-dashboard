@@ -454,6 +454,61 @@ def test_cf_d1_preset_is_scoped_to_one_account_and_lands_in_the_vault() -> None:
           "use_secret.py run --env prod proj CLOUDFLARE_API_TOKEN -- " in out.getvalue(), out.getvalue())
 
 
+def test_cf_fabric_account_preset_grants_both_levels_on_one_account_into_the_vault() -> None:
+    """Another account for a Fabric Inbox server: account-level groups on the account and
+    zone-level groups on its zones as two policies (one policy may not mix levels), named
+    after the slot, verified by listing the account's Workers with the NEW token, delivered
+    to the vault. A token that cannot list Workers never reaches the vault."""
+    m = cf(); _cf_with_admin(m)
+    preset = m.PRESETS["fabric-inbox-account"]
+    catalogue, n = [], 0
+    for name in preset["groups"] + preset["zone_groups"]:
+        for level in ("account", "zone"):
+            n += 1
+            catalogue.append({"id": f"{level[0]}{n}", "name": name,
+                              "scopes": ["com.cloudflare.api.account" + (".zone" if level == "zone" else "")]})
+    log, delivered, state = [], [], {"refuse": False}
+
+    def fake(path, token, payload=None, method=None):
+        log.append((method or ("POST" if payload is not None else "GET"), path, token, payload))
+        if "permission_groups" in path:
+            return {"result": catalogue}
+        if path.endswith("/tokens?per_page=50"):
+            return {"result": []}
+        if path == "/accounts/a1/tokens" and payload is not None:
+            return {"result": {"id": "t-f", "value": "fabric-value-" + "q" * 27}}
+        if path == "/accounts/a1/workers/scripts?per_page=1":
+            if state["refuse"]:
+                raise RuntimeError("cloudflare answered HTTP 403; provider response withheld")
+            return {"result": []}
+        raise AssertionError(f"unexpected call {path}")
+    m._request = fake
+    m.deliver_to_vault = lambda value, p, e, nm: delivered.append((value, p, e, nm))
+    m._journal = lambda *a, **k: None
+    rc = m.cmd_issue_account("fabric-inbox-account", "fabric/prod/CLOUDFLARE_API_TOKEN_A1", None, wait=0)
+    check("fabric-inbox-account issues", rc == 0, str(rc))
+    create = [pl for _m, path, _t, pl in log if path == "/accounts/a1/tokens" and pl]
+    pols = create[0]["policies"] if create else []
+    check("two policies, both on the one account",
+          len(pols) == 2 and pols[0]["resources"] == {"com.cloudflare.api.account.a1": "*"}
+          and pols[1]["resources"] == {"com.cloudflare.api.account.a1": {"com.cloudflare.api.account.zone.*": "*"}}, str(pols))
+    check("each with only its own level's groups",
+          all(g["id"].startswith("a") for g in pols[0]["permission_groups"])
+          and all(g["id"].startswith("z") for g in pols[1]["permission_groups"])
+          and len(pols[0]["permission_groups"]) == len(preset["groups"]) and len(pols[1]["permission_groups"]) == 4, str(pols))
+    check("verified by listing Workers with the NEW token",
+          any(path == "/accounts/a1/workers/scripts?per_page=1" and tok.startswith("fabric-value-") for _m, path, tok, _p in log), "")
+    check("delivered to the named slot", delivered == [("fabric-value-" + "q" * 27, "fabric", "prod", "CLOUDFLARE_API_TOKEN_A1")], str(delivered))
+
+    state["refuse"], delivered[:] = True, []
+    rc = m.cmd_issue_account("fabric-inbox-account", "fabric/prod/CLOUDFLARE_API_TOKEN_A1", None, wait=0)
+    check("a token that cannot list Workers is not delivered", rc == 1 and not delivered, str(rc))
+    server = m.PRESETS["fabric-inbox-server"]
+    check("the server's own preset can make the service tokens agent keys and relays sign in with",
+          "Access: Service Tokens Write" in server["groups"] and server["zone_groups"] == preset["zone_groups"]
+          and set(preset["groups"]) <= set(server["groups"]), str(server["groups"]))
+
+
 def test_cf_d1_preset_rolls_refuses_and_never_misfiles() -> None:
     m = cf(); _cf_with_admin(m)
     log, delivered = [], []
@@ -1090,6 +1145,7 @@ if __name__ == "__main__":
                test_cf_email_presets_grant_exactly_what_the_email_service_needs,
                test_cf_email_presets_refuse_what_they_do_not_grant,
                test_cf_email_routing_token_is_one_per_slot,
+               test_cf_fabric_account_preset_grants_both_levels_on_one_account_into_the_vault,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,
