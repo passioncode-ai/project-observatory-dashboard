@@ -11,10 +11,15 @@ revision and cannot satisfy the manifest, which pins the revision as a schema
 None of that is reconstructed here — the SDK owns the wire, and this file owns
 the tools.
 
-Nine tools read. Two write, and they write only PROPOSALS: `observatory_record`
+Eight tools read. Two write, and they write only PROPOSALS: `observatory_record`
 appends to the append-only ledger in state `proposed`, and
 `observatory_propose` queues a registry change without touching
-`registry/*.json`. Neither can approve its own proposal, and neither invents a
+`registry/*.json`.
+
+Beside them, every capability of fabric-agent.json is served under its own name
+with its published schemas (fabric-interop/0.1): `capability_tools.py` lists and
+answers those, and the `@server.capability` handlers below translate their
+arguments to the same code. Neither can approve its own proposal, and neither invents a
 caller identity — `owner` is required and has no default, because the gateway
 owns identity and a memory kernel that manufactures it has none.
 
@@ -28,9 +33,29 @@ from typing import Annotated, Any, Literal
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
+
+def _home_argument(argv: list[str]) -> None:
+    """`--home PATH` selects the workspace, for a host that starts this server from
+    the per-install manifest: a manifest's stdio connection carries arguments and
+    no environment, so `OBSERVATORY_HOME` cannot travel in it. Read before any
+    engine module resolves its paths. `--stdio` is accepted and means the default."""
+    if "--home" in argv:
+        at = argv.index("--home")
+        if at + 1 >= len(argv) or not argv[at + 1] or not pathlib.Path(argv[at + 1]).is_absolute():
+            raise SystemExit("--home needs an absolute workspace path")
+        import os
+        os.environ["OBSERVATORY_HOME"] = argv[at + 1]
+
+
+if __name__ == "__main__":
+    _home_argument(sys.argv[1:])
+
 from pydantic import AliasChoices, Field                                                        
-from mcp.server import MCPServer                                                  
-from mcp.types import ToolAnnotations
+
+# The capability tools live beside this file. `mcp/` is not a package — the SDK
+# owns the name `mcp` — so the directory itself goes on the path.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from capability_tools import Answer, InteropServer                                 # noqa: E402
 
 import paths                                                                      
 import proposals                                                                  
@@ -42,7 +67,7 @@ PROTOCOL_REVISION = "2026-07-28"
 import configuration
 VERSION = configuration.VERSION
 
-server = MCPServer(
+server = InteropServer(
     name="observatory",
     title="Project Observatory",
     version=VERSION,
@@ -52,7 +77,12 @@ server = MCPServer(
     # served and two of them write — and the gateway's own comment repeated the
     # same claim in Russian.
     instructions=(
-        "Nine tools read and two write.\n"
+        "Eight `observatory_*` tools read and two write, and every Fabric capability is also served under "
+        "its own name (fabric-interop/0.1): `estate.survey`, `project.detail`, "
+        "`project.timeline`, `project.record`, `machine.mcp.inventory`, and "
+        "`machine.mcp.refresh`, which answers a job followed with `fabric.job.get` and "
+        "stopped with `fabric.job.cancel`. Those tools take and return exactly the "
+        "published schemas and echo `_meta.traceparent` as a child span.\n"
         "READ: `observatory_status` surveys the current scope; a requested scan pin "
         "is reported as unsupported in degraded. `observatory_project` answers about "
         "one project; `observatory_timeline` returns its commit history; "
@@ -65,7 +95,7 @@ server = MCPServer(
         "opening the file, because a transcript outlives the key it quotes; "
         "`observatory_machine` shows what runs by origin, memory, disk, idle worktrees "
         "and branches and the cleanup plan, and with `explainPid` why one process "
-        "runs — never its environment or full command line; `machine.mcp.inventory` lists "
+        "runs — never its environment or full command line. `machine.mcp.inventory` lists "
         "every MCP server the agent configs on this machine declare, by name, with where "
         "each is declared, its transport and whether it answered the last probe — never a "
         "URL, command line, header or environment value.\n"
@@ -193,9 +223,6 @@ def observatory_status(
     input schema will construct the call, and it must get a truthful answer
     rather than a silent one.
     """
-    bad = _scope_error(kind, value)
-    if bad:
-        return bad
     # THE CONTRACT'S SHAPE FIRST. `scope` is what the published input schema
     # declares; `kind`/`value` are the flat spelling this tool has always taken.
     # Until 2026-09-08 only the flat one existed, so a host sending the declared
@@ -203,6 +230,12 @@ def observatory_status(
     # asked for one, with no error.
     if isinstance(scope, dict) and scope.get("kind"):
         kind, value = scope["kind"], scope.get("value")
+    # Checked AFTER the scope object is read. Checked before it, as until
+    # 2026-09-30, `{"scope": {"kind": "owner"}}` passed the check on the flat
+    # default `estate` and was surveyed with no owner at all.
+    bad = _scope_error(kind, value)
+    if bad:
+        return bad
     return survey_mod.survey(_scope(kind, value), include_external=includeExternal,
                              as_of_scan_id=asOfScanId, limit=limit, cursor=cursor)
 
@@ -277,19 +310,19 @@ def observatory_machine(
     return machine_view.summary(explainPid)
 
 
-@server.tool(name="machine.mcp.inventory",
-             annotations=ToolAnnotations(read_only_hint=True, idempotent_hint=True))
-def machine_mcp_inventory() -> dict[str, Any]:
+@server.capability("machine.mcp.inventory")
+def machine_mcp_inventory(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
     """Every MCP server this machine's agent configs declare — by name, never by value.
 
-    This is the `machine.mcp.inventory` capability declared in fabric-agent.json,
-    and the tool carries the capability's name. It answers from the last
-    inventory the observatory took (the tick takes one every run):
-    Claude Code (user and project scopes, plugins, claude.ai connectors), Cursor,
-    OpenCode, Codex, Gemini CLI and Kiro. Each server says which configs declare
-    it, its transport (stdio, streamable-http, sse) and whether it answered the
-    last probe, with that probe's time. An absent or unreadable config, and an
-    inventory older than the tick allows, are named in `degraded`.
+    The `machine.mcp.inventory` capability of fabric-agent.json, served under its
+    own name with its published schemas (`capability_tools.py`). It answers from
+    the last inventory the observatory took — every tick takes one, and
+    `machine.mcp.refresh` takes one on request: Claude Code (user and project
+    scopes, plugins, claude.ai connectors), Cursor, OpenCode, Codex, Gemini CLI and
+    Kiro. Each server says which configs declare it, its transport (stdio,
+    streamable-http, sse) and whether it answered the last probe, with that
+    probe's time. An absent or unreadable config, and an inventory older than the
+    tick allows, are named in `degraded`.
     """
     import mcp_inventory
     return mcp_inventory.inventory()
@@ -579,6 +612,64 @@ def observatory_propose(
         conn.close()
 
 
+# ─────────────────────────── capability tools ──────────────────────────────
+# The four v0.2.0 capabilities under their own names (fabric-interop/0.1, C3.1),
+# answering from the same code as the `observatory_*` tools above, which stay for
+# every host that already calls them. Arguments arrive validated against the
+# published input schema, so these only translate names.
+
+@server.capability("estate.survey")
+def capability_estate_survey(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
+    scope = arguments.get("scope") or {"kind": "estate"}
+    return observatory_status(scope=scope, includeExternal=arguments.get("includeExternal", False),
+                              asOfScanId=arguments.get("asOfScanId"), limit=arguments.get("limit"),
+                              cursor=arguments.get("cursor"))
+
+
+@server.capability("project.detail")
+def capability_project_detail(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
+    return observatory_project(projectId=arguments["projectId"],
+                               timelineLimit=arguments.get("timelineLimit", 10))
+
+
+@server.capability("project.timeline")
+def capability_project_timeline(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
+    return observatory_timeline(projectId=arguments["projectId"], since=arguments.get("since"),
+                                limit=arguments.get("limit", 100))
+
+
+@server.capability("project.record")
+def capability_project_record(arguments: dict[str, Any], span: Any) -> Answer:
+    """A note (`statement`) or a registry proposal (`targetId` + `patch`), both proposals.
+
+    A proposal's `warning` — its subject is not in the registry yet — has no field
+    in the published v0.2.0 output schema, so it travels as a sentence in the
+    text channel instead of being dropped."""
+    owner = arguments["owner"]
+    if arguments.get("targetId") is not None or arguments.get("patch") is not None:
+        if not (arguments.get("targetId") and isinstance(arguments.get("patch"), dict)):
+            return Answer({"error": "LedgerError",
+                           "detail": "a registry proposal needs both `targetId` and `patch`",
+                           "remedy": "send `targetId` and `patch` together, or `statement` for a note"})
+        out = observatory_propose(owner=owner, targetId=arguments["targetId"], patch=arguments["patch"],
+                                  evidence=arguments.get("evidence"))
+    elif arguments.get("statement"):
+        out = observatory_record(owner=owner, statement=arguments["statement"], why=arguments.get("why"),
+                                 projectId=arguments.get("projectId"), sessionId=arguments.get("sessionId"),
+                                 memoryId=arguments.get("memoryId"),
+                                 expectedRevision=arguments.get("expectedRevision"),
+                                 evidence=arguments.get("evidence"))
+    else:
+        return Answer({"error": "LedgerError",
+                       "detail": "nothing to write: neither `statement` nor `targetId` and `patch`",
+                       "remedy": "send `statement` for a note, or `targetId` and `patch` for a proposal"})
+    notes = []
+    if isinstance(out, dict) and out.get("warning"):
+        out = dict(out)
+        notes.append(str(out.pop("warning")))
+    return Answer(out, notes)
+
+
 # ─────────────────────────── resources ──────────────────────────────────────
 # WHY RESOURCES AND NOT A NEW CAPABILITY. The pinned Fabric contract defines no
 # rendering capability, no resource concept and no pagination, so inventing an
@@ -634,6 +725,11 @@ def resource_dashboard() -> str:
 
 def main() -> int:
     configuration.validate_workspace(required=True)
+    # A capability without its handler would be listed and then answer
+    # `not-served`; refuse to start instead, so the gap is found at the first run.
+    missing = server.missing_handlers()
+    if missing:
+        raise SystemExit(f"capabilities without a handler: {', '.join(missing)}")
     asyncio.run(server.run_stdio_async())
     return 0
 

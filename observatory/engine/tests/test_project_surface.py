@@ -72,6 +72,13 @@ def test_every_capability_declares_the_tools_its_schema_describes() -> None:
     three different answers claiming one shape, and two of them were wrong."""
     for name, cap in caps().items():
         tools = [f for f in cap["profile"]["requiredFeatures"] if f.startswith("tool:")]
+        # A job capability (fabric-interop/0.1) also requires `fabric.job.get` and
+        # `fabric.job.cancel`. They are the protocol's handle tools and answer the
+        # job's shape, not this capability's, so they claim no second output.
+        job = ((cap.get("extensions") or {}).get(
+            "https://fabric.passioncode.ai/agent-contract/extensions/interop/0.1") or {}).get("job") is True
+        if job:
+            tools = [t for t in tools if t not in ("tool:fabric.job.get", "tool:fabric.job.cancel")]
         if cap.get("effect") == "none":
             check(f"{name} declares exactly one tool", len(tools) == 1, str(tools))
         probed = {p["id"] for p in cap["profile"].get("probes", [])}

@@ -54,7 +54,7 @@ BOUNDARY = (
 
     # Merged from the parallel port streams.
     'cause_and_symptom', 'collector_state', 'corroboration', 'credentials', 'curation_paths', 'degradations', 'domain_probe', 'google', 'handoff', 'install_key', 'ledger_export', 'mechanical_confidence', 'notification', 'portfolio_review', 'project_secrets', 'publish_contract', 'recovery', 'reveals', 'session_start', 'tick', 'tick_failures', 'trap_efficacy', 'trap_map', 'unpublished_work', 'wire_survives', 'witness',
-    'fabric_service', 'machine_mcp_inventory',
+    'fabric_service', 'machine_mcp_inventory', 'interop',
 )
 # Suites and helpers ported by the second port stream.
 BOUNDARY += (
@@ -121,7 +121,7 @@ ROOT_FILES = (
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py',
     'identity_map.py', 'leak_register.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
-    'fabric_service.py', 'mcp_inventory.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
+    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
 )
 SKILL_FILES = (
     'skill/plugins/observatory-log/skills/handling-secrets/SKILL.md',

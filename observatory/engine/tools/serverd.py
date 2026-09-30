@@ -586,6 +586,9 @@ def install() -> int:
     install_launchd.prepare_logs(("serverd.err", "serverd.out"), paths.STATE / "logs")
     PLIST.parent.mkdir(parents=True, exist_ok=True)
     try:
+        # The manifest first: the descriptor points at it, and a host that reads
+        # the descriptor must find a manifest it can run, not the template.
+        service_identity.write_installed_manifest()
         where = fs.write_descriptor(service_identity.descriptor(PORT, label=LABEL, plist=PLIST))
     except (fs.ServiceError, OSError) as exc:
         print(f"Not installed: {exc}", file=sys.stderr)

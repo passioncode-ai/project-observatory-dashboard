@@ -20,7 +20,7 @@ Three gaps, all of one shape — a statement nothing honoured:
   reads to decide what the server can do; a stale one is not cosmetic.
 """
 from __future__ import annotations
-import json
+import json, re
 import jsonschema, pathlib, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -239,12 +239,18 @@ def test_the_ceiling_message_does_not_blame_the_wrong_spender() -> None:
 def test_the_served_instructions_describe_the_served_surface() -> None:
     src = (ROOT / "mcp/server.py").read_text(encoding="utf-8")
     tools = src.count("@server.tool(")
-    # ELEVEN SINCE `machine.mcp.inventory` (ten since `observatory_machine`, nine since
-    # `observatory_credentials`). The count is asserted
+    # TEN SINCE `observatory_machine` (nine since `observatory_credentials`); the
+    # capability tools are counted apart, below. The count is asserted
     # rather than the names because the instructions below are what an LLM client
     # reads to decide what to call, and a tool that exists while the string says
     # otherwise is the drift this test was written for.
-    check("the server serves eleven tools", tools == 11, str(tools))
+    check("the server serves ten observatory tools", tools == 10, str(tools))
+    manifest = json.loads((ROOT / "fabric-agent.json").read_text(encoding="utf-8"))
+    served = set(re.findall(r'@server\.capability\("([^"]+)"\)', src))
+    import interop
+    wanted = {c["name"] for c in interop.mcp_capabilities(manifest) if not interop.is_job(c)}
+    check("and a handler for every capability that is not a job",
+          served == wanted, f"served {sorted(served)} declared {sorted(wanted)}")
     block = src.split("instructions=(", 1)[1].split("),", 1)[0]
     check("the instructions no longer claim read-only", "Read-only" not in block)
     check("they state that two tools write", "WRITE:" in block)
@@ -328,6 +334,11 @@ def test_the_probe_runner_sends_the_fixture_verbatim() -> None:
         schema = json.loads((ROOT / "fabric/schemas" /
                              cap["inputSchema"].rsplit("/", 1)[-1]).read_text(encoding="utf-8"))
         declared |= set((schema.get("properties") or {}).keys())
+    # The job tools of fabric-interop/0.1 take `{id}`; their input schema is the
+    # one `mcp/capability_tools.py` serves, not a capability's.
+    sys.path.insert(0, str(ROOT / "mcp"))
+    import capability_tools
+    declared |= set(capability_tools.JOB_INPUT["properties"])
     tree = ast.parse((ROOT / "tools/run_probes.py").read_text(encoding="utf-8"))
     bad: list[str] = []
     for node in ast.walk(tree):

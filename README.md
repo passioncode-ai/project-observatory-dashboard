@@ -1,6 +1,6 @@
 # Project Observatory
 
-**Your projects. Back in view.** A local dashboard for the projects your agents work on. See what changed, what needs attention and where known API keys left a copy. In English or Russian. Project Observatory is a source-available tool from [PassionCode.ai](https://passioncode.ai/) ([product page](https://passioncode.ai/observatory/)), beside [Fabric Switchboard](https://passioncode.ai/switchboard/). It is Fabric-compatible — its server speaks `fabric-service/0.1` — and works without Fabric.
+**Your projects. Back in view.** A local dashboard for the projects your agents work on. See what changed, what needs attention and where known API keys left a copy. In English or Russian. Project Observatory is a source-available tool from [PassionCode.ai](https://passioncode.ai/) ([product page](https://passioncode.ai/observatory/)), beside [Fabric Switchboard](https://passioncode.ai/switchboard/). It is Fabric-compatible — its server speaks `fabric-service/0.1` and its MCP `fabric-interop/0.1` — and works without Fabric.
 
 ![The Project Observatory overview page: findings from critical to info, project and activity counters, and a card per section, in the PassionCode dark theme](site/assets/dashboard-overview-en.png)
 
@@ -96,6 +96,7 @@ project-observatory full agent uninstall # removes the plugin and only the setti
 | Where are credentials used or copied? | Named slots, environment metadata, known-value scans, rotation and movement records | [vault](observatory/engine/tools/vault.py), [scanner](observatory/engine/tools/scan_leaks.py) |
 | Can another agent inspect the same facts? | MCP tools and resources, input/output schemas, proposal authority checks | [MCP server](observatory/engine/mcp/server.py), [wire contract](observatory/engine/fabric/FABRIC-CONFORMANCE.md) |
 | Can it observe continuously? | Explicitly enabled workspace-specific scheduling and optional model interpretation | [scheduler](observatory/engine/tools/install_launchd.py), [agent](observatory/engine/agent/observe.py) |
+| Can other agents call it through Fabric? | Every Fabric capability is an MCP tool of its own name with its published schemas (`fabric-interop/0.1`): W3C trace context in `_meta.traceparent`, a job handle for long work (`machine.mcp.refresh`, `fabric.job.get`, `fabric.job.cancel`), and `machine.mcp.inventory` for every MCP server your agents declare | [capability tools](observatory/engine/mcp/capability_tools.py), [design](docs/design/FABRIC-INTEROP.md) |
 | Can a local host watch it? | The always-on server speaks `fabric-service/0.1`: one copy per workspace, a well-known identity and health document, a token-guarded events feed, a descriptor written by its installer | [server](observatory/engine/tools/serverd.py), [design](docs/design/FABRIC-SERVICE.md) |
 
 Optional integrations include GitHub, Bitbucket, Cloudflare, Heroku, Google analytics/search, domain observations, agent sessions and a local knowledge base. Connecting one does not connect all of them. Model calls, remote environment reads, notifications and remediation are opt-in. See [onboarding](docs/ONBOARDING.md) for settings and credential entry.

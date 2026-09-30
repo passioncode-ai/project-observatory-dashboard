@@ -546,6 +546,22 @@ class Installer(Sandbox):
         self.assertEqual((plist["RunAtLoad"], plist["KeepAlive"], plist["ThrottleInterval"]), (True, True, 10))
         self.assertGreater(plist["ExitTimeOut"], self.serverd.EXIT_TIMEOUT)
         self.assertEqual(os.stat(self.serverd.PLIST).st_mode & 0o777, 0o600)
+        manifest = Path(doc["fabricManifest"])
+        self.assertEqual(manifest, self.home / "config/fabric-agent.json",
+                         "the descriptor points at this installation's manifest, not the template")
+        self.assertEqual(os.stat(manifest).st_mode & 0o777, 0o600)
+        installed = json.loads(manifest.read_text())
+        conn = {json.dumps(c["profile"]["connection"], sort_keys=True) for c in installed["capabilities"]}
+        self.assertEqual(len(conn), 1)
+        conn = json.loads(conn.pop())
+        self.assertEqual(conn["executableRef"], Path(sys.executable).absolute().as_uri())
+        self.assertEqual(conn["args"][-2:], ["--home", str(self.home)])
+        self.assertEqual(installed["provider"]["extensions"][
+            "https://fabric.passioncode.ai/agent-contract/extensions/service/0.1"]["descriptor"],
+            f"project-observatory.{self.si.instance()}")
+        sys.path.insert(0, str(ROOT / "tools"))
+        from fabric_hash import compute
+        self.assertEqual(installed["provider"]["contentHash"], compute(installed))
         token = self.home / "service.token"
         self.assertNotIn(b"service.token", self.serverd.PLIST.read_bytes(), "the plist names no token")
         self.assertFalse(token.exists(), "the installer never creates the token; the service does, after its lock")

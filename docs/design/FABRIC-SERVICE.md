@@ -109,12 +109,15 @@ the access model [ACCESS.md](ACCESS.md) already states for this server. No POST 
      `test_uninstall_removes_the_plist_and_the_descriptor_and_keeps_the_data`,
      `test_install_refuses_off_macos_without_writing`,
      `test_descriptor_is_valid_and_names_this_workspace`.
-9. **The provider manifest points at the service.** `fabric-agent.json` revision 5 carries
+9. **The provider manifest points at the service.** `fabric-agent.json`, from revision 5, carries
    `provider.extensions["https://fabric.passioncode.ai/agent-contract/extensions/service/0.1"] =
    {"descriptor": "project-observatory.default"}`; the content hash is restamped by
    `tools/fabric_hash.py`. A non-default workspace's descriptor names its own instance; the
-   manifest ships once and names the standard one.
-   - `test_the_manifest_points_at_the_standard_descriptor`.
+   manifest ships once and names the standard one. Since revision 7 the installer also writes a
+   per-install copy that names this workspace's own descriptor, and the descriptor's
+   `fabricManifest` points at that copy ([FABRIC-INTEROP.md](FABRIC-INTEROP.md), rule 6).
+   - `test_the_manifest_points_at_the_standard_descriptor`,
+     `test_install_writes_the_descriptor_then_the_plist`.
 10. **The protocol's own probe passes.** The kit's `check_service.py`, vendored unedited, runs
     against a live server in a temporary workspace: 0 FAIL, and NOT_RUN only for
     `login.single-use` (the dashboard declares no login) and `lifecycle.launchd` (the test
