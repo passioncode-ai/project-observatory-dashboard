@@ -20,6 +20,11 @@ see each other's leases on shared files.
   hand; change the config and regenerate.
 - `AGENTS.md`: one paragraph under *How a change reaches `main`* pointing to it.
 - `.gitignore`: `.agent-sync/` (local state) and `.env.agent-sync`.
+- `tools/check_public_release.py`: `.claude/agent-sync.json` enters the release allowlist by its
+  explicit path (reviewed: lease backend, guarded files and gates, no credential); every other
+  `.claude/` file stays refused. `.agent-sync/` joins the walk's skip list, so a contributor who
+  took a lease does not get a privacy failure for ignored local state, and a tracked copy is still
+  refused. `tests/test_release_boundaries.py` covers both; it failed before the change.
 
 No register here carries a "Next free ID" line, so no `idRegisters` are declared.
 
@@ -30,7 +35,8 @@ No register here carries a "Next free ID" line, so no `idRegisters` are declared
 | `agent_sync.py check` | exit 0, 7 checks passed, 1 warning (`python` is not on `PATH` outside a virtual environment) |
 | lease round trip: `acquire roundtrip-2026-10-01` → `git ls-remote origin 'refs/agent-sync/leases/*'` → `release` | listed while held, gone after |
 | `python -m unittest discover -s tests -v` | exit 0, 81 tests |
-| `project-observatory full check` | before rebasing on `e863e52`: exit 1, only `test_temporary_block.py` failing (the clock-dated reset that #98 fixed) plus two load timeouts that passed on a re-run; after the rebase, see the pull request |
+| `project-observatory full check` | exit 0, 196 of 196 suites PASS on `main` at `e863e52` plus this change. Before that rebase it failed only `test_temporary_block.py`, the clock-dated reset #98 fixed |
+| `python tools/check_public_release.py --history --history-ref HEAD` | exit 0 (exit 1 before the allowlist change: `.claude/agent-sync.json` and local `.agent-sync/` state were outside it) |
 | `tools/update_inventory.py --check`, `compileall` | exit 0 |
 | org-index `check_private.py` over the added lines | 0 findings |
 
