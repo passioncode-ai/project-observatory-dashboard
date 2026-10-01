@@ -52,12 +52,19 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
-**Status 2026-10-01, honest absence (unreleased on `main`):** a source measured as not
+**Status 2026-10-01: 0.10.0 released** — the first release under `AGPL-3.0-only OR
+LicenseRef-PassionCode-Commercial`, with honest absence, the Cloudflare presets, suppression
+identity and the reset-date fix; companion plugin `observatory-log` 0.13.0. One operator machine
+updated with `full update --apply` and reports `ready` with no reasons. Next task: re-collect or
+reinterpret receipts an older release wrote, right after an update. Record:
+[runs/2026-10-01-release-0.10.0](runs/2026-10-01-release-0.10.0/README.md).
+
+**Status 2026-10-01, honest absence (released in 0.10.0):** a source measured as not
 applicable here (no RDAP service for the TLD, a companion tool not installed, a credential not
 set up for a surface another reads, a bounded OpenRouter listing that missed no consumer, a
 receipt of an integration that is off) goes on `not_applicable` and no longer degrades the
 service; a one-branch remote resolves its default branch; a timed-out command is asked again.
-Next task: the release, then `full update` on each machine. Record:
+Record:
 [runs/2026-10-01-honest-absence](runs/2026-10-01-honest-absence/README.md).
 
 **Status 2026-10-01, open pull requests:** #83, #89, #93 and #62 landed with fixes, plus #98
@@ -68,14 +75,14 @@ Record: [runs/2026-10-01-open-pr-sweep](runs/2026-10-01-open-pr-sweep/README.md)
 under an agent-sync lease decided by git refs on `origin`; [AGENT_SYNC.md](AGENT_SYNC.md) is the
 generated wiring. Record: [runs/2026-10-01-agent-sync](runs/2026-10-01-agent-sync/README.md).
 
-**Status 2026-10-01, leak suppression identity (unreleased on `main`):** a suppression now
+**Status 2026-10-01, leak suppression identity (released in 0.10.0):** a suppression now
 binds to the sighting's exact location and a workspace-keyed `version_id`, so it cannot hide a
-rotated value or another file; expired or changed rules replay old evidence. The next release
-describes it in `CHANGELOG.md`. Entry point:
+rotated value or another file; expired or changed rules replay old evidence. `CHANGELOG.md`
+0.10.0 describes it. Entry point:
 [runs/2026-09-25-suppression-boundaries](runs/2026-09-25-suppression-boundaries/README.md).
 
-**Status 2026-09-30, licence and repository standard (unreleased on `main`):** the code is
-`AGPL-3.0-only OR LicenseRef-PassionCode-Commercial` from the next release; v0.9.1 and earlier
+**Status 2026-09-30, licence and repository standard (released in 0.10.0):** the code is
+`AGPL-3.0-only OR LicenseRef-PassionCode-Commercial` from 0.10.0; v0.9.1 and earlier
 keep PolyForm or MIT. README and AGENTS.md follow the organisation's repository standard. Entry
 point and the next task: [runs/2026-09-30-standard-agpl](runs/2026-09-30-standard-agpl/README.md).
 
