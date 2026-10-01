@@ -46,6 +46,13 @@ PAGE = 100
 #: budget runs out the file says so rather than presenting a partial list as
 #: whole.
 MAX_PAGES = 12
+#: How much further to look, ONCE, for a consumer's key the bounded listing did
+#: not reach. The listing is newest first, and on one account another product
+#: mints about three hundred keys a day, so a consumer's key a few weeks old sat
+#: past key 7,400 — and was reported as "no longer exists" by a listing that had
+#: stopped at 1,200. A key found this way is remembered by its hash and asked
+#: about directly afterwards, so the deep walk is paid once per key, not per run.
+DEEP_PAGES = 200
 
 #: Where a key is read from, and by whom. The paths are facts about this
 #: machine; `tools/install_key.py` owns the first three and the gateway's
@@ -95,10 +102,22 @@ def _label(text: str) -> str:
     return label_of(text)
 
 
-def destinations() -> tuple[dict[str, str], list[dict]]:
-    """destination -> tail, plus a degradation for each one that is unreadable."""
-    out, degraded = {}, []
+def destinations() -> tuple[dict[str, str], list[dict], list[dict]]:
+    """destination -> label, a degradation for each unreadable one, and the absent ones.
+
+    A consumer whose DIRECTORY is missing is not on this machine: its key file
+    has nowhere to be, and saying "this consumer has none" in the words used for
+    an installed consumer with an empty slot sent a person to repair a tool that
+    is not there. That one goes on `not_applicable`; a directory without its key
+    file stays a degradation.
+    """
+    out, degraded, absent = {}, [], []
     for name, path in DESTINATIONS.items():
+        if not path.is_file() and not path.parent.is_dir():
+            absent.append({"source": f"openrouter:{name}",
+                           "reason": (f"{name} is not installed on this machine: {path.parent} "
+                                      f"does not exist, so there is no key of its to match")})
+            continue
         if not path.is_file():
             degraded.append({"source": f"openrouter:{name}",
                              "reason": f"no key at {path} — this consumer has none"})
@@ -114,13 +133,18 @@ def destinations() -> tuple[dict[str, str], list[dict]]:
                              "reason": "the file holds no OpenRouter-shaped key"})
             continue
         out[name] = tail
-    return out, degraded
+    return out, degraded, absent
 
 
-def listing(prov: str) -> tuple[list[dict], str | None]:
-    """Every key the provisioning key governs, or the reason there are none."""
-    rows, offset = [], 0
-    for _ in range(MAX_PAGES):
+def listing(prov: str, offset: int = 0, pages: int = MAX_PAGES,
+            until=None) -> tuple[list[dict], str | None]:
+    """The keys the provisioning key governs from `offset`, or the reason there are none.
+
+    `until(rows)` ends the walk early once it returns True — the deep search's
+    stop as soon as every missing consumer is found.
+    """
+    rows = []
+    for _ in range(pages):
         req = urllib.request.Request(f"{API}/keys?offset={offset}",
                                      headers={"Authorization": f"Bearer {prov}"})
         try:
@@ -133,10 +157,50 @@ def listing(prov: str) -> tuple[list[dict], str | None]:
         rows.extend(page)
         if len(page) < PAGE:
             return rows, None
+        if until is not None and until(rows):
+            return rows, None
         offset += len(page)
         time.sleep(0.2)
-    return rows, (f"stopped after {MAX_PAGES} pages ({len(rows)} keys); the account "
+    return rows, (f"stopped after {pages} pages ({len(rows)} keys); the account "
                   f"holds more and this list is partial")
+
+
+def _get(path: str, prov: str) -> tuple[dict | None, int | None, str | None]:
+    req = urllib.request.Request(f"{API}{path}", headers={"Authorization": f"Bearer {prov}"})
+    try:
+        with urllib.request.urlopen(req, timeout=45) as r:
+            return (json.loads(r.read().decode()).get("data") or {}), None, None
+    except urllib.error.HTTPError as e:
+        return None, e.code, f"HTTP {e.code}"
+    except Exception as e:                                        # noqa: BLE001
+        return None, None, type(e).__name__
+
+
+def whoami(prov: str) -> tuple[dict | None, str | None]:
+    """What the provider says about the provisioning key itself (`GET /key`).
+
+    Listings never include a provisioning key — measured: none among 8,000
+    listed keys — so "not in the listing" is no evidence about it. Asking about
+    itself is: the call carries only the key this collector already sends.
+    """
+    data, _code, why = _get("/key", prov)
+    return data, why
+
+
+def key_by_hash(prov: str, h: str) -> tuple[dict | None, int | None, str | None]:
+    """One key by the hash a previous run found it under (`GET /keys/{hash}`)."""
+    return _get(f"/keys/{h}", prov)
+
+
+def remembered(out_path: pathlib.Path) -> dict[str, dict]:
+    """The hash each consumer's key was found under on an earlier run."""
+    try:
+        doc = json.loads(out_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    got = doc.get("destination_hashes") if isinstance(doc, dict) else None
+    return {n: v for n, v in (got or {}).items()
+            if isinstance(v, dict) and v.get("label") and v.get("hash")}
 
 
 def main(argv: list[str]) -> int:
@@ -146,7 +210,7 @@ def main(argv: list[str]) -> int:
         return 0
     out_path = pathlib.Path(argv[1]) if len(argv) > 1 else paths.SCRATCH / "openrouter.json"
     started = datetime.now(timezone.utc).isoformat()
-    dests, degraded = destinations()
+    dests, degraded, not_applicable = destinations()
 
     prov_path = DESTINATIONS["provisioning"]
     if not prov_path.is_file():
@@ -159,6 +223,7 @@ def main(argv: list[str]) -> int:
             "degraded": degraded + [{"source": "openrouter:listing",
                                      "reason": "no provisioning key, so the account's "
                                                "keys cannot be listed at all"}],
+            "not_applicable": not_applicable,
         }, indent=1)
         print(f"openrouter.json: no provisioning key; {len(dests)} destination(s) read",
               file=sys.stderr)
@@ -166,8 +231,82 @@ def main(argv: list[str]) -> int:
 
     prov = prov_path.read_text(encoding="utf-8").strip()
     rows, why = listing(prov)
+    verified: dict[str, str] = {}
+    gone: dict[str, str] = {}
+    unknown: dict[str, str] = {}
+
+    # THE PROVISIONING KEY is never in a listing, so it is confirmed by asking
+    # about itself. Its label must be the one in the file; anything else is a
+    # different key in that slot, which is worth saying.
+    if "provisioning" in dests:
+        me, err = whoami(prov)
+        if me is not None and me.get("label") == dests["provisioning"]:
+            verified["provisioning"] = "the provider describes this key as itself (GET /key)"
+        elif me is not None:
+            degraded.append({"source": "openrouter:provisioning",
+                             "reason": "GET /key answered for a key whose label differs from "
+                                       "the one in this slot"})
+        else:
+            degraded.append({"source": "openrouter:provisioning",
+                             "reason": f"could not be confirmed: GET /key failed ({err})"})
+
+    listed_labels = {r.get("label") or "" for r in rows}
+    missing = [n for n, lab in dests.items() if n != "provisioning" and lab not in listed_labels]
+    extra: list[dict] = []
+
+    # A KEY FOUND ONCE IS ASKED ABOUT BY ITS HASH: one request, and a 404 there
+    # is the provider saying the key was deleted — a real problem for whichever
+    # consumer still holds it, and reported as one.
+    memory = remembered(out_path)
+    for n in list(missing):
+        m = memory.get(n)
+        if not m or m.get("label") != dests[n]:
+            continue
+        row, code, err = key_by_hash(prov, m["hash"])
+        if row is not None and row.get("label") == dests[n]:
+            extra.append({**row, "hash": row.get("hash") or m["hash"]})
+            verified[n] = "found by the hash an earlier run recorded"
+            missing.remove(n)
+        elif code == 404:
+            gone[n] = ("deleted: the provider answers 404 for the hash this key was found "
+                       "under earlier, so the consumer holds a dead key")
+            missing.remove(n)
+        else:
+            unknown[n] = f"its recorded hash could not be asked about ({err})"
+
+    # A BOUNDED LISTING IS NOT PROOF OF ABSENCE. Look further, once, for what is
+    # still missing, and stop as soon as all of it is found.
+    searched, complete = len(rows), why is None
+    if missing and not complete:
+        want = {dests[n] for n in missing}
+        deeper, deeper_why = listing(
+            prov, offset=len(rows), pages=DEEP_PAGES,
+            until=lambda got: want <= {r.get("label") for r in got})
+        searched += len(deeper)
+        # Walked to the end, or stopped early because everything was found.
+        complete = deeper_why is None
+        if deeper_why and not deeper_why.startswith("stopped after"):
+            why = f"{why}; the deeper search then failed: {deeper_why}"
+        for r in deeper:
+            if r.get("label") in want:
+                extra.append(r)
+        found = {r.get("label") for r in extra}
+        for n in list(missing):
+            if dests[n] in found:
+                verified[n] = f"found past the bounded listing, among the newest {searched} keys"
+                missing.remove(n)
+    seen_hashes = {r.get("hash") for r in rows}
+    rows = rows + [r for r in extra if r.get("hash") not in seen_hashes]
+
     if why:
-        degraded.append({"source": "openrouter:listing", "reason": why})
+        if missing or unknown:
+            degraded.append({"source": "openrouter:listing", "reason": why})
+        else:
+            not_applicable.append({
+                "source": "openrouter:listing",
+                "reason": (f"{why.split(';')[0]}, by design: only the newest {MAX_PAGES} pages "
+                           f"are read each run, and every key a consumer on this machine holds "
+                           f"was matched, so the unread older keys hold none of them")})
 
     # A LABEL SHARED BY TWO KEYS IS NAMED, never resolved by preference: the
     # destination is then unattributable, and saying so is the only honest
@@ -202,12 +341,22 @@ def main(argv: list[str]) -> int:
         })
     keys.sort(key=lambda x: (x["serves"] is None, x["serves"] or "", x["name"] or ""))
 
-    listed = {k["label"] for k in keys}
-    orphan_dests = sorted(n for n, t in dests.items() if t not in listed)
-    for n in orphan_dests:
-        degraded.append({"source": f"openrouter:{n}",
-                         "reason": ("its key is not in this account's listing — either it "
-                                    "belongs to another workspace or it no longer exists")})
+    for n in sorted(missing):
+        if complete:
+            reason = ("its key is not in this account's listing — either it belongs to "
+                      "another workspace or it no longer exists")
+        else:
+            reason = (f"its key is not among the newest {searched} keys the account lists, and "
+                      f"the listing goes further, so whether it still exists is unknown")
+        if n in unknown:
+            reason += f"; {unknown[n]}"
+        degraded.append({"source": f"openrouter:{n}", "reason": reason})
+    for n, reason in sorted(gone.items()):
+        degraded.append({"source": f"openrouter:{n}", "reason": reason})
+    orphan_dests = sorted(set(missing) | set(gone))
+    hash_of = {(r.get("label") or ""): r.get("hash") for r in rows}
+    destination_hashes = {n: {"label": lab, "hash": hash_of[lab]} for n, lab in dests.items()
+                          if lab in by_label and hash_of.get(lab)}
 
     atomic.write_json(out_path, {
         "schema_version": 1,
@@ -221,7 +370,12 @@ def main(argv: list[str]) -> int:
         # project: `store/.openrouter-key` sits inside the observatory's folder.
         "destination_paths": {n: str(p) for n, p in DESTINATIONS.items() if p.is_file()},
         "unlisted_destinations": orphan_dests,
+        # How each consumer's key was confirmed when the listing alone did not,
+        # and the hash it was found under, so the next run asks about it directly.
+        "verified": verified,
+        "destination_hashes": destination_hashes,
         "degraded": degraded,
+        "not_applicable": not_applicable,
     }, indent=1)
     served = sum(1 for k in keys if k["serves"])
     print(f"openrouter.json: {len(keys)} key(s), {served} serving a known consumer, "

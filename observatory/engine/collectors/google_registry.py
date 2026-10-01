@@ -362,4 +362,8 @@ def document(scan: dict, prop_rows: list[dict], obs_date: str) -> dict:
         "properties": prop_rows,
         "search_console": sites,
         "degraded": scan.get("degraded") or [],
+        # Kept beside `degraded`, never folded into it: a credential not set up
+        # for a surface another credential reads is information for the board,
+        # and `tools/google_findings.py` still names its switched-off API.
+        "not_applicable": scan.get("not_applicable") or [],
     })

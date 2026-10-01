@@ -3286,6 +3286,30 @@ def collect() -> list[dict]:
                       f"the source or accept the gap — the reason names which",
             "evidence": [f"store/raw/{receipt}#degraded"]})
 
+    # WHAT DOES NOT APPLY HERE, kept visible. A collector moves a source to its
+    # `not_applicable` list when it measured that the source does not apply to
+    # this machine — a tool not installed, a registry with no RDAP service for a
+    # domain DNS shows is held, an integration switched off. Those rows no longer
+    # hold the service degraded, so this is where a person still finds them:
+    # one INFO row per receipt, never pushed, worded as a fact and not a fault.
+    for receipt, rows in sorted(degradations.every_not_applicable().items()):
+        pairs = sorted({f"{d.get('source', '?')} — {str(d.get('reason', '')).strip()}"
+                        for d in rows if isinstance(d, dict)})
+        shown = pairs[:DEGRADED_LISTED]
+        rest = len(pairs) - len(shown)
+        out.append({
+            "type": "collector.not_applicable", "subject": f"collector:{receipt}",
+            "severity": "info",
+            "title": f"{receipt} names {len(rows)} source(s) that do not apply here",
+            "detail": ("Measured and found not to apply to this machine or estate, so "
+                       "they do not count as degraded coverage. "
+                       + clipped("; ".join(shown), 900)
+                       + (f" … and {rest} more source(s) not listed" if rest > 0 else "")
+                       + "."),
+            "action": f"nothing, unless one of them should apply — read `store/raw/{receipt}` "
+                      f"(`not_applicable`) for what would make it apply",
+            "evidence": [f"store/raw/{receipt}#not_applicable"]})
+
     if unread_status:
         shown = sorted(set(unread_status))
         out.append({

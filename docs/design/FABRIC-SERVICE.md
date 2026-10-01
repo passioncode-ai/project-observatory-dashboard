@@ -64,6 +64,18 @@ the access model [ACCESS.md](ACCESS.md) already states for this server. No POST 
    was interrupted, went stale or runs too long (`tick_health`), and a row for a registry, findings
    document or leak register that cannot be parsed. At most 64 rows, source ≤ 80 and reason ≤ 300
    characters. `ready` with a non-empty list is reported as `degraded`.
+   A source a collector measured as **not applicable here** — a companion tool that is not
+   installed, a TLD whose registry runs no RDAP service for a domain DNS shows is held, a Google
+   credential not set up for a surface another credential reads, a bounded key listing that
+   missed no consumer — goes on the receipt's `not_applicable` list instead, and so does a
+   receipt left by an integration the workspace has switched off. Those rows do not degrade the
+   service; `degradations.every_not_applicable()` reads them and the board shows one
+   `collector.not_applicable` info row per receipt. A timeout of an external command is asked
+   again with a longer limit before it is reported (`slow_command.py`), and the report names
+   every duration and the load average.
+   - `test_honest_absence.py`: `test_not_applicable_rows_do_not_degrade_the_service`,
+     `test_a_receipt_of_an_integration_that_is_off_is_not_a_measurement`,
+     `test_a_command_that_times_out_once_is_retried_with_backoff`.
    - `test_a_dead_tick_and_a_partial_collector_degrade_the_service`,
      `test_unreadable_sources_are_degraded_not_zero`,
      `test_limits_of_the_protocol_hold_under_many_sources`,

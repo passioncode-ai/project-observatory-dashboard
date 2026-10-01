@@ -28,6 +28,7 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import atomic
 import paths
+import slow_command
 import json, os, re, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +66,11 @@ def now() -> str:
 #: unmeasured claim.
 GIT_ENV = {"LC_ALL": "C", "LANGUAGE": ""}
 
+#: A git call's first limit, and the longer one it is given when asked again.
+#: The first is the old fixed limit, so a quiet machine behaves as before.
+SH_TIMEOUTS = (25, 60)
+SH_BACKOFF = 3.0
+
 
 def sh(args, cwd=None):
     """(output, reason_it_could_not_be_read). One of the two is always empty.
@@ -76,14 +82,20 @@ def sh(args, cwd=None):
 
     Git runs under `GIT_ENV` so the messages the caller matches are the ones it
     was written against, whatever the machine's locale.
+
+    A TIMEOUT IS ASKED AGAIN before it becomes a reason. One `git status` that
+    missed 25 s on a machine at load average 200, and answered in 0.3 s a minute
+    later, held the service degraded for a whole tick; `slow_command` retries it
+    once with a longer limit, and a command that misses both is reported with
+    both durations ("did not finish in 25s, nor in 60s …") and the load.
     """
     try:
-        r = subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=25,
-                           env={**os.environ, **GIT_ENV})
-    except subprocess.TimeoutExpired:
-        return "", f"`{' '.join(args[:3])}` did not finish in 25s"
+        r, slow = slow_command.run(args, timeouts=SH_TIMEOUTS, backoff=SH_BACKOFF, cwd=cwd,
+                                   capture_output=True, text=True, env={**os.environ, **GIT_ENV})
     except OSError as exc:
         return "", f"`{args[0]}` could not run: {type(exc).__name__}: {exc}"
+    if r is None:
+        return "", slow
     if r.returncode != 0:
         return "", (f"`{' '.join(args[:3])}` exited {r.returncode}: "
                     f"{(r.stderr or '').strip()[:100]}")

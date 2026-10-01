@@ -419,6 +419,11 @@ def survey(scope: dict | None = None, include_external: bool = False,
                 degraded.append({"source": d["source"],
                                  "reason": f"{d['reason']} — {thin} repositories are "
                                            f"therefore known only from a local remote"})
+        elif degradations.integration_off("bitbucket.json"):
+            degraded.append({"source": "bitbucket",
+                             "reason": f"{thin} repositories carry no listing data: the "
+                                       f"bitbucket integration is off in this workspace, so "
+                                       f"they are known only from a local remote"})
         else:
             degraded.append({"source": "bitbucket",
                              "reason": f"{thin} repositories carry no listing data; the "

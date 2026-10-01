@@ -239,6 +239,29 @@ def scan() -> dict:
     index, conflicts = build_index(projects)
 
     degraded: list[dict] = []
+    # NOT INSTALLED IS NOT BROKEN. The store's own directory is the companion's
+    # home: when that is absent the tool is not on this machine at all, which is
+    # a fact about the machine and asks nobody to repair anything. It is still
+    # named, on `not_applicable`, because activity then rests on commits alone.
+    # A home WITHOUT its database is the companion installed and failing, and
+    # stays a degradation below.
+    if STORE.parent.name == "unconfigured":
+        # `configuration.source_path`'s placeholder: the source was never set, so
+        # nothing was looked for — a configuration gap, not an absent tool.
+        return {"scanned_on": now()[:10], "source": str(STORE), "sessions": [],
+                "counts": {"sessions": 0, "projects": 0, "unmatched_names": 0},
+                "degraded": [{"source": "claude-mem",
+                              "reason": "the sessions integration is on and its `companion_db` "
+                                        "source is not configured; activity falls back to "
+                                        "commits alone"}]}
+    if not STORE.parent.is_dir():
+        return {"scanned_on": now()[:10], "source": str(STORE), "sessions": [],
+                "counts": {"sessions": 0, "projects": 0, "unmatched_names": 0},
+                "degraded": [],
+                "not_applicable": [{"source": "claude-mem",
+                                    "reason": f"claude-mem is not installed on this machine: "
+                                              f"{STORE.parent} does not exist, so no session is "
+                                              f"known and activity rests on commits alone"}]}
     if not STORE.is_file():
         return {"scanned_on": now()[:10], "source": str(STORE), "sessions": [],
                 "counts": {"sessions": 0, "projects": 0, "unmatched_names": 0},
@@ -539,6 +562,8 @@ def main(argv: list[str]) -> int:
         to_events(out)
     for d in out["degraded"]:
         print(f"  DEGRADED {d['source']}: {d['reason']}", file=sys.stderr)
+    for d in out.get("not_applicable") or []:
+        print(f"  not applicable {d['source']}: {d['reason']}")
     return 0
 
 

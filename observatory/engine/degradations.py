@@ -23,6 +23,53 @@ import json
 import paths
 
 
+#: Which integration a receipt belongs to, DECLARED, for the receipts written by a
+#: collector that an integration switch turns off. When the switch is off the
+#: collector returns before it writes, so the receipt it wrote while the switch
+#: was on stays in the scratch directory and nothing ever replaces it. Read as a
+#: measurement, that leftover held a service degraded for days on the strength of
+#: a run from before the operator turned the integration off. Each name must be
+#: an integration `tools/tick_lease.py` gates a step on; a test holds that.
+RECEIPT_INTEGRATIONS = {
+    "bitbucket.json": "bitbucket", "domains_live.json": "domains", "heroku.json": "heroku",
+    "openrouter.json": "openrouter", "cloudflare_zones.json": "cloudflare", "mcp.json": "mcp",
+    "remote-env.json": "remote_env", "google.json": "google", "sessions.json": "sessions",
+    "remotes.json": "git_remotes", "vault.json": "wiki",
+}
+
+
+def integration_off(name: str) -> str | None:
+    """The integration a receipt belongs to when the workspace has it OFF, else None.
+
+    The settings are read directly rather than through `configuration.enabled`:
+    `OBSERVATORY_OFFLINE` makes every integration read as off for one run, and a
+    run mode must not hide the operator's measurements. A configuration that
+    cannot be read hides nothing either: the receipt is then read as before.
+    """
+    integration = RECEIPT_INTEGRATIONS.get(name)
+    if integration is None:
+        return None
+    try:
+        import configuration
+        on = configuration.load().get("integrations", {}).get(integration) is True
+    except Exception:  # noqa: BLE001 — an unreadable switch is not a switch that is off
+        return None
+    return None if on else integration
+
+
+def _leftover(name: str, integration: str) -> dict:
+    """The note that names a receipt an integration that is off left behind."""
+    try:
+        doc = json.loads((paths.SCRATCH / name).read_text(encoding="utf-8"))
+        when = (doc.get("scanned_at") or doc.get("measured_at") or doc.get("scanned_on") or "")
+    except (ValueError, OSError, AttributeError):
+        when = ""
+    return {"source": f"integration:{integration}",
+            "reason": (f"the {integration} integration is off in this workspace, so "
+                       f"store/raw/{name}" + (f" from {str(when)[:10]}" if when else "")
+                       + " is a leftover of an earlier run and is not read as a measurement")}
+
+
 def collector(name: str) -> list[dict]:
     """The `degraded` rows a collector wrote, or [] if it never ran.
 
@@ -32,7 +79,7 @@ def collector(name: str) -> list[dict]:
     that class in one sitting and `tools/check_paths.py` now refuses it.
     """
     f = paths.SCRATCH / name
-    if not f.is_file():
+    if not f.is_file() or integration_off(name):
         return []
     try:
         doc = json.loads(f.read_text(encoding="utf-8"))
@@ -75,7 +122,7 @@ def every_collector() -> dict[str, list[dict]]:
     if not paths.SCRATCH.is_dir():
         return out
     for f in sorted(paths.SCRATCH.glob("*.json")):
-        if f.name in OWN_READER:
+        if f.name in OWN_READER or integration_off(f.name):
             continue
         try:
             doc = json.loads(f.read_text(encoding="utf-8"))
@@ -89,4 +136,34 @@ def every_collector() -> dict[str, list[dict]]:
         # about collectors.
         if isinstance(doc, dict) and isinstance(doc.get("degraded"), list) and doc["degraded"]:
             out[f.name] = list(doc["degraded"])
+    return out
+
+
+def every_not_applicable() -> dict[str, list[dict]]:
+    """Every receipt's `not_applicable` rows: sources that do not apply HERE.
+
+    The second list beside `degraded`, and deliberately a different claim. A row
+    on it was measured and found not to apply to this machine or this estate — a
+    companion tool that is not installed, a registry that runs no RDAP service
+    for a domain DNS shows is held, a credential set up for another surface that
+    a second credential already reads. Nothing failed and no person can act, so it
+    must not hold a service degraded; but it is still a fact about coverage, so it
+    is kept, read here and shown, never dropped. A receipt an integration that is
+    off left behind is reported on this list too, in place of its stale rows.
+    """
+    out: dict[str, list[dict]] = {}
+    if not paths.SCRATCH.is_dir():
+        return out
+    for f in sorted(paths.SCRATCH.glob("*.json")):
+        off = integration_off(f.name)
+        if off:
+            out[f.name] = [_leftover(f.name, off)]
+            continue
+        try:
+            doc = json.loads(f.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue  # an unreadable receipt is reported by `every_collector`
+        rows = doc.get("not_applicable") if isinstance(doc, dict) else None
+        if isinstance(rows, list) and rows:
+            out[f.name] = [r for r in rows if isinstance(r, dict)]
     return out
