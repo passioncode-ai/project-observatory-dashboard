@@ -39,6 +39,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import atomic              
 import paths              
+import slow_command
 
 API = "https://api.heroku.com"
 #: The Deploy tab's GitHub link is NOT in the Platform API. It lives on the
@@ -71,16 +72,27 @@ CODE_RELEASE = ("Deploy ", "Deployed ", "Promote ", "Rollback ")
 HEROKU_REMOTE = re.compile(r"git\.heroku\.com[:/]+([A-Za-z0-9][A-Za-z0-9-]*)\.git")
 
 
+#: The token's first limit, and the longer one a second attempt gets.
+TOKEN_TIMEOUTS = (30, 60)
+
+
 def token() -> tuple[str | None, str | None]:
     """The CLI's session token, or the reason there is none."""
     if not shutil.which("heroku"):
         return None, ("the heroku CLI is not on PATH; install it or run this "
                       "step on a machine that has it")
+    # ASKED AGAIN BEFORE IT IS REPORTED. The CLI is a Node program that starts
+    # slowly on a loaded machine: measured at load average ~200 it took 31 s once
+    # and 8-13 s on the next three tries, and that one miss emptied the whole
+    # Heroku survey for a tick. A second, longer attempt rides out the spike; a
+    # CLI that misses both is reported with both durations and the load.
     try:
-        p = subprocess.run(["heroku", "auth:token"], capture_output=True,
-                           text=True, timeout=30)
-    except subprocess.TimeoutExpired:
-        return None, "heroku auth:token did not answer within 30s"
+        p, slow = slow_command.run(["heroku", "auth:token"], timeouts=TOKEN_TIMEOUTS,
+                                   backoff=5.0, capture_output=True, text=True)
+    except OSError as exc:
+        return None, f"heroku auth:token could not run: {type(exc).__name__}"
+    if p is None:
+        return None, f"{slow} — the CLI did not answer, so no app could be read"
     if p.returncode != 0:
         # The CLI prints its own reason and it is more useful than ours.
         return None, ("heroku auth:token failed: "

@@ -66,14 +66,47 @@ def checkouts() -> list[dict]:
     return out
 
 
+def remote_branches(repo: str) -> list[str]:
+    """`origin`'s branches as this checkout last fetched them, without `HEAD`."""
+    out = git(repo, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin") or ""
+    return sorted(b.split("/", 1)[1] for b in out.split()
+                  if "/" in b and b != "origin/HEAD" and b != "origin")
+
+
 def default_branch(repo: str) -> str | None:
+    """The branch every other branch is measured against, or None.
+
+    In order: what `origin/HEAD` records; `main` or `master`; and, when the
+    remote has exactly ONE branch, that branch. The third rule is what a checkout
+    cloned without `origin/HEAD` needed: measured on one estate, a repository
+    whose only branch is `develop` (and whose remote's own `HEAD` names
+    `develop`) was reported as having no default branch at all, because only the
+    first two rules existed. A remote with one branch has no other candidate, so
+    nothing is guessed; with two or more and no `origin/HEAD`, None stands and
+    `unresolved_reason` says how to record it.
+    """
     head = (git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD") or "").strip()
     if head:
         return head.split("/", 1)[1]
     for name in ("main", "master"):
         if git(repo, "rev-parse", "--verify", "-q", "refs/heads/" + name) is not None:
             return name
+    remote = remote_branches(repo)
+    if len(remote) == 1:
+        return remote[0]
     return None
+
+
+def unresolved_reason(repo: str) -> str:
+    """Why `default_branch` found nothing, and the one command that fixes it."""
+    remote = remote_branches(repo)
+    if not remote:
+        return ("no default branch could be resolved: origin/HEAD is unset, there is no "
+                "main or master, and no branch of origin has been fetched")
+    return (f"no default branch could be resolved: origin/HEAD is unset and origin has "
+            f"{len(remote)} branches ({', '.join(remote[:4])}{', …' if len(remote) > 4 else ''}), "
+            f"none named main or master; `git remote set-head origin --auto` in the "
+            f"checkout records the remote's own choice")
 
 
 def worktrees(repo: str, busy: set[str], now: float) -> list[dict]:
@@ -148,7 +181,7 @@ def main(argv: list[str]) -> int:
     for c in checkouts():
         default = default_branch(c["path"])
         if not default:
-            degraded.append({"source": c["repository"], "reason": "no default branch could be resolved"})
+            degraded.append({"source": c["repository"], "reason": unresolved_reason(c["path"])})
             continue
         wts = worktrees(c["path"], busy, now)
         held = {w["branch"] for w in wts if w.get("branch")}

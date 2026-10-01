@@ -59,7 +59,9 @@ def scanner():
     the SOURCE for `sh`, so it compiles just that function in isolation.
     """
     src = (ROOT / "collectors/scan_filesystem.py").read_text(encoding="utf-8")
-    ns: dict = {"subprocess": subprocess, "os": os}
+    sys.path.insert(0, str(ROOT))
+    import slow_command  # `sh` asks a timed-out command again through it
+    ns: dict = {"subprocess": subprocess, "os": os, "slow_command": slow_command}
     start = src.index("GIT_ENV = ")
     end = src.index("MARKERS = [")
     exec(compile(src[start:end], "scan_filesystem:sh", "exec"), ns)   # noqa: S102

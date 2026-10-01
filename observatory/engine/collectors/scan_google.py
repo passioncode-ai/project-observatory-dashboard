@@ -188,8 +188,12 @@ def scan_analytics(cred: dict) -> tuple[list[dict], list[dict], list[dict]]:
                          "effect": "this credential's analytics are unknown, not empty"}]
     summaries, err = paged(f"{ADMIN}/accountSummaries", tok, "accountSummaries")
     if err:
-        return [], [], [{"source": f"ga4 via {cred['client_email']}", "reason": err,
-                         "effect": "no account list, so no property is known through this credential"}]
+        return [], [], [{"source": f"ga4 via {cred['client_email']}", "surface": "ga4",
+                         "reason": err,
+                         "effect": "no account list, so no property is known through this credential",
+                         "remedy": (f"enable the Google Analytics Admin and Data APIs in Cloud "
+                                    f"project {cred.get('cloud_project')}, or leave this "
+                                    f"credential to the surfaces it is set up for")}]
     accounts, props, degraded = [], [], []
     for a in summaries:
         ps = a.get("propertySummaries") or []
@@ -233,6 +237,7 @@ def scan_search_console(cred: dict) -> tuple[list[dict], list[dict]]:
         # enabled the API", a one-click operator fix. Carrying Google's own
         # sentence is the difference between the two.
         return [], [{"source": f"search console via {cred['client_email']}",
+                     "surface": "search_console",
                      "reason": d["__error__"],
                      "effect": "no Search Console site is known through this credential",
                      "remedy": (f"enable the Search Console API in Cloud project "
@@ -240,6 +245,40 @@ def scan_search_console(cred: dict) -> tuple[list[dict], list[dict]]:
                                 f"property in Search Console")}]
     return [{"site": s.get("siteUrl"), "permission": s.get("permissionLevel"),
              "read_with": cred["client_email"]} for s in d.get("siteEntry") or []], []
+
+
+#: Google's own words for an API switched off in a credential's Cloud project.
+DISABLED_API = ("has not been used in project", "accessNotConfigured", "SERVICE_DISABLED")
+
+
+def api_disabled(reason: str) -> bool:
+    return any(marker in str(reason) for marker in DISABLED_API)
+
+
+def sort_refusals(degraded: list[dict], readers: dict[str, list[str]]) -> tuple[list[dict], list[dict]]:
+    """(degraded, not_applicable): an API switched off where another credential reads that surface.
+
+    Every service account is asked about every surface, and each one is usually
+    set up for one of them. Measured on one estate: two analytics accounts read
+    72 properties and one Search Console account read its site, and each was
+    reported "degraded" on the OTHER surface, because its Cloud project never
+    enabled that API. Those refusals hide no data that the estate is reading —
+    the surface is read through the other credential — so they are not
+    applicable, and say who reads the surface instead. When NO credential reads
+    a surface, the refusals are the whole story and stay degraded. A refusal for
+    any other reason (a permission, a failed exchange) always stays degraded.
+    """
+    keep, notes = [], []
+    for d in degraded:
+        surface = d.get("surface")
+        others = [r for r in readers.get(surface or "", []) if r not in str(d.get("source"))]
+        if surface and others and api_disabled(d.get("reason", "")):
+            shown = ", ".join(others[:2]) + (f" and {len(others) - 2} more" if len(others) > 2 else "")
+            notes.append({**d, "reason": (f"{d.get('reason')} — this credential is not set up for "
+                                          f"{surface.replace('_', ' ')}, which is read through {shown}")})
+        else:
+            keep.append(d)
+    return keep, notes
 
 
 def main(argv: list[str]) -> int:
@@ -274,18 +313,27 @@ def main(argv: list[str]) -> int:
         return 0
 
     accounts, properties, sites, degraded = [], [], [], []
+    readers: dict[str, list[str]] = {"ga4": [], "search_console": []}
     for c in creds:
         acc, props, deg = scan_analytics(c)
         accounts += acc
         properties += props
         degraded += deg
+        # A READER is a credential that read something there, not merely one that
+        # was not refused: an empty answer covers nothing another one missed.
+        if acc and not any(d.get("surface") == "ga4" for d in deg):
+            readers["ga4"].append(c["client_email"])
         s, deg2 = scan_search_console(c)
         sites += s
         degraded += deg2
+        if s and not deg2:
+            readers["search_console"].append(c["client_email"])
+    degraded, not_applicable = sort_refusals(degraded, readers)
     properties.sort(key=lambda p: -(p.get("users_30d") or 0))
     atomic.write_json(out, {"scanned_at": now(), "credentials": creds,
                             "accounts": accounts, "properties": properties,
                             "search_console": sites, "degraded": degraded,
+                            "not_applicable": not_applicable,
                             "note": "Names, ids, hosts and three numbers per property. "
                                     "The credential signs a JWT and never leaves the "
                                     "process; what is recorded is the account's public "
@@ -296,6 +344,8 @@ def main(argv: list[str]) -> int:
           f"{len(sites)} Search Console site(s)")
     for d in degraded:
         print(f"  degraded {d['source']}: {d['reason'][:120]}")
+    for d in not_applicable:
+        print(f"  not applicable {d['source']}: {d['reason'][:120]}")
     return 0
 
 

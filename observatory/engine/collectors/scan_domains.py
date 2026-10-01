@@ -39,6 +39,10 @@ RDAP_BACKOFF = 2.0
 # 58 names arriving at once is what earned the 429s; the whole pass still
 # finishes in under a minute.
 RDAP_WORKERS = 1
+#: IANA's list of which TLD registries run an RDAP service, and where. `rdap.org`
+#: redirects through it, so a TLD missing from it answers 404 for every domain —
+#: registered or not. Read once per run; nothing else is asked of IANA.
+IANA_BOOTSTRAP = "https://data.iana.org/rdap/dns.json"
 # Enough for this estate; a multi-label public suffix (co.uk) would need the PSL,
 # and asserting one is not the same as having it — see `registrable()`.
 TWO_LABEL_SUFFIXES = {"co.uk", "com.br", "com.au", "co.jp", "com.ua", "co.il"}
@@ -111,6 +115,72 @@ def http_status(host: str) -> tuple[int, str | None]:
         return 0, f"curl returned {r.stdout.strip()[:40]!r} instead of a status"
 
 
+#: A 404 from `rdap()`, marked so the caller can tell "no record" from every
+#: other failure without parsing the sentence. It never reaches the receipt.
+NO_RECORD = "_no_record"
+
+
+def rdap_missing(name: str) -> tuple[dict, str]:
+    """What `rdap()` returns for a 404: no record, marked as such."""
+    return {NO_RECORD: True}, (f"RDAP has no record for {name} (404). For a TLD outside the "
+                               f"RDAP bootstrap — .me and .co answer this way while resolving "
+                               f"normally — it means no RDAP service, NOT an unregistered domain")
+
+
+def rdap_bootstrap() -> tuple[set[str] | None, str | None, str | None]:
+    """(TLDs with an RDAP service, the bootstrap's publication stamp, why it is unknown)."""
+    req = urllib.request.Request(IANA_BOOTSTRAP, headers={"Accept": "application/json",
+                                                          "User-Agent": "project-observatory"})
+    try:
+        with urllib.request.urlopen(req, timeout=25) as r:
+            doc = json.loads(r.read() or b"{}")
+        tlds = {t.lower() for entry in doc.get("services") or [] for t in (entry or [[]])[0]}
+    except (OSError, ValueError, TypeError, IndexError) as exc:
+        return None, None, f"the IANA RDAP bootstrap could not be read: {type(exc).__name__}"
+    if not tlds:
+        return None, None, "the IANA RDAP bootstrap listed no TLD at all"
+    return tlds, doc.get("publication"), None
+
+
+def classify_missing(name: str, reason: str, tlds: set[str] | None, published: str | None,
+                     why_unknown: str | None, hosts: list[dict]) -> tuple[str, dict]:
+    """("not_applicable" | "degraded", row) for a domain RDAP has no record of.
+
+    A registry that runs no RDAP service has no record to give, so its 404 says
+    nothing about the domain. Measured on one estate: seven domains under four
+    such TLDs, every one delegated in DNS and six of them serving — reported on
+    every run as sources "not fully read", which no person can fix. Such a 404
+    is NOT APPLICABLE when two facts hold: the TLD is absent from IANA's
+    bootstrap, and the DNS shows the domain is held (nameservers answer for it,
+    or it resolves). Without either fact the old degradation stands: a TLD that
+    DOES run RDAP and has no record is a domain that may be unregistered, and a
+    domain nothing in DNS knows about has no evidence of being held at all.
+    """
+    tld = name.rsplit(".", 1)[-1].lower()
+    if tlds is None:
+        return "degraded", {"source": f"rdap:{name}", "reason": f"{reason}; {why_unknown}, "
+                                                               f"so whether .{tld} runs RDAP is unknown"}
+    if tld in tlds:
+        return "degraded", {"source": f"rdap:{name}",
+                            "reason": (f"the .{tld} registry runs RDAP and has no record for {name} "
+                                       f"(404): it may be unregistered or just expired — check it "
+                                       f"at its registrar")}
+    ns = sorted({n for h in hosts for n in (h.get("nameservers") or [])})
+    resolves = any(h.get("resolves") is True for h in hosts)
+    if not ns and not resolves:
+        return "degraded", {"source": f"rdap:{name}",
+                            "reason": (f"the .{tld} registry runs no RDAP service, and nothing in "
+                                       f"DNS answers for {name} either, so nothing shows it is held")}
+    shown = ", ".join(ns[:2]) + (f" and {len(ns) - 2} more" if len(ns) > 2 else "")
+    evidence = f"delegated to {shown}" if ns else "resolving"
+    return "not_applicable", {
+        "source": f"rdap:{name}",
+        "reason": (f"the .{tld} registry runs no RDAP service (absent from the IANA RDAP "
+                   f"bootstrap{' of ' + str(published)[:10] if published else ''}), so there is no "
+                   f"registration record to read; {name} is {evidence} in DNS, which shows it is "
+                   f"held. Expiry and registrar for it come from the registrar, not from here")}
+
+
 def rdap(name: str, attempt: int = 0) -> tuple[dict, str]:
     """One RDAP lookup, with the failure modes told apart rather than blurred.
 
@@ -135,9 +205,7 @@ def rdap(name: str, attempt: int = 0) -> tuple[dict, str]:
             return {}, (f"RDAP rate-limited {name} (429) after {RDAP_RETRIES} retries — "
                         f"this says nothing about the domain, only about the query rate")
         if e.code == 404:
-            return {}, (f"RDAP has no record for {name} (404). For a TLD outside the "
-                        f"RDAP bootstrap — .me and .co answer this way while resolving "
-                        f"normally — it means no RDAP service, NOT an unregistered domain")
+            return rdap_missing(name)
         return {}, f"RDAP returned HTTP {e.code} for {name}"
     except OSError as e:
         return {}, f"RDAP unreachable for {name}: {e}"
@@ -261,9 +329,17 @@ def main(argv: list[str]) -> int:
     names = sorted({info["registrable"] for info in live.values()})
     whois: dict[str, dict] = {}
     degraded: list[dict] = []
+    not_applicable: list[dict] = []
+    bootstrap: tuple | None = None
     with cf.ThreadPoolExecutor(max_workers=RDAP_WORKERS) as pool:
         for name, (data, err) in zip(names, pool.map(rdap, names)):
-            if err:
+            if err and data.get(NO_RECORD):
+                if bootstrap is None:
+                    bootstrap = rdap_bootstrap()
+                hosts = [i for i in live.values() if i.get("registrable") == name]
+                kind, row = classify_missing(name, err, *bootstrap, hosts)
+                (not_applicable if kind == "not_applicable" else degraded).append(row)
+            elif err:
                 degraded.append({"source": f"rdap:{name}", "reason": err})
             else:
                 whois[name] = data
@@ -289,7 +365,8 @@ def main(argv: list[str]) -> int:
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps({"scanned_at": now(), "hosts": live, "rdap": whois,
-                                "degraded": degraded}, ensure_ascii=False, indent=1),
+                                "degraded": degraded, "not_applicable": not_applicable},
+                               ensure_ascii=False, indent=1),
                     encoding="utf-8")
 
     dark = [h for h, i in live.items() if i.get("dark")]
@@ -303,6 +380,8 @@ def main(argv: list[str]) -> int:
     print(f"  expiring within 90 days:  {len(soon)}" + (f" — {soon[:6]}" if soon else ""))
     for d in degraded[:6]:
         print(f"  degraded {d['source']}: {d['reason'][:90]}")
+    for d in not_applicable[:6]:
+        print(f"  not applicable {d['source']}: {d['reason'][:90]}")
     return 0
 
 

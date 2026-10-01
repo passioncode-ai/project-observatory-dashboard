@@ -96,16 +96,24 @@ def findings(doc: dict | None, today: str = "") -> list[dict]:
         })
 
     # ── a credential that cannot reach a surface at all ─────────────────────
-    for d in doc.get("degraded") or []:
+    # Both lists: a refusal on `not_applicable` is one whose surface another
+    # credential already reads (collectors/scan_google.py#sort_refusals). It is
+    # still a switched-off API worth one informational row, and it says so.
+    rows = ([(d, False) for d in doc.get("degraded") or []]
+            + [(d, True) for d in doc.get("not_applicable") or []])
+    for d, covered in rows:
         if "accessNotConfigured" in str(d.get("reason", "")) or "has not been used in project" in str(d.get("reason", "")):
             out.append({
                 "type": "analytics.api_disabled",
                 "subject": f"credential:{d.get('source', 'google')}",
                 "severity": "info",
                 "title": f"a Google API is switched off for {d.get('source', 'a credential')}",
-                "detail": (f"{str(d.get('reason'))[:240]} — the credential has the rights "
-                           f"and the API is not enabled in its Cloud project, which reads "
-                           f"as a permission problem and is not one."),
+                "detail": (f"{str(d.get('reason'))[:240]} — the API is not enabled in this "
+                           f"credential's Cloud project, which reads as a permission problem "
+                           f"and is not one."
+                           + (" Another credential reads this surface, so nothing the estate "
+                              "reads is missing; enable it only if this credential should "
+                              "read the surface too." if covered else "")),
                 "action": d.get("remedy") or "enable the API in that Cloud project",
             })
 
