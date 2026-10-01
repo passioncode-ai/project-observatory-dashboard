@@ -3,7 +3,10 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.10.1 — 2026-10-01
+
+A patch release: the always-on server is no longer scheduled as background work, and Fabric
+Dashboards is the one notification channel where it is installed.
 
 ### Fixed
 
