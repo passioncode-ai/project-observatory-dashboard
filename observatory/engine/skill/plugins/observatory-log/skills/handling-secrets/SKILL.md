@@ -127,6 +127,10 @@ Routing Rules, Zone Settings, DNS Write) on every zone of that account only —
 is verified by listing the account's Workers, and is named after its slot.
 The other-account token makes no storage and no sign-in there.
 
+Reading one account's Worker logs is `--preset workers-observability-read
+--account <slug> --vault <project>/<env>/<NAME>`: Workers Observability Read
+only, verified by the telemetry-keys query with the new value.
+
 By default, slots live under the private workspace's `secrets/projects/`.
 An explicitly configured `sources.secret_store` or `OBSERVATORY_VAULT_DIR`
 can select a separate private store. Such external stores are excluded from
