@@ -56,6 +56,12 @@ This follow-up changes documentation only and does not imply another deployment.
 under an agent-sync lease decided by git refs on `origin`; [AGENT_SYNC.md](AGENT_SYNC.md) is the
 generated wiring. Record: [runs/2026-10-01-agent-sync](runs/2026-10-01-agent-sync/README.md).
 
+**Status 2026-10-01, leak suppression identity (unreleased on `main`):** a suppression now
+binds to the sighting's exact location and a workspace-keyed `version_id`, so it cannot hide a
+rotated value or another file; expired or changed rules replay old evidence. The next release
+describes it in `CHANGELOG.md`. Entry point:
+[runs/2026-09-25-suppression-boundaries](runs/2026-09-25-suppression-boundaries/README.md).
+
 **Status 2026-09-30, licence and repository standard (unreleased on `main`):** the code is
 `AGPL-3.0-only OR LicenseRef-PassionCode-Commercial` from the next release; v0.9.1 and earlier
 keep PolyForm or MIT. README and AGENTS.md follow the organisation's repository standard. Entry
