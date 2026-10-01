@@ -1681,8 +1681,8 @@
       "path": "tests/test_assistant.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6d2e1659fd32b7aa1077409e0022e4669df0ab0400e7b212ca93ebc580cc0bcd",
-      "bytes": 6680
+      "export_sha256": "feea081b02b28c6a6bb581e496a6d80990ed4936203c391d9d94ba308615d4d4",
+      "bytes": 8280
     },
     {
       "path": "tests/test_at_stake.py",

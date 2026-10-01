@@ -68,5 +68,36 @@
     "public_identifiers_subtracted": 1
   },
   "python_3_11_compile": "PASS",
-  "wheel_content": "PASS (480 runtime files, 487 archive members)"
+  "wheel_content": "PASS (480 runtime files, 487 archive members)",
+  "detached_assistant_followup": {
+    "tests": 14,
+    "failures": 0,
+    "provider": "synthetic child boundary; actual job dispatcher and persistence"
+  },
+  "private_branch_history": {
+    "gate": "public-release-privacy",
+    "passed": true,
+    "files_checked": 628,
+    "history_blobs_checked": 40,
+    "private_denylist_entries": 3810,
+    "findings": [],
+    "limits": "Pattern/identifier checks cannot prove absence of every secret or private fact. Review source, metadata and release scope independently. Match values and paths are never printed.",
+    "public_identifiers_subtracted": 1
+  },
+  "public_full_history": {
+    "gate": "public-release-privacy",
+    "passed": true,
+    "files_checked": 628,
+    "history_blobs_checked": 2113,
+    "private_denylist_entries": 0,
+    "findings": [],
+    "limits": "Pattern/identifier checks cannot prove absence of every secret or private fact. Review source, metadata and release scope independently. Match values and paths are never printed.",
+    "public_identifiers_subtracted": 0
+  },
+  "remote_fresh_checkout": {
+    "commit": "75bcbc5b529ed1838351c4075fb2fbf2ea90b435",
+    "source_inventory": "PASS",
+    "assistant_tests": 13,
+    "swift_release_build": "PASS"
+  }
 }
