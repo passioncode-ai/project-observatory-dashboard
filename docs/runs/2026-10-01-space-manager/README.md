@@ -56,7 +56,7 @@ Direct uv cache mutation is prohibited by its owner; cleanup uses its native loc
 
 ## Completed implementation and verification
 
-Implementation: `89a0b05` ([source](https://github.com/passioncode-ai/project-observatory-dashboard/commit/89a0b05)).
+Implementation: `89a0b05`, extended inventory in `3b89e74` ([source](https://github.com/passioncode-ai/project-observatory-dashboard/commit/3b89e74)); [PR #109](https://github.com/passioncode-ai/project-observatory-dashboard/pull/109).
 The [verification receipt](verification.json) lists every suite and the distinction
 between the initial full run and focused retries: 198 latest suite results pass,
 including 24 Space safety/HTTP/CLI cases; 84 root tests pass. The first full run

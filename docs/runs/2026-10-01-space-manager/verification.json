@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "implementation_commit": "89a0b056ff0b1af0b77f5b8777e52f8a5b79d463",
+  "implementation_commit": "3b89e74",
   "coverage": "synthetic-offline-combined",
   "initial_full_run": {
     "suites": 198,
@@ -1214,7 +1214,11 @@
     "plugin_strict": "PASS",
     "wheel_content": "PASS: 482 runtime resources, 489 archive members",
     "wheel_cli": "PASS: init, space status, enable, disable in a temporary resolved HOME; no cleanup invoked",
-    "privacy_current_tree": "PASS with locally held identifier list; values excluded from this report"
+    "privacy_current_tree": "PASS with locally held identifier list; values excluded from this report",
+    "extra_cache_roots": "Inventory-only CocoaPods, SwiftPM, pnpm metadata; unchanged cleanup allowlist. All 24 Space cases and wheel content rechecked.",
+    "privacy_new_commits": "PASS: 29 blobs at 6bc2a41 with maintainer-local identifier list",
+    "privacy_standard_ancestry": "PASS: 2102 blobs at 6bc2a41 without private identifiers",
+    "fresh_checkout": "PASS: remote branch cloned; source inventory matches at 6bc2a41"
   },
   "browser": {
     "fixture": "fictional cache inventory with native commands replaced by no-op success; 8.25 GB free simulated",
@@ -1245,5 +1249,7 @@
     "Hosted CI at receipt creation",
     "Tagged release or production installation",
     "Full private-identifier scan of pre-existing public ancestry (separate known historical review)"
-  ]
+  ],
+  "wheel_sha256": "9040af0a3fd6aefb0dc4ea7340141e5d56ea69de24dad33f2f7079d74b4a0612",
+  "pull_request": "https://github.com/passioncode-ai/project-observatory-dashboard/pull/109"
 }
