@@ -52,6 +52,11 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
+**2026-10-01, client disconnect handling (proposed, unreleased):** expected socket
+closures no longer produce server tracebacks; unrelated I/O failures remain visible.
+Test-first receipt and exact next task:
+[runs/2026-10-01-client-disconnect](runs/2026-10-01-client-disconnect/README.md).
+
 **Status 2026-10-01: 0.10.0 released** — the first release under `AGPL-3.0-only OR
 LicenseRef-PassionCode-Commercial`, with honest absence, the Cloudflare presets, suppression
 identity and the reset-date fix; companion plugin `observatory-log` 0.13.0. One operator machine
