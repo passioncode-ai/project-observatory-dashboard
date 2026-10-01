@@ -3,6 +3,39 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+On `main` since v0.9.1, for the next release; no version is cut yet.
+
+### Changed
+
+- **Licence.** The next release is the first under `AGPL-3.0-only OR
+  LicenseRef-PassionCode-Commercial`: open source under the GNU AGPL-3.0, with a commercial
+  licence from PassionCode.ai (`LICENSE`, `COMMERCIAL-LICENSE.md`, every manifest and `SKILL.md`).
+  v0.8.2–v0.9.1 keep PolyForm Noncommercial or Internal Use, v0.8.1 and earlier MIT (#90, #91).
+- `google-auth` 2.58.1, with the lock (#83).
+
+### Added
+
+- Cloudflare door presets, each delivering into a vault slot only after its new token passes
+  its own probe: `email-send`, `email-routing` and `workers-edit`, and `cloudflare.py groups
+  --account <slug> --match "<words>"`, a read-only listing of permission-group names (#89);
+  `r2-bucket`, one bucket's S3 key pair, with the bucket and its lifecycle made by a setup token
+  deleted before the command returns (#94); `fabric-inbox-server`, `fabric-inbox-account` and
+  `workers-observability-read` (#93).
+
+### Fixed
+
+- **A leak-scan suppression could hide a rotated value or another file.** It matched only the
+  credential name and a path substring; it is now bound to an exact location and the value's
+  identity, malformed or legacy rules are refused with a warning, and evidence is replayed when a
+  decision expires (PB-032, #62).
+- **A spent key's reset date moved with the clock.** It was counted from today, so a key measured
+  as spent in one month read as still blocked in the next; it is now counted from the
+  measurement's `checked_at` (#98).
+- `test_leak_coverage.py` built its dates from the local clock while the scanner uses UTC, so it
+  failed between local and UTC midnight east of Greenwich (#94).
+
 ## 0.9.1 — 2026-09-30
 
 ### Fixed

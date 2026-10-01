@@ -62,6 +62,16 @@ class ReleaseBoundaryTests(unittest.TestCase):
         self.assertTrue(privacy.audit(self.root, [], False)['passed'])
         self.put('.claude/agent-sync.json','{"note": "private-fixture-value"}')
         self.assertFalse(privacy.audit(self.root, ['private-fixture-value'], False)['passed'])
+    def test_gitleaks_ignore_list_is_admitted_and_its_content_is_scanned(self):
+        # `.gitleaksignore` holds reviewed false-positive fingerprints (path:rule:line), so the
+        # repository's `gitleaks detect --no-git` is clean; it is public and scanned like any file.
+        self.assertTrue(privacy.allowed_path(Path('.gitleaksignore')))
+        self.assertFalse(privacy.allowed_path(Path('.gitleaks.toml')))
+        self.put('README.md','Generic text')
+        self.put('.gitleaksignore','tests/test_x.py:generic-api-key:12\n')
+        self.assertTrue(privacy.audit(self.root, [], False)['passed'])
+        self.put('.gitleaksignore','private-fixture-value:generic-api-key:12\n')
+        self.assertFalse(privacy.audit(self.root, ['private-fixture-value'], False)['passed'])
     def test_only_reviewed_commonjs_test_is_admitted_and_content_is_scanned(self):
         self.assertTrue(privacy.allowed_path(Path('tools/check_site_interactions.cjs')))
         self.assertFalse(privacy.allowed_path(Path('tools/unreviewed.cjs')))

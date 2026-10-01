@@ -1,0 +1,15 @@
+# gitleaks false positives, each reviewed 2026-10-01: SHA-256 digests of public files in evidence
+# records, and synthetic test credentials (the AWS documentation example key among them).
+docs/releases/0.2.0.json:generic-api-key:22
+docs/runs/2026-09-21-editorial-production.json:generic-api-key:22
+docs/runs/2026-09-21-origin-story-production.json:generic-api-key:22
+docs/seo/evidence/production-2026-09-21.json:generic-api-key:15
+docs/seo/evidence/production-2026-09-21.json:generic-api-key:24
+docs/site/check.py:generic-api-key:15
+docs/site/evidence/2026-09-23-dashboard-deployment.json:generic-api-key:10
+docs/site/evidence/2026-09-23-dashboard-deployment.json:generic-api-key:19
+observatory/engine/tests/test_credential_doors.py:generic-api-key:642
+observatory/engine/tests/test_env_inventory.py:generic-api-key:64
+observatory/engine/tests/test_vault.py:generic-api-key:122
+observatory/engine/tests/test_vault.py:generic-api-key:354
+observatory/engine/tests/test_vault.py:generic-api-key:379
