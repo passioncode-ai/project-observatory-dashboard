@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "kernel": {
+    "scope": "MAC-01 through MAC-10 in docs/macos/PLAN.md",
+    "evidence": "Python/Swift tests, native UI, MCP client and package/privacy receipts",
+    "deps": "Existing engine workspace, budgeted provider, Fabric interop and org knowledge",
+    "resume": "docs/macos/PLAN.md current status; no operational source hotpatch"
+  },
+  "stages": [
+    {"id": 0, "name": "specification", "gate": {"type": "auto", "check": "Request-derived scope, scenarios and state contracts written before UI"}},
+    {"id": 1, "name": "shared-agent-and-mcp", "gate": {"type": "auto", "check": "Meaningful red-to-green safety, persistence and job tests"}},
+    {"id": 2, "name": "native-app", "gate": {"type": "auto", "check": "Swift tests, real app inspection and buildable bundle"}},
+    {"id": 3, "name": "verification-and-ecosystem", "gate": {"type": "auto", "check": "Bounded acceptance, linked owner docs and pushed commits"}}
+  ]
+}
