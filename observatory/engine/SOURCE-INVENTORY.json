@@ -3637,8 +3637,8 @@
       "path": "tools/space_manager.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6c3df8a713590d9a2290328d7b3824f47cb81d746991b166434d395642c84fce",
-      "bytes": 23137
+      "export_sha256": "23c0f9aeb7434260c71d193d82bbf8c5657f602677cb9fe85b4d451e5e9e9667",
+      "bytes": 23473
     },
     {
       "path": "tools/sqlite_scan.py",

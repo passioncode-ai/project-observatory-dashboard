@@ -368,8 +368,8 @@ server stops these checks; the browser need not stay open. Disable affects the
 next operation; it does not terminate an operation already started.
 
 The allowlist in `observatory/engine/tools/space_manager.py::CACHES` measures
-conventional roots for npm, uv, pip, pnpm, Yarn, Bun, Homebrew, Gradle, Cargo,
-Xcode and the local Docker build cache. It does not search arbitrary directories
+conventional roots for npm, uv, pip, the pnpm store and metadata cache, CocoaPods,
+SwiftPM, Yarn, Bun, Homebrew, Gradle, Cargo, Xcode and the local Docker build cache. It does not search arbitrary directories
 or every custom package-manager configuration. uv's explicit `UV_CACHE_DIR` is
 recognized only inside the user home, without symlinks or parent traversal.
 Only **uv native prune with verified in-use locking** and **local Docker BuildKit
