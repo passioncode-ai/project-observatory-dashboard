@@ -2358,8 +2358,8 @@
       "path": "tests/test_notification.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0c6626335cca3223eff5760fd5708a7df72a18add3799b31e07c3cbdbccc4608",
-      "bytes": 13033
+      "export_sha256": "5025f8b36cca5ad643b5f2740417543ebfae87e0e35fa977e3ea841b8ad4258c",
+      "bytes": 14824
     },
     {
       "path": "tests/test_openrouter_keys.py",
@@ -3044,8 +3044,8 @@
     {
       "path": "tests/test_workspace_scheduler.py",
       "source_sha256": "b09debadb7dd2e9321e374f70c79f387b5fbdaac10a16ff34d12ba1a0ce41a15",
-      "export_sha256": "89d5ca918a5a1f65f03be4720e8039aa359d6fb53672b6729492263b2927f1ae",
-      "bytes": 12544,
+      "export_sha256": "88cee937376e2c77374490c3fc97bf5a64d3819d5b6dfbdb749862a2acea9b81",
+      "bytes": 12866,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -3401,8 +3401,8 @@
     {
       "path": "tools/notify_findings.py",
       "source_sha256": "cea75d7eea0721eed447653ac3c80ed1e02964cc2ffbc79d9b2638934de27e2b",
-      "export_sha256": "f857e43bd6b0f737a2304e7d2b88713a3b3a22a875cc400b82133c137f2902f0",
-      "bytes": 13280,
+      "export_sha256": "b4552adbcceb0d50eb45bccb673f0c4f1d7992de66fec9d955c0206437bc5169",
+      "bytes": 14767,
       "python_comments_removed": 57,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
@@ -3555,8 +3555,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "7be90480691c92d19c940735203a2e753876642e450d89ec8d8b90b8615df011",
-      "bytes": 31826,
+      "export_sha256": "67e8d593beeceef6525e5e805de6c7b1b7ae6a0b0806c51978506e7393589092",
+      "bytes": 32190,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,

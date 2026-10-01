@@ -21,7 +21,7 @@ than pushed.
     notify_findings.py [--dry-run]    # `--help` lists the flag that adds info
 """
 from __future__ import annotations
-import hashlib, json, pathlib, sqlite3, subprocess, sys
+import hashlib, json, os, pathlib, sqlite3, subprocess, sys
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -121,6 +121,30 @@ def notify(title: str, body: str) -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"
 
 
+def host_channel() -> str | None:
+    """Who delivers instead of us, or None.
+
+    ONE CHANNEL. When this service's Fabric descriptor is installed and Fabric
+    Dashboards is on the machine, the host reads `finding.opened` from the
+    events feed (with `notify: true`) and raises the banner itself, titled with
+    the agent and what it wants. A banner from here as well is the same finding
+    twice, from a sender that is not the host (Fabric Dashboards ADR-0010).
+    The descriptor alone is not enough: without the app nobody would deliver.
+    """
+    override = os.environ.get("FABRIC_SERVICES_DIR")
+    services = pathlib.Path(override).expanduser() if override else \
+        pathlib.Path.home() / "Library/Application Support/ai.passioncode.fabric/services"
+    if not (services / "project-observatory.default.json").is_file():
+        return None
+    apps = [pathlib.Path(os.environ["FABRIC_DASHBOARDS_APP"])] if os.environ.get("FABRIC_DASHBOARDS_APP") else \
+        [pathlib.Path("/Applications/Fabric Dashboards.app"),
+         pathlib.Path.home() / "Applications/Fabric Dashboards.app"]
+    for app in apps:
+        if app.is_dir():
+            return f"delivered by Fabric Dashboards from the events feed ({app})"
+    return None
+
+
 def now_z() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -208,6 +232,14 @@ def main(argv: list[str]) -> int:
     body = "; ".join(f["title"] for f in (crit or fresh)[:3])
     if len(fresh) > 3:
         body += f"; +{len(fresh) - 3} more"
+
+    host = host_channel()
+    if host:
+        con.close()
+        if not dry:
+            _report(now_z(), True, host, [])
+        print(f"notify_findings: {len(fresh)} new/escalated, {host}; no banner of our own")
+        return 0
 
     if dry:
         print(f"[dry-run] would notify: {head} — {body}")

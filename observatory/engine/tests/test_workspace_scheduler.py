@@ -64,6 +64,10 @@ class WorkspaceScheduler(unittest.TestCase):
             self.assertNotIn(b'synthetic-secret',plistlib.dumps(plan))
             self.assertTrue(plan['StandardOutPath'].startswith(str(self.home)))
             self.assertEqual(plan['Umask'],0o077)
+        self.assertEqual(server['ProcessType'],'Standard','the server answers hosts and agents; Background starves it under load')
+        self.assertNotIn('Nice',server)
+        self.assertNotIn('LowPriorityIO',server)
+        self.assertEqual(tick['ProcessType'],'Background','the scheduled scan stays background work')
         self.assertNotEqual(tick['Label'],'dev.sshlg.observatory.tick')
         original = tick['Label']
         with patch.object(self.paths,'HOME',self.base / 'second'):
