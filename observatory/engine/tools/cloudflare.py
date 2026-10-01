@@ -12,6 +12,7 @@
     ./tools/cloudflare.py issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
     ./tools/cloudflare.py issue --preset fabric-inbox-server --account <slug> --vault PROJECT/ENV/NAME
     ./tools/cloudflare.py issue --preset fabric-inbox-account --account <slug> --vault PROJECT/ENV/NAME
+    ./tools/cloudflare.py issue --preset workers-observability-read --account <slug> --vault PROJECT/ENV/NAME
     ./tools/cloudflare.py list
     ./tools/cloudflare.py groups --account <slug> --match "email sending"
     ./tools/cloudflare.py ping
@@ -185,6 +186,20 @@ PRESETS: dict[str, dict] = {
         "why": "the Fabric Inbox Worker manages its own account's domains, mail, sign-in and updates",
         "scope": "account-vault",
         "probe": "/accounts/{account_id}/workers/scripts?per_page=1",
+    },
+    # READING ONE ACCOUNT'S WORKER LOGS, INTO THE VAULT. Finding what a deployed
+    # Worker actually failed on needs its telemetry — Workers Observability Read
+    # on one account, nothing that can change it. Verified by listing the
+    # account's telemetry keys with the new value (that endpoint is a POST, so
+    # the probe carries a body).
+    "workers-observability-read": {
+        "name": "observatory-workers-logs {slot} (managed)",
+        "groups": ("Workers Observability Read",),
+        "level": "account",
+        "why": "reads one account's Worker logs (Workers Observability) for the project named by the vault slot",
+        "scope": "account-vault",
+        "probe": "/accounts/{account_id}/workers/observability/telemetry/keys",
+        "probe_body": {},
     },
     # ONE MORE ACCOUNT FOR A FABRIC INBOX SERVER, INTO THE VAULT. A Fabric Inbox
     # server runs in one account and reads another account's domains with a token
@@ -781,7 +796,8 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
         probe = preset["probe"].format(account_id=account["id"])
         for attempt in range(5):
             try:
-                _request(probe, value)
+                # A probe that is a POST (telemetry) carries its body; the rest are GETs.
+                _request(probe, value, preset.get("probe_body"))
                 break
             except RuntimeError:
                 if attempt == 4:

@@ -503,6 +503,10 @@ def test_cf_fabric_account_preset_grants_both_levels_on_one_account_into_the_vau
     state["refuse"], delivered[:] = True, []
     rc = m.cmd_issue_account("fabric-inbox-account", "fabric/prod/CLOUDFLARE_API_TOKEN_A1", None, wait=0)
     check("a token that cannot list Workers is not delivered", rc == 1 and not delivered, str(rc))
+    logs = m.PRESETS["workers-observability-read"]
+    check("the logs preset reads one account's telemetry and nothing else",
+          logs["groups"] == ("Workers Observability Read",) and logs["level"] == "account" and not logs.get("zone_groups")
+          and logs["probe"].endswith("/workers/observability/telemetry/keys") and logs["probe_body"] == {}, str(logs))
     server = m.PRESETS["fabric-inbox-server"]
     check("the server's own preset can make the service tokens agent keys and relays sign in with",
           "Access: Service Tokens Write" in server["groups"] and server["zone_groups"] == preset["zone_groups"]
