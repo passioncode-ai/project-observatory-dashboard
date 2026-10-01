@@ -3,6 +3,21 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Fixed
+
+- **The server is scheduled as a standard process.** Its launchd job carried `ProcessType
+  Background`, `Nice 5` and low-priority I/O; under load macOS starved it, and on 2026-10-01 Fabric
+  Dashboards recorded it "not answering" 30 times in a day while the process ran without a single
+  restart. `tools/serverd.py --install` now writes `ProcessType Standard` with neither; the
+  scheduled tick stays background work. Re-run `--install` to apply it to an installed server.
+- **One notification channel.** When the server's Fabric descriptor is installed and Fabric
+  Dashboards is on the machine, `tools/notify_findings.py` raises no banner of its own: the host
+  delivers `finding.opened` from the events feed, titled with the agent and what it wants (Fabric
+  Dashboards ADR-0010). Before, the operator got each finding twice. Without the app it notifies
+  as before.
+
 ## 0.10.0 — 2026-10-01
 
 A minor release: the licence changes, and collectors report sources that do not apply here

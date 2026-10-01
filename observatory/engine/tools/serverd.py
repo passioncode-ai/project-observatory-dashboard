@@ -559,13 +559,16 @@ def build_plist() -> dict:
         # SIGKILL comes only after the SIGTERM drain has had its time.
         "ThrottleInterval": 10,
         "ExitTimeOut": EXIT_TIMEOUT + 10,
-        "ProcessType": "Background",
+        # STANDARD, NOT BACKGROUND. The server answers Fabric Dashboards' probe and
+        # every agent's MCP call while the Mac is busy. As a Background job with
+        # Nice 5 and low-priority I/O, macOS starved it under load: on 2026-10-01
+        # the host recorded it "not answering" 30 times in a day while the process
+        # ran without one restart. The tick stays background work; the server is not.
+        "ProcessType": "Standard",
         "StandardErrorPath": str(paths.STATE / "logs/serverd.err"),
         "StandardOutPath": str(paths.STATE / "logs/serverd.out"),
         "EnvironmentVariables": install_launchd.environment(),
         "Umask": 0o077,
-        "LowPriorityIO": True,
-        "Nice": 5,
     }
 
 
