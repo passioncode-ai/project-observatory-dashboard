@@ -1,0 +1,112 @@
+{
+  "coverage": "synthetic-offline",
+  "prior_hosted_sha": "fd6ca2ddee3258468f986f50caacc5388cbc32b1",
+  "prior_hosted_jobs_passed": 6,
+  "focused": {
+    "schema_version": 1,
+    "coverage": "synthetic-offline",
+    "status": "PASS",
+    "suites": [
+      {
+        "file": "tests/test_space_manager.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 1.4,
+        "pass_assertions": 0,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 27,
+        "log": "space_manager/run.log"
+      },
+      {
+        "file": "tests/test_footprint.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 3.66,
+        "pass_assertions": 30,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 0,
+        "log": "footprint/run.log"
+      },
+      {
+        "file": "tests/test_reclaimable_pressure.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 3.79,
+        "pass_assertions": 22,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 0,
+        "log": "reclaimable_pressure/run.log"
+      },
+      {
+        "file": "tests/test_machine.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 11.19,
+        "pass_assertions": 0,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 16,
+        "log": "machine/run.log"
+      }
+    ],
+    "not_run": [
+      {
+        "scope": "live-provider-acceptance",
+        "status": "NOT_RUN",
+        "reason": "Requires independently configured provider accounts and explicit opt-in; no credentials are inherited."
+      },
+      {
+        "scope": "external-mcp-host-admission",
+        "status": "NOT_RUN",
+        "reason": "The local stdio protocol is tested; acceptance by another host requires a separate configured fixture run."
+      },
+      {
+        "scope": "live-secret-rotation-and-delivery",
+        "status": "NOT_RUN",
+        "reason": "Synthetic credential boundaries are tested; real rotation/delivery must be independently authorized."
+      }
+    ],
+    "suite_count": 4,
+    "python": "3.14.7"
+  },
+  "root_tests": {
+    "passed": 84,
+    "seconds": 6.258
+  },
+  "test_first": {
+    "footprint_before": 450000,
+    "footprint_expected_and_after": 50000,
+    "history_before": "3 errors: capability absent",
+    "history_after": "27 space tests pass"
+  },
+  "python_311_compile": "PASS",
+  "source_inventory": "PASS",
+  "wheel": {
+    "runtime_files": 482,
+    "archive_files": 489,
+    "sha256": "13969fba71de50f7ac95cfe65136269bcdc88a79ab787befab03078216a15dfe",
+    "content_gate": "PASS"
+  },
+  "privacy": {
+    "gate": "public-release-privacy",
+    "passed": true,
+    "files_checked": 617,
+    "history_blobs_checked": 0,
+    "private_denylist_entries": 3808,
+    "findings": [],
+    "limits": "Pattern/identifier checks cannot prove absence of every secret or private fact. Review source, metadata and release scope independently. Match values and paths are never printed.",
+    "public_identifiers_subtracted": 3
+  },
+  "not_run": [
+    "Full 198-suite rerun for this follow-up; four affected suites rerun instead.",
+    "Installed feature acceptance: candidate awaits review and a tagged release.",
+    "New browser pass: this follow-up changes backend telemetry and estimates, no visual controls."
+  ],
+  "requirements": {
+    "SP-8": "PASS bounded free-space and cache history; no fabricated pre-install history",
+    "SP-9": "PASS Git history excluded and duplicate checkout aliases deduplicated"
+  }
+}

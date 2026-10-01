@@ -62,7 +62,8 @@ board is where silence becomes visible, same as every other component here.
 
 SECURITY. Binds 127.0.0.1 only. Serves NO secret values anywhere: `/leaks` is
 names, places and dates from the register, which never held values to begin
-with. GET only; anything else is 405. The events token opens the events feed
+with. Read-only except the bounded, same-origin Space actions at /api/space.
+All other writes remain 405. The events token opens the events feed
 and nothing else; it never travels in a URL, an argument or the plist.
 """
 from __future__ import annotations
@@ -308,6 +309,10 @@ class Runtime:
 RUNTIME: Runtime | None = None
 
 
+from tools import space_manager
+SPACE = space_manager.Supervisor()
+
+
 def beat_once(runtime: Runtime) -> None:
     """One heartbeat cycle. The snapshot is refreshed whether or not the receipt could be
     written, so a full disk or a bad collector costs a degraded row, not the answer."""
@@ -319,6 +324,8 @@ def beat_once(runtime: Runtime) -> None:
     except Exception as exc:  # noqa: BLE001 — the beat survives a bad cycle
         print(f"heartbeat: {type(exc).__name__}: {exc}", file=sys.stderr)
         runtime.note_failure("heartbeat", f"the heartbeat receipt could not be written: {type(exc).__name__}: {exc}")
+    SPACE.poll()
+    runtime.note_failure("space", "Space monitoring is unavailable" if SPACE.error else None)
     runtime.refresh(leaks)
 
 
@@ -452,6 +459,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._json(RUNTIME.well_known())
         elif route == "/fabric/v1/events":
             self._events()
+        elif route == "/api/space":
+            try:
+                self._json({**space_manager.Manager().status(), 'busy': SPACE.busy, 'error': SPACE.error})
+            except (OSError, ValueError, configuration.ConfigurationError):
+                self._json({'error': 'space-state-unavailable'}, 503)
         elif route == "/health":
             self._json(heartbeat())
         elif route == "/remote":
@@ -466,7 +478,57 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                    "/leaks", "/skills", "/.well-known/fabric-service",
                                    "/fabric/v1/events"]}, 404)
 
+    def _space_post(self):
+        # Browser capability: exact origin + non-simple header + JSON. No CORS,
+        # paths, commands or credential-bearing service token enter this API.
+        port = self.server.server_address[1]
+        if (len(self.headers.get_all('Host') or []) != 1
+                or len(self.headers.get_all('Origin') or []) != 1
+                or self.headers.get('Origin') != 'http://' + self.headers.get('Host', '')
+                or not local_request(self.headers.get('Host', ''), self.headers.get('Origin'),
+                                     self.headers.get('Sec-Fetch-Site'), port)
+                or self.headers.get('X-Observatory-Action') != 'space'
+                or self.headers.get('Content-Type') != 'application/json'):
+            self._json({'error': 'local-action-required'}, 403)
+            return
+        try:
+            if len(self.headers.get_all('Content-Length') or []) != 1 or self.headers.get('Transfer-Encoding'):
+                raise ValueError('invalid-body')
+            length = int(self.headers['Content-Length'])
+            if not 0 < length <= 2048: raise ValueError('invalid-body')
+            self.connection.settimeout(5) if hasattr(self.connection, 'settimeout') else None
+            doc = json.loads(self.rfile.read(length))
+            if not isinstance(doc, dict): raise ValueError('invalid-body')
+            action = doc.get('action')
+            allowed = {'scan': {'action'}, 'plan': {'action', 'ids'},
+                       'clean': {'action', 'plan_id'}, 'cancel': {'action', 'plan_id'},
+                       'policy': {'action', 'enabled'}}
+            if action not in allowed or set(doc) - allowed[action]: raise ValueError('invalid-action')
+            if action == 'policy' and type(doc.get('enabled')) is not bool: raise ValueError('invalid-policy')
+            if action in ('clean', 'cancel') and (not isinstance(doc.get('plan_id'), str) or len(doc['plan_id']) != 32):
+                raise ValueError('invalid-plan')
+            manager = space_manager.Manager()
+            if action == 'plan':
+                self._json(manager.plan(doc.get('ids')))
+            elif action == 'policy':
+                self._json(manager.set_auto(doc['enabled']))
+            elif action == 'cancel':
+                self._json(manager.cancel(doc['plan_id']))
+            elif SPACE.start('scan' if action == 'scan' else 'execute', *([] if action == 'scan' else [doc['plan_id']])):
+                self._json({'status': 'accepted'}, 202)
+            else:
+                self._json({'error': 'operation-running'}, 409)
+        except (ValueError, TypeError, KeyError):
+            self._json({'error': 'invalid-or-expired-request'}, 400)
+        except BlockingIOError:
+            self._json({'error': 'operation-running'}, 409)
+        except (OSError, configuration.ConfigurationError):
+            self._json({'error': 'space-state-unavailable'}, 503)
+
     def do_POST(self):                                    # noqa: N802
+        if self.path == "/api/space":
+            self._space_post()
+            return
         self._json({"error": "GET only — this server changes nothing"}, 405)
 
 

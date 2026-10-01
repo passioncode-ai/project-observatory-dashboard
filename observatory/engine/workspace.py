@@ -425,6 +425,9 @@ def main(argv: list[str]) -> int:
     if argv and argv[0] == "profile":
         import workspace_profile
         return workspace_profile.main(argv[1:])
+    if argv and argv[0] == "space":
+        from tools import space_manager
+        return space_manager.main(argv[1:])
     if argv and argv[0] in {"machine", "cleanup"}:
         return machine_command(argv[0], argv[1:])
     if argv and argv[0] in {"workspace-backup", "upgrade", "restore"}:

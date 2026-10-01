@@ -406,3 +406,18 @@ body[data-page] .finding-body .act { display: block; margin: var(--space-3) 0; f
   body[data-page] .locale-switch button { padding: var(--space-1) var(--space-3); }
   body[data-page="findings"] .f > .chip { justify-self: start; }
 }
+
+/* Space uses the existing product token roles; no separate visual theme. */
+.space-manager { display: grid; gap: var(--space-4); }
+.space-manager .panel { padding: var(--space-4); min-width: 0; }
+.space-manager table { width: 100%; }
+.space-manager td { overflow-wrap: anywhere; }
+.space-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-block: var(--space-3); }
+.space-policy { display: flex; align-items: center; gap: var(--space-2); }
+.space-free { font-size: var(--t-section); color: var(--ink); }
+.space-manager .space-critical { border-color: var(--danger); }
+.space-critical .space-free { color: var(--danger); }
+.space-manager [hidden] { display: none; }
+body[data-page="space"] #out, body[data-page="space"] .controls,
+body[data-page="space"] #tiles, body[data-page="space"] #findings,
+body[data-page="space"] #list-tools, body[data-page="space"] #panel { display: none; }

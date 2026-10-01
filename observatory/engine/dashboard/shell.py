@@ -38,6 +38,7 @@ PAGES: tuple[tuple[str, str, str], ...] = (
     ("traffic",  "Traffic",   "table"),
     ("health",   "Health",    "health"),
     ("machine",  "Machine",   "machine"),
+    ("space",    "Space",     "space"),
 )
 #: THE QUESTION EACH PAGE ANSWERS, in the reader's words (IS-01/IS-02; backlog
 #: D-03). Nine pages shared one `<title>` and one `<h1>` until 2026-09-14: a
@@ -55,6 +56,7 @@ QUESTIONS: dict[str, str] = {
     "mcp":      "Agent servers, connections and reachability.",
     "traffic":  "Product audiences, data sources and linked projects.",
     "health":   "Observer state, data freshness and the decision queue.",
+    "space":    "Disk space, cache maintenance and protected work.",
     "machine":  "What runs on this machine, where memory and disk go, and what was cleaned.",
 }
 #: The product's name is never translated (docs/brand/locales/*.md).
@@ -71,7 +73,7 @@ NAV_GROUPS = (
     ("work", "Work", ("index", "projects", "findings")),
     ("infrastructure", "Infrastructure", ("heroku", "domains", "traffic")),
     ("access", "Access", ("creds", "env", "mcp")),
-    ("system", "System", ("health", "machine")),
+    ("system", "System", ("health", "machine", "space")),
 )
 OVERVIEW_FINDINGS_LIMIT = 8
 
@@ -238,7 +240,7 @@ def slice_for(page: str, payload: dict) -> dict:
     # small enough to ride everywhere, which is what the projects column and the
     # project panel read.
     heavy = {"env": "env", "heroku": "heroku", "creds": "creds", "mcp": "mcp",
-             "google": "traffic", "machine": "machine"}
+             "google": "traffic", "machine": "machine", "space": "space"}
     out = dict(payload)
     # WHAT PRODUCTION HOLDS is read by exactly the two pages that can say
     # something about it: the Heroku row and the ENV row.
@@ -346,6 +348,7 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
     template = re.sub(r'<main(\s+id="out"[^>]*)></main>', r'<div\1></div>', template, count=1)
     template = template.replace("__NAV__", '__NAV__\n<main id="workspace" class="workspace" tabindex="-1">', 1)
     template = template.replace("</footer>", "</footer>\n</main>", 1)
+    from space_page import space_html
     return (template.replace("__PAGE__", page)
             .replace("__TITLE__", html.escape(f"{t(title)} — {TITLE_SUFFIX}"))
             .replace("__PAGE_TITLE__", html.escape(title))
@@ -354,4 +357,5 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
             .replace("__NAV__", nav_html(page, counts, t))
             .replace("__CARDS__", cards_html(payload, counts, t) if page == "index" else "")
             .replace("__MACHINE__", _machine(payload, t) if page == "machine" else "")
+            .replace("__SPACE__", space_html(payload, t) if page == "space" else "")
             .replace("__DATA__", data.replace("</", "<\\/")))

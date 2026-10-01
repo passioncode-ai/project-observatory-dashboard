@@ -129,6 +129,21 @@ def test_the_three_measure_three_different_things() -> None:
           got.get("disk.reclaimable_bytes", 0) >= 50_000, json.dumps(got))
 
 
+def test_git_history_is_not_reclaimable_and_aliases_are_not_counted_twice() -> None:
+    d, env = estate(node_modules_bytes=50_000)
+    history = d / "projects/proj/.git/objects"
+    history.mkdir(parents=True)
+    (history / "unpublished").write_bytes(b"g" * 100_000)
+    reg = pathlib.Path(env["OBSERVATORY_REGISTRY"])
+    doc = json.loads((reg / "repositories.json").read_text())
+    (d / "projects/alias").symlink_to(d / "projects/proj", target_is_directory=True)
+    doc["repositories"][0]["local"]["extra_clones"] += ["proj", "alias"]
+    (reg / "repositories.json").write_text(json.dumps(doc))
+    got = measure(env)
+    check("git history is protected and duplicate checkout aliases counted once",
+          got.get("disk.reclaimable_bytes") == 50_000, json.dumps(got))
+
+
 def test_a_worktree_does_not_change_what_disk_bytes_has_always_measured() -> None:
     """The comparability rule. Folding the extra checkouts into `disk.bytes`
     would mean yesterday's value measured one thing and today's another, and a
@@ -243,6 +258,7 @@ if __name__ == "__main__":
     print("the footprint — three questions about one disk\n")
     for fn in (test_the_manifest_declares_all_three_with_their_roles,
                test_the_three_measure_three_different_things,
+               test_git_history_is_not_reclaimable_and_aliases_are_not_counted_twice,
                test_a_worktree_does_not_change_what_disk_bytes_has_always_measured,
                test_a_folder_counted_twice_is_counted_once,
                test_a_vanished_worktree_is_not_an_error,

@@ -7,6 +7,15 @@ each user retains their own private projects, credentials and runtime state; ret
 older CLI contracts, provide future upgrade/restore safeguards, and publish accurate
 onboarding, website and launch material.
 
+## Space manager candidate (2026-10-01)
+
+[Implementation, contracts, checks and exact next task](runs/2026-10-01-space-manager/README.md).
+The Space page adds a cache registry, bounded preview/cleanup and opt-in pressure
+maintenance below 10 GB. It is a source candidate, not an installed release.
+Review this packet and the PR before release; contributor CLA acknowledgement
+remains a human action under `CONTRIBUTING.md`. Private installation data and
+native cleanup output are local-only and must never be added to this repository.
+
 ## Completed implementation
 
 - Complete source export under `observatory/engine/`; generic defaults, individual

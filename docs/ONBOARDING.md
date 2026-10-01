@@ -343,6 +343,74 @@ The manual tier writes a thin git bundle per branch and a patch plus a tarball
 of untracked files per worktree under `<home>/archive/cleanup/<date>/` before
 removing anything.
 
+## Disk space and cache maintenance
+
+The space monitor keeps bounded local history in `store/raw/space-history.json`:
+1,440 minute observations and 720 hourly observations of free bytes, plus the last
+672 cache scans. A stopped monitor leaves gaps; it does not reconstruct earlier
+usage. `full space status` and `/api/space` expose hourly `pressure_history` and
+`growth` between the last two cache inventories. Growth compares only complete
+measurements of the same cache root. Neither growth nor `du`-reported occupied
+bytes promise physical space recoverable on clone/hardlink filesystems.
+Checks: `test_space_manager.py::Space.test_pressure_history_is_bounded_and_records_without_auto_cleanup`
+and `Space.test_cache_history_compares_same_root_and_never_promises_reclaimable`.
+
+The project footprint plugin excludes `.git` from its generated-data estimate and
+counts checkout aliases once. Earlier `disk.reclaimable_bytes` samples may include
+Git history or duplicate checkouts; keep them as historical observations, not as
+permission to delete or an exact comparison across this correction. Check:
+`test_footprint.py::test_git_history_is_not_reclaimable_and_aliases_are_not_counted_twice`.
+
+The **Space** page beside Machine shows free space, a cache register, protected
+reasons, previews and cleanup history. Open it through `full open --serve` to act;
+a page opened as a file is a snapshot and cannot clean anything. The local server
+accepts only same-origin JSON actions from this page (see
+`observatory/engine/tools/serverd.py::_space_post`).
+
+```sh
+project-observatory full space scan     # measure supported cache roots
+project-observatory full space plan     # preview; returns a single-use plan id
+project-observatory full space clean --plan PLAN_ID
+project-observatory full space enable   # opt in to low-space maintenance
+project-observatory full space disable  # stop starting automatic operations
+project-observatory full space status
+```
+
+The defaults are **off**, below **10 decimal GB** to start, **15 GB** to stop, and
+at least **30 minutes** between automatic attempts. The running local server
+checks pressure every minute and refreshes the register every 15 minutes when
+`features.machine_watch` or `features.space_auto_cleanup` is on. Stopping the
+server stops these checks; the browser need not stay open. Disable affects the
+next operation; it does not terminate an operation already started.
+
+The allowlist in `observatory/engine/tools/space_manager.py::CACHES` measures
+conventional roots for npm, uv, pip, the pnpm store and metadata cache, CocoaPods,
+SwiftPM, Yarn, Bun, Homebrew, Gradle, Cargo, Xcode and the local Docker build cache. It does not search arbitrary directories
+or every custom package-manager configuration. uv's explicit `UV_CACHE_DIR` is
+recognized only inside the user home, without symlinks or parent traversal.
+Only **uv native prune with verified in-use locking** and **local Docker BuildKit
+prune for entries older than seven days** may run. Other caches are inventory-only.
+No project build tree, worktree, branch, environment, container, image or volume
+is deleted by this feature. Native coordination protects active cache entries;
+unknown/busy Python consumers additionally block uv. Protected data remains even
+if the disk stays critically low. Disk sizes are occupied bytes, not a promised
+recovery; concurrent writers can make the final free-space change negative.
+
+State is private: `registry/caches.json` and `store/raw/space-state.json` under the chosen
+workspace; the machine-wide lock/cooldown is under
+`~/.local/state/project-observatory/`. Previews expire after ten minutes and are
+consumed before an operation starts. Recovery marks an interrupted run's result
+unknown. Notifications and the last 100 runs are retained in the state journal.
+Low/recovered transitions also request a local desktop notification on macOS or
+Linux with `notify-send`; OS permissions and a desktop session determine display.
+The journal distinguishes a request from an unavailable channel, not confirmed
+human receipt. No email, chat or provider credential is involved.
+
+This is separate from the older `features.auto_cleanup` Git/build hygiene option
+above. For cache-only automation, leave that older option off. Safety and HTTP
+boundary evidence: `observatory/engine/tests/test_space_manager.py`; source and
+verification packet: [space-manager run](runs/2026-10-01-space-manager/README.md).
+
 ## Organizations and resources
 
 An estate that serves more than one owner keeps each owner's analytics, design

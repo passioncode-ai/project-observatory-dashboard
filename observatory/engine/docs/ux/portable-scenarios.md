@@ -26,7 +26,7 @@ These supplement the original product scenarios. Approved scope: operator reques
 | OSS-15 | Triage and revisit findings | Overview counts all open severities; list shows matching rows and acknowledged history even with zero open findings | Preview names its boundary and links to full list; no invisible critical overflow |
 | OSS-16 | Know what an action does | Capability stated before Keys/ENV rows; copy/manual/live verbs clearly differ | Copy never claims execution; uncertain outcomes and reveal protections remain |
 | OSS-17 | Compare infrastructure/traffic | Cost and measurement context above lists; zero distinct from missing/error; one GA4 resource counted once across credentials | Contradictory chips cannot remain selected; evidence remains accessible |
-| OSS-18 | Navigate and inspect observer | Eleven destinations (ten until the Machine page, OSS-21), visible main, page search, narrow-screen sort; Health begins with observer/recovery | Snapshot claims qualified by time; keyboard retained; actions never replay on navigation |
+| OSS-18 | Navigate and inspect observer | Twelve destinations (including Machine, OSS-21, and Space, OSS-23), visible main, page search, narrow-screen sort; Health begins with observer/recovery | Snapshot claims qualified by time; keyboard retained; actions never replay on navigation |
 | OSS-19 | Read the dashboard in one's own language | A new workspace is English. `full configure interface locale ru` makes every page Russian after `full open --rebuild`; EN/RU in the rail switches one reader's pages at once, including pages opened as files, and the pressed button names the language shown. Counts use the language's plural forms and number grouping | An unsupported value is refused and nothing is written. A browser that keeps no storage says so and points to the workspace setting instead of pretending to switch. Choosing the workspace's language forgets the reader's override. Finding texts stay in English. Covered by `tests/test_i18n.py`, the ENV and action-outcome harnesses in both languages |
 | OSS-20 | Recognise the product | Every page carries the Observatory glyph on the PassionCode tile, "by PassionCode.ai", one dark theme with gold for action, selection and focus, and a link to the PassionCode toolkit | State colour is always paired with words; the design tokens are the pinned PassionCode bytes (`dashboard/brand/manifest.json`) |
 | OSS-21 | See what runs and where memory and disk go | `features.machine_watch` on: the Machine page and `full machine` show processes grouped by origin (agent session, launchd job, simulator by device name, app, detached), memory and swap, free disk, the largest cache/VM/history places with how each comes back, idle worktrees and branches holding the only copy; `full machine --explain PID` says why one process runs (witr detail when installed) | Read-only page; a process is shown by executable and script, never its environment or full command line; an unmeasured source is listed under Not measured, never shown as zero |
@@ -50,3 +50,28 @@ subcommands; `tests/test_dashboard_render.py` executes the renderer.
 ### OSS-13 — a suppression cannot hide a replacement value (PB-032)
 
 Given an accepted sighting with a reason and expiry, the operator copies its secret name, exact location and opaque `version_id` into the suppression config. The accepted sighting remains visible as suppressed. A new value under that name, another location, or another workspace salt remains an active sighting. Expiry replays old evidence without requiring a new write to the source. Malformed and legacy unversioned rules raise a warning and suppress nothing. Proof: `tests/test_leak_coverage.py` (rotation, exact path, duplicate names in files/SQLite, salt change, malformed shapes, expiry and incremental value discovery). Detection still covers known values only; it does not discover every unknown secret shape or search all deleted Git history.
+
+### Space management — SP-1..SP-7 (operator-requested scope)
+
+- **OSS-23 / SP-1..2:** Open System → Space. See current free bytes, timestamp,
+  automatic-mode setting and cache rows (owner/path/occupied bytes/action/protection).
+  Missing measurements are unknown, never zero. Missing tools and unsupported caches
+  show the reason and stay protected. Loading, empty and retryable error are distinct.
+- **OSS-24 / SP-3,5,7:** Preview cleanup, inspect the fixed eligible operations, cancel
+  or confirm. Confirmation can only apply a fresh preview once. Revalidate each
+  adapter; a newly busy cache is skipped. During execution disable repeated submit;
+  after interruption/reload read the durable state instead of resubmitting. Show
+  per-operation result and measured free-byte change, which may be negative due to
+  other processes. A file:// page remains a snapshot with a CLI recovery command.
+- **OSS-25 / SP-4..6:** Enable automatic cleanup explicitly. While the local server
+  runs, less than 10 GB free starts approved cache cleanup, subject to one shared
+  lock and a cooldown. Stop after reaching 15 GB or exhausting safe operations.
+  Active or uninspectable consumers are protected. Insufficient recovery remains
+  critical with skipped reasons; low/recovered/run notifications persist on the
+  Space page. Disable prevents the next automatic action; an already running native
+  command finishes normally. No Git/worktree/dependency/history/container/volume
+  deletion is part of this mode.
+
+These scenarios authorize the bounded Space exception to the older read-only
+local dashboard. All other mutation restrictions remain. Product outcome is
+unobserved until an installation runs it. Coverage will name the final test receipt.

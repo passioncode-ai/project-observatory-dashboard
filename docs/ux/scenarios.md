@@ -34,3 +34,8 @@ compatibility) and SITE-14 (explicitly fictional dashboard illustration) in
 [the site scenario base](../site/BRIEF.md#dashboard-landing-refresh--2026-09-23).
 This bounded update was explicitly authorized by the operator; it does not change
 the private dashboard's O9 runtime capabilities.
+
+The Space manager adds OSS-23–25 (cache register, reviewed manual cleanup, low-space
+automation with session protection) in the full-engine base. The operator explicitly
+requested these actions; they are a bounded exception to the older read-only UI.
+Implementation and evidence: [space-manager packet](../runs/2026-10-01-space-manager/README.md).

@@ -84,6 +84,14 @@
     {
       "token": "firebase",
       "reason": "a third-party Google product the tracking-resources skill names as a resource to record"
+    },
+    {
+      "token": "buildkit",
+      "reason": "Public Docker cache backend used by the fixed native cleanup adapter; https://docs.docker.com/build/buildkit/ . No project attribution."
+    },
+    {
+      "token": "cooldown",
+      "reason": "Ordinary algorithm term for the delay between maintenance retries, including the COOLDOWN constant. No project or account attribution."
     }
   ]
 }
