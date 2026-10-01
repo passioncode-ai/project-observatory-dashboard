@@ -345,6 +345,22 @@ removing anything.
 
 ## Disk space and cache maintenance
 
+The space monitor keeps bounded local history in `store/raw/space-history.json`:
+1,440 minute observations and 720 hourly observations of free bytes, plus the last
+672 cache scans. A stopped monitor leaves gaps; it does not reconstruct earlier
+usage. `full space status` and `/api/space` expose hourly `pressure_history` and
+`growth` between the last two cache inventories. Growth compares only complete
+measurements of the same cache root. Neither growth nor `du`-reported occupied
+bytes promise physical space recoverable on clone/hardlink filesystems.
+Checks: `test_space_manager.py::Space.test_pressure_history_is_bounded_and_records_without_auto_cleanup`
+and `Space.test_cache_history_compares_same_root_and_never_promises_reclaimable`.
+
+The project footprint plugin excludes `.git` from its generated-data estimate and
+counts checkout aliases once. Earlier `disk.reclaimable_bytes` samples may include
+Git history or duplicate checkouts; keep them as historical observations, not as
+permission to delete or an exact comparison across this correction. Check:
+`test_footprint.py::test_git_history_is_not_reclaimable_and_aliases_are_not_counted_twice`.
+
 The **Space** page beside Machine shows free space, a cache register, protected
 reasons, previews and cleanup history. Open it through `full open --serve` to act;
 a page opened as a file is a snapshot and cannot clean anything. The local server

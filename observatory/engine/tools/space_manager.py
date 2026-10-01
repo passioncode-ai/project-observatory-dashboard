@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import secrets
@@ -78,7 +79,67 @@ class Manager:
         self.home = Path.home().resolve()
         self.state_file = paths.SCRATCH / 'space-state.json'
         self.registry_file = paths.REGISTRY / 'caches.json'
+        self.history_file = paths.SCRATCH / 'space-history.json'
         self.lock_dir = self.home / '.local/state/project-observatory'
+
+    def history(self):
+        doc = read_json(self.history_file, {})
+        for key in ('pressure', 'hourly', 'inventories'):
+            rows = doc.setdefault(key, [])
+            if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
+                raise ValueError('unreadable-history')
+        for key in ('pressure', 'hourly'):
+            for row in doc[key]:
+                epoch = row.get('epoch')
+                if (type(epoch) not in (int, float) or not math.isfinite(epoch)
+                        or type(row.get('free_bytes')) is not int or row['free_bytes'] < 0):
+                    raise ValueError('unreadable-history')
+        for snapshot in doc['inventories']:
+            rows = snapshot.get('caches')
+            if not isinstance(rows, list): raise ValueError('unreadable-history')
+            for row in rows:
+                if (not isinstance(row, dict) or
+                        any(not isinstance(row.get(k), str) for k in ('id', 'path', 'measured_at')) or
+                        type(row.get('size_bytes')) is not int or row['size_bytes'] < 0):
+                    raise ValueError('unreadable-history')
+        return doc
+
+    def record_pressure(self, free):
+        # Called under cleanup_lock. Bounded history cannot itself fill the disk.
+        doc = self.history()
+        now = time.time()
+        recent = doc['pressure']
+        if recent and now - recent[-1]['epoch'] < 60: return
+        row = {'epoch': now, 'at': datetime.fromtimestamp(now, timezone.utc).isoformat(),
+               'free_bytes': free}
+        doc['pressure'] = (recent + [row])[-1440:]
+        hourly = doc['hourly']
+        if not hourly or now // 3600 != hourly[-1]['epoch'] // 3600:
+            doc['hourly'] = (hourly + [row])[-720:]
+        workspace.write_json(self.history_file, doc)
+
+    def record_inventory(self, inventory):
+        doc = self.history()
+        rows = [{'id': r['id'], 'path': r['path'], 'size_bytes': r['size_bytes'],
+                 'measured_at': r['measured_at']} for r in inventory['caches']
+                if type(r.get('size_bytes')) is int and r['size_bytes'] >= 0
+                and r.get('measured_at') and not r.get('measurement_error')]
+        doc['inventories'] = (doc['inventories'] +
+                              [{'at': inventory['measured_at'], 'caches': rows}])[-672:]
+        workspace.write_json(self.history_file, doc)
+
+    def growth(self, history):
+        snapshots = history['inventories']
+        if len(snapshots) < 2: return []
+        previous = {(r['id'], r['path']): r for r in snapshots[-2]['caches']}
+        result = []
+        for row in snapshots[-1]['caches']:
+            old = previous.get((row['id'], row['path']))
+            if old and old['measured_at'] != row['measured_at']:
+                result.append({'id': row['id'], 'from_at': old['measured_at'],
+                               'to_at': row['measured_at'],
+                               'delta_bytes': row['size_bytes'] - old['size_bytes']})
+        return sorted(result, key=lambda r: r['delta_bytes'], reverse=True)
 
     def state(self):
         state = read_json(self.state_file, {'runs': [], 'notifications': []})
@@ -275,6 +336,7 @@ class Manager:
         rows = [self.cache_row(key, consumers=active) for key in CACHES]
         doc = {'schema_version': 1, 'measured_at': stamp(), 'caches': rows}
         workspace.write_json(self.registry_file, doc)
+        self.record_inventory(doc)
         return doc
 
     def status(self):
@@ -283,10 +345,12 @@ class Manager:
         if not isinstance(reg.get('caches'), list) or any(not isinstance(r, dict) for r in reg['caches']):
             raise ValueError('unreadable-registry')
         free = self.free_bytes()
+        history = self.history()
         return {**reg, 'free_bytes': free, 'observed_at': stamp(), 'trigger_bytes': TRIGGER, 'target_bytes': TARGET,
                 'auto_enabled': self.enabled(), 'pressure': 'critical' if free < TRIGGER else 'normal',
                 'runs': state.get('runs', [])[-20:], 'notifications': state.get('notifications', [])[-30:],
-                'running': state.get('running'), 'cooldown_seconds': COOLDOWN}
+                'running': state.get('running'), 'cooldown_seconds': COOLDOWN,
+                'growth': self.growth(history), 'pressure_history': history['hourly']}
 
     def plan(self, ids=None):
         with self.cleanup_lock():
@@ -400,6 +464,7 @@ class Manager:
         with self.cleanup_lock():
             state = self.state()
             free = self.free_bytes()
+            self.record_pressure(free)
             if free >= TARGET:
                 if state.get('pressure_notified') == 'critical': self.notify(state, 'recovered')
             elif free < TRIGGER:

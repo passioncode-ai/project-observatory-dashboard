@@ -27,6 +27,8 @@ commands or paths from a browser. Credential and Git actions remain unchanged.
 | SP-5 | Protect active/unknown consumers; no directory removal or broad prune | Fake commands, busy/unknown/symlink/remote-daemon tests |
 | SP-6 | Persistent low/recovered/action notifications and honest before/after | Event history and insufficient-space tests |
 | SP-7 | No cross-origin cleanup and no arbitrary command/path injection | HTTP negative tests |
+| SP-8 | Bounded resource history, comparisons only across measured identical roots | Pressure retention and cache history tests |
+| SP-9 | Exclude Git history and duplicate aliases from generated-data estimate | Synthetic footprint regression |
 
 ## Design and safety decisions
 
@@ -105,3 +107,23 @@ Used: task-pipeline bounded implementation; ux-scenarios recorded OSS-23..25;
 sheleg-design reused tokens and guided browser review; copywriting supplied the
 EN/RU interface; evidence-docs kept receipts and limitations; agent-sync held the
 handoff lease and released it. No delegated agents or unrelated skill route.
+
+## Follow-up: resource growth and estimate accuracy
+
+The resource audit follow-up extends this candidate with SP-8 (bounded minute,
+hourly and cache-inventory history) and SP-9 (Git history excluded from the
+reinstallable estimate, checkout aliases deduplicated). No new deletion adapter,
+UI strings or cleanup authorization are introduced. The scope remains cache-only;
+active project data, session history and simulator data stay protected.
+
+The new footprint regression was watched failing: a synthetic 50,000-byte cache
+was reported as 450,000 bytes when Git objects and duplicate aliases were present.
+After the correction it reports exactly 50,000. Three new space-history tests were
+watched failing before implementation and passing after it. Pressure samples are
+recorded even when automatic cleanup is disabled. History corruption degrades the
+operation instead of erasing evidence. See `resource-followup.json` for checks.
+
+Runtime history is local-only. A cache-root change or failed measurement produces
+no growth comparison; gaps are not interpolated. History starts when the new
+monitor is installed, not at any earlier audit date. Existing hosted results apply
+to their recorded SHA, never automatically to this follow-up.

@@ -47,6 +47,42 @@ class Space(unittest.TestCase):
             run.assert_not_called()
             self.assertEqual(self.manager.status()['pressure'], 'critical')
 
+    def test_pressure_history_is_bounded_and_records_without_auto_cleanup(self):
+        with patch.object(self.manager, 'free_bytes', return_value=12_000_000_000), patch.object(self.manager, 'execute') as run:
+            for epoch in (1000, 1030, 1060):
+                with patch('time.time', return_value=epoch): self.manager.check_pressure()
+            run.assert_not_called()
+        history = self.manager.history()
+        self.assertEqual(len(history['pressure']), 2)
+        self.assertEqual(history['pressure'][-1]['free_bytes'], 12_000_000_000)
+        self.assertEqual(len(history['hourly']), 1)
+        history['pressure'] = [{'epoch': n * 60, 'free_bytes': n} for n in range(1500)]
+        self.m.workspace.write_json(self.manager.history_file, history)
+        with patch('time.time', return_value=100000): self.manager.record_pressure(123)
+        self.assertEqual(len(self.manager.history()['pressure']), 1440)
+
+    def test_cache_history_compares_same_root_and_never_promises_reclaimable(self):
+        def doc(path, size, at):
+            return {'measured_at': at, 'caches': [{'id': 'uv', 'path': path,
+                     'size_bytes': size, 'measured_at': at}]}
+        for args in (('/a', 10, '2026-01-01T00:00:00Z'), ('/a', 30, '2026-01-01T01:00:00Z')):
+            self.manager.record_inventory(doc(*args))
+        trend = self.manager.status()['growth'][0]
+        self.assertEqual(trend['delta_bytes'], 20)
+        self.assertNotIn('reclaimable_bytes', trend)
+        self.manager.record_inventory(doc('/b', 80, '2026-01-01T02:00:00Z'))
+        self.assertEqual(self.manager.status()['growth'], [])
+        self.manager.record_inventory(doc('/b', None, '2026-01-01T03:00:00Z'))
+        self.assertEqual(self.manager.history()['inventories'][-1]['caches'], [])
+
+    def test_unreadable_history_is_not_silently_reset(self):
+        self.manager.history_file.write_text('{')
+        with self.assertRaises(ValueError): self.manager.record_pressure(1)
+        for bad in ({'pressure': [{}]}, {'pressure': [{'epoch': float('nan'), 'free_bytes': 1}]},
+                    {'inventories': [{'caches': [False]}]}):
+            self.m.workspace.write_json(self.manager.history_file, bad)
+            with self.assertRaises(ValueError): self.manager.history()
+
     def test_no_arbitrary_adapter_or_browser_path(self):
         for ids in (['../../elsewhere'], ['pip'], ['worktrees'], ['node_modules']):
             with self.assertRaises(ValueError):

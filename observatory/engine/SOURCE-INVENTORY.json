@@ -1126,8 +1126,8 @@
     {
       "path": "plugins/disk_usage.py",
       "source_sha256": "d4f4b4a5e970caf7f9a6f07376d88d08258893124499434a15a90105658e7e1b",
-      "export_sha256": "e4bf929e2f27583efb4d880bdf69d352ac91f29fd03c8e9e7b8e59b8607c2667",
-      "bytes": 7492,
+      "export_sha256": "a39abb1390f9262372cfe5d95c4881c39bf013b39f0fa536c3a737ef2257fef7",
+      "bytes": 7801,
       "python_comments_removed": 18,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
@@ -2066,8 +2066,8 @@
       "path": "tests/test_footprint.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "054ae6a66bc86e98223b5482c8c5d13b1d65ccb27435ab4dd562b49129df92fe",
-      "bytes": 12580
+      "export_sha256": "9bd73b63903c186ab7cbcca87145e29223ef11fb1a4a22aeba724c1ec3c14537",
+      "bytes": 13446
     },
     {
       "path": "tests/test_foreign_vocabulary.py",
@@ -2800,8 +2800,8 @@
       "path": "tests/test_space_manager.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a36289993c761e11650e4464938747a2421da6351f97f9545372b045d195bd7f",
-      "bytes": 12921
+      "export_sha256": "c9f06bf1394bfa17b62eab4639fc535689ca9a11f6b1ba1b3b2bf178552425b5",
+      "bytes": 15202
     },
     {
       "path": "tests/test_stale_collapse.py",
@@ -3637,8 +3637,8 @@
       "path": "tools/space_manager.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "23c0f9aeb7434260c71d193d82bbf8c5657f602677cb9fe85b4d451e5e9e9667",
-      "bytes": 23473
+      "export_sha256": "d56565112ef21e45dfaade9a96146f48ad945a75a40661ab447958eb0cc3e48c",
+      "bytes": 26838
     },
     {
       "path": "tools/sqlite_scan.py",

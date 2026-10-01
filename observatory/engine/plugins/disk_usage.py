@@ -101,8 +101,9 @@ def reclaimable_bytes(root: pathlib.Path) -> int:
     rest is reclaimable. The finding would be asking "why is my disk full" while
     reading the answer to "what does this project cost".
 
-    So this is its own metric, with its own meaning: what can be deleted and got
-    back by reinstalling.
+    So this is its own metric, with its own meaning: generated dependency/build data, excluding Git history. This is an
+    inventory estimate, not permission to remove a directory or a physical-space
+    guarantee (hardlinks, clones and active work need separate checks).
 
     It descends into each pruned directory rather than counting only the files
     directly inside it: `node_modules` is deeply nested, and a shallow count
@@ -110,7 +111,7 @@ def reclaimable_bytes(root: pathlib.Path) -> int:
     """
     total = 0
     for dirpath, dirnames, _filenames in os.walk(root, onerror=lambda _e: None):
-        for d in [d for d in dirnames if d in SKIP]:
+        for d in [d for d in dirnames if d in SKIP and d != ".git"]:
             total += subtree_bytes(os.path.join(dirpath, d))
         dirnames[:] = [d for d in dirnames if d not in SKIP]
     return total
@@ -147,9 +148,11 @@ def main() -> int:
         # not care which copy the bytes sit in. Measured across the whole estate
         # in 34s, well inside the runner's 300s ceiling.
         recl = 0
+        reclaim_seen = set()
         for folder in list(folders) + worktrees_of(p["id"], relations, repos):
             path = paths.DATA / folder
-            if path.is_dir():
+            if path.is_dir() and str(path.resolve()) not in reclaim_seen:
+                reclaim_seen.add(str(path.resolve()))
                 recl += reclaimable_bytes(path)
         if recl:
             print(json.dumps({"project_id": p["id"],

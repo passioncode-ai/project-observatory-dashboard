@@ -1,7 +1,7 @@
 {
   "version": 1,
   "kernel": {
-    "scope": "SP-1 through SP-7; cache operations only, preserve sessions and data.",
+    "scope": "SP-1 through SP-9; cache operations only, preserve sessions and data.",
     "evidence": "README.md requirement table, synthetic tests, browser receipt and final verification.json.",
     "deps": "Existing shell, local request boundary, workspace settings, native cleanup contracts.",
     "resume": "README.md and implementation status; tagged release required before live installation."
@@ -60,5 +60,12 @@
     }
   ],
   "implementation_commit": "3b89e74",
-  "resume": "README.md exact next task; source implemented, human CLA and tagged installation pending"
+  "resume": "README.md exact next task; source implemented, human CLA and tagged installation pending",
+  "followup": {
+    "scope": "Resource history and correct generated-data estimates",
+    "evidence": "resource-followup.json",
+    "deps": "Original candidate and fixed cache roots",
+    "resume": "Review this follow-up, retain tagged installation boundary",
+    "status": "completed-local"
+  }
 }
