@@ -574,6 +574,35 @@ def test_cf_fabric_presets_refuse_what_they_do_not_grant() -> None:
               out.getvalue())
 
 
+def test_cf_logs_preset_reads_telemetry_with_a_post_and_grants_nothing_more() -> None:
+    """workers-observability-read: one read group on one account, proved by the
+    telemetry-keys POST with the NEW value, and refused when the catalogue
+    offers the group only at zone level."""
+    for offered, want_rc in (([("Workers Observability Read", "account"),
+                               ("Workers Observability Read", "zone")], 0),
+                             ([("Workers Observability Read", "zone")], 1)):
+        m = cf(); _cf_with_admin(m)
+        log, delivered = [], []
+        _preset_fake(m, log, offered, "/accounts/a1/workers/observability/telemetry/keys", "logs-")
+        m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append(value)
+        m._journal = lambda *a, **k: None
+        rc = m.cmd_issue_account("workers-observability-read", "proj/prod/CF_LOGS", None, wait=0)
+        create = [pl for _m, p, _t, pl in log if p == "/accounts/a1/tokens" and pl]
+        if want_rc == 0:
+            pols = create[0]["policies"] if create else []
+            check("the logs preset issues", rc == 0, str(rc))
+            check("with exactly one account-level read group, on one account",
+                  [[g["id"] for g in pol["permission_groups"]] for pol in pols]
+                  == [["id-account-Workers Observability Read"]]
+                  and pols[0]["resources"] == {"com.cloudflare.api.account.a1": "*"}, str(pols))
+            check("proved by the telemetry POST, with a body, under the NEW value",
+                  any(v == "POST" and p.endswith("/telemetry/keys") and t.startswith("logs-") and pl == {}
+                      for v, p, t, pl in log), str(log[-2:]))
+        else:
+            check("a zone-level Observability group is never taken for the account",
+                  rc == 1 and not create and not delivered, str(rc))
+
+
 def test_cf_d1_preset_rolls_refuses_and_never_misfiles() -> None:
     m = cf(); _cf_with_admin(m)
     log, delivered = [], []
@@ -1212,6 +1241,7 @@ if __name__ == "__main__":
                test_cf_email_routing_token_is_one_per_slot,
                test_cf_fabric_account_preset_grants_both_levels_on_one_account_into_the_vault,
                test_cf_fabric_presets_refuse_what_they_do_not_grant,
+               test_cf_logs_preset_reads_telemetry_with_a_post_and_grants_nothing_more,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,

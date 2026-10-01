@@ -1334,8 +1334,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "2f2edbd04b5fb2ec75429863ebee0f56e671a453004997f8fcd25c6f3f4ad3ed",
-      "bytes": 9163,
+      "export_sha256": "c054fc531c6cf04e1d14fde27ae8255d3b165a63b74285765433d746678d7e71",
+      "bytes": 9378,
       "upstream_modified": true
     },
     {
@@ -1812,8 +1812,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "0d1c01318c4e861e85a75a56fb152f28036330f59875ca7096f7270015d700a9",
-      "bytes": 68880,
+      "export_sha256": "9a7c8f7add6dfbe98248818bf26056d00b017a625c7f3058500660e079d0ca5e",
+      "bytes": 70844,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
