@@ -61,6 +61,10 @@ The assistant job returns a Fabric result envelope and preserves incoming trace
 context. No new MCP server or second registration is needed. Where an installation
 uses an MCP gateway, continue using that gateway; do not shadow it in agent config.
 
+`dashboard` verifies that the local server serves the selected workspace before
+returning its loopback address. It does not start/rebuild a server or silently
+open the default workspace after settings change.
+
 ## Persistence and limits
 
 `store/assistant/conversations/` and `store/assistant/requests.json` use private

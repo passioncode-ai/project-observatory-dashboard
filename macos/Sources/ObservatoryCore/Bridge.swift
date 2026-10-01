@@ -27,7 +27,7 @@ public struct Backend: Sendable {
     private func run(_ action: String, input: [String: String], timeout: TimeInterval) throws -> Data {
         guard executable.hasPrefix("/"), workspace.hasPrefix("/"),
               FileManager.default.isExecutableFile(atPath: executable),
-              ["status", "ask", "get", "list", "job", "cancel"].contains(action) else { throw BridgeError.configuration }
+              ["status", "ask", "get", "list", "job", "cancel", "dashboard"].contains(action) else { throw BridgeError.configuration }
         let process = Process(), out = Pipe(), err = Pipe(), stdin = Pipe()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = ["full", "assistant", action]
