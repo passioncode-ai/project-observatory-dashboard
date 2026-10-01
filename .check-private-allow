@@ -1,0 +1,8 @@
+# Reviewed synthetic findings for org-index scripts/check_private.py (fingerprint = rule:file:sha256(match)[:16]).
+# Synthetic test fixtures: an SSH remote (git@host), placeholder service accounts under example.*, a fake DSN password.
+# Reviewed 2026-10-01. A denylist term (P1) can never be listed here.
+P2:observatory/engine/tests/test_api_listings.py:1d14aeae5e68f1d9
+P2:observatory/engine/tests/test_credentials.py:ab82f3077eaefe7f
+P2:observatory/engine/tests/test_env_inventory.py:eef141828f920738
+P2:observatory/engine/tests/test_google.py:2ed69a6f1c6f8dd8
+P2:observatory/engine/tests/test_project_secrets.py:2c1921011f85585c
