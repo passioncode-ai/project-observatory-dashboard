@@ -54,7 +54,7 @@ BOUNDARY = (
 
     # Merged from the parallel port streams.
     'cause_and_symptom', 'collector_state', 'corroboration', 'credentials', 'curation_paths', 'degradations', 'domain_probe', 'google', 'handoff', 'install_key', 'ledger_export', 'mechanical_confidence', 'notification', 'portfolio_review', 'project_secrets', 'publish_contract', 'recovery', 'reveals', 'session_start', 'tick', 'tick_failures', 'trap_efficacy', 'trap_map', 'unpublished_work', 'wire_survives', 'witness',
-    'fabric_service', 'machine_mcp_inventory', 'interop',
+    'fabric_service', 'machine_mcp_inventory', 'interop', 'assistant',
 )
 # Suites and helpers ported by the second port stream.
 BOUNDARY += (

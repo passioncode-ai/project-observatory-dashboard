@@ -1,0 +1,72 @@
+{
+  "coverage": "synthetic-offline",
+  "initial_full": {
+    "suites": 198,
+    "pass": 197,
+    "failures": [
+      {
+        "file": "tests/test_wire_contract.py",
+        "status": "FAIL"
+      }
+    ]
+  },
+  "after_wire_description_fix": [
+    {
+      "file": "tests/test_wire_contract.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_assistant.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 13
+    },
+    {
+      "file": "tests/test_interop.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 17
+    }
+  ],
+  "swift": {
+    "tests": 10,
+    "failures": 0
+  },
+  "native_walkthrough": {
+    "status": "NOT_RUN",
+    "reason": "Window automation returns cgWindowNotFound, including Finder"
+  },
+  "signing": "ad-hoc candidate, not notarized",
+  "live_assistant_provider": "NOT_RUN",
+  "installed_engine": "unchanged",
+  "root_python": {
+    "tests": 85,
+    "failures": 0
+  },
+  "privacy_fixture_followup": [
+    {
+      "file": "tests/test_fabric_service.py",
+      "status": "PASS",
+      "exit_code": 0
+    },
+    {
+      "file": "tests/test_skill_check.py",
+      "status": "PASS",
+      "exit_code": 0
+    }
+  ],
+  "privacy_tree": {
+    "gate": "public-release-privacy",
+    "passed": true,
+    "files_checked": 627,
+    "history_blobs_checked": 0,
+    "private_denylist_entries": 3810,
+    "findings": [],
+    "limits": "Pattern/identifier checks cannot prove absence of every secret or private fact. Review source, metadata and release scope independently. Match values and paths are never printed.",
+    "public_identifiers_subtracted": 1
+  },
+  "python_3_11_compile": "PASS",
+  "wheel_content": "PASS (480 runtime files, 487 archive members)"
+}

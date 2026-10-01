@@ -18,7 +18,7 @@ ST-03: another agent invokes the same capability. Product outcome: unobserved.
 | SCN-006 | CLI/MCP caller obtains the same answer | validated |
 
 Validation is derived from the operator's explicit autonomous implementation brief;
-implementation coverage below stays none until tests and native inspection exist.
+coverage below distinguishes tested core/state behavior from the still-unverified native walkthrough. See [receipts](../runs/2026-10-01-macos-app/README.md).
 
 ## SCN-001 — First launch and connection recovery
 Status: validated
@@ -31,7 +31,7 @@ Steps: open → connection status; missing CLI → choose executable/workspace i
 Settings → Test connection → compatible status → empty conversation.
 Expected result: no automatic dependency install, no model call, usable next action.
 Errors & recovery: invalid path/protocol/timeout shows retry/settings, keeps selections.
-Coverage: none yet.
+Coverage: core/bridge/model regression tests; native walkthrough unverified.
 
 ## SCN-002 — Evidence-bound answer
 Status: validated
@@ -44,7 +44,7 @@ Steps: type → Send → persisted pending turn → working indicator/Stop → a
 model/cost and expandable evidence → follow-up uses bounded previous context.
 Expected result: cited facts and degraded sources visible; no implicit mutation.
 Errors & recovery: invalid reference/provider schema refuses the result, retains question.
-Coverage: none yet.
+Coverage: core/bridge/model regression tests; native walkthrough unverified.
 
 ## SCN-003 — Disabled provider or failed request
 Status: validated
@@ -56,7 +56,7 @@ Trigger: attempt Send.
 Steps: preflight → distinct error and next action; repair configuration → deliberate retry.
 Expected result: no fake response, no automatic spend loop, input/history preserved.
 Errors & recovery: full disk refuses before spending; errors do not expose raw provider text.
-Coverage: none yet.
+Coverage: core/bridge/model regression tests; native walkthrough unverified.
 
 ## SCN-004 — Stop, close and resume
 Status: validated
@@ -69,7 +69,7 @@ Steps: Stop → cancellation recorded; reopen → stored terminal state. Close w
 Stop → job continues; reopen → pending or completed answer recovered.
 Expected result: cancelled cannot become completed; dead runner becomes interrupted.
 Errors & recovery: missing/corrupt job is named, not recreated; retry is a new request.
-Coverage: none yet.
+Coverage: core/bridge/model regression tests; native walkthrough unverified.
 
 ## SCN-005 — Change workspace without stale output
 Status: validated
@@ -81,7 +81,7 @@ Trigger: select workspace B in settings.
 Steps: apply → invalidate UI generation → connect B → show B history.
 Expected result: late A response never enters B; A accepted job persists independently.
 Errors & recovery: failed B connection offers settings; no fallback into A disguised as B.
-Coverage: none yet.
+Coverage: core/bridge/model regression tests; native walkthrough unverified.
 
 ## SCN-006 — CLI/MCP caller obtains the same answer
 Status: validated
@@ -89,10 +89,10 @@ Product: unobserved
 Persona: P-01
 Traces: ST-03, JTBD-01, FLW-04
 Preconditions: compatible host, initialized workspace and provider.
-Trigger: call agent.ask.
+Trigger: call observatory_assistant_ask.
 Steps: validated input → durable handle → fabric.job.get → result envelope and
 shared conversation; fabric.job.cancel → terminal cancellation.
-Expected result: exact published schemas, trace propagation, no duplicate spend on replay.
+Expected result: advertised MCP input contract, trace propagation and shared Fabric job envelope; no duplicate spend on replay.
 Errors & recovery: changed input under same request id rejected; different busy request
 is not silently joined; unknown ids never create jobs.
-Coverage: none yet.
+Coverage: core/bridge/model regression tests; native walkthrough unverified.

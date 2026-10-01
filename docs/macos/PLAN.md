@@ -37,14 +37,14 @@ the backend. Conversations are workspace-local, not a third-party memory plugin.
 Edges carry the schemas (1→2,3,4), shared core (2→3,4), published CLI contract
 (3→4), exact candidate artifacts (2,3,4→5) and verified behavior (5→6).
 No parallel agents or global profile stages are implied. Scope/evidence/deps/resume
-are retained at every step. Code and contracts are test-first; no automatic remote
+are retained at every step. Safety and interface contracts are checked with focused regressions; no automatic remote
 model call in tests. Build caches use one bounded task directory on this low-space
 machine. Do not stop other sessions or overwrite their worktrees.
 
 ## Current status / resume
 
-Contract/scenario work in progress. Next: finish SPEC and scenario states, then
-write failing assistant/job/bridge tests. Main baseline 4e03a1c; resource cleanup
-candidate PR #109 is separate. Do not imply its new space API exists in a tagged
-installation. App release must follow CONTRIBUTING; personal CLA cannot be agreed
-by an agent. Signed/notarized distribution is separate from an ad-hoc test build.
+Implementation and focused checks are complete; see the [run record](../runs/2026-10-01-macos-app/README.md)
+for executed checks and explicit native-UI/release gates. Next: native scenario walkthrough
+once window automation is available, then review the candidate for normal PR integration.
+Main baseline 4e03a1c; resource cleanup PR #109 remains separate. No production installation
+or parent submodule pin is changed to this unmerged candidate.

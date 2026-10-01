@@ -91,7 +91,8 @@ def refresh(job: dict) -> dict:
                             created_at=jobs.now_iso())
 
 
-WORK = {"machine.mcp.refresh": refresh}
+from agent import assistant
+WORK = {"machine.mcp.refresh": refresh, "agent.ask": assistant.run_question}
 
 
 def main(argv: list[str]) -> int:
@@ -111,6 +112,11 @@ def main(argv: list[str]) -> int:
     def stop(signum, frame):                                          # noqa: ARG001
         raise SystemExit(128 + signum)
     signal.signal(signal.SIGTERM, stop)
+    def timeout(signum, frame):
+        raise assistant.AssistantError("assistant-timeout")
+    if job.get("capability") == "agent.ask":
+        signal.signal(signal.SIGALRM, timeout)
+        signal.alarm(300)
     beat = threading.Event()
     threading.Thread(target=_heartbeat, args=(job_id, beat), daemon=True).start()
     try:
@@ -124,10 +130,11 @@ def main(argv: list[str]) -> int:
         # named by its kind only, since a message can quote a path or a value.
         message = str(exc) if type(exc) is RuntimeError else type(exc).__name__
         jobs.update(job_id, status="failed", statusMessage="the work failed",
-                    error={"code": "job-failed", "message": message[:300]})
+                    error={"code": str(exc) if isinstance(exc, assistant.AssistantError) else "job-failed", "message": message[:300]})
         return 1
     finally:
         beat.set()
+        signal.alarm(0)
     jobs.update(job_id, status="completed", statusMessage="completed", result=result)
     return 0
 

@@ -432,5 +432,34 @@ class SlowJobs(Workspace):
         self.assertEqual(job["error"]["code"], "interrupted")
 
 
+class AssistantWire(Workspace):
+    def test_native_assistant_tools_are_discoverable(self):
+        async def case():
+            async with self.session() as s:
+                tools=await s.list_tools()
+                return {t.name:as_dict(t.input_schema) for t in tools.tools}
+        tools=asyncio.run(case())
+        for name in ('observatory_assistant_status','observatory_assistant_ask','observatory_assistant_conversation'):
+            self.assertIn(name,tools)
+        self.assertIn('question',tools['observatory_assistant_ask']['properties'])
+        self.assertIn('request_id',tools['observatory_assistant_ask']['required'])
+    def test_ask_rejects_extra_fields_on_the_wire_with_trace(self):
+        async def case():
+            async with self.session() as s:
+                return await s.call_tool('observatory_assistant_ask',{'question':'Demo?','request_id':'fixture-request','shell':'no'},meta={'traceparent':TRACEPARENT})
+        result=asyncio.run(case())
+        self.assertTrue(result.is_error)
+        self.assertEqual(payload(result)['error'],'invalid-input')
+        self.assertEqual(VALID.match(result.meta['traceparent']).group(1),PARENT_TRACE)
+    def test_status_does_not_start_a_job(self):
+        async def case():
+            async with self.session() as s:
+                return await s.call_tool('observatory_assistant_status',{})
+        result=asyncio.run(case())
+        self.assertFalse(result.is_error)
+        self.assertEqual(payload(result)['protocol'],'observatory-assistant/1')
+        self.assertEqual(list((self.home/'store/jobs').glob('job-*.json')),[])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
