@@ -1,0 +1,27 @@
+{
+  "backend": "fs",
+  "leaseBackend": "git",
+  "leaseRemote": "origin",
+  "integrationBranch": "main",
+  "leaseTtlSeconds": 2700,
+  "renewIntervalSeconds": 300,
+  "gated": true,
+  "idRegisters": {},
+  "guardedFiles": [
+    "CHANGELOG.md",
+    "docs/HANDOFF.md"
+  ],
+  "claimTags": {},
+  "gates": [
+    "python -m unittest discover -s tests -v",
+    "project-observatory full check"
+  ],
+  "mirror": {
+    "enabled": false,
+    "sources": []
+  },
+  "mergeLog": {
+    "file": "docs/MERGES.md",
+    "retentionDays": 7
+  }
+}

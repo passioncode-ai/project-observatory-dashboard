@@ -32,7 +32,10 @@ def public_identifiers(path: Path = PUBLIC_IDENTIFIERS) -> set[str]:
     return out
 ALLOWED_TOP = {".github", ".claude-plugin", "observatory", "tests", "tools", "docs", "site"}
 ALLOWED_ROOT = {".gitignore", "LICENSE", "COMMERCIAL-LICENSE.md", "CLA.md", "README.md", "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "CHANGELOG.md", "pyproject.toml", "AGENTS.md", "CLAUDE.md", "requirements-full.lock"}
-SKIP = {".git", ".venv", "__pycache__", "node_modules", "build", "dist"}
+# `.agent-sync/` is agent-sync's local, git-ignored state (run id, lease bookkeeping): it exists on
+# every contributor's disk after a lease and is never published, so the walk skips it and a tracked
+# copy is refused like any other unlisted path.
+SKIP = {".git", ".venv", "__pycache__", "node_modules", "build", "dist", ".agent-sync"}
 PUBLIC_IMAGES = {
     "site/assets/credential-copies-cartoon.png": {"8b69fe6ffcf44a4d5f8a32622d5c4d9d847d539c8c673c49fadf132c518be30c"},
     "site/assets/observatory-cover.png": {"70403cdb6ffc4029edcf2febbf63dec88a3118fa6cea9d7d6b17150d853d4833"},
@@ -122,6 +125,11 @@ def allowed_path(rel: Path) -> bool:
         return True
     # Reviewed offline browser-behavior test; do not admit arbitrary CommonJS files.
     if rel.as_posix() == "tools/check_site_interactions.cjs":
+        return True
+    # The coordination config of the repository standard (F12): lease backend, guarded files and
+    # gates, no credential (the record plane is `fs`; `.env.agent-sync` stays ignored). Every other
+    # file under `.claude/` — permission grants above all — stays private.
+    if rel.as_posix() == ".claude/agent-sync.json":
         return True
     if any(x in SKIP or x.endswith(".egg-info") for x in rel.parts):
         return False

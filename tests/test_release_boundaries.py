@@ -50,6 +50,18 @@ class ReleaseBoundaryTests(unittest.TestCase):
                         'observatory/engine/.env','observatory/engine/tools/unreviewed.sh',
                         'observatory/engine/.keyserver-token'):
             self.assertFalse(privacy.allowed_path(Path(refused)),refused)
+    def test_agent_sync_config_is_admitted_and_its_local_state_is_not(self):
+        self.assertTrue(privacy.allowed_path(Path('.claude/agent-sync.json')))
+        for refused in ('.claude/settings.json','.claude/settings.local.json',
+                        '.agent-sync/run-id','.agent-sync/leases/x.lock','.env.agent-sync'):
+            self.assertFalse(privacy.allowed_path(Path(refused)),refused)
+        # A contributor who took a lease has ignored state on disk; the walk must not call it public.
+        self.put('README.md','Generic text')
+        self.put('.agent-sync/run-id','r-0123456789')
+        self.put('.claude/agent-sync.json','{"backend": "fs", "leaseBackend": "git"}')
+        self.assertTrue(privacy.audit(self.root, [], False)['passed'])
+        self.put('.claude/agent-sync.json','{"note": "private-fixture-value"}')
+        self.assertFalse(privacy.audit(self.root, ['private-fixture-value'], False)['passed'])
     def test_only_reviewed_commonjs_test_is_admitted_and_content_is_scanned(self):
         self.assertTrue(privacy.allowed_path(Path('tools/check_site_interactions.cjs')))
         self.assertFalse(privacy.allowed_path(Path('tools/unreviewed.cjs')))

@@ -52,6 +52,10 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
+**Status 2026-10-01, agent coordination:** shared files (`CHANGELOG.md`, this file) are edited
+under an agent-sync lease decided by git refs on `origin`; [AGENT_SYNC.md](AGENT_SYNC.md) is the
+generated wiring. Record: [runs/2026-10-01-agent-sync](runs/2026-10-01-agent-sync/README.md).
+
 **Status 2026-09-30, licence and repository standard (unreleased on `main`):** the code is
 `AGPL-3.0-only OR LicenseRef-PassionCode-Commercial` from the next release; v0.9.1 and earlier
 keep PolyForm or MIT. README and AGENTS.md follow the organisation's repository standard. Entry
