@@ -185,3 +185,9 @@ Versions up to and including v0.9.1 were released under PolyForm Noncommercial o
 Contributions are accepted under the [CLA](CLA.md).
 
 Part of [PassionCode.ai](https://passioncode.ai/) — the design system is [PassionCode 1.0.0](https://passioncode.ai/design-system/). Observatory is also the observation component of the [ssheleg harness](https://skills.sshlg.me/harness/): skills guide the work; Observatory records and checks the state around it.
+
+## Native macOS client candidate
+
+This branch also contains a separate SwiftUI application and shared CLI/MCP assistant.
+See [build, configuration and release boundaries](docs/macos/README.md). The current
+tagged engine does not yet include this candidate; the chat is outside the dashboard.

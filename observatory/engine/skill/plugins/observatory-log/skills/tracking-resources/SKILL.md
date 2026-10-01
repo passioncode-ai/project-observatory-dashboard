@@ -58,7 +58,7 @@ Report each resource with `observatory_propose`:
  "targetId": "project:<slug>",
  "patch": {"resources": [{"kind": "ga4-property",
                           "identifier": "properties/123456789",
-                          "account": "accounts/162941847",
+                          "account": "accounts/123456789",
                           "url": "https://analytics.google.com/…",
                           "note": "web stream for example.com",
                           "added_on": "2026-09-27",

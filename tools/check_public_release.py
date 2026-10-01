@@ -37,7 +37,7 @@ ALLOWED_ROOT = {".gitignore", "LICENSE", "COMMERCIAL-LICENSE.md", "CLA.md", "REA
 # `.agent-sync/` is agent-sync's local, git-ignored state (run id, lease bookkeeping): it exists on
 # every contributor's disk after a lease and is never published, so the walk skips it and a tracked
 # copy is refused like any other unlisted path.
-SKIP = {".git", ".venv", "__pycache__", "node_modules", "build", "dist", ".agent-sync"}
+SKIP = {".git", ".venv", "__pycache__", "node_modules", "build", "dist", ".agent-sync", ".build", ".swiftpm"}
 PUBLIC_IMAGES = {
     "site/assets/credential-copies-cartoon.png": {"8b69fe6ffcf44a4d5f8a32622d5c4d9d847d539c8c673c49fadf132c518be30c"},
     "site/assets/observatory-cover.png": {"70403cdb6ffc4029edcf2febbf63dec88a3118fa6cea9d7d6b17150d853d4833"},
@@ -122,7 +122,19 @@ def scan_path(relative: str, deny: list[str]) -> dict[str, int]:
     return hits
 
 
+# Reviewed native source and synthetic tests only; no binaries, signing material,
+# Xcode user state or SwiftPM caches are admitted by this list.
+NATIVE_SOURCES = {
+    "macos/Package.swift", "macos/scripts/build-app.sh",
+    "macos/Sources/ObservatoryCore/Bridge.swift",
+    "macos/Sources/ObservatoryApp/App.swift", "macos/Sources/ObservatoryApp/Model.swift",
+    "macos/Tests/ObservatoryCoreTests/BridgeTests.swift", "macos/Tests/ObservatoryCoreTests/ModelTests.swift",
+}
+
+
 def allowed_path(rel: Path) -> bool:
+    if rel.as_posix() in NATIVE_SOURCES:
+        return True
     if rel.as_posix() in PUBLIC_IMAGES:
         return True
     # Reviewed offline browser-behavior test; do not admit arbitrary CommonJS files.

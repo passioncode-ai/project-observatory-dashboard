@@ -40,6 +40,12 @@ jobs:
         run: python -m compileall -q observatory
       - name: Synthetic runtime and privacy tests
         run: python -m unittest discover -s tests -v
+      - name: Native macOS bridge and state tests
+        if: runner.os == 'macOS'
+        run: swift test --package-path macos
+      - name: Build and validate native macOS candidate bundle
+        if: runner.os == 'macOS'
+        run: macos/scripts/build-app.sh
       - name: Complete engine offline compatibility and security matrix
         run: project-observatory full check --report-dir "${{ runner.temp }}/observatory-full-check"
       - name: Build and inspect the installable archive
