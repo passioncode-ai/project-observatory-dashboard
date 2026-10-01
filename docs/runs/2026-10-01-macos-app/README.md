@@ -24,10 +24,10 @@ to this candidate's code; they do not establish that a tagged installation has i
 
 - Root Python suite: 85 tests passed, including the native source allowlist boundary.
 - Focused core suites: assistant, interop, CLI compatibility and contract publication
-  passed. Assistant has 14 tests (including a real detached runner with only the provider boundary replaced); stdio interop now has 17, including new tool
+  passed. Assistant has 15 tests (including a real detached runner with only the provider boundary replaced); stdio interop now has 17, including new tool
   discovery, invalid input/trace propagation and readiness without job creation.
 - Full offline run: 197 of 198 suites passed; the only failure was the old ten-tool count. After correcting the expectation and server instructions, wire_contract, assistant and interop passed. See [checks](checks.json).
-- Swift: 10 tests passed (7 process bridge, 3 model state). The generation-race
+- Swift: 12 tests passed (7 process bridge, 5 model state). Dashboard navigation verifies the selected workspace and model state refuses non-loopback URLs; changing backend clears old draft/scope. The generation-race
   test proves that a late old-workspace response cannot replace the new state.
 - Real Claude Code client: strict fixture MCP configuration, actual recorded call
   to `observatory_assistant_status`, protocol `observatory-assistant/1`, disabled

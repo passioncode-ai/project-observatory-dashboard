@@ -66,6 +66,15 @@ class AssistantTests(unittest.TestCase):
         with patch.object(self.a.providers,'complete') as complete:
             doc=self.a.status();self.assertEqual(doc['protocol'],'observatory-assistant/1');complete.assert_not_called()
 
+    def test_dashboard_refuses_another_workspace_and_uses_selected_port(self):
+        from tools import dashboard_open
+        (self.a.paths.SCRATCH/'serverd.json').write_text(json.dumps({'port':48123}))
+        with patch.object(dashboard_open,'served_workspace',return_value='/another-workspace'):
+            with self.assertRaisesRegex(self.a.AssistantError,'dashboard-workspace-mismatch'):self.a.dashboard()
+        with patch.object(dashboard_open,'served_workspace',return_value=str(self.a.paths.HOME)) as get:
+            self.assertEqual(self.a.dashboard()['url'],'http://127.0.0.1:48123/dashboard/index.html')
+            get.assert_called_once_with(48123,timeout=3)
+
     def enabled(self):
         from contextlib import ExitStack
         ctx=ExitStack()

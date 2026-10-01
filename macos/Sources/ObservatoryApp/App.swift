@@ -83,7 +83,7 @@ struct MainView: View {
             ToolbarItemGroup {
                 Button { m.newConversation() } label: { Label(m.t("New conversation", "Новый диалог"), systemImage: "square.and.pencil") }.disabled(m.busy)
                 Button { Task { await m.refresh() } } label: { Label(m.t("Refresh", "Обновить"), systemImage: "arrow.clockwise") }.disabled(m.connecting)
-                Button { NSWorkspace.shared.open(URL(string: "http://127.0.0.1:47311")!) } label: { Label(m.t("Dashboard", "Дэшборд"), systemImage: "rectangle.grid.2x2") }
+                Button { Task { if let url = await m.dashboardURL() { NSWorkspace.shared.open(url) } } } label: { Label(m.t("Dashboard", "Дэшборд"), systemImage: "rectangle.grid.2x2") }
             }
         }.task { await m.refresh() }
         .onChange(of: m.selected) { _, id in if let id { Task { await m.load(id) } } }
@@ -143,7 +143,7 @@ struct SettingsView: View {
             Toggle("Русский", isOn: $m.russian)
             Button(m.t("Save and check connection", "Сохранить и проверить")) { Task { await m.saveSettings() } }.disabled(m.connecting)
             if let error = m.error { Text(error).font(.callout).foregroundStyle(.secondary).textSelection(.enabled) }
-            Text(m.t("Changing settings leaves accepted jobs running in their original workspace. Return there to stop or read them.", "Смена настроек оставляет принятые задания в прежней папке данных. Вернитесь к ней, чтобы остановить их или прочитать результат.")).font(.caption).foregroundStyle(.secondary)
+            Text(m.t("Changing the executable or workspace clears the draft and project scope. Accepted jobs keep running in their original workspace; return there to stop or read them.", "Смена программы или папки данных очищает черновик и выбор проекта. Принятые задания продолжают работу в прежней папке; вернитесь к ней для остановки или чтения результата.")).font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(width: 600)
     }
     func choose(_ directory: Bool) {

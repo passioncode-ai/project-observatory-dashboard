@@ -35,6 +35,8 @@ struct Turn: Identifiable {
     func t(_ en: String, _ ru: String) -> String { russian ? ru : en }
     func message(_ code: String) -> String {
         switch code {
+        case "dashboard-workspace-mismatch", "dashboard-unavailable":
+            return t("No running dashboard was verified for this workspace. Start its Observatory server, then try again.", "Для этой папки данных не найден подтверждённый дэшборд. Запустите её сервер Observatory и попробуйте снова.")
         case "agent-disabled": return t("Enable the agent in Observatory configuration.", "Включите агента в настройках Observatory.")
         case "provider-unconfigured": return t("Configure a model provider in Observatory first.", "Сначала настройте провайдера модели в Observatory.")
         case "assistant-busy": return t("Another question is running. Open its conversation or try again when it finishes.", "Другой запрос ещё выполняется. Откройте его диалог или дождитесь завершения.")
@@ -125,8 +127,21 @@ struct Turn: Identifiable {
             if let selected { await load(selected) }
         } catch { if g == generation { self.error = message(error.localizedDescription) } }
     }
+    func dashboardURL() async -> URL? {
+        let g = generation
+        do {
+            let doc = try await call("dashboard"); guard g == generation else { return nil }
+            guard let raw = doc["url"] as? String, let url = URL(string: raw),
+                  url.scheme == "http", url.host == "127.0.0.1", url.user == nil, url.password == nil,
+                  url.path == "/dashboard/index.html" else { throw BridgeError.invalidResponse }
+            return url
+        } catch { if g == generation { self.error = message(error.localizedDescription) }; return nil }
+    }
     func newConversation() { guard !busy else { return }; selected = nil; turns = []; error = nil }
     func saveSettings() async {
+        let changed = activeExecutable != executable || activeWorkspace != workspace
+        if changed { question = ""; scope = "" }
+        projects = []; version = ""
         generation = UUID(); activeExecutable = executable; activeWorkspace = workspace; polling?.cancel(); polling = nil; busy = false; job = nil
         selected = nil; turns = []; conversations = []; ready = false
         defaults.set(executable, forKey: "executable"); defaults.set(workspace, forKey: "workspace")

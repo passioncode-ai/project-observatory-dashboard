@@ -99,5 +99,20 @@
     "source_inventory": "PASS",
     "assistant_tests": 13,
     "swift_release_build": "PASS"
+  },
+  "workspace_navigation_followup": {
+    "assistant_tests": 15,
+    "swift_tests": 12,
+    "failures": 0,
+    "checks": [
+      "selected dashboard port and workspace refusal",
+      "non-loopback UI refusal",
+      "draft and project scope cleared on workspace change"
+    ]
+  },
+  "hosted_implementation_75bcbc5": {
+    "run": 36930357480,
+    "conclusion": "success",
+    "jobs": 3
   }
 }
