@@ -52,6 +52,10 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
+**Status 2026-10-01, open pull requests:** #83, #89, #93 and #62 landed with fixes, plus #98
+(reset dates counted from the measurement, which had turned `main` red). Follow-ups #95–#97.
+Record: [runs/2026-10-01-open-pr-sweep](runs/2026-10-01-open-pr-sweep/README.md).
+
 **Status 2026-10-01, agent coordination:** shared files (`CHANGELOG.md`, this file) are edited
 under an agent-sync lease decided by git refs on `origin`; [AGENT_SYNC.md](AGENT_SYNC.md) is the
 generated wiring. Record: [runs/2026-10-01-agent-sync](runs/2026-10-01-agent-sync/README.md).
