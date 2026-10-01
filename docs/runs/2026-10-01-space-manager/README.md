@@ -36,8 +36,8 @@ preview action. Below: measured cache sizes, protected reasons, cleanup history.
 A size is occupied bytes, never a promise that every byte is reclaimable.
 Falsifier: the page cannot distinguish a protected cache from an eligible operation,
 or reports requested deletion as measured disk recovery. No new visual direction or
-animation: one composition, existing typography and dense tables (variance 4,
-motion 1, density 7). No Figma file is changed. Accessibility assertions are limited
+animation: free space first, actions second, then the cache table using existing
+typography and spacing. No Figma file is changed. Accessibility assertions are limited
 to checks actually run.
 
 Fixed adapters call owners' cleanup APIs, not `rmtree`. Unknown/unsafe caches are
@@ -54,9 +54,54 @@ Native cache contracts reviewed: [uv cache safety](https://docs.astral.sh/uv/con
 [BuildKit reclaimability](https://docs.docker.com/reference/cli/docker/buildx/du/).
 Direct uv cache mutation is prohibited by its owner; cleanup uses its native lock.
 
-## Resume
+## Completed implementation and verification
 
-Implement and test the bounded engine, then same-origin routes/CLI/scheduler, then
-Space UI and scenario/catalog coverage. Run the full portable gate, source inventory,
-privacy and package checks. Publish a PR and private installation handoff; merge,
-tag and installation follow the owner's existing release/CLA policy.
+Implementation: `89a0b05` ([source](https://github.com/passioncode-ai/project-observatory-dashboard/commit/89a0b05)).
+The [verification receipt](verification.json) lists every suite and the distinction
+between the initial full run and focused retries: 198 latest suite results pass,
+including 24 Space safety/HTTP/CLI cases; 84 root tests pass. The first full run
+had two page-count/allowlist failures, fixed here, and one timeout, resolved by an
+isolated retry. This is combined local evidence, not a claim of one green hosted run.
+
+Commands: `python observatory/engine/tests/run_portable.py --report-dir OUT`, then
+focused `--suite` retries recorded by name in the receipt; `python -m unittest
+discover -s tests -v`; `python tools/update_inventory.py --check`; `python -m pip
+wheel --no-deps .`; `python tools/check_package.py WHEEL`; `claude plugin validate
+--strict observatory/engine/skill/plugins/observatory-log`; `node --check
+observatory/engine/dashboard/space.js`; Python 3.11 compilation. Current-tree
+privacy was checked with a maintainer-local identifier list. No values or machine
+paths from that list are published. BuildKit and cooldown are explicitly reviewed
+public technical terms in `tools/public-identifiers.json`. Synthetic example
+corrections also present in PR #107 are retained to satisfy the current-tree gate.
+
+The Safari walk used fictional caches and replaced native commands with no-ops.
+It verified preview, cancellation, execution/history, protected reasons, zero-byte
+recovery, language switch, keyboard focus and enlarged layout. No real cache was
+removed by these checks. Desktop delivery remains OS-dependent; the journal
+records requested/unavailable, never human receipt.
+
+Canonical contracts: [onboarding](../../ONBOARDING.md#disk-space-and-cache-maintenance),
+[scenarios](../../../observatory/engine/docs/ux/portable-scenarios.md),
+[manager](../../../observatory/engine/tools/space_manager.py),
+[HTTP boundary](../../../observatory/engine/tools/serverd.py),
+[safety tests](../../../observatory/engine/tests/test_space_manager.py).
+The docs/brand lint diagnostic and unsupported live checks are named in the receipt.
+No native tool output, user cache register, private state or real dashboard capture
+belongs in this repository.
+
+## Exact next task
+
+Review this candidate PR and the combined receipt. A contributor personally
+acknowledges the CLA under `CONTRIBUTING.md`; the agent has not agreed on their
+behalf. Merge through the normal PR policy, publish a tagged release, then update
+the installation through the documented release updater. Only then enable
+`features.space_auto_cleanup` for the requesting installation and verify the live
+Space endpoint/registry and scheduler. Keep `features.auto_cleanup` off if only
+cache maintenance is wanted. Do not install an untagged worktree or treat this
+source branch as a running feature. Hosted CI, merge, release and installation
+remain distinct checks.
+
+Used: task-pipeline bounded implementation; ux-scenarios recorded OSS-23..25;
+sheleg-design reused tokens and guided browser review; copywriting supplied the
+EN/RU interface; evidence-docs kept receipts and limitations; agent-sync held the
+handoff lease and released it. No delegated agents or unrelated skill route.

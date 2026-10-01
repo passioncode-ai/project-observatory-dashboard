@@ -1,0 +1,1249 @@
+{
+  "schema_version": 1,
+  "implementation_commit": "89a0b056ff0b1af0b77f5b8777e52f8a5b79d463",
+  "coverage": "synthetic-offline-combined",
+  "initial_full_run": {
+    "suites": 198,
+    "passed": 195,
+    "failed": 2,
+    "timeout": 1
+  },
+  "resolved": [
+    "workspace page count updated from 11 to 12",
+    "gate purity allowlist includes Space page and smoke receipt",
+    "finding_rules isolated retry passed with 600 second budget in 52.77 seconds"
+  ],
+  "latest_result_by_suite": [
+    {
+      "file": "tests/test_ledger.py",
+      "status": "PASS",
+      "seconds": 14.52,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_time.py",
+      "status": "PASS",
+      "seconds": 14.42,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_provider_boundary.py",
+      "status": "PASS",
+      "seconds": 16.41,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_provider_health.py",
+      "status": "PASS",
+      "seconds": 15.11,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_credential_doors.py",
+      "status": "PASS",
+      "seconds": 15.76,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_vault.py",
+      "status": "PASS",
+      "seconds": 77.69,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_plugins.py",
+      "status": "PASS",
+      "seconds": 17.77,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_wire_contract.py",
+      "status": "PASS",
+      "seconds": 15.88,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_metric_series.py",
+      "status": "PASS",
+      "seconds": 20.73,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_analytics_plugins.py",
+      "status": "PASS",
+      "seconds": 11.82,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_mcp_wire.py",
+      "status": "PASS",
+      "seconds": 20.1,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_wire_inputs.py",
+      "status": "PASS",
+      "seconds": 15.32,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_retention.py",
+      "status": "PASS",
+      "seconds": 17.71,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_provenance.py",
+      "status": "PASS",
+      "seconds": 10.62,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_events.py",
+      "status": "PASS",
+      "seconds": 13.18,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_fingerprints.py",
+      "status": "PASS",
+      "seconds": 13.82,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_pages.py",
+      "status": "PASS",
+      "seconds": 10.03,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_dashboard_render.py",
+      "status": "PASS",
+      "seconds": 39.13,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_atomic_writers.py",
+      "status": "PASS",
+      "seconds": 19.75,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_ack.py",
+      "status": "PASS",
+      "seconds": 49.17,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_rollup.py",
+      "status": "PASS",
+      "seconds": 19.34,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_runtime_identity.py",
+      "status": "PASS",
+      "seconds": 48.44,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_remote_env.py",
+      "status": "PASS",
+      "seconds": 16.85,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_project_identity.py",
+      "status": "PASS",
+      "seconds": 49.36,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_sessions.py",
+      "status": "PASS",
+      "seconds": 12.71,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_env_page.py",
+      "status": "PASS",
+      "seconds": 10.25,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_metric_labels.py",
+      "status": "PASS",
+      "seconds": 10.97,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_hosting_groups.py",
+      "status": "PASS",
+      "seconds": 9.96,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_action_outcomes.py",
+      "status": "PASS",
+      "seconds": 10.13,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_workspace_redesign.py",
+      "status": "PASS",
+      "seconds": 12.12,
+      "unittest_cases": 8
+    },
+    {
+      "file": "tests/test_google_identity.py",
+      "status": "PASS",
+      "seconds": 10.28,
+      "unittest_cases": 12
+    },
+    {
+      "file": "tests/test_i18n.py",
+      "status": "PASS",
+      "seconds": 9.9,
+      "unittest_cases": 23
+    },
+    {
+      "file": "tests/test_absent_fields.py",
+      "status": "PASS",
+      "seconds": 12.9,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_agent_faults.py",
+      "status": "PASS",
+      "seconds": 32.17,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_api_listings.py",
+      "status": "PASS",
+      "seconds": 49.58,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_caller_identity.py",
+      "status": "PASS",
+      "seconds": 14.5,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_clone_sync.py",
+      "status": "PASS",
+      "seconds": 28.63,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_companion.py",
+      "status": "PASS",
+      "seconds": 29.75,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_companion_hook.py",
+      "status": "PASS",
+      "seconds": 12.28,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_dark_domain_cost.py",
+      "status": "PASS",
+      "seconds": 35.11,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_docs_current.py",
+      "status": "PASS",
+      "seconds": 24.76,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_export_scope.py",
+      "status": "PASS",
+      "seconds": 9.05,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_filesystem_scan.py",
+      "status": "PASS",
+      "seconds": 15.14,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_finding_rules.py",
+      "status": "PASS",
+      "seconds": 52.77,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_heroku.py",
+      "status": "PASS",
+      "seconds": 9.11,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_interpretation_contract.py",
+      "status": "PASS",
+      "seconds": 25.84,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_keyserver.py",
+      "status": "PASS",
+      "seconds": 13.89,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_page_omission.py",
+      "status": "PASS",
+      "seconds": 13.44,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_plugin_reporting.py",
+      "status": "PASS",
+      "seconds": 31.93,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_projection_mirror.py",
+      "status": "PASS",
+      "seconds": 26.31,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_queue_order.py",
+      "status": "PASS",
+      "seconds": 12.57,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_rdap_keys.py",
+      "status": "PASS",
+      "seconds": 12.17,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_recall.py",
+      "status": "PASS",
+      "seconds": 16.24,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_recount.py",
+      "status": "PASS",
+      "seconds": 15.05,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_release_cadence.py",
+      "status": "PASS",
+      "seconds": 9.31,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_remedy_fits.py",
+      "status": "PASS",
+      "seconds": 9.25,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_render_surface.py",
+      "status": "PASS",
+      "seconds": 14.45,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_review_queue.py",
+      "status": "PASS",
+      "seconds": 15.32,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_serverd.py",
+      "status": "PASS",
+      "seconds": 18.32,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_stale_is_expected.py",
+      "status": "PASS",
+      "seconds": 54.83,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_store_modes.py",
+      "status": "PASS",
+      "seconds": 9.75,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_tick_standdown.py",
+      "status": "PASS",
+      "seconds": 61.48,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_trace_opens.py",
+      "status": "PASS",
+      "seconds": 47.39,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_two_surfaces.py",
+      "status": "PASS",
+      "seconds": 33.35,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_work_tiles.py",
+      "status": "PASS",
+      "seconds": 12.8,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_agent.py",
+      "status": "PASS",
+      "seconds": 18.3,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_agent_queue.py",
+      "status": "PASS",
+      "seconds": 19.59,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_blank_page.py",
+      "status": "PASS",
+      "seconds": 12.6,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_budget_subject.py",
+      "status": "PASS",
+      "seconds": 26.97,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_dashboard_store.py",
+      "status": "PASS",
+      "seconds": 9.51,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_erasure_bytes.py",
+      "status": "PASS",
+      "seconds": 62.74,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_estate_history.py",
+      "status": "PASS",
+      "seconds": 24.34,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_footprint.py",
+      "status": "PASS",
+      "seconds": 16.09,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_index.py",
+      "status": "PASS",
+      "seconds": 12.13,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_key_shape.py",
+      "status": "PASS",
+      "seconds": 20.51,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_project_surface.py",
+      "status": "PASS",
+      "seconds": 22.54,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_projection.py",
+      "status": "PASS",
+      "seconds": 18.2,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_reclaimable_pressure.py",
+      "status": "PASS",
+      "seconds": 15.98,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_temporary_block.py",
+      "status": "PASS",
+      "seconds": 19.31,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_traps.py",
+      "status": "PASS",
+      "seconds": 23.06,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_write_surface.py",
+      "status": "PASS",
+      "seconds": 14.29,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_space_manager.py",
+      "status": "PASS",
+      "seconds": 3.11,
+      "unittest_cases": 24
+    },
+    {
+      "file": "tests/test_workspace.py",
+      "status": "PASS",
+      "seconds": 63.92,
+      "unittest_cases": 11
+    },
+    {
+      "file": "tests/test_workspace_upgrade.py",
+      "status": "PASS",
+      "seconds": 14.09,
+      "unittest_cases": 26
+    },
+    {
+      "file": "tests/test_workspace_boundaries.py",
+      "status": "PASS",
+      "seconds": 3.88,
+      "unittest_cases": 20
+    },
+    {
+      "file": "tests/test_dashboard_shell.py",
+      "status": "PASS",
+      "seconds": 1.04,
+      "unittest_cases": 6
+    },
+    {
+      "file": "tests/test_workspace_scheduler.py",
+      "status": "PASS",
+      "seconds": 4.98,
+      "unittest_cases": 17
+    },
+    {
+      "file": "tests/test_schema_compatibility.py",
+      "status": "PASS",
+      "seconds": 5.29,
+      "unittest_cases": 20
+    },
+    {
+      "file": "tests/test_keyserver_boundary.py",
+      "status": "PASS",
+      "seconds": 11.62,
+      "unittest_cases": 20
+    },
+    {
+      "file": "tests/test_private_sources.py",
+      "status": "PASS",
+      "seconds": 4.19,
+      "unittest_cases": 5
+    },
+    {
+      "file": "tests/test_public_contracts.py",
+      "status": "PASS",
+      "seconds": 6.02,
+      "unittest_cases": 14
+    },
+    {
+      "file": "tests/test_vault_boundaries.py",
+      "status": "PASS",
+      "seconds": 4.97,
+      "unittest_cases": 15
+    },
+    {
+      "file": "tests/test_provider_secret_boundaries.py",
+      "status": "PASS",
+      "seconds": 2.2,
+      "unittest_cases": 12
+    },
+    {
+      "file": "tests/test_cli_compatibility.py",
+      "status": "PASS",
+      "seconds": 1.75,
+      "unittest_cases": 17
+    },
+    {
+      "file": "tests/test_dashboard_portability.py",
+      "status": "PASS",
+      "seconds": 3.25,
+      "unittest_cases": 9
+    },
+    {
+      "file": "tests/test_agent_plugin.py",
+      "status": "PASS",
+      "seconds": 23.39,
+      "unittest_cases": 17
+    },
+    {
+      "file": "tests/test_audit_regressions.py",
+      "status": "PASS",
+      "seconds": 1.73,
+      "unittest_cases": 4
+    },
+    {
+      "file": "tests/test_identity_map.py",
+      "status": "PASS",
+      "seconds": 2.92,
+      "unittest_cases": 13
+    },
+    {
+      "file": "tests/test_zone_accounts.py",
+      "status": "PASS",
+      "seconds": 2.27,
+      "unittest_cases": 1
+    },
+    {
+      "file": "tests/test_deployed_commit.py",
+      "status": "PASS",
+      "seconds": 1.87,
+      "unittest_cases": 2
+    },
+    {
+      "file": "tests/test_scrub_incremental.py",
+      "status": "PASS",
+      "seconds": 2.2,
+      "unittest_cases": 6
+    },
+    {
+      "file": "tests/test_leak_scan_incremental.py",
+      "status": "PASS",
+      "seconds": 2.03,
+      "unittest_cases": 6
+    },
+    {
+      "file": "tests/test_tick_health.py",
+      "status": "PASS",
+      "seconds": 1.78,
+      "unittest_cases": 4
+    },
+    {
+      "file": "tests/test_accounts.py",
+      "status": "PASS",
+      "seconds": 1.93,
+      "unittest_cases": 5
+    },
+    {
+      "file": "tests/test_environments.py",
+      "status": "PASS",
+      "seconds": 2.46,
+      "unittest_cases": 9
+    },
+    {
+      "file": "tests/test_credential_bindings.py",
+      "status": "PASS",
+      "seconds": 2.36,
+      "unittest_cases": 4
+    },
+    {
+      "file": "tests/test_local_keys.py",
+      "status": "PASS",
+      "seconds": 2.92,
+      "unittest_cases": 5
+    },
+    {
+      "file": "tests/test_trap_anchors.py",
+      "status": "PASS",
+      "seconds": 2.28,
+      "unittest_cases": 1
+    },
+    {
+      "file": "tests/test_leak_coverage.py",
+      "status": "PASS",
+      "seconds": 2.75,
+      "unittest_cases": 12
+    },
+    {
+      "file": "tests/test_backup_vault.py",
+      "status": "PASS",
+      "seconds": 63.97,
+      "unittest_cases": 29
+    },
+    {
+      "file": "tests/test_organizations.py",
+      "status": "PASS",
+      "seconds": 5.26,
+      "unittest_cases": 16
+    },
+    {
+      "file": "tests/test_machine.py",
+      "status": "PASS",
+      "seconds": 29.92,
+      "unittest_cases": 16
+    },
+    {
+      "file": "tests/test_local_folders.py",
+      "status": "PASS",
+      "seconds": 1.97,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_config_locations.py",
+      "status": "PASS",
+      "seconds": 4.89,
+      "unittest_cases": 5
+    },
+    {
+      "file": "tests/test_dashboard_stop.py",
+      "status": "PASS",
+      "seconds": 6.21,
+      "unittest_cases": 5
+    },
+    {
+      "file": "tests/test_engine_update.py",
+      "status": "PASS",
+      "seconds": 28.59,
+      "unittest_cases": 42
+    },
+    {
+      "file": "tests/test_workspace_profile.py",
+      "status": "PASS",
+      "seconds": 7.57,
+      "unittest_cases": 18
+    },
+    {
+      "file": "tests/test_delta_fold.py",
+      "status": "PASS",
+      "seconds": 0.87,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_mcp_inventory.py",
+      "status": "PASS",
+      "seconds": 3.24,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_openrouter_keys.py",
+      "status": "PASS",
+      "seconds": 1.0,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_scan_ids.py",
+      "status": "PASS",
+      "seconds": 0.69,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_secrets.py",
+      "status": "PASS",
+      "seconds": 7.2,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_signature.py",
+      "status": "PASS",
+      "seconds": 2.26,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_skill_check.py",
+      "status": "PASS",
+      "seconds": 1.93,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_use_secret.py",
+      "status": "PASS",
+      "seconds": 6.23,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_validator_rules.py",
+      "status": "PASS",
+      "seconds": 12.0,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_cause_and_symptom.py",
+      "status": "PASS",
+      "seconds": 10.53,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_collector_state.py",
+      "status": "PASS",
+      "seconds": 11.45,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_corroboration.py",
+      "status": "PASS",
+      "seconds": 11.95,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_credentials.py",
+      "status": "PASS",
+      "seconds": 2.13,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_curation_paths.py",
+      "status": "PASS",
+      "seconds": 10.24,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_degradations.py",
+      "status": "PASS",
+      "seconds": 2.19,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_domain_probe.py",
+      "status": "PASS",
+      "seconds": 13.15,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_google.py",
+      "status": "PASS",
+      "seconds": 1.66,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_handoff.py",
+      "status": "PASS",
+      "seconds": 0.61,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_install_key.py",
+      "status": "PASS",
+      "seconds": 2.77,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_ledger_export.py",
+      "status": "PASS",
+      "seconds": 1.37,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_mechanical_confidence.py",
+      "status": "PASS",
+      "seconds": 3.82,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_notification.py",
+      "status": "PASS",
+      "seconds": 11.24,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_portfolio_review.py",
+      "status": "PASS",
+      "seconds": 14.99,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_project_secrets.py",
+      "status": "PASS",
+      "seconds": 1.52,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_publish_contract.py",
+      "status": "PASS",
+      "seconds": 1.92,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_recovery.py",
+      "status": "PASS",
+      "seconds": 0.68,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_reveals.py",
+      "status": "PASS",
+      "seconds": 0.56,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_session_start.py",
+      "status": "PASS",
+      "seconds": 3.19,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_tick.py",
+      "status": "PASS",
+      "seconds": 6.59,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_tick_failures.py",
+      "status": "PASS",
+      "seconds": 9.02,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_trap_efficacy.py",
+      "status": "PASS",
+      "seconds": 0.78,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_trap_map.py",
+      "status": "PASS",
+      "seconds": 3.31,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_unpublished_work.py",
+      "status": "PASS",
+      "seconds": 22.13,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_wire_survives.py",
+      "status": "PASS",
+      "seconds": 5.31,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_witness.py",
+      "status": "PASS",
+      "seconds": 10.26,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_fabric_service.py",
+      "status": "PASS",
+      "seconds": 10.92,
+      "unittest_cases": 42
+    },
+    {
+      "file": "tests/test_machine_mcp_inventory.py",
+      "status": "PASS",
+      "seconds": 2.24,
+      "unittest_cases": 18
+    },
+    {
+      "file": "tests/test_interop.py",
+      "status": "PASS",
+      "seconds": 36.39,
+      "unittest_cases": 14
+    },
+    {
+      "file": "tests/test_activity.py",
+      "status": "PASS",
+      "seconds": 6.35,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_at_stake.py",
+      "status": "PASS",
+      "seconds": 11.34,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_backup_store.py",
+      "status": "PASS",
+      "seconds": 1.43,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_checkout_subject.py",
+      "status": "PASS",
+      "seconds": 4.18,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_companion_faults.py",
+      "status": "PASS",
+      "seconds": 8.7,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_conformance_receipt.py",
+      "status": "PASS",
+      "seconds": 72.63,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_dead_data.py",
+      "status": "PASS",
+      "seconds": 1.75,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_delivery.py",
+      "status": "PASS",
+      "seconds": 12.63,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_emit_purity.py",
+      "status": "PASS",
+      "seconds": 1.54,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_env_inventory.py",
+      "status": "PASS",
+      "seconds": 5.36,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_estate_surfaces.py",
+      "status": "PASS",
+      "seconds": 0.46,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_fixture_sweep.py",
+      "status": "PASS",
+      "seconds": 13.99,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_foreign_vocabulary.py",
+      "status": "PASS",
+      "seconds": 8.06,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_freshness.py",
+      "status": "PASS",
+      "seconds": 12.75,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_gate_purity.py",
+      "status": "PASS",
+      "seconds": 26.61,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_gate_skips.py",
+      "status": "PASS",
+      "seconds": 7.9,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_git_locale.py",
+      "status": "PASS",
+      "seconds": 0.69,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_horizon.py",
+      "status": "PASS",
+      "seconds": 8.05,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_indexer_load.py",
+      "status": "PASS",
+      "seconds": 21.82,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_interpretation.py",
+      "status": "PASS",
+      "seconds": 17.44,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_key.py",
+      "status": "PASS",
+      "seconds": 5.24,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_ledger_pointer.py",
+      "status": "PASS",
+      "seconds": 0.57,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_lost_projects.py",
+      "status": "PASS",
+      "seconds": 19.14,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_merge_membership.py",
+      "status": "PASS",
+      "seconds": 21.87,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_no_silent_truncation.py",
+      "status": "PASS",
+      "seconds": 18.01,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_pipeline.py",
+      "status": "PASS",
+      "seconds": 7.2,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_plugin_pair.py",
+      "status": "PASS",
+      "seconds": 0.88,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_policy_residue.py",
+      "status": "PASS",
+      "seconds": 9.88,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_registry_shape.py",
+      "status": "PASS",
+      "seconds": 7.49,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_rollup_sessions.py",
+      "status": "PASS",
+      "seconds": 11.9,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_scrub.py",
+      "status": "PASS",
+      "seconds": 8.83,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_search_path.py",
+      "status": "PASS",
+      "seconds": 1.63,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_shared_ancestry.py",
+      "status": "PASS",
+      "seconds": 1.49,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_side_effect_attribution.py",
+      "status": "PASS",
+      "seconds": 6.65,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_skill.py",
+      "status": "PASS",
+      "seconds": 3.44,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_skip_site_kinds.py",
+      "status": "PASS",
+      "seconds": 10.82,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_stale_collapse.py",
+      "status": "PASS",
+      "seconds": 8.52,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_store_faults.py",
+      "status": "PASS",
+      "seconds": 11.3,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_store_integrity.py",
+      "status": "PASS",
+      "seconds": 15.39,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_tick_repo.py",
+      "status": "PASS",
+      "seconds": 12.11,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_unobservable.py",
+      "status": "PASS",
+      "seconds": 7.06,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_step_references.py",
+      "status": "PASS",
+      "seconds": 0.42,
+      "unittest_cases": 0
+    },
+    {
+      "file": "tests/test_honest_absence.py",
+      "status": "PASS",
+      "seconds": 9.19,
+      "unittest_cases": 0
+    }
+  ],
+  "root_unittests": {
+    "passed": 84,
+    "python": "3.14.7"
+  },
+  "additional_checks": {
+    "python_3_11_compile": "PASS",
+    "javascript_syntax": "PASS (Node 26.8.2; hosted matrix uses Node 22)",
+    "source_inventory": "PASS",
+    "plugin_strict": "PASS",
+    "wheel_content": "PASS: 482 runtime resources, 489 archive members",
+    "wheel_cli": "PASS: init, space status, enable, disable in a temporary resolved HOME; no cleanup invoked",
+    "privacy_current_tree": "PASS with locally held identifier list; values excluded from this report"
+  },
+  "browser": {
+    "fixture": "fictional cache inventory with native commands replaced by no-op success; 8.25 GB free simulated",
+    "browser": "Safari on macOS",
+    "observed": [
+      "Space navigation and critical state",
+      "preview with eligible uv and protected Docker rows",
+      "cancel removes plan on server without a run",
+      "execution records skipped Docker and completed synthetic uv with 0 GB change",
+      "English/Russian switch",
+      "Option-Tab reaches confirmation",
+      "enlarged layout keeps actions reachable by scrolling"
+    ],
+    "limits": [
+      "No real cache removal in browser checks",
+      "Final status timestamp/color and desktop-delivery text checked by source/i18n tests; not a separate final rendered capture",
+      "OS notification display not verified"
+    ]
+  },
+  "brand_lint": {
+    "status": "BASELINE_DIAGNOSTIC",
+    "errors": 1,
+    "warnings": 774,
+    "error": "B030 reads the existing article JSON-LD wordCount 1432 as an unsourced public number; no article changed"
+  },
+  "not_run": [
+    "Live low-disk automatic deletion",
+    "Hosted CI at receipt creation",
+    "Tagged release or production installation",
+    "Full private-identifier scan of pre-existing public ancestry (separate known historical review)"
+  ]
+}

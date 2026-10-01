@@ -17,7 +17,8 @@
       "gate": {
         "type": "auto",
         "check": "Request-derived requirements and safety exclusions recorded; scenarios precede UI."
-      }
+      },
+      "status": "completed-local"
     },
     {
       "id": 1,
@@ -28,7 +29,8 @@
       "gate": {
         "type": "auto",
         "check": "Test-first cleanup boundaries, concurrent execution and HTTP rejection cases pass."
-      }
+      },
+      "status": "completed-local"
     },
     {
       "id": 2,
@@ -40,7 +42,8 @@
       "gate": {
         "type": "auto",
         "check": "Existing tokens, translated states, preview/execute/history and browser walk verified."
-      }
+      },
+      "status": "completed-local"
     },
     {
       "id": 3,
@@ -52,7 +55,10 @@
       "gate": {
         "type": "auto",
         "check": "Gates pass; source and evidence pushed, installation status explicitly recorded."
-      }
+      },
+      "status": "completed-local"
     }
-  ]
+  ],
+  "implementation_commit": "89a0b05",
+  "resume": "README.md exact next task; source implemented, human CLA and tagged installation pending"
 }
