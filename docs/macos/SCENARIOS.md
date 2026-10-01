@@ -1,0 +1,98 @@
+# Native assistant scenarios
+
+Persona P-01: operator responsible for the local project estate. Evidence kind:
+brief; decision status: accepted by explicit implementation request; validation
+status: unvalidated. JTBD-01: ask what changed and act from traceable evidence.
+Story ST-01: use the agent without a browser; ST-02: retain context across launches;
+ST-03: another agent invokes the same capability. Product outcome: unobserved.
+
+## Index
+
+| ID | Scenario | Status |
+|---|---|---|
+| SCN-001 | First launch and connection recovery | validated |
+| SCN-002 | Evidence-bound answer | validated |
+| SCN-003 | Disabled provider or failed request | validated |
+| SCN-004 | Stop, close and resume | validated |
+| SCN-005 | Change workspace without stale output | validated |
+| SCN-006 | CLI/MCP caller obtains the same answer | validated |
+
+Validation is derived from the operator's explicit autonomous implementation brief;
+implementation coverage below stays none until tests and native inspection exist.
+
+## SCN-001 — First launch and connection recovery
+Status: validated
+Product: unobserved
+Persona: P-01
+Traces: ST-01, JTBD-01, FLW-01
+Preconditions: app installed, backend may be absent or old.
+Trigger: user opens app.
+Steps: open → connection status; missing CLI → choose executable/workspace in
+Settings → Test connection → compatible status → empty conversation.
+Expected result: no automatic dependency install, no model call, usable next action.
+Errors & recovery: invalid path/protocol/timeout shows retry/settings, keeps selections.
+Coverage: none yet.
+
+## SCN-002 — Evidence-bound answer
+Status: validated
+Product: unobserved
+Persona: P-01
+Traces: ST-01, JTBD-01, FLW-02
+Preconditions: compatible backend and configured provider.
+Trigger: user sends a question, optionally scoped to a project.
+Steps: type → Send → persisted pending turn → working indicator/Stop → answer,
+model/cost and expandable evidence → follow-up uses bounded previous context.
+Expected result: cited facts and degraded sources visible; no implicit mutation.
+Errors & recovery: invalid reference/provider schema refuses the result, retains question.
+Coverage: none yet.
+
+## SCN-003 — Disabled provider or failed request
+Status: validated
+Product: unobserved
+Persona: P-01
+Traces: ST-01, JTBD-01, FLW-02
+Preconditions: missing key, disabled agent, budget limit or unavailable source.
+Trigger: attempt Send.
+Steps: preflight → distinct error and next action; repair configuration → deliberate retry.
+Expected result: no fake response, no automatic spend loop, input/history preserved.
+Errors & recovery: full disk refuses before spending; errors do not expose raw provider text.
+Coverage: none yet.
+
+## SCN-004 — Stop, close and resume
+Status: validated
+Product: unobserved
+Persona: P-01
+Traces: ST-02, JTBD-01, FLW-03
+Preconditions: accepted job.
+Trigger: Stop or close app then reopen.
+Steps: Stop → cancellation recorded; reopen → stored terminal state. Close without
+Stop → job continues; reopen → pending or completed answer recovered.
+Expected result: cancelled cannot become completed; dead runner becomes interrupted.
+Errors & recovery: missing/corrupt job is named, not recreated; retry is a new request.
+Coverage: none yet.
+
+## SCN-005 — Change workspace without stale output
+Status: validated
+Product: unobserved
+Persona: P-01
+Traces: ST-02, JTBD-01, FLW-01
+Preconditions: a request to workspace A is outstanding.
+Trigger: select workspace B in settings.
+Steps: apply → invalidate UI generation → connect B → show B history.
+Expected result: late A response never enters B; A accepted job persists independently.
+Errors & recovery: failed B connection offers settings; no fallback into A disguised as B.
+Coverage: none yet.
+
+## SCN-006 — CLI/MCP caller obtains the same answer
+Status: validated
+Product: unobserved
+Persona: P-01
+Traces: ST-03, JTBD-01, FLW-04
+Preconditions: compatible host, initialized workspace and provider.
+Trigger: call agent.ask.
+Steps: validated input → durable handle → fabric.job.get → result envelope and
+shared conversation; fabric.job.cancel → terminal cancellation.
+Expected result: exact published schemas, trace propagation, no duplicate spend on replay.
+Errors & recovery: changed input under same request id rejected; different busy request
+is not silently joined; unknown ids never create jobs.
+Coverage: none yet.
