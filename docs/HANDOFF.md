@@ -52,6 +52,14 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
+**Status 2026-10-01, honest absence (unreleased on `main`):** a source measured as not
+applicable here (no RDAP service for the TLD, a companion tool not installed, a credential not
+set up for a surface another reads, a bounded OpenRouter listing that missed no consumer, a
+receipt of an integration that is off) goes on `not_applicable` and no longer degrades the
+service; a one-branch remote resolves its default branch; a timed-out command is asked again.
+Next task: the release, then `full update` on each machine. Record:
+[runs/2026-10-01-honest-absence](runs/2026-10-01-honest-absence/README.md).
+
 **Status 2026-10-01, open pull requests:** #83, #89, #93 and #62 landed with fixes, plus #98
 (reset dates counted from the measurement, which had turned `main` red). Follow-ups #95–#97.
 Record: [runs/2026-10-01-open-pr-sweep](runs/2026-10-01-open-pr-sweep/README.md).

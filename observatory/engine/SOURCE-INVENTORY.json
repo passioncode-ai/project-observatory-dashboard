@@ -1346,6 +1346,13 @@
       "bytes": 4618
     },
     {
+      "path": "slow_command.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "164c45a1f2974e8059520098fbce2dd56c3d36794d3df6304f29e166e88d3c1a",
+      "bytes": 2958
+    },
+    {
       "path": "store/compatibility.py",
       "source_sha256": "d3ed7b3502649639bb30d0872dc319183168718a883c392249641fc16e0bec00",
       "export_sha256": "d3ed7b3502649639bb30d0872dc319183168718a883c392249641fc16e0bec00",
@@ -2007,8 +2014,8 @@
       "path": "tests/test_fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4d0978f6b9ac08f6cd16f924716bba51da787e13aeb8cd1e0f9e52bb4c43dbac",
-      "bytes": 47188
+      "export_sha256": "1c4ec7da53def9986b72b14f3cda1dbe08387c13d929ed21b581048e3d2c9bb0",
+      "bytes": 47774
     },
     {
       "path": "tests/test_filesystem_scan.py",
@@ -2052,8 +2059,8 @@
       "path": "tests/test_foreign_vocabulary.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "085f6a32474011be4b97bab9ecfb5f2634cc7adc4a3ef5b2d7538c41765d5250",
-      "bytes": 10560
+      "export_sha256": "41efa3bb1901353e4e60289c5e17a1cc6822c940c39b890259195354a3178ce4",
+      "bytes": 10936
     },
     {
       "path": "tests/test_freshness.py",
@@ -2110,6 +2117,13 @@
       "upstream_modified": true,
       "export_sha256": "fda42d895b24a7a4ef7f205df62f0e02951393453d013e72e0cb32820e8f6435",
       "bytes": 22244
+    },
+    {
+      "path": "tests/test_honest_absence.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "0e3de91fe784b654646b42df0330200896d076c25b21195963db2c84040c3330",
+      "bytes": 27509
     },
     {
       "path": "tests/test_horizon.py",
@@ -3721,7 +3735,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 468,
+  "file_count": 470,
   "excluded": [
     "git-history",
     "operator-registries",

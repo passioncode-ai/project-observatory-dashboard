@@ -180,6 +180,12 @@ def test_the_board_carries_them_and_does_not_cry_wolf() -> None:
               "fell inside the window, so the filter has stopped matching; a "
               "moved column or a changed unit reads exactly like this, and an "
               "empty estate would not")
+    # The receipt's integration is ON: one left by an integration that is off is
+    # a leftover, not a measurement (degradations.integration_off).
+    settings = paths.HOME / "config/settings.json"
+    doc = json.loads(settings.read_text(encoding="utf-8"))
+    doc.setdefault("integrations", {})["sessions"] = True
+    settings.write_text(json.dumps(doc), encoding="utf-8")
     (paths.SCRATCH / "sessions.json").write_text(json.dumps({
         "counts": {"sessions": 0, "projects": 0},
         "degraded": [{"source": "sessions", "reason": reason}]}), encoding="utf-8")

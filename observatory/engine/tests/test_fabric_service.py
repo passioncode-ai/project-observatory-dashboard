@@ -244,8 +244,11 @@ class Health(Sandbox):
         (raw / "tick.json").write_text(json.dumps({"finished_at": "2026-09-01T09:00:00Z"}))
         (raw / "bitbucket.json").write_text(json.dumps({"degraded": [
             {"source": "workspace-a", "reason": "401"}, {"source": "workspace-b", "reason": "401"}]}))
+        # The integration is ON: a receipt of one that is off is a leftover, not a
+        # measurement (test_honest_absence.py), and that case is asserted below.
         (self.home / "config/settings.json").write_text(json.dumps(
-            {"schema_version": 1, "sources": {}, "integrations": {}, "features": {"scheduler": True}}))
+            {"schema_version": 1, "sources": {}, "integrations": {"bitbucket": True},
+             "features": {"scheduler": True}}))
         snap = self.snapshot()
         sources = {d["source"]: d["reason"] for d in snap["degraded"]}
         self.assertIn("tick", sources)
@@ -253,6 +256,11 @@ class Health(Sandbox):
         self.assertIn("collector:bitbucket", sources)
         self.assertIn("2 source(s)", sources["collector:bitbucket"])
         self.assertTrue(self.tiles(snap)["Last tick"]["attention"])
+        (self.home / "config/settings.json").write_text(json.dumps(
+            {"schema_version": 1, "sources": {}, "integrations": {}, "features": {"scheduler": True}}))
+        sources = {d["source"] for d in self.snapshot()["degraded"]}
+        self.assertNotIn("collector:bitbucket", sources,
+                         "a receipt left by an integration that is off is not a measurement")
 
     def test_unreadable_sources_are_degraded_not_zero(self):
         (self.home / "registry/projects.json").write_text("{half a document")
