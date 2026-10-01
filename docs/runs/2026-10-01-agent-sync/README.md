@@ -34,7 +34,7 @@ No register here carries a "Next free ID" line, so no `idRegisters` are declared
 |---|---|
 | `agent_sync.py check` | exit 0, 7 checks passed, 1 warning (`python` is not on `PATH` outside a virtual environment) |
 | lease round trip: `acquire roundtrip-2026-10-01` → `git ls-remote origin 'refs/agent-sync/leases/*'` → `release` | listed while held, gone after |
-| `python -m unittest discover -s tests -v` | exit 0, 81 tests |
+| `python -m unittest discover -s tests -v` | exit 0, 82 tests (81 before the new release-boundary test) |
 | `project-observatory full check` | exit 0, 196 of 196 suites PASS on `main` at `e863e52` plus this change. Before that rebase it failed only `test_temporary_block.py`, the clock-dated reset #98 fixed |
 | `python tools/check_public_release.py --history --history-ref HEAD` | exit 0 (exit 1 before the allowlist change: `.claude/agent-sync.json` and local `.agent-sync/` state were outside it) |
 | `tools/update_inventory.py --check`, `compileall` | exit 0 |
