@@ -77,12 +77,16 @@ server = InteropServer(
     # served and two of them write — and the gateway's own comment repeated the
     # same claim in Russian.
     instructions=(
-        "Eight `observatory_*` tools read and two write, and every Fabric capability is also served under "
+        "Ten `observatory_*` tools read, two propose, and `observatory_assistant_ask` uses the configured model and writes dialogue, and every Fabric capability is also served under "
         "its own name (fabric-interop/0.1): `estate.survey`, `project.detail`, "
         "`project.timeline`, `project.record`, `machine.mcp.inventory`, and "
         "`machine.mcp.refresh`, which answers a job followed with `fabric.job.get` and "
         "stopped with `fabric.job.cancel`. Those tools take and return exactly the "
         "published schemas and echo `_meta.traceparent` as a child span.\n"
+        "ASSISTANT: `observatory_assistant_status` reads readiness and saved conversation summaries; "
+        "`observatory_assistant_conversation` reads a private dialogue; `observatory_assistant_ask` "
+        "SPENDS using the configured model, sends bounded local evidence and persists a dialogue/job. "
+        "It gives advice only. Follow or cancel its job with the Fabric job tools.\n"
         "READ: `observatory_status` surveys the current scope; a requested scan pin "
         "is reported as unsupported in degraded. `observatory_project` answers about "
         "one project; `observatory_timeline` returns its commit history; "
@@ -172,6 +176,38 @@ def _owner_error(owner: str) -> dict[str, Any] | None:
                     "identity to check it against — promote or reject a record with "
                     "`review.py`, from a terminal.",
             "degraded": []}
+
+
+@server.tool()
+def observatory_assistant_status() -> dict:
+    """Local assistant readiness and conversation list. Reads private workspace; no model spend."""
+    from agent import assistant
+    return assistant.status()
+
+
+@server.tool()
+def observatory_assistant_ask(question: str, request_id: str,
+                              conversation_id: str | None = None,
+                              project_id: str | None = None) -> dict:
+    """Ask the configured model about bounded local project evidence. Sends the question
+    and selected local facts to that provider and can incur configured model costs.
+    Advisory only: no shell, deletion, approval or deployment. Persists private dialogue.
+    Reuse request_id only for identical input. Returns job + conversation_id; follow
+    with fabric.job.get, stop with fabric.job.cancel. A different active ask is busy.
+    """
+    from agent import assistant
+    args={"question":question,"request_id":request_id}
+    if conversation_id is not None:args["conversation_id"]=conversation_id
+    if project_id is not None:args["project_id"]=project_id
+    try:return assistant.ask(args)
+    except assistant.AssistantError as exc:raise ValueError(str(exc)) from None
+
+
+@server.tool()
+def observatory_assistant_conversation(id: str) -> dict:
+    """Read this workspace's private conversation by opaque chat id; no model spend."""
+    from agent import assistant
+    return assistant.get_conversation(id)
 
 
 @server.tool()

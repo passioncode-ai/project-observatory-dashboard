@@ -592,3 +592,9 @@ zero and totals are sums across GA4 resources, not deduplicated human visitors.
 
 Behavior contracts and checks: [workspace redesign](ux/DASHBOARD-REDESIGN.md),
 `test_workspace_redesign`, `test_dashboard_shell`, `test_google_identity`.
+
+## Native macOS client candidate
+
+For the separate native agent window, see [macOS setup](macos/README.md). It requires
+a backend implementing `observatory-assistant/1`; it does not replace the existing
+tagged installation or register a second MCP server.

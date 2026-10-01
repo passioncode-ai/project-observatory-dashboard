@@ -7,9 +7,38 @@
     "resume": "docs/macos/PLAN.md current status; no operational source hotpatch"
   },
   "stages": [
-    {"id": 0, "name": "specification", "gate": {"type": "auto", "check": "Request-derived scope, scenarios and state contracts written before UI"}},
-    {"id": 1, "name": "shared-agent-and-mcp", "gate": {"type": "auto", "check": "Meaningful red-to-green safety, persistence and job tests"}},
-    {"id": 2, "name": "native-app", "gate": {"type": "auto", "check": "Swift tests, real app inspection and buildable bundle"}},
-    {"id": 3, "name": "verification-and-ecosystem", "gate": {"type": "auto", "check": "Bounded acceptance, linked owner docs and pushed commits"}}
-  ]
+    {
+      "id": 0,
+      "name": "specification",
+      "gate": {
+        "type": "auto",
+        "check": "Request-derived scope, scenarios and state contracts written before UI"
+      }
+    },
+    {
+      "id": 1,
+      "name": "shared-agent-and-mcp",
+      "gate": {
+        "type": "auto",
+        "check": "Safety, persistence, replay, cancellation and real stdio/client checks"
+      }
+    },
+    {
+      "id": 2,
+      "name": "native-app",
+      "gate": {
+        "type": "auto",
+        "check": "Swift tests, real app inspection and buildable bundle"
+      }
+    },
+    {
+      "id": 3,
+      "name": "verification-and-ecosystem",
+      "gate": {
+        "type": "auto",
+        "check": "Bounded acceptance, linked owner docs and pushed commits"
+      }
+    }
+  ],
+  "status": "candidate; native walkthrough and integration/release gates remain"
 }

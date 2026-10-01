@@ -33,8 +33,9 @@ agent feature/provider configuration and conversation summaries without spending
 `list` lists conversations. Unknown actions/fields/ids fail closed.
 
 `agent.ask` accepts question (1..6000 chars), optional conversation id, optional
-project id, and caller request id for deduplication. It returns the standard
-Fabric handle. Pending → working → completed | failed | cancelled. Cancellation
+project id, and caller request id for deduplication. The CLI and additive `observatory_assistant_ask` MCP tool return a
+Fabric-compatible job view plus conversation id; `agent.ask` is the internal job
+kind, not a newly published manifest capability. Pending → working → completed | failed | cancelled. Cancellation
 is terminal; a late answer cannot replace it. Repeating an identical request id
 reuses its job, never spends again. Reusing it with changed input is an error.
 A different request while this assistant is working is busy, not a join to an
@@ -46,7 +47,7 @@ assistant job has its own wall-time limit and no infinite conversation loop.
 The core stores private conversation records below `store/assistant/`, modes
 700/600, with atomic writes and a workspace lock around mutations. Conversations
 have opaque ids. Truncate model context to recent turns and a fixed evidence
-budget; retain original history locally. Bound message counts/length and document
+budget; retain original history locally. Limit a conversation to 32 turns and bound message lengths and document
 retention; never silently delete history to make disk space. A full/unwritable
 store refuses the operation before model spend. Interrupted turns stay visible.
 

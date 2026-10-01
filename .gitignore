@@ -17,3 +17,7 @@ node_modules/
 # agent-sync: local state and the credentials file are never committed
 .env.agent-sync
 .agent-sync/
+
+# Local SwiftPM build products
+macos/.build/
+macos/.swiftpm/
