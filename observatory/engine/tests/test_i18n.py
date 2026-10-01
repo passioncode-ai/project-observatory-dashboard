@@ -98,6 +98,9 @@ def source_ids() -> set[str]:
     shell_ids, _ = _python_ids(DASH / "shell.py")
     ids |= shell_ids
     ids |= machine_page_ids()
+    space_ids, _ = _python_ids(DASH / "space_page.py")
+    ids |= space_ids
+    template += (DASH / "space.js").read_text(encoding="utf-8")
     literal = r'(["\'])((?:\\.|(?!\1).)+?)\1'
     for m in re.finditer(r"\bT\(\s*" + literal, template):
         ids.add(m.group(2).replace('\\"', '"').replace("\\'", "'"))

@@ -877,12 +877,17 @@ def build():
         PAYLOAD["machine"] = machine_view.summary()
     except Exception as exc:  # noqa: BLE001 — a page, not a crash
         PAYLOAD["machine"] = {"degraded": [{"source": "machine", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
+    try:
+        from tools.space_manager import Manager
+        PAYLOAD["space"] = Manager().status()
+    except Exception:
+        PAYLOAD["space"] = {"caches": [], "error": "space-state-unavailable"}
     build.last_payload = PAYLOAD                                                  
     payload = json.dumps(PAYLOAD, ensure_ascii=False)
     locale = build_locale()
     t = i18n.Translator(locale)
     title = "Projects — the operator's registry"
-    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "").replace("__MACHINE__", "")
+    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "").replace("__MACHINE__", "").replace("__SPACE__", "")
             .replace("__TITLE__", html.escape(t(title)))
             .replace("__PAGE_TITLE__", "")
             .replace("__H1__", t.mark(title, tag="h1"))
@@ -1518,6 +1523,7 @@ __NAV__
 <section id="panel" class="card panel" role="dialog" aria-labelledby="panel-title" hidden></section>
 __CARDS__
 __MACHINE__
+__SPACE__
 <div id="list-tools" class="list-tools"></div>
 <main id="out" aria-live="polite"></main>
 
@@ -3647,6 +3653,9 @@ TEMPLATE = (TEMPLATE
             .replace("</style>", (Path(__file__).with_name("workspace.css").read_text(encoding="utf-8")) + "\n</style>"))
 import shell as _shell
 TEMPLATE = TEMPLATE.replace("__ICON__", _shell.ICON)
+# A shared script; the Space closure returns immediately on every other page.
+_at = TEMPLATE.rindex("</script>")
+TEMPLATE = TEMPLATE[:_at] + (Path(__file__).with_name("space.js").read_text()) + TEMPLATE[_at:]
 
 if __name__ == "__main__":
     OUT.parent.mkdir(parents=True, exist_ok=True)
