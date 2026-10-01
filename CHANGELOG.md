@@ -33,19 +33,19 @@ On `main` since v0.9.1, for the next release; no version is cut yet.
   for a domain DNS shows is held; a companion tool that is not installed, told apart from one
   installed without its store or key; a Google credential refused by an API its Cloud project
   never enabled, when another credential reads that surface; and a receipt left behind by an
-  integration the workspace has switched off, which was read as current for days (#PR).
+  integration the workspace has switched off, which was read as current for days (#104).
 - **An OpenRouter key was reported gone because a bounded listing did not reach it.** The listing
   reads the newest keys only, and an account where another product mints hundreds a day pushed a
   consumer's key past that bound. Missing keys are now searched for once past the bound and
   remembered by hash; the provisioning key, which no listing includes, is confirmed with
-  `GET /key`; a key is reported gone only on a 404 for its hash or a listing walked to its end (#PR).
+  `GET /key`; a key is reported gone only on a 404 for its hash or a listing walked to its end (#104).
 - **A repository whose remote has one branch had "no default branch".** With no `origin/HEAD`
   and no `main` or `master`, the remote's only branch is its default; with several, the reason
-  names `git remote set-head origin --auto` (#PR).
+  names `git remote set-head origin --auto` (#104).
 - **One slow answer from an external command degraded a whole collector.** `git` calls of the
   filesystem scan and `heroku auth:token` are asked again with a longer limit after a timeout
   (`slow_command.py`), and a command that misses every attempt is reported with each duration
-  and the load average (#PR).
+  and the load average (#104).
 - **A leak-scan suppression could hide a rotated value or another file.** It matched only the
   credential name and a path substring; it is now bound to an exact location and the value's
   identity, malformed or legacy rules are refused with a warning, and evidence is replayed when a
