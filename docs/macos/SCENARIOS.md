@@ -10,18 +10,18 @@ ST-03: another agent invokes the same capability. Product outcome: unobserved.
 
 | ID | Scenario | Status |
 |---|---|---|
-| SCN-001 | First launch and connection recovery | validated |
-| SCN-002 | Evidence-bound answer | validated |
-| SCN-003 | Disabled provider or failed request | validated |
-| SCN-004 | Stop, close and resume | validated |
-| SCN-005 | Change workspace without stale output | validated |
-| SCN-006 | CLI/MCP caller obtains the same answer | validated |
+| SCN-001 | First launch and connection recovery | draft |
+| SCN-002 | Evidence-bound answer | draft |
+| SCN-003 | Disabled provider or failed request | draft |
+| SCN-004 | Stop, close and resume | draft |
+| SCN-005 | Change workspace without stale output | draft |
+| SCN-006 | CLI/MCP caller obtains the same answer | draft |
 
-Validation is derived from the operator's explicit autonomous implementation brief;
+These scenarios are specified from the autonomous implementation brief, not human usability validation;
 coverage below distinguishes tested core/state behavior from the still-unverified native walkthrough. See [receipts](../runs/2026-10-01-macos-app/README.md).
 
 ## SCN-001 — First launch and connection recovery
-Status: validated
+Status: draft
 Product: unobserved
 Persona: P-01
 Traces: ST-01, JTBD-01, FLW-01
@@ -34,7 +34,7 @@ Errors & recovery: invalid path/protocol/timeout shows retry/settings, keeps sel
 Coverage: core/bridge/model regression tests; native walkthrough unverified.
 
 ## SCN-002 — Evidence-bound answer
-Status: validated
+Status: draft
 Product: unobserved
 Persona: P-01
 Traces: ST-01, JTBD-01, FLW-02
@@ -47,7 +47,7 @@ Errors & recovery: invalid reference/provider schema refuses the result, retains
 Coverage: core/bridge/model regression tests; native walkthrough unverified.
 
 ## SCN-003 — Disabled provider or failed request
-Status: validated
+Status: draft
 Product: unobserved
 Persona: P-01
 Traces: ST-01, JTBD-01, FLW-02
@@ -59,7 +59,7 @@ Errors & recovery: full disk refuses before spending; errors do not expose raw p
 Coverage: core/bridge/model regression tests; native walkthrough unverified.
 
 ## SCN-004 — Stop, close and resume
-Status: validated
+Status: draft
 Product: unobserved
 Persona: P-01
 Traces: ST-02, JTBD-01, FLW-03
@@ -72,19 +72,19 @@ Errors & recovery: missing/corrupt job is named, not recreated; retry is a new r
 Coverage: core/bridge/model regression tests; native walkthrough unverified.
 
 ## SCN-005 — Change workspace without stale output
-Status: validated
+Status: draft
 Product: unobserved
 Persona: P-01
 Traces: ST-02, JTBD-01, FLW-01
 Preconditions: a request to workspace A is outstanding.
 Trigger: select workspace B in settings.
 Steps: apply → invalidate UI generation → connect B → show B history.
-Expected result: late A response never enters B; A accepted job persists independently.
+Expected result: late A response never enters B; old draft and project scope are cleared when the backend/workspace changes; A accepted job persists independently. Dashboard opens only after the backend verifies the selected workspace.
 Errors & recovery: failed B connection offers settings; no fallback into A disguised as B.
 Coverage: core/bridge/model regression tests; native walkthrough unverified.
 
 ## SCN-006 — CLI/MCP caller obtains the same answer
-Status: validated
+Status: draft
 Product: unobserved
 Persona: P-01
 Traces: ST-03, JTBD-01, FLW-04

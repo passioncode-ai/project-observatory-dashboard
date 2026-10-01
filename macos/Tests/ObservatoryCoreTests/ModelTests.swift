@@ -32,6 +32,17 @@ import XCTest
         await model.send()
         XCTAssertEqual(model.question, "Question remains"); XCTAssertFalse(model.busy); XCTAssertNotNil(model.error)
     }
+    func testWorkspaceChangeClearsOldDraftAndProjectScope() async {
+        let model = Model(defaults: defaults()) { _, _ in ["engine_version": "new", "conversations": []] }
+        model.scope = "project:old"; model.question = "Old private draft"; model.workspace = "/new-workspace"
+        await model.saveSettings()
+        XCTAssertEqual(model.scope, ""); XCTAssertEqual(model.question, ""); XCTAssertTrue(model.projects.isEmpty)
+    }
+    func testDashboardRejectsNonLoopbackDestination() async {
+        let model = Model(defaults: defaults()) { _, _ in ["url": "https://example.invalid/dashboard/index.html"] }
+        let url = await model.dashboardURL()
+        XCTAssertNil(url); XCTAssertNotNil(model.error)
+    }
     func testNewConversationCannotDetachRunningRequest() {
         let model = Model(defaults: defaults())
         model.selected = "chat-existing"; model.busy = true

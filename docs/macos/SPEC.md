@@ -30,7 +30,7 @@ credential goes in argv. Errors are typed codes, never raw provider responses.
 `status` reports protocol `observatory-assistant/1`, workspace availability,
 agent feature/provider configuration and conversation summaries without spending.
 `ask` starts `agent.ask`; `get` reads a conversation; `job` polls; `cancel` stops;
-`list` lists conversations. Unknown actions/fields/ids fail closed.
+`list` lists conversations; `dashboard` verifies the selected workspace before returning a loopback URL. Unknown actions/fields/ids fail closed.
 
 `agent.ask` accepts question (1..6000 chars), optional conversation id, optional
 project id, and caller request id for deduplication. The CLI and additive `observatory_assistant_ask` MCP tool return a

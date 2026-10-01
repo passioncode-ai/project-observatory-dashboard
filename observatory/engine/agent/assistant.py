@@ -163,6 +163,19 @@ def project_choices():
                 for p in doc.get('projects',[]) if isinstance(p,dict) and isinstance(p.get('id'),str)][:1000]
     except (ValueError,OSError,AttributeError):return []
 
+def dashboard():
+    """Return only a loopback URL proven to serve this selected workspace."""
+    from tools import dashboard_open
+    try:
+        state=json.loads((paths.SCRATCH/'serverd.json').read_text())
+        port=state.get('port',47311)
+    except FileNotFoundError:port=47311
+    except (ValueError,OSError,AttributeError):raise AssistantError('dashboard-unavailable') from None
+    if type(port) is not int or not 1<=port<=65535:raise AssistantError('dashboard-unavailable')
+    served=dashboard_open.served_workspace(port,timeout=3)
+    if served!=str(paths.HOME):raise AssistantError('dashboard-workspace-mismatch')
+    return {'url':f'http://127.0.0.1:{port}/dashboard/index.html'}
+
 def status():
     return {'protocol':PROTOCOL,'engine_version':configuration.VERSION,'workspace':str(paths.HOME),
             'agent_enabled':configuration.enabled('agent','features'),'provider_configured':providers.have_key(),
@@ -242,15 +255,16 @@ def run_question(job):
 
 def main(argv=None):
     import argparse
-    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('action',choices=['status','ask','list','get','job','cancel']);args=ap.parse_args(argv)
+    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('action',choices=['status','ask','list','get','job','cancel','dashboard']);args=ap.parse_args(argv)
     try:
         doc={}
-        if args.action not in ('status','list'):
+        if args.action not in ('status','list','dashboard'):
             raw=sys.stdin.buffer.read(32769)
             if len(raw)>32768:raise AssistantError('input-too-large')
             doc=json.loads(raw)
             if not isinstance(doc,dict):raise AssistantError('invalid-input')
         if args.action=='status':result=status()
+        elif args.action=='dashboard':result=dashboard()
         elif args.action=='list':result={'conversations':list_conversations(),
             'projects':project_choices()}
         elif args.action=='ask':result=ask(doc)
