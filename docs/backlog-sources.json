@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/passioncode-ai/project-observatory-dashboard",
+  "sources": [
+    {
+      "path": "docs/backlog.md",
+      "goal": "reliable-work",
+      "kind": "tasks",
+      "format": "table",
+      "idColumn": "ID",
+      "titleColumn": "Item",
+      "statusColumn": "Status"
+    },
+    {
+      "path": "docs/ux/UI-PLAN.md",
+      "goal": "workflow-control",
+      "kind": "context"
+    }
+  ]
+}

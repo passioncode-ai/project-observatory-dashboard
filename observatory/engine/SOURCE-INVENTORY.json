@@ -2014,8 +2014,8 @@
       "path": "tests/test_fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1c4ec7da53def9986b72b14f3cda1dbe08387c13d929ed21b581048e3d2c9bb0",
-      "bytes": 47774
+      "export_sha256": "21cd0867560028ba1d0134e262afda86c45bea4a6d038924d6b844e8cae1f677",
+      "bytes": 48584
     },
     {
       "path": "tests/test_filesystem_scan.py",

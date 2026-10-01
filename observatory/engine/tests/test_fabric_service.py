@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 import plistlib
 import signal
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -821,6 +822,15 @@ class RunningServer(unittest.TestCase):
         with self.assertRaises(OSError, msg="the second copy never bound its port"):
             get(port, "/health")
 
+    def test_conformance_reports_a_missing_lsof_dependency(self):
+        tools = self.base / "without-lsof"
+        tools.mkdir(exist_ok=True)
+        git = shutil.which("git", path=self.env.get("PATH"))
+        self.assertIsNotNone(git, "git is required to check state.outside-code")
+        (tools / "git").symlink_to(git)
+        with mock.patch.dict(self.env, {"PATH": str(tools)}, clear=False):
+            self.test_the_conformance_probe_passes()
+
     def test_the_conformance_probe_passes(self):
         import fabric_service as fs
         import service_identity
@@ -841,12 +851,18 @@ class RunningServer(unittest.TestCase):
         self.assertEqual(failed, {})
         self.assertEqual(out.returncode, 0)
         not_run = {k for k, v in verdicts.items() if v["verdict"] == "NOT_RUN"}
-        self.assertEqual(not_run, {"login.single-use", "lifecycle.launchd",
-                                   "interop.well-known-capabilities", "interop.tools-match",
-                                   "interop.job-tools", "interop.unknown-job", "interop.trace-propagation"},
-                         "the dashboard declares no login, this descriptor has no supervisor, and the MCP "
-                         "server is stdio, so the probe's MCP-over-HTTP rules have no surface to call "
-                         "(tests/test_interop.py checks them over stdio)")
+        expected_not_run = {"login.single-use", "lifecycle.launchd",
+                            "interop.well-known-capabilities", "interop.tools-match",
+                            "interop.job-tools", "interop.unknown-job", "interop.trace-propagation"}
+        if shutil.which("lsof", path=self.env.get("PATH")) is None:
+            expected_not_run.add("network.loopback-only")
+            self.assertEqual(verdicts["network.loopback-only"]["verdict"], "NOT_RUN")
+            self.assertEqual(verdicts["network.loopback-only"]["evidence"], "lsof is not installed")
+        else:
+            self.assertEqual(verdicts["network.loopback-only"]["verdict"], "PASS")
+        self.assertEqual(not_run, expected_not_run,
+                         "only declared unsupported surfaces and an explicitly absent lsof may be NOT_RUN; "
+                         "tests/test_interop.py checks the stdio MCP surface")
         self.assertEqual(verdicts["interop.manifest-link"]["verdict"], "PASS")
         self.assertEqual(verdicts["interop.events-trace"]["verdict"], "PASS")
         self.assertEqual(verdicts["lifecycle.instance-lock"]["verdict"], "PASS")

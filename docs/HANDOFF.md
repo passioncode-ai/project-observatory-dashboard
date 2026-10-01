@@ -7,6 +7,14 @@ each user retains their own private projects, credentials and runtime state; ret
 older CLI contracts, provide future upgrade/restore safeguards, and publish accurate
 onboarding, website and launch material.
 
+## Current task register and organization quality
+
+Current editable task status lives in [backlog.md](backlog.md), declared by
+[backlog-sources.json](backlog-sources.json); dated records below retain their evidence.
+The [2026-10-01 quality run](runs/2026-10-01-organization-quality/README.md) connects this
+repository to the common workspace backlog and corrects the conformance suite's missing-lsof
+expectation. It changes test evidence and documentation, not the published engine version.
+
 ## Completed implementation
 
 - Complete source export under `observatory/engine/`; generic defaults, individual
