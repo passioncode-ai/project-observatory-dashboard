@@ -124,6 +124,16 @@ This repository is public, and so is its Git history, commit messages included.
 Do not bump the version, edit `CHANGELOG.md` or tag in a feature pull request unless it is the
 release itself.
 
+Shared registers are edited under a lease. [docs/AGENT_SYNC.md](docs/AGENT_SYNC.md) (generated
+from `.claude/agent-sync.json` by `agent_sync.py setup`; never edited by hand) lists the guarded
+files and the gate. Run `agent_sync.py acquire <file>` before editing one and
+`agent_sync.py release <file>` after, on every path including failure. The lease is a ref under
+`refs/agent-sync/leases/` on `origin`, so another contributor's agent sees it
+(`git ls-remote origin 'refs/agent-sync/leases/*'`); the record plane is local (`fs`), and
+`.agent-sync/` is git-ignored. No register here carries a "Next free ID" line, so nothing is
+reserved yet; a register that gains one is declared under `idRegisters` and taken with
+`agent_sync.py reserve <REG>`.
+
 ## Decisions and receipts
 
 A unit of work leaves its record in `docs/runs/<date>-<slug>/README.md`: what shipped (PRs,

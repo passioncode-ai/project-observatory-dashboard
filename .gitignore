@@ -13,3 +13,7 @@ node_modules/
 
 # Deployment client cache is private runtime state.
 .wrangler/
+
+# agent-sync: local state and the credentials file are never committed
+.env.agent-sync
+.agent-sync/
