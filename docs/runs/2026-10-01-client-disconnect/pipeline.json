@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "kernel": {
+    "scope": "Handle disconnected HTTP peers, keep unexpected errors visible, and use synthetic example and fixture identifiers.",
+    "evidence": "verification.json; test-first socket failures, full portable runner and focused rerun.",
+    "deps": "AGENTS.md, CONTRIBUTING.md, fabric-service contract; ordinary peer disconnects must not obscure service failures.",
+    "resume": "README.md: required PR checks, contributor CLA, tagged release and normal update."
+  },
+  "stages": [
+    {
+      "id": 1,
+      "state": "reproduce",
+      "skills": [
+        "task-pipeline"
+      ],
+      "gate": {
+        "type": "auto",
+        "check": "Four socket-boundary regression failures observed before implementation."
+      }
+    },
+    {
+      "id": 2,
+      "state": "fix-and-verify",
+      "skills": [
+        "task-pipeline",
+        "evidence-docs"
+      ],
+      "gate": {
+        "type": "auto",
+        "check": "Regression green; unrelated EIO propagates; portable tests, inventory and package checks pass."
+      }
+    },
+    {
+      "id": 3,
+      "state": "handoff",
+      "skills": [
+        "agent-sync",
+        "evidence-docs"
+      ],
+      "gate": {
+        "type": "auto",
+        "check": "Guarded handoff edited under a Git lease; source and evidence pushed for PR review, without claiming a release."
+      }
+    }
+  ]
+}

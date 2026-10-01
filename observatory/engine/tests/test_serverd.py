@@ -12,6 +12,8 @@ planted inside the sandbox's own HOME.
 """
 from __future__ import annotations
 import http.client
+import io
+import errno
 import socket
 import importlib.util
 import json
@@ -20,6 +22,7 @@ import pathlib
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -212,13 +215,57 @@ def test_the_daemon_never_binds_beyond_localhost() -> None:
           "a project watcher has no business on the network")
 
 
+def test_disconnected_clients_are_not_server_failures() -> None:
+    """Drive real HTTP parsing with failures at the socket's response boundary.
+
+    Both headers and bodies use sendall. Inject the peer failure there rather
+    than raising from a route; unrelated application errors must still escape.
+    """
+    sys.path.insert(0, str(ROOT / "tools"))
+    import serverd
+
+    class Peer:
+        def __init__(self, error, fail_at):
+            self.error, self.fail_at, self.writes = error, fail_at, 0
+
+        def makefile(self, *args):
+            return io.BytesIO(b"GET /nope HTTP/1.0\r\nHost: localhost:43210\r\n\r\n")
+
+        def sendall(self, data):
+            self.writes += 1
+            if self.writes == self.fail_at:
+                raise self.error
+
+    server = SimpleNamespace(server_address=("127.0.0.1", 43210))
+    for error in (BrokenPipeError(errno.EPIPE, "peer closed"),
+                  ConnectionResetError(errno.ECONNRESET, "peer reset")):
+        for fail_at in (1, 2):
+            peer = Peer(error, fail_at)
+            escaped = None
+            try:
+                serverd.Handler(peer, ("127.0.0.1", 1), server)
+            except Exception as exc:
+                escaped = exc
+            check(f"{type(error).__name__} during response write {fail_at} closes quietly",
+                  escaped is None and peer.writes == fail_at, str(escaped))
+
+    peer = Peer(OSError(errno.EIO, "synthetic storage failure"), 1)
+    escaped = None
+    try:
+        serverd.Handler(peer, ("127.0.0.1", 1), server)
+    except OSError as exc:
+        escaped = exc
+    check("an unrelated I/O failure is not hidden", escaped is peer.error)
+
+
 if __name__ == "__main__":
     print("the always-on server — every route, every state, both board rules\n")
     for fn in (test_every_route_answers_and_none_serves_a_value,
                test_the_health_row_speaks_three_states,
                test_the_board_rule_fires_on_silence_and_only_with_the_plist,
                test_the_stale_session_rule_reads_the_handshake,
-               test_the_daemon_never_binds_beyond_localhost):
+               test_the_daemon_never_binds_beyond_localhost,
+               test_disconnected_clients_are_not_server_failures):
         fn()
     print()
     if FAILURES:
