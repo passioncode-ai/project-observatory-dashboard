@@ -50,3 +50,28 @@ subcommands; `tests/test_dashboard_render.py` executes the renderer.
 ### OSS-13 — a suppression cannot hide a replacement value (PB-032)
 
 Given an accepted sighting with a reason and expiry, the operator copies its secret name, exact location and opaque `version_id` into the suppression config. The accepted sighting remains visible as suppressed. A new value under that name, another location, or another workspace salt remains an active sighting. Expiry replays old evidence without requiring a new write to the source. Malformed and legacy unversioned rules raise a warning and suppress nothing. Proof: `tests/test_leak_coverage.py` (rotation, exact path, duplicate names in files/SQLite, salt change, malformed shapes, expiry and incremental value discovery). Detection still covers known values only; it does not discover every unknown secret shape or search all deleted Git history.
+
+### Space management — SP-1..SP-7 (operator-requested scope)
+
+- **OSS-23 / SP-1..2:** Open System → Space. See current free bytes, timestamp,
+  automatic-mode setting and cache rows (owner/path/occupied bytes/action/protection).
+  Missing measurements are unknown, never zero. Missing tools and unsupported caches
+  show the reason and stay protected. Loading, empty and retryable error are distinct.
+- **OSS-24 / SP-3,5,7:** Preview cleanup, inspect the fixed eligible operations, cancel
+  or confirm. Confirmation can only apply a fresh preview once. Revalidate each
+  adapter; a newly busy cache is skipped. During execution disable repeated submit;
+  after interruption/reload read the durable state instead of resubmitting. Show
+  per-operation result and measured free-byte change, which may be negative due to
+  other processes. A file:// page remains a snapshot with a CLI recovery command.
+- **OSS-25 / SP-4..6:** Enable automatic cleanup explicitly. While the local server
+  runs, less than 10 GB free starts approved cache cleanup, subject to one shared
+  lock and a cooldown. Stop after reaching 15 GB or exhausting safe operations.
+  Active or uninspectable consumers are protected. Insufficient recovery remains
+  critical with skipped reasons; low/recovered/run notifications persist on the
+  Space page. Disable prevents the next automatic action; an already running native
+  command finishes normally. No Git/worktree/dependency/history/container/volume
+  deletion is part of this mode.
+
+These scenarios authorize the bounded Space exception to the older read-only
+local dashboard. All other mutation restrictions remain. Product outcome is
+unobserved until an installation runs it. Coverage will name the final test receipt.

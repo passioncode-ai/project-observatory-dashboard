@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "kernel": {
+    "scope": "SP-1 through SP-7; cache operations only, preserve sessions and data.",
+    "evidence": "README.md requirement table, synthetic tests, browser receipt and final verification.json.",
+    "deps": "Existing shell, local request boundary, workspace settings, native cleanup contracts.",
+    "resume": "README.md and implementation status; tagged release required before live installation."
+  },
+  "stages": [
+    {
+      "id": 0,
+      "state": "scope-and-scenarios",
+      "skills": [
+        "task-pipeline",
+        "ux-scenarios"
+      ],
+      "gate": {
+        "type": "auto",
+        "check": "Request-derived requirements and safety exclusions recorded; scenarios precede UI."
+      }
+    },
+    {
+      "id": 1,
+      "state": "backend-and-safety",
+      "skills": [
+        "task-pipeline"
+      ],
+      "gate": {
+        "type": "auto",
+        "check": "Test-first cleanup boundaries, concurrent execution and HTTP rejection cases pass."
+      }
+    },
+    {
+      "id": 2,
+      "state": "interface",
+      "skills": [
+        "sheleg-design",
+        "copywriting"
+      ],
+      "gate": {
+        "type": "auto",
+        "check": "Existing tokens, translated states, preview/execute/history and browser walk verified."
+      }
+    },
+    {
+      "id": 3,
+      "state": "verification-and-handoff",
+      "skills": [
+        "evidence-docs",
+        "agent-sync"
+      ],
+      "gate": {
+        "type": "auto",
+        "check": "Gates pass; source and evidence pushed, installation status explicitly recorded."
+      }
+    }
+  ]
+}
