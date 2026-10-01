@@ -1,3 +1,3 @@
 """Project Observatory local observation tools. Importing performs no I/O."""
 
-__version__ = "0.9.1"
+__version__ = "0.10.0"

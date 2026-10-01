@@ -15,7 +15,7 @@ description: >-
   decision with different evidence.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
-  version: "0.12.3"
+  version: "0.13.0"
 compatibility: >-
   Requires an initialized full Project Observatory installation to persist
   records. Uses its MCP server when available in the current host; the bundled
