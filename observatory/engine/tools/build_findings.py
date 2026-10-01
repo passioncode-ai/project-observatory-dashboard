@@ -785,6 +785,26 @@ def reset_date(word: str | None, at: datetime | None = None) -> str | None:
     return f"{year:04d}-{month:02d}-01"
 
 
+
+def key_reset_date(doc: dict) -> str | None:
+    """When the limit a key-usage document MEASURED lifts — counted from the
+    measurement, not from today.
+
+    The document says "monthly" and when it was checked. Counted from the wall
+    clock, a key measured as spent on 2026-09-07 was reported as lifting on
+    2026-11-01 from October on: a month late, and a date nobody measured (found
+    2026-10-01, when the fixtures stopped agreeing with the clock). A document
+    without a readable `checked_at` is read as current, which is what it was
+    before this function existed.
+    """
+    at = None
+    try:
+        at = datetime.strptime(str(doc.get("checked_at") or ""),
+                               "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        at = None
+    return reset_date(doc.get("limit_reset"), at)
+
 def gate_skip_findings(sites: list[dict]) -> list[dict]:
     """Places a suite can drop assertions without saying who carries them.
 
@@ -2192,7 +2212,7 @@ def collect() -> list[dict]:
         # ("monthly"), never a date, so a block the system knows is temporary said
         # nothing about when it lifts — and a warning that will be lit for three
         # weeks reads exactly like one nobody has looked at.
-        _reset = reset_date(doc.get("limit_reset"))
+        _reset = key_reset_date(doc)
         if others > max(1.0, own_month * 2):
             out.append({
                 "type": "wallet.shared_key", "subject": "provider:openrouter",
@@ -3795,7 +3815,7 @@ def collect() -> list[dict]:
                 _kd = {}
             _rem = _kd.get("limit_remaining")
             key_spent = _rem is not None and float(_rem) <= 0
-            key_reset = reset_date(_kd.get("limit_reset"))
+            key_reset = key_reset_date(_kd)
         stale = False
         if waiting and since:
             try:

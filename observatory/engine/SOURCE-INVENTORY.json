@@ -2814,8 +2814,8 @@
       "path": "tests/test_temporary_block.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9d33388cdefd959676ce4f5a41ca78554783c80df3b4c711efff2dabd2ea9b05",
-      "bytes": 10677
+      "export_sha256": "918f3eecbf3862800d936f2573c7a0c5cb892fe4984a0f9ebca3ba29a251bd27",
+      "bytes": 11838
     },
     {
       "path": "tests/test_tick.py",
@@ -3149,8 +3149,8 @@
     {
       "path": "tools/build_findings.py",
       "source_sha256": "03136ce1f366d180307f7f0c17ab41a3de82631103750f081a6d79758569e0b3",
-      "export_sha256": "2f9b7747bb3a028c8cd7a29786b666b97980d4a1649f11c824cbdb7cb05a29f1",
-      "bytes": 245505,
+      "export_sha256": "279be2d05b8fd1d6f1137e14979af53c86179ac66cdac571cc3507afda8bc1ff",
+      "bytes": 246329,
       "python_comments_removed": 996,
       "python_docstrings_removed": 28,
       "tool_descriptions_retained": 0,
