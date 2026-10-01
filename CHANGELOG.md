@@ -3,13 +3,14 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.10.0 — 2026-10-01
 
-On `main` since v0.9.1, for the next release; no version is cut yet.
+A minor release: the licence changes, and collectors report sources that do not apply here
+without degrading the service.
 
 ### Changed
 
-- **Licence.** The next release is the first under `AGPL-3.0-only OR
+- **Licence.** This release is the first under `AGPL-3.0-only OR
   LicenseRef-PassionCode-Commercial`: open source under the GNU AGPL-3.0, with a commercial
   licence from PassionCode.ai (`LICENSE`, `COMMERCIAL-LICENSE.md`, every manifest and `SKILL.md`).
   v0.8.2–v0.9.1 keep PolyForm Noncommercial or Internal Use, v0.8.1 and earlier MIT (#90, #91).
@@ -55,6 +56,14 @@ On `main` since v0.9.1, for the next release; no version is cut yet.
   measurement's `checked_at` (#98).
 - `test_leak_coverage.py` built its dates from the local clock while the scanner uses UTC, so it
   failed between local and UTC midnight east of Greenwich (#94).
+
+### Companion plugin 0.13.0
+
+- Licence metadata in `plugin.json`, both marketplace entries and every `SKILL.md` front matter
+  is `AGPL-3.0-only OR LicenseRef-PassionCode-Commercial`; 0.12.3 shipped the PolyForm text.
+- `handling-secrets` documents the new Cloudflare presets (`r2-bucket`, `email-send`,
+  `email-routing`, `workers-edit`, `fabric-inbox-server`, `fabric-inbox-account`,
+  `workers-observability-read`) and the read-only `cloudflare.py groups` listing.
 
 ## 0.9.1 — 2026-09-30
 
