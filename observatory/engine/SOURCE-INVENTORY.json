@@ -2087,8 +2087,8 @@
       "path": "tests/test_git_locale.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "90a84665208076c076dc4d9e56b6eea27563ec705d25db603025d94459e95f1c",
-      "bytes": 7692
+      "export_sha256": "074c28baa5e42a96af48b77e5080252d333c45d95117b42f65592642fee4f764",
+      "bytes": 7830
     },
     {
       "path": "tests/test_google.py",
