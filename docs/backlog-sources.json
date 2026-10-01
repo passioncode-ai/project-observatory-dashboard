@@ -14,7 +14,11 @@
     {
       "path": "docs/ux/UI-PLAN.md",
       "goal": "workflow-control",
-      "kind": "context"
+      "kind": "tasks",
+      "format": "table",
+      "idColumn": "Packet",
+      "titleColumn": "User problem and change",
+      "statusColumn": "Status"
     }
   ]
 }

@@ -8,7 +8,9 @@ one vision-linked workspace backlog. Reviewed source: `4e03a1c8fb53db187010dbb1c
 
 ## Completed
 
-Recorded the post-update receipt refresh task. The conformance test now checks the explicit missing-lsof NOT_RUN reason; with lsof available it still requires loopback PASS.
+Recorded the post-update receipt refresh task. Registered UX1–UX6 directly from their
+existing implementation plan with explicit `not recorded` statuses; acceptance criteria
+are unchanged and no completion was inferred. The conformance test now checks the explicit missing-lsof NOT_RUN reason; with lsof available it still requires loopback PASS.
 
 - `docs/backlog-sources.json` declares task owners and vision goals; AGENTS describes source edits,
   leases, stable IDs, closure receipts and publication. The aggregate is a derived view.
@@ -28,6 +30,8 @@ Commands below were run locally. Hosted CI and live product acceptance are separ
 | `python3 observatory/engine/tests/test_fabric_service.py` | exit 0; 43 tests, including missing-lsof fixture |
 | `.venv/bin/project-observatory full check` | exit 1; 195 of 197 suites PASS, two 120-second timeouts under concurrent load |
 | `full check --suite conformance_receipt`; `full check --suite backup_vault` | both exit 0 in isolation, unchanged 120-second timeout |
+| `.venv/bin/project-observatory full check --jobs 2` | exit 0; all 197 suites PASS, unchanged 120-second timeout |
+| Workspace collector against the local task manifest | 7 tasks; 0 errors; UX1–UX6 statuses normalize to unknown |
 | `python3 tools/update_inventory.py --check` | exit 0; source inventory current |
 | Wheel content check; strict plugin validation on all three manifests | exit 0; 478 runtime files, 485 archive files |
 | Site static negative probes, article and interaction checks | exit 0; 15 negative probes |
@@ -43,7 +47,10 @@ An initial root test invocation outside the required full virtual environment fa
 sqlite-vec prerequisite; installing the documented locked full environment made all 84 pass.
 The first complete portable run timed out in `test_backup_vault.py` and
 `test_conformance_receipt.py`; both then passed individually at the original timeout.
-This is passing coverage across all 197 suites, not a claim that the first full run passed.
+A complete rerun with two workers then passed all 197 suites with exit 0 and the
+original timeout. The initial full run remains a failed receipt. The late UX plan
+registration changes only root documentation and coordination metadata; source
+inventory, privacy and manifest checks were repeated after it.
 Live provider, external MCP host admission and real secret rotation remain NOT_RUN.
 
 ## Audit limits

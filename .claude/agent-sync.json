@@ -11,7 +11,8 @@
     "CHANGELOG.md",
     "docs/HANDOFF.md",
     "docs/backlog-sources.json",
-    "docs/backlog.md"
+    "docs/backlog.md",
+    "docs/ux/UI-PLAN.md"
   ],
   "claimTags": {},
   "gates": [
