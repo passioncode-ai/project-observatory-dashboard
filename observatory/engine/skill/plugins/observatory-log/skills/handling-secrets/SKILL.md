@@ -107,6 +107,17 @@ put, a get and a delete, and must be refused a bucket list. It lands in three
 slots on stdin: `<PREFIX>_ACCESS_KEY_ID`, `<PREFIX>_SECRET_ACCESS_KEY` and
 `<PREFIX>_ENDPOINT`. A second issue rolls the same token and keeps the key id.
 
+An application that sends transactional email through Cloudflare Email Service
+gets `cloudflare.py issue --preset email-send --account <slug> --vault
+<project>/<env>/<NAME>`: Email Sending Write and Read on that one account (the
+group exists at account level only), verified by listing its suppressions.
+Adding an Email Routing rule in one zone — one address to a Worker — is
+`--preset email-routing --zone <zone>`, and deploying that Worker with its KV
+namespace is `--preset workers-edit --account <slug>`. Each is its own token in
+its own slot. When a preset's groups are unknown, `cloudflare.py groups
+--account <slug> --match "<words>"` lists the catalogue's names and levels,
+read-only and without ids.
+
 By default, slots live under the private workspace's `secrets/projects/`.
 An explicitly configured `sources.secret_store` or `OBSERVATORY_VAULT_DIR`
 can select a separate private store. Such external stores are excluded from

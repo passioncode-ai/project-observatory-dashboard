@@ -696,6 +696,190 @@ def test_cf_r2_preset_refuses_and_cleans_up() -> None:
     check("the setup right is not a preset anyone can issue",
           "r2-setup" not in m.PRESETS and m.R2_SETUP["groups"] == ("Workers R2 Storage Write",), "")
 
+
+def test_cf_groups_lists_names_and_levels_and_never_a_value() -> None:
+    """Choosing a preset's permission groups needs their exact NAMES, which
+    Cloudflare's docs do not always list (Email Sending was absent from the
+    permissions reference on 2026-09-30). `groups` asks the account's own
+    catalogue through the stashed admin, filtered, and prints names and levels
+    only — never an id that could be pasted into a policy by hand."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    log = []
+
+    def fake(path, token, payload=None, method=None):
+        log.append((method, path, token, payload))
+        if "permission_groups" in path:
+            return {"result": [
+                {"id": "g1", "name": "Email Sending Write", "scopes": ["com.cloudflare.api.account"]},
+                {"id": "g2", "name": "Email Sending Write", "scopes": ["com.cloudflare.api.account.zone"]},
+                {"id": "g3", "name": "D1 Write", "scopes": ["com.cloudflare.api.account"]}]}
+        raise AssertionError(f"unexpected call {path}")
+    m._request = fake
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_groups(None, "email sending")
+    text = out.getvalue()
+    check("groups answers", rc == 0, str(rc))
+    check("it names both levels of a same-named group",
+          "Email Sending Write" in text and "account" in text and "zone" in text, text)
+    check("the filter drops what does not match", "D1 Write" not in text, text)
+    check("no id and no admin value reach the output",
+          "g1" not in text and "g2" not in text and "admin-token" not in text, text)
+    check("it only reads", all(pl is None for _m, _p, _t, pl in log), str(log))
+
+
+def _preset_fake(m, log, groups, probe_prefix, value_prefix):
+    """A provider that offers `groups` (name, level) and answers `probe_prefix`."""
+    def fake(path, token, payload=None, method=None):
+        log.append((method or ("POST" if payload is not None else "GET"), path, token, payload))
+        if "permission_groups" in path:
+            return {"result": [{"id": f"id-{lvl}-{name}", "name": name,
+                                "scopes": ["com.cloudflare.api.account" + (".zone" if lvl == "zone" else "")]}
+                               for name, lvl in groups]}
+        if path.startswith("/zones?name=example.com&account.id=a1"):
+            return {"result": [{"id": "z1", "name": "example.com"}]}
+        if path.endswith("/tokens?per_page=50"):
+            return {"result": []}
+        if path == "/accounts/a1/tokens" and method is None and payload is not None:
+            return {"result": {"id": "t-new", "value": value_prefix + "y" * 30}}
+        if path.startswith(probe_prefix):
+            return {"result": []}
+        raise AssertionError(f"unexpected call {path}")
+    m._request = fake
+
+
+def test_cf_email_presets_grant_exactly_what_the_email_service_needs() -> None:
+    """Transactional email through Cloudflare Email Service: a
+    runtime SENDER on one account, a zone's ROUTING-rule writer, and a Workers
+    writer for an inbound probe — each its own narrow token, each verified by a
+    read its own grant allows, each delivered to a vault slot."""
+    import contextlib, io
+    cases = [
+        ("email-send", "account", ("Email Sending Write", "Email Sending Read"),
+         "/accounts/a1/email/sending/suppressions", "send-value-"),
+        ("workers-edit", "account", ("Workers Scripts Write", "Workers KV Storage Write"),
+         "/accounts/a1/workers/scripts", "wk-value-"),
+        ("email-routing", "zone", ("Zone Read", "Email Routing Rules Write"),
+         "/zones/z1/email/routing/rules", "rt-value-"),
+    ]
+    for preset, level, groups, probe, prefix in cases:
+        m = cf(); _cf_with_admin(m)
+        log, delivered = [], []
+        offered = [(g, level) for g in groups] + [(g, "zone" if level == "account" else "account") for g in groups]
+        _preset_fake(m, log, offered, probe, prefix)
+        m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append((value, p, e, n))
+        m._journal = lambda *a, **k: None
+        m.token_dir = lambda: (_ for _ in ()).throw(AssertionError("vault presets never reach the plugin folder"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = (m.cmd_issue_zone(preset, "example.com", "proj/prod/CF_X", None, wait=0) if level == "zone"
+                  else m.cmd_issue_account(preset, "proj/prod/CF_X", None, wait=0))
+        check(f"{preset} issues", rc == 0, str(rc))
+        create = [pl for _m, path, _t, pl in log if path == "/accounts/a1/tokens" and pl]
+        pol = create[0]["policies"][0] if create else {}
+        check(f"{preset} grants exactly its {level}-level groups",
+              [g["id"] for g in pol.get("permission_groups", [])] == [f"id-{level}-{g}" for g in groups],
+              str(pol))
+        want_res = ({"com.cloudflare.api.account.zone.z1": "*"} if level == "zone"
+                    else {"com.cloudflare.api.account.a1": "*"})
+        check(f"{preset} is scoped to one {level}", pol.get("resources") == want_res, str(pol))
+        check(f"{preset} is verified with the NEW token by its own read",
+              any(path.startswith(probe) and tok.startswith(prefix) for _m, path, tok, _p in log), str(log[-3:]))
+        check(f"{preset} lands in the named slot and is never printed",
+              [d[1:] for d in delivered] == [("proj", "prod", "CF_X")] and prefix not in out.getvalue(),
+              out.getvalue())
+
+
+def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
+    """The other half of least privilege: each email preset is ATTEMPTED on a
+    path it does not belong to, with a slot the vault refuses, against a
+    catalogue that offers its group only at the wrong level, and with a token
+    that cannot do its read. Every attempt is refused, and none mints or
+    delivers anything."""
+    groups = {"email-send": ("Email Sending Write", "Email Sending Read"),
+              "workers-edit": ("Workers Scripts Write", "Workers KV Storage Write"),
+              "email-routing": ("Zone Read", "Email Routing Rules Write")}
+    level = {"email-send": "account", "workers-edit": "account", "email-routing": "zone"}
+    for preset in groups:
+        m = cf(); _cf_with_admin(m)
+        log, delivered = [], []
+        other = "zone" if level[preset] == "account" else "account"
+        # The catalogue carries the preset's names at the OTHER level only.
+        _preset_fake(m, log, [(g, other) for g in groups[preset]], "/never", "cfx-")
+        m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append(value)
+        m._journal = lambda *a, **k: None
+        issue = ((lambda slot: m.cmd_issue_zone(preset, "example.com", slot, None, wait=0))
+                 if level[preset] == "zone"
+                 else (lambda slot: m.cmd_issue_account(preset, slot, None, wait=0)))
+        check(f"{preset}: a same-named group at the wrong level is never taken",
+              issue("proj/prod/CF_X") == 1, "")
+        check(f"{preset}: a slot the vault would refuse is refused before minting",
+              issue("proj/prod/lower-case") == 2, "")
+        check(f"{preset}: without --vault nothing is minted", issue(None) == 2, "")
+        check(f"{preset}: the analytics path refuses it", m.cmd_issue(preset, None, None) == 2, "")
+        if level[preset] == "zone":
+            check(f"{preset}: the account path refuses a zone preset",
+                  m.cmd_issue_account(preset, "proj/prod/CF_X", None) == 2, "")
+        else:
+            check(f"{preset}: the zone path refuses an account preset",
+                  m.cmd_issue_zone(preset, "example.com", "proj/prod/CF_X", None) == 2, "")
+        check(f"{preset}: no refusal minted anything",
+              not any(p == "/accounts/a1/tokens" and pl for _m, p, _t, pl in log), str(log))
+
+        # A token that never proves its read is not delivered.
+        log2, delivered2 = [], []
+        _preset_fake(m, log2, [(g, level[preset]) for g in groups[preset]], "/never", "cfx-")
+        inner = m._request
+
+        def refuse_new_token(path, token, payload=None, method=None, inner=inner):
+            if token.startswith("cfx-"):
+                raise RuntimeError("HTTP 403")
+            return inner(path, token, payload, method)
+        m._request = refuse_new_token
+        m.deliver_to_vault = lambda value, p, e, n, d=delivered2: d.append(value)
+        check(f"{preset}: a token that cannot do its read is not delivered",
+              issue("proj/prod/CF_X") == 1 and not delivered2 and not delivered, str(delivered2))
+
+
+def test_cf_email_routing_token_is_one_per_slot() -> None:
+    """Two projects that route mail in ONE zone hold two tokens. Named after
+    the zone alone, the second issue would ROLL the first project's token and
+    kill the value its slot holds — silently, since that slot is not touched."""
+    m = cf(); _cf_with_admin(m)
+    tokens: dict[str, str] = {}
+    log = []
+
+    def fake(path, token, payload=None, method=None):
+        log.append((method or ("POST" if payload is not None else "GET"), path, token, payload))
+        if "permission_groups" in path:
+            return {"result": [{"id": "zr", "name": "Zone Read", "scopes": ["com.cloudflare.api.account.zone"]},
+                               {"id": "er", "name": "Email Routing Rules Write",
+                                "scopes": ["com.cloudflare.api.account.zone"]}]}
+        if path.startswith("/zones?name=example.com&account.id=a1"):
+            return {"result": [{"id": "z1", "name": "example.com"}]}
+        if path.endswith("/tokens?per_page=50"):
+            return {"result": [{"id": i, "name": n} for n, i in tokens.items()]}
+        if path == "/accounts/a1/tokens" and method is None and payload is not None:
+            tokens[payload["name"]] = f"t{len(tokens)}"
+            return {"result": {"id": tokens[payload["name"]], "value": "cfr-" + "y" * 30}}
+        if "/value" in path or method == "PUT":
+            raise AssertionError(f"a second slot must not roll the first slot's token: {path}")
+        if path.startswith("/zones/z1/email/routing/rules"):
+            return {"result": []}
+        raise AssertionError(f"unexpected call {path}")
+    m._request = fake
+    m.deliver_to_vault = lambda *a: None
+    m._journal = lambda *a, **k: None
+    check("the first project's routing writer issues",
+          m.cmd_issue_zone("email-routing", "example.com", "alpha/prod/CF_ROUTING", None, wait=0) == 0, "")
+    check("a second project in the same zone gets its own token",
+          m.cmd_issue_zone("email-routing", "example.com", "beta/prod/CF_ROUTING", None, wait=0) == 0
+          and len(tokens) == 2, str(sorted(tokens)))
+    check("each token names its zone and its slot",
+          all("example.com" in n and "/prod/CF_ROUTING" in n for n in tokens), str(sorted(tokens)))
+
+
 # ─────────────────────────── openrouter ──────────────────────────────────────
 
 def orr():
@@ -902,6 +1086,10 @@ if __name__ == "__main__":
                test_cf_sigv4_matches_the_published_aws_example,
                test_cf_r2_preset_issues_one_bucket_pair_into_the_vault,
                test_cf_r2_preset_refuses_and_cleans_up,
+               test_cf_groups_lists_names_and_levels_and_never_a_value,
+               test_cf_email_presets_grant_exactly_what_the_email_service_needs,
+               test_cf_email_presets_refuse_what_they_do_not_grant,
+               test_cf_email_routing_token_is_one_per_slot,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,
