@@ -104,6 +104,31 @@ class AssistantTests(unittest.TestCase):
             self.a.run_question(job)
             self.assertEqual(self.a.jobs.get(job['id'])['status'],'cancelled')
             self.assertNotIn('answer',self.a.get_conversation(second['conversation_id'])['turns'][0])
+    def test_real_detached_runner_dispatches_and_persists_answer(self):
+        import time
+        real_spawn=self.a.jobs._spawn
+        # Only the provider boundary is replaced in this test child. The real
+        # run_job dispatcher, heartbeat, completion and private files execute.
+        code=("import sys,runpy;sys.path.insert(0,"+repr(str(ROOT))+");"
+              "from agent import assistant;"
+              "assistant.providers.complete=lambda *a,**k:{'parsed':{'answer':'Demo active','evidence_ids':['E1'],'next_steps':[]},'model':'fixture','cost':0};"
+              "runpy.run_path("+repr(str(ROOT/'tools/run_job.py'))+",run_name='__main__')")
+        children=[]
+        def spawn(argv,env):
+            child=real_spawn([sys.executable,'-c',code,argv[-1]],env);children.append(child);return child
+        with self.enabled(),patch.object(self.a.jobs,'_spawn',side_effect=spawn):
+            first=self.a.ask(self.request())
+            deadline=time.monotonic()+15
+            while time.monotonic()<deadline:
+                doc=self.a.jobs.get(first['job']['id'])
+                if doc['status'] in self.a.jobs.TERMINAL:break
+                time.sleep(.05)
+            if doc['status'] not in self.a.jobs.TERMINAL:self.a.jobs.cancel(doc['id'])
+            for child in children:child.wait(timeout=5)
+            self.assertEqual(doc['status'],'completed',doc.get('error'))
+            self.assertEqual(self.a.get_conversation(first['conversation_id'])['turns'][0]['answer']['answer'],'Demo active')
+            self.assertEqual(self.a.ask(self.request())['job']['id'],doc['id'])
+
     def test_cancel_during_spawn_stops_new_process(self):
         def spawn(argv,env):
             self.a.jobs.cancel(argv[-1]);return type('Proc',(),{'pid':12345})()
