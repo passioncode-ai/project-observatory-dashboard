@@ -344,6 +344,16 @@ def local_request(host: str, origin: str | None, fetch_site: str | None, port: i
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = f"observatory-serverd/{VERSION}"
 
+    # region client-disconnect — docs: docs/runs/2026-10-01-client-disconnect/README.md
+    def handle(self):
+        # Browsers and polling clients may leave while a response is in flight.
+        # This ends that connection, not the service; other I/O errors propagate.
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
+    # endregion client-disconnect
+
     def log_message(self, fmt, *args):                    # quiet by design;
         pass                                              # launchd keeps stderr
 

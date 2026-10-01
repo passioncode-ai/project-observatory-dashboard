@@ -1342,7 +1342,7 @@
       "path": "skill/plugins/observatory-log/skills/tracking-resources/SKILL.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9c3b819f3ed6f273a4b294f384856631165a00fbcf3205805fe56e0c557a2ab5",
+      "export_sha256": "83cf0fb4689ff571e29b0ecaee04aa3e14444bb29223ab97837e02186d80c75c",
       "bytes": 4618
     },
     {
@@ -2014,8 +2014,8 @@
       "path": "tests/test_fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1c4ec7da53def9986b72b14f3cda1dbe08387c13d929ed21b581048e3d2c9bb0",
-      "bytes": 47774
+      "export_sha256": "2268a3835f42b012830a361f5e47ef4a5d7e928ef588287d1c21f7b01e646915",
+      "bytes": 47825
     },
     {
       "path": "tests/test_filesystem_scan.py",
@@ -2723,8 +2723,8 @@
       "path": "tests/test_serverd.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5448531031b31087c8a9107328bf2fcd14f2476f44cf92453acbc955addf5708",
-      "bytes": 10980
+      "export_sha256": "ddd925fd7017528248ba2f47c2ef7d969318c867ea4c5ca836978d22b83a3076",
+      "bytes": 12766
     },
     {
       "path": "tests/test_session_start.py",
@@ -3555,8 +3555,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "7be90480691c92d19c940735203a2e753876642e450d89ec8d8b90b8615df011",
-      "bytes": 31826,
+      "export_sha256": "2734ce73bdbc9d7656163943852d7ed8fb4e94e5dd756ac38273d3f29b4ffeda",
+      "bytes": 32274,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
