@@ -35,7 +35,10 @@ the service snapshot. Files: `degradations.py`, `slow_command.py`, `collectors/s
   degraded); after the change 49 assertions, 0 failures.
 - Root tests: 83, OK. `tools/update_inventory.py --check`: passed. `compileall` on Python 3.11:
   OK. `tools/check_public_release.py --history --history-ref HEAD`: 0 findings.
-- `project-observatory full check --jobs 3`: see the pull request for the counts.
+- `project-observatory full check --jobs 3` (197 suites, host at load average ~130-150): 194
+  PASS, 3 FAIL — `test_fabric_service`, `test_foreign_vocabulary` and `test_git_locale` planted
+  a receipt without enabling its integration, or compiled `sh()` without its new helper. Each
+  was corrected and the three, with 17 suites touching the changed code, re-ran: 20 of 20 PASS.
 - A dry run of the fixed collectors against a live workspace, writing only to a scratch copy
   of its receipts: every collector reported 0 degradations, and the service snapshot computed
   from that copy held no collector row. A second OpenRouter run answered from the remembered
