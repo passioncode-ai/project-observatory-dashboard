@@ -96,6 +96,28 @@ def test_a_word_it_cannot_read_is_refused_not_guessed() -> None:
     # instead of printing a date nobody measured.
 
 
+def test_the_date_belongs_to_the_measurement_not_the_clock() -> None:
+    """A key measured spent in September lifts on October 1st, whenever it is read.
+    The wall clock was the input until 2026-10-01, when this file's own fixture
+    (measured 2026-09-07) started reading "2026-11-01" and every CI row went red."""
+    b = B()
+    fn = getattr(b, "measured_at", None)
+    if fn is None:
+        check("build_findings.measured_at exists", False,
+              "the reset date must be derived from the document's own checked_at")
+        return
+    check("checked_at is read as UTC",
+          fn({"checked_at": "2026-09-07T22:48:54Z"})
+          == datetime(2026, 9, 7, 22, 48, 54, tzinfo=timezone.utc),
+          str(fn({"checked_at": "2026-09-07T22:48:54Z"})))
+    check("a measurement from January resets in February, read at any date",
+          b.reset_date("monthly", fn({"checked_at": "2026-01-15T00:00:00Z"})) == "2026-02-01",
+          str(b.reset_date("monthly", fn({"checked_at": "2026-01-15T00:00:00Z"}))))
+    for doc in ({}, {"checked_at": ""}, {"checked_at": "yesterday"}, {"checked_at": 7}):
+        check(f"{doc!r} falls back to the clock rather than a guessed moment",
+              fn(doc) is None, str(fn(doc)))
+
+
 # ─────────── the symptom branches on its cause ─────────────────────────
 
 def estate(key_usage: dict | None, agent: dict) -> list[dict]:
@@ -220,6 +242,7 @@ if __name__ == "__main__":
           "nothing its cause forbids\n")
     for fn in (test_monthly_resolves_to_the_first_of_next_month,
                test_a_word_it_cannot_read_is_refused_not_guessed,
+               test_the_date_belongs_to_the_measurement_not_the_clock,
                test_with_the_key_spent_the_ceiling_remedy_is_withdrawn,
                test_with_the_key_roomy_the_ceiling_remedy_stays,
                test_with_no_key_document_the_cause_is_unknown_not_absent,

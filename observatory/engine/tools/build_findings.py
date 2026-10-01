@@ -785,6 +785,27 @@ def reset_date(word: str | None, at: datetime | None = None) -> str | None:
     return f"{year:04d}-{month:02d}-01"
 
 
+def measured_at(doc: dict) -> datetime | None:
+    """When a key-usage document was measured (`checked_at`), or None.
+
+    The reset date belongs to the MEASUREMENT, not to the clock reading it: a key
+    found spent on 2026-09-07 lifts on 2026-10-01, and saying "2026-11-01" when
+    the same document is read on October 1st both moves a date the provider
+    already passed and tells the operator to wait a month for nothing. Measured
+    2026-10-01, when `tests/test_temporary_block.py` went red on every CI row at
+    midnight UTC with no change to the code. None (absent or unreadable) leaves
+    `reset_date` on the wall clock, the only time left to reason from.
+    """
+    raw = doc.get("checked_at") if isinstance(doc, dict) else None
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        when = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
 def gate_skip_findings(sites: list[dict]) -> list[dict]:
     """Places a suite can drop assertions without saying who carries them.
 
@@ -2192,7 +2213,7 @@ def collect() -> list[dict]:
         # ("monthly"), never a date, so a block the system knows is temporary said
         # nothing about when it lifts — and a warning that will be lit for three
         # weeks reads exactly like one nobody has looked at.
-        _reset = reset_date(doc.get("limit_reset"))
+        _reset = reset_date(doc.get("limit_reset"), measured_at(doc))
         if others > max(1.0, own_month * 2):
             out.append({
                 "type": "wallet.shared_key", "subject": "provider:openrouter",
@@ -3795,7 +3816,7 @@ def collect() -> list[dict]:
                 _kd = {}
             _rem = _kd.get("limit_remaining")
             key_spent = _rem is not None and float(_rem) <= 0
-            key_reset = reset_date(_kd.get("limit_reset"))
+            key_reset = reset_date(_kd.get("limit_reset"), measured_at(_kd))
         stale = False
         if waiting and since:
             try:
