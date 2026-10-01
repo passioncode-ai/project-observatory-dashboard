@@ -82,6 +82,25 @@ def test_monthly_resolves_to_the_first_of_next_month() -> None:
           str(fn("monthly", datetime(2026, 12, 20, tzinfo=timezone.utc))))
 
 
+def test_the_reset_is_counted_from_the_measurement_not_from_today() -> None:
+    """A spend limit measured as spent on 2026-09-07 lifts on 2026-10-01. Counted
+    from the wall clock instead, the same document said 2026-11-01 from October
+    on: a date nobody measured, and a month late. Found on 2026-10-01, when every
+    fixture in this file stopped agreeing with itself."""
+    b = B()
+    fn = getattr(b, "key_reset_date", None)
+    check("build_findings.key_reset_date exists", fn is not None, "")
+    if fn is None:
+        return
+    doc = {"limit_reset": "monthly", "checked_at": "2026-09-07T22:48:54Z"}
+    check("a September measurement lifts on the first of October",
+          fn(doc) == "2026-10-01", str(fn(doc)))
+    check("a measurement with no time falls back to today, and says a date only for a known word",
+          fn({"limit_reset": "never"}) is None and fn({"limit_reset": "monthly"}) is not None, "")
+    check("an unreadable time is not a measurement",
+          fn({"limit_reset": "monthly", "checked_at": "yesterday"}) == b.reset_date("monthly"), "")
+
+
 def test_a_word_it_cannot_read_is_refused_not_guessed() -> None:
     b = B()
     fn = getattr(b, "reset_date", None)
@@ -223,7 +242,8 @@ if __name__ == "__main__":
                test_with_the_key_spent_the_ceiling_remedy_is_withdrawn,
                test_with_the_key_roomy_the_ceiling_remedy_stays,
                test_with_no_key_document_the_cause_is_unknown_not_absent,
-               test_the_cause_and_the_symptom_agree_about_the_date):
+               test_the_cause_and_the_symptom_agree_about_the_date,
+               test_the_reset_is_counted_from_the_measurement_not_from_today):
         fn()
     print()
     if FAILURES:
