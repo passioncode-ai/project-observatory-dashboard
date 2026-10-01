@@ -72,6 +72,15 @@ class ReleaseBoundaryTests(unittest.TestCase):
         self.assertTrue(privacy.audit(self.root, [], False)['passed'])
         self.put('.gitleaksignore','private-fixture-value:generic-api-key:12\n')
         self.assertFalse(privacy.audit(self.root, ['private-fixture-value'], False)['passed'])
+    def test_check_private_allow_list_is_admitted_and_its_content_is_scanned(self):
+        # `.check-private-allow` holds reviewed synthetic-finding fingerprints for org-index
+        # check_private.py (rule:file:hash); it is public and scanned like any file.
+        self.assertTrue(privacy.allowed_path(Path('.check-private-allow')))
+        self.put('README.md','Generic text')
+        self.put('.check-private-allow','P2:tests/test_x.py:0123456789abcdef\n')
+        self.assertTrue(privacy.audit(self.root, [], False)['passed'])
+        self.put('.check-private-allow','private-fixture-value\n')
+        self.assertFalse(privacy.audit(self.root, ['private-fixture-value'], False)['passed'])
     def test_only_reviewed_commonjs_test_is_admitted_and_content_is_scanned(self):
         self.assertTrue(privacy.allowed_path(Path('tools/check_site_interactions.cjs')))
         self.assertFalse(privacy.allowed_path(Path('tools/unreviewed.cjs')))
