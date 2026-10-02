@@ -3,6 +3,9 @@ import Foundation
 /// What the dashboard view does with a navigation it did not start itself.
 public enum NavigationDecision: Equatable, Sendable { case allow, openExternally, deny }
 
+/// What the dashboard view does with an authentication challenge.
+public enum ChallengeAnswer: Equatable, Sendable { case performDefault, cancel }
+
 /// The one place a dashboard address is judged. The window shows exactly one
 /// workspace's dashboard — its verified loopback server, or its built pages on disk —
 /// and nothing else: another site, another local server or a file outside the
@@ -39,5 +42,13 @@ public struct DashboardOrigin: Equatable, Sendable {
         }
         if Self.externalSchemes.contains(scheme) { return .openExternally }
         return .deny
+    }
+
+    /// The dashboard asks for no credential — loopback http or files on disk. WebKit's
+    /// default handling of a password or client-certificate challenge can consult the
+    /// login keychain (a Keychain dialog, or a stored password sent on), so every such
+    /// challenge is cancelled; only TLS server-trust evaluation keeps its default.
+    public static func challenge(_ method: String) -> ChallengeAnswer {
+        method == NSURLAuthenticationMethodServerTrust ? .performDefault : .cancel
     }
 }

@@ -10,6 +10,9 @@ public enum BridgeError: Error, LocalizedError, Equatable {
     case failed(String)
     /// A typed engine error code, e.g. `budget-reached`.
     case backend(String)
+    /// No program at the chosen absolute path: on a first launch, nothing is installed
+    /// yet. The detail is the path, so the message can name where it looked.
+    case missing(String)
     public var errorDescription: String? { code }
     public var code: String {
         switch self {
@@ -21,11 +24,12 @@ public enum BridgeError: Error, LocalizedError, Equatable {
         case .incompatible: return "backend-incompatible"
         case .failed: return "backend-failed"
         case .backend(let code): return code
+        case .missing: return "backend-missing"
         }
     }
     public var detail: String? {
         switch self {
-        case .incompatible(let d), .failed(let d): return d.isEmpty ? nil : d
+        case .incompatible(let d), .failed(let d), .missing(let d): return d.isEmpty ? nil : d
         default: return nil
         }
     }
@@ -50,9 +54,9 @@ public struct Backend: Sendable {
     }
 
     private func run(_ action: String, input: [String: String], timeout: TimeInterval, child: Child) throws -> Data {
-        guard executable.hasPrefix("/"), workspace.hasPrefix("/"),
-              FileManager.default.isExecutableFile(atPath: executable),
-              Self.actions.contains(action) else { throw BridgeError.configuration }
+        guard executable.hasPrefix("/"), workspace.hasPrefix("/"), Self.actions.contains(action) else { throw BridgeError.configuration }
+        guard FileManager.default.fileExists(atPath: executable) else { throw BridgeError.missing(executable) }
+        guard FileManager.default.isExecutableFile(atPath: executable) else { throw BridgeError.configuration }
         let payload = try JSONSerialization.data(withJSONObject: input)
         var env = ProcessInfo.processInfo.environment
         env["OBSERVATORY_HOME"] = workspace

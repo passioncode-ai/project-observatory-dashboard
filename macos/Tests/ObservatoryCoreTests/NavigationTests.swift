@@ -28,4 +28,17 @@ final class NavigationTests: XCTestCase {
         XCTAssertNil(DashboardOrigin.files("/srv/example-ws/../other/docs/dashboard/index.html", workspace: "/srv/example-ws"))
         XCTAssertNil(DashboardOrigin.files("relative/index.html", workspace: "/srv/example-ws"))
     }
+    func testNoAuthenticationChallengeCanReachTheKeychain() {
+        // The dashboard needs no credential. A password or client-certificate challenge
+        // left to WebKit's default handling can consult the login keychain and put a
+        // Keychain dialog in front of the operator; every such challenge is cancelled.
+        for method in [NSURLAuthenticationMethodHTTPBasic, NSURLAuthenticationMethodHTTPDigest,
+                       NSURLAuthenticationMethodNTLM, NSURLAuthenticationMethodNegotiate,
+                       NSURLAuthenticationMethodClientCertificate, NSURLAuthenticationMethodHTMLForm,
+                       NSURLAuthenticationMethodDefault, "an-unknown-method"] {
+            XCTAssertEqual(DashboardOrigin.challenge(method), .cancel, method)
+        }
+        // Server trust is certificate evaluation, not a stored secret: default handling.
+        XCTAssertEqual(DashboardOrigin.challenge(NSURLAuthenticationMethodServerTrust), .performDefault)
+    }
 }
