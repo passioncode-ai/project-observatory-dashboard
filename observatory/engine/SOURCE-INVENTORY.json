@@ -1664,8 +1664,8 @@
       "path": "tests/test_agent_plugin.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "60aff323fbe2109fde326c7bf42a8a379e0314199ee0240db7405534997718a6",
-      "bytes": 18155
+      "export_sha256": "f6db162304481099c00b7a0251ce7a489deb3b9050e3f6334b45adb433a3f83f",
+      "bytes": 18429
     },
     {
       "path": "tests/test_agent_queue.py",
@@ -3165,8 +3165,8 @@
       "path": "tools/agent_plugin.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3b1605bbe3a333ef662edcfaa366e31321b6ef5ed480d0371be6002d15353f26",
-      "bytes": 17921
+      "export_sha256": "f3ea745b6435ad2a170e5dfc3fee5b75bc037a8080466c683a36670de8365297",
+      "bytes": 17952
     },
     {
       "path": "tools/audit_vault_links.py",
