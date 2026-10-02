@@ -422,6 +422,35 @@ def test_a_register_that_will_not_read_is_a_row_and_withholds_unsigned():
         check("and the file is byte-identical afterwards", bad.read_bytes() == before)
 
 
+def test_a_vault_slot_reaches_the_document_without_an_openrouter_scan() -> None:
+    """A key added with `vault.py put` never reached the Keys page: the emitter
+    built the credential document only when `store/raw/openrouter.json` existed,
+    which is never, for a workspace that has not switched OpenRouter on."""
+    from emitter_fixture import seed
+    root = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-credentials-novault-")).resolve()
+    env = {**seed(root), "OBSERVATORY_HOME": str(root / "home")}
+    env.pop("OBSERVATORY_VAULT_DIR", None)
+    subprocess.run([sys.executable, str(ROOT / "observatory.py"), "init"], cwd=ROOT, env=env,
+                   capture_output=True, timeout=120, check=True)
+    (root / "raw" / "openrouter.json").unlink(missing_ok=True)
+    put = subprocess.run([sys.executable, str(ROOT / "tools/vault.py"), "put", "fixture-a", "local", "EXAMPLE_API_KEY"],
+                         cwd=ROOT, env=env, input="synthetic-not-a-real-value-0000\n",
+                         capture_output=True, text=True, timeout=60)
+    check("vault put accepts the slot", put.returncode == 0, (put.stdout + put.stderr)[-300:])
+    p = subprocess.run([sys.executable, str(ROOT / "collectors/emit_registry.py")], cwd=ROOT, env=env,
+                       capture_output=True, text=True, timeout=120)
+    doc = root / "registry/credentials.json"
+    check("the emitter still writes the credential document", p.returncode == 0 and doc.is_file(),
+          (p.stdout + p.stderr)[-300:])
+    if not doc.is_file():
+        return
+    d = json.loads(doc.read_text(encoding="utf-8"))
+    names = [c.get("name") for c in d["credentials"]]
+    check("the slot is a record", "EXAMPLE_API_KEY" in names, str(names))
+    check("and the document says when it was read", bool(d.get("scanned_on")), str(d.get("scanned_on")))
+    check("no value anywhere in it", "synthetic-not-a-real-value" not in doc.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     print("credentials — a document about secrets that holds none\n")
     for fn in (test_a_register_that_will_not_read_is_a_row_and_withholds_unsigned,
@@ -434,7 +463,8 @@ if __name__ == "__main__":
                test_the_rules_fire_on_their_own_subjects,
                test_no_rule_here_duplicates_the_leak_register,
                test_the_emitted_document_agrees_with_itself,
-               test_the_machines_own_secrets_are_records_too):
+               test_the_machines_own_secrets_are_records_too,
+               test_a_vault_slot_reaches_the_document_without_an_openrouter_scan):
         fn()
     print()
     if FAILURES:
