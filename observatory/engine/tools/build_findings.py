@@ -1013,7 +1013,43 @@ MERGE_REMEDY_UNKNOWN = ("read the reason above — this degradation's class has 
                         "here can tell you what to run")
 
 
-def merge_findings(deg: list[dict]) -> list[dict]:
+def _settings() -> dict:
+    """The workspace's own switches, read from settings.json rather than through
+    `configuration.enabled`: `local` runs with OBSERVATORY_OFFLINE, which answers
+    "off" for every integration, and the board must speak about what the operator
+    switched on, not about what this one run was allowed to call."""
+    try:
+        import configuration
+        doc = configuration.load()
+        return doc if isinstance(doc, dict) else {}
+    except Exception:                                                     # noqa: BLE001
+        return {}
+
+
+def maintaining_the_engine(root: pathlib.Path | None = None) -> bool:
+    """Whether this engine runs from a source checkout — the only place its own
+    test suite is the reader's business. An installed wheel sits in
+    site-packages with no repository beside the package; an editable install or
+    a clone has `.git` two levels up. `OBSERVATORY_MAINTAINER=1|0` overrides it
+    (the suites run on a copied tree without `.git`)."""
+    forced = os.environ.get("OBSERVATORY_MAINTAINER")
+    if forced in ("0", "1"):
+        return forced == "1"
+    root = root or paths.ROOT
+    return (root.parents[1] / ".git").exists()
+
+
+#: Which integration each optional merge input belongs to. A source whose
+#: integration is switched off was not MISSED — it was never asked for — so it is
+#: no warning on the board (model.json still records it, and doctor says what
+#: is enabled without its source). Sources not listed here are always read.
+MERGE_SOURCE_INTEGRATION = {
+    "wiki": "wiki", "github": "github", "sessions.json": "sessions",
+    "remotes.json": "git_remotes", "bitbucket.json": "bitbucket",
+}
+
+
+def merge_findings(deg: list[dict], integrations: dict | None = None) -> list[dict]:
     """The merge's unmeasured sources, with the cure that fits them.
 
     The merge is the collector every other module reads, and without a
@@ -1021,6 +1057,10 @@ def merge_findings(deg: list[dict]) -> list[dict]:
     moved" for every address, which put phantom repositories and a phantom
     project into the model in silence.
     """
+    if integrations is not None:
+        deg = [d for d in deg
+               if str(d.get("source") or "") not in MERGE_SOURCE_INTEGRATION
+               or integrations.get(MERGE_SOURCE_INTEGRATION[str(d.get("source") or "")]) is True]
     if not deg:
         return []
     # SOURCE AND REASON, deduplicated on the PAIR. This joined
@@ -1392,7 +1432,7 @@ def blank_page_findings(receipt: dict | None,
     return []
 
 
-def provider_findings(health: dict | None, agent: dict | None) -> list[dict]:
+def provider_findings(health: dict | None, agent: dict | None, agent_enabled: bool = True) -> list[dict]:
     """The LLM boundary's health, as findings. Reads two documents, writes none.
 
     Takes the documents rather than reading them, for one reason: on a healthy
@@ -1481,7 +1521,9 @@ def provider_findings(health: dict | None, agent: dict | None) -> list[dict]:
                       "lists what the catalogue actually offers",
             "evidence": ["store/raw/agent.json#chain_retired"]})
 
-    if not quarantined and (age is None or age > HEALTH_STALE_HOURS):
+    # With the agent feature off nothing here is meant to call a model, so "no
+    # model has been asked" is the configuration, not an unmeasured health.
+    if agent_enabled and not quarantined and (age is None or age > HEALTH_STALE_HOURS):
         out.append({
             "type": "provider.health_unmeasured", "subject": "provider:openrouter",
             "severity": "info",
@@ -2116,7 +2158,8 @@ def collect() -> list[dict]:
             _agent = json.loads(_ag.read_text(encoding="utf-8"))
         except ValueError:
             _agent = None
-    out += provider_findings(_health, _agent)
+    out += provider_findings(_health, _agent,
+                             agent_enabled=(_settings().get("features") or {}).get("agent") is True)
 
     # WHERE ASSERTIONS CAN VANISH. Read through the measurer rather than by
     # grepping here: two readers of one convention with two regexes is how a
@@ -2125,7 +2168,10 @@ def collect() -> list[dict]:
     try:
         sys.path.insert(0, str(paths.ROOT / "tools"))
         import skip_sites
-        out += gate_skip_findings(skip_sites.survey())
+        # The engine's own suites are a maintainer's business, not an installed
+        # user's: a wheel's board carried this row about tests it never runs.
+        if maintaining_the_engine():
+            out += gate_skip_findings(skip_sites.survey())
     except Exception as exc:                                                        
         print(f"  skip-site survey failed: {type(exc).__name__}: {exc}", file=sys.stderr)
 
@@ -3233,7 +3279,8 @@ def collect() -> list[dict]:
     # reads, and without a degradation channel a missing `gh` made the transfer
     # check answer "not moved" for every address, which put phantom
     # repositories and a phantom project into the model in silence.
-    out += merge_findings(degradations.collector("model.json"))
+    out += merge_findings(degradations.collector("model.json"),
+                          integrations=_settings().get("integrations") or {})
 
     # EVERY OTHER COLLECTOR'S OWN WORDS, and until 2026-09-08 four of six had
     # nowhere to say them. `model.json` reached the board through the rule above;
