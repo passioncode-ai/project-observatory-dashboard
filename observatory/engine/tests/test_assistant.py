@@ -162,7 +162,8 @@ class AssistantTests(unittest.TestCase):
         ctx = self.a.evidence()
         machine = [i for i in ctx['items'] if i['source'] == 'store/raw/machine.json']
         self.assertEqual(len(machine), 1, ctx['degraded'])
-        self.assertEqual(machine[0]['facts']['free_gb'], 29.0)
+        self.assertEqual(machine[0]['facts']['disk_free_gb'], 29.0)
+        self.assertEqual(machine[0]['facts']['memory_free_mb'], 900)
         self.assertEqual(machine[0]['facts']['largest_locations'][0], {'label': 'Cache 11', 'gb': 11.0})
         self.assertEqual(sum(1 for i in ctx['items'] if i['source'] == 'registry/findings.json'), 15)
         self.assertLess(len(json.dumps(ctx['items'])), 24000)
@@ -170,6 +171,9 @@ class AssistantTests(unittest.TestCase):
         reasons = ' '.join(d['reason'] for d in ctx['degraded'])
         self.assertIn('20 findings', reasons)
         self.assertIn('of 60 projects', reasons)
+        # A code and the numbers travel beside the sentence, so an app can word it.
+        trimmed = {d['source']: d for d in ctx['degraded'] if d.get('code') == 'trimmed'}
+        self.assertEqual((trimmed['findings']['total'], trimmed['projects']['total']), (20, 60))
 
     def test_measurement_times_come_from_the_real_keys(self):
         self.real_estate()
@@ -243,6 +247,16 @@ class AssistantTests(unittest.TestCase):
         (self.a.paths.HOME / 'workspace.json').unlink()
         with self.assertRaisesRegex(self.a.AssistantError, 'unknown-workspace'):
             self.a.status()
+
+    def test_provider_status_never_carries_key_characters(self):
+        with patch.object(self.a.providers,'have_key',return_value=False), \
+             patch.object(self.a.providers,'read_key',return_value=('',None)):
+            self.assertEqual(self.a.status()['provider_status'],'absent')
+        with patch.object(self.a.providers,'have_key',return_value=False), \
+             patch.object(self.a.providers,'read_key',side_effect=self.a.providers.Fatal('key file is mode 644; chmod 600 it')):
+            self.assertEqual(self.a.status()['provider_status'],'refused: key file is mode 644; chmod 600 it')
+        with patch.object(self.a.providers,'have_key',return_value=True):
+            self.assertNotIn('provider_status',self.a.status())
 
     def test_status_project_list_is_optional(self):
         self.assertIn('projects', self.a.status())
