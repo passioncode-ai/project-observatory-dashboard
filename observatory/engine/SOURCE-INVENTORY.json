@@ -31,8 +31,8 @@
     {
       "path": "agent/providers.py",
       "source_sha256": "e2d88a03c47dc5985b106877fc894951b0b5972f37bed90df0a0e54dd03caaaf",
-      "export_sha256": "af26614e26ea44cad61edf50208b4accbb1df1e761d00306581e51d10811b75f",
-      "bytes": 50319,
+      "export_sha256": "2b360138b7912f824f29ea532b9a4d3488d7adcf592fa16582b3e6bcba9b6f7e",
+      "bytes": 50558,
       "python_comments_removed": 168,
       "python_docstrings_removed": 24,
       "tool_descriptions_retained": 0,
@@ -1747,8 +1747,8 @@
       "path": "tests/test_budget_subject.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "38bb15809346dde8ab26518d3d4fd24ff78dc4cdb4331996ba9975be65273d28",
-      "bytes": 18978
+      "export_sha256": "ae8837ee351dee05c7160e9a968202b5a6d84d251a824c9f5d2c6b82dc9d793a",
+      "bytes": 19901
     },
     {
       "path": "tests/test_caller_identity.py",
@@ -2296,8 +2296,8 @@
       "path": "tests/test_local_folders.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "73c4636ab1811c77c9ae457b9dae1d1430d50c03a459d677f7532cc77c621466",
-      "bytes": 5904
+      "export_sha256": "743392be38ec841a1d014f556685694a49dc91f923ca49da930215f11dfd2bb5",
+      "bytes": 7068
     },
     {
       "path": "tests/test_local_keys.py",
