@@ -758,7 +758,7 @@ def reclaimable_pressure(free_bytes: float | None, reclaimable_bytes: float | No
                       "carries what that endangers — this row is only the lever.")),
         "action": "delete the package directories of a project you are not working "
                   "on; every byte comes back with a reinstall. "
-                  "`./observatory.py project <name>` shows one project's footprint",
+                  "`project-observatory full project <name>` shows one project's footprint",
         "evidence": ["store:metrics#" + RECLAIMABLE_ROLE,
                      "shutil.disk_usage(.).free"]}]
 
@@ -983,11 +983,11 @@ def store_fault_findings(rows: list[dict]) -> list[dict]:
 #: another class's cure by default.
 MERGE_REMEDY = {
     "transfer": "check that `gh` is authenticated for the PATH the tick runs "
-                "with, then `./observatory.py merge`",
+                "with, then `project-observatory full merge`",
     "ownership": "decide whether the organisation is yours — add it to "
                  "`organizations` in the workspace's `config/ownership.json` "
                  "(read as `OWNED_ORGS` by `collectors/merge.py`) and re-run "
-                 "`./observatory.py merge emit`, or leave it and its projects "
+                 "`project-observatory full merge emit`, or leave it and its projects "
                  "stay `external`",
     # The merge's own coverage sources. Each is emitted when an input the
     # merge reads was never produced, so the cure is to produce that input —
@@ -1339,9 +1339,8 @@ def blank_page_findings(receipt: dict | None,
                        "the page renders. A ReferenceError at load leaves a "
                        "header, a footer and nothing between them, and every "
                        "static check passes; that shipped once on 2026-09-05."),
-            "action": "`node dashboard/smoke.js docs/projects-dashboard.html` "
-                      "answers it in a second and records the verdict beside "
-                      "the page",
+            "action": "`project-observatory full smoke` answers it in a second "
+                      "and records the verdict beside the page",
             "evidence": ["dashboard/smoke.js"]}]
 
     verdict = str(receipt.get("verdict") or "")
@@ -1357,7 +1356,7 @@ def blank_page_findings(receipt: dict | None,
                        "renders. Treating an unreadable verdict as a pass is the "
                        "defect this row was written against, so it is reported "
                        "as unverified."),
-            "action": "`node dashboard/smoke.js docs/projects-dashboard.html`",
+            "action": "`project-observatory full smoke`",
             "evidence": ["docs/projects-dashboard.smoke.json"]}]
 
     if verdict == "blank":
@@ -1374,7 +1373,7 @@ def blank_page_findings(receipt: dict | None,
                        f"that is how one shipped on 2026-09-05."),
             "action": "read the trace in `store/logs/tick.log` beside "
                       "`dashboard SMOKE FAILED`, or re-run "
-                      "`node dashboard/smoke.js docs/projects-dashboard.html`",
+                      "`project-observatory full smoke`",
             "evidence": ["docs/projects-dashboard.smoke.json", "store/logs/tick.log"]}]
 
     if page_sha and checked and checked != page_sha:
@@ -1387,8 +1386,8 @@ def blank_page_findings(receipt: dict | None,
                        f"since, and a clean verdict about the previous build "
                        f"says nothing about this one — a stale pass is the same "
                        f"silence, differently spelled."),
-            "action": "`node dashboard/smoke.js docs/projects-dashboard.html`, "
-                      "or wait for the next tick, which records it",
+            "action": "`project-observatory full smoke`, or the next scheduled "
+                      "tick (when features.scheduler is on), which records it",
             "evidence": ["docs/projects-dashboard.smoke.json"]}]
     return []
 
@@ -1432,7 +1431,7 @@ def provider_findings(health: dict | None, agent: dict | None) -> list[dict]:
                       "Unreadable, it reads as an empty list — and an empty list is "
                       "indistinguishable from every model being healthy, which is why "
                       "this is a finding rather than a silent default.",
-            "action": "`./observatory.py key` prints every model's verdict and rewrites "
+            "action": "`project-observatory full key` prints every model's verdict and rewrites "
                       "the file; delete it to start from a clean slate — the marks are "
                       "transient by design",
             "evidence": ["store/provider-health.json"]})
@@ -1462,7 +1461,7 @@ def provider_findings(health: dict | None, agent: dict | None) -> list[dict]:
                            + (f" {rest} more model(s) are also quarantined and not "
                               f"listed separately." if rest > 0 and model_id == shown[-1]
                               else "")),
-                "action": "`./observatory.py key` re-probes and prints each model's "
+                "action": "`project-observatory full key` re-probes and prints each model's "
                           "verdict; a mark that returns belongs in `agent/models.json` "
                           "as a chain change rather than a daily surprise",
                 "evidence": ["store/provider-health.json#" + model_id]})
@@ -1478,7 +1477,7 @@ def provider_findings(health: dict | None, agent: dict | None) -> list[dict]:
                       "boundary's own words the only other visible sign would be the "
                       "bill. Unlike a quarantine this never expires: the id is gone until "
                       "the chain is edited.",
-            "action": "edit the chain in `agent/models.json`; `./observatory.py key` "
+            "action": "edit the chain in `agent/models.json`; `project-observatory full key` "
                       "lists what the catalogue actually offers",
             "evidence": ["store/raw/agent.json#chain_retired"]})
 
@@ -1496,7 +1495,7 @@ def provider_findings(health: dict | None, agent: dict | None) -> list[dict]:
                        + f", past the {HEALTH_STALE_HOURS:.0f}h horizon. This is 'not "
                          "measured', not 'healthy' — the distinction the file cannot make "
                          "on its own."),
-            "action": "`./observatory.py key` probes every model in the chain and says so "
+            "action": "`project-observatory full key` probes every model in the chain and says so "
                       "explicitly; nothing here is broken until it reports otherwise",
             "evidence": ["store/provider-health.json", "store/raw/agent.json#ran_at"]})
     return out
@@ -1719,7 +1718,7 @@ def collect() -> list[dict]:
                       "Until the probe runs, the estate does not know whether these "
                       "hosts serve anything.",
             "action": "check that `dig` and `curl` are on the PATH the tick runs "
-                      "with, then `./observatory.py domains`",
+                      "with, then `project-observatory full domains`",
             "evidence": ["registry:domain-liveness.json"]})
 
     # A CLONE WHOSE `origin` NAMES AN ADDRESS THAT MOVED. GitHub keeps the old
@@ -1797,7 +1796,7 @@ def collect() -> list[dict]:
                             "that long — and the wiki is what the wiki-* skills "
                             "read.",
                 "action": "commit or discard the changes in the wiki by hand, then "
-                          "`./observatory.py commit-projection`",
+                          "`project-observatory full commit-projection`",
                 "evidence": ["store/raw/commit-projection.json#outcome"]})
 
     # THE CAUSE, NOT FOUR SYMPTOMS. On 2026-09-07 the volume filled and
@@ -2037,7 +2036,7 @@ def collect() -> list[dict]:
                               f"was renamed, the new name is a project here and the "
                               f"sessions attach to it")
                 else:
-                    action = (f"`./observatory.py lost` records it in the ledger with "
+                    action = (f"`project-observatory full lost` records it in the ledger with "
                               f"the session store as its evidence; then decide what "
                               f"{name!r} was — if the folder was renamed the new name "
                               f"is a project here, and if it was deleted deliberately, "
@@ -2221,7 +2220,7 @@ def collect() -> list[dict]:
                              "journal, so a neighbour's spending no longer disables it "
                              "— but the key is shared and the budget is one."),
                 "action": ("a separate key for this system, or a higher limit; "
-                           "`./observatory.py wallet` shows both figures"
+                           "`project-observatory full wallet` shows both figures"
                            + (f". Left alone it lifts on {_reset} when the key's "
                               f"monthly counter resets" if _reset else
                               f". The provider calls the reset "
@@ -2769,7 +2768,7 @@ def collect() -> list[dict]:
                        "old as this: nothing here is being re-measured, and a finding "
                        "that has been fixed will still be shown."),
             "action": "`launchctl list | grep observatory` and "
-                      "`tail -40 store/logs/tick.err`; `./observatory.py all` runs it "
+                      "`tail -40 store/logs/tick.err`; `project-observatory full tick` runs it "
                       "by hand",
             "evidence": ["store/observatory.db#scans.started_at"]})
 
@@ -2802,7 +2801,7 @@ def collect() -> list[dict]:
                            + ". The wiki is regenerated into every tick and read by "
                              "the wiki-* skills, so a dangling link is a dead end for "
                              "a reader rather than a cosmetic issue."),
-                "action": "`./observatory.py links` for the sources, then fix the note "
+                "action": "`project-observatory full links` for the sources, then fix the note "
                           "or the target",
                 "evidence": ["store/raw/vault-links.json#targets"]})
         stale = hours_since(doc.get("ran_at") or "")
@@ -2818,7 +2817,7 @@ def collect() -> list[dict]:
                     else titled("the wiki's link check has never completed")),
                 "detail": "the audit runs in the tick; a receipt this old means the "
                           "step stopped rather than that the links are fine.",
-                "action": "`./observatory.py links`",
+                "action": "`project-observatory full links`",
                 "evidence": ["store/raw/vault-links.json#ran_at"]})
 
     # THE DIFF HAS STOPPED, which nothing could say before the cursor existed.
@@ -2861,7 +2860,7 @@ def collect() -> list[dict]:
                               else "has never been set") +
                            ". The agent is being handed an empty queue while the "
                            "estate changes, which looks exactly like a quiet estate."),
-                "action": "`./observatory.py deltas`, and check the tick's log for "
+                "action": "`project-observatory full deltas`, and check the tick's log for "
                           "why the step stopped",
                 "evidence": ["store/observatory.db#cursors.deltas.diffed_through"]})
 
@@ -2928,7 +2927,7 @@ def collect() -> list[dict]:
                 "detail": clipped(detail, 900),
                 "action": ("read the kinds above: a store fault needs "
                            "`PRAGMA integrity_check`, a chain fault needs "
-                           "`./observatory.py chain`, a ledger refusal needs the "
+                           "`project-observatory full chain`, a ledger refusal needs the "
                            "row it refused"),
                 "evidence": ["store/raw/agent.json#faults",
                              "store/raw/agent.json#failed"]})
@@ -2943,7 +2942,7 @@ def collect() -> list[dict]:
                           "loop refuses the answer and leaves the deltas unconsumed "
                           "for a later run.",
                 "action": "if it repeats, the chain's first model is the suspect: "
-                          "`./observatory.py chain` shows the order",
+                          "`project-observatory full chain` shows the order",
                 "evidence": ["store/raw/agent.json#malformed"]})
         if mute:
             out.append({
@@ -3110,7 +3109,7 @@ def collect() -> list[dict]:
                               + (f" Last measurement: {p['last_at']}."
                                  if p.get("last_at") else
                                  " It has never written a measurement."),
-                    "action": f"./observatory.py plugins --only {p['id']} --force, "
+                    "action": f"project-observatory full plugins --only {p['id']} --force, "
                               f"and `--check` for the manifest",
                     "evidence": ["store/raw/plugins.json#plugins"]})
             elif refused:
@@ -3148,7 +3147,7 @@ def collect() -> list[dict]:
                                f"Anything reading the metric is reading the past."
                                if age is not None else
                                "the age of the series could not be computed"),
-                    "action": f"./observatory.py plugins --only {p['id']} --force",
+                    "action": f"project-observatory full plugins --only {p['id']} --force",
                     "evidence": ["store/raw/plugins.json#plugins"]})
             elif cls == "waiting":
                 out.append({
@@ -3226,7 +3225,7 @@ def collect() -> list[dict]:
                            "purged` and `tombstoned_rows_remaining: 0` left the "
                            "erased text in the file, through a WAL checkpoint, "
                            "until a VACUUM ran." if not broke else ""),
-                "action": "re-run `./observatory.py retention-apply` when nothing "
+                "action": "re-run `project-observatory full retention-apply` when nothing "
                           "else is writing to the store",
                 "evidence": ["store/raw/retention.json#scrub"]})
 
@@ -3626,7 +3625,7 @@ def collect() -> list[dict]:
                            f"the tick has not completed since — which "
                            f"`tick.standing_down` and `scan.stale` measure from "
                            f"their own angles."),
-                "action": "`./observatory.py integrity` takes a fresh one in "
+                "action": "`project-observatory full integrity` takes a fresh one in "
                           "about a fifth of a second",
                 "evidence": ["store/raw/integrity.json"]})
 
@@ -3652,7 +3651,7 @@ def collect() -> list[dict]:
             holder = str(lease.get("holder") or "another run")
             # NAMED, not guessed. `ga` is the gate's own tag and nothing else
             # uses it; any other holder is reported as the id it gave.
-            who = ("a `./observatory.py check` run — the gate holds the registry "
+            who = ("a `project-observatory full check` run — the gate holds the registry "
                    f"for its whole duration ({holder})"
                    if holder.startswith("r-ga") else holder)
             stale = hours_since(lease.get("last_acquired_at") or "")
@@ -3669,7 +3668,7 @@ def collect() -> list[dict]:
                            f"findings and this dashboard are only as fresh as the "
                            f"last completed cycle, and nothing else says so. "
                            f"{age}"),
-                "action": ("run `./observatory.py tick` once the holder is done, "
+                "action": ("run `project-observatory full tick` once the holder is done, "
                            "or space long `check` runs between ticks — the lease "
                            "is not the thing to weaken"),
                 "evidence": ["store/raw/tick-lease.json",
@@ -3701,7 +3700,7 @@ def collect() -> list[dict]:
             when = ("when it was last looked at" if days is None else
                     f"{int(days)} day(s) ago" if days >= 1 else "today")
             hedge = ("" if days is not None and days < KEY_SHAPE_HEDGE_DAYS else
-                     " It may already have been fixed — `./observatory.py key` "
+                     " It may already have been fixed — `project-observatory full key` "
                      "re-checks it and clears this.")
             out.append({
                 "type": "env.key_misplaced", "subject": f"env:{env_name}",
@@ -3898,7 +3897,7 @@ def collect() -> list[dict]:
                           f"later run will try again — this notice is how you learn the "
                           f"channel is dead rather than merely quiet. "
                           f"Attempted {ndoc.get('attempted_at', 'unknown')}.",
-                "action": "run `./observatory.py notify` from a terminal to see the error, "
+                "action": "run `project-observatory full notify` from a terminal to see the error, "
                           "or read the dashboard instead — the findings are all there",
                 "evidence": ["store:raw/notify.json", "registry:findings.json"]})
 
@@ -3980,7 +3979,7 @@ def collect() -> list[dict]:
                           f"ninety days — so the absence of a clone, not a judgement "
                           f"about the work, is what would delete it."
                           + _erasure_horizon(row),
-                "action": "clone the repository and re-run `./observatory.py "
+                "action": "clone the repository and re-run `project-observatory full "
                           "corroborate`, or decide on the row with review.py from a "
                           "terminal",
                 "evidence": ["store:raw/corroboration.json", "store:ledger"]})
@@ -4105,7 +4104,7 @@ def collect() -> list[dict]:
                 # an hour apart and IDENTICAL when computed at one instant
                 #. The stamp cannot go in this sentence — it would
                 # make the document differ every tick and defeat the rule above.
-                "action": "./observatory.py digest — the queue grouped by project, "
+                "action": "project-observatory full digest — the queue grouped by project, "
                           "structural first, with what retention will erase and when",
                 "evidence": ["store:ledger"]})
 
@@ -4118,7 +4117,7 @@ def collect() -> list[dict]:
                           f"{REVIEW_HORIZON_DAYS} days. These were written by an "
                           "automated reader that cannot promote its own work, and "
                           "nobody has looked. Erasure by timeout is not a decision.",
-                "action": "./observatory.py digest, then review.py promote|reject "
+                "action": "project-observatory full digest, then review.py promote|reject "
                           "from a terminal",
                 "evidence": ["store:ledger"]})
 
@@ -4154,7 +4153,7 @@ def collect() -> list[dict]:
                           "the indexer degrades to the lexical index alone and the "
                           "vector half falls behind. "
                           f"Oldest committed {lag['oldest']}.",
-                "action": "./observatory.py index — and ./observatory.py wallet if "
+                "action": "project-observatory full index — and project-observatory full wallet if "
                           "the ceiling is what stopped it",
                 "evidence": ["store:outbox", "store:ledger"]})
 

@@ -31,7 +31,7 @@ WHY IT IS CACHED. Thirty-eight properties is seventy-six HTTPS calls and about
 a minute; a dashboard that asked Google on every build would be slow, rate
 limited, and no more correct — analytics settle daily. The scan refuses to
 re-fetch inside the age window and says so; `--force` is the refresh button's
-path, and `./observatory.py google --force` is the operator's.
+path, and `project-observatory full google --force` is the operator's.
 """
 from __future__ import annotations
 import argparse

@@ -162,7 +162,7 @@ def cmd_index(conn: sqlite3.Connection, limit: int) -> int:
         ensure_vec_table(conn, cfg["dims"])
     else:
         print("sqlite-vec is not loadable here — the lexical index is built, the vector "
-              "one is not. `./observatory.py deps` installs it.", file=sys.stderr)
+              "one is not. `python -m pip install 'project-observatory[full]'` installs it.", file=sys.stderr)
 
     # `<=`, not `=`. Equality meant a row enqueued under an older contract was
     # invisible rather than in need of re-projection, so the queue could report
@@ -192,7 +192,7 @@ def cmd_index(conn: sqlite3.Connection, limit: int) -> int:
         if built and built[0] != PROJECTION_VERSION:
             print(f"outbox empty, but the projections on disk were built at version "
                   f"{built[0]} and this indexer builds {PROJECTION_VERSION}. "
-                  f"Run `./observatory.py reindex` — the index is stale, not current.",
+                  f"Run `project-observatory full reindex` — the index is stale, not current.",
                   file=sys.stderr)
             return 1
         print("outbox empty — every committed revision is already projected")
@@ -281,7 +281,7 @@ def cmd_index(conn: sqlite3.Connection, limit: int) -> int:
     # A caller reading that line would reasonably conclude the queue was drained.
     if still:
         print(f"  {still} revision(s) still queued — this run was capped at {limit}. "
-              f"Run `./observatory.py index` again until it reports the outbox empty."
+              f"Run `project-observatory full index` again until it reports the outbox empty."
               if still > len(held_seqs) else
               f"  {still} revision(s) still queued.", file=sys.stderr)
     if total_tokens:
@@ -323,7 +323,7 @@ def cmd_rebuild(conn: sqlite3.Connection) -> int:
         "SELECT count(*) FROM outbox WHERE consumed_at IS NULL").fetchone()[0]
     if left:
         print(f"{left} revision(s) still unprojected — the rebuild cap is {CAP} per run. "
-              f"Run `./observatory.py index` again until it reports the outbox empty.",
+              f"Run `project-observatory full index` again until it reports the outbox empty.",
               file=sys.stderr)
     return rc
 

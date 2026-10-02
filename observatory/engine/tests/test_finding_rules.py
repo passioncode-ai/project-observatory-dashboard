@@ -38,6 +38,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -747,6 +748,23 @@ def test_every_rule_has_evidence_of_some_kind() -> None:
     check("and every rule this file claims to drive still exists", not stale, str(stale))
 
 
+def test_no_message_names_a_command_a_user_cannot_run() -> None:
+    """Finding actions, errors and hints said `./observatory.py key` and
+    `node dashboard/smoke.js docs/projects-dashboard.html` — paths inside the
+    engine's source tree that resolve nowhere for an installed user. The command
+    a user has is `project-observatory full STEP`. Comments may keep history."""
+    stale = re.compile(r"\./observatory\.py |node dashboard/smoke\.js |run observatory\.py init")
+    offenders = []
+    for path in sorted(ROOT.rglob("*.py")):
+        rel = path.relative_to(ROOT)
+        if rel.parts[0] in ("tests", ".venv") or "__pycache__" in rel.parts:
+            continue
+        for n, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if not line.lstrip().startswith("#") and stale.search(line):
+                offenders.append(f"{rel}:{n}")
+    check("no user-facing string names a source-tree command", not offenders, ", ".join(offenders[:8]))
+
+
 if __name__ == "__main__":
     print("the board's rules — eleven that had never been seen firing\n")
     for fn in (test_a_blank_page_is_reported,
@@ -771,7 +789,8 @@ if __name__ == "__main__":
                test_stale_knowledge_is_one_row_per_artefact_not_160,
                test_every_clone_sync_state_has_a_row_of_its_own,
                test_a_quiet_project_that_never_shipped_is_reported,
-               test_every_rule_has_evidence_of_some_kind):
+               test_every_rule_has_evidence_of_some_kind,
+               test_no_message_names_a_command_a_user_cannot_run):
         fn()
     print()
     if FAILURES:

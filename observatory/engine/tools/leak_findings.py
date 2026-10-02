@@ -158,6 +158,6 @@ def findings(doc: dict | None) -> list[dict]:
                        "machine — no env scan, no vault, no installed key. A clean "
                        "report from it means UNMEASURED, and the difference is the "
                        "whole point of saying so."),
-            "action": "./observatory.py env, then ./observatory.py leaks",
+            "action": "project-observatory full env, then project-observatory full leaks",
         }]
     return sightings(doc) + suppression(doc) + unscanned(doc)

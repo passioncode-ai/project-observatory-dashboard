@@ -437,7 +437,7 @@ def survey(scope: dict | None = None, include_external: bool = False,
         if not (paths.SCRATCH / "domains_live.json").is_file():
             degraded.append({"source": "domains",
                              "reason": "no domain scan has run, so no site is known to "
-                                       "resolve or not; run `./observatory.py domains`"})
+                                       "resolve or not; run `project-observatory full domains`"})
         else:
             degraded.extend(_collector_degradation("domains_live.json"))
 
@@ -568,7 +568,7 @@ def project_detail(project_id: str, timeline_limit: int = 10,
                 out["degraded"].append({
                     "source": "rollup",
                     "reason": f"no weekly rollup for this project in the last {weeks} "
-                              f"week(s); `./observatory.py rollup` computes it"})
+                              f"week(s); `project-observatory full rollup` computes it"})
 
             # LATEST PER METRIC, and the metric names come from the data. A core
             # file naming a plugin's metric is the defect the plugin suite
@@ -701,7 +701,7 @@ def credentials(project_id: str) -> dict:
     if not doc_path.is_file():
         out["degraded"].append({
             "source": "env-inventory",
-            "reason": "registry/env-inventory.json does not exist — `./observatory.py "
+            "reason": "registry/env-inventory.json does not exist — `project-observatory full "
                       "env` builds it",
             "effect": "no env file is known for this project, which is not the same "
                       "as it having none"})

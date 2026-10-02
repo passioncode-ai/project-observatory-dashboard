@@ -206,7 +206,7 @@ def document(scan: dict, env_scan: dict, obs_date: str) -> dict:
             "withheld": withheld,
             **({"reason": reason} if state != "matched" else {}),
             **({"action": "collectors/scan_remote_env.py store/raw/remote-env.json --force, "
-                          "then ./observatory.py env and ./observatory.py emit"}
+                          "then project-observatory full env and project-observatory full emit"}
                if withheld else {}),
         },
         "apps": apps,

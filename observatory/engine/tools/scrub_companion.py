@@ -324,7 +324,7 @@ def main(argv: list[str]) -> int:
         save_watermark(new_mark)
     if not a.dry_run and report:
         print(f"scrub: {len({r['name'] for r in report})} distinct value(s) replaced by name; "
-              f"re-run `./observatory.py leaks` to see the store read clean")
+              f"re-run `project-observatory full leaks` to see the store read clean")
     return 0
 
 

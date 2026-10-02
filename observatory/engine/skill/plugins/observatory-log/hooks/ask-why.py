@@ -40,7 +40,7 @@ def main() -> int:
                           "Observatory could NOT record this turn: " + reason +
                           "\n\nThe facts of this turn are not in the ledger. "
                           "`store/raw/record-turn.json` holds the same reason, and "
-                          "`./observatory.py findings` raises it.",
+                          "`project-observatory full findings` raises it.",
                           "suppressOutput": True}))
         return 0
     if r.get("hasWhy"):

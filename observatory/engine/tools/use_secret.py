@@ -225,7 +225,7 @@ def cmd_names(args) -> int:
                     rows.append((slot.name, "vault", f"vault:{args.project}/{directory.name}"))
     if not rows:
         print(f"{args.project}: nothing in the vault and nothing in the env "
-              f"inventory. `./observatory.py env` refreshes the second.")
+              f"inventory. `project-observatory full env` refreshes the second.")
         return 0
     width = max(len(r[0]) for r in rows)
     seen = set()

@@ -430,7 +430,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self.wfile.write(body)
                     return
                 self._json({"error": "the pages are not built yet",
-                            "build_with": "./observatory.py dashboard"}, 404)
+                            "build_with": "project-observatory full dashboard"}, 404)
                 return
             self._json({"error": "no such page", "pages": list(shell.NAMES)}, 404)
             return
@@ -447,7 +447,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             page = paths.DASHBOARD_HTML
             if not page.is_file():
                 self._json({"error": "the dashboard is not built yet",
-                            "build_with": "./observatory.py dashboard"}, 404)
+                            "build_with": "project-observatory full dashboard"}, 404)
                 return
             body = page.read_bytes()
             self.send_response(200)

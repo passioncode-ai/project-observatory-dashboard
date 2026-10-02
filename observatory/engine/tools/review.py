@@ -485,7 +485,7 @@ def cmd_proposal_accept(conn, args) -> int:
     # operator to diff the wrong one.
     print(f"accepted {row['id']}: {', '.join(sorted(patch))} -> "
           f"{f}#{row['target_id']}")
-    print("The registry changes on the next emit, not now — `./observatory.py "
+    print("The registry changes on the next emit, not now — `project-observatory full "
           "emit` applies it, and the diff is what you commit.")
     return 0
 

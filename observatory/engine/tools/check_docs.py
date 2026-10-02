@@ -278,7 +278,7 @@ def conformance_doc_failures() -> list[str]:
 .
 
     Two rules, both mechanical, because the third — is the CURRENT revision
-    published? — has a gate step of its own (`./observatory.py contract`) and a
+    published? — has a gate step of its own (`project-observatory full contract`) and a
     prose statement here would duplicate a check rather than add one.
     """
     doc = ROOT / "fabric/FABRIC-CONFORMANCE.md"

@@ -246,7 +246,7 @@ def scrub(conn: sqlite3.Connection) -> dict:
                           f"{str(exc)[:120]}. The rows are gone from every index "
                           f"and `secure_delete` zeroed what it could reach, but "
                           f"pages freed earlier may still hold text. Re-run "
-                          f"`./observatory.py retention-apply` when nothing else "
+                          f"`project-observatory full retention-apply` when nothing else "
                           f"is writing."}
     return {"scrubbed": True,
             "detail": "WAL checkpointed and the file vacuumed, so no freed page "
@@ -473,8 +473,8 @@ def cmd_apply(conn: sqlite3.Connection) -> int:
     if bad:
         print(f"\nAN ERASURE IS NOT COMPLETE — {', '.join(bad)}. A projection either "
               f"still holds a tombstoned revision or cannot be checked at all. "
-              f"`./observatory.py deps` installs the vector extension; "
-              f"`./observatory.py reindex` rebuilds from canon.", file=sys.stderr)
+              f"`python -m pip install 'project-observatory[full]'` installs the vector extension; "
+              f"`project-observatory full reindex` rebuilds from canon.", file=sys.stderr)
         return 1
     return 0
 

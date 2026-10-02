@@ -285,7 +285,7 @@ def main() -> int:
     if repo_id is None:
         return out({"recorded": False,
                     "reason": "this repository is not in the registry; run "
-                              "./observatory.py scan merge emit to add it"})
+                              "project-observatory full scan merge emit to add it"})
     facts = diff_facts(pathlib.Path(top or cwd))
     if not facts["files"] and not facts["unpushed"]:
         return out({"recorded": False, "reason": "nothing changed"})

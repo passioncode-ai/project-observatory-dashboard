@@ -47,7 +47,7 @@ import paths
 #: be a deliberate line here rather than a guess at install time.
 DESTINATIONS: dict[str, tuple[pathlib.Path, str]] = {
     "observatory": (paths.STATE / ".openrouter-key",
-                    "the tick's agent and indexer (`./observatory.py key` shows "
+                    "the tick's agent and indexer (`project-observatory full key` shows "
                     "what the SCHEDULED run resolves)"),
     "claude-mem": (paths.source_path("companion_home", paths.HOME / "disabled/companion") / ".env",
                    "the memory observer's worker, which reads this file and "
