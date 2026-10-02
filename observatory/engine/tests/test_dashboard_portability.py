@@ -124,7 +124,10 @@ class DashboardPortabilityTests(unittest.TestCase):
         self.assertNotIn('./tools/',self.template)
         self.assertNotIn('./observatory.py',self.template)
         self.assertNotIn('pbpaste',self.template)
-        self.assertIn('cliCommand("local")',self.template)
+        # The empty estate's first step is the installed command, not a path into
+        # a checkout: `project-observatory full local`, with this workspace's home.
+        self.assertIn('fullCommand("local")',self.template)
+        self.assertIn('"project-observatory full "',self.template)
 
 
 if __name__ == '__main__':

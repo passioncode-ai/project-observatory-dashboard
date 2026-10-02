@@ -1878,8 +1878,8 @@
     {
       "path": "tests/test_dashboard_portability.py",
       "source_sha256": "8e15eef8f8f4ef92fdc4dfb2fe64e81847e6877a81ea0d7ceac818f6daffbcc6",
-      "export_sha256": "99446fc7d56a895c3c666dcb84091bfe68d4e4c01cd925660c2b0534c57b3cf5",
-      "bytes": 7577,
+      "export_sha256": "1627496182b5ac1584d4522df703eb904ce4447988eac0c6136d79f69f994936",
+      "bytes": 7811,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -2337,8 +2337,8 @@
     {
       "path": "tests/test_mcp_wire.py",
       "source_sha256": "6ef615d88123f97f325c42bf8e4a9a41c0d3e501756f82c8833f761143cdf006",
-      "export_sha256": "1330727f3db3ba336fad357dadd63bd3ad998e41e30feddca7eb7167635af75d",
-      "bytes": 20514,
+      "export_sha256": "5721ea9042d855d8a3dffcb566c0bcea0857e2b70664ac91ffca93a61c070054",
+      "bytes": 23307,
       "python_comments_removed": 13,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
