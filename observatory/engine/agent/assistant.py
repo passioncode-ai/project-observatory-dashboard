@@ -11,8 +11,11 @@ import os
 from pathlib import Path
 import re
 import secrets
+import signal
 import sys
+import threading
 import time
+from datetime import datetime, timezone
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
@@ -86,20 +89,50 @@ def save_conversation(doc):
     if not CID.fullmatch(doc.get('id','')):raise AssistantError('invalid-conversation-id')
     conversations_dir().mkdir(parents=True,exist_ok=True,mode=0o700)
     write(conversations_dir()/f"{doc['id']}.json",doc)
-def get_conversation(cid):
+def _open_conversation(cid):
+    """(conversation, changed): its OPEN turns reconciled against their jobs. No lock and
+    no write — for callers already inside `locked()`, which save it themselves."""
     if not isinstance(cid,str) or not CID.fullmatch(cid):raise AssistantError('invalid-conversation-id')
     doc=read(conversations_dir()/f'{cid}.json')
     if doc.get('id')!=cid or not isinstance(doc.get('turns'),list):raise AssistantError('unreadable-history')
-    # Reconcile pending turns from the existing durable jobs; no new jobs/spend.
+    # Only OPEN turns are reconciled; no new jobs or spend. A terminal turn is
+    # already the record: its job file is pruned after jobs.RETENTION, and reading
+    # "job gone" as a failure turned paid answers into errors.
+    changed=False
     for turn in doc['turns']:
         if not isinstance(turn,dict):raise AssistantError('unreadable-history')
-        if turn.get('job_id'):
+        if turn.get('job_id') and turn.get('status') not in jobs.TERMINAL:
             job=jobs.get(turn.get('job_id',''))
             if job and job['status'] in jobs.TERMINAL:
                 turn['status']=job['status'];turn['error']=(job.get('error') or {}).get('code')
                 if job['status']!='completed':turn.pop('answer',None)
-            elif job is None:turn.update(status='failed',error='unknown-job')
+                changed=True
+            elif job is None:
+                turn.update(status='failed',error='unknown-job');changed=True
+    return doc,changed
+
+def get_conversation(cid):
+    """A conversation, with any reconciled turn state written back under the lock, so a
+    failure or cancellation is stored rather than re-derived on every read."""
+    with locked():
+        doc,changed=_open_conversation(cid)
+        if changed:save_conversation(doc)
     return doc
+
+def delete_conversation(cid):
+    """Explicit removal — the only way history leaves — with its request ids and jobs."""
+    with locked():
+        doc,_=_open_conversation(cid)
+        if any(t.get('status') not in jobs.TERMINAL for t in doc['turns']):raise AssistantError('conversation-busy')
+        index=read(folder()/'requests.json',{'requests':{}}).get('requests')
+        if not isinstance(index,dict):raise AssistantError('unreadable-history')
+        index={k:v for k,v in index.items() if not (isinstance(v,dict) and v.get('conversation_id')==cid)}
+        write(folder()/'requests.json',{'requests':index})
+        (conversations_dir()/f'{cid}.json').unlink()
+        for turn in doc['turns']:
+            try:jobs._file(turn.get('job_id','')).unlink(missing_ok=True)
+            except (KeyError,OSError):pass
+    return {'deleted':cid}
 
 def list_conversations():
     if linked(conversations_dir()):raise AssistantError('linked-history')
@@ -110,40 +143,72 @@ def list_conversations():
         out.append({k:d.get(k) for k in ('id','title','updated_at')})
     return sorted(out,key=lambda r:r.get('updated_at') or '',reverse=True)
 
+#: The evidence budget, in characters of JSON, and the order it is spent in:
+#: the machine first (one small item), then findings, then projects. Trimming
+#: from the end of one list used to drop the machine and the findings to keep
+#: forty project descriptions, so "how much disk is free" was answered from
+#: nothing at all.
+BUDGET=24000
+MAX_FINDINGS=15
+MAX_PROJECTS=40
+SEVERITY={'critical':0,'warning':1,'info':2}
+STAMPS=('updated_on','built_at','generated_at','updated_at','scanned_at','measured_at')
+
+def _size(rows):return len(json.dumps(rows,ensure_ascii=False))
+
 def evidence(project_id=None):
     items=[];degraded=[];timestamps={}
+    def add(title,source,measured,facts):
+        items.append({'id':'E'+str(len(items)+1),'title':str(title)[:100],'source':source,'measured_at':measured,'facts':facts})
     def load(name,key):
         try:
             doc=json.loads((paths.REGISTRY/name).read_text());rows=doc.get(key)
-            timestamps[name]=doc.get('generated_at') or doc.get('updated_at') or doc.get('scanned_at')
+            timestamps[name]=next((doc[k] for k in STAMPS if doc.get(k)),None)
             if not isinstance(rows,list) or any(not isinstance(r,dict) for r in rows):raise ValueError()
             return rows
         except (ValueError,OSError,AttributeError):
             degraded.append({'source':name,'reason':'unavailable'});return []
     projects=load('projects.json','projects')
     if project_id and not any(p.get('id')==project_id for p in projects):raise AssistantError('unknown-project')
-    wanted=[p for p in projects if not project_id or p.get('id')==project_id]
-    for p in wanted[:40]:
-        fields={k:str(p[k])[:500] for k in ('id','name','lifecycle','description') if k in p}
-        items.append({'id':'E'+str(len(items)+1),'title':str(p.get('name',p.get('id','Project')))[:100],
-                      'source':'registry/projects.json','measured_at':timestamps.get('projects.json'),'facts':fields})
-    if len(wanted)>40:degraded.append({'source':'projects','reason':'limited to 40 projects; select a project for detail'})
-    findings=load('findings.json','findings')
-    findings=[f for f in findings if not project_id or f.get('project_id')==project_id or f.get('project')==project_id]
-    for f in findings[:15]:
-        fields={k:str(f[k])[:600] for k in ('id','severity','type','title','detail','first_seen') if k in f}
-        items.append({'id':'E'+str(len(items)+1),'title':str(f.get('title',f.get('type','Finding')))[:100],
-                      'source':'registry/findings.json','measured_at':timestamps.get('findings.json'),'facts':fields})
+    findings=[f for f in load('findings.json','findings') if not f.get('acked')]
+    if project_id:
+        try:
+            import survey
+            about=survey.finding_matcher(project_id)
+        except (OSError,ValueError,KeyError,TypeError):
+            about=lambda subject:subject==project_id
+            degraded.append({'source':'relations','reason':'repository and site links are unreadable; only findings naming the project itself are included'})
+        findings=[f for f in findings if about(str(f.get('subject') or ''))]
+    findings.sort(key=lambda f:SEVERITY.get(f.get('severity'),3))
     if not project_id:
         try:
-            doc=json.loads((paths.SCRATCH/'machine.json').read_text());volume=(doc.get('disk') or {}).get('volume') or {}
-            items.append({'id':'E'+str(len(items)+1),'title':'Machine volume','source':'store/raw/machine.json',
-                          'measured_at':doc.get('measured_at'),'facts':{k:volume[k] for k in ('free_gb','total_gb','free_percent') if k in volume}})
+            doc=json.loads((paths.SCRATCH/'machine.json').read_text())
+            disk=doc.get('disk') or {};volume=disk.get('volume') or {};memory=doc.get('memory') or {}
+            facts={k:volume[k] for k in ('free_gb','total_gb','free_percent') if k in volume}
+            facts.update({k:memory[k] for k in ('total_mb','free_mb','swap_used_mb') if k in memory})
+            places=sorted((l for l in disk.get('locations') or [] if isinstance(l,dict)),key=lambda l:-(l.get('gb') or 0))[:5]
+            if places:facts['largest_locations']=[{'label':str(l.get('label') or l.get('path') or '')[:80],'gb':l.get('gb')} for l in places]
+            add('Machine disk and memory','store/raw/machine.json',doc.get('measured_at'),facts)
         except (ValueError,OSError,AttributeError,TypeError):degraded.append({'source':'machine','reason':'unavailable'})
-    # Bound even unexpectedly large values without returning partial JSON.
-    trimmed=False
-    while len(json.dumps(items,ensure_ascii=False))>24000:items.pop();trimmed=True
-    if trimmed:degraded.append({'source':'context','reason':'evidence budget reached'})
+    shown=0
+    for f in findings[:MAX_FINDINGS]:
+        fields={k:str(f[k])[:400] for k in ('id','severity','type','subject','title','detail','action','first_seen') if k in f}
+        add(f.get('title',f.get('type','Finding')),'registry/findings.json',timestamps.get('findings.json'),fields)
+        if _size(items)>BUDGET*2//3:items.pop();break
+        shown+=1
+    if shown<len(findings):
+        degraded.append({'source':'findings','reason':f'{shown} of {len(findings)} findings included, most severe first'
+                         +('' if project_id else '; ask about one project for its own')})
+    wanted=[p for p in projects if not project_id or p.get('id')==project_id]
+    keys=('id','name','lifecycle','activity_tier','last_activity_on','description')
+    shown=0
+    for p in wanted[:MAX_PROJECTS]:
+        fields={k:str(p[k])[:500 if project_id else 200] for k in keys if k in p}
+        add(p.get('name',p.get('id','Project')),'registry/projects.json',timestamps.get('projects.json'),fields)
+        if _size(items)>BUDGET:items.pop();break
+        shown+=1
+    if shown<len(wanted):
+        degraded.append({'source':'projects','reason':f'{shown} of {len(wanted)} projects included; select a project for detail'})
     if any(not i.get('measured_at') for i in items):degraded.append({'source':'timestamps','reason':'some snapshots have no measurement time; freshness is unknown'})
     return {'items':items,'degraded':degraded}
 
@@ -176,11 +241,24 @@ def dashboard():
     if served!=str(paths.HOME):raise AssistantError('dashboard-workspace-mismatch')
     return {'url':f'http://127.0.0.1:{port}/dashboard/index.html'}
 
-def status():
-    return {'protocol':PROTOCOL,'engine_version':configuration.VERSION,'workspace':str(paths.HOME),
-            'agent_enabled':configuration.enabled('agent','features'),'provider_configured':providers.have_key(),
-            'conversations':list_conversations(),
-            'projects':project_choices()}
+def require_workspace():
+    """A path that is not an initialised workspace is named, not read as "agent disabled"."""
+    if not (paths.HOME/'workspace.json').is_file():raise AssistantError('unknown-workspace')
+
+def status(include_projects=True):
+    require_workspace()
+    choices=project_choices()
+    out={'protocol':PROTOCOL,'engine_version':configuration.VERSION,'workspace':str(paths.HOME),
+         'workspace_available':True,
+         'agent_enabled':configuration.enabled('agent','features'),'provider_configured':providers.have_key(),
+         'conversations':list_conversations(),'project_count':len(choices),'degraded':[]}
+    if include_projects:out['projects']=choices
+    return out
+
+def prune_requests(index):
+    """Request ids kept for de-duplication while their job is: a request whose job is gone
+    (pruned after jobs.RETENTION, or never written) can no longer be replayed anyway."""
+    return {k:v for k,v in index.items() if isinstance(v,dict) and jobs.get(v.get('job_id','')) is not None}
 
 def ask(raw,span_record=None):
     args=validate(raw)
@@ -197,10 +275,11 @@ def ask(raw,span_record=None):
             job=jobs.get(old['job_id'])
             if not job:raise AssistantError('expired-request')
             return {'job':jobs.view(job),'conversation_id':old['conversation_id']}
+        index=prune_requests(index)
         if len(index)>=1000:raise AssistantError('request-history-full')
         if jobs._running('agent.ask'):raise AssistantError('assistant-busy')
         evidence(args.get('project_id')) # reject unknown scope before write/spend
-        conv=get_conversation(args['conversation_id']) if args.get('conversation_id') else new_conversation(args['question'])
+        conv=_open_conversation(args['conversation_id'])[0] if args.get('conversation_id') else new_conversation(args['question'])
         if len(conv['turns'])>=32:raise AssistantError('conversation-full')
         if not args.get('conversation_id') and len(list_conversations())>=100:raise AssistantError('history-full')
         save_conversation(conv) # full/unwritable disk stops before a runner starts
@@ -221,7 +300,7 @@ def run_question(job):
     with locked():
         current=jobs.get(job['id'])
         if not current or current['status'] in jobs.TERMINAL:return {}
-        conv=get_conversation(args['conversation_id'])
+        conv,_=_open_conversation(args['conversation_id'])
     sources=evidence(args.get('project_id'))
     messages=[{'role':'system','content':SYSTEM}]
     for turn in conv['turns'][-7:]:
@@ -239,6 +318,10 @@ def run_question(job):
         done=[{'claimId':'ASSISTANT-ANSWER','statement':'Produced an advisory answer from bounded local evidence.'}],
         proof=[],not_verified=[{'claim':'All local data was reviewed','reason':'Only bounded allowlisted snapshots were read.'}],
         write_scopes=['observatory:store/assistant'],wall_ms=int((time.monotonic()-started)*1000),created_at=stamp())
+    # The runner's deadline is disarmed BEFORE the commit: firing between the
+    # dialogue write and the job write left a paid answer stored as completed
+    # under a job that read failed.
+    if threading.current_thread() is threading.main_thread():signal.alarm(0)
     # Every path acquires assistant BEFORE job. Cancellation takes only job.
     # Hold both while archiving and committing; cancellation cannot resurrect.
     with locked():
@@ -255,8 +338,9 @@ def run_question(job):
 
 def main(argv=None):
     import argparse
-    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('action',choices=['status','ask','list','get','job','cancel','dashboard']);args=ap.parse_args(argv)
+    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('action',choices=['status','ask','list','get','job','cancel','delete','dashboard']);args=ap.parse_args(argv)
     try:
+        require_workspace()
         doc={}
         if args.action not in ('status','list','dashboard'):
             raw=sys.stdin.buffer.read(32769)
@@ -271,12 +355,21 @@ def main(argv=None):
         else:
             if set(doc)!={'id'} or not isinstance(doc['id'],str):raise AssistantError('invalid-input')
             if args.action=='get':result=get_conversation(doc['id'])
+            elif args.action=='delete':result=delete_conversation(doc['id'])
             else:
-                job=jobs.get(doc['id']) if args.action=='job' else jobs.cancel(doc['id'])
-                if job is None:raise AssistantError('unknown-job')
+                # Only this assistant's jobs: the job tools of other capabilities
+                # have their own surface, and Stop must not reach them.
+                found=jobs.get(doc['id'])
+                if found is None or found.get('capability')!='agent.ask':raise AssistantError('unknown-job')
+                job=found if args.action=='job' else jobs.cancel(doc['id'])
                 result={'job':jobs.view(job)}
         print(json.dumps(result,ensure_ascii=False));return 0
-    except (AssistantError,ValueError,OSError,configuration.ConfigurationError) as exc:
+    except OSError as exc:
+        # A full or unwritable disk is its own answer: the spec keeps it apart
+        # from configuration errors, and the operator's remedy differs.
+        code='disk-full' if exc.errno==28 else 'workspace-unwritable' if exc.errno in (13,30) else 'OSError'
+        print(json.dumps({'error':code}));return 1
+    except (AssistantError,ValueError,configuration.ConfigurationError) as exc:
         print(json.dumps({'error':str(exc) if isinstance(exc,AssistantError) else type(exc).__name__}));return 1
 
 if __name__=='__main__':raise SystemExit(main())
