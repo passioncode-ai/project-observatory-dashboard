@@ -283,6 +283,54 @@ def test_behind_or_diverged_still_reports_when_it_is_the_true_answer() -> None:
               "no tracking ref" in got[0]["detail"], got[0]["detail"][:200])
 
 
+# ─────────── no probe reaches a credential store ───────────────────────
+
+def test_a_remote_asking_for_a_password_never_reaches_a_credential_helper() -> None:
+    """`git ls-remote` against an HTTPS remote that answers 401 asks every
+    configured credential helper — on macOS `osxkeychain`, which can put a
+    Keychain dialog in front of the operator from an unattended tick. This
+    collector is credential-free by contract: the helper list is emptied for
+    the probe, and a remote that wants a password is simply unreachable."""
+    import http.server, threading
+    import scan_remotes as S
+    seen: list[str] = []
+
+    class Asks(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):                                          # noqa: N802
+            seen.append(self.path)
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="example"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args):                              # quiet
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Asks)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-helper-"))
+    marker = d / "helper-was-asked"
+    helper = d / "helper.sh"
+    helper.write_text(f"#!/bin/sh\ntouch '{marker}'\n", encoding="utf-8")
+    helper.chmod(0o700)
+    config = d / "gitconfig"
+    config.write_text(f"[credential]\n\thelper = {helper}\n", encoding="utf-8")
+    saved = S.ENV
+    S.ENV = {**saved, "GIT_CONFIG_GLOBAL": str(config)}
+    try:
+        folder, got = S.probe({"folder": "alpha-web", "path": str(d),
+                               "remote": f"http://127.0.0.1:{server.server_port}/alpha-web.git",
+                               "branch": "main"})
+    finally:
+        S.ENV = saved
+        server.shutdown()
+    check("the remote was asked, and answered with a password demand", bool(seen), str(seen))
+    check("a remote that wants a password is reported unreachable",
+          got.get("reachable") is False, str(got)[:200])
+    check("no credential helper ran — no keychain can be consulted",
+          not marker.exists(), "the helper configured for the user was invoked")
+
+
 if __name__ == "__main__":
     print("clone sync — eight clones whose work existed nowhere else\n")
     for fn in (test_the_tracking_ref_answers_it_without_a_fetch,
@@ -292,7 +340,8 @@ if __name__ == "__main__":
                test_ahead_is_reported_as_work_that_exists_nowhere_else,
                test_stale_and_at_risk_do_not_share_a_severity,
                test_an_unknown_state_is_raised_rather_than_dropped,
-               test_behind_or_diverged_still_reports_when_it_is_the_true_answer):
+               test_behind_or_diverged_still_reports_when_it_is_the_true_answer,
+               test_a_remote_asking_for_a_password_never_reaches_a_credential_helper):
         fn()
     print()
     if FAILURES:

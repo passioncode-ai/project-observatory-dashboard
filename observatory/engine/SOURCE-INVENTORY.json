@@ -336,8 +336,8 @@
     {
       "path": "collectors/scan_remotes.py",
       "source_sha256": "ce5757e5937b7fdbe9a72f063dbede301deffd47960f07d335ba9209878abb4e",
-      "export_sha256": "342db96f969c7c219d781e4b33531a8a19bbf40520559a723408181cbf2f29ca",
-      "bytes": 12130,
+      "export_sha256": "bd7d0b9635d1b383088d6bdd950e83615c182358e5889c12c5548cc906e33a38",
+      "bytes": 12633,
       "python_comments_removed": 29,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
@@ -1785,8 +1785,8 @@
       "path": "tests/test_clone_sync.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "64e5b617edb516c60e7bb75a1a5969a4f979fdc82dbadd2a40a809db573d0408",
-      "bytes": 14462
+      "export_sha256": "055956c063cecd348b74d0caaf7305a5f7e894e91e6139a9d11a757e1bc6fe23",
+      "bytes": 16912
     },
     {
       "path": "tests/test_collector_state.py",
