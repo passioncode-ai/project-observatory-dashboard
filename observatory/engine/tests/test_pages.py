@@ -512,7 +512,8 @@ def test_the_findings_page_is_a_working_surface() -> None:
           and 'data-f="rules"' in src.split('id="view-projects"', 1)[1][:400], "")
     # D-22: an empty estate is a sentence and the command, not eight zeros.
     check("an empty registry renders one sentence with a workspace-local observation command",
-          'class="tile empty-estate"' in src and 'data-copy="${E(cliCommand("local"))}"' in src
+          'class="empty-estate"' in src and 'fullCommand("local")' in src
+          and 'fullCommand("configure sources projects", "PATH")' in src
           and "if (MORE_TILES) MORE_TILES.onclick" in src, "")
     # D-19: every grouped table declares its columns; unused tokens are gone.
     check("mcp, traffic, domains and heroku tables carry a colgroup",

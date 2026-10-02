@@ -314,6 +314,49 @@ def test_an_unmeasured_estate_does_not_say_measured_not_measured() -> None:
     check("and never 'Measured not measured'", n["Измерено не"] == 0, str(n))
 
 
+def page_with_its_script(pages: pathlib.Path, name: str, dest: pathlib.Path) -> pathlib.Path:
+    """A split page with `app.js` inlined, so the harness (which reads inline
+    scripts) runs exactly what a browser runs for that page."""
+    html = (pages / f"{name}.html").read_text(encoding="utf-8")
+    js = (pages / "app.js").read_text(encoding="utf-8")
+    out = dest / f"{name}-inline.html"
+    out.write_text(html.replace('<script src="app.js"></script>', "<script>" + js + "</script>"), encoding="utf-8")
+    return out
+
+
+def test_a_stub_document_is_not_scanned_and_says_how_to_scan() -> None:
+    """`init` writes empty documents with `scanned_on: null`; the pages tested only
+    whether the document existed, so Keys, ENV, MCP, Traffic and Heroku said
+    "Empty here — the registry holds no row of this kind" instead of "not
+    scanned", and Keys offered `full openrouter`, which does nothing while that
+    integration is off."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-stubs-")).resolve()
+    env = dashboard_fixture.seed(d)
+    empty = json.loads((ROOT / "defaults/empty-registry.json").read_text(encoding="utf-8"))
+    for name in ("credentials.json", "env-inventory.json", "mcp-servers.json",
+                 "google-properties.json", "heroku-apps.json", "cloudflare-zones.json"):
+        (d / "registry" / name).write_text(json.dumps(dict(empty[name], schema_version=1)), encoding="utf-8")
+    p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT, env=env,
+                       capture_output=True, text=True)
+    check("the page builds over stub documents", p.returncode == 0, p.stderr[-300:])
+    pages = pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"])
+    expect = {"creds": ("Credentials were not scanned", "vault.py"),
+              "env": ("Environment files were not scanned", "full env"),
+              "mcp": ("MCP was not scanned", "configure integrations mcp true"),
+              "traffic": ("Analytics was not scanned", "configure integrations google true"),
+              "heroku": ("Heroku was not scanned", "configure integrations heroku true")}
+    for name, (says, command) in expect.items():
+        page = page_with_its_script(pages, name, d)
+        got = {n: render(page, count=n) for n in (says, command, "registry holds no row")}
+        if any(v is None for v in got.values()):
+            print("  SKIP  node is not on this machine")
+            return
+        n = {k: sum((v.get("counts") or {}).values()) for k, v in got.items()}
+        check(f"{name}: says it was not scanned", n[says] >= 1, str(n))
+        check(f"{name}: hands over the command that scans it", n[command] >= 1, str(n))
+        check(f"{name}: never 'the registry holds no row'", n["registry holds no row"] == 0, str(n))
+
+
 def test_no_panel_renders_an_object_as_text() -> None:
     """`[object Object]` is what a page says when a field means two things.
 
@@ -444,6 +487,7 @@ if __name__ == "__main__":
                test_a_finding_title_reads_in_the_readers_language,
                test_an_unmeasured_estate_does_not_say_measured_not_measured,
                test_no_panel_renders_an_object_as_text,
+               test_a_stub_document_is_not_scanned_and_says_how_to_scan,
                test_a_metric_that_moved_says_so_on_the_page,
                test_a_single_sample_renders_no_movement,
                test_the_harness_itself_can_fail):

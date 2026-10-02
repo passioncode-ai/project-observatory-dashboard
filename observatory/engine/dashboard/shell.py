@@ -217,6 +217,17 @@ def _traffic_line(payload: dict, t: Translator) -> str:
     return " · ".join(parts)
 
 
+def _machine_line(payload: dict, t: Translator) -> str:
+    """The overview's Machine card: free disk and process count, or that the
+    machine has not been surveyed — never a blank card."""
+    m = payload.get("machine") or {}
+    volume = (m.get("disk") or {}).get("volume") or {}
+    if not m.get("measuredAt") or volume.get("free_gb") is None:
+        return t.mark("not surveyed")
+    return (t.mark("{gb} GB free on disk", gb=volume.get("free_gb")) + " · "
+            + t.mark("{n} processes", n=(m.get("processes") or {}).get("count") or 0))
+
+
 def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
     """The index page's module cards: one sentence each, the number, the link."""
     t = t or Translator()
@@ -236,11 +247,16 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
         "mcp": t.mark("{n} declarations", n=counts["mcp"] or 0) + " · "
                + t.mark("{n} servers", n=((payload.get("mcp") or {}).get("totals") or {}).get("distinct_servers", 0)),
         "traffic": _traffic_line(payload, t),
+        "machine": _machine_line(payload, t),
         # TWO NUMBERS, because one of them is the reason to open the page: the
         # observer's state, and how many rows are waiting for a person (S4/F9).
         "health": (_observer(health, t) + " · "
                    + t.mark("awaiting a decision: {n}", n=health.get("proposed", 0))),
     }
+    # A page nobody scanned says so on its card, instead of "0 apps".
+    for name, key in (("heroku", "heroku"), ("creds", "creds"), ("env", "env"), ("mcp", "mcp")):
+        if payload.get(key) is None:
+            lines[name] = t.mark("not scanned")
     cards = []
     for name, title, _kind in PAGES:
         if name == "index":

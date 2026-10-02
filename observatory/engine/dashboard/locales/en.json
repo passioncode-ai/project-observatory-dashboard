@@ -44,7 +44,6 @@
   "one": "{n} variable",
   "other": "{n} variables"
  },
- "s@@sessions-abbrev": "s",
  "the Heroku snapshot is {n} days old, so nothing is being said about it": {
   "one": "the Heroku snapshot is {n} day old, so nothing is being said about it",
   "other": "the Heroku snapshot is {n} days old, so nothing is being said about it"
@@ -401,6 +400,10 @@
  "{n} origins": {
   "one": "{n} origin",
   "other": "{n} origins"
+ },
+ "{n} processes": {
+  "one": "{n} process",
+  "other": "{n} processes"
  },
  "{n} production secrets cannot be compared with this machine's": {
   "one": "{n} production secret cannot be compared with this machine's",
