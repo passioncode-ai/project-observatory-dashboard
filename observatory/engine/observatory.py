@@ -2,7 +2,7 @@
 """Project Observatory — the deterministic pipeline.
 
     setup      create .venv (the MCP server's shebang points at it)
-    deps       install the pinned MCP SDK and sqlite-vec — mcp==2.1.1, the only line that
+    deps       install the pinned MCP SDK and sqlite-vec — mcp==2.2.0, the only line that
                speaks protocol revision 2026-07-28. The LLM provider needs no
                SDK: OpenRouter is HTTP and urllib reaches it.
     scan       collect: filesystem, GitHub, the wiki
@@ -88,7 +88,7 @@ if not Path(PY).exists():
 STEPS = {
     "setup":     ["uv", "venv", ".venv"],
     "deps":      ["uv", "pip", "install", "--python", ".venv/bin/python",
-                  "mcp==2.1.1", "jsonschema", "sqlite-vec",
+                  "mcp==2.2.0", "jsonschema", "sqlite-vec",
                   # google-auth signs the service-account JWTs the GSC and GA4
                   # plugins need; a launchd tick cannot do an OAuth browser dance
                   #. Pure-python, no build step.

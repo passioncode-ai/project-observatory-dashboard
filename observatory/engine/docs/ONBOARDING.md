@@ -90,7 +90,7 @@ Always pass the same home to the CLI, server and scheduler.
 
 ## Give this prompt to your agent
 
-Copy [AGENT-ONBOARDING.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/AGENT-ONBOARDING.md), or run
+Copy [AGENT-ONBOARDING.md](AGENT-ONBOARDING.md), or run
 `project-observatory full onboard`. The agent starts locally, explains available
 integrations, and guides credential entry on your own machine. It does not need
 the author's accounts or data.
@@ -450,7 +450,7 @@ workspace. Keep the snapshot and matching previous application release.
 
 To restore, select a new empty home with global `--home` and pass the private
 snapshot directory to `full restore`. Never point old code at newer data to
-simulate a downgrade. [COMPATIBILITY.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/COMPATIBILITY.md) specifies supported
+simulate a downgrade. [COMPATIBILITY.md](COMPATIBILITY.md) specifies supported
 formats, failure handling, backup exclusions and the tested migration matrix.
 
 ### Encrypted backups off this disk
