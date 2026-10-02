@@ -66,14 +66,77 @@ class AssistantTests(unittest.TestCase):
         with patch.object(self.a.providers,'complete') as complete:
             doc=self.a.status();self.assertEqual(doc['protocol'],'observatory-assistant/1');complete.assert_not_called()
 
-    def test_dashboard_refuses_another_workspace_and_uses_selected_port(self):
+    def test_dashboard_names_the_server_and_the_built_files(self):
         from tools import dashboard_open
         (self.a.paths.SCRATCH/'serverd.json').write_text(json.dumps({'port':48123}))
+        index=self.a.paths.DASHBOARD_DIR/'index.html'
         with patch.object(dashboard_open,'served_workspace',return_value='/another-workspace'):
-            with self.assertRaisesRegex(self.a.AssistantError,'dashboard-workspace-mismatch'):self.a.dashboard()
+            doc=self.a.dashboard()
+            self.assertEqual((doc['server'],doc.get('url'),doc['files']),('other-workspace',None,None))
+        index.parent.mkdir(parents=True,exist_ok=True);index.write_text('<html></html>')
+        with patch.object(dashboard_open,'served_workspace',return_value=None):
+            doc=self.a.dashboard()
+            # No server: the built pages are still a dashboard, opened as files.
+            self.assertEqual((doc['server'],doc.get('url')),('absent',None))
+            self.assertEqual(doc['files'],str(index.resolve()))
+            self.assertTrue(doc['built_at'])
         with patch.object(dashboard_open,'served_workspace',return_value=str(self.a.paths.HOME)) as get:
-            self.assertEqual(self.a.dashboard()['url'],'http://127.0.0.1:48123/dashboard/index.html')
+            doc=self.a.dashboard()
+            self.assertEqual((doc['server'],doc['url']),('verified','http://127.0.0.1:48123/dashboard/index.html'))
             get.assert_called_once_with(48123,timeout=3)
+
+    def test_serve_starts_only_when_asked_and_reuses_a_verified_server(self):
+        from tools import dashboard_open
+        home=str(self.a.paths.HOME);answers=iter([None,home])
+        with patch.object(dashboard_open,'served_workspace',side_effect=lambda *a,**k:next(answers)), \
+             patch.object(dashboard_open,'_always_on',return_value=False), \
+             patch.object(dashboard_open,'start_server') as start:
+            doc=self.a.serve()
+            start.assert_called_once_with(47311)
+            self.assertEqual(doc['server'],'verified')
+        with patch.object(dashboard_open,'served_workspace',return_value=home), \
+             patch.object(dashboard_open,'start_server') as start:
+            self.a.serve();start.assert_not_called()
+
+    def test_serve_restarts_an_installed_server_through_launchd(self):
+        from tools import dashboard_open
+        home=str(self.a.paths.HOME);answers=iter([None,None,home,home])
+        with patch.object(dashboard_open,'served_workspace',side_effect=lambda *a,**k:next(answers)), \
+             patch.object(dashboard_open,'_always_on',return_value=True), \
+             patch.object(dashboard_open,'start_server') as start, \
+             patch.object(self.a.subprocess,'run') as run, patch.object(self.a.time,'sleep'):
+            run.return_value=type('R',(),{'returncode':0})()
+            doc=self.a.serve()
+        start.assert_not_called()
+        argv=run.call_args[0][0]
+        self.assertEqual(argv[:3],['launchctl','kickstart','-k'])
+        self.assertTrue(argv[3].endswith('.server'))
+        self.assertEqual(doc['server'],'verified')
+
+    def test_serve_refuses_a_port_another_workspace_holds(self):
+        from tools import dashboard_open
+        with patch.object(dashboard_open,'served_workspace',return_value='/elsewhere'), \
+             patch.object(dashboard_open,'start_server') as start:
+            with self.assertRaisesRegex(self.a.AssistantError,'dashboard-port-busy'):self.a.serve()
+            start.assert_not_called()
+
+    def test_serve_failure_is_typed(self):
+        from tools import dashboard_open
+        with patch.object(dashboard_open,'served_workspace',return_value=None), \
+             patch.object(dashboard_open,'_always_on',return_value=False), \
+             patch.object(dashboard_open,'start_server',side_effect=self.a.configuration.ConfigurationError('exited 1')):
+            with self.assertRaisesRegex(self.a.AssistantError,'dashboard-start-failed'):self.a.serve()
+
+    def test_build_runs_the_dashboard_step_and_reports_failure(self):
+        from tools import dashboard_open
+        with patch.object(dashboard_open,'build',return_value=1):
+            with self.assertRaisesRegex(self.a.AssistantError,'dashboard-build-failed'):self.a.build()
+        index=self.a.paths.DASHBOARD_DIR/'index.html'
+        def built():
+            index.parent.mkdir(parents=True,exist_ok=True);index.write_text('<html></html>');return 0
+        with patch.object(dashboard_open,'build',side_effect=built), \
+             patch.object(dashboard_open,'served_workspace',return_value=None):
+            self.assertEqual(self.a.build()['files'],str(index.resolve()))
 
     def enabled(self):
         from contextlib import ExitStack
@@ -279,6 +342,32 @@ class AssistantTests(unittest.TestCase):
                 self.a.run_question(self.a.jobs.get(first['job']['id']))
         commit = calls.index(('save', True))
         self.assertIn(('alarm', 0), calls[:commit])
+
+    def test_stop_ends_a_runner_started_with_sigterm_blocked(self):
+        # The Mac app's bridge once handed its children a blocked signal mask; Stop
+        # then marked the job cancelled while the runner kept waiting on the model.
+        import signal as sig, time
+        real_spawn=self.a.jobs._spawn
+        code=("import sys,time,runpy;sys.path.insert(0,"+repr(str(ROOT))+");"
+              "from agent import assistant;"
+              "assistant.providers.complete=lambda *a,**k:time.sleep(30);"
+              "runpy.run_path("+repr(str(ROOT/'tools/run_job.py'))+",run_name='__main__')")
+        children=[]
+        def spawn(argv,env):
+            import subprocess
+            log=open(self.a.jobs.jobs_dir()/'runner.log','ab')
+            child=subprocess.Popen([sys.executable,'-c',code,argv[-1]],env=env,stdout=log,stderr=log,
+                                   start_new_session=True,
+                                   preexec_fn=lambda:sig.pthread_sigmask(sig.SIG_BLOCK,{sig.SIGTERM}))
+            children.append(child);return child
+        with self.enabled(),patch.object(self.a.jobs,'_spawn',side_effect=spawn):
+            first=self.a.ask(self.request())
+            time.sleep(1.5)                                    # the runner is waiting on the model
+            self.a.jobs.cancel(first['job']['id'])
+            try:code=children[0].wait(timeout=10)
+            except Exception:children[0].kill();children[0].wait();code=None
+        self.assertIsNotNone(code,'the runner ignored SIGTERM after Stop')
+        self.assertEqual(self.a.jobs.get(first['job']['id'])['status'],'cancelled')
 
     def test_cancel_during_spawn_stops_new_process(self):
         def spawn(argv,env):

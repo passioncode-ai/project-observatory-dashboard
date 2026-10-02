@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import secrets
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -232,18 +233,66 @@ def project_choices():
                 for p in doc.get('projects',[]) if isinstance(p,dict) and isinstance(p.get('id'),str)][:1000]
     except (ValueError,OSError,AttributeError):return []
 
-def dashboard():
-    """Return only a loopback URL proven to serve this selected workspace."""
-    from tools import dashboard_open
+def _port():
     try:
         state=json.loads((paths.SCRATCH/'serverd.json').read_text())
         port=state.get('port',47311)
     except FileNotFoundError:port=47311
     except (ValueError,OSError,AttributeError):raise AssistantError('dashboard-unavailable') from None
     if type(port) is not int or not 1<=port<=65535:raise AssistantError('dashboard-unavailable')
+    return port
+
+def dashboard():
+    """Where this workspace's dashboard can be shown, without starting anything.
+
+    `url` only for a loopback server proven to serve THIS workspace; `files` for the
+    built pages, which are self-contained and readable with no server at all, so the
+    app shows the dashboard either way and says which one it is."""
+    from tools import dashboard_open
+    port=_port()
     served=dashboard_open.served_workspace(port,timeout=3)
-    if served!=str(paths.HOME):raise AssistantError('dashboard-workspace-mismatch')
-    return {'url':f'http://127.0.0.1:{port}/dashboard/index.html'}
+    index=(paths.DASHBOARD_DIR/'index.html')
+    out={'port':port,'server':'verified' if served==str(paths.HOME) else 'absent' if served is None else 'other-workspace',
+         'always_on':dashboard_open._always_on(),'files':None,'built_at':None}
+    if out['server']=='verified':out['url']=f'http://127.0.0.1:{port}/dashboard/index.html'
+    if index.is_file():
+        out['files']=str(index.resolve())
+        out['built_at']=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime(index.stat().st_mtime))
+    return out
+
+def serve(wait=45.0):
+    """Start this workspace's server, on request only (the app's «Start server»).
+
+    An installed always-on server is restarted through its own launchd job — starting
+    a second process would only hit its instance lock; otherwise the same detached
+    start `full open --serve` uses. A port held by another workspace is refused."""
+    from tools import dashboard_open
+    state=dashboard()
+    if state['server']=='verified':return state
+    if state['server']=='other-workspace':raise AssistantError('dashboard-port-busy')
+    try:
+        if state['always_on']:
+            from tools import install_launchd
+            label=install_launchd.instance_label('server')
+            done=subprocess.run(['launchctl','kickstart','-k',f'gui/{os.getuid()}/{label}'],
+                                capture_output=True,timeout=15)
+            if done.returncode!=0:raise AssistantError('dashboard-start-failed')
+            deadline=time.monotonic()+wait
+            while dashboard_open.served_workspace(state['port'],timeout=3)!=str(paths.HOME):
+                if time.monotonic()>deadline:raise AssistantError('dashboard-start-failed')
+                time.sleep(0.5)
+        else:
+            dashboard_open.start_server(state['port'])
+    except (configuration.ConfigurationError,OSError,subprocess.SubprocessError):
+        raise AssistantError('dashboard-start-failed') from None
+    return dashboard()
+
+def build():
+    """Rebuild the pages from the registry: local, no provider call, no spend."""
+    from tools import dashboard_open
+    if dashboard_open.build()!=0 or not (paths.DASHBOARD_DIR/'index.html').is_file():
+        raise AssistantError('dashboard-build-failed')
+    return dashboard()
 
 def require_workspace():
     """A path that is not an initialised workspace is named, not read as "agent disabled"."""
@@ -352,17 +401,19 @@ def run_question(job):
 
 def main(argv=None):
     import argparse
-    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('action',choices=['status','ask','list','get','job','cancel','delete','dashboard']);args=ap.parse_args(argv)
+    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('action',choices=['status','ask','list','get','job','cancel','delete','dashboard','serve','build']);args=ap.parse_args(argv)
     try:
         require_workspace()
         doc={}
-        if args.action not in ('status','list','dashboard'):
+        if args.action not in ('status','list','dashboard','serve','build'):
             raw=sys.stdin.buffer.read(32769)
             if len(raw)>32768:raise AssistantError('input-too-large')
             doc=json.loads(raw)
             if not isinstance(doc,dict):raise AssistantError('invalid-input')
         if args.action=='status':result=status()
         elif args.action=='dashboard':result=dashboard()
+        elif args.action=='serve':result=serve()
+        elif args.action=='build':result=build()
         elif args.action=='list':result={'conversations':list_conversations(),
             'projects':project_choices()}
         elif args.action=='ask':result=ask(doc)

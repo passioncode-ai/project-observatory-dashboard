@@ -80,18 +80,45 @@ unknown workspace remain distinguishable. Status and local navigation spend noth
 
 ## Native screens and lifecycle
 
-Main window: native split view, conversation sidebar, toolbar with new dialogue,
-project scope and dashboard action, central transcript, evidence disclosure,
-composer and Send/Stop. Returning users see stored history. Empty state explains
-the job and offers concrete starter questions; loading/error states preserve input.
-Settings: CLI executable picker, workspace directory picker, connection test,
-language (EN/RU), and visible backend/version status. Absolute executable path,
-argv array, no shell interpolation. The app never edits other agents' MCP configs.
-No hidden enrollment or automatic service takeover.
+**Decision, 2026-10-02 (operator):** opening Observatory shows the dashboard, not the
+assistant. The first version put the conversation in the main window and kept the
+dashboard in the browser; the operator expected the dashboard. Supersedes the
+"no WebView, dashboard stays in the browser" choice of 2026-10-01.
+
+Dashboard window (main, opens at launch and on Dock reopen — the app opens it itself,
+because a WindowGroup window is not recreated by AppKit's reopen): the workspace's
+dashboard in a WKWebView. Live when `assistant dashboard` verifies a loopback server
+for THIS workspace; otherwise the built pages from `docs/dashboard/`, which are
+self-contained, under a banner that names their build time and offers **Start
+server** (`assistant serve`: an installed always-on server is restarted through its
+own launchd job, otherwise the detached `full open --serve` start). No pages yet →
+**Build the dashboard** (`assistant build`, local, no provider call). A port held by
+another workspace is named and Start is disabled. Navigation stays inside this
+workspace's pages (`DashboardOrigin`); other sites, other local services, mail and
+mail links open in the default browser or mail app; any other scheme is refused, so a page
+cannot launch an app.
+The page's `confirm`/`prompt` are native sheets. Toolbar: back, forward, overview,
+reload, open in browser, assistant. The app's language is written once per change to
+the page's own `observatory.locale`; a choice made on the page is read back after
+each load and adopted. Re-checked when the app becomes active.
+
+Assistant window (⇧⌘A, toolbar): native split view, conversation sidebar, toolbar with
+new dialogue, project scope and dashboard action, central transcript, evidence
+disclosure, composer and Send/Stop. Returning users see stored history. Empty state
+explains the job and offers concrete starter questions; loading/error states preserve
+input. Settings: CLI executable picker, workspace directory picker, connection test,
+language (EN/RU), and visible backend/version status. Absolute executable path, argv
+array, no shell interpolation. The app never edits other agents' MCP configs. No hidden
+enrollment or automatic service takeover: a server starts only from Start server.
+
+Icon: the product mark (`dashboard/brand/observatory-mark.svg`, pinned in its
+manifest) rasterized on the macOS grid by `macos/scripts/make-icon.swift` at every
+iconset size — vector rasterization of the reviewed mark, not generated imagery.
 
 Native process bridge uses bounded output, timeout, cancellation and exit status,
-spawning the CLI in its own process group so a timeout or Stop ends what the CLI
-started; a write to a child that exited is EPIPE, never SIGPIPE. Malformed or
+spawning the CLI in its own process group with an empty signal mask and default
+dispositions, so a timeout or Stop ends what the CLI started and a server it starts
+can be stopped; a write to a child that exited is EPIPE, never SIGPIPE. Malformed or
 incompatible protocol is a recoverable configuration error: an engine without the
 assistant is `backend-incompatible` with its first stderr line, any other non-JSON
 failure `backend-failed` with its first stderr line. One request id per draft until
@@ -103,7 +130,8 @@ can resume it. Stop explicitly cancels the job, not unrelated processes.
 Design: native controls and system semantic colors; one central token map for
 spacing, widths and accent. System font, keyboard shortcuts, selectable answer text,
 VoiceOver labels, clear focused controls, reduced-motion-compatible static layout.
-No custom animation or WebView chat. Main action remains reachable at 900×620.
+No custom animation; the chat is native, the dashboard is the workspace's own pages.
+Main actions remain reachable at 900×620.
 Native controls are the component layer, not a web component kit. Visual direction
 is quiet macOS utility; observable target is readable evidence beside an answer,
 not a tile dashboard. No Figma publication requested. Native UI inspection is

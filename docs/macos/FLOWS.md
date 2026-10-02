@@ -12,8 +12,17 @@ not observed usability outcomes.
 | FLW-02 | SCN-002, SCN-003 | composer → persisted job → working → answer/sources or typed failure | SCR-01 |
 | FLW-03 | SCN-004 | working → Stop → cancelled; close/reopen → read persisted job → resume/terminal | SCR-01 |
 | FLW-04 | SCN-006 | MCP ask → validated bounded input → shared job → poll/cancel → envelope/history | CLI/MCP, no new screen |
+| FLW-05 | SCN-007, SCN-008, SCN-009 | launch/reopen → dashboard window → live, or saved pages → Start server → live; no pages → Build | SCR-00 |
 
-## SCR-01 — Main window
+## SCR-00 — Dashboard window (the app's main window)
+
+The workspace's dashboard pages in a web view, under the native title bar: the page's
+title as the window title, «Live» or «Saved pages · <time>» as the subtitle. Toolbar:
+back, forward, overview, reload, open in browser, assistant. Saved pages carry a banner
+with Start server; an unbuilt workspace shows Build the dashboard; an unreadable engine
+shows the reason with Retry and Settings. The assistant (SCR-01) is its own window.
+
+## SCR-01 — Assistant window
 
 Left: conversation list and connection/version status. Right: transcript with
 question, advisory answer, model/cost, suggested steps, missing-source notes and
@@ -32,13 +41,14 @@ action and leaves the input intact. Changing workspace never cancels an old job.
 
 ## Native visual direction
 
-The existing dashboard remains a browser dashboard; this surface uses native
-macOS utility conventions: split view, system font, semantic system colors,
+The dashboard window shows the workspace's own pages (decision of 2026-10-02, SPEC);
+the assistant uses native macOS utility conventions: split view, system font, semantic system colors,
 compact toolbar and one reading column. No decorative tiles, custom animation or
 embedded browser chat. `Design` in `macos/Sources/ObservatoryApp/App.swift` owns the
 shared spacing and transcript width. Native controls supply their platform states.
-The alternate web-wrapper direction was rejected because it duplicates browser
-navigation and does not fulfill the requested separate native application.
+The first version rejected a web wrapper for the main window; the operator then asked
+for the dashboard to be what opens, so the dashboard window wraps the pages while the
+assistant stays native.
 
 Scenarios govern placement and actions; the draft brand pack governs strings.
 EN/RU errors and the provider disclosure are in `Model.swift` / `App.swift`.

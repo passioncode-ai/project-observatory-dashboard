@@ -13,6 +13,7 @@ import ObservatoryCore
         var calls = 0
         let first = expectation(description: "old request started")
         let model = Model(defaults: defaults()) { action, _ in
+            if action == "dashboard" { return ["server": "absent"] }   // Save re-checks the dashboard too
             XCTAssertEqual(action, "status"); calls += 1
             if calls == 1 {
                 return try await withCheckedThrowingContinuation { waiting = $0; first.fulfill() }
@@ -39,10 +40,60 @@ import ObservatoryCore
         await model.saveSettings()
         XCTAssertEqual(model.scope, ""); XCTAssertEqual(model.question, ""); XCTAssertTrue(model.projects.isEmpty)
     }
-    func testDashboardRejectsNonLoopbackDestination() async {
-        let model = Model(defaults: defaults()) { _, _ in ["url": "https://example.invalid/dashboard/index.html"] }
-        let url = await model.dashboardURL()
-        XCTAssertNil(url); XCTAssertNotNil(model.error)
+    func testDashboardPrefersTheVerifiedServerThenTheBuiltPages() {
+        let ws = "/srv/example-ws"
+        let live = Model.mode(["server": "verified", "url": "http://127.0.0.1:47311/dashboard/index.html",
+                               "files": ws + "/docs/dashboard/index.html"], workspace: ws)
+        XCTAssertEqual(live.origin?.isLive, true)
+        let files = Model.mode(["server": "absent", "files": ws + "/docs/dashboard/index.html",
+                                "built_at": "2026-10-02T14:03:19Z", "always_on": true], workspace: ws)
+        guard case .files(let o, let at, let alwaysOn, let busy) = files else { return XCTFail("\(files)") }
+        XCTAssertFalse(o.isLive); XCTAssertNotNil(at); XCTAssertTrue(alwaysOn); XCTAssertFalse(busy)
+        XCTAssertEqual(Model.mode(["server": "absent"], workspace: ws), .notBuilt(portBusy: false))
+        XCTAssertEqual(Model.mode(["server": "other-workspace"], workspace: ws), .notBuilt(portBusy: true))
+    }
+    func testDashboardRefusesAnAddressThatIsNotThisWorkspaces() {
+        let ws = "/srv/example-ws"
+        // A remote "verified" URL, or pages outside the workspace, are never shown.
+        XCTAssertNil(Model.mode(["server": "verified", "url": "https://example.invalid/dashboard/index.html"], workspace: ws).origin)
+        XCTAssertNil(Model.mode(["server": "absent", "files": "/srv/example-other/docs/dashboard/index.html"], workspace: ws).origin)
+    }
+    func testDashboardStartAndBuildReportTheirFailure() async {
+        let d = defaults(); d.set("/srv/example-ws", forKey: "workspace")
+        let model = Model(defaults: d) { action, _ in
+            if action == "serve" { throw BridgeError.backend("dashboard-start-failed") }
+            if action == "build" { throw BridgeError.backend("dashboard-build-failed") }
+            return ["server": "absent", "files": "/srv/example-ws/docs/dashboard/index.html"]
+        }
+        await model.refreshDashboard()
+        if case .files = model.dashboardMode {} else { XCTFail("\(model.dashboardMode)") }
+        await model.startServer()
+        XCTAssertEqual(model.dashboardFailure?.code, "dashboard-start-failed")
+        XCTAssertFalse(model.dashboardWorking)
+        XCTAssertTrue(model.dashboardError?.contains("serverd.out") == true)
+        await model.buildDashboard()
+        XCTAssertEqual(model.dashboardFailure?.code, "dashboard-build-failed")
+        if case .files = model.dashboardMode {} else { XCTFail("a failed build must keep the pages shown") }
+    }
+    func testAnEngineWithoutTheDashboardActionsIsNamedNotShownAsUnbuilt() async {
+        // 0.11.0 answers `dashboard` in its old shape (a url, or an error) and has no
+        // serve/build: "no dashboard yet" would be a lie about a workspace that has one.
+        let model = Model(defaults: defaults()) { action, _ in
+            action == "dashboard" ? ["url": "http://127.0.0.1:47311/dashboard/index.html"] : [:]
+        }
+        model.russian = false
+        await model.refreshDashboard()
+        XCTAssertEqual(model.dashboardMode, .unavailable)
+        XCTAssertEqual(model.dashboardFailure?.code, "backend-incompatible")
+        XCTAssertTrue(model.dashboardError?.contains("0.12") == true)
+    }
+    func testAppLanguageChangeReachesThePageOnceAndAPageChoiceComesBack() {
+        let model = Model(defaults: defaults()); model.russian = false
+        let seed = model.localeSeed
+        model.russian = true
+        XCTAssertEqual(model.localeSeed, seed + 1)                 // the app's change is pushed to the page
+        model.adoptPageLocale("en")
+        XCTAssertFalse(model.russian); XCTAssertEqual(model.localeSeed, seed + 1)   // adopted, not pushed back
     }
     func testNewConversationCannotDetachRunningRequest() {
         let model = Model(defaults: defaults())

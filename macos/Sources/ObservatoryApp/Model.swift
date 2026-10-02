@@ -1,5 +1,6 @@
 import SwiftUI
 import ObservatoryCore
+import AppKit
 
 struct Conversation: Identifiable { let id: String; let title: String }
 struct Turn: Identifiable {
@@ -11,11 +12,27 @@ struct Turn: Identifiable {
 /// when it is shown, so switching the language re-words an error on screen.
 struct Failure: Equatable { let code: String; let detail: String? }
 
+/// What the main window shows. The built pages are a dashboard in their own right
+/// (self-contained, readable with no server), so «no server» is a mode, not a failure.
+enum DashboardMode: Equatable {
+    case checking
+    case live(DashboardOrigin)
+    case files(DashboardOrigin, builtAt: Date?, alwaysOn: Bool, portBusy: Bool)
+    case notBuilt(portBusy: Bool)
+    case unavailable
+    var origin: DashboardOrigin? {
+        switch self { case .live(let o), .files(let o, _, _, _): return o; default: return nil }
+    }
+}
+
 @MainActor final class Model: ObservableObject {
     static let questionLimit = 6000           // the engine's, in code points (Python `len`)
     @Published var executable: String
     @Published var workspace: String
-    @Published var russian: Bool { didSet { defaults.set(russian, forKey: "russian") } }
+    @Published var russian: Bool { didSet { if russian != oldValue { defaults.set(russian, forKey: "russian"); if !localeFromPage { localeSeed += 1 } } } }
+    /// Set while a language choice made INSIDE the dashboard is being adopted.
+    private var localeFromPage = false
+    func adoptPageLocale(_ code: String) { localeFromPage = true; russian = code == "ru"; localeFromPage = false }
     @Published var conversations: [Conversation] = []
     @Published var turns: [Turn] = []
     @Published var projects: [Conversation] = []
@@ -31,6 +48,16 @@ struct Failure: Equatable { let code: String; let detail: String? }
     @Published var savedAt: Date?
     /// The conversation awaiting a delete confirmation, from the menu or a row's context menu.
     @Published var deleting: String?
+    @Published var dashboardMode: DashboardMode = .checking
+    /// When the pages were last built; the scheduled cycle rebuilds them, and a
+    /// change makes the open page reload so the window does not show stale numbers.
+    @Published var dashboardBuiltAt: String?
+    @Published var dashboardFailure: Failure?
+    @Published var dashboardWorking = false
+    /// Bumped when the APP's language changes, so the dashboard adopts it once and
+    /// a choice made inside the dashboard afterwards is not overwritten on reload.
+    @Published var localeSeed = 0
+    var dashboardError: String? { dashboardFailure.map { message($0.code, $0.detail) } }
     var error: String? { failure.map { message($0.code, $0.detail) } }
 
     private var generation = UUID()
@@ -54,6 +81,10 @@ struct Failure: Equatable { let code: String; let detail: String? }
     }
     private var backend: Backend { Backend(executable: activeExecutable, workspace: activeWorkspace) }
     func t(_ en: String, _ ru: String) -> String { russian ? ru : en }
+    /// A date in the APP's language, not the system's: "2 окт. 2026 г., 18:57" beside Russian text.
+    func when(_ date: Date) -> String {
+        date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Locale(identifier: russian ? "ru_RU" : "en_US")))
+    }
 
     var questionTooLong: Bool { question.unicodeScalars.count > Self.questionLimit }
     var questionBlank: Bool { question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -70,8 +101,8 @@ struct Failure: Equatable { let code: String; let detail: String? }
         let extra = detail.map { " (\($0))" } ?? ""
         switch code {
         case "backend-incompatible":
-            return t("This Observatory engine has no assistant — it needs version 0.11 or newer. Update it with `project-observatory full update`, then Refresh.",
-                     "В этом движке Observatory нет ассистента — нужна версия 0.11 или новее. Обновите его командой `project-observatory full update` и нажмите «Обновить».") + extra
+            return t("This Observatory engine is too old for this app — it needs version 0.12 or newer. Update it with `project-observatory full update`, then Refresh.",
+                     "Этот движок Observatory слишком старый для приложения — нужна версия 0.12 или новее. Обновите его командой `project-observatory full update` и нажмите «Обновить».") + extra
         case "backend-configuration":
             return t("Choose the absolute path of the project-observatory program and its workspace folder in Settings.",
                      "Укажите в настройках абсолютный путь к программе project-observatory и её папку данных.")
@@ -81,6 +112,12 @@ struct Failure: Equatable { let code: String; let detail: String? }
         case "backend-cancelled": return t("The request was stopped before it finished.", "Запрос остановлен до завершения.")
         case "backend-invalid-response", "backend-response-too-large":
             return t("The engine returned an answer this app cannot read. Check that Settings point at a project-observatory program.", "Движок вернул ответ, который приложение не может прочитать. Проверьте, что в настройках выбрана программа project-observatory.")
+        case "dashboard-port-busy":
+            return t("The dashboard port is held by another workspace's server. Stop it, or choose that workspace in Settings.", "Порт дашборда занят сервером другой папки данных. Остановите его или выберите ту папку в настройках.")
+        case "dashboard-start-failed":
+            return t("The dashboard server did not start. Its log is store/logs/serverd.out in the workspace; `project-observatory full open --serve` shows the reason.", "Сервер дашборда не запустился. Его журнал — store/logs/serverd.out в папке данных; причину покажет `project-observatory full open --serve`.")
+        case "dashboard-build-failed":
+            return t("The dashboard could not be built. Run `project-observatory full local` once; it measures this machine and builds the pages.", "Дашборд не удалось построить. Один раз выполните `project-observatory full local` — она измерит машину и построит страницы.")
         case "unknown-workspace":
             return t("This folder is not an Observatory workspace. Choose the folder `project-observatory full init` created.", "Эта папка не является папкой данных Observatory. Выберите папку, созданную `project-observatory full init`.")
         case "dashboard-workspace-mismatch", "dashboard-unavailable":
@@ -125,15 +162,18 @@ struct Failure: Equatable { let code: String; let detail: String? }
         }
         return "\(source): \(reason)"
     }
+    private func failure(of error: Error) -> Failure {
+        if let b = error as? BridgeError { return Failure(code: b.code, detail: b.detail) }
+        return Failure(code: "backend-failed", detail: error.localizedDescription)
+    }
     private func fail(_ error: Error) {
-        if let b = error as? BridgeError { failure = Failure(code: b.code, detail: b.detail) }
-        else { failure = Failure(code: "backend-failed", detail: error.localizedDescription) }
+        failure = failure(of: error)
         if failure?.code == "unknown-project" { scope = "" }
     }
 
-    private func call(_ action: String, _ input: [String: String] = [:]) async throws -> [String: Any] {
+    private func call(_ action: String, _ input: [String: String] = [:], timeout: TimeInterval = 20) async throws -> [String: Any] {
         if let transport { return try await transport(action, input) }
-        let data = try await backend.call(action, input: input)
+        let data = try await backend.call(action, input: input, timeout: timeout)
         guard let doc = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw BridgeError.invalidResponse }
         return doc
     }
@@ -277,15 +317,45 @@ struct Failure: Equatable { let code: String; let detail: String? }
         } catch { if g == generation { fail(error) } }
     }
 
-    func dashboardURL() async -> URL? {
+    /// Which dashboard this workspace can show now; never starts anything.
+    func refreshDashboard() async {
         let g = generation
         do {
-            let doc = try await call("dashboard"); guard g == generation else { return nil }
-            guard let raw = doc["url"] as? String, let url = URL(string: raw),
-                  url.scheme == "http", url.host == "127.0.0.1", url.user == nil, url.password == nil,
-                  url.path == "/dashboard/index.html" else { throw BridgeError.invalidResponse }
-            return url
-        } catch { if g == generation { fail(error) }; return nil }
+            let doc = try await call("dashboard"); guard g == generation else { return }
+            // An engine before 0.12 answers in its old shape, without `server`.
+            guard doc["server"] is String else {
+                throw BridgeError.incompatible(t("engine without the dashboard actions", "движок без действий дашборда"))
+            }
+            dashboardMode = Self.mode(doc, workspace: activeWorkspace)
+            dashboardBuiltAt = doc["built_at"] as? String
+            dashboardFailure = nil
+        } catch {
+            guard g == generation else { return }
+            dashboardMode = .unavailable; dashboardFailure = failure(of: error)
+        }
+    }
+    /// «Start server»: the operator's explicit act, never a side effect of opening the app.
+    func startServer() async { await dashboardAction("serve", timeout: 75) }
+    /// «Build the dashboard» from the registry — local, no provider call.
+    func buildDashboard() async { await dashboardAction("build", timeout: 300) }
+    private func dashboardAction(_ action: String, timeout: TimeInterval) async {
+        guard !dashboardWorking else { return }
+        let g = generation; dashboardWorking = true
+        defer { if g == generation { dashboardWorking = false } }
+        do {
+            let doc = try await call(action, timeout: timeout); guard g == generation else { return }
+            dashboardMode = Self.mode(doc, workspace: activeWorkspace); dashboardFailure = nil
+        } catch { if g == generation { dashboardFailure = failure(of: error) } }
+    }
+    nonisolated static func mode(_ doc: [String: Any], workspace: String) -> DashboardMode {
+        let busy = doc["server"] as? String == "other-workspace"
+        if doc["server"] as? String == "verified", let raw = doc["url"] as? String, let url = URL(string: raw),
+           let origin = DashboardOrigin.live(url) { return .live(origin) }
+        if let path = doc["files"] as? String, let origin = DashboardOrigin.files(path, workspace: workspace) {
+            let built = (doc["built_at"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) }
+            return .files(origin, builtAt: built, alwaysOn: doc["always_on"] as? Bool == true, portBusy: busy)
+        }
+        return .notBuilt(portBusy: busy)
     }
     func newConversation() { guard !busy else { return }; selected = nil; turns = []; failure = nil; revision += 1 }
 
@@ -303,7 +373,9 @@ struct Failure: Equatable { let code: String; let detail: String? }
             selected = nil; turns = []; conversations = []; ready = false; connected = false
         }
         savedAt = nil
+        if changed { dashboardMode = .checking }
         await refresh()
+        await refreshDashboard()
         if connected { savedAt = Date() }
     }
     /// The engine refuses a workspace path through a symbolic link (`/tmp` is one);

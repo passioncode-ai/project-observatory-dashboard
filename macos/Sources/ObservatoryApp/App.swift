@@ -1,241 +1,97 @@
 import SwiftUI
 import AppKit
 
-private enum Design { static let gap: CGFloat = 16; static let transcript: CGFloat = 760 }
 @MainActor final class ApplicationDelegate: NSObject, NSApplicationDelegate {
+    /// SwiftUI's own "open this window", remembered from the app's commands — which
+    /// exist with no window open — because AppKit's reopen and a launch restored with
+    /// no window do NOT recreate a WindowGroup window by themselves (measured: zero
+    /// windows after closing the dashboard and clicking the Dock icon).
+    static var openWindow: OpenWindowAction?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Belt and braces beside the bridge's per-descriptor F_SETNOSIGPIPE: a pipe
         // to a child that already exited must fail a write, never end the app.
         signal(SIGPIPE, SIG_IGN)
         NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
+        // A launch from Finder, the Dock or `open` brings the window forward: the
+        // macOS 14 cooperative call, which the system honours for a user-started app.
+        NSApp.activate()
+        // A launch must always end with the dashboard on screen.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { Self.showDashboardIfNone() }
     }
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { true }
+    /// Clicking the Dock icon with no window open brings the dashboard back.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { Self.showDashboardIfNone() }
+        return true
+    }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    static func showDashboardIfNone() {
+        let visible = NSApp.windows.contains { $0.isVisible && $0.canBecomeMain }
+        if !visible { openWindow?(id: WindowID.dashboard) }
+        NSApp.activate()
+    }
 }
+
 @main struct ObservatoryApp: App {
     @NSApplicationDelegateAdaptor(ApplicationDelegate.self) var appDelegate
     @StateObject private var model = Model()
+    @StateObject private var web = WebController()
+
     var body: some Scene {
-        // ONE window: several windows over one model would show one conversation
-        // twice and let a second window's Send race the first.
-        Window("Project Observatory", id: "main") {
-            MainView().environmentObject(model).frame(minWidth: 900, minHeight: 620)
-        }.defaultSize(width: 1120, height: 760)
-            .commands { CommandGroup(replacing: .newItem) {
-                Button(model.t("New conversation", "Новый диалог")) { model.newConversation() }
-                    .keyboardShortcut("n").disabled(model.busy)
-                Button(model.t("Refresh", "Обновить")) { Task { await model.refresh() } }.keyboardShortcut("r")
-                Divider()
-                Button(model.t("Delete Conversation…", "Удалить диалог…")) { model.deleting = model.selected }
-                    .keyboardShortcut(.delete, modifiers: .command).disabled(model.selected == nil || model.busy)
-            } }
+        // The DASHBOARD is the app: it opens first, at launch and on reopen.
+        WindowGroup("Project Observatory", id: WindowID.dashboard) {
+            // The pages are dark by design (PassionCode tokens, `color-scheme: dark`):
+            // the window's chrome matches them instead of framing them in light grey.
+            DashboardView().environmentObject(model).environmentObject(web).preferredColorScheme(.dark)
+        }
+        .defaultSize(width: 1320, height: 860)
+        .commands { AppCommands(model: model, web: web) }
+
+        // The assistant is one window away, never in front of the dashboard.
+        Window(model.t("Assistant", "Ассистент"), id: WindowID.assistant) {
+            AssistantView().environmentObject(model).frame(minWidth: 900, minHeight: 620)
+        }
+        .defaultSize(width: 1080, height: 760)
+
         Settings { SettingsView().environmentObject(model) }
     }
 }
 
-/// Model text as Markdown — emphasis, code and line breaks — with every link
-/// removed: an answer suggests, it never navigates anywhere by itself.
-func rendered(_ text: String) -> AttributedString {
-    let bulleted = text.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
-        let t = line.drop(while: { $0 == " " })
-        return (t.hasPrefix("- ") || t.hasPrefix("* ")) ? String(line.prefix(line.count - t.count)) + "• " + t.dropFirst(2) : String(line)
-    }.joined(separator: "\n")
-    var out = (try? AttributedString(markdown: bulleted, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
-    for run in out.runs where run.link != nil { out[run.range].link = nil }
-    return out
-}
-func money(_ cost: Double) -> String { "$" + String(format: "%.4f", cost) }    // not the locale's comma
+struct AppCommands: Commands {
+    private func remember(_ action: OpenWindowAction) { ApplicationDelegate.openWindow = action }
+    @ObservedObject var model: Model
+    @ObservedObject var web: WebController
+    @Environment(\.openWindow) private var openWindow
 
-struct MainView: View {
-    @EnvironmentObject var m: Model
-    var deletingTitle: String { m.conversations.first { $0.id == m.deleting }?.title ?? "" }
-    var statusLine: String {
-        if !m.connected { return m.t("Not connected", "Нет подключения") }
-        return "Observatory \(m.version) · " + (m.ready ? m.t("ready", "готов") : m.t("setup needed", "нужна настройка"))
-    }
-    var body: some View {
-        NavigationSplitView {
-            List(selection: $m.selected) {
-                Section(m.t("Conversations", "Диалоги")) {
-                    ForEach(m.conversations) { c in
-                        Text(c.title).lineLimit(2).tag(c.id)
-                            .contextMenu { Button(m.t("Delete Conversation…", "Удалить диалог…"), role: .destructive) { m.deleting = c.id } }
-                    }
-                }
-            }.disabled(m.busy).navigationSplitViewColumnWidth(min: 200, ideal: 245, max: 320)
-            .safeAreaInset(edge: .bottom) {
-                HStack {
-                    HStack {
-                        Image(systemName: m.ready ? "checkmark.circle.fill" : m.connected ? "exclamationmark.circle" : "xmark.circle")
-                            .foregroundStyle(m.ready ? .green : .secondary).accessibilityHidden(true)
-                        Text(statusLine).font(.caption)
-                    }.accessibilityElement(children: .combine)
-                    Spacer(); SettingsLink { Image(systemName: "gearshape") }.accessibilityLabel(m.t("Settings", "Настройки"))
-                }.padding()
-            }
-        } detail: {
-            VStack(spacing: 0) {
-                if let error = m.error {
-                    HStack(alignment: .top) {
-                        Image(systemName: "exclamationmark.triangle").accessibilityHidden(true)
-                        Text(rendered(error)).textSelection(.enabled); Spacer()
-                        Button(m.t("Retry", "Повторить")) { Task { await m.refresh() } }.disabled(m.connecting)
-                        SettingsLink { Text(m.t("Settings", "Настройки")) }
-                    }.font(.callout).padding().background(.orange.opacity(0.10))
-                }
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 24) {
-                            if m.turns.isEmpty { welcome }
-                            ForEach(m.turns) { turn in turnView(turn).id(turn.id) }
-                            Color.clear.frame(height: 1).id("end")
-                        }.frame(maxWidth: Design.transcript, alignment: .leading).padding(24).frame(maxWidth: .infinity)
-                    }
-                    // Follows every change of content, not only a new turn: an answer
-                    // arriving into an existing turn used to stay below the fold.
-                    .onChange(of: m.revision) { _, _ in withAnimation(nil) { proxy.scrollTo("end", anchor: .bottom) } }
-                }
-                Divider()
-                composer
-            }.navigationTitle("Project Observatory")
-        }.toolbar {
-            ToolbarItemGroup {
-                Button { m.newConversation() } label: { Label(m.t("New conversation", "Новый диалог"), systemImage: "square.and.pencil") }
-                    .disabled(m.busy).help(m.t("New conversation (⌘N)", "Новый диалог (⌘N)"))
-                Button { Task { await m.refresh() } } label: { Label(m.t("Refresh", "Обновить"), systemImage: "arrow.clockwise") }
-                    .disabled(m.connecting).help(m.t("Refresh (⌘R)", "Обновить (⌘R)"))
-                Button { Task { if let url = await m.dashboardURL() { NSWorkspace.shared.open(url) } } } label: { Label(m.t("Dashboard", "Дэшборд"), systemImage: "rectangle.grid.2x2") }
-                    .disabled(!m.connected).help(m.t("Open the dashboard of this workspace", "Открыть дэшборд этой папки данных"))
-            }
-        }.task { await m.refresh() }
-        .onChange(of: m.selected) { _, id in if let id { Task { await m.load(id) } } }
-        .confirmationDialog(m.t("Delete “\(deletingTitle)”?", "Удалить «\(deletingTitle)»?"), isPresented: Binding(get: { m.deleting != nil }, set: { if !$0 { m.deleting = nil } })) {
-            Button(m.t("Delete", "Удалить"), role: .destructive) { if let id = m.deleting { Task { await m.delete(id) } }; m.deleting = nil }
-        } message: { Text(m.t("Its questions and answers are removed from this workspace. This cannot be undone.", "Его вопросы и ответы будут удалены из этой папки данных. Отменить это нельзя.")) }
-    }
-    var composer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Picker(m.t("Scope", "Область"), selection: $m.scope) {
-                    Text(m.t("All projects", "Все проекты")).tag("")
-                    ForEach(m.projects) { Text($0.title).tag($0.id) }
-                }.labelsHidden().frame(maxWidth: 300).disabled(m.busy).accessibilityLabel(m.t("Scope", "Область"))
-                Spacer()
-                if m.busy { ProgressView().controlSize(.small); Text(m.t("Working…", "Выполняется…")).font(.caption) }
-                else if let why = m.sendBlocked { Text(why).font(.caption).foregroundStyle(.secondary) }
-                if m.question.unicodeScalars.count > Model.questionLimit - 500 {
-                    Text("\(m.question.unicodeScalars.count)/\(Model.questionLimit)").font(.caption.monospacedDigit())
-                        .foregroundStyle(m.questionTooLong ? .red : .secondary)
-                }
-            }
-            HStack(alignment: .bottom) {
-                TextField(m.t("Ask about your projects…", "Спросите о проектах…"), text: $m.question, axis: .vertical)
-                    .lineLimit(2...5).textFieldStyle(.roundedBorder).disabled(m.busy)
-                    .accessibilityLabel(m.t("Question", "Вопрос"))
-                if m.busy {
-                    Button(m.t("Stop", "Остановить"), systemImage: "stop.fill") { Task { await m.stop() } }.disabled(m.job == nil)
-                } else {
-                    Button(m.t("Send", "Отправить"), systemImage: "arrow.up") { Task { await m.send() } }
-                        .keyboardShortcut(.return, modifiers: .command).buttonStyle(.borderedProminent)
-                        .disabled(!m.ready || m.questionBlank || m.questionTooLong)
-                        .help(m.sendBlocked ?? m.t("Send (⌘↩)", "Отправить (⌘↩)"))
-                }
-            }
-            Text(m.t("Sending shares your question and selected local facts with your configured model. Model costs apply. Answers suggest actions; they do not run them.", "При отправке вопрос и выбранные локальные факты передаются настроенной модели. Применяются её тарифы. Ответы предлагают действия, но не выполняют их."))
-                .font(.caption).foregroundStyle(.secondary)
-        }.padding(Design.gap)
-    }
-    var welcome: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Image(systemName: "binoculars").font(.system(size: 36)).foregroundStyle(.tint).accessibilityHidden(true)
-            Text(m.t("What is happening across your projects?", "Что происходит с вашими проектами?")).font(.largeTitle).bold()
-            Text(m.t("Ask Observatory to explain its latest local snapshots. Every answer can show the facts it used. Missing or old data remains visible.", "Попросите Observatory объяснить последние локальные данные. У ответа можно раскрыть использованные факты. Отсутствующие и старые данные не скрываются.")).foregroundStyle(.secondary)
-            ForEach([m.t("Which projects need attention?", "Какие проекты требуют внимания?"), m.t("How much disk space is available?", "Сколько места осталось на диске?")], id: \.self) { q in
-                Button(q) { m.question = q }.buttonStyle(.bordered).disabled(m.busy)
-            }
-            if !m.connected { SettingsLink { Text(m.t("Connect Observatory", "Подключить Observatory")) }.buttonStyle(.borderedProminent) }
-        }.padding(.vertical, 36)
-    }
-    func turnView(_ t: Turn) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(t.question).font(.title3).bold().textSelection(.enabled)
-            if !t.answer.isEmpty {
-                Text(rendered(t.answer)).textSelection(.enabled)
-                Text("\(t.model) · \(money(t.cost))").font(.caption).foregroundStyle(.secondary)
-                if !t.degraded.isEmpty {
-                    Text(m.t("Some evidence is unavailable or limited:", "Часть данных недоступна или ограничена:")).font(.callout).bold()
-                    ForEach(Array(t.degraded.enumerated()), id: \.offset) { _, d in
-                        Text(m.limitation(d)).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                ForEach(Array(t.steps.enumerated()), id: \.offset) { _, step in Label { Text(rendered(step)) } icon: { Image(systemName: "arrow.right") }.textSelection(.enabled) }
-                if !t.evidence.isEmpty {
-                    DisclosureGroup(m.t("Sources", "Источники") + " (\(t.evidence.count))") {
-                        ForEach(Array(t.evidence.enumerated()), id: \.offset) { _, e in
-                            VStack(alignment: .leading, spacing: 4) {
-                                // The id the answer cites, so "(E17)" in the text leads somewhere.
-                                Text("\(e["id"] as? String ?? "") · \(e["title"] as? String ?? "")").bold()
-                                Text("\(e["source"] as? String ?? "") · " + ((e["measured_at"] as? String) ?? m.t("measurement time unknown", "время измерения неизвестно")))
-                                    .font(.caption).foregroundStyle(.secondary)
-                                if let facts = e["facts"] as? [String: Any] {
-                                    ForEach(facts.keys.sorted(), id: \.self) { key in Text("\(key): \(describe(facts[key]))").font(.callout).textSelection(.enabled) }
-                                }
-                            }.padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }.padding().background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
-                }
-            } else if t.status == "working" { Text(m.t("Reading evidence and preparing an answer…", "Читаю факты и готовлю ответ…")).foregroundStyle(.secondary) }
-            else { Text(rendered(m.message(t.error ?? t.status))).foregroundStyle(.secondary) }
+    var body: some Commands {
+        let _ = remember(openWindow)
+        // One dashboard window: no "New Window" over a single web view.
+        CommandGroup(replacing: .newItem) {
+            Button(model.t("New Conversation", "Новый диалог")) { openWindow(id: WindowID.assistant); model.newConversation() }
+                .keyboardShortcut("n").disabled(model.busy)
             Divider()
+            Button(model.t("Delete Conversation…", "Удалить диалог…")) { openWindow(id: WindowID.assistant); model.deleting = model.selected }
+                .keyboardShortcut(.delete, modifiers: .command).disabled(model.selected == nil || model.busy)
         }
-    }
-    func describe(_ value: Any?) -> String {
-        switch value {
-        case let s as String: return s
-        case let n as NSNumber: return n.stringValue
-        case let rows as [[String: Any]]:
-            // A row reads by its name first: "OrbStack VM disk · 24.2", not "gb 24.2, label …".
-            let first = ["label", "name", "title", "id"]
-            return rows.map { r in
-                let named = first.first { r[$0] != nil }
-                let rest = r.keys.filter { $0 != named }.sorted().map { "\($0) \(describe(r[$0]))" }
-                return ([named.map { describe(r[$0]) }].compactMap { $0 } + rest).joined(separator: " · ")
-            }.joined(separator: "; ")
-        case let list as [Any]: return list.map { describe($0) }.joined(separator: ", ")
-        case is NSNull, nil: return "—"
-        default: return String(describing: value!)
+        CommandMenu(model.t("Dashboard", "Дашборд")) {
+            Button(model.t("Overview", "Обзор")) { openWindow(id: WindowID.dashboard); web.home() }
+                .keyboardShortcut("h", modifiers: [.command, .shift])
+            Button(model.t("Back", "Назад")) { web.view.goBack() }.keyboardShortcut("[").disabled(!web.canGoBack)
+            Button(model.t("Forward", "Вперёд")) { web.view.goForward() }.keyboardShortcut("]").disabled(!web.canGoForward)
+            Button(model.t("Reload", "Обновить")) { Task { await model.refreshDashboard(); web.reload() } }.keyboardShortcut("r")
+            Divider()
+            Button(model.t("Start Server", "Запустить сервер")) { Task { await model.startServer() } }
+                .disabled(model.dashboardWorking)
+            Button(model.t("Rebuild Pages", "Перестроить страницы")) { Task { await model.buildDashboard(); web.reload() } }
+                .disabled(model.dashboardWorking)
+            Button(model.t("Open in Browser", "Открыть в браузере")) { if let u = web.currentURL { NSWorkspace.shared.open(u) } }
+                .disabled(web.currentURL == nil)
         }
-    }
-}
-
-struct SettingsView: View {
-    @EnvironmentObject var m: Model
-    var body: some View {
-        Form {
-            Text(m.t("Connect to your local Observatory engine. Choose a compatible installed CLI and its private workspace.", "Подключитесь к локальному движку Observatory. Выберите совместимую установленную CLI-программу и её папку данных."))
-            HStack { TextField(m.t("Executable", "Программа"), text: $m.executable); Button(m.t("Choose…", "Выбрать…")) { choose(false) } }
-            HStack { TextField(m.t("Workspace", "Папка данных"), text: $m.workspace); Button(m.t("Choose…", "Выбрать…")) { choose(true) } }
-            Toggle("Русский", isOn: $m.russian)
-            HStack {
-                Button(m.t("Save and check connection", "Сохранить и проверить")) { Task { await m.saveSettings() } }.disabled(m.connecting)
-                if m.connecting { ProgressView().controlSize(.small); Text(m.t("Checking…", "Проверяю…")).font(.callout) }
-            }
-            // What the check found, in one place: engine, protocol, readiness.
-            if m.connected {
-                Label(m.t("Connected to Observatory \(m.version) (observatory-assistant/1).", "Подключено к Observatory \(m.version) (observatory-assistant/1)."), systemImage: "checkmark.circle")
-                Text(m.ready ? m.t("The assistant is ready.", "Ассистент готов.") : (m.error ?? "")).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
-                if let at = m.savedAt { Text(m.t("Saved", "Сохранено") + " " + at.formatted(date: .omitted, time: .standard)).font(.caption).foregroundStyle(.secondary) }
-            } else if let error = m.error {
-                Label { Text(rendered(error)).textSelection(.enabled) } icon: { Image(systemName: "xmark.circle") }.font(.callout)
-            }
-            Text(m.t("Changing the executable or workspace clears the draft and project scope. Accepted jobs keep running in their original workspace; return there to stop or read them.", "Смена программы или папки данных очищает черновик и выбор проекта. Принятые задания продолжают работу в прежней папке; вернитесь к ней для остановки или чтения результата.")).font(.caption).foregroundStyle(.secondary)
-        }.padding(24).frame(width: 600)
-    }
-    func choose(_ directory: Bool) {
-        let panel = NSOpenPanel(); panel.canChooseDirectories = directory; panel.canChooseFiles = !directory
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
-            if directory { m.workspace = url.resolvingSymlinksInPath().path } else { m.executable = url.path }
+        CommandGroup(before: .windowList) {
+            Button(model.t("Dashboard", "Дашборд")) { openWindow(id: WindowID.dashboard) }.keyboardShortcut("1")
+            Button(model.t("Assistant", "Ассистент")) { openWindow(id: WindowID.assistant) }.keyboardShortcut("a", modifiers: [.command, .shift])
+            Divider()
         }
     }
 }
