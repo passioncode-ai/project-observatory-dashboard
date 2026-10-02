@@ -16,10 +16,12 @@ def _load(name: str) -> tuple[dict | None, dict | None]:
     try:
         return json.loads((paths.SCRATCH / name).read_text(encoding="utf-8")), None
     except FileNotFoundError:
-        return None, {"source": name, "reason": "not surveyed yet — enable features.machine_watch, "
-                                                "or run `project-observatory full machine`"}
+        return None, {"source": name, "code": "not-surveyed",
+                      "reason": "not surveyed yet — enable features.machine_watch, "
+                                "or run `project-observatory full machine`"}
     except (OSError, ValueError) as exc:
-        return None, {"source": name, "reason": f"unreadable: {type(exc).__name__}"}
+        return None, {"source": name, "code": "unreadable", "error": type(exc).__name__,
+                      "reason": f"unreadable: {type(exc).__name__}"}
 
 
 def journal(days: int = 7, limit: int = 200) -> list[dict]:

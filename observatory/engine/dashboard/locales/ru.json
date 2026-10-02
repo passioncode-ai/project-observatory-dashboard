@@ -1778,5 +1778,8 @@
  },
  "{weeks} wk, {commits} commits": "{weeks} нед., {commits} коммитов",
  "{zones} in {accounts}": "{zones} в {accounts}",
- "“show” and “copy” act: this page is served by {server}, and every reveal is written to {log} before the file is read": "«показать» и «копировать» действуют: страницу отдаёт {server}, и каждое раскрытие пишется в {log} до того, как файл будет прочитан"
+ "“show” and “copy” act: this page is served by {server}, and every reveal is written to {log} before the file is read": "«показать» и «копировать» действуют: страницу отдаёт {server}, и каждое раскрытие пишется в {log} до того, как файл будет прочитан",
+ "Not measured yet — run project-observatory full machine": "Ещё не измерено — выполните project-observatory full machine",
+ "not surveyed yet — enable features.machine_watch, or run project-observatory full machine": "ещё не обследовано — включите features.machine_watch или выполните project-observatory full machine",
+ "unreadable: {error}": "не читается: {error}"
 }

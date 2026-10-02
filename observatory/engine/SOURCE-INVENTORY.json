@@ -456,15 +456,15 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "218dbd7e62e9acc5d2f0f0266e7121abe947d0928f055a4eeccd97b47b56407d",
-      "bytes": 127018
+      "export_sha256": "b67d23f1077e9cf4f6f3baff51fc1b683accec2b782f993b3c1399e8e8ea2b1c",
+      "bytes": 127463
     },
     {
       "path": "dashboard/machine_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "eb910e1270b0626e2a71d1965b70000f6d17239f4f7152109abd3e9836699dec",
-      "bytes": 9809
+      "export_sha256": "3fa49188dc36d493b1e5b8e3b001973feffd99a058ec6c50c15c3b1062df373f",
+      "bytes": 10931
     },
     {
       "path": "dashboard/shell.py",
@@ -1029,8 +1029,8 @@
       "path": "machine_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5974c97322e8fde3c6a941e3f655fd452cde257a9cc3ef161c2987117b6030bc",
-      "bytes": 3445
+      "export_sha256": "14d7b4a42d37b75207faae12a1dac20340da8d9452564f425e20b9fd71978d8d",
+      "bytes": 3548
     },
     {
       "path": "mcp/capability_tools.py",
@@ -2317,8 +2317,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "72b31252d346f9d94597f1b8ff7b9822a07d900f011226daad247660470150fd",
-      "bytes": 24520
+      "export_sha256": "6335cabe8ed13c9d5796f5d139b4de17247481b665400caa5e5120c34a510cf5",
+      "bytes": 25756
     },
     {
       "path": "tests/test_machine_mcp_inventory.py",
