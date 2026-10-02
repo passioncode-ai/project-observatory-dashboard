@@ -39,6 +39,8 @@ import companion_faults
 import leak_register  # noqa: E402
 import paths              
 from store import db as store_db              
+sys.path.append(str(ROOT / "dashboard"))
+from finding_types import titled  # noqa: E402  (a title is a message id)
 
 OUT = paths.REGISTRY / "findings.json"
 ACKS = paths.FINDING_ACKS
@@ -234,40 +236,43 @@ RELEASE_COUNT_ROLE = "release.count"
 #: remote and produced no finding at all, while `local-only-branch` — the same
 #: fact where the branch has no remote counterpart — was a warning telling the
 #: operator to push.
+#:
+#: Each row's second element is the finding's TITLE ID (`finding_types.titled`),
+#: filled with `repo`; `tests/test_i18n.py` reads it from here for the catalogs.
 SYNC_FINDINGS = {
-    "local-only-branch": ("warning", "has a branch that exists on no remote",
+    "local-only-branch": ("warning", "{repo} has a branch that exists on no remote",
                           "work here survives only this disk",
                           "push the branch, or delete it deliberately"),
-    "ahead": ("warning", "holds commits that are on no remote",
+    "ahead": ("warning", "{repo} holds commits that are on no remote",
               "the remote's own commit is an ancestor of this checkout, so this "
               "work survives only this disk",
               "push the branch"),
     "unpushed-and-remote-moved": (
-        "warning", "holds unpushed commits while its remote has moved",
+        "warning", "{repo} holds unpushed commits while its remote has moved",
         "this checkout is not contained in the branch as of its last fetch, and "
         "the remote has since moved — so there is work only on this disk, and it "
         "will not fast-forward",
         "push what is here, or reconcile the two deliberately"),
-    "diverged": ("warning", "has diverged from its remote",
+    "diverged": ("warning", "{repo} has diverged from its remote",
                  "local and remote have both moved", "reconcile them"),
-    "stale": ("info", "is behind its remote",
+    "stale": ("info", "{repo} is behind its remote",
               "the remote has moved and this checkout is contained in the branch "
               "as of its last fetch, so nothing here is at risk",
               "pull when you next work here"),
-    "behind": ("info", "is behind its remote", "the remote has newer commits",
+    "behind": ("info", "{repo} is behind its remote", "the remote has newer commits",
                "pull"),
     "behind-or-diverged": (
-        "info", "may be behind its remote",
+        "info", "{repo} may be behind its remote",
         "the remote commit is not in this clone and there is no tracking ref to "
         "compare against, so the direction cannot be told without a fetch",
         "fetch when it matters — nothing local can answer this one"),
     #: Set by `merge.py` when the probe could not reach the remote at all. The
     #: reason is already reported by `remote.unreachable`; this row exists so
     #: the state is DECLARED rather than silently skipped.
-    "unreachable": ("info", "could not be compared with its remote",
+    "unreachable": ("info", "{repo} could not be compared with its remote",
                     "the remote did not answer when it was last probed",
                     "see the unreachable-remote finding for what git said"),
-    "unknown": ("info", "has a clone whose state could not be determined",
+    "unknown": ("info", "{repo} has a clone whose state could not be determined",
                 "the checkout has no resolvable HEAD, so there was nothing to "
                 "compare",
                 "check that the clone is not empty or corrupt"),
@@ -550,9 +555,7 @@ def declared_alive_measured_dead(projects: list[dict]) -> list[dict]:
         "type": "project.declared_alive_measured_dead",
         "subject": "estate:lifecycle-drift",
         "severity": "info",
-        "title": (f"{len(stale)} projects declare they are active and have not moved"
-                  if len(stale) > 1 else
-                  "1 project declares it is active and has not moved"),
+        **titled("{n} projects declare they are active and have not moved", n=len(stale)),
         "detail": (f"`lifecycle` is a declaration and `activity_tier` is a "
                    f"measurement, and for these they disagree: "
                    f"{listed(stale, 6)}. an earlier review found fourteen of these; "
@@ -612,8 +615,7 @@ def unobservable_projects(projects: list[dict], related: set) -> list[dict]:
         out.append({
             "type": "project.unobservable", "subject": p["id"],
             "severity": "info",
-            "title": (f"{p.get('name') or p['id']} has no folder and no repository, "
-                      f"so nothing about it can be measured"),
+            **titled("{project} has no folder and no repository, so nothing about it can be measured", project=p.get("name") or p["id"]),
             "detail": ("Every answer this system gives about a project comes from a "
                        "checkout or a remote, and this project has neither: no local "
                        "folder, no related repository, no activity date. "
@@ -680,13 +682,9 @@ def stale_clones(names: list) -> list[dict]:
             "type": "clone.stale",
             "subject": "estate:copies" if is_external else "estate:clones",
             "severity": "info",
-            "title": ((f"{len(got)} copies of somebody else's work are behind "
-                       f"their upstreams" if len(got) > 1 else
-                       "1 copy of somebody else's work is behind its upstream")
-                      if is_external else
-                      (f"{len(got)} of this estate's checkouts are behind their "
-                       f"remotes" if len(got) > 1 else
-                       "1 of this estate's checkouts is behind its remote")),
+            **(titled("{n} copies of somebody else's work are behind their upstreams", n=len(got))
+                if is_external else
+                titled("{n} of this estate's checkouts are behind their remotes", n=len(got))),
             "detail": ("The remote has moved and each of these is contained in "
                        "its branch as of its last fetch, so nothing here is at "
                        "risk — which is why this is one row rather than "
@@ -744,8 +742,7 @@ def reclaimable_pressure(free_bytes: float | None, reclaimable_bytes: float | No
     return [{
         "type": "host.reclaimable_lever", "subject": "host:volume",
         "severity": "warning",
-        "title": (f"{rec_gib:.0f} GiB can be freed by reinstalling, against "
-                  f"{free_gib:.0f} GiB free on the volume"),
+        **titled("{reclaimable} GiB can be freed by reinstalling, against {free} GiB free on the volume", reclaimable=f"{rec_gib:.0f}", free=f"{free_gib:.0f}"),
         "detail": ("The plugin layer measures what sits inside the directories a "
                    "project's footprint prunes — `node_modules`, `.venv`, `build`, "
                    "`target`, `Pods` and their kin. Deleting them costs a reinstall "
@@ -856,15 +853,15 @@ def gate_skip_findings(sites: list[dict]) -> list[dict]:
         # and a judged gap still open. "0 of 70 do not say" as a title is a
         # sentence about an empty set, and a reader who sees a zero at the front
         # stops reading — so when the unexamined count is nil the gap leads.
-        "title": ((f"{len(gaps)} of {len(skips)} skip site(s) "
-                   f"{'is a judged gap' if len(gaps) == 1 else 'are judged gaps'}: "
-                   f"the property is assertable and nothing asserts it yet")
+        **(titled("{n} of {total} skip sites are judged gaps: the property is assertable and nothing asserts it yet",
+                          n=len(gaps), total=len(skips))
                   if not uncovered else
-                  (f"{len(uncovered)} of {len(skips)} skip site(s) do not say which "
-                   f"suite carries the property they skip"
-                   + (f", and {len(gaps)} more "
-                      f"{'is a judged gap' if len(gaps) == 1 else 'are judged gaps'} "
-                      f"awaiting a fixture" if gaps else ""))),
+                  titled("{n} of {total} skip sites do not say which suite carries the property they skip",
+                         n=len(uncovered), total=len(skips))
+                  if not gaps else
+                  titled("{n} of {total} skip sites do not say which suite carries the property they skip; "
+                         "judged gaps awaiting a fixture: {gaps}",
+                         n=len(uncovered), total=len(skips), gaps=len(gaps))),
         "detail": ("A suite that cannot run a block prints its reason and exits 0, so "
                    "the gate counts the step as passed — `observatory.py` now prints "
                    "the blocks each run skipped, which is what makes a PASS total "
@@ -952,8 +949,7 @@ def store_fault_findings(rows: list[dict]) -> list[dict]:
     out.append({
         "type": "store.faults_recurring", "subject": "store:observatory.db",
         "severity": "warning" if pattern else "info",
-        "title": (f"the store failed {len(rows)} time(s) in the last "
-                  f"{STORE_FAULT_DAYS:.0f} days: {listed(codes, 4)}"),
+        **titled("the store failed {n} times in the last {days} days: {codes}", n=len(rows), days=f"{STORE_FAULT_DAYS:.0f}", codes=listed(codes, 4)),
         "detail": ((f"{len(rows)} recorded fault(s) across {listed(ops, 4)}, newest "
                     f"{newest}. {space}{held}. ")
                    + ("`integrity_check` has answered `ok` after every one of them, "
@@ -1045,7 +1041,7 @@ def merge_findings(deg: list[dict]) -> list[dict]:
     return [{
         "type": "model.degraded", "subject": "collector:merge",
         "severity": "warning",
-        "title": f"the model was built with {len(deg)} source(s) unmeasured",
+        **titled("the model was built with {n} sources unmeasured", n=len(deg)),
         "detail": why + ". The registry was still written: 170-odd "
                   "repositories are unaffected and refusing the whole model "
                   "would age every fact in the estate to save these.",
@@ -1258,8 +1254,7 @@ def companion_findings(rows: list[dict], slot: dict,
         out.append({
             "type": "companion.not_recording", "subject": "skill:observatory-log",
             "severity": "warning",
-            "title": (f"the companion could not record {n} turn"
-                      f"{'s' if n != 1 else ''}"),
+            **titled("the companion could not record {n} turns", n=n),
             "detail": (f"newest at {newest}; session"
                        f"{'s' if len(seen) != 1 else ''} "
                        f"{listed(seen, COMPANION_LISTED)}; in "
@@ -1290,7 +1285,7 @@ def companion_findings(rows: list[dict], slot: dict,
         out.append({
             "type": "companion.faults_unlogged", "subject": "skill:observatory-log",
             "severity": "warning",
-            "title": "a lost turn is in the receipt and not in the fault log",
+            **titled("a lost turn is in the receipt and not in the fault log"),
             "detail": (f"the receipt records a fault at {at} in session "
                        f"{sess[:8] or '?'} — "
                        f"{clipped(' '.join(str((slot or {}).get('reason') or '?').split()), 160)} "
@@ -1336,7 +1331,7 @@ def blank_page_findings(receipt: dict | None,
         return [{
             "type": "dashboard.unverified", "subject": "surface:dashboard",
             "severity": "info",
-            "title": "the dashboard has not been verified to render at all",
+            **titled("the dashboard has not been verified to render at all"),
             "detail": ("`dashboard/smoke.js` executes the page's own script "
                        "against a stub DOM, and no receipt of a run exists. That "
                        "is a fresh checkout, a machine without `node`, or no "
@@ -1357,8 +1352,7 @@ def blank_page_findings(receipt: dict | None,
         return [{
             "type": "dashboard.unverified", "subject": "surface:dashboard",
             "severity": "info",
-            "title": f"the smoke receipt carries no verdict this can read: "
-                     f"{verdict or 'nothing'!r}",
+            **titled("the smoke receipt carries no verdict this can read: {verdict}", verdict=repr(verdict or "nothing")),
             "detail": ("The receipt exists and does not say whether the page "
                        "renders. Treating an unreadable verdict as a pass is the "
                        "defect this row was written against, so it is reported "
@@ -1371,7 +1365,7 @@ def blank_page_findings(receipt: dict | None,
         return [{
             "type": "dashboard.blank", "subject": "surface:dashboard",
             "severity": "critical",
-            "title": "the dashboard would render blank — its script dies at load",
+            **titled("the dashboard would render blank — its script dies at load"),
             "detail": (f"`dashboard/smoke.js` ran the page's own script at "
                        f"{ran_at} and it did not survive: {reason}. Everything "
                        f"below the header is written by that script, so every "
@@ -1387,8 +1381,7 @@ def blank_page_findings(receipt: dict | None,
         return [{
             "type": "dashboard.unverified", "subject": "surface:dashboard",
             "severity": "info",
-            "title": "the last clean smoke verdict describes an older build of "
-                     "the page",
+            **titled("the last clean smoke verdict describes an older build of the page"),
             "detail": (f"The page verified at {ran_at} hashed `{checked}`; the "
                        f"page on disk hashes `{page_sha}`. It has been rebuilt "
                        f"since, and a clean verdict about the previous build "
@@ -1432,7 +1425,7 @@ def provider_findings(health: dict | None, agent: dict | None) -> list[dict]:
         out.append({
             "type": "provider.health_unreadable", "subject": "provider:openrouter",
             "severity": "warning",
-            "title": "the model quarantine list did not parse, so no model's health is known",
+            **titled("the model quarantine list did not parse, so no model's health is known"),
             "detail": "`store/provider-health.json` is the only record of which models "
                       "failed recently; `agent/providers.py` consults it before every "
                       "attempt and re-probes an entry after the configured window. "
@@ -1457,7 +1450,7 @@ def provider_findings(health: dict | None, agent: dict | None) -> list[dict]:
             out.append({
                 "type": "provider.model_quarantined", "subject": f"model:{model_id}",
                 "severity": "warning",
-                "title": f"{model_id} is skipped by the model chain: {reason}",
+                **titled("{model} is skipped by the model chain: {reason}", model=model_id, reason=reason),
                 "detail": ("`agent/providers.py` marked it on a failed attempt"
                            + (f" {hrs:.0f}h ago" if hrs is not None else
                               (f" at {since}" if since else ""))
@@ -1478,7 +1471,7 @@ def provider_findings(health: dict | None, agent: dict | None) -> list[dict]:
         out.append({
             "type": "provider.chain_retired", "subject": f"model:{model_id}",
             "severity": "warning",
-            "title": f"{model_id} is configured in the chain and no longer exists at the provider",
+            **titled("{model} is configured in the chain and no longer exists at the provider", model=model_id),
             "detail": "`resolve_chain()` skips an id the catalogue does not list. That is "
                       "deliberate — a chain exists so one model leaving is survivable — "
                       "but it means a three-model chain can become one, and in the "
@@ -1493,8 +1486,7 @@ def provider_findings(health: dict | None, agent: dict | None) -> list[dict]:
         out.append({
             "type": "provider.health_unmeasured", "subject": "provider:openrouter",
             "severity": "info",
-            "title": ("no model has been asked anything recently, so the empty quarantine "
-                      "list says nothing about health"),
+            **titled("no model has been asked anything recently, so the empty quarantine list says nothing about health"),
             "detail": ("The quarantine list is written by failures and cleared by "
                        "successes, so it is empty both when every model answers and when "
                        "nothing has called one. "
@@ -1630,7 +1622,7 @@ def collect() -> list[dict]:
                     "type": "domain.expiring", "subject": f"domain:{host}",
                     "severity": ("info" if renews else
                                  "critical" if d <= SOON_CRITICAL else "warning"),
-                    "title": f"{host} expires in {d} days",
+                    **titled("{host} expires in {days} days", host=host, days=d),
                     "detail": f"RDAP gives {exp}. Auto-renew is "
                               + (f"ON and {host} resolves nowhere, so the renewal "
                                  f"will pay for another year of serving nothing"
@@ -1704,7 +1696,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "domain.dark", "subject": f"domain:{host}",
                 "severity": "info",
-                "title": f"{host} is owned and resolves nowhere",
+                **titled("{host} is owned and resolves nowhere", host=host),
                 "detail": ("No A record and no CNAME. It serves nothing."
                            + _dark_for(live.get("hosts") or [], host) + cost),
                 "action": act,
@@ -1721,8 +1713,7 @@ def collect() -> list[dict]:
         out.append({
             "type": "domain.unmeasured", "subject": "probe:dns",
             "severity": "warning",
-            "title": f"{len(unmeasured)} host(s) could not be probed, so their "
-                     f"liveness is unknown",
+            **titled("{n} hosts could not be probed, so their liveness is unknown", n=len(unmeasured)),
             "detail": clipped("; ".join(why)) + ". These are NOT reported as dark: a "
                       "question that could not be asked has no negative answer. "
                       "Until the probe runs, the estate does not know whether these "
@@ -1749,8 +1740,7 @@ def collect() -> list[dict]:
         out.append({
             "type": "repo.stale_remote", "subject": f"clone:{c['folder']}",
             "severity": "warning",
-            "title": f"{c['folder']} still points at {c['was']}, which moved to "
-                     f"{c['now']}",
+            **titled("{folder} still points at {was}, which moved to {now}", folder=c["folder"], was=c["was"], now=c["now"]),
             # WHY THE OPERATOR SHOULD CARE, not why the system does. This said
             # the merge "has to follow the transfer on every tick to keep the
             # phantom out of the registry" — true, and an account of the
@@ -1798,9 +1788,9 @@ def collect() -> list[dict]:
             out.append({
                 "type": "projection.uncommitted", "subject": "wiki:inventory",
                 "severity": "warning",
-                "title": f"the wiki's copy of the registry has not been committed "
-                         f"for {int(stale_hours)}h" if stale_hours is not None
-                         else "the wiki's copy of the registry is not being committed",
+                **(titled("the wiki's copy of the registry has not been committed for {hours}h", hours=int(stale_hours))
+                         if stale_hours is not None
+                         else titled("the wiki's copy of the registry is not being committed")),
                 "detail": clipped(f"{outcome}: {pj.get('detail', '')}")
                           + ". The mirror is regenerated every tick, so the "
                             "registry and the wiki have been drifting apart for "
@@ -1826,7 +1816,7 @@ def collect() -> list[dict]:
         out.append({
             "type": "host.disk_unknown", "subject": "host:volume",
             "severity": "info",
-            "title": "the free space on this volume could not be measured",
+            **titled("the free space on this volume could not be measured"),
             "detail": f"{type(exc).__name__}: {exc}",
             "action": "`df -h .`", "evidence": ["shutil.disk_usage"]})
     if free_mib is not None and free_mib < DISK_WARNING_MIB:
@@ -1841,8 +1831,7 @@ def collect() -> list[dict]:
             # two runs seconds apart byte for byte, which is exactly the guard
             # for this. A whole gigabyte moving IS meaningful, and `df -h .` is
             # where the precise number belongs.
-            "title": (f"under {free_mib // 1024 + 1} GiB free on the volume holding "
-                      f"this repository"),
+            **titled("under {gib} GiB free on the volume holding this repository", gib=free_mib // 1024 + 1),
             "detail": ("a collector may be unable to write its output at this level. "
                        "A full volume can interrupt database and scan writes."
                        if critical else
@@ -1949,9 +1938,9 @@ def collect() -> list[dict]:
             out.append({
                 "type": "fixtures.leaked", "subject": "host:volume",
                 "severity": "warning" if (heavy or refused) else "info",
-                "title": (f"{gib:.2f} GiB of leaked test fixtures swept"
-                          if not refused else
-                          f"leaked test fixtures could not be swept"),
+                **(titled("{gib} GiB of leaked test fixtures swept", gib=f"{gib:.2f}")
+                    if not refused else
+                    titled("leaked test fixtures could not be swept")),
                 "detail": detail,
                 "action": ("fix the permissions on the paths named above"
                            if refused else
@@ -2086,12 +2075,13 @@ def collect() -> list[dict]:
                 "severity": ("info" if kept else
                              ("warning" if verdict == "estate-folder-gone" or n >= 10
                               else "info")),
-                "title": (f"{n} session(s) with ambiguous project attribution for {name!r}"
-                          if verdict == 'ambiguous-project' else
-                          f"{n} session(s) of work on {name!r}, whose folder "
-                          f"{where} is gone" if verdict == "estate-folder-gone"
-                          else f"{n} session(s) of work on {name!r}, which this "
-                               f"registry does not list"),
+                **(titled("{n} sessions with ambiguous project attribution for {name}", n=n, name=repr(name))
+                    if verdict == "ambiguous-project" else
+                    titled("{n} sessions of work on {name}, whose folder {where} is gone",
+                           n=n, name=repr(name), where=where)
+                    if verdict == "estate-folder-gone" else
+                    titled("{n} sessions of work on {name}, which this registry does not list",
+                           n=n, name=repr(name))),
                 "detail": detail, "action": action,
                 "evidence": ["store:raw/sessions.json#unattributed", "SRC-0012"]})
 
@@ -2217,9 +2207,8 @@ def collect() -> list[dict]:
             out.append({
                 "type": "wallet.shared_key", "subject": "provider:openrouter",
                 "severity": "critical" if spent else ("warning" if low else "info"),
-                "title": (f"the API key has spent {key_month:.1f} of "
-                          f"{limit or '?'} this month; this project accounts for "
-                          f"{own_month:.2f}"),
+                **titled("the API key has spent {spent} of {limit} this month; this project accounts for {own}",
+                         spent=f"{key_month:.1f}", limit=limit or "?", own=f"{own_month:.2f}"),
                 "detail": (f"{others:.1f} was spent by something else using the same "
                            f"key — measured {doc.get('checked_at')}"
                            + (f", {age:.0f}h ago" if age is not None else "")
@@ -2285,8 +2274,7 @@ def collect() -> list[dict]:
         out.append({
             "type": "project.graph_stale", "subject": "estate:graphs",
             "severity": "info",
-            "title": (f"{len(graph_stale)} project(s) have a code graph older than "
-                      f"their code"),
+            **titled("{n} projects have a code graph older than their code", n=len(graph_stale)),
             "detail": ("A graph that fell behind carries the authority of a machine "
                        "and the accuracy of a memory. Worst: "
                        + listed([f"{f} ({d}d behind)" for d, f in graph_stale], 5)
@@ -2301,8 +2289,7 @@ def collect() -> list[dict]:
         out.append({
             "type": "project.wiki_stale", "subject": "estate:wiki",
             "severity": "info",
-            "title": (f"{len(wiki_stale)} project(s) have wiki notes older than "
-                      f"their last commit"),
+            **titled("{n} projects have wiki notes older than their last commit", n=len(wiki_stale)),
             "detail": ("The registry's own composition comes partly from these "
                        "notes ('named in vault notes'), so a stale note is not "
                        "cosmetic: outdated notes can omit repositories from a project. Worst: "
@@ -2337,9 +2324,9 @@ def collect() -> list[dict]:
             out.append({
                 "type": "server.silent", "subject": "server:local",
                 "severity": "warning",
-                "title": ("the local server is installed and has never reported"
-                          if age_min is None else
-                          f"the local server's last heartbeat is {age_min:.0f} minutes old"),
+                **(titled("the local server is installed and has never reported")
+                    if age_min is None else
+                    titled("the local server's last heartbeat is {minutes} minutes old", minutes=f"{age_min:.0f}")),
                 "detail": ("launchd holds a KeepAlive agent for it, so a silence "
                            "this long means it is crash-looping or cannot write "
                            "its receipt — not that it was turned off, which "
@@ -2368,9 +2355,11 @@ def collect() -> list[dict]:
                 "type": "skill.stale_session",
                 "subject": f"skill:{row.get('skill')}",
                 "severity": "warning" if major else "info",
-                "title": (f"a session is following {row.get('skill')} "
-                          f"{row.get('reported')} — "
-                          + ("a MAJOR version behind" if major else "behind the shipped text")),
+                **(titled("a session is following {skill} {version} — a MAJOR version behind",
+                           skill=row.get("skill"), version=row.get("reported"))
+                    if major else
+                    titled("a session is following {skill} {version} — behind the shipped text",
+                           skill=row.get("skill"), version=row.get("reported"))),
                 "detail": (f"Reported {row.get('last_seen')} (×{row.get('count')}). "
                            f"Skills are read at session START and never re-read, so "
                            f"`claude plugin update` alone does not reach a running "
@@ -2407,8 +2396,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "secret.retired_unrevoked", "subject": "vault:archives",
                 "severity": "warning",
-                "title": (f"{len(stale_retired)} retired secret value(s) are over a "
-                          f"month old and presumably never revoked"),
+                **titled("{n} retired secret values are over a month old and presumably never revoked", n=len(stale_retired)),
                 "detail": ("A rotation replaces the value HERE; the provider keeps "
                            "honouring the old one until it is revoked THERE. These "
                            "archives are past any reasonable revocation window: "
@@ -2476,9 +2464,10 @@ def collect() -> list[dict]:
             out.append({
                 "type": "analytics.unmapped_host", "subject": "estate:boundary",
                 "severity": "info",
-                "title": (f"traffic outside the estate's projects: {_total or len(_seen)} "
-                          f"host(s) — {len(_outside)} by decision, {len(_pending)} pending, "
-                          f"{len(_unclassified)} of the top-listed unclassified"),
+                **titled("traffic outside the estate's projects: {n} hosts — {outside} by decision, {pending} pending, "
+                         "{unclassified} of the top-listed unclassified",
+                         n=_total or len(_seen), outside=len(_outside), pending=len(_pending),
+                         unclassified=len(_unclassified)),
                 "detail": ("By the operator's rule a host with no project here is one "
                            "the operator is not working on — someone else runs it, or "
                            "it is not a priority — so this is the estate's edge, not an "
@@ -2505,7 +2494,7 @@ def collect() -> list[dict]:
         if _dead:
             out.append({
                 "type": "mcp.unreachable", "subject": "estate:mcp", "severity": "warning",
-                "title": f"{len(_dead)} MCP server(s) Claude could not reach",
+                **titled("{n} MCP servers Claude could not reach", n=len(_dead)),
                 "detail": ("Declared, and `claude mcp list` reports a failed connection: "
                            + listed(_dead, 6) + ". A session that needs one of these "
                            "fails at the tool call, not at startup."),
@@ -2516,7 +2505,7 @@ def collect() -> list[dict]:
         if _keyed:
             out.append({
                 "type": "mcp.key_in_url", "subject": "estate:mcp", "severity": "warning",
-                "title": f"{len(_keyed)} MCP server(s) carry a key in their URL",
+                **titled("{n} MCP servers carry a key in their URL", n=len(_keyed)),
                 "detail": ("A token in a query string is printed by `claude mcp list`, by "
                            "any process listing, and by every log that records a URL — "
                            "one reached a session transcript on 2026-09-14 that way: "
@@ -2531,7 +2520,7 @@ def collect() -> list[dict]:
         if _auth:
             out.append({
                 "type": "mcp.needs_auth", "subject": "estate:mcp", "severity": "info",
-                "title": f"{len(_auth)} MCP server(s) wait for a browser sign-in",
+                **titled("{n} MCP servers wait for a browser sign-in", n=len(_auth)),
                 "detail": ("OAuth-backed servers Claude reports as `Needs authentication`: "
                            + listed(_auth, 8) + ". They work after `/mcp` in a session "
                            "signs in; nothing here can do that for a person."),
@@ -2540,7 +2529,7 @@ def collect() -> list[dict]:
         if _mdoc and not _mdoc.get("own_declared"):
             out.append({
                 "type": "mcp.own_unregistered", "subject": "estate:mcp", "severity": "warning",
-                "title": "the observatory's own MCP server is declared in no agent",
+                **titled("the observatory's own MCP server is declared in no agent"),
                 "detail": ("`mcp/server.py` serves eighteen tools — recall, credentials by "
                            "name, proposals — and none of them is reachable until an "
                            "agent's config names the server (credentials audit G14)."),
@@ -2586,7 +2575,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "secret.register_unreadable", "subject": "vault:leaks",
                 "severity": "warning",
-                "title": "the leak register did not parse, so no leak's status is known",
+                **titled("the leak register did not parse, so no leak's status is known"),
                 "detail": f"{type(exc).__name__}: {exc} — an unreadable register "
                           f"reads as empty, and empty is indistinguishable from "
                           f"nothing ever having leaked.",
@@ -2630,11 +2619,17 @@ def collect() -> list[dict]:
             out.append({
                 "type": "secret.leaked_unrotated", "subject": f"secret:{r.get('secret')}",
                 "severity": "warning" if r.get("id") in legacy_rotated else "critical",
-                "title": (f"{r.get('secret')} was seen leaking"
-                          + (f" {age_d:.0f} day(s) ago" if age_d is not None and age_d >= 1
-                             else "")
-                          + (" and was closed only by a local rotate"
-                             if r.get("id") in legacy_rotated else " and has no recorded settlement")),
+                **(titled("{secret} was seen leaking {n} days ago and was closed only by a local rotate",
+                           secret=r.get("secret"), n=int(f"{age_d:.0f}"))
+                    if age_d is not None and age_d >= 1 and r.get("id") in legacy_rotated else
+                    titled("{secret} was seen leaking {n} days ago and has no recorded settlement",
+                           secret=r.get("secret"), n=int(f"{age_d:.0f}"))
+                    if age_d is not None and age_d >= 1 else
+                    titled("{secret} was seen leaking and was closed only by a local rotate",
+                           secret=r.get("secret"))
+                    if r.get("id") in legacy_rotated else
+                    titled("{secret} was seen leaking and has no recorded settlement",
+                           secret=r.get("secret"))),
                 "detail": (("An earlier version marked this leak settled when the local slot "
                             "was replaced; that records neither revocation nor consumer checks. "
                             if r.get("id") in legacy_rotated else "")
@@ -2671,7 +2666,7 @@ def collect() -> list[dict]:
         out.append({
             "type": "secret.moved_unrecorded", "subject": "estate:movements",
             "severity": "warning",
-            "title": f"{len(_unrecorded)} key movement(s) at Heroku that no agent recorded",
+            **titled("{n} key movements at Heroku that no agent recorded", n=len(_unrecorded)),
             "detail": ("A config variable shaped like a secret changed at the provider and "
                        "the movements journal holds nothing within two hours naming it. "
                        "The operator's rule: every movement of every key is recorded by "
@@ -2724,7 +2719,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "companion.stale_install", "subject": "skill:observatory-log",
                 "severity": "warning",
-                "title": "the installed companion differs from this repository",
+                **titled("the installed companion differs from this repository"),
                 "detail": ("the harness runs the COPY under "
                            "`~/.claude/plugins/cache/`, not the checkout, so every "
                            "change to the hook has no effect until it is "
@@ -2766,8 +2761,8 @@ def collect() -> list[dict]:
             "type": "scan.stale", "subject": "observatory:tick",
             "severity": ("critical" if scan_age is None or scan_age > SCAN_CRITICAL_HOURS
                          else "warning"),
-            "title": (f"no scan since {newest_scan}" if newest_scan
-                      else "the store holds no scan at all"),
+            **(titled("no scan since {date}", date=newest_scan) if newest_scan
+                else titled("the store holds no scan at all")),
             "detail": ("the tick runs every thirty minutes and writes a `scans` row on "
                        "every collector run, so this is a scheduler that has stopped "
                        "rather than a slow run. Everything else on the dashboard is as "
@@ -2799,7 +2794,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "wiki.broken_link", "subject": "wiki:links",
                 "severity": "warning",
-                "title": f"{broken} wikilink(s) in the wiki resolve to nothing",
+                **titled("{n} wikilinks in the wiki resolve to nothing", n=broken),
                 "detail": (f"{doc.get('links', '?')} link(s) across "
                            f"{doc.get('notes', '?')} note(s) were checked at "
                            f"{doc.get('ran_at', '?')}. Targets: "
@@ -2818,9 +2813,9 @@ def collect() -> list[dict]:
                 # AN ABSOLUTE STAMP, not a relative age, for the same reason
                 # as the disk figure above: a stamp is stable until the audit
                 # runs again, while "37h" changes every hour in a committed file.
-                "title": (f"the wiki's links have not been checked since "
-                          f"{doc.get('ran_at')}" if stale is not None
-                          else "the wiki's link check has never completed"),
+                **(titled("the wiki's links have not been checked since {date}", date=doc.get("ran_at"))
+                    if stale is not None
+                    else titled("the wiki's link check has never completed")),
                 "detail": "the audit runs in the tick; a receipt this old means the "
                           "step stopped rather than that the links are fine.",
                 "action": "`./observatory.py links`",
@@ -2855,9 +2850,9 @@ def collect() -> list[dict]:
             out.append({
                 "type": "deltas.not_diffed", "subject": "store:deltas",
                 "severity": "warning",
-                "title": (f"the registry has not been diffed for {int(lag)}h"
-                          if lag is not None else
-                          "the registry has never been diffed"),
+                **(titled("the registry has not been diffed for {hours}h", hours=int(lag))
+                    if lag is not None else
+                    titled("the registry has never been diffed")),
                 "detail": (f"fingerprints are still arriving — the newest is "
                            f"{newest['scan_id']} at {newest['observed_at']} — but "
                            f"`deltas.diffed_through` "
@@ -2929,8 +2924,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "interpretation.faults", "subject": "agent:observer",
                 "severity": "warning",
-                "title": f"the agent could not interpret {unexplained} project(s) "
-                         f"it took",
+                **titled("the agent could not interpret {n} projects it took", n=unexplained),
                 "detail": clipped(detail, 900),
                 "action": ("read the kinds above: a store fault needs "
                            "`PRAGMA integrity_check`, a chain fault needs "
@@ -2942,7 +2936,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "interpretation.malformed", "subject": "agent:observer",
                 "severity": "warning",
-                "title": f"{bad} answer(s) contradicted themselves and were not recorded",
+                **titled("{n} answers contradicted themselves and were not recorded", n=bad),
                 "detail": "The model said a change was worth recording and gave no "
                           "interpretation. The schema cannot express that rule — "
                           "`strict` structured outputs have no `if`/`then` — so the "
@@ -2955,7 +2949,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "interpretation.unreasoned", "subject": "agent:observer",
                 "severity": "info",
-                "title": f"{mute} decline(s) gave no reason",
+                **titled("{n} declines gave no reason", n=mute),
                 "detail": "The change was consumed as needing no note, and nothing "
                           "says why — so nothing will revisit it. The judgement is "
                           "probably right (a mechanical bump), but a decline with no "
@@ -2977,7 +2971,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "interpretation.not_english", "subject": "agent:observer",
                 "severity": "info",
-                "title": f"{alien} conclusion(s) were written in another language",
+                **titled("{n} conclusions were written in another language", n=alien),
                 "detail": "The ledger sits beside English documentation, is "
                           "committed into an English repository and is mirrored into "
                           "an English wiki, and the system prompt says so with its "
@@ -3033,8 +3027,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "memory.followed_rename", "subject": "store:ledger",
                 "severity": "info",
-                "title": f"{len(renamed)} project id(s) in the ledger belong to a "
-                         f"project that has since been published",
+                **titled("{n} project ids in the ledger belong to a project that has since been published", n=len(renamed)),
                 "detail": clipped("; ".join(
                     f"{o} ({counts.get(o, 0)} row(s)) is now {followed[o]}"
                     for o in renamed))
@@ -3052,8 +3045,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "memory.orphan_subject", "subject": "store:ledger",
                 "severity": "info",
-                "title": f"{len(orphans)} project id(s) in the ledger are not in "
-                         f"the registry",
+                **titled("{n} project ids in the ledger are not in the registry", n=len(orphans)),
                 "detail": clipped("; ".join(f"{o} ({counts.get(o, 0)} row(s))"
                                               for o in orphans))
                           + ". A note keyed to a subject the registry does not "
@@ -3076,14 +3068,14 @@ def collect() -> list[dict]:
     except (OSError, ValueError):
         _amb = []
         out.append({"type": "identity.unreadable", "subject": "registry:identity.json", "severity": "warning",
-                    "title": "the identity map could not be read",
+                    **titled("the identity map could not be read"),
                     "detail": "Project ids are resolved from registry/identity.json; an unreadable map stops "
                               "the emit step so ids are not re-minted.",
                     "action": "restore registry/identity.json from the registry history",
                     "evidence": ["registry:identity.json"]})
     for a_ in _amb:
         out.append({"type": "identity.ambiguous", "subject": f"key:{a_.get('key')}", "severity": "warning",
-                    "title": f"project key {a_.get('key')!r} could not be matched to one recorded project",
+                    **titled("project key {key} could not be matched to one recorded project", key=repr(a_.get("key"))),
                     "detail": f"{a_.get('reason')}: {', '.join(a_.get('candidates') or [])}. It was given a new id "
                               "instead of borrowing another project's history.",
                     "action": "if it is a rename, pin it in config/identity_overrides.json to the id it should keep",
@@ -3112,7 +3104,7 @@ def collect() -> list[dict]:
                 out.append({
                     "type": "plugin.broken", "subject": f"plugin:{p['id']}",
                     "severity": "warning",
-                    "title": f"the {p['id']} plugin is not producing measurements",
+                    **titled("the {plugin} plugin is not producing measurements", plugin=p["id"]),
                     "detail": clipped((p.get("skipped") or "") + " " +
                                       ("; ".join(problems) if problems else ""))
                               + (f" Last measurement: {p['last_at']}."
@@ -3129,7 +3121,7 @@ def collect() -> list[dict]:
                 out.append({
                     "type": "plugin.refused", "subject": f"plugin:{p['id']}",
                     "severity": "warning",
-                    "title": f"{len(refused)} row(s) from {p['id']} were refused",
+                    **titled("{n} rows from {plugin} were refused", n=len(refused), plugin=p["id"]),
                     "detail": clipped(listed(refused, 4, sep="; ")) + ". A refused row is "
                               "not written at all, so the metric is missing rather "
                               "than wrong — and the plugin exited successfully.",
@@ -3147,8 +3139,7 @@ def collect() -> list[dict]:
                 out.append({
                     "type": "plugin.stale", "subject": f"plugin:{p['id']}",
                     "severity": "warning",
-                    "title": (f"{p['id']}'s newest measurement is from "
-                              f"{p.get('last_at')}"),
+                    **titled("{plugin}'s newest measurement is from {date}", plugin=p["id"], date=p.get("last_at")),
                     "detail": (f"that is {age:.1f} cadence period(s) ago at "
                                f"{p.get('every_hours')}h — the plugin is installed "
                                f"and exits cleanly, so the series has simply stopped "
@@ -3163,7 +3154,7 @@ def collect() -> list[dict]:
                 out.append({
                     "type": "plugin.waiting", "subject": f"plugin:{p['id']}",
                     "severity": "info",
-                    "title": f"the {p['id']} plugin has never run: {p.get('skipped')}",
+                    **titled("the {plugin} plugin has never run: {reason}", plugin=p["id"], reason=p.get("skipped")),
                     "detail": "A requirement is unmet. This is a state rather than "
                               "a defect — the credential may not exist on purpose — "
                               "but until it is met the plugin measures nothing.",
@@ -3189,7 +3180,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "rollup.frozen_incomplete", "subject": "store:project_week",
                 "severity": "warning",
-                "title": f"{gap} frozen week(s) carry no session figure and never can",
+                **titled("{n} frozen weeks carry no session figure and never can", n=gap),
                 "detail": "Those weeks were frozen while the rollup counted commits "
                           "only, and the events they were computed from have aged "
                           "out. The rows are not wrong about commits; they are "
@@ -3227,9 +3218,9 @@ def collect() -> list[dict]:
             out.append({
                 "type": "erasure.not_scrubbed", "subject": "store:observatory.db",
                 "severity": "critical",
-                "title": ("retention did not complete, so nothing was erased"
-                          if broke else
-                          "rows were erased but the file was not scrubbed"),
+                **(titled("retention did not complete, so nothing was erased")
+                    if broke else
+                    titled("rows were erased but the file was not scrubbed")),
                 "detail": clipped(rec["scrub"].get("detail") or "") +
                           (" Measured 2026-09-07: a purge reporting `status: "
                            "purged` and `tombstoned_rows_remaining: 0` left the "
@@ -3273,7 +3264,7 @@ def collect() -> list[dict]:
         out.append({
             "type": "collector.degraded", "subject": f"collector:{receipt}",
             "severity": "info",
-            "title": f"{receipt} reports {len(rows)} source(s) it could not measure",
+            **titled("{receipt} reports {n} sources it could not measure", receipt=receipt, n=len(rows)),
             "detail": ("A collector that cannot read a source says so in its own "
                        "`degraded` list rather than returning an empty result — "
                        "AGENTS.md rule 7 — and this row is what carries that to a "
@@ -3300,7 +3291,7 @@ def collect() -> list[dict]:
         out.append({
             "type": "collector.not_applicable", "subject": f"collector:{receipt}",
             "severity": "info",
-            "title": f"{receipt} names {len(rows)} source(s) that do not apply here",
+            **titled("{receipt} names {n} sources that do not apply here", receipt=receipt, n=len(rows)),
             "detail": ("Measured and found not to apply to this machine or estate, so "
                        "they do not count as degraded coverage. "
                        + clipped("; ".join(shown), 900)
@@ -3315,8 +3306,7 @@ def collect() -> list[dict]:
         out.append({
             "type": "domain.hold_unknown", "subject": "collector:rdap",
             "severity": "warning",
-            "title": f"whether {len(shown)} domain(s) are on registrar hold could "
-                     f"not be read",
+            **titled("whether {n} domains are on registrar hold could not be read", n=len(shown)),
             "detail": ("RDAP answered for them and its reply carried no `status` "
                        "array, so the hold check has nothing to read — which is "
                        "not the same as 'not on hold'. "
@@ -3336,7 +3326,7 @@ def collect() -> list[dict]:
         darkened = sorted(set(info["hosts"]))
         out.append({
             "type": "domain.hold", "subject": f"domain:{name}", "severity": "critical",
-            "title": f"{name} is on registrar hold",
+            **titled("{domain} is on registrar hold", domain=name),
             # THE PRESSURE, WHICH THE SAME RECORD ALREADY HELD. A hold with eight
             # months of registration left and one expiring next week are the same
             # sentence and different decisions, and the expiry sat unread in the
@@ -3372,7 +3362,7 @@ def collect() -> list[dict]:
                     # project, and a project whose site is dark must not look
                     # clean — but the operator has one thing to do, not three.
                     "severity": "warning" if parent else "critical",
-                    "title": f"{p['name']} publishes {s['host']}, which is dark",
+                    **titled("{project} publishes {host}, which is dark", project=p["name"], host=s["host"]),
                     "detail": ("The registry presents this host as the project's "
                                "site and it resolves nowhere — a published claim "
                                "that is currently false."
@@ -3439,7 +3429,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "clone.unknown-state", "subject": r["id"],
                 "severity": "warning",
-                "title": f"{nwo} reports a clone state this system cannot read",
+                **titled("{repo} reports a clone state this system cannot read", repo=nwo),
                 "detail": f"the collector recorded sync={state!r}, which neither "
                           f"the findings table nor the dashboard declares, so "
                           f"whatever it means about this clone is reaching no "
@@ -3495,7 +3485,7 @@ def collect() -> list[dict]:
                      "the branch NAME rather than any work.")
         out.append({
             "type": f"clone.{state}", "subject": r["id"], "severity": sev,
-            "title": f"{nwo} {what}",
+            **titled(what, repo=nwo),
             "detail": f"{why} {where}.{stake}",
             "action": act,
             "evidence": [f"registry:repositories.json#{r['id']}"]})
@@ -3567,7 +3557,7 @@ def collect() -> list[dict]:
             # becomes furniture at warning level — the same reasoning that
             # keeps stale clones at info.
             "severity": "info",
-            "title": f"{len(order)} project(s) have released nothing and stopped",
+            **titled("{n} projects have released nothing and stopped", n=len(order)),
             "detail": clipped(
                 "Effort went in, no tag came out, and the work has stopped: "
                 + listed(rows, 5)
@@ -3611,7 +3601,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "store.integrity", "subject": "store:observatory.db",
                 "severity": "critical",
-                "title": f"the store failed its integrity check ({verdict})",
+                **titled("the store failed its integrity check ({verdict})", verdict=verdict),
                 "detail": clipped(
                     f"{said}: {iv.get('detail') or 'no detail recorded'}. "
                     f"Checked with PRAGMA {iv.get('pragma') or '?'} over "
@@ -3629,8 +3619,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "store.integrity_stale", "subject": "store:observatory.db",
                 "severity": "info",
-                "title": f"the store's last integrity check was "
-                         f"{int(age_h)}h ago",
+                **titled("the store's last integrity check was {hours}h ago", hours=int(age_h)),
                 "detail": (f"It said `ok`, and that is a statement about "
                            f"{iv.get('ran_at')} rather than about now. The check "
                            f"runs early in the tick, so a verdict this old means "
@@ -3673,7 +3662,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "tick.standing_down", "subject": "collector:tick",
                 "severity": "warning",
-                "title": f"the tick has skipped {skips} cycle(s) in a row",
+                **titled("the tick has skipped {n} cycles in a row", n=skips),
                 "detail": (f"It stood down because the registry was held by "
                            f"{who}. That is the correct choice — a skipped tick "
                            f"is cheaper than two writers — but the registry, the "
@@ -3717,7 +3706,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "env.key_misplaced", "subject": f"env:{env_name}",
                 "severity": "warning",
-                "title": f"${env_name} holds a key for a different provider",
+                **titled("${env} holds a key for a different provider", env=env_name),
                 "detail": (f"{o.get('reason') or 'the value has the wrong shape'}"
                            f" — measured {when}. This system is unharmed: it sees "
                            f"the wrong shape, ignores the variable and falls "
@@ -3750,8 +3739,7 @@ def collect() -> list[dict]:
         worktrees = [x for x in risky if x.get("worktree_of")]
         out.append({
             "type": "worktree.unpushed", "subject": r["id"], "severity": "warning",
-            "title": (f"{nwo} has {len(risky)} extra checkout"
-                      f"{'' if len(risky) == 1 else 's'} holding work no remote has"),
+            **titled("{repo} has {n} extra checkouts holding work no remote has", repo=nwo, n=len(risky)),
             "detail": (f"{lines}. "
                        + ("These are git worktrees, so their commits live in the "
                           "parent's object database and removing the directory "
@@ -3795,8 +3783,7 @@ def collect() -> list[dict]:
                        f"beside it are not in any commit, local or otherwise.")
         out.append({
             "type": "repo.no_remote", "subject": p["id"], "severity": "warning",
-            "title": f"{p.get('name') or p['id']} has {commits} commit"
-                     f"{'' if commits == 1 else 's'} and no remote",
+            **titled("{project} has {n} commits and no remote", project=p.get("name") or p["id"], n=commits),
             "detail": detail,
             "action": "give it a remote and push, or record deliberately that "
                       "this one is meant to live on this disk only",
@@ -3853,8 +3840,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "interpretation.halted", "subject": "agent",
                 "severity": "warning",
-                "title": f"{waiting} change(s) have waited over "
-                         f"{INTERPRETATION_LAG_HOURS}h for the agent to interpret them",
+                **titled("{n} changes have waited over {hours}h for the agent to interpret them", n=waiting, hours=INTERPRETATION_LAG_HOURS),
                 "detail": (adoc.get("halted_by")
                            or f"the last run recorded {adoc.get('recorded', 0)}, skipped "
                               f"{adoc.get('skipped', 0)} and failed {adoc.get('failed', 0)}")
@@ -3905,8 +3891,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "notify.channel_failing", "subject": "channel:notification-centre",
                 "severity": worst,
-                "title": f"{len(undelivered)} finding(s) could not be delivered to the "
-                         f"notification centre",
+                **titled("{n} findings could not be delivered to the notification centre", n=len(undelivered)),
                 "detail": f"{ndoc.get('detail', 'the send failed')}. The usual cause is a "
                           f"launchd job with no Aqua session, which cannot reach the window "
                           f"server at all. The findings were NOT marked as notified, so a "
@@ -3936,7 +3921,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "tick.step_failed", "subject": f"step:{name}",
                 "severity": "critical" if grave else "warning",
-                "title": f"the scheduled tick's `{name}` step exited {row.get('exit')}",
+                **titled("the scheduled tick's `{step}` step exited {code}", step=name, code=row.get("exit")),
                 "detail": (grave or
                            "The tick does not abort on a degradation, by design — "
                            "launchd would retry a state that needs reporting rather "
@@ -3972,7 +3957,7 @@ def collect() -> list[dict]:
                 "type": "work.unverifiable",
                 "subject": row.get("memory_id", "unknown"),
                 "severity": "warning",
-                "title": "recorded work git contradicts",
+                **titled("recorded work git contradicts"),
                 "detail": f"{row.get('why', 'the check refused')}. A witness LOOKED and "
                           f"disagreed — this is not a branch that was tidied up, which "
                           f"is reported separately and promotes. The row stays "
@@ -3987,7 +3972,7 @@ def collect() -> list[dict]:
                 "type": "work.unwitnessed",
                 "subject": row.get("memory_id", "unknown"),
                 "severity": "info",
-                "title": "recorded work no clone here can witness",
+                **titled("recorded work no clone here can witness"),
                 "detail": f"{row.get('why', 'nothing could be asked')}. Nothing is known "
                           f"to be wrong with this record: no witness contradicted it, "
                           f"there was simply none to ask. It stays `proposed` for that "
@@ -4084,7 +4069,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "ledger.review_backlog", "subject": "ledger",
                 "severity": "warning",
-                "title": f"{n} ledger records await review",
+                **titled("{n} ledger records await review", n=n),
                 "detail": (f"{shape.get('structural', 0)} rest on a structural change "
                            f"— a project appearing or vanishing, an owner, a repository "
                            f"or a stack moving — and {shape.get('routine', 0)} on the "
@@ -4128,7 +4113,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "ledger.review_expiring", "subject": "ledger",
                 "severity": "warning",
-                "title": f"{soon[0]} conclusion(s) will be erased unreviewed within 14 days",
+                **titled("{n} conclusions will be erased unreviewed within 14 days", n=soon[0]),
                 "detail": "Retention tombstones a `proposed` row at "
                           f"{REVIEW_HORIZON_DAYS} days. These were written by an "
                           "automated reader that cannot promote its own work, and "
@@ -4161,8 +4146,7 @@ def collect() -> list[dict]:
             out.append({
                 "type": "projection.lagging", "subject": "store",
                 "severity": "warning",
-                "title": f"{lag['n']} conclusion(s) unindexed for over "
-                         f"{PROJECTION_LAG_HOURS}h",
+                **titled("{n} conclusions unindexed for over {hours}h", n=lag["n"], hours=PROJECTION_LAG_HOURS),
                 "detail": "Both search indexes are fed by the outbox, so every "
                           "search since then answered over an index that does not "
                           "contain these revisions. The usual cause is the "
@@ -4196,7 +4180,7 @@ def main(argv: list[str]) -> int:
         collected.append({
             "type": "acks.unreadable", "subject": "config:finding_acks",
             "severity": "warning",
-            "title": "saved acknowledgements could not be read",
+            **titled("saved acknowledgements could not be read"),
             "detail": ("The acknowledgement file is not valid. The board was built as if "
                        "nothing were acknowledged, so muted findings show again. The file "
                        "was left exactly as it was."),

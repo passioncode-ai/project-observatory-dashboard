@@ -125,8 +125,69 @@ def source_ids() -> set[str]:
             if metric.get("label"):
                 ids.add(metric["label"])
     ids |= DYNAMIC_IDS
+    # The rule modules' finding titles: each `titled("…")` id and each clone
+    # state's title id, translated like any other string the page shows.
+    ids |= {msgid for _module, msgid, _args, _line in finding_title_calls()}
     # Ids that are not reader-facing text: technical names and the product's.
     return {i for i in ids if any(c.isalpha() for c in i) and i not in UNTRANSLATED}
+
+
+#: The rule modules that build findings: every `tools/*findings*.py`.
+FINDING_PRODUCERS = sorted((ROOT / "tools").glob("*findings*.py"))
+
+
+def finding_title_calls() -> list[tuple[str, str, set[str] | None, int]]:
+    """(module, title id, argument names, line) for every finding title.
+
+    Read from the syntax tree: each `titled("<id>", name=…)` call whose id is a
+    literal, and each clone state's title id in `build_findings.SYNC_FINDINGS`
+    (the second element of its row, filled with `repo` alone). Argument names
+    are None where the call passes `**mapping` and so cannot be named here."""
+    out = []
+    for module in FINDING_PRODUCERS:
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "titled" and node.args \
+                    and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                names = None if any(k.arg is None for k in node.keywords) else {k.arg for k in node.keywords}
+                out.append((module.name, node.args[0].value, names, node.lineno))
+            if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "SYNC_FINDINGS" for t in node.targets):
+                for state, row in ast.literal_eval(node.value).items():
+                    out.append((module.name, row[1], {"repo"}, node.lineno))
+    return out
+
+
+def _titled(node: ast.AST) -> bool:
+    """`titled(…)`, or a conditional whose every branch is one."""
+    if isinstance(node, ast.IfExp):
+        return _titled(node.body) and _titled(node.orelse)
+    return isinstance(node, ast.Call) and getattr(node.func, "id", "") == "titled"
+
+
+def untitled_finding_literals() -> list[str]:
+    """`module:line` of every dict literal in a rule module that carries a
+    finding title without its message id.
+
+    Two shapes are refused: a `"title"` key with no `"title_id"` beside it
+    (unless the value is copied from another dict's `["title"]`, as the
+    notifier does), and a finding-shaped literal — `"type"` and `"severity"`
+    keys — whose title does not come from `**titled(…)`."""
+    bad = []
+    for module in FINDING_PRODUCERS:
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            keys = {k.value for k in node.keys if isinstance(k, ast.Constant)}
+            spread = any(k is None and _titled(v) for k, v in zip(node.keys, node.values))
+            copied = any(isinstance(k, ast.Constant) and k.value == "title" and isinstance(v, ast.Subscript)
+                         and isinstance(v.slice, ast.Constant) and v.slice.value == "title"
+                         for k, v in zip(node.keys, node.values))
+            if "title" in keys and "title_id" not in keys and not copied:
+                bad.append(f"{module.name}:{node.lineno}")
+            elif {"type", "severity"} <= keys and not spread and "title_id" not in keys:
+                bad.append(f"{module.name}:{node.lineno}")
+    return bad
 
 
 #: Ids reached through a variable, each named with where it is used.
@@ -242,6 +303,79 @@ class Translation(unittest.TestCase):
         for locale in i18n.LOCALES:
             ours = [i18n.plural_category(locale, n) for n in range(250)]
             self.assertEqual(ours, browser[locale], locale)
+
+
+class FindingTitles(unittest.TestCase):
+    """A finding's title is a message id and its arguments, so the board can
+    say it in the reader's language; `title` stays the English rendering of the
+    same pair for every reader that is not the page (MCP, notifications)."""
+
+    def test_every_finding_title_carries_a_message_id(self):
+        calls = finding_title_calls()
+        self.assertGreater(len(calls), 100, "the rule modules were not read")
+        bad = untitled_finding_literals()
+        self.assertEqual(bad, [], f"{len(bad)} finding title(s) without a title_id: {bad[:10]}")
+
+    def test_every_finding_title_id_is_in_both_catalogs(self):
+        en, ru = i18n.catalog("en"), i18n.catalog("ru")
+        for module, msgid, names, line in finding_title_calls():
+            where = f"{module}:{line} {msgid!r}"
+            with self.subTest(where=where):
+                self.assertTrue(msgid in ru, f"no Russian for {where}")
+                want = set(PLACEHOLDER.findall(i18n.english(msgid)))
+                if names is not None:
+                    self.assertEqual(names, want, f"arguments do not match the placeholders: {where}")
+                if "{n}" in msgid:
+                    # A counted title agrees with its number in both languages.
+                    self.assertIsInstance(en.get(msgid), dict, f"no English plural for {where}")
+                    self.assertIsInstance(ru.get(msgid), dict, f"no Russian plural for {where}")
+                else:
+                    # English needs no entry: the id is its English text.
+                    self.assertNotIn(msgid, en, f"{where}: English holds only plurals and contexts")
+
+    def test_title_is_the_english_rendering_of_its_id(self):
+        import finding_types
+        f = finding_types.titled("{host} expires in {days} days", host="alpha.example.com", days=12)
+        self.assertEqual(f, {"title": "alpha.example.com expires in 12 days",
+                             "title_id": "{host} expires in {days} days",
+                             "title_args": {"host": "alpha.example.com", "days": 12}})
+        self.assertEqual(i18n.translate(f["title_id"], "ru", **f["title_args"]),
+                         "alpha.example.com: домен истекает через 12 дн.")
+        # A counted title takes its number's form, in English and in Russian.
+        one = finding_types.titled("{n} MCP servers Claude could not reach", n=1)
+        many = finding_types.titled("{n} MCP servers Claude could not reach", n=3)
+        self.assertEqual(one["title"], "1 MCP server Claude could not reach")
+        self.assertEqual(many["title"], "3 MCP servers Claude could not reach")
+        for n, word in ((1, "MCP-сервер"), (2, "MCP-сервера"), (5, "MCP-серверов"), (21, "MCP-сервер")):
+            self.assertIn(f"{n} {word}", i18n.translate(one["title_id"], "ru", n=n))
+        # Arguments are kept JSON-plain: integers stay numbers, the rest text.
+        odd = finding_types.titled("the machine survey is {hours} hours old", hours=2.0)
+        self.assertEqual(odd["title_args"], {"hours": "2.0"})
+        self.assertEqual(odd["title"], "the machine survey is 2.0 hours old")
+
+    def test_rules_render_their_titles_from_the_id(self):
+        # Real rules over synthetic input: every title equals the English
+        # rendering of its own id and arguments, so the two cannot drift.
+        sys.path.insert(0, str(ROOT / "tools"))
+        import env_findings
+        import heroku_findings
+        secret = [{"name": "API_TOKEN", "class": "secret"}]
+        rows = env_findings.findings({"files": [
+            {"id": "env:alpha-web/.env", "path": "alpha-web/.env", "kind": "env", "git": "tracked",
+             "mode": "0644", "variables": secret},
+            {"id": "env:beta-api/.env", "path": "beta-api/.env", "kind": "env", "git": "loose",
+             "mode": "0644", "variables": secret},
+            {"id": "env:gamma/.env", "path": "gamma/.env", "kind": "env", "git": "loose",
+             "mode": "0600", "variables": secret}]})
+        rows += heroku_findings.app_down([
+            {"id": "heroku:1", "name": "alpha-app", "state": "down", "crashed": ["web.1"],
+             "monthly_cost": 7.0}])
+        self.assertTrue(rows, "the synthetic input produced no finding")
+        for f in rows:
+            with self.subTest(type=f["type"]):
+                self.assertIn("title_id", f)
+                self.assertEqual(f["title"], i18n.translate(f["title_id"], "en", **f["title_args"]))
+                json.dumps(f["title_args"])  # plain JSON, nothing richer
 
 
 class StaticMarkup(unittest.TestCase):

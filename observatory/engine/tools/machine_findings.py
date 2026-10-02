@@ -9,6 +9,12 @@ space — the board does not run it: this page reads, the operator acts.
 NO TIMESTAMP INSIDE A FINDING beyond the documents' own.
 """
 from __future__ import annotations
+import pathlib as _pathlib
+import sys as _sys
+_DASHBOARD = str(_pathlib.Path(__file__).resolve().parents[1] / "dashboard")
+if _DASHBOARD not in _sys.path:
+    _sys.path.append(_DASHBOARD)  # `finding_types.titled`: a title is a message id
+from finding_types import titled  # noqa: E402
 
 import json
 import pathlib
@@ -43,7 +49,7 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
         age = _age_hours(machine.get("measured_at"), now)
         if age is not None and age > 2:
             out.append({"type": "machine.stale", "subject": "machine", "severity": "warning",
-                        "title": f"the machine survey is {age:.0f} hours old",
+                        **titled("the machine survey is {hours} hours old", hours=f"{age:.0f}"),
                         "detail": "Processes and memory change by the minute; this page is reading an old picture.",
                         "action": "check the tick log for the `machine` step"})
 
@@ -61,7 +67,7 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
                           f"closing what holds the most memory gives that space back")
             out.append({"type": "machine.disk_low", "subject": "machine",
                         "severity": "critical" if pct < crit else "warning",
-                        "title": f"{vol.get('free_gb')} GB free on the disk ({pct}%)",
+                        **titled("{gb} GB free on the disk ({pct}%)", gb=vol.get("free_gb"), pct=pct),
                         "detail": (f"Below the {crit if pct < crit else warn}% line in config/machine.json. "
                                    f"Largest measured places outside the projects: {named or 'none measured yet'}."),
                         "action": "review the Machine page's disk table; each row names how its space comes back"})
@@ -72,14 +78,14 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
         if swap > 4096:
             heavy = ", ".join(f"{g['origin']} {g['rss_mb'] / 1024:.1f} GB" for g in groups[:LISTED])
             out.append({"type": "machine.memory_pressure", "subject": "machine", "severity": "warning",
-                        "title": f"{swap / 1024:.1f} GB of memory is swapped to disk",
+                        **titled("{gb} GB of memory is swapped to disk", gb=f"{swap / 1024:.1f}"),
                         "detail": f"Largest by origin: {heavy}.",
                         "action": "close what the Machine page shows as largest and idle"})
         limit = config.get("memory_group_warning_mb", 4096)
         for g in groups:
             if g["rss_mb"] >= limit and not g["origin"].startswith(("system", "agent:")):
                 out.append({"type": "machine.heavy_origin", "subject": f"machine:{g['origin']}", "severity": "info",
-                            "title": f"{g['origin']} holds {g['rss_mb'] / 1024:.1f} GB in {g['processes']} process(es)",
+                            **titled("{origin} holds {gb} GB in {n} processes", origin=g["origin"], gb=f"{g['rss_mb'] / 1024:.1f}", n=g["processes"]),
                             "detail": "Above memory_group_warning_mb in config/machine.json.",
                             "action": "quit it if it is not in use"})
 
@@ -88,7 +94,7 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
         if detached:
             total = sum(g["rss_mb"] for g in detached)
             out.append({"type": "machine.detached_servers", "subject": "machine", "severity": "info",
-                        "title": f"{sum(g['processes'] for g in detached)} detached server process(es) hold {total:.0f} MB",
+                        **titled("{n} detached server processes hold {mb} MB", n=sum(g["processes"] for g in detached), mb=f"{total:.0f}"),
                         "detail": ("Interpreters whose parent is launchd and which no job, app or agent session explains — "
                                    "usually an MCP or dev server that outlived the session that started it: "
                                    + ", ".join(g["origin"].split(":", 1)[1] for g in detached[:LISTED]) + "."),
@@ -99,7 +105,7 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
                  if w.get("state") == "dirty" and not w.get("busy") and (w.get("idle_days") or 0) >= 7]
         if dirty:
             out.append({"type": "git.idle_dirty_worktrees", "subject": "estate:git", "severity": "warning",
-                        "title": f"{len(dirty)} idle worktree(s) hold uncommitted work",
+                        **titled("{n} idle worktrees hold uncommitted work", n=len(dirty)),
                         "detail": ("Nobody works in them and their edits exist nowhere else: "
                                    + ", ".join(w["path"].rsplit("/", 1)[-1] for _, w in dirty[:LISTED]) + "."),
                         "action": "commit what matters, or `full cleanup --apply --include manual` archives and removes them"})
@@ -107,7 +113,7 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
                   if b.get("class") == "unique" and (b.get("idle_days") or 0) >= 14]
         if unique:
             out.append({"type": "git.idle_unique_branches", "subject": "estate:git", "severity": "info",
-                        "title": f"{len(unique)} idle branch(es) hold the only copy of their commits",
+                        **titled("{n} idle branches hold the only copy of their commits", n=len(unique)),
                         "detail": ", ".join(f"{r.split('/', 1)[-1]}:{b['name']}" for r, b in unique[:LISTED]) + ".",
                         "action": "push or merge what matters; `full cleanup --apply --include manual` bundles the rest before deleting"})
 
@@ -124,8 +130,8 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
         pass
     if removed:
         out.append({"type": "cleanup.done", "subject": "machine", "severity": "info",
-                    "title": f"cleanup removed {removed} item(s) in 24 hours"
-                             + (f", {freed / 1048576:.1f} GB of build output" if freed else ""),
+                    **(titled("cleanup removed {n} items in 24 hours, {gb} GB of build output", n=removed, gb=f"{freed / 1048576:.1f}")
+                       if freed else titled("cleanup removed {n} items in 24 hours", n=removed)),
                     "detail": "Only what loses nothing: merged or pushed branches, clean idle worktrees, "
                               "build output of idle projects. Each is a line in store/logs/cleanup.jsonl.",
                     "action": "nothing to do; the journal names every item and how to bring it back"})

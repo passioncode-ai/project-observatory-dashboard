@@ -237,7 +237,7 @@ def test_findings_do_not_call_an_unmeasured_host_dark() -> None:
     unm = [f for f in found if f["type"] == "domain.unmeasured"]
     check("one finding names the whole gap", len(unm) == 1, str(len(unm)))
     if unm:
-        check("counting the hosts", "host(s) could not be probed" in unm[0]["title"],
+        check("counting the hosts", "hosts could not be probed" in unm[0]["title"],
               unm[0]["title"])
         check("saying they are NOT dark",
               "no negative answer" in unm[0]["detail"], unm[0]["detail"][:160])

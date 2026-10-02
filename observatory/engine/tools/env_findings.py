@@ -28,6 +28,12 @@ NO TIMESTAMP INSIDE A FINDING: every date quoted is one the registry
 already holds.
 """
 from __future__ import annotations
+import pathlib as _pathlib
+import sys as _sys
+_DASHBOARD = str(_pathlib.Path(__file__).resolve().parents[1] / "dashboard")
+if _DASHBOARD not in _sys.path:
+    _sys.path.append(_DASHBOARD)  # `finding_types.titled`: a title is a message id
+from finding_types import titled  # noqa: E402
 
 
 def _config_label(name: str) -> str:
@@ -66,7 +72,7 @@ def tracked_in_git(doc: dict) -> list[dict]:
             "type": "env.tracked_in_git",
             "subject": f["id"],
             "severity": "critical" if secrets else "warning",
-            "title": f"{f['path']} is committed to git",
+            **titled("{path} is committed to git", path=f["path"]),
             "detail": (f"It is a live env file, not a template, and git tracks it — "
                        f"so its contents are in the repository's history and on "
                        f"every clone of it."
@@ -92,8 +98,7 @@ def unignored(doc: dict) -> list[dict]:
         "type": "env.unignored",
         "subject": "estate:env-unignored",
         "severity": "warning",
-        "title": (f"{len(rows)} env files are untracked but not ignored"
-                  if len(rows) > 1 else "1 env file is untracked but not ignored"),
+        **titled("{n} env files are untracked but not ignored", n=len(rows)),
         "detail": ("git does not carry them today and nothing stops it carrying them "
                    f"tomorrow: {_listed([f['path'] for f in rows])}. In `git status` "
                    "they are indistinguishable from a file that is safely ignored, "
@@ -113,9 +118,7 @@ def world_readable(doc: dict) -> list[dict]:
         "type": "env.world_readable",
         "subject": "estate:env-modes",
         "severity": "warning",
-        "title": (f"{len(rows)} env files holding credentials are readable beyond their owner"
-                  if len(rows) > 1 else
-                  "1 env file holding credentials is readable beyond its owner"),
+        **titled("{n} env files holding credentials are readable beyond their owner", n=len(rows)),
         "detail": ("Their mode grants group or other read, so any process on this "
                    "machine that is not this user can read the values: "
                    + _listed([f"{f['path']} ({f['mode']})" for f in rows])
@@ -135,9 +138,7 @@ def shared_secret(doc: dict) -> list[dict]:
         "type": "env.shared_secret",
         "subject": "estate:env-shared",
         "severity": "info",
-        "title": (f"{len(groups)} credentials are held by more than one project"
-                  if len(groups) > 1 else
-                  "1 credential is held by more than one project"),
+        **titled("{n} credentials are held by more than one project", n=len(groups)),
         "detail": ("Measured by value, not by name, which is why "
                    + ", ".join(widest["names"][:3])
                    + (" are one credential under " + str(len(widest["names"]))
@@ -165,9 +166,7 @@ def reusable_slot(doc: dict) -> list[dict]:
         "type": "env.reusable_slot",
         "subject": "estate:env-reusable",
         "severity": "info",
-        "title": (f"{len(rows)} empty credential slots have a value in another project"
-                  if len(rows) > 1 else
-                  "1 empty credential slot has a value in another project"),
+        **titled("{n} empty credential slots have a value in another project", n=len(rows)),
         "detail": ("Each of these is a variable this project declares and leaves "
                    "blank while another project here holds a live one under the same "
                    "name: "

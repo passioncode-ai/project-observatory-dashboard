@@ -145,7 +145,7 @@ def test_the_board_reports_the_unsigned_and_only_a_chosen_policy() -> None:
     check("of type `credential.unsigned`",
           rows[0]["type"] == "credential.unsigned", rows[0]["type"])
     check("which counts only the unsigned and names them",
-          "1 credential(s)" in rows[0]["title"] and "openrouter/a" in rows[0]["detail"],
+          "1 credential carries" in rows[0]["title"] and "openrouter/a" in rows[0]["detail"],
           rows[0]["title"])
     check("and the remedy is the verb, not a file to edit",
           "sign_credential.py set" in rows[0]["action"], rows[0]["action"])
@@ -161,7 +161,7 @@ def test_the_board_reports_the_unsigned_and_only_a_chosen_policy() -> None:
     check("of type `credential.rotation_due`",
           due[0]["type"] == "credential.rotation_due", due[0]["type"])
     check("and the row names the age and the policy",
-          "256 day(s) ago" in due[0]["title"] and "every 30" in due[0]["title"],
+          "256 days ago" in due[0]["title"] and "every 30" in due[0]["title"],
           due[0]["title"])
     check("it is not due the day before", cf.rotation_due(creds, "2026-01-30") == [],
           "thirty days after 2026-01-01 is not past thirty days")

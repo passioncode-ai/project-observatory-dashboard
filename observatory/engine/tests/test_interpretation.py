@@ -181,7 +181,7 @@ def test_a_stalled_interpretation_is_raised_by_AGE() -> None:
         return
     check("as a warning, because the FACTS are still current",
           f["severity"] == "warning", f["severity"])
-    check("counting what is waiting", "77 change(s)" in f["title"], f["title"])
+    check("counting what is waiting", "77 changes" in f["title"], f["title"])
     check("quoting the cause from the report rather than guessing",
           "36.09 of 2.00" in f["detail"], f["detail"][:160])
     check("naming that the key is shared", "shared with everything else" in f["action"],

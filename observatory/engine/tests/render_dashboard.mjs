@@ -30,6 +30,9 @@ if (scripts.length === 0) {
 const ids = new Set([...html.matchAll(/getElementById\("([^"]+)"\)/g)].map(m => m[1]));
 for (const m of html.matchAll(/id="([^"]+)"/g)) ids.add(m[1]);
 
+const rootAttributes = Object.fromEntries(
+  [...((html.match(/<html\b([^>]*)>/) || [])[1] || "").matchAll(/([a-z-]+)="([^"]*)"/g)]
+    .map(m => [m[1], m[2]]));
 const written = {};
 
 // A bounded excerpt that names its own limit, so a reader of this report cannot
@@ -88,7 +91,12 @@ const document = {
   createElement(tag) { return makeEl(`<${tag}>`); },
   addEventListener(type, fn) { listeners.push(["document", type, fn]); },
   body: makeEl("body"),
-  documentElement: makeEl("html"),
+  // The root element answers with the page's own attributes, so the script
+  // reads the language the page was built in (`data-build-locale`) as a
+  // browser would; a stub answering null made every page English.
+  documentElement: Object.assign(makeEl("html"), {
+    getAttribute(name) { return rootAttributes[name] ?? null; },
+  }),
 };
 
 const errors = [];

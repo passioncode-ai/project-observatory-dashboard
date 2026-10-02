@@ -22,6 +22,12 @@ import collections
 import datetime
 import json
 import pathlib
+import pathlib as _pathlib
+import sys as _sys
+_DASHBOARD = str(_pathlib.Path(__file__).resolve().parents[1] / "dashboard")
+if _DASHBOARD not in _sys.path:
+    _sys.path.append(_DASHBOARD)  # `finding_types.titled`: a title is a message id
+from finding_types import titled  # noqa: E402
 
 DAYS = 14
 LISTED = 6
@@ -78,7 +84,7 @@ def findings(path: pathlib.Path, known_folders: set[str], data_root: pathlib.Pat
         "type": "project.seen_unobserved",
         "subject": "estate:sessions-seen",
         "severity": "info",
-        "title": (f"{len(still)} folder(s) agents worked in over {DAYS} days are not in the registry"),
+        **titled("{n} folders agents worked in over {days} days are not in the registry", n=len(still), days=DAYS),
         "detail": (f"{named}{f' and {more} more' if more > 0 else ''} — {total_sessions} session(s) in all. "
                    f"Each was where an agent was told to work and the board could show nothing "
                    f"about it: no keys by name, no findings, no history. A folder under the configured project directory "

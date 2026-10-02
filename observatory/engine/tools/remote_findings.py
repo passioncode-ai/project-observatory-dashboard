@@ -35,6 +35,12 @@ NO TIMESTAMP INSIDE A FINDING: the only dates quoted are the ones the registry
 already carries.
 """
 from __future__ import annotations
+import pathlib as _pathlib
+import sys as _sys
+_DASHBOARD = str(_pathlib.Path(__file__).resolve().parents[1] / "dashboard")
+if _DASHBOARD not in _sys.path:
+    _sys.path.append(_DASHBOARD)  # `finding_types.titled`: a title is a message id
+from finding_types import titled  # noqa: E402
 
 #: Named by name up to this many, as everywhere else on this board.
 LISTED = 6
@@ -65,8 +71,7 @@ def findings(doc: dict | None) -> list[dict]:
             "type": "remote.same_as_local",
             "subject": "estate:remote-config",
             "severity": "warning",
-            "title": (f"{total} production secret(s) hold the same value as a "
-                      f"`.env` on this machine"),
+            **titled("{n} production secrets hold the same value as a `.env` on this machine", n=total),
             "detail": (f"Measured by comparing salted fingerprints, never values: "
                        f"{worst}. A laptop is not where a production credential "
                        f"should be recoverable from — a stolen checkout, a "
@@ -86,8 +91,7 @@ def findings(doc: dict | None) -> list[dict]:
                 "type": "remote.retired_still_deployed",
                 "subject": f"app:{a['app']}/{row['name']}",
                 "severity": "critical",
-                "title": (f"{a['app']} is still running the value retired from "
-                          f"{row['slot']} on {row['retired_on']}"),
+                **titled("{app} is still running the value retired from {slot} on {date}", app=a["app"], slot=row["slot"], date=row["retired_on"]),
                 "detail": ("The vault rotated this value away and kept the old one "
                            "as an archive; production's copy still fingerprints to "
                            "that archive. Every reason the value was rotated for is "
@@ -115,8 +119,7 @@ def findings(doc: dict | None) -> list[dict]:
             "type": "remote.unbacked",
             "subject": "estate:remote-config",
             "severity": "info",
-            "title": (f"{total} production secret(s) on {len(unbacked)} application(s) "
-                      f"exist only at the provider"),
+            **titled("{n} production secrets exist only at the provider (applications: {apps})", n=total, apps=len(unbacked)),
             "detail": (f"Worst first: {_listed([f'{app} ({len(names)})' for app, names in unbacked])}. "
                        f"Nothing on this machine fingerprints to them — no checkout, no "
                        f"vault slot — so an application deleted, a dyno reset or a "
@@ -140,8 +143,7 @@ def findings(doc: dict | None) -> list[dict]:
             "type": "remote.namespace_withheld",
             "subject": "estate:remote-config",
             "severity": "warning",
-            "title": (f"{ns['withheld']} production secret(s) cannot be compared with "
-                      f"this machine's"),
+            **titled("{n} production secrets cannot be compared with this machine's", n=ns["withheld"]),
             "detail": (f"{ns.get('reason') or 'the two scans do not share a fingerprint namespace'}. "
                        "Both sides hold the variable and both hold a fingerprint. "
                        "They were salted differently, so equal values would not produce "
@@ -161,7 +163,7 @@ def findings(doc: dict | None) -> list[dict]:
             "type": "remote.unreadable",
             "subject": "estate:remote-config",
             "severity": "info",
-            "title": f"{len(unreadable)} application(s) would not report their configuration",
+            **titled("{n} applications would not report their configuration", n=len(unreadable)),
             "detail": (f"{_listed(sorted(unreadable))}. Their production "
                        f"configuration is unknown here, which is not the same as "
                        f"empty: nothing on this board should be read as saying "

@@ -1,4 +1,12 @@
 {
+ "cleanup removed {n} items in 24 hours": {
+  "one": "cleanup removed {n} item in 24 hours",
+  "other": "cleanup removed {n} items in 24 hours"
+ },
+ "cleanup removed {n} items in 24 hours, {gb} GB of build output": {
+  "one": "cleanup removed {n} item in 24 hours, {gb} GB of build output",
+  "other": "cleanup removed {n} items in 24 hours, {gb} GB of build output"
+ },
  "findings@@heading": "findings",
  "in@@{n} accounts": {
   "one": "{n} account",
@@ -37,6 +45,42 @@
   "other": "{n} variables"
  },
  "s@@sessions-abbrev": "s",
+ "the Heroku snapshot is {n} days old, so nothing is being said about it": {
+  "one": "the Heroku snapshot is {n} day old, so nothing is being said about it",
+  "other": "the Heroku snapshot is {n} days old, so nothing is being said about it"
+ },
+ "the agent could not interpret {n} projects it took": {
+  "one": "the agent could not interpret {n} project it took",
+  "other": "the agent could not interpret {n} projects it took"
+ },
+ "the analytics numbers are {n} days old": {
+  "one": "the analytics numbers are {n} day old",
+  "other": "the analytics numbers are {n} days old"
+ },
+ "the companion could not record {n} turns": {
+  "one": "the companion could not record {n} turn",
+  "other": "the companion could not record {n} turns"
+ },
+ "the leak scan could not read {n} sources": {
+  "one": "the leak scan could not read {n} source",
+  "other": "the leak scan could not read {n} sources"
+ },
+ "the leak scan did not read {n} sources": {
+  "one": "the leak scan did not read {n} source",
+  "other": "the leak scan did not read {n} sources"
+ },
+ "the model was built with {n} sources unmeasured": {
+  "one": "the model was built with {n} source unmeasured",
+  "other": "the model was built with {n} sources unmeasured"
+ },
+ "the store failed {n} times in the last {days} days: {codes}": {
+  "one": "the store failed {n} time in the last {days} days: {codes}",
+  "other": "the store failed {n} times in the last {days} days: {codes}"
+ },
+ "the tick has skipped {n} cycles in a row": {
+  "one": "the tick has skipped {n} cycle in a row",
+  "other": "the tick has skipped {n} cycles in a row"
+ },
  "tile@@{n} Heroku apps": {
   "one": "{n} Heroku app",
   "other": "{n} Heroku apps"
@@ -129,34 +173,178 @@
   "one": "{n} site does not resolve",
   "other": "{n} sites do not resolve"
  },
+ "traffic outside the estate's projects: {n} hosts — {outside} by decision, {pending} pending, {unclassified} of the top-listed unclassified": {
+  "one": "traffic outside the estate's projects: {n} host — {outside} by decision, {pending} pending, {unclassified} of the top-listed unclassified",
+  "other": "traffic outside the estate's projects: {n} hosts — {outside} by decision, {pending} pending, {unclassified} of the top-listed unclassified"
+ },
  "variables@@count": "variables",
+ "whether {n} domains are on registrar hold could not be read": {
+  "one": "whether {n} domain is on registrar hold could not be read",
+  "other": "whether {n} domains are on registrar hold could not be read"
+ },
+ "{key} was last set {n} days ago and its own policy says every {days}": {
+  "one": "{key} was last set {n} day ago and its own policy says every {days}",
+  "other": "{key} was last set {n} days ago and its own policy says every {days}"
+ },
  "{n} Cloudflare zones": {
   "one": "{n} Cloudflare zone",
   "other": "{n} Cloudflare zones"
+ },
+ "{n} MCP servers Claude could not reach": {
+  "one": "{n} MCP server Claude could not reach",
+  "other": "{n} MCP servers Claude could not reach"
+ },
+ "{n} MCP servers carry a key in their URL": {
+  "one": "{n} MCP server carries a key in its URL",
+  "other": "{n} MCP servers carry a key in their URL"
+ },
+ "{n} MCP servers wait for a browser sign-in": {
+  "one": "{n} MCP server waits for a browser sign-in",
+  "other": "{n} MCP servers wait for a browser sign-in"
+ },
+ "{n} account identifiers appear outside their files": {
+  "one": "{n} account identifier appears outside its file",
+  "other": "{n} account identifiers appear outside their files"
+ },
+ "{n} analytics properties have unknown traffic": {
+  "one": "{n} analytics property has unknown traffic",
+  "other": "{n} analytics properties have unknown traffic"
+ },
+ "{n} analytics properties with unknown traffic ({unknown} unmeasured) belong to no project here": {
+  "one": "{n} analytics property with unknown traffic ({unknown} unmeasured) belongs to no project here",
+  "other": "{n} analytics properties with unknown traffic ({unknown} unmeasured) belong to no project here"
+ },
+ "{n} analytics properties with {users} summed users in 30 days ({unknown} unmeasured) belong to no project here": {
+  "one": "{n} analytics property with {users} summed users in 30 days ({unknown} unmeasured) belongs to no project here",
+  "other": "{n} analytics properties with {users} summed users in 30 days ({unknown} unmeasured) belong to no project here"
+ },
+ "{n} analytics properties with {users} summed users in 30 days belong to no project here": {
+  "one": "{n} analytics property with {users} summed users in 30 days belongs to no project here",
+  "other": "{n} analytics properties with {users} summed users in 30 days belong to no project here"
+ },
+ "{n} answers contradicted themselves and were not recorded": {
+  "one": "{n} answer contradicted itself and was not recorded",
+  "other": "{n} answers contradicted themselves and were not recorded"
+ },
+ "{n} applications would not report their configuration": {
+  "one": "{n} application would not report its configuration",
+  "other": "{n} applications would not report their configuration"
  },
  "{n} apps": {
   "one": "{n} app",
   "other": "{n} apps"
  },
+ "{n} changes have waited over {hours}h for the agent to interpret them": {
+  "one": "{n} change has waited over {hours}h for the agent to interpret it",
+  "other": "{n} changes have waited over {hours}h for the agent to interpret them"
+ },
+ "{n} conclusions unindexed for over {hours}h": {
+  "one": "{n} conclusion unindexed for over {hours}h",
+  "other": "{n} conclusions unindexed for over {hours}h"
+ },
+ "{n} conclusions were written in another language": {
+  "one": "{n} conclusion was written in another language",
+  "other": "{n} conclusions were written in another language"
+ },
+ "{n} conclusions will be erased unreviewed within 14 days": {
+  "one": "{n} conclusion will be erased unreviewed within 14 days",
+  "other": "{n} conclusions will be erased unreviewed within 14 days"
+ },
  "{n} copies in this same project": {
   "one": "{n} copy in this same project",
   "other": "{n} copies in this same project"
+ },
+ "{n} copies of somebody else's work are behind their upstreams": {
+  "one": "{n} copy of somebody else's work is behind its upstream",
+  "other": "{n} copies of somebody else's work are behind their upstreams"
+ },
+ "{n} credentials appear in files they do not live in": {
+  "one": "{n} credential appears in a file it does not live in",
+  "other": "{n} credentials appear in files they do not live in"
+ },
+ "{n} credentials are held by more than one project": {
+  "one": "{n} credential is held by more than one project",
+  "other": "{n} credentials are held by more than one project"
+ },
+ "{n} credentials are used by more than one project": {
+  "one": "{n} credential is used by more than one project",
+  "other": "{n} credentials are used by more than one project"
+ },
+ "{n} credentials belong to no project here": {
+  "one": "{n} credential belongs to no project here",
+  "other": "{n} credentials belong to no project here"
+ },
+ "{n} credentials carry no statement of what they are for": {
+  "one": "{n} credential carries no statement of what it is for",
+  "other": "{n} credentials carry no statement of what they are for"
  },
  "{n} declarations": {
   "one": "{n} declaration",
   "other": "{n} declarations"
  },
+ "{n} declines gave no reason": {
+  "one": "{n} decline gave no reason",
+  "other": "{n} declines gave no reason"
+ },
+ "{n} detached server processes hold {mb} MB": {
+  "one": "{n} detached server process holds {mb} MB",
+  "other": "{n} detached server processes hold {mb} MB"
+ },
+ "{n} empty credential slots have a value in another project": {
+  "one": "{n} empty credential slot has a value in another project",
+  "other": "{n} empty credential slots have a value in another project"
+ },
  "{n} entries": {
   "one": "{n} entry",
   "other": "{n} entries"
+ },
+ "{n} env files are untracked but not ignored": {
+  "one": "{n} env file is untracked but not ignored",
+  "other": "{n} env files are untracked but not ignored"
+ },
+ "{n} env files holding credentials are readable beyond their owner": {
+  "one": "{n} env file holding credentials is readable beyond its owner",
+  "other": "{n} env files holding credentials are readable beyond their owner"
+ },
+ "{n} findings could not be delivered to the notification centre": {
+  "one": "{n} finding could not be delivered to the notification centre",
+  "other": "{n} findings could not be delivered to the notification centre"
  },
  "{n} folders": {
   "one": "{n} folder",
   "other": "{n} folders"
  },
+ "{n} folders agents worked in over {days} days are not in the registry": {
+  "one": "{n} folder agents worked in over {days} days is not in the registry",
+  "other": "{n} folders agents worked in over {days} days are not in the registry"
+ },
+ "{n} frozen weeks carry no session figure and never can": {
+  "one": "{n} frozen week carries no session figure and never can",
+  "other": "{n} frozen weeks carry no session figure and never can"
+ },
+ "{n} hosts could not be probed, so their liveness is unknown": {
+  "one": "{n} host could not be probed, so its liveness is unknown",
+  "other": "{n} hosts could not be probed, so their liveness is unknown"
+ },
  "{n} identical conclusions; the newest is shown": {
   "one": "{n} identical conclusion; the newest is shown",
   "other": "{n} identical conclusions; the newest is shown"
+ },
+ "{n} idle branches hold the only copy of their commits": {
+  "one": "{n} idle branch holds the only copy of its commits",
+  "other": "{n} idle branches hold the only copy of their commits"
+ },
+ "{n} idle worktrees hold uncommitted work": {
+  "one": "{n} idle worktree holds uncommitted work",
+  "other": "{n} idle worktrees hold uncommitted work"
+ },
+ "{n} key movements at Heroku that no agent recorded": {
+  "one": "{n} key movement at Heroku that no agent recorded",
+  "other": "{n} key movements at Heroku that no agent recorded"
+ },
+ "{n} ledger records await review": {
+  "one": "{n} ledger record awaits review",
+  "other": "{n} ledger records await review"
  },
  "{n} linked": {
   "one": "{n} linked",
@@ -174,9 +362,33 @@
   "one": "{n} name",
   "other": "{n} names"
  },
+ "{n} new properties in legacy account {account}": {
+  "one": "{n} new property in legacy account {account}",
+  "other": "{n} new properties in legacy account {account}"
+ },
  "{n} notes": {
   "one": "{n} note",
   "other": "{n} notes"
+ },
+ "{n} of this estate's checkouts are behind their remotes": {
+  "one": "{n} of this estate's checkouts is behind its remote",
+  "other": "{n} of this estate's checkouts are behind their remotes"
+ },
+ "{n} of {total} Heroku applications have no checkout here": {
+  "one": "{n} of {total} Heroku applications has no checkout here",
+  "other": "{n} of {total} Heroku applications have no checkout here"
+ },
+ "{n} of {total} skip sites are judged gaps: the property is assertable and nothing asserts it yet": {
+  "one": "{n} of {total} skip sites is a judged gap: the property is assertable and nothing asserts it yet",
+  "other": "{n} of {total} skip sites are judged gaps: the property is assertable and nothing asserts it yet"
+ },
+ "{n} of {total} skip sites do not say which suite carries the property they skip": {
+  "one": "{n} of {total} skip sites does not say which suite carries the property it skips",
+  "other": "{n} of {total} skip sites do not say which suite carries the property they skip"
+ },
+ "{n} of {total} skip sites do not say which suite carries the property they skip; judged gaps awaiting a fixture: {gaps}": {
+  "one": "{n} of {total} skip sites does not say which suite carries the property it skips; judged gaps awaiting a fixture: {gaps}",
+  "other": "{n} of {total} skip sites do not say which suite carries the property they skip; judged gaps awaiting a fixture: {gaps}"
  },
  "{n} open": {
   "one": "{n} open",
@@ -190,9 +402,45 @@
   "one": "{n} origin",
   "other": "{n} origins"
  },
+ "{n} production secrets cannot be compared with this machine's": {
+  "one": "{n} production secret cannot be compared with this machine's",
+  "other": "{n} production secrets cannot be compared with this machine's"
+ },
+ "{n} production secrets exist only at the provider (applications: {apps})": {
+  "one": "{n} production secret exists only at the provider (applications: {apps})",
+  "other": "{n} production secrets exist only at the provider (applications: {apps})"
+ },
+ "{n} production secrets hold the same value as a `.env` on this machine": {
+  "one": "{n} production secret holds the same value as a `.env` on this machine",
+  "other": "{n} production secrets hold the same value as a `.env` on this machine"
+ },
+ "{n} project ids in the ledger are not in the registry": {
+  "one": "{n} project id in the ledger is not in the registry",
+  "other": "{n} project ids in the ledger are not in the registry"
+ },
+ "{n} project ids in the ledger belong to a project that has since been published": {
+  "one": "{n} project id in the ledger belongs to a project that has since been published",
+  "other": "{n} project ids in the ledger belong to a project that has since been published"
+ },
  "{n} projects": {
   "one": "{n} project",
   "other": "{n} projects"
+ },
+ "{n} projects declare they are active and have not moved": {
+  "one": "{n} project declares it is active and has not moved",
+  "other": "{n} projects declare they are active and have not moved"
+ },
+ "{n} projects have a code graph older than their code": {
+  "one": "{n} project has a code graph older than its code",
+  "other": "{n} projects have a code graph older than their code"
+ },
+ "{n} projects have released nothing and stopped": {
+  "one": "{n} project has released nothing and stopped",
+  "other": "{n} projects have released nothing and stopped"
+ },
+ "{n} projects have wiki notes older than their last commit": {
+  "one": "{n} project has wiki notes older than its last commit",
+  "other": "{n} projects have wiki notes older than their last commit"
  },
  "{n} repos": {
   "one": "{n} repo",
@@ -201,6 +449,34 @@
  "{n} repos need attention": {
   "one": "{n} repo needs attention",
   "other": "{n} repos need attention"
+ },
+ "{n} retired secret values are over a month old and presumably never revoked": {
+  "one": "{n} retired secret value is over a month old and presumably never revoked",
+  "other": "{n} retired secret values are over a month old and presumably never revoked"
+ },
+ "{n} reveals in {hours} hours came from a caller that did not name itself": {
+  "one": "{n} reveal in {hours} hours came from a caller that did not name itself",
+  "other": "{n} reveals in {hours} hours came from a caller that did not name itself"
+ },
+ "{n} rows from {plugin} were refused": {
+  "one": "{n} row from {plugin} was refused",
+  "other": "{n} rows from {plugin} were refused"
+ },
+ "{n} running applications belong to no project here": {
+  "one": "{n} running application belongs to no project here",
+  "other": "{n} running applications belong to no project here"
+ },
+ "{n} secret files beside the code are neither tracked nor ignored": {
+  "one": "{n} secret file beside the code is neither tracked nor ignored",
+  "other": "{n} secret files beside the code are neither tracked nor ignored"
+ },
+ "{n} secret files beside the code are readable by more than their owner": {
+  "one": "{n} secret file beside the code is readable by more than its owner",
+  "other": "{n} secret files beside the code are readable by more than their owner"
+ },
+ "{n} secret files beside the code are tracked by git": {
+  "one": "{n} secret file beside the code is tracked by git",
+  "other": "{n} secret files beside the code are tracked by git"
  },
  "{n} secrets": {
   "one": "{n} secret",
@@ -218,9 +494,29 @@
   "one": "{n} session",
   "other": "{n} sessions"
  },
+ "{n} sessions of work on {name}, which this registry does not list": {
+  "one": "{n} session of work on {name}, which this registry does not list",
+  "other": "{n} sessions of work on {name}, which this registry does not list"
+ },
+ "{n} sessions of work on {name}, whose folder {where} is gone": {
+  "one": "{n} session of work on {name}, whose folder {where} is gone",
+  "other": "{n} sessions of work on {name}, whose folder {where} is gone"
+ },
+ "{n} sessions with ambiguous project attribution for {name}": {
+  "one": "{n} session with ambiguous project attribution for {name}",
+  "other": "{n} sessions with ambiguous project attribution for {name}"
+ },
+ "{n} sightings suppressed by a recorded decision": {
+  "one": "{n} sighting suppressed by a recorded decision",
+  "other": "{n} sightings suppressed by a recorded decision"
+ },
  "{n} sites": {
   "one": "{n} site",
   "other": "{n} sites"
+ },
+ "{n} suppression rules not applied": {
+  "one": "{n} suppression rule not applied",
+  "other": "{n} suppression rules not applied"
  },
  "{n} templates": {
   "one": "{n} template",
@@ -233,5 +529,41 @@
  "{n} variables": {
   "one": "{n} variable",
   "other": "{n} variables"
+ },
+ "{n} wikilinks in the wiki resolve to nothing": {
+  "one": "{n} wikilink in the wiki resolves to nothing",
+  "other": "{n} wikilinks in the wiki resolve to nothing"
+ },
+ "{origin} holds {gb} GB in {n} processes": {
+  "one": "{origin} holds {gb} GB in {n} process",
+  "other": "{origin} holds {gb} GB in {n} processes"
+ },
+ "{project} has {n} commits and no remote": {
+  "one": "{project} has {n} commit and no remote",
+  "other": "{project} has {n} commits and no remote"
+ },
+ "{receipt} names {n} sources that do not apply here": {
+  "one": "{receipt} names {n} source that does not apply here",
+  "other": "{receipt} names {n} sources that do not apply here"
+ },
+ "{receipt} reports {n} sources it could not measure": {
+  "one": "{receipt} reports {n} source it could not measure",
+  "other": "{receipt} reports {n} sources it could not measure"
+ },
+ "{repo} has {n} extra checkouts holding work no remote has": {
+  "one": "{repo} has {n} extra checkout holding work no remote has",
+  "other": "{repo} has {n} extra checkouts holding work no remote has"
+ },
+ "{secret} was seen leaking {n} days ago and has no recorded settlement": {
+  "one": "{secret} was seen leaking {n} day ago and has no recorded settlement",
+  "other": "{secret} was seen leaking {n} days ago and has no recorded settlement"
+ },
+ "{secret} was seen leaking {n} days ago and was closed only by a local rotate": {
+  "one": "{secret} was seen leaking {n} day ago and was closed only by a local rotate",
+  "other": "{secret} was seen leaking {n} days ago and was closed only by a local rotate"
+ },
+ "{subject} was revealed {n} times in {hours} hours": {
+  "one": "{subject} was revealed {n} time in {hours} hours",
+  "other": "{subject} was revealed {n} times in {hours} hours"
  }
 }

@@ -216,7 +216,7 @@ def test_the_unfillable_gap_becomes_a_finding() -> None:
     got = findings({"frozen_without_sessions": 4})
     check("the gap is raised", len(got) == 1, str(len(got)))
     if got:
-        check("counting the weeks", "4 frozen week(s)" in got[0]["title"], got[0]["title"])
+        check("counting the weeks", "4 frozen weeks" in got[0]["title"], got[0]["title"])
         check("saying nothing can restore them",
               "nothing can restore them" in got[0]["action"], got[0]["action"])
         check("and that the rows are not wrong about commits",
