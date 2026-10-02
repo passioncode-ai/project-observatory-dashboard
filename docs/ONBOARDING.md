@@ -175,7 +175,24 @@ python "$(project-observatory full-path)/tools/vault.py" put PROJECT ENV NAME   
 ```
 
 `ENV` is one of `local`, `stage` or `prod`, and `NAME` is UPPER_SNAKE_CASE.
-The command accepts the value only on stdin. Prefer a human-controlled hidden prompt or a
+The command accepts the value only on stdin. The same tool manages the slot afterwards —
+`list`, `rotate` (the new value on stdin; the old one is archived at mode 600), `leak` and
+`settle` (record an exposure and its settlement), `moved` / `movements` (a change made at
+the provider), and `remove PROJECT ENV NAME` (the value, its metadata and its retired
+archives; refused while a leak on the slot is open unless `--force`; `--retired` removes
+only the archives). Every change is a line in the movements journal and none prints a value.
+A command uses a slot by name, never by value:
+
+```sh
+python "$(project-observatory full-path)/tools/use_secret.py" names PROJECT
+python "$(project-observatory full-path)/tools/use_secret.py" run --env local PROJECT NAME -- COMMAND …
+```
+
+Flags come before the project name (`run --env ENV PROJECT NAME -- …`); a flag after it is
+refused with the right order, and a program that does not exist exits 127. The command's
+output is filtered for the exact value. `project-observatory full local` refreshes the
+inventory of `.env` names this reads (`env`, local, names and keyed fingerprints only), and
+the Keys page shows a new slot after the next `full local`. Prefer a human-controlled hidden prompt or a
 pipe from an already authenticated provider tool. Do not put a secret in a chat,
 command argument, test fixture or tracked file. Read the installed
 `handling-secrets` skill before an agent works with these commands.
