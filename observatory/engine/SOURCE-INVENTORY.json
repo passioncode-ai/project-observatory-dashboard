@@ -162,8 +162,8 @@
     {
       "path": "collectors/merge.py",
       "source_sha256": "832e43056d8f239ebe5184d9c2a20c12ef771d641064c2bee03365b1c75b5e69",
-      "export_sha256": "61f17e7cc50923677b58995d32d2543646ea52c892a490efa603b4231e321ec5",
-      "bytes": 37057,
+      "export_sha256": "281b75865f82b795f6f548971385f8d1070c1587af7caa15d4133915d06ae8c9",
+      "bytes": 37714,
       "python_comments_removed": 202,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,
