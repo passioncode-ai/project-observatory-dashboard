@@ -459,6 +459,19 @@ class AssistantWire(Workspace):
         self.assertFalse(result.is_error)
         self.assertEqual(payload(result)['protocol'],'observatory-assistant/1')
         self.assertEqual(list((self.home/'store/jobs').glob('job-*.json')),[])
+        # The picker list is the app's; an agent gets the count unless it asks.
+        self.assertNotIn('projects',payload(result))
+        self.assertIn('project_count',payload(result))
+        self.assertEqual(payload(result)['degraded'],[])
+    def test_conversation_errors_are_typed_not_a_generic_tool_error(self):
+        async def case():
+            async with self.session() as s:
+                return (await s.call_tool('observatory_assistant_conversation',{'id':'../../etc'}),
+                        await s.call_tool('observatory_assistant_conversation',{'id':'chat-'+'0'*32}))
+        bad,missing=asyncio.run(case())
+        self.assertEqual(payload(bad)['error'],'invalid-conversation-id')
+        self.assertEqual(payload(missing)['error'],'unknown-conversation')
+        self.assertIn('degraded',payload(missing))
 
 
 if __name__ == "__main__":

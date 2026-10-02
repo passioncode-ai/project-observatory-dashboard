@@ -626,16 +626,11 @@ def project_detail(project_id: str, timeline_limit: int = 10,
     # **20 carry a `repository:` or `clone:` one** — dirty checkouts, diverged
     # branches, stale remotes — so a per-project view built on the subject alone
     # showed nothing for almost every project that had something wrong with it.
-    mine = {project_id}
-    for r in out["project"].get("repositories", []):
-        mine.add(r.get("id", ""))
-        nwo = r.get("nameWithOwner") or ""
-        if nwo:
-            mine.add(f"clone:{nwo.split('/')[-1]}")
+    about = finding_matcher(project_id, out["project"])
     try:
         doc = json.loads((paths.REGISTRY / "findings.json").read_text(encoding="utf-8"))
         for f in doc.get("findings", []):
-            if f.get("acked") or (f.get("subject") or "") not in mine:
+            if f.get("acked") or not about(f.get("subject") or ""):
                 continue
             row = {k: f[k] for k in ("type", "severity", "title", "action") if k in f}
             # THE SUBJECT TRAVELS WITH IT. Without it a renderer showing five
@@ -650,6 +645,38 @@ def project_detail(project_id: str, timeline_limit: int = 10,
                                 "reason": f"findings.json is unreadable: "
                                           f"{type(exc).__name__}"})
     return out
+
+
+def finding_matcher(project_id: str, view: dict | None = None):
+    """A predicate: is a finding with this `subject` about this project?
+
+    One answer for every surface that groups findings by project — the project
+    detail, the MCP findings filter and the assistant's evidence — because three
+    private versions of it disagreed: the assistant matched `project_id`, a key
+    no finding carries, and saw nothing for any project.
+
+    A subject names the thing that is wrong, so a project owns it through what it
+    holds: the project itself, its repositories and their clones, the hosts its
+    sites answer on, and secrets and env files kept in its local folders
+    (`secret:<folder>/…`, `credential:vault/<folder>/…`, `env:<folder>/…`)."""
+    if view is None:
+        projects, repos, members = _index()
+        p = next((x for x in projects if x["id"] == project_id), None)
+        view = _project_view(p, repos, members) if p else {"id": project_id, "repositories": []}
+    exact = {project_id}
+    for r in view.get("repositories", []):
+        exact.add(r.get("id", ""))
+        nwo = r.get("nameWithOwner") or ""
+        if nwo:
+            exact.add(f"clone:{nwo.split('/')[-1]}")
+    for site in view.get("sites", []):
+        for host in (site.get("host"), site.get("ownedDomain")):
+            if host:
+                exact.add(f"domain:{host}")
+    folders = {Path(f).name for f in view.get("localFolders", []) if f}
+    prefixes = tuple(f"{kind}{folder}/" for folder in folders
+                     for kind in ("secret:", "credential:vault/", "env:"))
+    return lambda subject: subject in exact or (bool(prefixes) and subject.startswith(prefixes))
 
 
 def credentials(project_id: str) -> dict:
