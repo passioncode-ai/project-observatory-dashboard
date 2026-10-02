@@ -46,13 +46,14 @@ All commands below are Python scripts under `OBSERVATORY_ROOT/tools`. `PROJECT`,
 |---|---|
 | Store a credential supplied locally | `vault.py put PROJECT ENV NAME`, value on stdin |
 | List slots | `vault.py list PROJECT ENV` |
-| Run a command using a slot | `use_secret.py run PROJECT NAME -- COMMAND ARGUMENTS` |
+| Run a command using a slot | `use_secret.py run [--env ENV] PROJECT NAME -- COMMAND ARGUMENTS` (flags before PROJECT) |
 | Receive a value from another local command | `use_secret.py pipe NAME -- COMMAND ARGUMENTS` |
 | Populate a project's ignored environment file | `vault.py inject PROJECT ENV DIRECTORY` |
 | Record an exposure | `vault.py leak PROJECT ENV NAME --where "location and evidence, no value"` |
 | Replace a stored value | `vault.py rotate PROJECT ENV NAME`, replacement on stdin |
 | Close an exposure after revocation and consumer checks | `vault.py settle PROJECT ENV NAME --how "action" --revocation-evidence "receipt" --consumer-evidence "receipt"` |
 | Record an external movement | `vault.py moved PROJECT ENV NAME --at PROVIDER --how "action and evidence"`; add `--settle` with both evidence flags to also close its exposure |
+| Delete a slot, or only the archives a rotation left | `vault.py remove PROJECT ENV NAME` (refused while its exposure is open unless `--force`), or `vault.py remove PROJECT ENV NAME --retired`; both are journalled |
 | Review unresolved exposures or movements | `vault.py leaks` or `vault.py movements PROJECT` |
 
 Use the installed command's `--help` for optional flags. Avoid placing a value
