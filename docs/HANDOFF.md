@@ -65,6 +65,11 @@ closures no longer produce server tracebacks; unrelated I/O failures remain visi
 Test-first receipt and exact next task:
 [runs/2026-10-01-client-disconnect](runs/2026-10-01-client-disconnect/README.md).
 
+**Status 2026-10-02 (evening): 0.12.0** — the Mac app opens on the dashboard (live, or the
+built pages with Start server), has its icon, always comes back to a window, and can stop what it
+starts; finding titles read in Russian. Record and next task:
+[runs/2026-10-02-dashboard-first-app](runs/2026-10-02-dashboard-first-app/README.md).
+
 **Status 2026-10-02: 0.11.0** — the native Mac app and shared assistant, an agent channel
 an agent can read (`observatory_overview`, bounded and paged tools, the survey contract kept),
 and the dashboard audit; companion plugin `observatory-log` 0.13.1. Record, REQ table and the
