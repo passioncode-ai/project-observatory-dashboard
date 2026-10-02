@@ -544,6 +544,10 @@ def serve(port: int) -> int:
         threading.Thread(target=srv.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGTERM, on_term)
+    # A blocked mask survives exec: a server started from a thread that blocks
+    # asynchronous signals (the Mac app's bridge did) never saw SIGTERM, so neither
+    # `full open --stop` nor launchd could stop it. Unblock what stops us.
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM, signal.SIGINT, signal.SIGHUP})
     threading.Thread(target=beat, daemon=True).start()
     print(f"observatory serverd {VERSION} on http://127.0.0.1:{port} "
           f"(pid {os.getpid()}, instance {RUNTIME.instance})", flush=True)

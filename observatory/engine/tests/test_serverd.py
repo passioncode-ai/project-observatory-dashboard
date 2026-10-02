@@ -258,6 +258,40 @@ def test_disconnected_clients_are_not_server_failures() -> None:
     check("an unrelated I/O failure is not hidden", escaped is peer.error)
 
 
+def test_a_server_started_with_sigterm_blocked_still_stops() -> None:
+    """A parent's blocked signal mask is inherited across exec: the Mac app's bridge
+    passed one, and a server it started ignored SIGTERM — `full open --stop` reported
+    "still answers" and launchd could not stop it either. The daemon unblocks the
+    stop signals itself, whoever started it."""
+    import signal as sig
+    work = pathlib.Path(tmpdir.mkdtemp(prefix="serverd-mask-"))
+    (work / "pages").mkdir()
+    port = free_port()
+    env = {**os.environ, "OBSERVATORY_SCRATCH": str(work / "scratch"),
+           "OBSERVATORY_DASHBOARD_DIR": str(work / "pages"),
+           "OBSERVATORY_DASHBOARD": str(work / "page.html")}
+    (work / "page.html").write_text("<html>fixture page</html>", encoding="utf-8")
+    p = subprocess.Popen([PY, "tools/serverd.py", "--run", "--port", str(port)], cwd=ROOT, env=env,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         preexec_fn=lambda: sig.pthread_sigmask(sig.SIG_BLOCK, {sig.SIGTERM, sig.SIGINT}))
+    try:
+        for _ in range(75):
+            try:
+                if get("/health", port)[0] == 200:
+                    break
+            except OSError:
+                time.sleep(0.2)
+        p.send_signal(sig.SIGTERM)
+        try:
+            code = p.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            code = None
+        check("a server started with SIGTERM blocked stops on SIGTERM", code == 0, f"exit {code}")
+    finally:
+        if p.poll() is None:
+            p.kill(); p.wait()
+
+
 if __name__ == "__main__":
     print("the always-on server — every route, every state, both board rules\n")
     for fn in (test_every_route_answers_and_none_serves_a_value,
@@ -265,7 +299,8 @@ if __name__ == "__main__":
                test_the_board_rule_fires_on_silence_and_only_with_the_plist,
                test_the_stale_session_rule_reads_the_handshake,
                test_the_daemon_never_binds_beyond_localhost,
-               test_disconnected_clients_are_not_server_failures):
+               test_disconnected_clients_are_not_server_failures,
+               test_a_server_started_with_sigterm_blocked_still_stops):
         fn()
     print()
     if FAILURES:

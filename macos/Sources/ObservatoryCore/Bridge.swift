@@ -33,7 +33,7 @@ public enum BridgeError: Error, LocalizedError, Equatable {
 
 public struct Backend: Sendable {
     public static let protocolName = "observatory-assistant/1"
-    public static let actions: Set<String> = ["status", "ask", "get", "list", "job", "cancel", "delete", "dashboard"]
+    public static let actions: Set<String> = ["status", "ask", "get", "list", "job", "cancel", "delete", "dashboard", "serve", "build"]
     public let executable: String
     public let workspace: String
     public init(executable: String, workspace: String) {
@@ -106,9 +106,19 @@ final class Child: @unchecked Sendable {
         posix_spawn_file_actions_adddup2(&actions, errP[1], 2)
         var attr: posix_spawnattr_t? = nil
         posix_spawnattr_init(&attr); defer { posix_spawnattr_destroy(&attr) }
-        // Own process group; inherit only the three descriptors above.
-        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
+        // Own process group; inherit only the three descriptors above. And a CLEAN
+        // signal state: posix_spawn passes the calling thread's mask, a Swift worker
+        // thread blocks the asynchronous signals, and the app ignores SIGPIPE — so
+        // without this every server and job runner started from here was deaf to
+        // SIGTERM (`--stop`, Stop and launchd's own stop did nothing).
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT
+                                              | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF))
         posix_spawnattr_setpgroup(&attr, 0)
+        var noneBlocked = sigset_t(); sigemptyset(&noneBlocked)
+        posix_spawnattr_setsigmask(&attr, &noneBlocked)
+        var defaults = sigset_t(); sigfillset(&defaults)
+        sigdelset(&defaults, SIGKILL); sigdelset(&defaults, SIGSTOP)
+        posix_spawnattr_setsigdefault(&attr, &defaults)
         let cArgs = argv.map { strdup($0) } + [nil]
         let cEnv = env.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer { cArgs.forEach { free($0) }; cEnv.forEach { free($0) } }
@@ -155,6 +165,9 @@ final class Child: @unchecked Sendable {
             usleep(20_000)
         }
         out.join(); err.join()
+        // A cancel's SIGTERM can end the child before the loop looks at the flag:
+        // that exit is the cancellation, not a failure of the engine.
+        if isCancelled { throw BridgeError.cancelled }
         let code: Int32 = (status & 0x7f) == 0 ? (status >> 8) & 0xff : 128 + (status & 0x7f)
         return Result(stdout: out.data, stderr: err.data, status: code, tooLarge: out.overflowed)
     }
