@@ -12,4 +12,4 @@ No credential values, private project names, local paths or real dashboard captu
 
 ## Contributor License Agreement
 
-- [ ] I agree to [CLA.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/CLA.md) for every contribution in this pull request.
+Opening this pull request means you agree to the repository's `CLA.md` for this contribution. Nothing to tick.

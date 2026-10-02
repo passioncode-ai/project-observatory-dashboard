@@ -5,7 +5,7 @@ software under the GNU AGPL-3.0 and under separate commercial licenses.
 It is between you and Siarhei Sheleh (the "Maintainer").
 
 By opening a pull request or otherwise submitting a contribution to a PassionCode.ai
-repository, and ticking the CLA box in the pull request template, you agree to the
+repository, you agree to the
 following for every contribution you submit:
 
 1. **Copyright license.** You grant the Maintainer a perpetual, worldwide,

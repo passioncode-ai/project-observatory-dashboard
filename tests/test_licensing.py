@@ -114,11 +114,18 @@ class ContributionTermsTest(unittest.TestCase):
         self.assertIn(EXPRESSION, contributing)
         self.assertIn("](COMMERCIAL-LICENSE.md)", contributing)
 
-    def test_pull_request_template_asks_for_the_cla(self):
+    def test_pull_request_template_states_the_cla_without_a_checkbox(self):
         template = text(".github/PULL_REQUEST_TEMPLATE.md")
-        self.assertIn("- [ ] I agree to [CLA.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/CLA.md)", template)
-        # The existing checks stay: the CLA box is added, nothing is replaced.
+        # Opening the pull request is the agreement; nobody ticks a box for it.
+        self.assertIn("Opening this pull request means you agree to the repository's `CLA.md`", template)
+        self.assertNotRegex(template, r"- \[[ xX]\][^\n]*CLA")
+        # The existing checks stay.
         self.assertIn("python tools/check_public_release.py --history", template)
+
+    def test_the_cla_names_no_checkbox(self):
+        cla = text("CLA.md")
+        self.assertIn("repository, you agree to the", cla)
+        self.assertNotIn("CLA box", cla)
 
 
 class CurrentWordingTest(unittest.TestCase):
