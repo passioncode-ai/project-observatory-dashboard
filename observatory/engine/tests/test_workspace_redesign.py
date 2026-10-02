@@ -30,7 +30,7 @@ prefix = prefix.replace('const file = process.argv[2];', 'const file = ' + JSON.
 // Finding controls ask descendants for stable nodes. The existing smoke DOM
 // deliberately omits this, but these tests need their filter inputs.
 prefix = prefix.replace('querySelector() { return null; },',
-  'querySelector(selector) { this._sub ||= new Map(); if (!this._sub.has(selector)) this._sub.set(selector, makeEl(selector)); return this._sub.get(selector); }, closest() { return null; }, remove() {},');
+  'querySelector(selector) { this._sub ||= new Map(); if (!this._sub.has(selector)) this._sub.set(selector, makeEl(selector)); return this._sub.get(selector); }, closest() { return null; }, remove() {}, insertAdjacentHTML(where, markup) { written[this.id + ":" + where] = String(markup); },');
 const exercise = `
 const chips = [...html.matchAll(/<button\\b[^>]*data-f="([^"]+)"[^>]*>([\\s\\S]*?)<\\/button>/g)].map(match => {
   const chip = makeEl("chip-" + match[1]);
@@ -48,8 +48,12 @@ document.querySelectorAll = selector => selector.includes("data-f") ? selectChip
 document.querySelector = selector => selector.includes("data-f") ? selectChips(selector)[0] || null : originalQuery(selector);
 let body = scripts.join("\\n;\\n");
 body = body.replace(/const PAGE = [^;]+;/, "const PAGE = " + JSON.stringify(spec.view) + ";");
+// The reader's language: the harness has no localStorage, so the build locale decides.
+if (spec.locale) body = body.replace('document.documentElement.getAttribute("data-build-locale") || "en"', JSON.stringify(spec.locale));
 body = body.replace("const RUNTIME =", "Object.assign(D, " + JSON.stringify(spec.data || {}) + ");\\nconst RUNTIME =");
 body += "\\n;" + (spec.after || "");
+// The record of what was written, so a case's after-code can keep a snapshot.
+globals.written = written;
 const run = new Function(...Object.keys(globals), "\\\"use strict\\\";\\n" + body);
 run(...Object.values(globals));
 process.stdout.write(JSON.stringify(written));
@@ -75,9 +79,9 @@ class WorkspaceRedesignTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.tmp.cleanup()
 
-    def render(self, view, data=None, after=""):
+    def render(self, view, data=None, after="", locale=None):
         spec = self.base / "case.json"
-        spec.write_text(json.dumps({"page": str(self.page), "view": view,
+        spec.write_text(json.dumps({"page": str(self.page), "view": view, "locale": locale,
                                     "data": data or {}, "after": after}), encoding="utf-8")
         p = subprocess.run(["node", str(self.runner), str(ROOT / "tests/render_dashboard.mjs"), str(spec)],
                            cwd=ROOT, text=True, capture_output=True, timeout=60)
@@ -168,6 +172,148 @@ class WorkspaceRedesignTests(unittest.TestCase):
         self.assertIn("Synthetic review reason", out)
         self.assertIn("--undo", out)
         self.assertRegex(out, r'data-(?:cmd|copy)="[^"]*--undo')
+
+
+    # ── defects found by walking all eleven pages in a browser, 2026-10-02 ──
+
+    def test_finding_types_are_named_and_subjects_link_where_the_builder_says(self):
+        items = [
+            {"id": "f1", "severity": "warning", "type": "heroku.app_down", "subject": "heroku:1111-aaaa",
+             "title": "alpha-app is down", "detail": "d", "action": "a",
+             "href": "heroku.html#a-alpha-app", "href_label": "alpha-app"},
+            {"id": "f2", "severity": "warning", "type": "example.unnamed", "subject": "credential:gone",
+             "title": "Unlinked fixture", "detail": "d", "action": "a"},
+            {"id": "f3", "severity": "warning", "type": "heroku.orphan_app", "subject": "estate:heroku-orphans",
+             "title": "Orphans fixture", "detail": "d", "action": "a",
+             "href": "heroku.html?f=noproject", "href_label": "Keys", "href_page": True}]
+        data = self.findings(items)
+        data["findings"]["type_labels"] = {"heroku.app_down": "Heroku app down",
+                                           "heroku.orphan_app": "Heroku apps without a project"}
+        for locale, down, orphans in (("en", "Heroku app down", "Heroku apps without a project"),
+                                      ("ru", "Приложение Heroku не работает", "Приложения Heroku без проекта")):
+            with self.subTest(locale=locale):
+                out = self.render("findings", data, locale=locale)["findings"]
+                options = re.findall(r'<option value="([^"]*)"[^>]*>([^<]*)</option>', out)
+                self.assertIn(("heroku.app_down", f"{down} · 1"), options)
+                self.assertIn(("example.unnamed", "example.unnamed · 1"), options, "an unnamed type keeps its id")
+                self.assertIn(f'<span class="ftl" title="heroku.orphan_app">{orphans}</span>', out)
+                self.assertIn('href="heroku.html#a-alpha-app"', out)
+                self.assertIn("→ alpha-app", out)
+                self.assertEqual(out.count('class="plink fsubj"'), 2, "a subject without a row is not a link")
+        self.assertIn("→ Keys", self.render("findings", data)["findings"], "a page link's label is a page title")
+
+    def test_every_grouped_table_folds_from_its_heading(self):
+        apps = {"heroku": {"apps": [{"name": "alpha-app", "team": "example-org", "state": "running",
+                                     "monthly_cost": 7, "region": "eu", "stack": "s"}], "scanned_on": "2026-01-01"}}
+        mcp = {"mcp": {"servers": [{"name": "docs", "agent": "example-agent", "scope": "user",
+                                    "liveness": "connected", "liveness_detail": "Connected"}],
+                       "totals": {"declarations": 1, "distinct_servers": 1}}}
+        doms = {"domains": [{"name": "alpha.example.com", "registrar": "example-registrar", "projects": []}]}
+        creds = {"creds": {"credentials": [{"id": "credential:fixture", "name": "Fixture", "kind": "llm-api-key",
+                                            "used_by": [], "limit": 100, "limit_reset": "monthly", "usage": 1.5}]}}
+        for view, data in (("heroku", apps), ("mcp", mcp), ("domains", doms), ("creds", creds),
+                           ("traffic", self.traffic()), ("env", {})):
+            with self.subTest(view=view):
+                out = self.render(view, data)["out"]
+                groups = len(re.findall(r'<tbody class="grp', out))
+                self.assertGreater(groups, 0)
+                self.assertEqual(len(re.findall(r'<button class="grp-fold" type="button" aria-expanded="true">', out)),
+                                 groups, "every group heading is its fold control")
+
+    def test_keys_and_mcp_speak_the_readers_language_with_units(self):
+        creds = {"creds": {"credentials": [{"id": "credential:fixture", "name": "Fixture", "kind": "llm-api-key",
+                                            "used_by": [], "limit": 100, "limit_reset": "monthly", "usage": 1.5}]}}
+        out = self.render("creds", creds, locale="ru")["out"]
+        self.assertIn("$100", out)
+        self.assertIn("ежемесячно", out)
+        self.assertNotIn(">monthly<", out)
+        self.assertIn("$1.500", out)
+        mcp = {"mcp": {"servers": [{"name": "docs", "agent": "example-agent", "scope": "user",
+                                    "liveness": "needs-auth", "liveness_detail": "Needs authentication"}],
+                       "totals": {}}}
+        out = self.render("mcp", mcp, locale="ru")["out"]
+        self.assertIn(">нужен вход</div>", out)
+        self.assertIn('title="Needs authentication"', out)
+        out = self.render("traffic", self.traffic(), locale="ru")["out"]
+        self.assertIn("Показано <b>3</b> из 3 ресурсов", out)
+        self.assertNotIn("property", out.split("<table")[0].lower())
+
+    def test_counts_after_of_take_the_genitive(self):
+        creds = {"creds": {"credentials": [{"id": f"credential:c{i}", "name": f"c{i}", "kind": "machine-secret",
+                                            "used_by": []} for i in range(4)]}}
+        out = self.render("creds", creds, locale="ru")["out"]
+        self.assertIn("Показано <b>4</b> из 4 записей", out)
+
+    def test_env_links_only_known_projects_and_options_only_visible_ones(self):
+        env = {"env": {"files": [
+            {"path": "alpha-folder/.env", "project": "alpha-folder", "kind": "env", "git": "ignored", "mode": "600",
+             "modified_on": "2026-01-01", "variables": [
+                 {"name": "SHARED_TOKEN", "class": "secret", "shared_with": ["beta-folder", "gamma-folder"]}]},
+            {"path": "beta-folder/.env.example", "project": "beta-folder", "kind": "template", "git": "ignored",
+             "mode": "600", "modified_on": "2026-01-01", "variables": [{"name": "ONLY_TEMPLATE", "class": "secret"}]}],
+            "totals": {}, "project_ids": {"alpha-folder": "project:alpha-web", "beta-folder": "project:beta-api"}}}
+        out = self.render("env", env, 'sel.dataset.filled = ""; fillOwners(); written.optionsDefault = sel.innerHTML;'
+                                      'active.add("e-tpl"); fillOwners(); written.optionsWide = sel.innerHTML;')
+        links = out["out"]
+        self.assertIn('href="#project:beta-api">beta-folder</a>', links)
+        self.assertNotIn('#project:gamma-folder', links, "a folder the registry does not know is not a link")
+        self.assertRegex(links, r'<span class="unlinked" title="[^"]+">gamma-folder</span>')
+        self.assertIn('value="alpha-folder"', out["optionsDefault"])
+        self.assertNotIn('value="beta-folder"', out["optionsDefault"], "a project whose rows are all hidden is no option")
+        self.assertIn('value="beta-folder"', out["optionsWide"])
+
+    def test_domains_offer_a_dash_for_names_without_a_registrar(self):
+        doms = {"domains": [{"name": "alpha.example.com", "registrar": "example-registrar", "projects": []},
+                            {"name": "beta.example.com", "registrar": None, "projects": []}],
+                "zones": [{"name": "zone.example.com"}]}
+        out = self.render("domains", doms, 'fillOwners(); written.options = sel.innerHTML;'
+                                         'sel.value = NO_REGISTRAR; renderDomains();')
+        self.assertIn('>—</option>', out["options"])
+        self.assertIn("beta.example.com", out["out"])
+        self.assertIn("zone.example.com", out["out"])
+        self.assertNotIn("alpha.example.com", out["out"])
+
+    def test_project_panel_folds_repeats_translates_enums_and_names_a_missing_project(self):
+        after = ('const r0 = D.rows[0]; r0.anchor = "vault-folder"; r0.lifecycle = "active"; r0.tier = "cold";'
+                 'r0.products = [{name: "Example product", role: "other", kind: "declared"}];'
+                 'r0.notes = [{at: "2026-01-09", text: "Same conclusion", state: "observed", conf: 0.5, n: 3}];'
+                 'detail(r0.id); written.known = written.panel; detail("project:not-in-registry");')
+        out = self.render("projects", {}, after, locale="ru")
+        self.assertIn("×3", out["known"])
+        self.assertEqual(out["known"].count("Same conclusion"), 1)
+        for word in ("папка в хранилище заметок", "активен", "другое", "наблюдение"):
+            self.assertIn(word, out["known"])
+        for raw in (">vault-folder", "— other<", ">observed"):
+            self.assertNotIn(raw, out["known"])
+        self.assertIn('id="panel-missing"', out["panel"])
+        self.assertIn("not-in-registry", out["panel"])
+
+    def test_tiles_agree_with_their_number_and_drop_the_count_when_open(self):
+        after = ('written.rest = tileHTML(TILES_REST);'
+                 'const b = document.getElementById("more-tiles"); b.getAttribute = () => "false";'
+                 'MORE_TILES.onclick({currentTarget: b}); written.count = b.querySelector("b").textContent;')
+        stats = {"stats": {"projects": 3, "inactive_repos": 1, "creds_leaked": 24, "commits_7d": 5}}
+        out = self.render("index", stats, after, locale="ru")
+        self.assertIn("<b>5</b><span>коммитов за 7 дн</span>", out["work"])
+        self.assertIn("<b>1</b><span>неактивный репо</span>", out["rest"])
+        self.assertIn("<b>24</b><span>ключа утекли</span>", out["rest"])
+        self.assertEqual(out["count"], "−", "an open counter list shows no '+N'")
+
+    def test_health_spend_has_its_unit_and_the_queue_hands_over_the_rest(self):
+        data = {"health": {"spend_month": 1.25, "spend_today": 0.0051, "spend_denomination": "credits", "proposed": 30},
+                "queue": [{"id": "mem-1", "rev": 1, "kind": "fact", "at": "2026-01-01", "statement": "Fixture"}]}
+        out = self.render("health", data)
+        self.assertIn("0.0051 credits", out["health"])
+        self.assertIn("1.2500 credits", out["health"])
+        self.assertIn('id="queue-rest"', out["queue"])
+        self.assertIn("review.py&#39; &#39;list", out["queue"])
+
+    def test_the_copy_toast_names_the_end_of_the_command(self):
+        out = self.render("index", {}, 'toast(T("copied: {what}", {what: copiedWhat("Command: silence", '
+                                       '"/very/long/interpreter/path/python3 /very/long/engine/path/tools/ack.py finding:1 --why x")}));')
+        self.assertIn("Command: silence", out["toast"])
+        self.assertIn("tools/ack.py finding:1 --why x", out["toast"])
+        self.assertNotIn("/very/long/interpreter", out["toast"])
 
 
 if __name__ == "__main__":

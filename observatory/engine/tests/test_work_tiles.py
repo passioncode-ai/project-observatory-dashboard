@@ -158,11 +158,12 @@ def test_the_page_draws_them_and_not_only_carries_them() -> None:
           "a figure in `stats` that no renderer reads is a figure nobody sees")
     # The captions are English message ids translated from the catalog; the
     # stable key is what the script reads from `stats`.
-    for key, caption in (("commits_7d", "commits, 7 d"),
-                         ("projects_active_7d", "projects in progress, 7 d"),
-                         ("commits_28d", "commits, 28 d"),
-                         ("projects_active_28d", "projects in progress, 28 d"),
-                         ("unpushed_commits", "commits on no remote")):
+    # Each caption is a plural id (`tile@@{n} …`), so it agrees with its number.
+    for key, caption in (("commits_7d", "tile@@{n} commits, 7 d"),
+                         ("projects_active_7d", "tile@@{n} projects in progress, 7 d"),
+                         ("commits_28d", "tile@@{n} commits, 28 d"),
+                         ("projects_active_28d", "tile@@{n} projects in progress, 28 d"),
+                         ("unpushed_commits", "tile@@{n} commits on no remote")):
         check(f"the tile for «{caption}» is drawn",
               f'"{key}"' in src and f'"{caption}"' in src,
               "work_stats() computes it, so the page must be able to say it")

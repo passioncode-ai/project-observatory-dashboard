@@ -154,5 +154,139 @@ class DashboardShellTests(unittest.TestCase):
             "users_30d": 1200, "unknown_properties": 0}}}, shell.Translator("en"))))
 
 
+def _builder():
+    """`dashboard/build_dashboard.py` as a module, for its pure helpers."""
+    spec = importlib.util.spec_from_file_location("build_dashboard_helpers", ROOT / "dashboard/build_dashboard.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _template() -> str:
+    source = ast.parse((ROOT / "dashboard/build_dashboard.py").read_text())
+    return next(ast.literal_eval(node.value) for node in source.body
+                if isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "TEMPLATE" for t in node.targets))
+
+
+class AuditFixes(unittest.TestCase):
+    """Defects found by walking all eleven pages in a browser (2026-10-02)."""
+
+    def test_every_finding_type_a_rule_can_emit_has_a_label(self):
+        import re
+        import finding_types
+        emitted = set()
+        for module in sorted((ROOT / "tools").glob("*findings*.py")):
+            emitted |= set(re.findall(r'"type":\s*"([a-z_]+\.[a-z_-]+)"', module.read_text(encoding="utf-8")))
+        # `clone.<state>` is built from the declared states, one type per state.
+        tree = ast.parse((ROOT / "tools/build_findings.py").read_text(encoding="utf-8"))
+        states = next(ast.literal_eval(node.value) for node in tree.body if isinstance(node, ast.Assign)
+                      and any(getattr(t, "id", "") == "SYNC_FINDINGS" for t in node.targets))
+        emitted |= {f"clone.{state}" for state in states}
+        self.assertGreater(len(emitted), 100, "the rule modules were not read")
+        self.assertEqual(sorted(emitted - set(finding_types.LABELS)), [], "finding types without a label")
+        self.assertEqual(finding_types.labels_for(["heroku.app_down", "example.unknown"]),
+                         {"heroku.app_down": "Heroku app down"}, "an unknown type is left to its raw id")
+
+    def test_subject_links_point_only_at_rows_that_exist(self):
+        import subject_links as sl
+        index = sl.build_index(
+            projects=[{"id": "project:alpha-web", "local_folders": ["alpha-folder"]},
+                      {"id": "project:beta-api"}],
+            relations=[{"type": "implemented_by", "from": "project:beta-api", "to": "repository:example-org/beta"},
+                       {"type": "implemented_by", "from": "project:alpha-web", "to": "repository:example-org/beta"}],
+            domains=[{"name": "alpha.example.com"}], zones=[{"name": "zone.example.com"}],
+            apps=[{"id": "heroku:1111-aaaa", "name": "alpha-app"}],
+            credentials=[{"id": "credential:vault/alpha-web/prod/API_TOKEN"}, {"id": "credential:machine/file.json"}],
+            google_credentials=[{"client_email": "reader@example-org.iam.example.invalid"}],
+            env_files=[{"path": "alpha-folder/.env", "variables": [{"name": "API_TOKEN"}]}],
+            mcp_servers=[{"agent": "example-agent", "name": "docs"}])
+        r = lambda subject: sl.resolve(subject, index)
+        self.assertEqual(r("heroku:1111-aaaa"), {"href": "heroku.html#a-alpha-app", "label": "alpha-app"})
+        self.assertEqual(r("app:alpha-app")["href"], "heroku.html#a-alpha-app")
+        self.assertIsNone(r("heroku:gone"), "an application the scan does not hold has no row")
+        self.assertEqual(r("secret:alpha-web/prod/API_TOKEN")["href"], "creds.html#c-vault-alpha-web-prod-API_TOKEN")
+        self.assertIsNone(r("secret:alpha-web/prod/OTHER"))
+        self.assertEqual(r("credential:machine/file.json")["href"], "creds.html#c-machine-file.json")
+        grant = r("credential:ga4 via reader@example-org.iam.example.invalid")
+        self.assertEqual(grant["href"], "traffic.html#gc-reader-example-org.iam.example.invalid")
+        self.assertIsNone(r("credential:search console via nobody@example.invalid"),
+                          "a credential with no rendered row must not become a link")
+        self.assertEqual(r("repository:example-org/beta")["href"], "projects.html#project:alpha-web",
+                         "a repository links to its owning project, the first by id")
+        self.assertIsNone(r("repository:example-org/unclaimed"))
+        self.assertEqual(r("clone:alpha-folder")["href"], "projects.html#project:alpha-web")
+        self.assertEqual(r("domain:zone.example.com")["href"], "domains.html#d-zone.example.com")
+        self.assertIsNone(r("domain:absent.example.com"))
+        self.assertEqual(r("project:beta-api")["href"], "projects.html#project:beta-api")
+        self.assertIsNone(r("project:gamma"))
+        self.assertEqual(r("env:alpha-folder/.env")["href"], "env.html#e-alpha-folder/.env")
+        self.assertEqual(r("env:API_TOKEN")["href"], "env.html?f=e-all&q=API_TOKEN")
+        self.assertEqual(r("mcp:example-agent/docs")["href"], "mcp.html#m-example-agent/docs")
+        self.assertEqual(r("estate:heroku-orphans"), {"href": "heroku.html?f=noproject", "label": "Heroku", "page": True})
+        self.assertIsNone(r("mem:0123abcd"))
+
+    def test_population_subjects_name_real_pages_and_chips(self):
+        import re
+        import subject_links as sl
+        template = _template()
+        titles = {title for _n, title, _k in shell.PAGES}
+        for subject, (href, title) in sl.PAGE_SUBJECTS.items():
+            with self.subTest(subject=subject):
+                self.assertIn(href.split("?")[0].split("#")[0][:-len(".html")], shell.NAMES)
+                self.assertIn(title, titles)
+                for chip in re.findall(r"[?&]f=([a-z-]+)", href):
+                    self.assertIn(f'data-f="{chip}"', template)
+                if "#" in href:
+                    self.assertIn(f'id="{href.split("#")[1]}"', template)
+
+    def test_badges_count_what_each_page_shows_when_it_opens(self):
+        env = {"totals": {"secrets": 4}, "files": [
+            {"kind": "env", "variables": [{"class": "secret"}, {"class": "config"},
+                                          {"class": "config", "available_in": ["beta-api"]}]},
+            {"kind": "template", "variables": [{"class": "secret"}, {"class": "secret"}]}]}
+        mcp = {"totals": {"declarations": 3, "distinct_servers": 2},
+               "servers": [{"name": "a"}, {"name": "a"}, {"name": "b"}]}
+        counts = shell.counts_of({"env": env, "mcp": mcp})
+        self.assertEqual(counts["env"], 2, "live secrets plus values set elsewhere, not every secret")
+        self.assertEqual(counts["mcp"], 3, "declarations, the MCP page's own unit")
+        cards = text(shell.cards_html({"env": env, "mcp": mcp}, {**counts, "projects": 0, "findings": 0,
+                                                                 "domains": 0, "heroku": 0, "creds": 0}))
+        self.assertIn("2 variables · 4 read as a secret", cards)
+        self.assertIn("3 declarations · 2 servers", cards)
+
+    def test_domain_counts_are_the_domains_page_rows(self):
+        domains = [{"name": "alpha.example.com", "projects": ["project:alpha-web"]},
+                   {"name": "beta.example.com", "projects": []}]
+        zones = [{"name": "alpha.example.com"}, {"name": "zone-a.example.com", "project": "project:beta-api"},
+                 {"name": "zone-b.example.com"}]
+        self.assertEqual(shell.domain_totals(domains, zones), (4, 2))
+        self.assertEqual(shell.counts_of({"domains": domains, "zones": zones})["domains"], 4)
+
+    def test_queue_statements_end_at_a_word_with_an_ellipsis(self):
+        clip = _builder().clip_words
+        self.assertEqual(clip("short statement", 200), "short statement")
+        cut = clip("alpha " * 50, 40)
+        self.assertTrue(cut.endswith("alpha…"), cut)
+        self.assertLessEqual(len(cut), 40)
+        self.assertEqual(clip("x" * 80, 20), "x" * 19 + "…", "an unbroken token is cut where it is")
+
+    def test_identical_conclusions_fold_into_one_line(self):
+        rows = [{"project_id": "project:alpha-web", "created_at": f"2026-01-0{d}T00:00:00Z",
+                 "statement": text_, "state": "observed", "confidence": 0.5}
+                for d, text_ in ((9, "same finding"), (8, "same finding"), (7, "other finding"), (6, "same finding"))]
+        notes = _builder().fold_notes(rows)["project:alpha-web"]
+        self.assertEqual([(n["text"], n["n"], n["at"]) for n in notes],
+                         [("same finding", 3, "2026-01-09"), ("other finding", 1, "2026-01-07")])
+
+    def test_machine_survey_time_reads_like_the_header(self):
+        import machine_page
+        self.assertEqual(machine_page.stamp("2026-01-02T03:04:05Z"), "2026-01-02 03:04:05 UTC")
+        self.assertEqual(machine_page.stamp("2026-01-02T03:04:05.123+00:00"), "2026-01-02 03:04:05 UTC")
+        self.assertEqual(machine_page.stamp("not a time"), "not a time")
+        page = machine_page.machine_html({"machine": {"measuredAt": "2026-01-02T03:04:05Z"}})
+        self.assertIn("Machine surveyed 2026-01-02 03:04:05 UTC", text(page))
+
+
 if __name__ == "__main__":
     unittest.main()

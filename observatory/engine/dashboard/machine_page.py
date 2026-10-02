@@ -9,6 +9,7 @@ dashboard's own table, card and narrow-screen rules; nothing here adds a style.
 from __future__ import annotations
 
 import html
+import re
 
 from i18n import Translator
 
@@ -22,6 +23,16 @@ HEADING = ' class="machine-h"'
 
 def _e(v) -> str:
     return html.escape("" if v is None else str(v))
+
+
+def stamp(value) -> str:
+    """An ISO instant written the way the page header writes "Measured":
+    `2026-01-02 03:04:05 UTC`. A value in another shape is shown as it is."""
+    text = str(value or "")
+    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]00:?00)?", text)
+    if not m:
+        return text
+    return f"{m.group(1)} {m.group(2)}" + (" UTC" if m.group(3) else "")
 
 
 def _gb(mb) -> str:
@@ -71,7 +82,7 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     m = payload.get("machine") or {}
     parts = [f'<section id="machine" class="machine">']
     if m.get("measuredAt"):
-        parts.append(t.mark("Machine surveyed {at}", tag="p", attrs=' class="machine-at"', at=m["measuredAt"]))
+        parts.append(t.mark("Machine surveyed {at}", tag="p", attrs=' class="machine-at"', at=stamp(m["measuredAt"])))
     parts.append(summary_html(m, t))
     procs = m.get("processes") or {}
     parts.append(_table(t, "Memory by origin",
