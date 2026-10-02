@@ -219,6 +219,21 @@ class WorkspaceTests(unittest.TestCase):
         for section,names in read.items():
             self.assertTrue(names,section)
             self.assertEqual(names-configuration.known_names(section),set(),section)
+    def test_local_verifies_the_page_it_builds(self):
+        # `local` built the pages and never ran `smoke`, so every run left
+        # `dashboard.unverified` on a new user's board — about a page just built.
+        import shutil
+        if not shutil.which('node'):
+            self.skipTest('node is not installed: smoke cannot run')
+        self.run_cli('init')
+        projects=self.base/'projects';(projects/'alpha-web').mkdir(parents=True)
+        (projects/'alpha-web'/'package.json').write_text('{"name":"alpha-web"}')
+        self.run_cli('configure','sources','projects',str(projects))
+        for _ in range(2):
+            self.run_cli('local')
+        types={f.get('type') for f in json.loads((self.home/'registry/findings.json').read_text())['findings']}
+        self.assertNotIn('dashboard.unverified',types)
+        self.assertNotIn('dashboard.blank',types)
     def test_independent_homes(self):
         self.run_cli('init');first=json.loads((self.home/'workspace.json').read_text())
         other=self.base/'other';self.env['OBSERVATORY_HOME']=str(other)

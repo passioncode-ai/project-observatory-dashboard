@@ -333,8 +333,10 @@ STEPS = {
 }
 GROUPS = {
     "scan":  ["scan-fs", "scan-gh", "scan-vault", "scan-sessions"],
+    # `smoke` records the verdict `findings` reads on the next run; without it
+    # every `local` left `dashboard.unverified` about the page it had just built.
     "local": ["scan-fs", "merge", "emit", "validate", "scan-events",
-              "findings", "dashboard", "smoke-pages"],
+              "findings", "dashboard", "smoke", "smoke-pages"],
     # `dashboard` is IN the gate, not assumed before it: `design` and `smoke` both
     # read docs/projects-dashboard.html, which git ignores — so on a fresh clone
     # the gate failed on an artefact no step of it built. Building an ignored file
