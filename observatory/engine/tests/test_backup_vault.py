@@ -225,6 +225,30 @@ class Snapshots(Base):
         self.assertEqual(conn.execute("SELECT id FROM events WHERE id='synthetic-event'").fetchone()[0], 'synthetic-event')
         conn.close()
 
+    def test_decrypt_takes_the_bare_name_backups_status_prints(self):
+        # `backups status` names the newest copy by file name; that name, typed
+        # back, used to end in a raw `[Errno 2]`.
+        vault.set_passphrase(self.home, PASS)
+        name = Path(upgrade.snapshot(self.home, writers_stopped=True)['snapshot']).name
+        out = self.base / 'decrypted'
+        with patch.object(sys, 'stdout', io.StringIO()):
+            self.assertEqual(workspace.main(['backups', 'decrypt', name, str(out)]), 0)
+        self.assertTrue(out.is_dir() and any(out.rglob('*')), list(out.rglob('*'))[:5])
+        err = io.StringIO()
+        with patch.object(sys, 'stderr', err), patch.object(sys, 'stdout', io.StringIO()):
+            self.assertEqual(workspace.main(['backups', 'decrypt', 'snapshot-absent.obsnap', str(self.base / 'x')]), 2)
+        self.assertIn('backups status', err.getvalue())
+        self.assertNotIn('Errno', err.getvalue())
+
+    def test_backup_commands_speak_like_every_other_command(self):
+        # workspace-backup/upgrade/restore printed `ConfigurationError: …` and exit 1
+        # where every other command prints `Observatory: …`; a refusal is exit 2.
+        err = io.StringIO()
+        with patch.object(sys, 'stderr', err):
+            self.assertEqual(upgrade.main(['backup']), 2)
+        self.assertTrue(err.getvalue().startswith('Observatory: '), err.getvalue())
+        self.assertNotIn('ConfigurationError', err.getvalue())
+
     def test_encrypted_rotation_keeps_newest(self):
         vault.set_passphrase(self.home, PASS)
         names = [Path(upgrade.snapshot(self.home, writers_stopped=True)['snapshot']).name for _ in range(5)]

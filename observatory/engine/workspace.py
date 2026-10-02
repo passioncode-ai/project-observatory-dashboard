@@ -606,6 +606,18 @@ def _backups_command(base: Path, a) -> int:
             raise config.ConfigurationError("Usage: backups decrypt FILE OUTPUT")
         if a.output.exists():
             raise config.ConfigurationError("Decrypt output must not exist")
+        if not a.file.exists() and a.file.parent == Path("."):
+            # `backups status` names the newest copy by file name; that name is
+            # resolved in this workspace's backups root.
+            in_root = backup_vault.root_info(base)["path"] / a.file
+            if not in_root.is_file():
+                raise config.ConfigurationError(
+                    f"No backup named {a.file} here or in {in_root.parent}; "
+                    f"`project-observatory full backups status` lists the root and the newest of each kind")
+            a.file = in_root
+        elif not a.file.is_file():
+            raise config.ConfigurationError(
+                f"No backup file at {a.file}; `project-observatory full backups status` lists the root")
         secret = backup_vault.require_passphrase(base, prompt=True)
         header = backup_vault.verify_file(a.file, secret)
         if header.get("content") == "tar+gzip":

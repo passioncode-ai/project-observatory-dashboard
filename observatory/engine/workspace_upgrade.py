@@ -484,8 +484,14 @@ def main(argv: list[str]) -> int:
             result = restore(args.snapshot,base)
         print(json.dumps(result,indent=2))
         return 0
-    except (config.ConfigurationError,RuntimeError,ValueError,OSError,sqlite3.Error) as exc:
-        print(f'{type(exc).__name__}: {exc}',file=sys.stderr)
+    # The same voice as every other command: `Observatory: <reason>`. A refusal
+    # before any change (configuration, a missing --writers-stopped) is exit 2;
+    # a failure while working is exit 1.
+    except (config.ConfigurationError,ValueError) as exc:
+        print(f'Observatory: {exc}',file=sys.stderr)
+        return 2
+    except (RuntimeError,OSError,sqlite3.Error) as exc:
+        print(f'Observatory: {exc}',file=sys.stderr)
         return 1
 
 
