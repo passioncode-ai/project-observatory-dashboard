@@ -3,6 +3,57 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.11.0 — 2026-10-02
+
+A minor release: the native Mac app and its shared assistant, and an agent channel an agent can
+actually read. Behaviour changes for MCP callers are listed under **Changed**.
+
+### Added
+
+- **Project Observatory for macOS** (`macos/`, `docs/macos/`): a SwiftUI window that asks the
+  workspace's configured model about bounded local evidence and shows the facts each answer used.
+  `project-observatory full assistant status|ask|get|job|cancel|delete|list|dashboard` is the same
+  workflow for the CLI, and `observatory_assistant_status`, `observatory_assistant_ask` and
+  `observatory_assistant_conversation` for MCP hosts (#112, #114). An engine without the assistant
+  is reported by the app as incompatible, with the update command.
+- `observatory_findings` takes `projectId`, `limit` and `cursor`; `observatory_machine` takes
+  `section`; `observatory_assistant_status` takes `includeProjects`.
+
+### Changed
+
+- **`observatory_overview`**, the agent's entry point: counts, activity tiers, the most recently
+  active projects, the most severe findings and this machine's disk, about 5 KB on an estate whose
+  unpaged survey is 165 KB. `observatory_status` keeps the published "no limit means everything"
+  (the v0.2.0 probes rely on it) and gains `detail: "summary"` (about 400 characters a project) and
+  `detail: "full"`; by default every row now carries only the published survey fields, and the
+  organization and recorded resources come with `detail: "full"`.
+- `observatory_machine` answers an overview with the top ten of each section; a named `section`
+  in full; `explainPid` alone with its explanation. It was 168,000 characters every time.
+- Smaller defaults: `observatory_findings` 20 (most severe first), `observatory_recall` 10,
+  `observatory_timeline` 25. Text copies of `observatory_*` answers are compact JSON.
+- Server instructions fit under 1,800 characters with the SPENDS, WRITE and SECRETS rules first; a
+  host keeps about 2,048 and cut the old text at the WRITE rule.
+
+### Fixed
+
+- **`estate.survey` failed on every call** on an estate that records organizations: survey rows
+  carried `organization` and `resources`, which the closed v0.2.0 item schema does not list. The
+  capability now meets its published schema and names what it omits; `observatory_status` keeps
+  both fields.
+- `observatory_credentials` and `observatory_timeline` name an id the registry does not hold in
+  `degraded` instead of answering an empty list that reads as clean.
+- Findings reach a project through one shared matcher (its repositories and clones, its sites'
+  domains, the secrets and env files in its folders), in `project.detail` too.
+- A client that disconnects mid-answer no longer leaves a traceback in the server log (#107).
+- Dashboard: every subject link lands on a row that is rendered, and a subject without one stays
+  text; env links resolve folders to registry ids and an unknown project says so; the domains
+  tile, nav badges and pages count the same sets; every grouped table folds; a linked row is no
+  longer hidden under the sticky header; finding types are labelled in English and Russian;
+  units, plural agreement, enum words, the health queue and the machine page at 900 px are fixed
+  (#114). Finding titles, details and actions are still written in English by their rules.
+- The `observatory-log` plugin is 0.13.1: an example in `tracking-resources` carried a real
+  analytics account id and now carries a synthetic one (#107, #114).
+
 ## 0.10.1 — 2026-10-01
 
 A patch release: the always-on server is no longer scheduled as background work, and Fabric
