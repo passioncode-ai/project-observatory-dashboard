@@ -593,6 +593,17 @@ zero and totals are sums across GA4 resources, not deduplicated human visitors.
 Behavior contracts and checks: [workspace redesign](ux/DASHBOARD-REDESIGN.md),
 `test_workspace_redesign`, `test_dashboard_shell`, `test_google_identity`.
 
+## Socket inspection in the local conformance check
+
+The synthetic `test_fabric_service.py` suite invokes the vendored conformance probe.
+Its `network.loopback-only` rule needs `lsof` on `PATH` (on macOS it commonly lives in
+`/usr/sbin`). Without it, the rule reports `NOT_RUN` with `lsof is not installed`;
+that is missing socket-inspection evidence, never a loopback PASS. The suite checks
+this exact missing-dependency outcome in `RunningServer.test_conformance_reports_a_missing_lsof_dependency`.
+With `lsof` available it requires the loopback verdict to pass. HTTP host/origin guards
+and binding behavior retain their own tests; add the system utility directory to `PATH`
+when collecting complete local socket evidence.
+
 ## Native macOS client candidate
 
 For the separate native agent window, see [macOS setup](macos/README.md). It requires

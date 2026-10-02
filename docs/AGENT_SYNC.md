@@ -1,4 +1,4 @@
-<!-- agent-sync:generated source=project-observatory-dashboard@68fc707 cfg=79e685ef71f9 at=2026-09-30T23:50:32Z — regenerate with `agent_sync.py setup`, do not hand-edit -->
+<!-- agent-sync:generated source=project-observatory-dashboard@1eecac3 cfg=f746b6a3c7a0 at=2026-10-01T16:25:46Z — regenerate with `agent_sync.py setup`, do not hand-edit -->
 
 # How documentation and coordination work in project-observatory-dashboard
 
@@ -29,6 +29,9 @@ None declared here. Ids live in the parent repository; reserve them there.
 
 - `CHANGELOG.md`
 - `docs/HANDOFF.md`
+- `docs/backlog-sources.json`
+- `docs/backlog.md`
+- `docs/ux/UI-PLAN.md`
 
 ### Gates run before a change is considered done
 
