@@ -105,7 +105,7 @@ class CLICompatibilityTests(unittest.TestCase):
         command.assert_called_once_with(["workspace-backup", "--writers-stopped"])
 
     def test_local_cycle_has_no_plugin_provider_or_paid_step(self):
-        self.assertEqual(cli.GROUPS["local"], ["scan-fs", "merge", "emit", "validate", "scan-events", "findings", "dashboard", "smoke", "smoke-pages"])
+        self.assertEqual(cli.GROUPS["local"], ["scan-fs", "env", "merge", "emit", "validate", "scan-events", "findings", "dashboard", "smoke", "smoke-pages"])
         self.assertTrue(all(not name.startswith("test") for name in cli.GROUPS["local"]))
 
     def test_local_step_passes_offline_flag_without_changing_parent_environment(self):
