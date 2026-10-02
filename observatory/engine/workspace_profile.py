@@ -323,8 +323,13 @@ def export(base: Path, target: Path | None, force: bool) -> dict:
     if target is None:
         _log(base, "exported", sha256=doc["sha256"], files=sorted(doc["files"]), to="stdout")
         return doc
+    # The output is a file the user names, outside the workspace: a linked folder on
+    # the way (`/tmp` on macOS) is resolved, but the file itself must not be a link
+    # (the exclusive create below also refuses to follow one).
     target = target.expanduser().absolute()
-    workspace.reject_symlinks(target)
+    target = target.parent.resolve() / target.name
+    if target.is_symlink():
+        raise config.ConfigurationError(f"{target} is a symbolic link; name a new file for the profile")
     if force:
         import atomic
         atomic.write_text(target, text)

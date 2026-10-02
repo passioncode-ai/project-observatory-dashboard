@@ -2200,8 +2200,8 @@
       "path": "tests/test_install_key.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "138b62ae534eb0a531a954cd7355d1225d82a1830730a84d80ad54ef119c262d",
-      "bytes": 12418
+      "export_sha256": "cc6adc63dbe26a4ed2994cbbbf1bd8497a59b6258c83fce2a23e5b415bfb454b",
+      "bytes": 13127
     },
     {
       "path": "tests/test_interop.py",
@@ -2228,8 +2228,8 @@
       "path": "tests/test_key.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "35d22fc75bae64c3d7b4ef735b002a12105e2c401f21aca0a894b492fbe54af2",
-      "bytes": 10471
+      "export_sha256": "ce7e8e2ceb23585265fe17581b15e32a7ddd95b316bc6a4b5beb2bd1b28b5dfa",
+      "bytes": 10732
     },
     {
       "path": "tests/test_key_shape.py",
@@ -3060,8 +3060,8 @@
       "path": "tests/test_workspace_profile.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "55f03c763f07ca8204ce01683effda7eb02874d8fc6bfdafdf84141bcdb2566c",
-      "bytes": 22049
+      "export_sha256": "79452670ac775c2a68493075c27cad76c674cf6ad63e4ffc5e5ef7bbad7c1e43",
+      "bytes": 22952
     },
     {
       "path": "tests/test_workspace_redesign.py",
@@ -3750,8 +3750,8 @@
       "path": "workspace_profile.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7a72d4ab20cdf3eee5dee4514f4b44b07a23e5a52a4eba2f2b81716a89c1c775",
-      "bytes": 28755
+      "export_sha256": "fc43cd24cde6f0475a42bf494e49f6011da51e7ddc5ab4090ba72f22ba8e5f01",
+      "bytes": 29133
     },
     {
       "path": "workspace_upgrade.py",

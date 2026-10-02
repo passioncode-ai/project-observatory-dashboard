@@ -237,6 +237,21 @@ class Profile(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("exists", err)
 
+    def test_export_goes_through_a_linked_folder_but_never_onto_a_link(self):
+        # `/tmp` is a link on macOS: "Workspace paths must not contain symlinks"
+        # for a file the user names outside the workspace was the wrong refusal.
+        real = self.base / "real-out"; real.mkdir()
+        linked = self.base / "linked-out"; linked.symlink_to(real)
+        code, out, err = self.cli("export", str(linked / "profile.json"))
+        self.assertEqual(code, 0, err)
+        self.assertTrue((real / "profile.json").is_file())
+        # The file itself being a link is still refused: it could point anywhere.
+        (real / "elsewhere.json").write_text("{}")
+        (real / "link.json").symlink_to(real / "elsewhere.json")
+        code, out, err = self.cli("export", str(real / "link.json"))
+        self.assertEqual(code, 2)
+        self.assertEqual((real / "elsewhere.json").read_text(), "{}")
+
     def test_detector_catches_each_shape(self):
         for value, kind in (("/opt/tool/bin", "absolute-path"), ("~/x", "home-path"), ("a@example.com", "email"),
                             (PLANTED_KEY, "token"), ("C:\\tools", "absolute-path"), ("file:///x", "absolute-path")):
