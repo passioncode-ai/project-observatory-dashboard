@@ -16,8 +16,7 @@ and earlier); those releases keep their licence.
 
 Contributions are accepted under the [Contributor License Agreement](CLA.md) ([CLA.md](CLA.md)).
 It lets PassionCode.ai offer every contribution under the AGPL and under the commercial license; you keep the copyright in your contribution. Opening a pull
-request and ticking the CLA box in the pull request template is how you agree to it. A pull
-request without the ticked box is not merged.
+request is how you agree to it; there is no checkbox to tick.
 
 ## Checks
 

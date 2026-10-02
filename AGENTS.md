@@ -114,8 +114,8 @@ This repository is public, and so is its Git history, commit messages included.
 3. The code is open source under `AGPL-3.0-only OR LicenseRef-PassionCode-Commercial`
    ([LICENSE](LICENSE), [COMMERCIAL-LICENSE.md](COMMERCIAL-LICENSE.md); the knowledge base's
    [licensing](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/licensing.md) page), and
-   contributions are accepted under [CLA.md](CLA.md): the pull request template's CLA box is
-   ticked by the contributor, never by an agent on a person's behalf. Releases up to and
+   contributions are accepted under [CLA.md](CLA.md): opening a pull request is the agreement,
+   and the template carries no checkbox for it. Releases up to and
    including v0.9.1 keep the licence they shipped with (PolyForm Noncommercial or Internal Use
    from v0.8.2, MIT up to v0.8.1); describe the current version as AGPL or commercial.
 4. `main` keeps a linear history and refuses force-pushes, so a pull request merges by squash
