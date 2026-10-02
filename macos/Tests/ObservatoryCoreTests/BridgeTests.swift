@@ -65,7 +65,9 @@ final class BridgeTests: XCTestCase {
     }
     func testTimeoutStopsTheWholeProcessGroup() async throws {
         let (dir, b) = try fixture("/bin/sleep 30 &\necho $! > \"$OBSERVATORY_HOME/grandchild\"\nwait\n")
-        do { _ = try await b.call("ask", timeout: 0.5); XCTFail() }
+        // 3 s, not 0.5: on a loaded machine the shell had not yet written the pid when a
+        // half-second timeout fired, and the test failed on a missing file, not on a leak.
+        do { _ = try await b.call("ask", timeout: 3); XCTFail() }
         catch { XCTAssertEqual(error as? BridgeError, .timeout) }
         let pid = pid_t(try String(contentsOf: dir.appendingPathComponent("grandchild"), encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines))!
