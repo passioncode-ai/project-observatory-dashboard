@@ -42,6 +42,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import private_io
 import paths                                                                    
+from agent.providers import KEY_SHAPES
+
+#: The prefix an OpenRouter key must carry — the engine's own constant, so this
+#: door cannot accept a key `project-observatory full key` then refuses.
+KEY_PREFIX = KEY_SHAPES["OPENROUTER_API_KEY"][0]
 
 #: consumer -> (file, what reads it). Enumerated, because a fourth consumer must
 #: be a deliberate line here rather than a guess at install time.
@@ -137,12 +142,12 @@ def main(argv: list[str]) -> int:
     if sys.stdin.isatty():
         die("the key must arrive on stdin, never in an argument — an argument "
             "lands in the shell history and in the process list.\n"
-            "    run install_key with --for claude-mem and redirect a protected file to stdin")
+            f"    run install_key with --for {a.consumer or 'CONSUMER'} and redirect a protected file to stdin")
     key = sys.stdin.read().strip()
     if not key:
         die("stdin was empty")
-    if not key.startswith("sk-or-"):
-        die("that does not look like an OpenRouter key (it should start `sk-or-`)")
+    if not key.startswith(KEY_PREFIX):
+        die(f"that does not look like an OpenRouter key (it should start `{KEY_PREFIX}`)")
 
     kind, info = kind_of(key)
     if kind == "provisioning":

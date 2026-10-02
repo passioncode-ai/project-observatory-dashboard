@@ -121,6 +121,16 @@ def test_an_empty_or_malformed_key_is_refused_before_anything_is_written() -> No
     check("and the refusal says what the value does not look like",
           "does not look like" in p.stderr, p.stderr[:120])
     check("and happens before any network call", calls == [], str(calls))
+    # KEY-11: one prefix for both doors. `sk-or-x…` passed here and was then
+    # refused by `full key`, which wants `sk-or-v1-`.
+    p, calls = run(env, base, "sk-or-x" + "b" * 40, "--for", "observatory")
+    check("a key the engine itself would refuse is refused here too",
+          p.returncode != 0 and "sk-or-v1-" in p.stderr and calls == [], p.stderr[:160])
+    src = TOOL.read_text(encoding="utf-8")
+    check("the prefix is the providers' constant, not a second literal",
+          "KEY_SHAPES" in src and '"sk-or-"' not in src, "")
+    # KEY-10: a terminal on stdin names the consumer the caller chose.
+    check("the stdin refusal echoes the chosen consumer", "--for {a.consumer or" in src, "")
 
 
 def test_a_key_the_provider_rejects_never_reaches_a_file() -> None:
