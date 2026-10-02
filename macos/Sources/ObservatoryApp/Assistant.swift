@@ -111,7 +111,7 @@ struct AssistantView: View {
     }
     /// Setup a person must do is a warning; anything that broke is negative.
     static func tone(_ code: String?) -> Tone {
-        ["agent-disabled", "provider-unconfigured", "unknown-workspace", "backend-missing", "backend-configuration",
+        ["agent-disabled", "provider-unconfigured", "model-unconfigured", "budget-unset", "unknown-workspace", "backend-missing", "backend-configuration",
          "backend-incompatible", "budget-reached", "assistant-busy", "conversation-full", "history-full"].contains(code ?? "") ? .warning : .negative
     }
     var composer: some View {
