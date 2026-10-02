@@ -101,6 +101,18 @@ class WorkspaceBoundaryTests(unittest.TestCase):
             workspace.write_json(linked / "settings.json", {"synthetic": True})
         self.assertEqual(list(external.iterdir()), [])
 
+    def test_a_symlinked_home_is_refused_with_the_path_to_use_instead(self):
+        # "use the resolved path" without printing it left a new user guessing,
+        # typically under /tmp, which is itself a link on macOS.
+        external = self.root / "external"
+        external.mkdir()
+        linked = self.root / "linked"
+        linked.symlink_to(external, target_is_directory=True)
+        with self.assertRaises(configuration.ConfigurationError) as caught:
+            workspace.initialize(linked / "home")
+        self.assertIn(str((external / "home").resolve()), str(caught.exception))
+        self.assertIn("OBSERVATORY_HOME", str(caught.exception))
+
     def test_migration_refuses_wal_change_after_database_backup(self):
         source = self.original()
         connection = sqlite3.connect(source / "store/observatory.db")
