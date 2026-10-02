@@ -748,6 +748,41 @@ def test_every_rule_has_evidence_of_some_kind() -> None:
     check("and every rule this file claims to drive still exists", not stale, str(stale))
 
 
+def test_a_board_with_the_agent_off_does_not_ask_for_model_health() -> None:
+    """A new user's board said "no model has been asked anything recently" with the
+    agent feature off — a measurement nobody asked this workspace to make."""
+    bf = builder()
+    off = bf.provider_findings({}, {"ran_at": OLD}, agent_enabled=False)
+    check("agent off: no provider.health_unmeasured", not rows(off, "provider.health_unmeasured"),
+          str([f["type"] for f in off]))
+    on = bf.provider_findings({}, {"ran_at": OLD}, agent_enabled=True)
+    check("agent on: the unmeasured health is still said", bool(rows(on, "provider.health_unmeasured")))
+    check("and an unreadable quarantine list is reported either way",
+          bool(rows(bf.provider_findings(None, {"ran_at": OLD}, agent_enabled=False),
+                    "provider.health_unreadable")))
+
+
+def test_a_disabled_integration_is_not_an_unmeasured_source() -> None:
+    """model.degraded warned that wiki, github, sessions, remotes and bitbucket were
+    unmeasured on a board where none of them is switched on."""
+    bf = builder()
+    deg = [{"source": "wiki", "reason": "wiki scan unavailable"},
+           {"source": "github", "reason": "no repository listing available"},
+           {"source": "sessions.json", "reason": "optional collector output unavailable"},
+           {"source": "remotes.json", "reason": "optional collector output unavailable"},
+           {"source": "bitbucket.json", "reason": "optional collector output unavailable"},
+           {"source": "ownership", "reason": "ownership policy unreadable"}]
+    got = bf.merge_findings(deg, integrations={"github": True})
+    check("only the enabled integration and the always-read source remain",
+          len(got) == 1 and "github" in got[0]["detail"] and "ownership" in got[0]["detail"]
+          and "wiki" not in got[0]["detail"] and "bitbucket" not in got[0]["detail"],
+          str(got)[:300])
+    check("nothing enabled and nothing else missing: no row at all",
+          bf.merge_findings(deg[:5], integrations={}) == [])
+    check("an enabled integration's gap is still a warning",
+          bool(bf.merge_findings(deg[:1], integrations={"wiki": True})))
+
+
 def test_no_message_names_a_command_a_user_cannot_run() -> None:
     """Finding actions, errors and hints said `./observatory.py key` and
     `node dashboard/smoke.js docs/projects-dashboard.html` — paths inside the
@@ -790,7 +825,9 @@ if __name__ == "__main__":
                test_every_clone_sync_state_has_a_row_of_its_own,
                test_a_quiet_project_that_never_shipped_is_reported,
                test_every_rule_has_evidence_of_some_kind,
-               test_no_message_names_a_command_a_user_cannot_run):
+               test_no_message_names_a_command_a_user_cannot_run,
+               test_a_board_with_the_agent_off_does_not_ask_for_model_health,
+               test_a_disabled_integration_is_not_an_unmeasured_source):
         fn()
     print()
     if FAILURES:

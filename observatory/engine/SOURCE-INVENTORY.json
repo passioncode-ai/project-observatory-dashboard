@@ -2056,8 +2056,8 @@
       "path": "tests/test_finding_rules.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ab1a32774620e567b62db46cd72f56eb8dc30034ad34fa94ae44c6c4d5fd1b43",
-      "bytes": 43729
+      "export_sha256": "48f8721e17ff358775195203e6baace7b16543a96d97fe92ef576417c0b7e1a1",
+      "bytes": 46082
     },
     {
       "path": "tests/test_fingerprints.py",
@@ -2807,8 +2807,8 @@
       "path": "tests/test_skip_site_kinds.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f1a09ae83ea21a0b8e618610ff0257a9775fe5bd1148b4b3363f44a5fad2ec43",
-      "bytes": 13733
+      "export_sha256": "3bb4620abd15fff63f76e0cf5c21ace74905202ed42a19ab2c72d9e50a7888d1",
+      "bytes": 14738
     },
     {
       "path": "tests/test_stale_collapse.py",
@@ -3191,8 +3191,8 @@
     {
       "path": "tools/build_findings.py",
       "source_sha256": "03136ce1f366d180307f7f0c17ab41a3de82631103750f081a6d79758569e0b3",
-      "export_sha256": "c1e77ddb570fa0de06ca52212446d5798d9d1c3627060fd84776df97041189d3",
-      "bytes": 248908,
+      "export_sha256": "f76c38dccbadb3dde38b8c1676db0d659da0bcc62a8a5fba0da90c9b63926257",
+      "bytes": 251442,
       "python_comments_removed": 996,
       "python_docstrings_removed": 28,
       "tool_descriptions_retained": 0,

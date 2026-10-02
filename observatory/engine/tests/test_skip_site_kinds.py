@@ -27,6 +27,7 @@ measure "places assertions can vanish". The third instrument of my own to be
 corrected this session, and the only one whose figure had reached the board.
 """
 from __future__ import annotations
+import os
 import pathlib
 import sys
 
@@ -265,9 +266,28 @@ def test_the_named_file_is_read_correctly() -> None:
           str([(s["line"], s.get("kind_of_site")) for s in sites]))
 
 
+def test_an_installed_engine_does_not_report_its_own_test_suite() -> None:
+    """gate.skips_uncovered is about the engine's own suites — a maintainer's
+    finding. An installed engine (no repository around it) leaves it off the
+    user's board; a source checkout keeps it."""
+    import build_findings as B
+    os.environ["OBSERVATORY_MAINTAINER"] = "0"
+    try:
+        rows = [f for f in B.collect() if f["type"] == "gate.skips_uncovered"]
+    finally:
+        os.environ.pop("OBSERVATORY_MAINTAINER", None)
+    check("an installed engine: no gate.skips_uncovered", not rows, str(rows)[:200])
+    check("a wheel's site-packages has no repository beside it",
+          B.maintaining_the_engine(pathlib.Path("/srv/example-env/lib/python3/site-packages/observatory/engine")) is False)
+
+
 def test_the_finding_counts_only_what_a_judgement_could_fix() -> None:
     import build_findings as B
-    rows = [f for f in B.collect() if f["type"] == "gate.skips_uncovered"]
+    os.environ["OBSERVATORY_MAINTAINER"] = "1"
+    try:
+        rows = [f for f in B.collect() if f["type"] == "gate.skips_uncovered"]
+    finally:
+        os.environ.pop("OBSERVATORY_MAINTAINER", None)
     if not rows:
         print("  NOTE  every skip site names its cover "
               "[covered: the survey cases above]")
@@ -304,7 +324,8 @@ if __name__ == "__main__":
                test_a_capability_is_not_a_judgement_the_board_asks_for,
                test_the_survey_separates_the_two,
                test_the_named_file_is_read_correctly,
-               test_the_finding_counts_only_what_a_judgement_could_fix):
+               test_the_finding_counts_only_what_a_judgement_could_fix,
+               test_an_installed_engine_does_not_report_its_own_test_suite):
         fn()
     print()
     if FAILURES:
