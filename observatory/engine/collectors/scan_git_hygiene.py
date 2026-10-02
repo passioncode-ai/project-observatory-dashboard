@@ -63,6 +63,23 @@ def checkouts() -> list[dict]:
             continue
         seen.add(real)
         out.append({"repository": r["id"], "path": real})
+    # A git folder with NO remote has no repository row — only a project's local
+    # folder under the projects source. Without this the survey (and cleanup)
+    # reported "0 checkouts" beside it, and its worktrees went unseen.
+    try:
+        projects = json.loads((paths.REGISTRY / "projects.json").read_text(encoding="utf-8"))["projects"]
+    except (OSError, ValueError, KeyError):
+        projects = []
+    for p in projects:
+        for folder in (p.get("local_folders") or []) if isinstance(p, dict) else []:
+            path = os.path.join(str(paths.DATA), str(folder))
+            if not os.path.isdir(os.path.join(path, ".git")):
+                continue
+            real = os.path.realpath(path)
+            if real in seen:
+                continue
+            seen.add(real)
+            out.append({"repository": f"local:{folder}", "path": real})
     return out
 
 
