@@ -112,6 +112,10 @@ def main(argv: list[str]) -> int:
     def stop(signum, frame):                                          # noqa: ARG001
         raise SystemExit(128 + signum)
     signal.signal(signal.SIGTERM, stop)
+    # Cancellation is SIGTERM to this process group. A mask blocked by whoever
+    # started the chain is inherited across exec, and a runner that cannot hear it
+    # keeps spending after Stop; SIGALRM carries the assistant's deadline.
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGALRM})
     def timeout(signum, frame):
         raise assistant.AssistantError("assistant-timeout")
     if job.get("capability") == "agent.ask":

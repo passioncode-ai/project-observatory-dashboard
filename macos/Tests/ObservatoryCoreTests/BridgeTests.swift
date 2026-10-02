@@ -82,6 +82,27 @@ final class BridgeTests: XCTestCase {
         catch { XCTAssertEqual(error as? BridgeError, .cancelled) }
         XCTAssertLessThan(Date().timeIntervalSince(start), 3)
     }
+    func testChildrenCanBeStoppedWithSIGTERM() async throws {
+        // posix_spawn hands the CALLING thread's signal mask to the child, and a Swift
+        // worker thread blocks the asynchronous signals: a server or job runner started
+        // through the bridge then never saw SIGTERM — `--stop` and Stop did nothing.
+        let (_, b) = try fixture("/bin/sleep 5 &\np=$!\nkill -TERM $p\nwait $p\nprintf '{\"status\":\"%s\"}' $?\n")
+        let start = Date()
+        let data = try await b.call("ask", timeout: 10)
+        let doc = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: String])
+        XCTAssertEqual(doc["status"], "143", "SIGTERM did not reach a grandchild")
+        XCTAssertLessThan(Date().timeIntervalSince(start), 3)
+    }
+    func testEveryEngineActionCanCrossTheBridge() throws {
+        // The engine's own argparse choices are the contract; the bridge's allowlist must
+        // name each, or a button reports "configuration" for an action that exists.
+        let src = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().appendingPathComponent("../../../observatory/engine/agent/assistant.py").standardizedFileURL, encoding: .utf8)
+        let line = try XCTUnwrap(src.components(separatedBy: "\n").first { $0.contains("add_argument('action',choices=") })
+        let choices = Set(line.components(separatedBy: "choices=[")[1].components(separatedBy: "]")[0]
+            .components(separatedBy: ",").map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "' ")) })
+        XCTAssertEqual(choices, Backend.actions)
+    }
     func testRelativeExecutableRefused() async throws {
         do { _ = try await Backend(executable: "echo", workspace: "/tmp").call("status"); XCTFail() }
         catch { XCTAssertEqual(error as? BridgeError, .configuration) }
