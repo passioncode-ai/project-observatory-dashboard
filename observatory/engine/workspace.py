@@ -35,7 +35,11 @@ def write_json(path: Path, value: object) -> None:
 def reject_symlinks(path: Path) -> None:
     for part in (path, *path.parents):
         if part.is_symlink():
-            raise config.ConfigurationError("Workspace paths must not contain symlinks; use the resolved path")
+            # Name the path to use: "the resolved path" alone left a new user
+            # guessing, typically under /tmp, which is itself a link on macOS.
+            raise config.ConfigurationError(
+                f"Workspace paths must not contain symlinks ({part} is one); use the resolved "
+                f"path instead, e.g. OBSERVATORY_HOME={path.resolve()}")
 
 
 @contextlib.contextmanager
