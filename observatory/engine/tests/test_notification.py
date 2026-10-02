@@ -59,6 +59,11 @@ def sandbox() -> tuple[pathlib.Path, dict]:
     os.environ["OBSERVATORY_REGISTRY"] = str(d / "registry")
     os.environ["OBSERVATORY_SCRATCH"] = str(d / "scratch")
     os.environ["OBSERVATORY_DB"] = str(d / "observatory.db")
+    # No Fabric host in the sandbox unless a test installs one: the operator's own
+    # descriptor and app must not decide which channel a fixture takes.
+    (d / "services").mkdir()
+    os.environ["FABRIC_SERVICES_DIR"] = str(d / "services")
+    os.environ["FABRIC_DASHBOARDS_APP"] = str(d / "no-such.app")
     import paths
     importlib.reload(paths)
     from store import db as sdb
@@ -261,6 +266,36 @@ def test_info_findings_still_never_notify() -> None:
           "the reason must travel with the rule, or the next cap re-hides a class")
 
 
+def test_a_fabric_host_is_the_one_channel() -> None:
+    """With its descriptor installed and Fabric Dashboards present, the host delivers
+    `finding.opened` from the events feed; a banner of our own would be the same finding
+    twice, from a sender that is not the host (Fabric Dashboards ADR-0010)."""
+    d, _ = sandbox()
+    (d / "services/project-observatory.default.json").write_text("{}", encoding="utf-8")
+    app = d / "Fabric Dashboards.app"
+    app.mkdir()
+    os.environ["FABRIC_DASHBOARDS_APP"] = str(app)
+    m = load_notifier()
+    calls = {"n": 0}
+
+    def counting(title, body):
+        calls["n"] += 1
+        return True, "osascript accepted it"
+
+    m.notify = counting
+    rc = m.main([])
+    check("exits 0", rc == 0, str(rc))
+    check("no banner of our own", calls["n"] == 0, str(calls["n"]))
+    check("nothing recorded as notified by this tool", not notified_refs(d), str(notified_refs(d)))
+    report = json.loads((d / "scratch/notify.json").read_text(encoding="utf-8"))
+    check("the channel report names the host, so no channel finding is raised",
+          report["delivered"] is True and "Fabric Dashboards" in report["detail"], str(report))
+    # Without the app the descriptor alone delivers nothing: the banner is ours again.
+    os.environ["FABRIC_DASHBOARDS_APP"] = str(d / "gone.app")
+    m.main([])
+    check("no host app: the tool notifies itself", calls["n"] == 1, str(calls["n"]))
+
+
 if __name__ == "__main__":
     print("the notifier — and what it did when it could not tell anyone\n")
     for fn in (test_a_failed_send_is_not_recorded_as_notified,
@@ -269,7 +304,8 @@ if __name__ == "__main__":
                test_a_failing_channel_is_reported,
                test_a_successful_run_raises_no_channel_finding,
                test_the_reason_reaches_the_caller,
-               test_info_findings_still_never_notify):
+               test_info_findings_still_never_notify,
+               test_a_fabric_host_is_the_one_channel):
         fn()
     print()
     if FAILURES:

@@ -114,7 +114,9 @@ the access model [ACCESS.md](ACCESS.md) already states for this server. No POST 
    service declares is refused before any plist exists; then the kit's `launchd_install` writes
    and lints the plist, bootouts and waits, bootstraps with retries and polls the well-known
    document until this id and instance answer. The plist gains `ThrottleInterval 10`,
-   `ExitTimeOut 40` and `ProcessType Background`, keeps mode 600 and still carries no secret.
+   `ExitTimeOut 40` and `ProcessType Standard` (not `Background`, no `Nice` or low-priority I/O:
+   a background server was starved under load and reported down by the host while it ran),
+   keeps mode 600 and still carries no secret.
    `--uninstall` removes plist and descriptor and keeps the workspace.
    - `test_install_writes_the_descriptor_then_the_plist`,
      `test_a_claimed_port_is_refused_before_any_plist`,
