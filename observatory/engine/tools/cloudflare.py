@@ -766,7 +766,7 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
              preset=preset_key, zone=zone, account=account["name"])
     print(f"  {project}/{env}/{name}: {'rolled' if rolled else 'issued'} — "
           f"{', '.join(preset['groups'])} on {zone} only; "
-          f"use: tools/use_secret.py run --env {env} {project} {name} -- <command>")
+          f"use: python \"$(project-observatory full-path)/tools/use_secret.py\" run --env {env} {project} {name} -- <command>")
     return 0
 
 
@@ -819,7 +819,7 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
           + (f", and {', '.join(preset['zone_groups'])} on its zones"
              if preset.get("zone_groups") else "") + "; "
           f"use: CLOUDFLARE_ACCOUNT_ID={account['id']} "
-          f"tools/use_secret.py run --env {env} {project} {name} -- <command>")
+          f"python \"$(project-observatory full-path)/tools/use_secret.py\" run --env {env} {project} {name} -- <command>")
     return 0
 
 
@@ -1035,7 +1035,7 @@ def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
     print(f"  {project}/{env}/{prefix}_{{ACCESS_KEY_ID,SECRET_ACCESS_KEY,ENDPOINT}}: "
           f"{'rolled' if rolled else 'issued'} — {', '.join(preset['groups'])} on {bucket} only, "
           f"proved by a put, a get and a delete, and refused a bucket list; "
-          f"use: tools/use_secret.py run --env {env} {project} "
+          f"use: python \"$(project-observatory full-path)/tools/use_secret.py\" run --env {env} {project} "
           f"{','.join(slots)} -- <command>")
     return 0
 
@@ -1162,7 +1162,7 @@ def cmd_rotate(label: str | None, leaked: bool) -> int:
                               stash=m.get("stash") or p.name)
     if leaked and not bad:
         print("the leaked values are dead; settle the register with "
-              "`./tools/vault.py rotate` for each row it names")
+              "`python \"$(project-observatory full-path)/tools/vault.py\" rotate` for each row it names")
     return 1 if bad else 0
 
 

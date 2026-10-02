@@ -84,7 +84,7 @@ def tracked_in_git(doc: dict) -> list[dict]:
                          "it from the history."),
             "action": ("rotate what it holds, then `git rm --cached` it and add the "
                        "path to .gitignore; record the exposure with "
-                       "`tools/vault.py leak --where` so the debt stays visible"),
+                       "`python \"$(project-observatory full-path)/tools/vault.py\" leak --where` so the debt stays visible"),
         })
     return out
 

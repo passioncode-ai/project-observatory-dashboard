@@ -622,7 +622,7 @@ def install() -> int:
                            instance=service_identity.instance())
     except (fs.ServiceError, OSError, subprocess.SubprocessError) as exc:
         print(f"{exc} The descriptor ({where}) and the plist stay in place; "
-              f"`tools/serverd.py --uninstall` removes both.", file=sys.stderr)
+              f"`python \"$(project-observatory full-path)/tools/serverd.py\" --uninstall` removes both.", file=sys.stderr)
         return 1
     finally:
         # The kit writes the plist 644; it holds no secret, but every other
@@ -632,7 +632,7 @@ def install() -> int:
     print(f"installed and started: {LABEL} (RunAtLoad + KeepAlive) — "
           f"http://127.0.0.1:{PORT}/")
     print(f"  fabric-service descriptor: {where}")
-    print(f"  off is `tools/serverd.py --uninstall`; off STAYS off until --install")
+    print(f"  off is `python \"$(project-observatory full-path)/tools/serverd.py\" --uninstall`; off STAYS off until --install")
     return 0
 
 

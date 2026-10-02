@@ -2376,7 +2376,7 @@ def collect() -> list[dict]:
                            "this long means it is crash-looping or cannot write "
                            "its receipt — not that it was turned off, which "
                            "removes the agent entirely."),
-                "action": "tools/serverd.py --status; the log is store/logs/serverd.err",
+                "action": "python \"$(project-observatory full-path)/tools/serverd.py\" --status; the log is store/logs/serverd.err",
                 "evidence": ["store/raw/serverd.json",
                              str(sd_plist)]})
 
@@ -2685,9 +2685,9 @@ def collect() -> list[dict]:
                            f"or consumer verification. The register keeps names and "
                            f"places, never values." + _hint),
                 "action": (f"verify old-version revocation at the provider and the consumers; "
-                           f"if a local slot needs replacement, use `tools/vault.py rotate "
+                           f"if a local slot needs replacement, use `python \"$(project-observatory full-path)/tools/vault.py\" rotate "
                            f"{(r.get('secret') or '//').replace('/', ' ')}` first. "
-                           f"Then record manual settlement with `tools/vault.py settle "
+                           f"Then record manual settlement with `python \"$(project-observatory full-path)/tools/vault.py\" settle "
                            f"{(r.get('secret') or '//').replace('/', ' ')} --how \"…\" "
                            f"--revocation-evidence \"…\" --consumer-evidence \"…\"`. "
                            f"These references are manual attestations, not an automatic provider check."),
@@ -2718,7 +2718,7 @@ def collect() -> list[dict]:
                        "the agent that made it, in the same turn — the tools write it "
                        "themselves, anything done by hand is `vault.py moved`. "
                        + listed(_unrecorded, 5)),
-            "action": ("if an agent or a person did it: `tools/vault.py moved <project> "
+            "action": ("if an agent or a person did it: `python \"$(project-observatory full-path)/tools/vault.py\" moved <project> "
                        "<env> <NAME> --at heroku --how \"…\"` (settlement also requires "
                        "--settle, --revocation-evidence and --consumer-evidence); "
                        "if nobody here did, that is a change to explain"),

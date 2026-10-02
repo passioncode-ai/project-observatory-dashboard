@@ -98,8 +98,8 @@ def findings(doc: dict | None) -> list[dict]:
                            "still live in production, and the rotation reads as done "
                            "in every record here."),
                 "action": (f"`heroku config:set {row['name']}=… -a {a['app']}` with the "
-                           f"current value from `tools/use_secret.py`, then record it "
-                           f"with `tools/vault.py moved` and delete the archive"),
+                           f"current value from `python \"$(project-observatory full-path)/tools/use_secret.py\"`, then record it "
+                           f"with `python \"$(project-observatory full-path)/tools/vault.py\" moved` and delete the archive"),
             })
 
     # ── production secrets this machine holds no copy of ────────────────────
@@ -127,7 +127,7 @@ def findings(doc: dict | None) -> list[dict]:
                        f"holds verdicts, never values (S10), which is why this is a "
                        f"count and not a copy."),
             "action": ("for each value worth keeping: `heroku config:get NAME -a <app> | "
-                       "tools/vault.py put <project> prod NAME` — on stdin, by name — and "
+                       "python \"$(project-observatory full-path)/tools/vault.py\" put <project> prod NAME` — on stdin, by name — and "
                        "it comes back with the encrypted store backup; the row stays until "
                        "the scan can see the slot"),
         })

@@ -322,7 +322,7 @@ def test_cf_dns_preset_is_scoped_to_one_zone_and_lands_in_the_vault() -> None:
     # `run` takes its names as a remainder, so a flag after them is part of the
     # command: the line printed on 2026-09-29 put --env last and was refused.
     check("the printed use line puts --env before the positionals",
-          "use_secret.py run --env prod proj CF_DNS -- " in out.getvalue(), out.getvalue())
+          'use_secret.py" run --env prod proj CF_DNS -- ' in out.getvalue(), out.getvalue())
 
 
 def test_cf_dns_preset_rolls_refuses_and_never_misfiles() -> None:
@@ -451,7 +451,7 @@ def test_cf_d1_preset_is_scoped_to_one_account_and_lands_in_the_vault() -> None:
           "CLOUDFLARE_ACCOUNT_ID=a1" in out.getvalue(), out.getvalue())
     check("and the value is never printed", "d1-value-" not in out.getvalue(), out.getvalue())
     check("the printed use line puts --env before the positionals",
-          "use_secret.py run --env prod proj CLOUDFLARE_API_TOKEN -- " in out.getvalue(), out.getvalue())
+          'use_secret.py" run --env prod proj CLOUDFLARE_API_TOKEN -- ' in out.getvalue(), out.getvalue())
 
 
 def test_cf_fabric_account_preset_grants_both_levels_on_one_account_into_the_vault() -> None:
@@ -785,7 +785,7 @@ def test_cf_r2_preset_issues_one_bucket_pair_into_the_vault() -> None:
     check("neither the token values nor the secret key are ever printed",
           "bucket-value-" not in printed and "setup-value-" not in printed and secret not in printed, printed)
     check("the use line puts --env before the positionals and names all three slots",
-          "use_secret.py run --env prod proj "
+          'use_secret.py" run --env prod proj '
           "OFFSITE_ACCESS_KEY_ID,OFFSITE_SECRET_ACCESS_KEY,OFFSITE_ENDPOINT -- " in printed, printed)
 
 

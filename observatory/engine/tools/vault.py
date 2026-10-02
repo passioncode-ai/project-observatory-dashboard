@@ -545,7 +545,7 @@ def cmd_inject(a) -> int:
             f".gitignore first.")
     src = STORE / a.project / a.env
     if not src.is_dir():
-        die(f"no secrets stored for {a.project}/{a.env} — `tools/vault.py list` "
+        die(f"no secrets stored for {a.project}/{a.env} — `python \"$(project-observatory full-path)/tools/vault.py\" list` "
             f"shows what exists")
     names = []
     lines = []
@@ -566,7 +566,7 @@ def cmd_inject(a) -> int:
     if not names:
         die(f"{a.project}/{a.env} holds no values")
     body = (f"# vault: {a.project}/{a.env} injected {now()} — regenerate with\n"
-            f"# vault:   tools/vault.py inject {a.project} {a.env} {target_dir}\n"
+            f"# vault:   python \"$(project-observatory full-path)/tools/vault.py\" inject {a.project} {a.env} {target_dir}\n"
             + "\n".join(kept + lines) + "\n")
     _atomic_write(env_file, body)
     journal("inject", f"{a.project}/{a.env}/*", names=sorted(names), into=str(env_file))

@@ -798,6 +798,27 @@ def test_no_message_names_a_command_a_user_cannot_run() -> None:
             if not line.lstrip().startswith("#") and stale.search(line):
                 offenders.append(f"{rel}:{n}")
     check("no user-facing string names a source-tree command", not offenders, ", ".join(offenders[:8]))
+    # THE ENGINE'S TOOLS BY THEIR INSTALLED PATH. A bare `tools/vault.py put …`
+    # resolves only inside the engine directory; an installed user runs
+    # `python "$(project-observatory full-path)/tools/vault.py" …`. Read through
+    # the syntax tree, so a module's own usage docstring may stay relative.
+    import ast
+    bare = re.compile(r'(?<!full-path\)/)(?:\./)?tools/(vault|use_secret|install_key|serverd)\.py"? '
+                      r'(put|rotate|settle|moved|leak|run|remove|list|inject|names|pipe|--status|--install|--uninstall|--for)')
+    loose = []
+    for path in sorted(ROOT.rglob("*.py")):
+        rel = path.relative_to(ROOT)
+        if rel.parts[0] in ("tests", ".venv") or "__pycache__" in rel.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        docs = {id(n.body[0].value) for n in ast.walk(tree)
+                if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and n.body and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs \
+                    and bare.search(node.value) and not node.value.startswith(("installedBy", "tools/")):
+                loose.append(f"{rel}:{node.lineno}")
+    check("no message hands over a tool by its source-tree path", not loose, ", ".join(loose[:10]))
 
 
 if __name__ == "__main__":

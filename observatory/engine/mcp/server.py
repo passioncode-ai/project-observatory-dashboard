@@ -391,7 +391,7 @@ def observatory_credentials(
     limitation. An agent that needs a project's key does not need to read it: it
     needs to know the key exists, what it is called, and how to put it into a
     command. So this answers the first two, and `use` in the result answers the
-    third — `tools/use_secret.py run <project> <NAME> -- <command>` places the
+    third — `python "$(project-observatory full-path)/tools/use_secret.py" run [--env ENV] <project> <NAME> -- <command>` places the
     value in that command's environment and removes it from everything the
     agent itself can see.
 
