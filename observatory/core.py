@@ -103,8 +103,17 @@ def refuse_home_inside_code(path: Path) -> Path:
 def state_path(value: str | None = None) -> Path:
     # Only resolved when a command runs, never at module import.
     base = value or os.environ.get("OBSERVATORY_HOME")
-    return refuse_home_inside_code(Path(base).expanduser().absolute() if base
+    path = refuse_home_inside_code(Path(base).expanduser().absolute() if base
                                    else Path.home() / ".local" / "share" / "project-observatory")
+    # The README exports OBSERVATORY_HOME for the complete engine, and the 0.1
+    # commands read the same variable: without this, `demo` wrote its own format
+    # into the complete workspace. The two formats never share a folder.
+    if (path / "workspace.json").is_file():
+        raise ObservatoryError(
+            f"{path} is a complete-engine workspace; the 0.1 commands keep their own format "
+            f"and never write there. Use `project-observatory full ...` for it, or give the "
+            f"0.1 command a separate folder with --home PATH.")
+    return path
 
 
 def private_dir(path: Path) -> None:
