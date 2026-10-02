@@ -11,10 +11,11 @@ revision and cannot satisfy the manifest, which pins the revision as a schema
 None of that is reconstructed here — the SDK owns the wire, and this file owns
 the tools.
 
-Eight tools read. Two write, and they write only PROPOSALS: `observatory_record`
-appends to the append-only ledger in state `proposed`, and
-`observatory_propose` queues a registry change without touching
-`registry/*.json`.
+The `observatory_*` tools read, bounded and paged, except two that write only
+PROPOSALS — `observatory_record` appends to the append-only ledger in state
+`proposed`, and `observatory_propose` queues a registry change without touching
+`registry/*.json` — and two that spend (`observatory_search`,
+`observatory_assistant_ask`).
 
 Beside them, every capability of fabric-agent.json is served under its own name
 with its published schemas (fabric-interop/0.1): `capability_tools.py` lists and
@@ -57,7 +58,8 @@ from pydantic import AliasChoices, Field
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from capability_tools import Answer, InteropServer                                 # noqa: E402
 
-import paths                                                                      
+import interop                                                                    
+import paths
 import proposals                                                                  
 import survey as survey_mod                                                       
 from store import db as store_db                                                  
@@ -76,40 +78,29 @@ server = InteropServer(
     # not cosmetic. It said "Read-only" and named three tools while eight were
     # served and two of them write — and the gateway's own comment repeated the
     # same claim in Russian.
+    # HELD UNDER 1,800 CHARACTERS, and the rules that protect something come first:
+    # a host keeps about 2,048 and drops the rest, and the earlier text was cut
+    # exactly at the WRITE rule (tests/test_mcp_wire.py checks the length).
     instructions=(
-        "Ten `observatory_*` tools read, two propose, and `observatory_assistant_ask` uses the configured model and writes dialogue, and every Fabric capability is also served under "
-        "its own name (fabric-interop/0.1): `estate.survey`, `project.detail`, "
-        "`project.timeline`, `project.record`, `machine.mcp.inventory`, and "
-        "`machine.mcp.refresh`, which answers a job followed with `fabric.job.get` and "
-        "stopped with `fabric.job.cancel`. Those tools take and return exactly the "
-        "published schemas and echo `_meta.traceparent` as a child span.\n"
-        "ASSISTANT: `observatory_assistant_status` reads readiness and saved conversation summaries; "
-        "`observatory_assistant_conversation` reads a private dialogue; `observatory_assistant_ask` "
-        "SPENDS using the configured model, sends bounded local evidence and persists a dialogue/job. "
-        "It gives advice only. Follow or cancel its job with the Fabric job tools.\n"
-        "READ: `observatory_status` surveys the current scope; a requested scan pin "
-        "is reported as unsupported in degraded. `observatory_project` answers about "
-        "one project; `observatory_timeline` returns its commit history; "
-        "`observatory_findings` lists what needs a person; `observatory_recall` and "
-        "`observatory_search` look over recorded narrative — SEARCH SPENDS: it "
-        "embeds the query, charges the wallet, and falls back to the lexical half "
-        "alone when a spend guardrail is reached, saying so in `degraded`; "
-        "`observatory_credentials` names what a project can authenticate with and "
-        "CANNOT return a value — use the `use` command it hands back instead of "
-        "opening the file, because a transcript outlives the key it quotes; "
-        "`observatory_machine` shows what runs by origin, memory, disk, idle worktrees "
-        "and branches and the cleanup plan, and with `explainPid` why one process "
-        "runs — never its environment or full command line. `machine.mcp.inventory` lists "
-        "every MCP server the agent configs on this machine declare, by name, with where "
-        "each is declared, its transport and whether it answered the last probe — never a "
-        "URL, command line, header or environment value.\n"
-        "WRITE: `observatory_record` and `observatory_propose` append to the ledger. "
-        "Everything they write lands `proposed` with confidence below 1 and NOTHING "
-        "here can promote it — that is the operator's act or a second independent "
-        "corroboration.\n"
-        "Every result carries a `degraded` list: an empty list asserts full coverage, "
-        "and a non-empty one names the sources that could not be read. Treat a "
-        "missing `degraded` field as a bug rather than as full coverage."
+        "SPENDS: `observatory_search` (embeds the query) and `observatory_assistant_ask` "
+        "(the configured model; persists a private dialogue and a job — follow it with "
+        "`fabric.job.get`, stop it with `fabric.job.cancel`).\n"
+        "WRITE: `observatory_record` and `observatory_propose` append PROPOSALS with "
+        "confidence below 1; nothing here promotes one — that is the operator's act or an "
+        "independent corroboration.\n"
+        "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run the "
+        "`use` command it hands back instead of opening a file.\n"
+        "DEGRADED: every answer carries `degraded`; empty asserts full coverage, a "
+        "non-empty one names what could not be read. A missing `degraded` is a bug.\n"
+        "READ, bounded and paged with `limit` and `cursor` → `nextCursor`, totals covering "
+        "the whole scope: `observatory_status` gives a summary page, `detail: full` adds "
+        "descriptions; `observatory_project`; `observatory_timeline`; `observatory_findings` "
+        "filters by `projectId`; `observatory_recall`; `observatory_machine` gives an "
+        "overview, `section` or `explainPid` the detail; `observatory_assistant_status`; "
+        "`observatory_assistant_conversation`.\n"
+        "Fabric capabilities under their own names (fabric-interop/0.1) take and return "
+        "the published schemas exactly: `estate.survey`, `project.detail`, "
+        "`project.timeline`, `project.record`, `machine.mcp.inventory`, `machine.mcp.refresh`."
     ),
 )
 
@@ -179,10 +170,16 @@ def _owner_error(owner: str) -> dict[str, Any] | None:
 
 
 @server.tool()
-def observatory_assistant_status() -> dict:
+def observatory_assistant_status(
+    includeProjects: Annotated[bool, Field(description="Also list every project id and name for a "
+                                                       "scope picker; `project_count` is always there.")] = False,
+) -> dict:
     """Local assistant readiness and conversation list. Reads private workspace; no model spend."""
     from agent import assistant
-    return assistant.status()
+    try:
+        return assistant.status(include_projects=includeProjects)
+    except assistant.AssistantError as exc:
+        return {"error": str(exc), "degraded": [{"source": "workspace", "reason": str(exc)}]}
 
 
 @server.tool()
@@ -195,19 +192,21 @@ def observatory_assistant_ask(question: str, request_id: str,
     Reuse request_id only for identical input. Returns job + conversation_id; follow
     with fabric.job.get, stop with fabric.job.cancel. A different active ask is busy.
     """
-    from agent import assistant
-    args={"question":question,"request_id":request_id}
-    if conversation_id is not None:args["conversation_id"]=conversation_id
-    if project_id is not None:args["project_id"]=project_id
-    try:return assistant.ask(args)
-    except assistant.AssistantError as exc:raise ValueError(str(exc)) from None
+    # DECLARATION ONLY. `InteropServer.call_tool` answers this name itself, because
+    # only there is the caller's `_meta.traceparent` in reach, and the job must carry
+    # the caller's trace. A second body here would be a second implementation that
+    # drifts from the first; it is unreachable and says so if that ever changes.
+    raise RuntimeError("observatory_assistant_ask is answered by InteropServer.call_tool")
 
 
 @server.tool()
 def observatory_assistant_conversation(id: str) -> dict:
     """Read this workspace's private conversation by opaque chat id; no model spend."""
     from agent import assistant
-    return assistant.get_conversation(id)
+    try:
+        return assistant.get_conversation(id)
+    except assistant.AssistantError as exc:
+        return {"error": str(exc), "id": id, "degraded": []}
 
 
 @server.tool()
@@ -234,16 +233,23 @@ def observatory_status(
                                                "answer carries the current estate and says so "
                                                "in `degraded`. Omit it.")] = None,
     limit: Annotated[int | None, Field(ge=1, le=200,
-                     description="Return at most this many projects. Omit for all of them — "
-                                 "an estate survey is about 30,000 tokens, so pass a limit "
-                                 "unless you want the whole thing.")] = None,
+                     description="Projects per page. Omitted: 25 for an estate or owner "
+                                 "scope — the whole estate is far larger than a tool "
+                                 "result an agent can read — and `counts` still covers "
+                                 "the whole scope; follow `nextCursor` for the rest.")] = None,
     cursor: Annotated[str | None,
                       Field(description="Continue after this project id, from a previous "
                                         "answer's `nextCursor`. The walk loses and repeats "
                                         "nothing, but a project appearing mid-walk still "
                                         "shifts it — no parameter freezes the estate.")] = None,
+    detail: Annotated[Literal["summary", "full"] | None,
+                      Field(description="summary = identity, ownership, lifecycle, activity "
+                                        "and repositories (about 400 characters a project); "
+                                        "full = also description, sites, stack, folders and "
+                                        "organization. Omitted: full for one project, summary "
+                                        "otherwise.")] = None,
 ) -> dict[str, Any]:
-    """Survey a scope: every project in it, with repositories, sites, stack and last activity.
+    """Survey a scope: a page of its projects, with repositories and last activity.
 
     This is the `estate.survey` capability declared in fabric-agent.json. It is
     deterministic — no model participates — so the same scope over one registry
@@ -272,8 +278,33 @@ def observatory_status(
     bad = _scope_error(kind, value)
     if bad:
         return bad
-    return survey_mod.survey(_scope(kind, value), include_external=includeExternal,
-                             as_of_scan_id=asOfScanId, limit=limit, cursor=cursor)
+    # A BOUNDED DEFAULT, measured: the unpaged estate was 254,000 characters on a
+    # real machine of 178 projects, past what an agent host accepts as one tool
+    # result, so the tool answered nothing usable at all. `estate.survey` keeps
+    # the published "no limit means everything" and does not come through here.
+    if limit is None and kind != "project":
+        limit = DEFAULT_STATUS_PAGE
+    out = survey_mod.survey(_scope(kind, value), include_external=includeExternal,
+                            as_of_scan_id=asOfScanId, limit=limit, cursor=cursor)
+    if (detail or ("full" if kind == "project" else "summary")) == "summary" and "projects" in out:
+        out["projects"] = [_summary_row(p) for p in out["projects"]]
+    return out
+
+
+DEFAULT_STATUS_PAGE = 25
+#: What a summary row keeps: every field the published item schema requires, so
+#: a summary page still validates against capability-output.schema.json, plus
+#: the activity a reader ranks projects by.
+SUMMARY_FIELDS = ("id", "name", "ownership", "lifecycle", "activityTier",
+                  "lastActivityOn", "lastSessionOn", "membershipRules")
+SUMMARY_REPOSITORY_FIELDS = ("id", "host", "nameWithOwner", "archived")
+
+
+def _summary_row(p: dict) -> dict:
+    row = {k: p[k] for k in SUMMARY_FIELDS if k in p}
+    row["repositories"] = [{k: r[k] for k in SUMMARY_REPOSITORY_FIELDS if k in r}
+                           for r in p.get("repositories", [])]
+    return row
 
 
 @server.tool()
@@ -322,14 +353,33 @@ def observatory_credentials(
     `available_in` is the opposite — a slot empty here whose name holds a live
     value elsewhere.
     """
-    return survey_mod.credentials(projectId)
+    return _note_unknown(projectId, survey_mod.credentials(projectId))
+
+
+def _note_unknown(project_id: str, out: dict[str, Any]) -> dict[str, Any]:
+    """An id the registry does not hold, NAMED, so empty does not read as clean.
+
+    `observatory_project` already refuses one; these two answered `[]` with an
+    empty `degraded`, which asserts "known project, nothing here". History under
+    a former id may still be listed, so the answer is kept and qualified."""
+    pid = project_id if project_id.startswith("project:") else f"project:{project_id}"
+    if isinstance(out, dict) and not any(p.get("id") == pid for p in survey_mod._index()[0]):
+        out.setdefault("degraded", []).append(
+            {"source": "registry", "reason": f"{pid} is not a project in the registry; an empty "
+                                             f"answer is not evidence it has nothing — "
+                                             f"call observatory_status to list ids"})
+    return out
 
 
 @server.tool()
 def observatory_machine(
     explainPid: Annotated[int | None, Field(validation_alias=AliasChoices("explainPid", "explain_pid", "pid"),
                                             description="A process id to explain: its origin, ancestry, and "
-                                                        "witr's service/port detail when witr is installed")] = None,
+                                                        "witr's service/port detail when witr is installed. "
+                                                        "The answer is then that explanation alone.")] = None,
+    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup"],
+                       Field(description="overview = totals and the top few of each (default); "
+                                         "a named section = that section in full.")] = "overview",
 ) -> dict[str, Any]:
     """The machine this estate runs on: processes grouped by ORIGIN (agent
     session, launchd job, simulator, app, detached), memory and swap, free disk
@@ -343,7 +393,39 @@ def observatory_machine(
     full command line, because either can carry a credential.
     """
     import machine_view
-    return machine_view.summary(explainPid)
+    full = machine_view.summary(explainPid)
+    base = {"measuredAt": full.get("measuredAt"), "degraded": full["degraded"]}
+    # BOUNDED BY DEFAULT, measured: the whole summary was 168,000 characters on a
+    # real machine (process groups 35k, worktrees and unique branches 35k, the
+    # cleanup plan and journal 31k), and asking about ONE process returned all
+    # of it with the explanation on top.
+    if explainPid is not None:
+        return {**base, "explain": full.get("explain")}
+    if section != "overview":
+        return {**base, section: full.get(section)}
+    out = {**base, "memory": full.get("memory"), "witr": full.get("witr", False),
+           "sections": ["memory", "processes", "disk", "git", "cleanup"]}
+    if full.get("processes"):
+        procs = full["processes"]
+        out["processes"] = {"count": procs.get("count"), "top": (procs.get("top") or [])[:MACHINE_TOP],
+                            "groups": sorted(procs.get("groups") or [], key=lambda g: -(g.get("rss_mb") or 0))[:MACHINE_TOP]}
+    if full.get("disk"):
+        disk = full["disk"]
+        out["disk"] = {"volume": disk.get("volume"), "thresholds": disk.get("thresholds"),
+                       "measured_at": disk.get("measured_at"),
+                       "locations": sorted(disk.get("locations") or [], key=lambda l: -(l.get("gb") or 0))[:MACHINE_TOP]}
+    if full.get("git"):
+        git = full["git"]
+        out["git"] = {"measuredAt": git.get("measuredAt"), "totals": git.get("totals"),
+                      "branches": git.get("branches"), "uniqueBranches": len(git.get("uniqueBranches") or [])}
+    if full.get("cleanup"):
+        plan = full["cleanup"]
+        out["cleanup"] = {"plannedAt": plan.get("plannedAt"), "autoEnabled": plan.get("autoEnabled"),
+                          "counts": plan.get("counts"), "actions": len(plan.get("actions") or [])}
+    return out
+
+
+MACHINE_TOP = 10
 
 
 @server.capability("machine.mcp.inventory")
@@ -369,10 +451,10 @@ def observatory_timeline(
     projectId: Annotated[str, Field(validation_alias=AliasChoices("projectId", "project_id"), description="A 'project:<slug>' id")],
     since: Annotated[str | None, Field(description="ISO-8601 date or timestamp; "
                                                    "only events at or after it")] = None,
-    limit: Annotated[int, Field(ge=1, le=500)] = 100,
+    limit: Annotated[int, Field(ge=1, le=500, description="Events per answer, newest first.")] = 25,
 ) -> dict[str, Any]:
-    "Commits and recorded events for one project, newest first."    
-    return survey_mod.timeline(projectId, since=since, limit=limit)
+    "Commits and recorded events for one project, newest first."
+    return _note_unknown(projectId, survey_mod.timeline(projectId, since=since, limit=limit))
 
 
 @server.tool()
@@ -395,7 +477,8 @@ def observatory_search(
 @server.tool()
 def observatory_recall(
     projectId: Annotated[str | None, Field(validation_alias=AliasChoices("projectId", "project_id"), description="Limit to one project, or omit for all")] = None,
-    limit: Annotated[int, Field(ge=1, le=200)] = 50,
+    limit: Annotated[int, Field(ge=1, le=200, description="Records per page; `total` counts "
+                                                          "them all.")] = 10,
     cursor: Annotated[str | None,
                       Field(description="Continue after this point, from a previous "
                                         "answer's `nextCursor`.")] = None,
@@ -481,6 +564,16 @@ def observatory_findings(
     include_acknowledged: Annotated[bool,
                                     Field(description="Include findings the operator has "
                                                       "silenced in finding_acks.json.")] = False,
+    projectId: Annotated[str | None,
+                         Field(validation_alias=AliasChoices("projectId", "project_id"),
+                               description="Only findings about this 'project:<slug>': itself, "
+                                           "its repositories and clones, its sites' domains, and "
+                                           "the secrets and env files in its folders.")] = None,
+    limit: Annotated[int, Field(ge=1, le=200, description="Findings per page, most severe "
+                                                          "first. `total` counts them all.")] = 20,
+    cursor: Annotated[str | None,
+                      Field(description="Continue after this finding id, from a previous "
+                                        "answer's `nextCursor`.")] = None,
 ) -> dict[str, Any]:
     """What in this estate needs a person: expiring domains, dark sites, clones that exist nowhere else.
 
@@ -504,6 +597,24 @@ def observatory_findings(
     rows = [x for x in doc["findings"]
             if order.get(x["severity"], 3) <= (floor if severity != "all" else 2)
             and (include_acknowledged or not x.get("acked"))]
+    if projectId:
+        if not any(p.get("id") == projectId for p in survey_mod._index()[0]):
+            return {"error": "unknown project", "projectId": projectId,
+                    "hint": "call observatory_status to list what exists", "degraded": []}
+        about = survey_mod.finding_matcher(projectId)
+        rows = [x for x in rows if about(x.get("subject") or "")]
+    # PAGED, measured: the default answer was 78,000 characters and `all` 137,000
+    # on a real estate. Most severe first, so the first page is the one to act on.
+    rows.sort(key=lambda x: order.get(x["severity"], 3))
+    total = len(rows)
+    if cursor:
+        at = next((i for i, x in enumerate(rows) if x.get("id") == cursor), None)
+        if at is None:
+            return {"error": "unknown cursor", "cursor": cursor,
+                    "hint": "start again without `cursor`; findings are rebuilt every tick",
+                    "degraded": []}
+        rows = rows[at + 1:]
+    page, more = rows[:limit], len(rows) > limit
     # TWO dates, because they answer different questions and one of them used to
     # answer both badly. `builtAt` is when these findings last CHANGED — it stops
     # moving when nothing moves, which is what makes the registry committable
@@ -522,10 +633,13 @@ def observatory_findings(
         degraded.append({"source": "store",
                          "reason": f"the last scan time is unreadable: {exc}; "
                                    f"builtAt alone cannot tell staleness from quiet"})
-    return {"builtAt": doc.get("built_at"), "checkedAt": checked_at,
-            "counts": doc.get("counts", {}),
-            "resolvedSinceLastRun": doc.get("resolved_since_last_run", []),
-            "findings": rows, "degraded": degraded}
+    out = {"builtAt": doc.get("built_at"), "checkedAt": checked_at,
+           "counts": doc.get("counts", {}), "total": total,
+           "resolvedSinceLastRun": doc.get("resolved_since_last_run", []),
+           "findings": page, "degraded": degraded}
+    if more and page:
+        out["nextCursor"] = page[-1].get("id")
+    return out
 
 
 @server.tool()
@@ -654,12 +768,48 @@ def observatory_propose(
 # every host that already calls them. Arguments arrive validated against the
 # published input schema, so these only translate names.
 
+def _published_shape(schema: dict, value: Any, dropped: set[str], path: str = "") -> Any:
+    """`value` cut down to what a closed published schema lists, naming what went.
+
+    The survey grew fields after v0.2.0 was published (`organization`,
+    `resources`); the item schema is `additionalProperties: false`, so EVERY
+    estate.survey answer on an estate that records an organization failed its
+    own contract and reached the host as an error. The names come from the
+    bundled schema itself, never from a list kept here that would drift from it."""
+    if isinstance(value, dict) and schema.get("type") == "object":
+        props = schema.get("properties", {})
+        out = {}
+        for k, v in value.items():
+            if k in props:
+                out[k] = _published_shape(props[k], v, dropped, f"{path}{k}.")
+            elif schema.get("additionalProperties") is False:
+                dropped.add(f"{path}{k}")
+            else:
+                out[k] = v
+        return out
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        return [_published_shape(schema["items"], v, dropped, path) for v in value]
+    return value
+
+
 @server.capability("estate.survey")
-def capability_estate_survey(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
+def capability_estate_survey(arguments: dict[str, Any], span: Any) -> Answer:
     scope = arguments.get("scope") or {"kind": "estate"}
-    return observatory_status(scope=scope, includeExternal=arguments.get("includeExternal", False),
-                              asOfScanId=arguments.get("asOfScanId"), limit=arguments.get("limit"),
-                              cursor=arguments.get("cursor"))
+    kind, value = scope.get("kind", "estate"), scope.get("value")
+    out = _scope_error(kind, value) or survey_mod.survey(
+        _scope(kind, value), include_external=arguments.get("includeExternal", False),
+        as_of_scan_id=arguments.get("asOfScanId"), limit=arguments.get("limit"),
+        cursor=arguments.get("cursor"))
+    if "error" in out:
+        return Answer(out)
+    schema = next(d["outputSchema"] for d in interop.tool_definitions() if d["name"] == "estate.survey")
+    dropped: set[str] = set()
+    shaped = _published_shape(schema, out, dropped)
+    # Project rows carry the same fields at the same path; name each once.
+    names = sorted({re.sub(r"^projects\.", "", d) for d in dropped})
+    notes = ([f"fields outside the published v0.2.0 survey schema are omitted here: "
+              f"{', '.join(names)}; observatory_status carries them"] if names else [])
+    return Answer(shaped, notes)
 
 
 @server.capability("project.detail")
@@ -720,8 +870,8 @@ def capability_project_record(arguments: dict[str, Any], span: Any) -> Answer:
 @server.resource("observatory://estate", mime_type="application/json",
                  title="The whole estate",
                  description="Every project with its repositories, sites, stack and last "
-                             "activity. About 120 KB — a deliberate read, not a cheap one; "
-                             "call the observatory_status tool with a `limit` to page it.")
+                             "activity — about 1 KB a project, so hundreds of KB on a real "
+                             "estate; call the observatory_status tool to page it instead.")
 def resource_estate() -> dict[str, Any]:
     return survey_mod.survey({"kind": "estate"})
 
@@ -745,7 +895,8 @@ def resource_project(project_id: str) -> dict[str, Any]:
 
 @server.resource("observatory://dashboard", mime_type="text/html",
                  title="The dashboard, as built",
-                 description="The generated HTML page, self-contained, roughly 450 KB. Meant "
+                 description="The generated HTML page, self-contained, several MB on a real "
+                             "estate. Meant "
                              "for a host that RENDERS it; reading it into a model's context "
                              "spends far more than the JSON resources beside it.")
 def resource_dashboard() -> str:

@@ -379,5 +379,46 @@ class Page(Base):
         self.assertIn("git-hygiene.json", json.dumps(summary["degraded"]))
 
 
+class Tool(Base):
+    """The MCP tool an agent reads: bounded by default, whole only on request."""
+
+    def setUp(self):
+        super().setUp()
+        groups = [{"origin": f"app:App{i}", "processes": 1, "sessions": 0, "rss_mb": 100 + i, "cpu": 0.1}
+                  for i in range(30)]
+        top = [{"pid": 100 + i, "name": f"App{i}", "origin": f"app:App{i}", "rss_mb": 100 + i, "cpu": 0.1}
+               for i in range(30)]
+        (self.home / "store/raw/machine.json").write_text(json.dumps({
+            "measured_at": "2026-01-01T00:00:00Z", "memory": {"total_mb": 16384, "free_mb": 1024},
+            "processes": {"count": 30, "groups": groups, "top": top, "projects": []},
+            "disk": {"volume": {"free_gb": 100, "free_percent": 40, "total_gb": 250},
+                     "locations": [{"path": f"~/c{i}", "label": f"C{i}", "kind": "cache",
+                                    "reclaim": "regenerable", "gb": float(i)} for i in range(30)]}}))
+        sys.path.insert(0, str(ROOT / "mcp"))
+        import server
+        self.server = importlib.reload(server)
+
+    def test_overview_is_bounded_and_names_the_sections(self):
+        out = self.server.observatory_machine()
+        self.assertEqual(len(out["processes"]["top"]), self.server.MACHINE_TOP)
+        self.assertEqual(out["processes"]["groups"][0]["origin"], "app:App29")   # heaviest first
+        self.assertEqual(out["disk"]["locations"][0]["gb"], 29.0)
+        self.assertEqual(out["processes"]["count"], 30)                            # the total stays whole
+        self.assertIn("processes", out["sections"])
+        self.assertIn("degraded", out)
+
+    def test_a_named_section_is_whole(self):
+        out = self.server.observatory_machine(section="processes")
+        self.assertEqual(len(out["processes"]["groups"]), 30)
+        self.assertNotIn("disk", out)
+
+    def test_explaining_one_process_returns_only_the_explanation(self):
+        import scan_machine
+        with patch.object(scan_machine, "explain", return_value={"pid": 7, "origin": "app:Editor"}):
+            out = self.server.observatory_machine(explainPid=7)
+        self.assertEqual(out["explain"], {"pid": 7, "origin": "app:Editor"})
+        self.assertEqual(set(out), {"explain", "measuredAt", "degraded"})
+
+
 if __name__ == "__main__":
     unittest.main()

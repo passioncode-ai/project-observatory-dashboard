@@ -72,6 +72,12 @@ async def run() -> None:
                   session.protocol_version == "2026-07-28", f"got {session.protocol_version}")
             check("server instructions describe the degraded contract",
                   "degraded" in (disc.instructions or ""), (disc.instructions or "")[:60])
+            # A host keeps about 2,048 characters of the instructions and drops the
+            # rest; the text was once cut exactly at the WRITE rule.
+            check("server instructions fit what a host keeps, with the WRITE and SPENDS rules in it",
+                  len(disc.instructions or "") <= 1800
+                  and "WRITE:" in (disc.instructions or "") and "SPENDS:" in (disc.instructions or ""),
+                  f"{len(disc.instructions or '')} characters")
 
             listed = await session.list_tools()
             names = sorted(t.name for t in listed.tools)
@@ -185,6 +191,51 @@ async def run() -> None:
 
             # ---- the capability tools (fabric-interop/0.1): the same answers under
             # the capability names, with the published schemas enforced both ways ----
+            # A REAL estate carries the organization and recorded resources on every
+            # project; the published v0.2.0 item schema lists neither. The synthetic
+            # registry gets both, so the published capability is checked against
+            # the shape an operator's estate has rather than a bare fixture.
+            reg = __import__("paths").REGISTRY / "projects.json"
+            pdoc = json.loads(reg.read_text())
+            for p in pdoc["projects"]:
+                p.update(organization="example-org", organization_source="operator",
+                         organization_why="fixture",
+                         resources=[{"kind": "analytics", "id": "example-property"}])
+            reg.write_text(json.dumps(pdoc))
+            res = await session.call_tool("estate.survey", {"limit": 2})
+            data = payload(res)
+            check("estate.survey: a project carrying organization/resources still meets the published schema",
+                  not res.is_error and len(data.get("projects", [])) == 2,
+                  " ".join(b.text for b in res.content if isinstance(b, mtypes.TextContent))[-200:])
+            check("estate.survey: fields outside the published contract are left to observatory_status",
+                  all("organization" not in p and "resources" not in p for p in data.get("projects", [])))
+            res = await session.call_tool("observatory_status", {"limit": 2, "detail": "full"})
+            check("observatory_status: detail=full still carries the organization the capability omits",
+                  all("organization" in p for p in payload(res).get("projects", [])), str(payload(res))[:160])
+            # The default an agent gets is a bounded SUMMARY page: the unpaged estate
+            # was 254,000 characters on a real machine, which no agent host reads.
+            res = await session.call_tool("observatory_status", {})
+            check("observatory_status: the text copy is compact JSON, not indented",
+                  "\n" not in res.content[0].text and json.loads(res.content[0].text) == payload(res),
+                  res.content[0].text[:80])
+            data = payload(res)
+            rows = data.get("projects", [])
+            check("observatory_status: the default page is bounded and counts the whole scope",
+                  0 < len(rows) <= 25 and data["counts"]["projects"] >= len(rows), str(data.get("counts")))
+            check("observatory_status: default rows are summaries (no description, sites, organization)",
+                  all(not {"description", "sites", "organization", "stack"} & set(p) for p in rows),
+                  str(sorted(rows[0]) if rows else []))
+            check("observatory_status: a summary row keeps every field the published item schema requires",
+                  all({"id", "name", "ownership", "lifecycle", "repositories", "membershipRules"} <= set(p)
+                      for p in rows))
+            res = await session.call_tool("observatory_status", {"limit": 3})
+            data = payload(res)
+            check("observatory_status: a short page names where to continue",
+                  len(data["projects"]) == 3 and data.get("nextCursor") == data["projects"][-1]["id"],
+                  str(data.get("nextCursor")))
+            res = await session.call_tool("observatory_status", {"limit": 3, "cursor": data["nextCursor"]})
+            check("observatory_status: the next page continues after the cursor",
+                  payload(res)["projects"][0]["id"] > data["projects"][-1]["id"])
             res = await session.call_tool("estate.survey", {"scope": {"kind": "project", "value": SYNTHETIC_PROJECT}},
                                           meta={"traceparent": "00-" + "1" * 32 + "-" + "2" * 16 + "-01"})
             data = payload(res)
