@@ -838,7 +838,11 @@ def key_status() -> str:
                 + "\n    ".join(str(f) for f in KEY_FILES)
                 + f"\n  Create one at https://openrouter.ai/keys, then:\n"
                   f"    umask 077 && printf %s '<key>' > {KEY_FILES[0]}")
-    shape = f"{key[:9]}…{key[-4:]}" if len(key) > 16 else "…"
+    # PRESENCE AND LENGTH, plus the provider's own prefix when the key carries
+    # it — never a character of the key itself: a masked tail still lands in a
+    # transcript and narrows a search.
+    prefix = KEY_SHAPES["OPENROUTER_API_KEY"][0]
+    shape = (prefix + "…, " if key.startswith(prefix) else "unrecognised prefix, ") + f"length {len(key)}"
     return f"present ({shape}) from {where}"
 
 

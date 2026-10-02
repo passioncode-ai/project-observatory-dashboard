@@ -140,6 +140,9 @@ def test_the_key_is_never_printed_whole() -> None:
         status = pr.key_status()
         check("key_status shows a shape, never the key", FAKE not in status, status[:80])
         check("key_status still says where it came from", pr.KEY_ENV in status, status[:80])
+        # KEY-12: no character of the key beyond the provider's own prefix.
+        check("key_status carries no tail of the key", FAKE[-4:] not in status, status[:80])
+        check("and says presence and length", f"length {len(FAKE)}" in status, status[:80])
     finally:
         os.environ.pop(pr.KEY_ENV, None)
     p = subprocess.run([PY, "agent/providers.py", "key"],
