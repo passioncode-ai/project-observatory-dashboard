@@ -109,6 +109,37 @@ KNOWN_SOURCES = frozenset({
     "mcp_config_root", "projects", "secret_store", "secrets", "sessions", "wiki"})
 
 
+#: The wallet ceilings `configure budget` sets; each must be above 0 for a model
+#: call to be permitted (`providers.check_budget` refuses at `spent >= ceiling`).
+BUDGET_SETTINGS = ("daily_ceiling", "monthly_ceiling", "velocity_ceiling")
+#: An OpenRouter-style model id: `vendor/model`, optionally `:variant`.
+MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._:-]+")
+
+
+def model_readiness(base: Path | None = None) -> dict:
+    """Whether the agent has a model to ask and a budget to spend, from the
+    workspace's own `config/models.json` — no catalogue, no network, no spend.
+
+    A fresh workspace ships `chain: []` and every ceiling at 0.0, so a newcomer
+    with a key met "no model in the configured chain" or `budget-reached`, a
+    false reason. This names the step that is actually missing."""
+    try:
+        doc = json.loads(((base or home()) / "config" / "models.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        doc = {}
+    chain = [e.get("id") for e in doc.get("chain") or [] if isinstance(e, dict) and isinstance(e.get("id"), str)]
+    wallet = doc.get("wallet") if isinstance(doc.get("wallet"), dict) else {}
+    unset = [k for k in BUDGET_SETTINGS
+             if not isinstance(wallet.get(k), (int, float)) or isinstance(wallet.get(k), bool) or wallet.get(k) <= 0]
+    status = "no-model" if not chain else "no-budget" if unset else "ready"
+    steps = []
+    if not chain:
+        steps.append("project-observatory full configure model chain VENDOR/MODEL[,VENDOR/MODEL...]")
+    steps += [f"project-observatory full configure budget {k} AMOUNT" for k in unset]
+    return {"model_configured": bool(chain), "model_status": status, "chain": chain,
+            "budget_unset": unset, "next": steps}
+
+
 def known_names(section: str) -> frozenset:
     if section == "features":
         return KNOWN_FEATURES

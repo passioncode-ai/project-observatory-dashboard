@@ -138,8 +138,15 @@ class AssistantTests(unittest.TestCase):
              patch.object(dashboard_open,'served_workspace',return_value=None):
             self.assertEqual(self.a.build()['files'],str(index.resolve()))
 
-    def enabled(self):
+    def configure_model(self, chain=('example/model-a',), ceilings=(1.0, 10.0, 0.5)):
+        models=self.a.paths.config_file('models.json')
+        doc=json.loads(models.read_text())
+        doc['chain']=[{'id':m,'why':'configured'} for m in chain]
+        doc['wallet'].update(daily_ceiling=ceilings[0],monthly_ceiling=ceilings[1],velocity_ceiling=ceilings[2])
+        models.write_text(json.dumps(doc))
+    def enabled(self, model=True):
         from contextlib import ExitStack
+        if model:self.configure_model()
         ctx=ExitStack()
         ctx.enter_context(patch.object(self.a.configuration,'enabled',return_value=True))
         ctx.enter_context(patch.object(self.a.providers,'have_key',return_value=True))
@@ -305,6 +312,26 @@ class AssistantTests(unittest.TestCase):
                 kill.assert_not_called()
             self.assertEqual(json.loads(out.getvalue())['error'], 'unknown-job')
         self.assertNotEqual(self.a.jobs.get(doc['id'])['status'], 'cancelled')
+
+    def test_status_names_what_the_model_still_needs(self):
+        # A fresh workspace has no model chain and every ceiling at 0: a newcomer
+        # with a key got `budget-reached` or "no model in the configured chain".
+        doc=self.a.status()
+        self.assertEqual((doc['model_configured'],doc['model_status']),(False,'no-model'))
+        self.configure_model(ceilings=(0.0,0.0,0.0))
+        doc=self.a.status()
+        self.assertEqual((doc['model_configured'],doc['model_status']),(True,'no-budget'))
+        self.configure_model()
+        self.assertEqual(self.a.status()['model_status'],'ready')
+
+    def test_ask_refuses_an_unconfigured_model_before_any_spend(self):
+        for setup,code in ((lambda:None,'model-unconfigured'),
+                           (lambda:self.configure_model(ceilings=(0.0,10.0,0.5)),'budget-unset')):
+            setup()
+            with self.enabled(model=False),patch.object(self.a.jobs,'start') as start, \
+                 patch.object(self.a.providers,'complete') as complete:
+                with self.assertRaisesRegex(self.a.AssistantError,code):self.a.ask(self.request())
+                start.assert_not_called();complete.assert_not_called()
 
     def test_status_names_a_missing_workspace(self):
         (self.a.paths.HOME / 'workspace.json').unlink()

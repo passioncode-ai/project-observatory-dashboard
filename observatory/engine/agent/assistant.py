@@ -305,6 +305,8 @@ def status(include_projects=True):
          'workspace_available':True,
          'agent_enabled':configuration.enabled('agent','features'),'provider_configured':providers.have_key(),
          'conversations':list_conversations(),'project_count':len(choices),'degraded':[]}
+    ready=configuration.model_readiness()
+    out['model_configured']=ready['model_configured'];out['model_status']=ready['model_status']
     if not out['provider_configured']:out['provider_status']=provider_status()
     if include_projects:out['projects']=choices
     return out
@@ -328,6 +330,11 @@ def ask(raw,span_record=None):
     digest=hashlib.sha256(json.dumps(args,sort_keys=True).encode()).hexdigest()
     if not configuration.enabled('agent','features'):raise AssistantError('agent-disabled')
     if not providers.have_key():raise AssistantError('provider-unconfigured')
+    # Before any job or spend: a chain and ceilings are configuration, and a fresh
+    # workspace has neither (`budget-reached` stays for a ceiling really spent).
+    model=configuration.model_readiness()['model_status']
+    if model=='no-model':raise AssistantError('model-unconfigured')
+    if model=='no-budget':raise AssistantError('budget-unset')
     with locked():
         index=read(folder()/'requests.json',{'requests':{}}).get('requests')
         if not isinstance(index,dict):raise AssistantError('unreadable-history')

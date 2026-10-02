@@ -443,6 +443,8 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
   version / doctor             the engine version; workspace health, sources and backups
+  configure model chain ID[,ID]        the assistant's model chain (vendor/model ids)
+  configure budget CEILING AMOUNT      daily_ceiling | monthly_ceiling | velocity_ceiling
   local                        filesystem → registry → events → findings → dashboard
   dashboard                    rebuild the dashboard pages only
   open [--serve|--stop]        open the dashboard in a browser (builds it if needed); stop the server
