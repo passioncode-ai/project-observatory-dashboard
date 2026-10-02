@@ -262,7 +262,7 @@ def test_an_unkept_loss_is_a_warning_that_names_the_command() -> None:
           str([f["severity"] for f in got]))
     if got:
         check("and the action names the command that keeps it",
-              "./observatory.py lost" in got[0]["action"], got[0]["action"][:120])
+              "project-observatory full lost" in got[0]["action"], got[0]["action"][:120])
 
 
 def test_a_kept_loss_drops_to_info_and_names_the_record() -> None:

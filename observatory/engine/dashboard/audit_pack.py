@@ -38,7 +38,7 @@ def strip_comments(css: str) -> str:
 
 def main() -> int:
     if not PAGE.exists():
-        print(f"no page at {PAGE} — run `./observatory.py dashboard`", file=sys.stderr)
+        print(f"no page at {PAGE} — run `project-observatory full dashboard`", file=sys.stderr)
         return 1
     html = PAGE.read_text(encoding="utf-8")
     css_raw = html[html.index("<style>") + 7:html.index("</style>")]

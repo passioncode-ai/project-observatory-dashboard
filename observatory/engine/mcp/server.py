@@ -26,7 +26,7 @@ owns identity and a memory kernel that manufactures it has none.
 
 The shebang points at the project venv on purpose: the declared tenancy is one
 operator on one machine, and the manifest's `executableRef` names this file
-directly. Run `./observatory.py setup` on a fresh clone to create it.
+directly. `project-observatory full init` creates it.
 """
 from __future__ import annotations
 import asyncio, json, re, sqlite3, sys, pathlib
@@ -640,7 +640,7 @@ def observatory_findings(
         return {"findings": [], "counts": {},
                 "degraded": [{"source": "findings",
                               "reason": "no findings have been built; run "
-                                        "`./observatory.py findings`"}]}
+                                        "`project-observatory full findings`"}]}
     doc = json.loads(f.read_text(encoding="utf-8"))
     order = {"critical": 0, "warning": 1, "info": 2}
     floor = 3 if severity == "all" else order[severity]
@@ -955,7 +955,7 @@ def resource_dashboard() -> str:
         # page and read as "the estate has nothing to show".
         return ("<!doctype html><meta charset=\"utf-8\"><title>not built</title>"
                 "<p>The dashboard has not been built on this machine. Run "
-                "<code>./observatory.py dashboard</code>.</p>")
+                "<code>project-observatory full dashboard</code>.</p>")
     return f.read_text(encoding="utf-8")
 
 

@@ -152,7 +152,7 @@ def hold(identity: str) -> tuple[object | None, str]:
     interleaved with a writer. Returns (handle, explanation); a None handle is
     never fatal — the caller decides, and the gate proceeds unleased and says so.
 
-    Why a reader needs it at all: `./observatory.py check` reads `registry/*.json`
+    Why a reader needs it at all: `project-observatory full check` reads `registry/*.json`
     across about ten minutes, and the tick rewrites those files one atomic
     replace at a time. A tick landing mid-gate therefore lets a cross-file check
     read the NEW `relations.json` against the OLD `projects.json` and report a

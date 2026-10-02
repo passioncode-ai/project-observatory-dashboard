@@ -748,7 +748,7 @@ if __name__ == "__main__":
             for key, was, now_ in drift:
                 print(f"receipts describe {key}={was!r}, it is now {now_!r}",
                       file=sys.stderr)
-            print("re-run `./observatory.py probes` to refresh them", file=sys.stderr)
+            print("re-run `project-observatory full probes` to refresh them", file=sys.stderr)
     else:
         atomic.write_text(RECEIPTS,
                           json.dumps(report, indent=2, ensure_ascii=False) + "\n")

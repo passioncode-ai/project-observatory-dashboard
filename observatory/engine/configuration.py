@@ -72,7 +72,7 @@ def validate_workspace(base: Path | None = None, *, required: bool = False) -> d
         raise ConfigurationError("Workspace marker must not be a symbolic link")
     if not marker.exists():
         if required:
-            raise ConfigurationError("Workspace is not initialized; run observatory.py init")
+            raise ConfigurationError("Workspace is not initialized; run project-observatory full init")
         return {}
     doc = read_json(marker)
     v = doc.get("format_version")

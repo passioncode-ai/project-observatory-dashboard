@@ -110,7 +110,7 @@ def cmd_ack(a) -> int:
     f = ids[a.id]
     print(f"silenced: {a.id}\n  [{f['severity']}] {f['title'][:90]}\n"
           f"  until {a.until or 'its cause is gone'} — reason: {a.why.strip()[:100]}\n"
-          f"  the board withholds it from the next build; `./observatory.py findings` now, "
+          f"  the board withholds it from the next build; `project-observatory full findings` now, "
           f"or the tick within 30 minutes")
     return 0
 

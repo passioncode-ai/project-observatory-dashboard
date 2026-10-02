@@ -336,7 +336,7 @@ def act_reveal(body: dict) -> dict:
         raise ValueError("path and name are both required")
     scan = paths.SCRATCH / "env.json"
     if not scan.is_file():
-        raise ValueError("no env scan on this machine — run `./observatory.py env` "
+        raise ValueError("no env scan on this machine — run `project-observatory full env` "
                          "first; this reads the inventory, not the disk")
     doc = json.loads(scan.read_text(encoding="utf-8"))
     rec = next((f for f in doc.get("files", []) if f.get("path") == path), None)
@@ -360,7 +360,7 @@ def act_reveal(body: dict) -> dict:
         if n == name:
             return {"path": path, "name": name, "value": v}
     raise LookupError(f"{name} was in the scan and is not in the file now — "
-                      f"rescan with `./observatory.py env`")
+                      f"rescan with `project-observatory full env`")
 
 
 def _toggle(body: dict, disabled: bool) -> dict:
@@ -504,7 +504,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         page, ctype = self._page_for(route)
         if page is not None and ctype != "text/html":
             if not page.is_file():
-                self._send(404, {"error": "the pages have not been built — ./observatory.py dashboard"})
+                self._send(404, {"error": "the pages have not been built — project-observatory full dashboard"})
                 return
             body = page.read_bytes()
             self.send_response(200)
@@ -517,7 +517,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if page is not None:
             if not page.is_file():
                 self._send(404, {"error": "the dashboard has not been built — "
-                                          "./observatory.py dashboard"})
+                                          "project-observatory full dashboard"})
                 return
             html = page.read_text(encoding="utf-8")
             # THE TOKEN IS GIVEN TO THE PAGE, not typed by a person. It is not a

@@ -21,7 +21,7 @@ def main() -> int:
     for name, _t, _k in shell.PAGES:
         page = paths.DASHBOARD_DIR / f"{name}.html"
         if not page.is_file():
-            print(f"  {name}: not built — ./observatory.py dashboard")
+            print(f"  {name}: not built — project-observatory full dashboard")
             bad += 1
             continue
         p = subprocess.run(["node", str(ROOT / "dashboard/smoke.js"), str(page)],

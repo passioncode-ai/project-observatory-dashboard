@@ -164,7 +164,7 @@ def scan_heroku_apps(pepper: str) -> tuple[list[dict], list[dict]]:
     except (OSError, ValueError) as exc:
         return [], [{"source": "heroku", "reason": f"{type(exc).__name__} reading {raw.name}",
                      "effect": "no application list, so nothing to ask about; "
-                               "run `./observatory.py heroku` first"}]
+                               "run `project-observatory full heroku` first"}]
     if len(apps) > MAX_APPS:
         return [], [{"source": "heroku", "reason": f"{len(apps)} applications is past "
                                                    f"the {MAX_APPS} this scan will walk",

@@ -52,7 +52,7 @@ def access_token(key_file: pathlib.Path, scope: str, now: float | None = None) -
         from google.auth import crypt
     except ImportError:
         raise RuntimeError("google-auth is not installed in this venv — "
-                           "`./observatory.py deps` installs it") from None
+                           "`python -m pip install 'project-observatory[full]'` installs it") from None
 
     issued = int(t)
     claims = {"iss": info["client_email"], "scope": scope,

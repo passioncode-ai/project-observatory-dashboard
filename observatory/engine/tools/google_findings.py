@@ -144,7 +144,7 @@ def findings(doc: dict | None, today: str = "") -> list[dict]:
                 "detail": (f"Measured {scanned}; the scan is gated to twice a day, so this "
                            f"means the tick has not run rather than that Google was quiet. "
                            f"Every traffic figure on the page is that old."),
-                "action": "`./observatory.py google --force`, or the refresh button on the traffic page",
+                "action": "`project-observatory full google --force`, or the refresh button on the traffic page",
             })
     return out
 

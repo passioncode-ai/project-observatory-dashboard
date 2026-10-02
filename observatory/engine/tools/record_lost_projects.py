@@ -71,7 +71,7 @@ def lost_from_sessions() -> tuple[list[dict], str | None]:
     """
     f = paths.SCRATCH / "sessions.json"
     if not f.is_file():
-        return [], f"{f} does not exist — `./observatory.py scan-sessions` writes it"
+        return [], f"{f} does not exist — `project-observatory full scan-sessions` writes it"
     try:
         doc = json.loads(f.read_text(encoding="utf-8"))
     except (ValueError, OSError) as exc:

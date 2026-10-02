@@ -632,7 +632,7 @@ def write_shape_report(rows: list[dict] | None = None) -> pathlib.Path:
     MERGED, not replaced: two processes see two different environments, and a
     run that cannot see a variable must not erase another run's true observation
     of it. A run that CAN see one overwrites its row with a fresh stamp, so
-    fixing the shell clears the finding on the next `./observatory.py key`.
+    fixing the shell clears the finding on the next `project-observatory full key`.
     """
     rows = shape_report() if rows is None else rows
     f = _shapes_file()
