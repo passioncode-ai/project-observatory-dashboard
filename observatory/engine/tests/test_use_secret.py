@@ -335,9 +335,31 @@ def test_what_the_scan_could_not_open_is_named() -> None:
           and "no reader" in rows[0]["detail"], str(rows)[:200])
 
 
+def test_a_flag_after_the_names_and_a_missing_program_are_typed() -> None:
+    """`run demo NAME --env local -- cmd` put `--env` into the command and ran it;
+    a program that does not exist ended in a traceback, after an audit row that
+    recorded a use that never happened."""
+    d, env = estate()
+    audit = pathlib.Path(env["OBSERVATORY_STATE"]) / "logs" / "secret-use.jsonl"
+    p = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "run", "demo", "DEMO_API_KEY",
+                        "--env", "local", "--", "true"], env=env, capture_output=True, text=True, timeout=60)
+    check("a flag after the names is refused", p.returncode == 2, f"exit {p.returncode}")
+    check("naming the order flags go in", "run --env ENV PROJECT NAME -- COMMAND" in p.stderr, p.stderr[-200:])
+    p = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "run", "demo", "DEMO_API_KEY",
+                        "--", "observatory-no-such-program-example"], env=env, capture_output=True, text=True, timeout=60)
+    check("a missing program exits 127", p.returncode == 127, f"exit {p.returncode}")
+    check("and says which", "command not found: observatory-no-such-program-example" in p.stderr
+          and "Traceback" not in p.stderr, p.stderr[-200:])
+    rows = [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()] if audit.is_file() else []
+    check("the audit says the use failed rather than happened",
+          any(r.get("action") == "use-failed" for r in rows), str(rows)[-300:])
+    check("and no value reached the audit", PLANTED not in (audit.read_text(encoding="utf-8") if audit.is_file() else ""))
+
+
 if __name__ == "__main__":
     print("a secret reaches the command and not the transcript\n")
-    for fn in (test_the_value_reaches_the_command,
+    for fn in (test_a_flag_after_the_names_and_a_missing_program_are_typed,
+               test_the_value_reaches_the_command,
                test_and_not_the_transcript,
                test_a_value_split_across_a_buffer_is_still_removed,
                test_a_name_that_resolves_nowhere_says_where_it_looked,

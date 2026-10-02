@@ -2964,8 +2964,8 @@
       "path": "tests/test_use_secret.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fb65df247ed76ac581b9cc631fd87d9ca41d527f6b22f4e82bb771c28fc0f7df",
-      "bytes": 20095
+      "export_sha256": "023c03b31a68630630c94a1c5f3b745e47307b55e21c6502538cd4d9e6e31c8f",
+      "bytes": 21830
     },
     {
       "path": "tests/test_validator_rules.py",
@@ -3708,8 +3708,8 @@
     {
       "path": "tools/use_secret.py",
       "source_sha256": "8836e5826c78ca12bd852fd8f7b036c49db3b41383209d829f321318afc76bc1",
-      "export_sha256": "92c0cf6c6bb24a982e37ca283ad849663c72421945a8746f5bdab8fe67949b5c",
-      "bytes": 16730,
+      "export_sha256": "4cf377eec8996249665e066c06871d14faee7cdb275b80c53999756b65903e39",
+      "bytes": 17719,
       "python_comments_removed": 14,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
