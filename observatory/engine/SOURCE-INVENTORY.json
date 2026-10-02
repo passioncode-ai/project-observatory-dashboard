@@ -376,8 +376,8 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "90e6fea049f42e8b332f614d731c7247e4414eca4af80245d9998cd67da9f644",
-      "bytes": 8478,
+      "export_sha256": "1846667ffde217f8804d8258fe988dd28d09b0ec23a607b73bb44814d63a371c",
+      "bytes": 10261,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -3038,8 +3038,8 @@
     {
       "path": "tests/test_workspace.py",
       "source_sha256": "80e71bbefcc5361d23e3b1313518f9fa0f953130c8dd5ec108ce75de1841c6eb",
-      "export_sha256": "04f5ff6a6f9836dbe43f10fc2215d0adbfb825cefc89427b9bb8a7e5f31dcc20",
-      "bytes": 11316,
+      "export_sha256": "4418593bf84ed41f392bf2c94f32ee2e36cecd0a1a7ed8f64beb937942256500",
+      "bytes": 14109,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -3048,8 +3048,8 @@
     {
       "path": "tests/test_workspace_boundaries.py",
       "source_sha256": "542a2e1eea03dbcce41146fef9b3cca335a690452d5a4ffc5e112150a3b4de68",
-      "export_sha256": "2a8b911baceee1e26011e67f113a64763f8932da27642e33dd3b94af611a9255",
-      "bytes": 15257,
+      "export_sha256": "000f9b385e2c9e95a3caca82619c3595fa8bd38d21574a68740f7797a38f6455",
+      "bytes": 15233,
       "python_comments_removed": 1,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -3738,8 +3738,8 @@
     {
       "path": "workspace.py",
       "source_sha256": "40d5ac9aafad0ab2485f03b86d84a0f192103a284f27309dfc2bf798f18071ef",
-      "export_sha256": "8359a459d5afd18fc5531854621f43d459d35386093ebfab2aae713ddc88b03c",
-      "bytes": 30842,
+      "export_sha256": "8320d97f1d2338803e6241b78242f64c5b457c1bcf21ea5e693941bff83cfad9",
+      "bytes": 31126,
       "python_comments_removed": 3,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,

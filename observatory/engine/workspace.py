@@ -486,6 +486,9 @@ def main(argv: list[str]) -> int:
             doc = config.load(base)
             if not re_safe_name(a.name):
                 raise config.ConfigurationError("Invalid configuration name")
+            if a.section in ("integrations", "features", "sources") and a.name not in config.known_names(a.section):
+                raise config.ConfigurationError(
+                    f"Unknown {a.section[:-1]}: {a.name}; known: {', '.join(sorted(config.known_names(a.section)))}")
             if a.section == "storage":
                 if a.name not in config.STORAGE_SETTINGS:
                     raise config.ConfigurationError(f"Unknown storage setting: {a.name}; known: {', '.join(config.STORAGE_SETTINGS)}")

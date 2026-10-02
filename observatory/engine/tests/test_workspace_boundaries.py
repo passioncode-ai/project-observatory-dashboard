@@ -88,7 +88,7 @@ class WorkspaceBoundaryTests(unittest.TestCase):
         shutil.rmtree(base / "config")
         (base / "config").symlink_to(external, target_is_directory=True)
         with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
-            result = workspace.main(["configure", "integrations", "synthetic_provider", "true"])
+            result = workspace.main(["configure", "integrations", "github", "true"])
         self.assertEqual(result, 2)
         self.assertEqual((external / "settings.json").read_bytes(), original)
 
@@ -167,7 +167,7 @@ class WorkspaceBoundaryTests(unittest.TestCase):
         with self.assertRaises(configuration.ConfigurationError):
             workspace.initialize(base)
         with contextlib.redirect_stderr(io.StringIO()):
-            result = workspace.main(["configure", "integrations", "synthetic_provider", "true"])
+            result = workspace.main(["configure", "integrations", "github", "true"])
         self.assertEqual(result, 2)
         after = {str(p.relative_to(base)): p.read_bytes() for p in base.rglob("*") if p.is_file()}
         self.assertEqual(before, after)
