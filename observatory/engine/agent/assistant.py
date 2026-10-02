@@ -167,7 +167,7 @@ def evidence(project_id=None):
             if not isinstance(rows,list) or any(not isinstance(r,dict) for r in rows):raise ValueError()
             return rows
         except (ValueError,OSError,AttributeError):
-            degraded.append({'source':name,'reason':'unavailable'});return []
+            degraded.append({'source':name,'code':'unavailable','reason':'unavailable'});return []
     projects=load('projects.json','projects')
     if project_id and not any(p.get('id')==project_id for p in projects):raise AssistantError('unknown-project')
     findings=[f for f in load('findings.json','findings') if not f.get('acked')]
@@ -177,19 +177,21 @@ def evidence(project_id=None):
             about=survey.finding_matcher(project_id)
         except (OSError,ValueError,KeyError,TypeError):
             about=lambda subject:subject==project_id
-            degraded.append({'source':'relations','reason':'repository and site links are unreadable; only findings naming the project itself are included'})
+            degraded.append({'source':'relations','code':'relations-unavailable','reason':'repository and site links are unreadable; only findings naming the project itself are included'})
         findings=[f for f in findings if about(str(f.get('subject') or ''))]
     findings.sort(key=lambda f:SEVERITY.get(f.get('severity'),3))
     if not project_id:
         try:
             doc=json.loads((paths.SCRATCH/'machine.json').read_text())
             disk=doc.get('disk') or {};volume=disk.get('volume') or {};memory=doc.get('memory') or {}
-            facts={k:volume[k] for k in ('free_gb','total_gb','free_percent') if k in volume}
-            facts.update({k:memory[k] for k in ('total_mb','free_mb','swap_used_mb') if k in memory})
+            # Named by what they measure: bare `total_mb`/`free_mb` beside `free_gb`
+            # were read by a model as a second disk volume.
+            facts={'disk_'+k:volume[k] for k in ('free_gb','total_gb','free_percent') if k in volume}
+            facts.update({('memory_'+k if not k.startswith('swap') else k):memory[k] for k in ('total_mb','free_mb','swap_used_mb') if k in memory})
             places=sorted((l for l in disk.get('locations') or [] if isinstance(l,dict)),key=lambda l:-(l.get('gb') or 0))[:5]
             if places:facts['largest_locations']=[{'label':str(l.get('label') or l.get('path') or '')[:80],'gb':l.get('gb')} for l in places]
-            add('Machine disk and memory','store/raw/machine.json',doc.get('measured_at'),facts)
-        except (ValueError,OSError,AttributeError,TypeError):degraded.append({'source':'machine','reason':'unavailable'})
+            add('This machine: startup disk volume and memory','store/raw/machine.json',doc.get('measured_at'),facts)
+        except (ValueError,OSError,AttributeError,TypeError):degraded.append({'source':'machine','code':'unavailable','reason':'unavailable'})
     shown=0
     for f in findings[:MAX_FINDINGS]:
         fields={k:str(f[k])[:400] for k in ('id','severity','type','subject','title','detail','action','first_seen') if k in f}
@@ -197,7 +199,8 @@ def evidence(project_id=None):
         if _size(items)>BUDGET*2//3:items.pop();break
         shown+=1
     if shown<len(findings):
-        degraded.append({'source':'findings','reason':f'{shown} of {len(findings)} findings included, most severe first'
+        degraded.append({'source':'findings','code':'trimmed','shown':shown,'total':len(findings),
+                         'reason':f'{shown} of {len(findings)} findings included, most severe first'
                          +('' if project_id else '; ask about one project for its own')})
     wanted=[p for p in projects if not project_id or p.get('id')==project_id]
     keys=('id','name','lifecycle','activity_tier','last_activity_on','description')
@@ -208,8 +211,9 @@ def evidence(project_id=None):
         if _size(items)>BUDGET:items.pop();break
         shown+=1
     if shown<len(wanted):
-        degraded.append({'source':'projects','reason':f'{shown} of {len(wanted)} projects included; select a project for detail'})
-    if any(not i.get('measured_at') for i in items):degraded.append({'source':'timestamps','reason':'some snapshots have no measurement time; freshness is unknown'})
+        degraded.append({'source':'projects','code':'trimmed','shown':shown,'total':len(wanted),
+                         'reason':f'{shown} of {len(wanted)} projects included; select a project for detail'})
+    if any(not i.get('measured_at') for i in items):degraded.append({'source':'timestamps','code':'freshness-unknown','reason':'some snapshots have no measurement time; freshness is unknown'})
     return {'items':items,'degraded':degraded}
 
 def check_answer(doc,items):
@@ -252,8 +256,18 @@ def status(include_projects=True):
          'workspace_available':True,
          'agent_enabled':configuration.enabled('agent','features'),'provider_configured':providers.have_key(),
          'conversations':list_conversations(),'project_count':len(choices),'degraded':[]}
+    if not out['provider_configured']:out['provider_status']=provider_status()
     if include_projects:out['projects']=choices
     return out
+
+def provider_status():
+    """Why no provider is usable, carrying no character of any key: `key_status()` prints
+    the key's first and last characters, and this line is shown in an app window."""
+    try:
+        key,_=providers.read_key()
+    except providers.Fatal as exc:
+        return 'refused: '+str(exc).split('\n')[0][:200]
+    return 'absent' if not key else 'present'
 
 def prune_requests(index):
     """Request ids kept for de-duplication while their job is: a request whose job is gone
