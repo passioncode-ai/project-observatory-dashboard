@@ -128,7 +128,8 @@ carried. The CLI's `full assistant` gained `delete`; MCP gained `observatory_ove
 
 ## Open work and the exact next task
 
-1. **Human step — the contributor's CLA box on the pull request.** Automation never ticks it.
+1. The pull request itself — opening it is the CLA agreement; there is nothing to tick (organisation
+   decision of 2026-10-02).
 2. Then: required checks green → merge → release PR 0.11.0 (version files, CHANGELOG,
    inventory) → tag → GitHub release with wheel and `SHA256SUMS` → `full update` on the
    machine → build the app from the tag and install it; check the app against the installed
