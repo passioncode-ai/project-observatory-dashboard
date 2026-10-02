@@ -91,6 +91,41 @@ INTERFACE_SETTINGS = {"locale": ("en", "ru")}
 #: backups are written to (backup_vault.root_info); an absolute path.
 STORAGE_SETTINGS = ("backups",)
 
+#: Every switch and source the engine reads. `configure` refuses any other name:
+#: a typo used to be answered "configured" and then did nothing. The workspace
+#: suite derives the names the code actually reads (`enabled(...)`, `source_path`,
+#: the tick's step gates, every `configure ...` command the engine prints) and
+#: fails when one is missing here. A metric plugin's `integration:KEY` adds itself.
+KNOWN_INTEGRATIONS = frozenset({
+    "bitbucket", "cloudflare", "cloudflare_analytics", "domains", "ga4", "git_remotes",
+    "github", "google", "heroku", "mcp", "openrouter", "remote_env", "search_console",
+    "sessions", "wiki"})
+KNOWN_FEATURES = frozenset({
+    "agent", "auto_cleanup", "companion_remediation", "embeddings", "fixture_cleanup",
+    "machine_watch", "notifications", "probe_fixture", "registry_history", "retention",
+    "scheduler", "wiki_projection"})
+KNOWN_SOURCES = frozenset({
+    "cloudflare_snapshot", "companion_db", "companion_home", "domain_export", "gateway_root",
+    "mcp_config_root", "projects", "secret_store", "secrets", "sessions", "wiki"})
+
+
+def known_names(section: str) -> frozenset:
+    if section == "features":
+        return KNOWN_FEATURES
+    if section == "sources":
+        return KNOWN_SOURCES
+    if section != "integrations":
+        raise ValueError(section)
+    names = set(KNOWN_INTEGRATIONS)
+    for manifest in sorted((Path(__file__).resolve().parent / "plugins").glob("*.json")):
+        try:
+            requires = json.loads(manifest.read_text(encoding="utf-8")).get("requires") or []
+        except (OSError, ValueError, AttributeError):
+            continue
+        names |= {r.split(":", 1)[1] for r in requires
+                  if isinstance(r, str) and r.startswith("integration:")}
+    return frozenset(names)
+
 def interface_locale(base: Path | None = None) -> str:
     """The dashboard's language for this workspace: `interface.locale`, else English."""
     return load(base).get("interface", {}).get("locale", "en")

@@ -177,6 +177,48 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn('project-observatory full configure sources projects',out)
         self.assertNotIn('purity checks',out)
         self.assertNotIn('\033[',out)      # colour is for a terminal, not a pipe
+    def test_an_unknown_switch_or_source_name_is_refused_with_the_known_ones(self):
+        # A typo used to be answered "configured" and then did nothing at all.
+        self.run_cli('init')
+        file=self.home/'config/settings.json';before=file.read_bytes()
+        for section,name,value,known in (('integrations','githb','true','github'),
+                                         ('features','schedular','true','scheduler'),
+                                         ('sources','projcts',str(self.base),'projects')):
+            p=self.run_cli('configure',section,name,value,ok=False)
+            self.assertEqual(p.returncode,2,p.stdout+p.stderr)
+            self.assertIn(name,p.stderr);self.assertIn(known,p.stderr)
+        self.assertEqual(before,file.read_bytes())
+        self.run_cli('configure','integrations','github','true')
+        # A plugin's `integration:KEY` is a switch too.
+        self.run_cli('configure','integrations','ga4','true')
+    def test_every_switch_and_source_the_engine_reads_is_declared(self):
+        # The refusal above is only safe while the declared names cover every name
+        # the code reads or tells a user to configure; this keeps the two together.
+        import re
+        sys.path.insert(0,str(ROOT))
+        import configuration
+        read={'integrations':set(),'features':set(),'sources':set()}
+        for path in ROOT.rglob('*'):
+            if path.suffix not in {'.py','.sh','.js','.json'} or 'tests' in path.relative_to(ROOT).parts or not path.is_file():
+                continue
+            text=path.read_text(errors='replace')
+            for m in re.finditer(r'enabled\(\s*["\']([a-z_0-9]+)["\'](\s*,\s*(?:section=)?["\'](integrations|features)["\'])?',text):
+                read[m.group(3) or 'integrations'].add(m.group(1))
+            for m in re.finditer(r'configure (integrations|features|sources) ([a-z_0-9]+)\b',text):
+                read[m.group(1)].add(m.group(2))
+            for m in re.finditer(r'source_path\(\s*["\']([a-z_0-9]+)["\']',text):
+                read['sources'].add(m.group(1))
+        # The tick's step gates, read as literals (importing tick_lease has side effects).
+        import ast
+        tree=ast.parse((ROOT/'tools/tick_lease.py').read_text())
+        for node in ast.walk(tree):
+            if isinstance(node,ast.Assign) and isinstance(node.targets[0],ast.Name) \
+                    and node.targets[0].id in ('FEATURE_STEPS','INTEGRATION_STEPS'):
+                section='features' if node.targets[0].id=='FEATURE_STEPS' else 'integrations'
+                read[section]|=set(ast.literal_eval(node.value).values())
+        for section,names in read.items():
+            self.assertTrue(names,section)
+            self.assertEqual(names-configuration.known_names(section),set(),section)
     def test_independent_homes(self):
         self.run_cli('init');first=json.loads((self.home/'workspace.json').read_text())
         other=self.base/'other';self.env['OBSERVATORY_HOME']=str(other)
