@@ -57,6 +57,11 @@ closures no longer produce server tracebacks; unrelated I/O failures remain visi
 Test-first receipt and exact next task:
 [runs/2026-10-01-client-disconnect](runs/2026-10-01-client-disconnect/README.md).
 
+**Status 2026-10-02: 0.11.0** — the native Mac app and shared assistant, an agent channel
+an agent can read (`observatory_overview`, bounded and paged tools, the survey contract kept),
+and the dashboard audit; companion plugin `observatory-log` 0.13.1. Record, REQ table and the
+exact next task: [runs/2026-10-02-app-agent-audit](runs/2026-10-02-app-agent-audit/README.md).
+
 **Status 2026-10-01: 0.10.0 released** — the first release under `AGPL-3.0-only OR
 LicenseRef-PassionCode-Commercial`, with honest absence, the Cloudflare presets, suppression
 identity and the reset-date fix; companion plugin `observatory-log` 0.13.0. One operator machine
