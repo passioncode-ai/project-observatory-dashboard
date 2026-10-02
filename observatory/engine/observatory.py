@@ -440,7 +440,9 @@ WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migr
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
+  version / doctor             the engine version; workspace health, sources and backups
   local                        filesystem → registry → events → findings → dashboard
+  dashboard                    rebuild the dashboard pages only
   open [--serve|--stop]        open the dashboard in a browser (builds it if needed); stop the server
   agent install|status|uninstall  Claude Code plugin; install turns auto-update on
   check [runner options]       isolated synthetic regression suites; no live providers
@@ -461,6 +463,11 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   machine [--disk] [--explain PID]   processes by origin, memory, disk; why one process runs
   cleanup [--apply [--include manual]]  plan, or remove what loses nothing; manual tier archives first
   tick                         configured cycle; scheduler must be explicitly enabled
+  assistant ACTION             the app's JSON protocol (observatory-assistant/1) on stdin/stdout
+  scan-mcp                     the MCP servers your agent configs declare (integration mcp)
+
+`project-observatory full-path` (outside `full`) prints the engine directory, where the
+credential tools live: tools/vault.py, tools/use_secret.py, tools/install_key.py.
 
 Local excludes metric plugins, provider collectors, secret scans and model calls.
 Plugin execution remains an explicit command and can use enabled integrations.
@@ -780,7 +787,35 @@ def tree_state() -> tuple[str, set[str], dict[str, str]] | None:
     return digest, set(st.stdout.splitlines()), per_file
 
 
+class _Plain:
+    """A text stream that drops ANSI colour codes. Colour is for a terminal; a log
+    file or a pipe gets the words alone (`NO_COLOR` asks for the same on a terminal)."""
+
+    _CODE = re.compile(r"\033\[[0-9;]*m")
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    def write(self, text):
+        return self._stream.write(self._CODE.sub("", text))
+
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+
+def _plain_unless_terminal() -> None:
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name)
+        try:
+            colour = stream.isatty() and not os.environ.get("NO_COLOR")
+        except (AttributeError, ValueError):
+            colour = False
+        if not colour and not isinstance(stream, _Plain):
+            setattr(sys, name, _Plain(stream))
+
+
 def main(argv: list[str]) -> int:
+    _plain_unless_terminal()
     try:
         public = public_profile()
     except configuration.ConfigurationError as exc:
@@ -1090,10 +1125,13 @@ def _run_group(name: str, steps: list[str], expect_skipped: list[str] | None,
               file=sys.stderr)
         return 1
     if failed_at is not None:
-        print(f"\n\033[31m{failed_at} failed, and the purity checks above ran anyway "
-              f"— a gate that stops checking itself the moment a step fails is a gate "
-              f"whose guarantee is strongest when nothing is wrong.\033[0m",
-              file=sys.stderr)
+        # The purity sentence belongs to a group that checks the tree; after a
+        # user's `local` it only buries the failed step's own message.
+        tail = (", and the purity checks above ran anyway — a gate that stops checking "
+                "itself the moment a step fails is a gate whose guarantee is strongest "
+                "when nothing is wrong." if name in NON_MUTATING else
+                " — its message above says what to do.")
+        print(f"\n\033[31m{failed_at} failed{tail}\033[0m", file=sys.stderr)
         return failed_code
     print("\n\033[32mok\033[0m")
     return 0

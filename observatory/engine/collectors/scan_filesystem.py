@@ -256,6 +256,16 @@ EXCLUDED_PREFIXES, EXCLUDED_NAMES = exclusions()
 #
 # Only when there is something to lose: an estate with no git folder at all is
 # legitimately scannable without git.
+# The source itself first: a new user who runs `full local` before naming a
+# projects folder met a FileNotFoundError traceback from `os.listdir` below. The
+# placeholder path (`<home>/unconfigured/projects`) is what an unset source reads as.
+if not DATA.is_dir():
+    print(f"scan_filesystem: the projects source {DATA} "
+          f"{'is not a directory' if DATA.exists() else 'does not exist'}.\n"
+          f"  Point it at the folder that holds your project checkouts:\n"
+          f"  project-observatory full configure sources projects PATH",
+          file=sys.stderr)
+    sys.exit(2)
 _probe, _why = sh(["git", "--version"])
 if _why:
     _git_folders = [e for e in os.listdir(DATA)

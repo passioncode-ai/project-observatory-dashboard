@@ -368,6 +368,17 @@ def coverage_warnings(doc: dict) -> list[dict]:
     """
     sources = doc.get("sources", {})
     out = []
+    # The base scan reads `projects` whatever is switched on, and it cannot be
+    # switched off: no `disable` row, only the fix.
+    projects = sources.get("projects")
+    fix = "project-observatory full configure sources projects PATH"
+    if not projects:
+        out.append({"collector": "filesystem", "source": "projects",
+                    "problem": "not configured; `full local` has no projects to scan", "fix": fix})
+    elif not Path(projects).expanduser().is_dir():
+        out.append({"collector": "filesystem", "source": "projects",
+                    "problem": f"{projects} does not exist or is not a directory; `full local` has no projects to scan",
+                    "fix": fix})
     for (section, name), needed in SOURCE_NEEDS.items():
         if doc.get(section, {}).get(name) is not True:
             continue

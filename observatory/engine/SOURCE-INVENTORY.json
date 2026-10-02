@@ -252,8 +252,8 @@
     {
       "path": "collectors/scan_filesystem.py",
       "source_sha256": "c99bffa1518af8a0bba6600890a7bde2fb1643fb004feb635ffdaacdb64d562c",
-      "export_sha256": "c557e6dda41a313c76d9de1501490a4a85f99ac053036a2e365c5e83a173b9f0",
-      "bytes": 20595,
+      "export_sha256": "9eb67ac8c0745aeedea2512403d1eda4bd9da3b575e2da0e5a544e03cb85c5fd",
+      "bytes": 21187,
       "python_comments_removed": 96,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
@@ -1059,8 +1059,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "b2ddf194ebde59f78ceed17c27aecf0f57f4d29244183af9b9a393ea747de20f",
-      "bytes": 66305,
+      "export_sha256": "b26330e5a7e8afd3da6befc81eed7e7aebbbf6cf24922bda50832b023c6a4417",
+      "bytes": 67933,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -2049,8 +2049,8 @@
       "path": "tests/test_filesystem_scan.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "48fd7eb675c5a4985e14a26b29534d4615efbd678b923af8c331fc6c10c734da",
-      "bytes": 22875
+      "export_sha256": "5f00f43f31268a67aaffa43f36f04e7eda7501d8a65b4b92450abe18a24e4cf6",
+      "bytes": 23978
     },
     {
       "path": "tests/test_finding_rules.py",
@@ -3038,8 +3038,8 @@
     {
       "path": "tests/test_workspace.py",
       "source_sha256": "80e71bbefcc5361d23e3b1313518f9fa0f953130c8dd5ec108ce75de1841c6eb",
-      "export_sha256": "52813dce0ebc12e8c36a8ff5290c5fffd48fbce9914aaaf3b264b27793b888a2",
-      "bytes": 9439,
+      "export_sha256": "04f5ff6a6f9836dbe43f10fc2215d0adbfb825cefc89427b9bb8a7e5f31dcc20",
+      "bytes": 11316,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -3738,8 +3738,8 @@
     {
       "path": "workspace.py",
       "source_sha256": "40d5ac9aafad0ab2485f03b86d84a0f192103a284f27309dfc2bf798f18071ef",
-      "export_sha256": "75c68d2868866cf2071c4f198a414e8ccf550bdf5c69b85ceebac5702201423d",
-      "bytes": 30139,
+      "export_sha256": "8359a459d5afd18fc5531854621f43d459d35386093ebfab2aae713ddc88b03c",
+      "bytes": 30842,
       "python_comments_removed": 3,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
