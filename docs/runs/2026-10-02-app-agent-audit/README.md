@@ -82,3 +82,58 @@ with every row now cut to the published item schema, which the probe needs on an
 estate that records an organization — and the bounded default an agent needs became
 an additive tool, `observatory_overview` (about 5 KB on a 178-project estate against
 165 KB for the unpaged survey). `detail: "summary" | "full"` stays additive.
+
+## What shipped on this branch
+
+Ten commits on `fix/macos-app-audit-20261002`, rebased from #112 onto 0.10.1, with #107
+carried. The CLI's `full assistant` gained `delete`; MCP gained `observatory_overview`.
+
+| Module | Outcome |
+|---|---|
+| Mac app (R1–R12) | done; the native walkthrough below covers every screen |
+| Assistant (R13–R20) | done |
+| MCP (R21–R27) | done; R22 changed shape during the run (decision above) |
+| Server (R28) | done, carried from #107 |
+| Dashboard D2–D18 | done; D1 partial: finding **types** are labelled in both languages and a test fails when a rule's type has none, but titles, details and actions are still English f-strings in the rule modules (about 116 producer sites); translating them needs message ids per rule and is carried |
+
+## Checks actually run
+
+- Engine, full offline matrix: `project-observatory full check` — **198 of 198 suites PASS,
+  5,846 printed assertions, 581 unittest cases, 0 failures** (one run before the dashboard
+  plural fix found 2 failures, `recall` and `conformance_receipt`; both are fixed above and
+  the second full run is the one quoted). Live providers, external MCP host admission and
+  secret rotation stay NOT_RUN, as the runner states.
+- Root: `python -m unittest discover -s tests` — 85 tests OK. `compileall` on 3.14 and the
+  touched modules on 3.11. `update_inventory.py --check` passed. Wheel + `check_package.py`:
+  0 failures, 482 runtime files. `claude plugin validate --strict` on the three manifests:
+  passed. Site checks (`docs/site/check.py --self-test`, `build_article.py --check`,
+  `check_site_interactions.cjs`): passed.
+- Privacy: `check_public_release.py --history --history-ref HEAD` — 0 findings (2,169 history
+  blobs); the tree against a maintainer's private identifier list — 0 findings.
+- Swift: `swift test --package-path macos` — 24 tests, 0 failures. The five new bridge tests
+  were run against the previous bridge first: cancellation hung for 30 s and the test process
+  died of SIGPIPE (signal 13).
+- Native walkthrough (debug build, a copy of a real workspace, a real provider at a cost of
+  well under one cent per answer): first launch; ask with answer rendered without Refresh
+  while the window was inactive; Markdown and sources with ids; disk question answered from
+  the machine snapshot; Settings with engine, protocol and readiness; Russian switched live
+  with the session kept; 900×620 with Send reachable; File menu shows New Conversation, not
+  New Window; delete with a named confirmation; Stop; agent disabled; dashboard for a
+  workspace the server does not serve; and the app pointed at the installed 0.10.1 engine,
+  which now reads «needs version 0.11 or newer … `project-observatory full update`».
+  Screenshots carry real project names and stay in the operator's private repository.
+- Dashboard: rebuilt from the same copy and walked in a browser — 0 console errors on 11
+  pages in Russian, 0 `undefined`/`NaN`, no horizontal scroll at 1440 or 900 px, 0 of 427
+  project links to an unknown project, 67 of 67 subject links landing on a rendered row.
+
+## Open work and the exact next task
+
+1. **Human step — the contributor's CLA box on the pull request.** Automation never ticks it.
+2. Then: required checks green → merge → release PR 0.11.0 (version files, CHANGELOG,
+   inventory) → tag → GitHub release with wheel and `SHA256SUMS` → `full update` on the
+   machine → build the app from the tag and install it; check the app against the installed
+   engine and `observatory_overview` from Claude Code.
+3. Carried: D1 prose localization (message ids in the finding rules);
+   `machine.mcp.refresh` is declared `effect: none` in the published manifest although it
+   probes and writes (a contract revision); the 0.10.1 record's two items (`full update`
+   re-running the server's `--install`; an authenticated update check).
