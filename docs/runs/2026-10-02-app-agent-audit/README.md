@@ -123,7 +123,7 @@ carried. The CLI's `full assistant` gained `delete`; MCP gained `observatory_ove
   which now reads «needs version 0.11 or newer … `project-observatory full update`».
   Screenshots carry real project names and stay in the operator's private repository.
 - Dashboard: rebuilt from the same copy and walked in a browser — 0 console errors on 11
-  pages in Russian, 0 `undefined`/`NaN`, no horizontal scroll at 1440 or 900 px, 0 of 427
+  pages in Russian, 0 `undefined`/`NaN`, no horizontal scroll at 1440 or 900 px, 0 of 428
   project links to an unknown project, 67 of 67 subject links landing on a rendered row.
 
 ## Open work and the exact next task
