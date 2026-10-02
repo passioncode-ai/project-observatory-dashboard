@@ -59,6 +59,9 @@ arbitrary plugin. Inspect the generated `docs/dashboard/index.html` beneath
 `OBSERVATORY_HOME`. These pages contain private project information. They do not
 belong on the public marketing website.
 
+A workspace path must not pass through a symbolic link (on macOS `/tmp` is one):
+`init` refuses such a path and prints the resolved `OBSERVATORY_HOME` to use instead.
+
 `init` is idempotent. It seeds missing initial state only for an empty new home;
 it does not replace an existing installation. Configuration belongs in
 `config/settings.json`; curated overrides and policy files are adjacent.
@@ -71,9 +74,11 @@ for connecting scripts, hooks and MCP.
 `stage` are read as their full names). An app with neither is listed as `unassigned` in
 `registry/environments.json`. Its name is never read as a hint.
 
-`full doctor` also reports whether the scheduled tick is alive (`tick.verdict`). A tick that was
-killed mid-run, for example by a restart, is `interrupted`. When no tick has finished for six hours
-the verdict is `stale`, and when one has held the lock for longer than that it is `running-long`.
+`full doctor` also reports whether the scheduled tick is alive (`tick.verdict`): `disabled` while
+`features.scheduler` is off (the default), `never` before the first tick, `running` during one and
+`ok` after a recent one. A tick that was killed mid-run, for example by a restart, is `interrupted`.
+When no tick has finished for six hours the verdict is `stale`, and when one has held the lock for
+longer than that it is `running-long`.
 The dashboard server's `/health` and every MCP answer's `degraded` list say the same. Its findings
 cannot: they are built by the tick itself, so a dead tick leaves the last report looking current.
 
@@ -93,7 +98,8 @@ the author's accounts or data.
 ## Choose integrations individually
 
 List current settings with `doctor`. Enable a selected integration with
-`project-observatory full configure integrations NAME true`. The collector's
+`project-observatory full configure integrations NAME true`. An unknown integration,
+feature or source name is refused (exit 2) with the list of known names. The collector's
 installed help and source describe its exact input format. Start with the
 smallest account access that can read the requested resources; inventory access
 and token provisioning are different permissions.
@@ -101,6 +107,7 @@ and token provisioning are different permissions.
 | Integration name | Purpose | User-owned setup |
 |---|---|---|
 | `github` | Repository inventory | Authenticate GitHub CLI locally; it enumerates resources visible to that account |
+| `git_remotes` | Whether each checkout is current with its remote: one `git ls-remote` per checkout | None added: it uses each checkout's own remote and SSH keys, asks no credential helper, and reports a remote that wants a password as unreachable |
 | `bitbucket` | Repository inventory | A local Bitbucket credential in the configured secret store |
 | `cloudflare` | Zones and DNS inventory | User-owned account credentials; token administration is separately scoped |
 | `heroku` | Hosting inventory | Local authentication for the intended Heroku account |
@@ -111,6 +118,7 @@ and token provisioning are different permissions.
 | `wiki` | Knowledge-base inventory | Explicit `sources.wiki` |
 | `openrouter` | Key and usage inventory | A locally supplied provider credential |
 | `remote_env` | Compare deployed environment metadata | Explicit opt-in to provider environment reads |
+| `ga4`, `search_console`, `cloudflare_analytics` | The traffic metric plugins | The `google` service-account files, or Cloudflare credentials, in `secret_store` |
 
 Metric plugins have their own manifest requirements and opt-ins. Run
 `project-observatory full plugins-check` to validate them and read
@@ -127,6 +135,8 @@ or of the wrong kind under `coverage_warnings`, because a collector without its 
 nothing rather than failing. Each row carries two exact commands: `fix`
 (`project-observatory full configure sources NAME PATH`) and `disable`
 (`project-observatory full configure integrations NAME false`, or `features` for a feature).
+The `projects` source is the exception: the filesystem scan always runs, so a missing
+`projects` source is a row with `fix` and no `disable`.
 
 | Source | What it points at | Read by |
 |---|---|---|
@@ -191,7 +201,7 @@ is not applied, and neither is an expired one; both are reported.
 With `companion_remediation` enabled, each tick replaces known values in the memory companion's
 stores with `[REDACTED:<name>]`, after taking a backup of each store it changes. The first pass reads
 every row; later ticks read only rows added since, per table, and record where they stopped in
-`store/scrub-watermark.json`. That file identifies the value set by an HMAC under the workspace's
+the workspace store's `scrub-watermark.json`. That file identifies the value set by an HMAC under the workspace's
 salt, so it holds nothing a value could be recovered from. A complete pass runs again when the set of
 known values changes, a week after the last complete pass, when a table was emptied or recreated, or
 on `python "$(project-observatory full-path)/tools/scrub_companion.py" --full`. A row edited in place between complete passes is caught by the
@@ -202,7 +212,7 @@ database from its last rowid per table (in `store/raw/leak-scan-state.json`), wi
 for a complete pass. So a sighting is reported once, by the tick that first reads it, and stays on
 record in the leak register until it is settled. `python "$(project-observatory full-path)/tools/scan_leaks.py" --full` reads everything again.
 
-**A local provider key** (`python "$(project-observatory full-path)/tools/install_key.py" --for observatory`,
+**The agent's OpenRouter key** (`python "$(project-observatory full-path)/tools/install_key.py" --for observatory`,
 stdin only) is kept at
 `store/.openrouter-key`, or under `OBSERVATORY_STATE` when you redirect the state. After such a
 redirect, a key left at the old `store/` location is still read, with a note saying where it
@@ -239,7 +249,9 @@ GitHub marketplace `passioncode-ai/project-observatory-dashboard`, installs
 `--no-auto-update`) and writes `OBSERVATORY_ROOT` and `OBSERVATORY_HOME` into
 Claude Code's user settings for the hooks. `full agent status` shows the
 installed and shipped versions and anything the hooks would miss; `full agent
-uninstall` reverses it. A directory-sourced marketplace from an earlier setup is
+uninstall` reverses it. The hook environment it writes is `OBSERVATORY_ROOT`
+(the engine), `OBSERVATORY_HOME` (the workspace) and `OBSERVATORY_PYTHON` (the
+interpreter that runs the hooks). A directory-sourced marketplace from an earlier setup is
 replaced. When another channel already installs and enables the plugin under
 its own id (the PassionCode launcher installs `observatory-log@passioncode`),
 `install` leaves that copy alone, adds no second id (two copies would fire every
@@ -252,8 +264,15 @@ into any agent configuration; only this explicit command does.
 `observatory` (the short name of `project-observatory`) with no arguments opens the
 dashboard of the workspace in `OBSERVATORY_HOME`, or the default one; with no workspace yet it says
 how to create one. Open it explicitly with `project-observatory full open` (local files) or
-`project-observatory full open --serve` (loopback server, needed for the keys
-page's live actions).
+`project-observatory full open --serve` (a read-only loopback server on
+127.0.0.1:47311; it answers GET only and changes nothing).
+
+The Keys and ENV pages' buttons — mint, cap or revoke a provider key, mark a leak,
+reveal one inventoried value — act only when the pages are served by the
+token-guarded credential server, `python "$(project-observatory full-path)/tools/keyserver.py"`
+(127.0.0.1:7717 by default; `--port N`). Opened any other way, those pages hand over
+the command instead. A vault value is never put or rotated from a page; that is
+`tools/vault.py` on stdin.
 
 The server `--serve` starts runs detached, so closing the terminal does not end
 it. Stop it with the same port:
@@ -272,8 +291,27 @@ stops it and keeps it off.
 
 Settings under `features` control scheduler, agent interpretation, embeddings,
 notifications, retention, fixture cleanup, wiki projection, memory remediation
-and private registry history. Their default is disabled. Configure model
-selection and a budget before enabling reasoning or embeddings. On macOS the
+and private registry history. Their default is disabled. A fresh workspace has no
+model chain and every budget ceiling at 0, so the agent and the assistant refuse
+(`model-unconfigured`, `budget-unset`) until both are set:
+
+```sh
+project-observatory full configure model chain VENDOR/MODEL[,VENDOR/MODEL...]   # tried in order
+project-observatory full configure budget daily_ceiling AMOUNT                 # also monthly_ceiling, velocity_ceiling
+```
+
+Ceilings are non-negative numbers in the wallet's denomination, written to
+`config/models.json`; all three must be above zero. To use the assistant (the Mac
+app's assistant window, `full assistant`, or the MCP `observatory_assistant_ask`):
+
+1. `project-observatory full configure features agent true`
+2. the OpenRouter key, on stdin: `python "$(project-observatory full-path)/tools/install_key.py" --for observatory`
+3. `project-observatory full configure model chain VENDOR/MODEL`
+4. the three `full configure budget …` ceilings above
+
+With the agent on, `full doctor` shows an `agent` section with `model_status` and the
+`next` commands still missing; `project-observatory full assistant status` says the same
+without spending. On macOS the
 two launchd installers write workspace-specific jobs only after the scheduler
 is explicitly enabled; Linux can run `project-observatory full tick` under a
 supervisor chosen by the user. Do not create duplicate writers for one home.
@@ -404,7 +442,9 @@ project-observatory full doctor
 ```
 
 The first command previews changes. Apply creates a private snapshot and
-validates the staged upgrade. The original `full backup` command retains its
+validates the staged upgrade. `workspace-backup`, `upgrade` and `restore` print a
+refusal as one `Observatory: …` line and exit 2 (for example, `--writers-stopped`
+missing) before changing anything; a failure while working exits 1. The original `full backup` command retains its
 older database-only meaning; `workspace-backup` snapshots the whole managed
 workspace. Keep the snapshot and matching previous application release.
 
@@ -427,8 +467,9 @@ project-observatory full backups migrate           # move the newest legacy copi
 
 The root is chosen in this order: `OBSERVATORY_BACKUPS`, then
 `project-observatory full configure storage backups /absolute/path`, then the
-platform default — on macOS `~/Documents/Project Observatory/Backups`, which
-iCloud Desktop & Documents syncs off the machine; elsewhere `<home>/backups`.
+platform default — on macOS `~/Documents/Project Observatory/Backups` when
+`~/Documents` exists, which iCloud Desktop & Documents can sync off the machine;
+elsewhere, or with no `~/Documents`, `<home>/backups`.
 Each workspace writes into its own subfolder (`<home-name>-<instance>`), so two
 workspaces sharing one root never rotate each other's files. Three artifacts
 per kind are kept (`observatory-db-*.obsdb`, `snapshot-*.obsnap`,
@@ -569,8 +610,8 @@ project-observatory full open --rebuild                  # pages carry the langu
 key or value is refused. Releases before 0.4.0 ignore the section. Each reader can also
 press **EN** or **RU** in the navigation rail: the choice is stored in that browser,
 applied before the first paint and kept for pages opened as local files; choosing the
-workspace's own language forgets it again. The interface is translated; the texts the
-finding rules write stay in English. An agent asked to set the language runs the
+workspace's own language forgets it again. The interface and finding titles are
+translated; a finding's details and suggested action stay in English. An agent asked to set the language runs the
 `configure` command above and never edits other settings to do it.
 
 ## Reading the dashboard workspace
@@ -604,8 +645,22 @@ With `lsof` available it requires the loopback verdict to pass. HTTP host/origin
 and binding behavior retain their own tests; add the system utility directory to `PATH`
 when collecting complete local socket evidence.
 
-## Native macOS client candidate
+## Mac app
 
-For the separate native agent window, see [macOS setup](macos/README.md). It requires
-a backend implementing `observatory-assistant/1`; it does not replace the existing
-tagged installation or register a second MCP server.
+0.12.0 ships a native macOS app (macOS 14+). It opens on this workspace's dashboard —
+live when the workspace's own server answers, otherwise the saved pages under a banner
+with **Start server**, and **Build the dashboard** when nothing is built yet — with the
+assistant one window away (⇧⌘A). From a checkout:
+
+```sh
+macos/scripts/build-app.sh             # dist/macos/Project Observatory.app
+macos/scripts/install-app.sh --open    # into /Applications (or ~/Applications), then opens it
+```
+
+On first launch it looks for the engine at `~/.local/bin/project-observatory`, then
+`~/.local/share/project-observatory-venv/bin/project-observatory` (the README's install),
+then `/opt/homebrew/bin` and `/usr/local/bin`, with the default workspace; otherwise choose
+the engine's absolute path and an initialized workspace in **Settings**. The assistant
+needs the setup in [Enable background or paid actions deliberately](#enable-background-or-paid-actions-deliberately).
+It uses the existing MCP server and engine; it registers no second server. Details:
+[macOS app](macos/README.md).

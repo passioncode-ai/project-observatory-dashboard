@@ -1,7 +1,7 @@
 # Set up my Project Observatory
 
 Help me install and configure the full Project Observatory on this computer.
-Read ONBOARDING.md and COMPATIBILITY.md from the checked-out release first.
+Read ONBOARDING.md and COMPATIBILITY.md first: under `docs/` in a checkout of the release, or under `$(project-observatory full-path)/docs/` in an installed release.
 
 1. Verify Python and SQLite requirements. Explain the code directory and the separate private workspace. Run `project-observatory full version`, then `full init` and `full doctor` with an explicit OBSERVATORY_HOME.
 2. Ask which project directory I want to observe. Configure only that directory. Explain which local metadata will be read. Start with filesystem scanning and the local dashboard.

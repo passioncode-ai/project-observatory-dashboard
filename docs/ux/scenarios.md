@@ -35,6 +35,8 @@ compatibility) and SITE-14 (explicitly fictional dashboard illustration) in
 This bounded update was explicitly authorized by the operator; it does not change
 the private dashboard's O9 runtime capabilities.
 
-The standalone native application adds [SCN-001–006](../macos/SCENARIOS.md).
-Its conversational agent is outside the dashboard; [specification](../macos/SPEC.md)
-and [delivery plan](../macos/PLAN.md) own the new surface and verification scope.
+The native macOS application adds [SCN-001–009](../macos/SCENARIOS.md). It opens on
+the workspace's dashboard (SCN-007–009: live, saved pages with Start server, reopen from
+the Dock); the conversational assistant is its own window, never a widget inside the
+dashboard pages (SCN-001–006). The [specification](../macos/SPEC.md) and
+[delivery plan](../macos/PLAN.md) own the surface and its verification scope.

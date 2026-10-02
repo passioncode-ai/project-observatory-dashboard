@@ -34,6 +34,7 @@ organisation members).
 | `observatory/engine/tests/` | engine suites, run by `tests/run_portable.py` in sandboxes |
 | `observatory/engine/skill/` | the `observatory-log` plugin; `.claude-plugin/` at the root publishes it |
 | `tests/` | root tests: launcher, packaging, release gates, version and plugin consistency |
+| `macos/` | the native Mac app (SwiftUI): sources, tests, `scripts/build-app.sh` and `scripts/install-app.sh`; [docs/macos/](docs/macos/README.md) |
 | `tools/` | release tooling: privacy gate, package checker, source inventory, demo estate |
 | `site/`, `docs/site/` | the retired website (a redirect to the product page plus the field-notes article) and its checks; it never reads a workspace |
 | `docs/` | onboarding, compatibility, security boundary, UX scenarios, run receipts |
@@ -59,6 +60,8 @@ or newer for the complete checks. These are the commands CI runs
 python -m pip install -c requirements-full.lock '.[full]'
 python -m compileall -q observatory
 python -m unittest discover -s tests -v                # root tests
+swift test --package-path macos                        # macOS rows only: the Mac app's tests
+macos/scripts/build-app.sh                             # macOS rows only: build and sign the app bundle (ad hoc)
 project-observatory full check                         # every engine suite, each in a fresh sandbox
 python tools/update_inventory.py --check               # engine files match SOURCE-INVENTORY.json
 python -m pip wheel --no-deps . --wheel-dir dist
@@ -68,6 +71,8 @@ python tools/check_public_release.py --history --history-ref HEAD
 python docs/site/check.py --self-test
 python tools/build_article.py --check
 node tools/check_site_interactions.cjs
+# then: the installed CLI's demo, a sterile full-engine workspace, and an install
+# from the wheel without the lock file (see the workflow for their exact lines)
 git diff --exit-code                                   # the checks left no tracked change
 ```
 

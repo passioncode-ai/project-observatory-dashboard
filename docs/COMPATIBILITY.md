@@ -33,7 +33,7 @@ the release installation instructions, then run the full doctor command.
 | Registry | projects/repositories/relations 1–2; other documents 1 | Refuse future versions; preserve optional top-level extension fields on atomic writes |
 | SQLite | seven historical migration IDs, recorded AST checksums | Never rewrite a released migration; append a new ID; upgrade atomically with a verified snapshot |
 | Plugin execution | API 1; absent version means legacy API 1 | Reject unknown versions and escaped script paths before execution; plugins remain trusted executable code |
-| MCP transport | existing declared 2026-07-28 interface, SDK 2.1.1 | Preserve existing tool names, camelCase/snake_case aliases and proposal authority; transport negotiation is SDK-owned |
+| MCP transport | existing declared 2026-07-28 interface, SDK 2.2.0 (`mcp==2.2.0` in the `full` extra) | Preserve existing tool names, camelCase/snake_case aliases and proposal authority; transport negotiation is SDK-owned |
 | Tool data | existing published input/output schemas | A closed output schema can reject an added field: version the capability before changing its shape |
 | CLI | existing full-engine step names plus workspace management | Keep names/arguments through compatible releases; announce deprecation before removal |
 | Profile (`full profile`) | format 1, minor 0 | Refuse an unknown format, a newer engine's profile or unmet `must_understand`; ignore and name unknown sections; never carry or touch `sources`, `storage` or `features.scheduler` |
@@ -45,7 +45,7 @@ Semantic versioning applies to the declared public API even before 1.0 as a proj
 
 `observatory/engine/tests/test_schema_compatibility.py` covers every prefix of the seven original migration IDs, repeat opens, legacy checksum adoption, unknown IDs, changed migration checksum, future user_version, rollback after injected failure, WAL-only data and concurrent openers. Adopting a checksum for a legacy history records the current implementation; it cannot prove which old implementation originally ran.
 
-`observatory/engine/tests/test_workspace_boundaries.py` covers concurrent initialization, symbolic-link escape attempts, source changes during migration, future writer refusal and preservation of an existing destination. `observatory/engine/tests/test_workspace.py` covers separate homes, optional settings preservation, configuration/registry version refusal and the complete local pipeline through ten generated pages. Test execution receipts are recorded separately; listing a test here is not a claim that every release ran it.
+`observatory/engine/tests/test_workspace_boundaries.py` covers concurrent initialization, symbolic-link escape attempts, source changes during migration, future writer refusal and preservation of an existing destination. `observatory/engine/tests/test_workspace.py` covers separate homes, optional settings preservation, configuration/registry version refusal and the complete local pipeline through eleven generated pages (`test_complete_local_workflow_and_eleven_pages`). Test execution receipts are recorded separately; listing a test here is not a claim that every release ran it.
 
 ## Upgrade and rollback rules
 

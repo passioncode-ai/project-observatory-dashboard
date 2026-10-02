@@ -86,8 +86,10 @@ the page script. To add or change a string:
   Russian text left in the sources. (Running the file directly with `python -m unittest` also
   needs an initialized `OBSERVATORY_HOME`: its page-build cases emit a registry first.)
 
-Finding texts written by the rules in `tools/*_findings.py` are data in English, not
-interface strings. The PassionCode design tokens in `dashboard/brand/` are vendored
+A finding's title is a message id with arguments (`finding_types.titled(msgid, **args)`
+gives `title`, `title_id`, `title_args`), so its Russian lives in `locales/ru.json` like any
+interface string. A finding's details and action, written by the rules in
+`tools/*_findings.py`, are still data in English. The PassionCode design tokens in `dashboard/brand/` are vendored
 bytes: change them at the canonical source, then copy and repin (`brand/README.md`).
 
 ## Comments and design notes
