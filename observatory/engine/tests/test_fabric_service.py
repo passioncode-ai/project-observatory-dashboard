@@ -296,7 +296,7 @@ class Events(Sandbox):
         super().setUp()
         self.db = self.home / "store/observatory.db"
         self.conn = make_store(self.db)
-        self.labels = {"project:fabric": "Fabric", "project:site": "Site"}
+        self.labels = {"project:alpha-web": "Alpha Web", "project:site": "Site"}
 
     def tearDown(self):
         self.conn.close()
@@ -314,22 +314,22 @@ class Events(Sandbox):
                       payload={"subject": f"change {start + i}", "repo": "owner/x"})
 
     def test_consecutive_commits_are_one_sentence(self):
-        self.commits("project:fabric", "A. Author", 3)
+        self.commits("project:alpha-web", "A. Author", 3)
         self.commits("project:site", "A. Author", 1, start=10)
         events = self.page()["events"]
         self.assertEqual(len(events), 2)
         first = events[0]
         self.assertEqual(first["kind"], "project.commits")
-        self.assertTrue(first["text"].startswith("3 commits in Fabric by A. Author; latest “change 2”"), first["text"])
+        self.assertTrue(first["text"].startswith("3 commits in Alpha Web by A. Author; latest “change 2”"), first["text"])
         self.assertEqual(first["at"], "2026-09-28T08:02:00Z", "the newest commit, in UTC")
-        self.assertEqual(first["subject"], {"type": "project", "id": "project:fabric", "label": "Fabric"})
-        self.assertEqual(first["link"], "/dashboard/projects.html#project:fabric")
+        self.assertEqual(first["subject"], {"type": "project", "id": "project:alpha-web", "label": "Alpha Web"})
+        self.assertEqual(first["link"], "/dashboard/projects.html#project:alpha-web")
         self.assertNotIn("notify", first)
         self.assertTrue(events[1]["text"].startswith("Commit in Site by A. Author: “change 10”"))
 
     def test_sessions_findings_and_unknown_kinds_read_as_sentences(self):
-        add_event(self.conn, "session:1", "session", "2026-09-28T10:00:00.123Z", project="project:fabric",
-                  ref="s1:project:fabric", actor="operator", payload={"prompts": 13})
+        add_event(self.conn, "session:1", "session", "2026-09-28T10:00:00.123Z", project="project:alpha-web",
+                  ref="s1:project:alpha-web", actor="operator", payload={"prompts": 13})
         add_event(self.conn, "ev:notify:1", "finding.notified", "2026-09-28T11:00:00Z",
                   ref="clone.diverged:repository:owner/x@critical#0", actor="tool:notify_findings",
                   payload={"title": "owner/x has diverged from its remote", "severity": "critical", "delivered": True})
@@ -337,7 +337,7 @@ class Events(Sandbox):
                   ref="clone.diverged:repository:owner/x#0", actor="tool:notify_findings", payload={"episode": 0})
         add_event(self.conn, "x:1", "backup_run", "2026-09-28T13:00:00Z", project="project:site")
         session, opened, cleared, other = self.page()["events"]
-        self.assertEqual(session["text"], "An agent session worked in Fabric (13 prompts).")
+        self.assertEqual(session["text"], "An agent session worked in Alpha Web (13 prompts).")
         self.assertEqual(opened["kind"], "finding.opened")
         self.assertEqual(opened["level"], "error")
         self.assertTrue(opened["notify"], "a newly opened finding asks the host to notify")
@@ -349,9 +349,9 @@ class Events(Sandbox):
         self.assertNotIn("backup_run", other["text"], "a machine id never reaches the sentence")
 
     def test_cursor_paging_sees_every_row_once_and_then_the_new_ones(self):
-        self.commits("project:fabric", "A", 2)
+        self.commits("project:alpha-web", "A", 2)
         self.commits("project:site", "B", 2, start=10)
-        self.commits("project:fabric", "C", 1, start=20)
+        self.commits("project:alpha-web", "C", 1, start=20)
         newest = self.page(limit=50)["events"]
         seen, cursor = [], "0"
         while True:
@@ -388,7 +388,7 @@ class Events(Sandbox):
             self.events.page(broken, None, 10, {})
 
     def test_the_view_never_writes(self):
-        self.commits("project:fabric", "A", 1)
+        self.commits("project:alpha-web", "A", 1)
         before = hashlib.sha256(self.db.read_bytes()).hexdigest()
         self.page()
         self.assertEqual(hashlib.sha256(self.db.read_bytes()).hexdigest(), before)
@@ -733,11 +733,11 @@ class RunningServer(unittest.TestCase):
         cls.services = cls.base / "services"
         cls.env = sandbox_env(cls.base, cls.home, FABRIC_SERVICES_DIR=str(cls.services), PYTHONPATH=str(ROOT))
         conn = make_store(cls.home / "store/observatory.db")
-        add_event(conn, "commit:1", "commit", "2026-09-28T10:00:00Z", project="project:fabric",
+        add_event(conn, "commit:1", "commit", "2026-09-28T10:00:00Z", project="project:alpha-web",
                   ref="1", actor="A. Author", payload={"subject": "first change"})
         conn.close()
-        (cls.home / "registry/projects.json").write_text(json.dumps({"projects": [{"id": "project:fabric",
-                                                                                    "name": "Fabric"}]}))
+        (cls.home / "registry/projects.json").write_text(json.dumps({"projects": [{"id": "project:alpha-web",
+                                                                                    "name": "Alpha Web"}]}))
         cls.port = free_port()
         cls.proc = start_server(cls.env, cls.port)
         try:
@@ -803,7 +803,7 @@ class RunningServer(unittest.TestCase):
         self.assertEqual(code, 200)
         page = json.loads(body)
         self.assertEqual(schema_errors("service-events-page.schema.json", page), [])
-        self.assertEqual(page["events"][0]["text"], "Commit in Fabric by A. Author: “first change”.")
+        self.assertEqual(page["events"][0]["text"], "Commit in Alpha Web by A. Author: “first change”.")
         code, _h, body = get(self.port, "/fabric/v1/events?after=" + page["cursor"], self.bearer())
         self.assertEqual(json.loads(body), {"events": [], "cursor": page["cursor"]})
         self.assertEqual(get(self.port, "/fabric/v1/events?after=abc", self.bearer())[0], 400)

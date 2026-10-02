@@ -159,7 +159,7 @@ def test_the_panel_shows_the_story_and_its_caveats() -> None:
                     "What the observatory concluded", "What the plugins measured"):
         check(f"the panel answers {heading!r}", heading in src)
     check("a conclusion shows its state, so `proposed` is never read as a fact",
-          'E(n.state)' in src,
+          'E(labelOf(NOTE_STATE_LABEL, n.state))' in src and "proposed: T(" in src,
           "the agent proposes and never asserts — a reader must see that beside the sentence")
     check("and its confidence", "confidence" in src)
     check("store-derived sections say so when there is no store",

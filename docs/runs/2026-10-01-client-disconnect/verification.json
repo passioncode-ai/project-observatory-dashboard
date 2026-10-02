@@ -1,0 +1,83 @@
+{
+  "scope": "synthetic-offline",
+  "python": "3.14.7",
+  "test_first": {
+    "red": {
+      "failed_assertions": 4,
+      "passed_assertions": 20
+    },
+    "green": {
+      "failed_assertions": 0,
+      "passed_assertions": 24
+    }
+  },
+  "engine": {
+    "status": "PASS",
+    "suites": 197,
+    "pass_assertions": 5827,
+    "fail_assertions": 0,
+    "skip_assertions": 14,
+    "unittest_cases": 529
+  },
+  "root_unittest_cases": 84,
+  "root_unittest_status": "PASS",
+  "package": {
+    "gate": "wheel-content",
+    "passed": true,
+    "runtime_files": 478,
+    "archive_files": 485,
+    "failures": []
+  },
+  "compile_python_3_11": "PASS",
+  "site_negative_probes": 15,
+  "site_interactions": "PASS",
+  "article_current": "PASS",
+  "plugins_strict": "PASS (three plugin paths)",
+  "not_run": [
+    "hosted CI",
+    "release",
+    "installed runtime upgrade"
+  ],
+  "final_focused": {
+    "status": "PASS",
+    "suite_count": 2,
+    "suites": [
+      {
+        "file": "tests/test_fabric_service.py",
+        "status": "PASS",
+        "pass_assertions": 0,
+        "unittest_cases": 42,
+        "skip_assertions": 0
+      },
+      {
+        "file": "tests/test_serverd.py",
+        "status": "PASS",
+        "pass_assertions": 24,
+        "unittest_cases": 0,
+        "skip_assertions": 0
+      }
+    ]
+  },
+  "privacy_current_tree": {
+    "gate": "public-release-privacy",
+    "passed": true,
+    "files_checked": 612,
+    "history_blobs_checked": 0,
+    "private_denylist_entries": 3810,
+    "findings": [],
+    "limits": "Pattern/identifier checks cannot prove absence of every secret or private fact. Review source, metadata and release scope independently. Match values and paths are never printed.",
+    "public_identifiers_subtracted": 1
+  },
+  "privacy_pattern_history": {
+    "gate": "public-release-privacy",
+    "passed": true,
+    "files_checked": 612,
+    "history_blobs_checked": 2073,
+    "private_denylist_entries": 0,
+    "findings": [],
+    "limits": "Pattern/identifier checks cannot prove absence of every secret or private fact. Review source, metadata and release scope independently. Match values and paths are never printed.",
+    "public_identifiers_subtracted": 0
+  },
+  "denylist_baseline": "v0.10.0",
+  "root_final_status": "PASS"
+}

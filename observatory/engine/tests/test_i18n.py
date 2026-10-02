@@ -44,7 +44,10 @@ PLURAL_FORMS = {"ru": {"one", "few", "many", "other"}, "en": {"one", "other"}}
 #: placeholders chosen by tab, table units passed to `filterLine`, plugin
 #: labels read from manifests, and the store's degradation messages.
 DYNAMIC_PATTERNS = (
-    re.compile(r'filterLine\([^;]*?"(\{n\}[^"]*)"'),
+    re.compile(r'filterLine\([^;]*?"((?:of@@)?\{n\}[^"]*)"'),
+    # Tile captions: `tile("…", value)` and the work tiles' `tile@@` plurals.
+    re.compile(r'\btile\(\s*"([^"]+)"'),
+    re.compile(r'"(tile@@\{n\}[^"]*)"'),
     re.compile(r'(?:projects|heroku|domains|creds|env|mcp|traffic):\s*"(Search[^"]*)"'),
     re.compile(r'"text":\s*"([^"]+)"'),
     re.compile(r'"label":\s*"([^"]+)"'),
@@ -114,6 +117,9 @@ def source_ids() -> set[str]:
     # shell.py: the page titles, their questions and the navigation groups.
     ids |= {title for _n, title, _k in shell.PAGES} | set(shell.QUESTIONS.values())
     ids |= {label for _k, label, _names in shell.NAV_GROUPS}
+    # finding_types.py: the reader's name for every finding type.
+    import finding_types
+    ids |= set(finding_types.LABELS.values())
     for manifest in (ROOT / "plugins").glob("*.json"):
         for metric in json.loads(manifest.read_text(encoding="utf-8")).get("metrics", []):
             if metric.get("label"):
@@ -132,13 +138,14 @@ DYNAMIC_IDS = {
 
 
 #: Words that read the same in both languages and are never translated.
-UNTRANSLATED = {"Heroku", "ENV", "MCP", "Property", "Cloudflare", "GA4", "RDAP",
+UNTRANSLATED = {"Heroku", "ENV", "MCP", "Cloudflare", "GA4", "RDAP",
                 "Project Observatory", "PassionCode.ai", "English", "Русский", "__TITLE__"}
 
 
 class SourcesCarryNoRussian(unittest.TestCase):
     def test_dashboard_sources(self):
-        for name in ("build_dashboard.py", "shell.py", "workspace.css", "i18n.py"):
+        for name in ("build_dashboard.py", "shell.py", "workspace.css", "i18n.py",
+                     "finding_types.py", "subject_links.py", "machine_page.py"):
             text = (DASH / name).read_text(encoding="utf-8")
             if name == "i18n.py":
                 text = text.replace('"ru": "Русский"', "")

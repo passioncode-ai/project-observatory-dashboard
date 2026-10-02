@@ -136,7 +136,9 @@ def test_a_page_carries_only_what_it_renders() -> None:
     payload = {
         "rows": [{"id": "project:a", "name": "a", "anchor": "x", "products": [],
                   "tier": 1, "lifecycle": "live", "events": [1] * 50, "repos": [1] * 20}],
-        "env": {"totals": {"secrets": 3}, "vars": [1] * 100},
+        "env": {"totals": {"secrets": 3}, "vars": [1] * 100,
+                "files": [{"kind": "env", "variables": [{"class": "secret"}] * 3},
+                          {"kind": "template", "variables": [{"class": "secret"}] * 2}]},
         "heroku": {"apps": [1, 2]}, "creds": {"credentials": [1]},
         "mcp": {"totals": {"distinct_servers": 4}},
         "zones": [{"name": "z.dev"}], "domains": [{"name": "d.dev"}],
@@ -331,9 +333,9 @@ def test_the_estate_pages_hand_over_commands_and_fold_what_is_long() -> None:
     for fn in ("renderHeroku", "renderDomains", "renderEnv", "renderCreds"):
         body = src.split(f"function {fn}(", 1)[1].split("\nfunction ", 1)[0]
         thead = re.search(r"<thead>.*?</thead>", body, re.S)
-        # The span is either a literal `colspan="N"` (env keeps its own header)
-        # or the first argument of `grpHead(N, …)`, the shared header since D-12.
-        span = re.search(r'colspan="(\d+)"|\$\{grpHead\((\d+),', body)
+        # The span is either a literal `colspan="N"` or the first argument of
+        # `grpHead(N, …)` / `grpBody(N, …)`, the shared fold header since D-12.
+        span = re.search(r'colspan="(\d+)"|\bgrp(?:Head|Body)\((\d+),', body)
         check(f"{fn}: the table and its group header are both readable here",
               bool(thead) and bool(span), "one of them moved out of this function")
         if not (thead and span):
@@ -415,8 +417,12 @@ def test_the_findings_page_is_a_working_surface() -> None:
     src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
     check("every finding row carries an id and a permalink", 'id="${E(fid)}"' in src
           and 'class="fperma"' in src, "")
+    # The link is resolved by the builder against the rows the pages render
+    # (dashboard/subject_links.py); the page only prints what it was given.
+    links = (ROOT / "dashboard/subject_links.py").read_text(encoding="utf-8")
     check("a finding links to its subject's row where one exists",
-          "function subjectHref" in src and 'heroku.html#a-' in src and 'domains.html#d-' in src, "")
+          "function subjectHref" in src and "f.href" in src
+          and 'heroku.html#a-' in links and 'domains.html#d-' in links, "")
     check("severity chips, a type select and a search exist on the page",
           'data-sev="${s}"' in src and 'class="ftype"' in src and 'class="fq"' in src, "")
     check("and the target rows have anchors to land on",
@@ -427,7 +433,9 @@ def test_the_findings_page_is_a_working_surface() -> None:
           "id=\"e-' + E(anchorSlug(e.path + \":\" + e.name))" in src
           and 'id="m-${E(anchorSlug(s.agent + "/" + s.name))}"' in src, "")
     check("a finding about an env file or an MCP server links to its page",
-          '"env.html#e-" + anchorSlug(rest)' in src and '"mcp.html#m-" + anchorSlug(rest)' in src, "")
+          '"env.html#e-" + anchor_slug(rest)' in links and '"mcp.html#m-" + anchor_slug(rest)' in links
+          and "_ANCHOR = re.compile(r\"[^A-Za-z0-9_.:/-]+\")" in links
+          and "replace(/[^A-Za-z0-9_.:/-]+/g, \"-\")" in src, "one slug rule on both sides")
     check("and a row named in the address is revealed inside a folded group",
           "function revealHash" in src and 'closest("tbody.grp.folded")' in src
           and "revealHash();" in src.split("function render() {", 1)[1].split("\nfunction ", 1)[0], "")

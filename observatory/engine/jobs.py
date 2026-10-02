@@ -23,8 +23,8 @@ at once, and the caller follows it with `fabric.job.get {id}` and may stop it wi
   two refreshes of one inventory race for one file and prove nothing more.
 
 Records keep the trace of the request that started the job, so every later answer
-about it carries the same trace id (C3.4). They hold no input values: the only
-job today takes no arguments.
+about it carries the same trace id (C3.4). Assistant jobs retain bounded user questions in the private workspace;
+no credentials are accepted as arguments.
 """
 from __future__ import annotations
 import errno
@@ -78,14 +78,20 @@ def new_id() -> str:
 def _file(job_id: str) -> Path:
     if not JOB_ID.match(job_id or ""):
         raise KeyError(job_id)
-    return jobs_dir() / f"{job_id}.json"
+    path = jobs_dir() / f"{job_id}.json"
+    if any(p.is_symlink() for p in (path, *path.parents)):
+        raise OSError(errno.ELOOP, "linked job state refused")
+    return path
 
 
 @contextmanager
 def _locked(job_id: str) -> Iterator[None]:
     directory = jobs_dir()
+    lock_path = directory / f"{job_id}.lock"
+    if any(p.is_symlink() for p in (lock_path, *lock_path.parents)):
+        raise OSError(errno.ELOOP, "linked job state refused")
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(directory / f"{job_id}.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    fd = os.open(directory / f"{job_id}.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         yield
@@ -201,6 +207,10 @@ def prune(now: datetime | None = None) -> int:
         with _locked(job_id):
             doc = _read(job_id)
             at = _parse((doc or {}).get("updatedAt"))
+            # Assistant jobs too: their conversation already holds the terminal
+            # state and the answer, and each job file carries the question and the
+            # whole answer envelope, so keeping them forever duplicated private
+            # dialogue outside store/assistant/ and slowed every later ask.
             if doc and doc.get("status") in TERMINAL and at and now - at > RETENTION:
                 path.unlink(missing_ok=True)
                 removed += 1
@@ -213,19 +223,42 @@ def runner_command(job_id: str) -> list[str]:
     return [sys.executable, str(ROOT / "tools/run_job.py"), job_id]
 
 
-def start(capability: str, span_record: dict, *,
+class JobBusy(ValueError):
+    """A different parameterized request is already running."""
+
+
+def start(capability: str, span_record: dict, *, arguments: dict | None = None,
+          prepared: Callable[[dict], None] | None = None,
           spawn: Callable[[list[str], dict], subprocess.Popen] | None = None) -> tuple[dict, bool]:
+    # Serialize the scan and reservation across all callers/processes.
+    with _locked("start"):
+        return _start(capability, span_record, arguments=arguments, prepared=prepared, spawn=spawn)
+
+
+def _start(capability: str, span_record: dict, *, arguments: dict | None = None,
+           prepared: Callable[[dict], None] | None = None,
+           spawn: Callable[[list[str], dict], subprocess.Popen] | None = None) -> tuple[dict, bool]:
     """(job record, joined): a new job for `capability`, or the one already running."""
     running = _running(capability)
     if running is not None:
+        if arguments is not None and running.get("arguments") != arguments:
+            raise JobBusy("assistant-busy")
         return running, True
     prune()
     job_id = new_id()
     doc = {"id": job_id, "capability": capability, "status": "working",
            "statusMessage": "started", "createdAt": now_iso(), "heartbeatAt": now_iso(),
            "pid": None, "trace": span_record}
+    if arguments is not None:
+        doc["arguments"] = arguments
     with _locked(job_id):
         _write(doc)
+    try:
+        if prepared:
+            prepared(doc)  # durable caller journal BEFORE any process/spend
+    except Exception:
+        update(job_id, status="failed", error={"code": "journal-failed", "message": "request journal unavailable"})
+        raise
     env = {**os.environ, "OBSERVATORY_HOME": str(paths.HOME)}
     try:
         proc = (spawn or _spawn)(runner_command(job_id), env)
@@ -241,6 +274,12 @@ def start(capability: str, span_record: dict, *,
         if doc.get("status") not in TERMINAL:
             doc["pid"] = proc.pid
             _write(doc)
+        elif doc.get("status") == "cancelled":
+            # Cancellation can race the spawn before its PID is recorded.
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except OSError:
+                pass
     return doc, False
 
 

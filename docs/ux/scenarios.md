@@ -34,3 +34,7 @@ compatibility) and SITE-14 (explicitly fictional dashboard illustration) in
 [the site scenario base](../site/BRIEF.md#dashboard-landing-refresh--2026-09-23).
 This bounded update was explicitly authorized by the operator; it does not change
 the private dashboard's O9 runtime capabilities.
+
+The standalone native application adds [SCN-001–006](../macos/SCENARIOS.md).
+Its conversational agent is outside the dashboard; [specification](../macos/SPEC.md)
+and [delivery plan](../macos/PLAN.md) own the new surface and verification scope.

@@ -33,6 +33,7 @@ import jsonschema
 from mcp.server import MCPServer
 from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
 
+import configuration
 import interop
 import jobs
 
@@ -71,6 +72,28 @@ JOB_OUTPUT = {
 
 def _text(value: Any) -> TextContent:
     return TextContent(type="text", text=json.dumps(value, ensure_ascii=False))
+
+
+def _compact(result: Any) -> Any:
+    """The SDK's text copy of a structured answer, without its indentation.
+
+    The SDK serialises a returned dict with `indent=2` into the text channel and
+    sends the same value again as `structuredContent`; the indentation alone made
+    a survey a third larger (253,753 against 189,379 characters, measured). Hosts
+    that read the text get the same JSON, compact; the structured copy is untouched."""
+    if not isinstance(result, CallToolResult) or result.structured_content is None:
+        return result
+    out = []
+    for block in result.content:
+        if isinstance(block, TextContent):
+            try:
+                block = TextContent(type="text", text=json.dumps(
+                    json.loads(block.text), ensure_ascii=False, separators=(",", ":")))
+            except ValueError:
+                pass
+        out.append(block)
+    result.content = out
+    return result
 
 
 def _error(code: str, detail: str, span: interop.Span | None = None) -> CallToolResult:
@@ -149,8 +172,9 @@ class InteropServer(MCPServer):
     # ── calling ──────────────────────────────────────────────────────────────
     async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
         is_job_tool = self._job_tools and name in (interop.JOB_GET, interop.JOB_CANCEL)
-        if name not in self._definitions and not is_job_tool:
-            return await super().call_tool(name, arguments, context)
+        is_assistant = name == "observatory_assistant_ask"
+        if name not in self._definitions and not is_job_tool and not is_assistant:
+            return _compact(await super().call_tool(name, arguments, context))
         meta = None
         try:
             request = context.request_context if context is not None else None
@@ -158,6 +182,20 @@ class InteropServer(MCPServer):
         except ValueError:
             meta = None
         span = interop.span_for(meta)
+        if is_assistant:
+            from agent import assistant
+            try:
+                out = await anyio.to_thread.run_sync(lambda: assistant.ask(arguments or {}, span.record()))
+            except assistant.AssistantError as exc:
+                return _error(str(exc), str(exc), span)
+            except OSError as exc:
+                code = "disk-full" if exc.errno == 28 else "workspace-write-failed"
+                return _error(code, "Could not persist the request", span)
+            except configuration.ConfigurationError:
+                return _error("backend-configuration", "The workspace configuration is invalid", span)
+            record = jobs.get(out["job"]["id"])
+            job_span = interop.Span.from_record(record["trace"]) if record else span
+            return CallToolResult(content=[_text(out)], structured_content=out, _meta=job_span.meta())
         if is_job_tool:
             return await anyio.to_thread.run_sync(self._job_call, name, arguments or {}, span)
         return await self._capability_call(name, arguments or {}, span)

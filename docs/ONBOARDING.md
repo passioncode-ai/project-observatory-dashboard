@@ -603,3 +603,9 @@ this exact missing-dependency outcome in `RunningServer.test_conformance_reports
 With `lsof` available it requires the loopback verdict to pass. HTTP host/origin guards
 and binding behavior retain their own tests; add the system utility directory to `PATH`
 when collecting complete local socket evidence.
+
+## Native macOS client candidate
+
+For the separate native agent window, see [macOS setup](macos/README.md). It requires
+a backend implementing `observatory-assistant/1`; it does not replace the existing
+tagged installation or register a second MCP server.

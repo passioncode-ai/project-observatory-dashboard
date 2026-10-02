@@ -1,0 +1,19 @@
+{
+  "client": "Claude Code",
+  "success": true,
+  "tool_calls": [
+    {
+      "name": "ToolSearch",
+      "input": {
+        "query": "select:mcp__observatory-native-qa__observatory_assistant_status",
+        "max_results": 1
+      }
+    },
+    {
+      "name": "mcp__observatory-native-qa__observatory_assistant_status",
+      "input": {}
+    }
+  ],
+  "answer": "`observatory_assistant_status` \u0432\u0435\u0440\u043d\u0443\u043b:\n\n- **protocol:** `observatory-assistant/1`\n- **agent_enabled:** `false`",
+  "cost_usd": 0.2891366000000001
+}

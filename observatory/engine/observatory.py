@@ -786,6 +786,9 @@ def main(argv: list[str]) -> int:
     except configuration.ConfigurationError as exc:
         print(f"Observatory: {exc}", file=sys.stderr)
         return 2
+    if len(argv) > 1 and argv[1] == "assistant":
+        from agent import assistant
+        return assistant.main(argv[2:])
     if len(argv) > 1 and argv[1] in WORKSPACE_COMMANDS:
         import workspace
         return workspace.main(argv[1:])

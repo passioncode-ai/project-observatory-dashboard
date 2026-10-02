@@ -50,6 +50,12 @@ class ReleaseBoundaryTests(unittest.TestCase):
                         'observatory/engine/.env','observatory/engine/tools/unreviewed.sh',
                         'observatory/engine/.keyserver-token'):
             self.assertFalse(privacy.allowed_path(Path(refused)),refused)
+    def test_native_source_allowlist_does_not_admit_builds_or_private_state(self):
+        for path in privacy.NATIVE_SOURCES:
+            self.assertTrue(privacy.allowed_path(Path(path)))
+        for path in ('macos/.build/debug/ProjectObservatory', 'macos/signing.p12',
+                     'macos/unknown.swift', 'macos/workspace.json', 'macos/.swiftpm/config'):
+            self.assertFalse(privacy.allowed_path(Path(path)), path)
     def test_agent_sync_config_is_admitted_and_its_local_state_is_not(self):
         self.assertTrue(privacy.allowed_path(Path('.claude/agent-sync.json')))
         for refused in ('.claude/settings.json','.claude/settings.local.json',
