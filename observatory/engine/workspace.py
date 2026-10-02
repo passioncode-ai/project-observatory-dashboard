@@ -422,7 +422,10 @@ def doctor(base: Path) -> dict:
             "backups": __import__("backup_vault").status(base),
             # PB-132: a dead or interrupted tick cannot report itself.
             "tick": _tick_health(base, doc),
-            "credentials": "values are never returned", "network_calls": 0}
+            "credentials": "values are never returned", "network_calls": 0,
+            # With the agent on, whether it has a model and a budget: a fresh
+            # models.json has neither, and the refusal a call meets says less.
+            **({"agent": config.model_readiness(base)} if (doc.get("features") or {}).get("agent") is True else {})}
 
 
 def main(argv: list[str]) -> int:
@@ -452,7 +455,7 @@ def main(argv: list[str]) -> int:
     migration.add_argument("--apply", action="store_true")
     migration.add_argument("--writers-stopped", action="store_true")
     conf = sub.add_parser("configure")
-    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage"])
+    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage", "model", "budget"])
     conf.add_argument("name")
     conf.add_argument("value")
     phrase = sub.add_parser("backup-passphrase")
@@ -489,6 +492,8 @@ def main(argv: list[str]) -> int:
             if a.section in ("integrations", "features", "sources") and a.name not in config.known_names(a.section):
                 raise config.ConfigurationError(
                     f"Unknown {a.section[:-1]}: {a.name}; known: {', '.join(sorted(config.known_names(a.section)))}")
+            if a.section in ("model", "budget"):
+                return _configure_models(base, a)
             if a.section == "storage":
                 if a.name not in config.STORAGE_SETTINGS:
                     raise config.ConfigurationError(f"Unknown storage setting: {a.name}; known: {', '.join(config.STORAGE_SETTINGS)}")
@@ -525,6 +530,43 @@ def main(argv: list[str]) -> int:
     except (config.ConfigurationError, OSError, sqlite3.Error) as exc:
         print(f"Observatory: {exc}", file=__import__('sys').stderr)
         return 2
+
+
+def _configure_models(base: Path, a) -> int:
+    """`configure model chain ID[,ID…]` and `configure budget CEILING AMOUNT`:
+    the agent's model chain and wallet ceilings in `config/models.json`, written
+    atomically under the workspace lock with every other field kept."""
+    import math
+    if a.section == "model":
+        if a.name != "chain":
+            raise config.ConfigurationError("Unknown model setting: " + a.name + "; known: chain")
+        ids = [part.strip() for part in a.value.split(",") if part.strip()]
+        bad = [i for i in ids if not config.MODEL_ID.fullmatch(i)]
+        if not ids or bad:
+            raise config.ConfigurationError(
+                "A model chain is one or more ids like vendor/model, comma-separated"
+                + (f"; not an id: {', '.join(bad)}" if bad else ""))
+    else:
+        if a.name not in config.BUDGET_SETTINGS:
+            raise config.ConfigurationError(f"Unknown budget setting: {a.name}; known: {', '.join(config.BUDGET_SETTINGS)}")
+        try:
+            amount = float(a.value)
+        except ValueError:
+            amount = math.nan
+        if not math.isfinite(amount) or amount < 0:
+            raise config.ConfigurationError("A budget ceiling is a non-negative number, in the wallet's denomination")
+    with lock(base):
+        file = base / "config" / "models.json"
+        doc = json.loads(file.read_text(encoding="utf-8"))
+        if a.section == "model":
+            doc["chain"] = [{"id": i, "why": "configured"} for i in ids]
+        else:
+            doc.setdefault("wallet", {})[a.name] = amount
+        write_json(file, doc)
+    result = {"status": "configured", "section": a.section, "name": a.name,
+              "model_status": config.model_readiness(base)["model_status"]}
+    print(json.dumps(result, indent=2))
+    return 0
 
 
 def machine_command(name: str, argv: list[str]) -> int:

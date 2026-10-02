@@ -234,6 +234,33 @@ class WorkspaceTests(unittest.TestCase):
         types={f.get('type') for f in json.loads((self.home/'registry/findings.json').read_text())['findings']}
         self.assertNotIn('dashboard.unverified',types)
         self.assertNotIn('dashboard.blank',types)
+    def test_configure_sets_the_model_chain_and_the_budget(self):
+        # A fresh models.json has chain [] and every ceiling 0.0, and nothing
+        # offered a way to set them but editing the file by hand.
+        self.run_cli('init')
+        models=self.home/'config/models.json';before=json.loads(models.read_text())
+        self.run_cli('configure','model','chain','example/model-a, example/model-b:free')
+        for name,value in (('daily_ceiling','0.5'),('monthly_ceiling','10'),('velocity_ceiling','0.25')):
+            self.run_cli('configure','budget',name,value)
+        doc=json.loads(models.read_text())
+        self.assertEqual([e['id'] for e in doc['chain']],['example/model-a','example/model-b:free'])
+        self.assertEqual((doc['wallet']['daily_ceiling'],doc['wallet']['monthly_ceiling'],doc['wallet']['velocity_ceiling']),(0.5,10.0,0.25))
+        self.assertEqual(doc['embedding'],before['embedding'])                # every other field kept
+        self.assertEqual(doc['wallet']['denomination'],before['wallet']['denomination'])
+        for args in (('budget','yearly_ceiling','1'),('budget','daily_ceiling','-1'),('budget','daily_ceiling','nan'),
+                     ('budget','daily_ceiling','lots'),('model','order','x'),('model','chain',' , '),
+                     ('model','chain','has space/model')):
+            p=self.run_cli('configure',*args,ok=False)
+            self.assertEqual(p.returncode,2,args)
+        self.assertEqual(json.loads(models.read_text()),doc)
+        # doctor names the agent's readiness once the agent is switched on.
+        self.assertNotIn('agent',json.loads(self.run_cli('doctor').stdout))
+        self.run_cli('configure','features','agent','true')
+        self.assertEqual(json.loads(self.run_cli('doctor').stdout)['agent']['model_status'],'ready')
+        self.run_cli('configure','budget','daily_ceiling','0')
+        agent=json.loads(self.run_cli('doctor').stdout)['agent']
+        self.assertEqual(agent['model_status'],'no-budget')
+        self.assertIn('project-observatory full configure budget daily_ceiling',' '.join(agent['next']))
     def test_independent_homes(self):
         self.run_cli('init');first=json.loads((self.home/'workspace.json').read_text())
         other=self.base/'other';self.env['OBSERVATORY_HOME']=str(other)
