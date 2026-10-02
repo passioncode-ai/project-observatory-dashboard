@@ -415,7 +415,8 @@ def _note_unknown(project_id: str, out: dict[str, Any]) -> dict[str, Any]:
     pid = project_id if project_id.startswith("project:") else f"project:{project_id}"
     if isinstance(out, dict) and not any(p.get("id") == pid for p in survey_mod._index()[0]):
         out.setdefault("degraded", []).append(
-            {"source": "registry", "reason": f"{pid} is not a project in the registry; an empty "
+            {"source": "registry", "code": "unknown-project",
+             "reason": f"{pid} is not a project in the registry; an empty "
                                              f"answer is not evidence it has nothing — "
                                              f"call observatory_status to list ids"})
     return out

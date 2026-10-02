@@ -694,9 +694,25 @@ def credentials(project_id: str) -> dict:
     it from everything that child prints.
     """
     slug = project_id.split(":", 1)[1] if project_id.startswith("project:") else project_id
-    out: dict = {"projectId": f"project:{slug}", "project": slug,
+    pid = f"project:{slug}"
+    # THE FOLDER, NOT THE ID'S SUFFIX. Slots and env rows are keyed by the name a
+    # project's folder has on disk (`vault.py put alpha-web …`); a local-only
+    # project's id is `project:local-alpha-web`. Taking the suffix as the folder
+    # answered two empty lists and a `use` command use_secret could not resolve.
+    try:
+        record = next((p for p in _index()[0] if p.get("id") == pid), None)
+    except (OSError, ValueError, KeyError):
+        record = None
+    names = [slug] if record is None else []
+    for folder in (record or {}).get("local_folders") or []:
+        if folder and Path(folder).name not in names:
+            names.append(Path(folder).name)
+    if record is not None and slug not in names:
+        names.append(slug)
+    out: dict = {"projectId": pid, "project": names[0] if names else slug,
                  "env": [], "vault": [], "degraded": []}
 
+    env_owner = None
     doc_path = paths.REGISTRY / "env-inventory.json"
     if not doc_path.is_file():
         out["degraded"].append({
@@ -716,8 +732,9 @@ def credentials(project_id: str) -> dict:
                 "effect": "the env half of this answer is empty for a reason that is "
                           "not absence"})
         for f in doc.get("files", []):
-            if f.get("project") != slug:
+            if f.get("project") not in names:
                 continue
+            env_owner = env_owner or f.get("project")
             for v in f.get("variables", []):
                 row = {"name": v["name"], "class": v["class"], "file": f["path"],
                        "kind": f["kind"]}
@@ -727,21 +744,27 @@ def credentials(project_id: str) -> dict:
                     row["available_in"] = v["available_in"]
                 out["env"].append(row)
 
-    vault = Path(os.environ.get(
+    root = Path(os.environ.get(
         "OBSERVATORY_VAULT_DIR",
-        paths.source_path("secret_store", paths.SECRETS) / "projects")) / slug
-    if not vault.parent.is_dir():
+        paths.source_path("secret_store", paths.SECRETS) / "projects"))
+    if not root.is_dir():
         out["degraded"].append({
             "source": "vault",
-            "reason": f"{vault.parent} does not exist on this machine",
+            "reason": f"{root} does not exist on this machine",
             "effect": "managed slots are unknown, so a name absent below may still "
                       "exist"})
-    elif vault.is_dir():
-        for envdir in sorted(p for p in vault.iterdir() if p.is_dir()):
-            for slot in sorted(envdir.iterdir()):
-                if slot.is_file() and not slot.name.startswith(".") \
-                        and slot.name != "meta.json":
-                    out["vault"].append({"name": slot.name, "env": envdir.name})
+    else:
+        for name in names:
+            vault = root / name
+            if not vault.is_dir():
+                continue
+            for envdir in sorted(p for p in vault.iterdir() if p.is_dir()):
+                for slot in sorted(envdir.iterdir()):
+                    # A SLOT NAME, as use_secret reads one: `NAME.meta.json` and a
+                    # rotation's `NAME.retired-…` archive sit beside it and are not slots.
+                    if slot.is_file() and re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", slot.name):
+                        out["vault"].append({"name": slot.name, "env": envdir.name})
+                        out["project"] = name
 
     out["totals"] = {
         "env_variables": len(out["env"]),
@@ -750,7 +773,9 @@ def credentials(project_id: str) -> dict:
                         if r["class"] in ("empty", "placeholder")),
         "vault_slots": len(out["vault"]),
     }
-    out["use"] = (f"tools/use_secret.py run {slug} <NAME> -- <command>  "
+    if not out["vault"] and env_owner:
+        out["project"] = env_owner
+    out["use"] = (f"python \"$(project-observatory full-path)/tools/use_secret.py\" run [--env ENV] {out['project']} <NAME> -- <command>  "
                   "# injects named values and redacts exact matches from captured output; "
                   "not a sandbox against encoded output or network transmission")
     out["never"] = "Do not print a credential value into a transcript or public report."

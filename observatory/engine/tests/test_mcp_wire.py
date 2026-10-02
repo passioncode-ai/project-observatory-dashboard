@@ -301,9 +301,49 @@ async def run() -> None:
                   f"{data['counts']}")
 
 
+async def run_credentials() -> None:
+    """A local-only project, asked for by its REGISTRY id.
+
+    `project:local-alpha-web` names the folder `alpha-web`; the tool took the id's
+    suffix as the folder, answered two empty lists and handed over a `use` command
+    that use_secret could not resolve. And a rotated slot's `.meta.json` and
+    `.retired-…` archive were counted as slots of their own."""
+    import paths
+    reg = paths.REGISTRY / "projects.json"
+    doc = json.loads(reg.read_text(encoding="utf-8"))
+    doc["projects"] = [p for p in doc["projects"] if p.get("id") != "project:local-alpha-web"] + [
+        {"id": "project:local-alpha-web", "name": "alpha-web", "lifecycle": "active",
+         "anchor": "local-folder", "local_folders": ["alpha-web"], "owners": []}]
+    reg.write_text(json.dumps(doc), encoding="utf-8")
+    vault = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-wire-vault-")) / "projects"
+    slot = vault / "alpha-web" / "local"
+    slot.mkdir(parents=True)
+    for name in ("EXAMPLE_API_KEY", "EXAMPLE_API_KEY.meta.json", "EXAMPLE_API_KEY.retired-20260101T000000Z"):
+        (slot / name).write_text("{}" if name.endswith(".json") else "synthetic-not-a-value", encoding="utf-8")
+    params = StdioServerParameters(command=sys.executable, args=[str(ROOT / "mcp/server.py")], cwd=str(ROOT),
+                                   env={**os.environ, "OBSERVATORY_VAULT_DIR": str(vault),
+                                        "OBSERVATORY_DB": str(vault.parent / "test.db")})
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.discover()
+            data = payload(await session.call_tool("observatory_credentials", {"projectId": "project:local-alpha-web"}))
+            check("a local-only project's slots are found by its registry id",
+                  [v["name"] for v in data.get("vault", [])] == ["EXAMPLE_API_KEY"], str(data.get("vault")))
+            check("and a rotated slot's meta and archive are not slots", data.get("totals", {}).get("vault_slots") == 1,
+                  str(data.get("totals")))
+            check("the use command names the folder use_secret resolves",
+                  " alpha-web " in data.get("use", "") and "local-alpha-web" not in data.get("use", ""),
+                  data.get("use", "")[:160])
+            check("and no value crosses the wire", "synthetic-not-a-value" not in json.dumps(data))
+            data = payload(await session.call_tool("observatory_credentials", {"projectId": "project:absent-example"}))
+            check("an unknown id is a typed degradation",
+                  any(d.get("code") == "unknown-project" for d in data.get("degraded", [])), str(data.get("degraded")))
+
+
 if __name__ == "__main__":
     print("MCP wire — mcp/server.py over stdio\n")
     asyncio.run(run())
+    asyncio.run(run_credentials())
     print()
     if FAILURES:
         print(f"\033[31m{len(FAILURES)} failed\033[0m")
