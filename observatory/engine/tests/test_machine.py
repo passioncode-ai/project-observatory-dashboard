@@ -246,6 +246,26 @@ class Estate(Base):
         states = {Path(w["path"]).name: w["state"] for w in c["worktrees"]}
         self.assertEqual(states, {"wt-clean": "clean", "wt-dirty": "dirty", "wt-gone": "missing"})
 
+    def test_a_checkout_with_no_remote_is_surveyed_too(self):
+        # A git folder with no remote has no repository row, only a project's
+        # local folder; the survey used to report "0 checkouts" beside it.
+        self.build()
+        solo = self.data / "solo"
+        subprocess.run(["git", "init", "-q", "-b", "main", str(solo)], check=True)
+        commit(solo, "s")
+        git(solo, "branch", "side")
+        git(solo, "worktree", "add", "-q", str(self.base / "wt-solo"), "side")
+        (self.data / "plain").mkdir()                          # not git: never a checkout
+        reg = self.home / "registry"
+        doc = json.loads((reg / "projects.json").read_text())
+        doc["projects"] += [{"id": "project:local-solo", "name": "solo", "local_folders": ["solo"]},
+                            {"id": "project:local-plain", "name": "plain", "local_folders": ["plain"]},
+                            {"id": "project:app-again", "name": "app", "local_folders": ["app"]}]
+        (reg / "projects.json").write_text(json.dumps(doc))
+        got = {c["repository"]: c for c in self.survey()["checkouts"]}
+        self.assertEqual(set(got), {"repository:example/app", "local:solo"})
+        self.assertEqual([Path(w["path"]).name for w in got["local:solo"]["worktrees"]], ["wt-solo"])
+
     def run_cleanup(self, *args, auto_on=True, busy=None):
         import cleanup
         importlib.reload(cleanup)
