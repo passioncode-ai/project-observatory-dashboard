@@ -394,6 +394,12 @@ enum DashboardMode: Equatable {
         }
         return .notBuilt(portBusy: busy)
     }
+    /// The previous or next conversation in the list (⌥⌘↑ / ⌥⌘↓); never while a question runs.
+    func selectAdjacent(_ step: Int) {
+        guard !busy, !conversations.isEmpty else { return }
+        let at = selected.flatMap { id in conversations.firstIndex { $0.id == id } } ?? (step > 0 ? -1 : conversations.count)
+        selected = conversations[max(0, min(conversations.count - 1, at + step))].id
+    }
     func newConversation() { guard !busy else { return }; selected = nil; turns = []; failure = nil; revision += 1 }
 
     /// Saves Settings. Only a change of program or workspace starts over — clearing

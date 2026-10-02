@@ -259,4 +259,19 @@ import ObservatoryCore
         model.russian = false
         XCTAssertEqual(model.limitation(["source": "machine", "code": "unavailable"]), "The machine snapshot could not be read.")
     }
+    func testConversationsCanBeWalkedFromTheKeyboard() async {
+        // The list draws its own selection (no system blue), so it no longer takes
+        // arrow keys; ⌥⌘↑/↓ walk it instead.
+        let model = Model(defaults: defaults()) { action, _ in
+            action == "status" ? ["engine_version": "0.12.0", "agent_enabled": true, "provider_configured": true,
+                                  "conversations": [["id": "chat-a", "title": "A"], ["id": "chat-b", "title": "B"]]]
+                               : ["turns": []]
+        }
+        await model.refresh()
+        XCTAssertEqual(model.selected, "chat-a")
+        model.selectAdjacent(1); XCTAssertEqual(model.selected, "chat-b")
+        model.selectAdjacent(1); XCTAssertEqual(model.selected, "chat-b")
+        model.selectAdjacent(-1); XCTAssertEqual(model.selected, "chat-a")
+        model.busy = true; model.selectAdjacent(1); XCTAssertEqual(model.selected, "chat-a")
+    }
 }

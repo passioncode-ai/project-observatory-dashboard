@@ -79,6 +79,11 @@ struct AppCommands: Commands {
             Divider()
             Button(model.t("Delete Conversation…", "Удалить диалог…")) { openWindow(id: WindowID.assistant); model.deleting = model.selected }
                 .keyboardShortcut(.delete, modifiers: .command).disabled(model.selected == nil || model.busy)
+            Divider()
+            Button(model.t("Previous Conversation", "Предыдущий диалог")) { model.selectAdjacent(-1) }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option]).disabled(model.conversations.isEmpty || model.busy)
+            Button(model.t("Next Conversation", "Следующий диалог")) { model.selectAdjacent(1) }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option]).disabled(model.conversations.isEmpty || model.busy)
         }
         CommandMenu(model.t("Dashboard", "Дашборд")) {
             Button(model.t("Overview", "Обзор")) { openWindow(id: WindowID.dashboard); web.home() }
