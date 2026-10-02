@@ -77,7 +77,9 @@ enum DashboardMode: Equatable {
         let cli = defaults.string(forKey: "executable") ?? Self.defaultExecutable(home: NSHomeDirectory())
         let home = defaults.string(forKey: "workspace") ?? NSHomeDirectory() + "/.local/share/project-observatory-full"
         executable = cli; activeExecutable = cli; workspace = home; activeWorkspace = home
-        russian = defaults.object(forKey: "russian") as? Bool ?? Locale.preferredLanguages.first?.hasPrefix("ru") ?? false
+        // `bool(forKey:)` also reads "YES"/"1" given as a launch argument (a string there).
+        russian = defaults.object(forKey: "russian") != nil ? defaults.bool(forKey: "russian")
+            : Locale.preferredLanguages.first?.hasPrefix("ru") ?? false
     }
     /// Where a first launch looks for the engine, before anything was chosen in
     /// Settings: a link on PATH first, then the virtual environment README → Install
@@ -89,6 +91,8 @@ enum DashboardMode: Equatable {
                           "/opt/homebrew/bin/project-observatory", "/usr/local/bin/project-observatory"]
         return candidates.first(where: exists) ?? venv
     }
+    /// Where a person without an engine learns to install one.
+    nonisolated static let installGuide = URL(string: "https://github.com/passioncode-ai/project-observatory-dashboard#install")!
     private var backend: Backend { Backend(executable: activeExecutable, workspace: activeWorkspace) }
     func t(_ en: String, _ ru: String) -> String { russian ? ru : en }
     /// A date in the APP's language, not the system's: "2 окт. 2026 г., 18:57" beside Russian text.

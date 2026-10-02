@@ -128,10 +128,12 @@ NATIVE_SOURCES = {
     "macos/Package.swift", "macos/scripts/build-app.sh",
     "macos/scripts/make-icon.swift", "macos/scripts/install-app.sh",
     "macos/Sources/ObservatoryCore/Bridge.swift", "macos/Sources/ObservatoryCore/Navigation.swift",
+    "macos/Sources/ObservatoryCore/Palette.swift",
     "macos/Sources/ObservatoryApp/App.swift", "macos/Sources/ObservatoryApp/Model.swift",
     "macos/Sources/ObservatoryApp/Assistant.swift", "macos/Sources/ObservatoryApp/Dashboard.swift",
+    "macos/Sources/ObservatoryApp/Theme.swift",
     "macos/Tests/ObservatoryCoreTests/BridgeTests.swift", "macos/Tests/ObservatoryCoreTests/ModelTests.swift",
-    "macos/Tests/ObservatoryCoreTests/NavigationTests.swift",
+    "macos/Tests/ObservatoryCoreTests/NavigationTests.swift", "macos/Tests/ObservatoryCoreTests/PaletteTests.swift",
 }
 
 

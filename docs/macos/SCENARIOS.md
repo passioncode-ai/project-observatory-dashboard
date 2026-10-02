@@ -21,7 +21,7 @@ ST-03: another agent invokes the same capability. Product outcome: unobserved.
 | SCN-009 | Window closed, Dock click brings it back | draft |
 
 These scenarios are specified from the autonomous implementation brief, not human usability validation;
-coverage below names the regression tests and the native walkthrough run on 2026-10-02. See [receipts](../runs/2026-10-01-macos-app/README.md).
+coverage below names the regression tests and the native walkthroughs run on 2026-10-02 and 2026-10-03. See [receipts](../runs/2026-10-01-macos-app/README.md).
 
 ## SCN-001 — First launch and connection recovery
 Status: draft
@@ -30,11 +30,16 @@ Persona: P-01
 Traces: ST-01, JTBD-01, FLW-01
 Preconditions: app installed, backend may be absent or old.
 Trigger: user opens app.
-Steps: open → connection status; missing CLI → choose executable/workspace in
-Settings → Test connection → compatible status → empty conversation.
+Steps: open → the engine is looked for where README → Install puts it → no engine:
+«Observatory is not installed yet» with the path, Settings and an installation guide;
+a folder that is not a workspace: the `full init` command → choose program/workspace in
+Settings → Save and check connection → compatible status → empty conversation.
 Expected result: no automatic dependency install, no model call, usable next action.
 Errors & recovery: invalid path/protocol/timeout shows retry/settings, keeps selections.
-Coverage: core/bridge/model regression tests; native walkthrough run 2026-10-02 against a workspace copy ([receipt](../runs/2026-10-02-app-agent-audit/README.md)).
+Coverage: core/bridge/model regression tests (`testMissingExecutableIsNamedMissingNotMisconfigured`,
+`testDefaultEngineIsFoundWhereTheReadmeInstallsIt`, `testFirstRunMessagesNameTheInstallAndInitSteps`);
+native walkthroughs 2026-10-02 ([receipt](../runs/2026-10-02-app-agent-audit/README.md)) and
+2026-10-03 on synthetic workspaces: no engine, no workspace, unbuilt dashboard ([report](../reports/2026-10-03-observatory-audit-run-1/README.md)).
 
 ## SCN-002 — Evidence-bound answer
 Status: draft
@@ -111,7 +116,7 @@ Steps: launch → the dashboard window comes forward → its overview loads, liv
 workspace's server answers → toolbar offers back/forward, overview, reload, browser, assistant.
 Expected result: the dashboard, never the assistant, is what opens; the window title is the page's.
 Errors & recovery: an unreadable engine or workspace shows the reason with Retry and Settings.
-Coverage: Model and navigation tests; native walkthrough 2026-10-02 ([receipt](../runs/2026-10-02-dashboard-first-app/README.md)).
+Coverage: Model and navigation tests; native walkthroughs 2026-10-02 ([receipt](../runs/2026-10-02-dashboard-first-app/README.md)) and 2026-10-03, EN and RU, default size and 900×620 ([report](../reports/2026-10-03-observatory-audit-run-1/README.md)).
 
 ## SCN-008 — No server: saved pages, then Start server
 Status: draft
@@ -125,7 +130,9 @@ window switches to the live dashboard; an installed always-on server is restarte
 Expected result: reading never waits for a server; a server starts only on request.
 Errors & recovery: a port held by another workspace is named and Start is disabled; a failed
 start names its log; no pages at all → Build the dashboard.
-Coverage: engine `serve`/`build` tests, Model tests; native walkthrough 2026-10-02.
+Coverage: engine `serve`/`build` tests, Model tests; native walkthroughs 2026-10-02 and 2026-10-03:
+port held by another workspace → Start disabled with the reason; unbuilt → Build → saved pages;
+spare port → Start server → «Live» ([report](../reports/2026-10-03-observatory-audit-run-1/README.md)).
 
 ## SCN-009 — Window closed, Dock click brings it back
 Status: draft
@@ -137,5 +144,6 @@ Trigger: Dock icon click, or launching the app again.
 Steps: reopen → the dashboard window is created and comes forward.
 Expected result: the app is never running without a way back to its window.
 Errors & recovery: none expected; ⌘1 (Window → Dashboard) does the same.
-Coverage: native walkthrough 2026-10-02 (launch 1 window → closed 0 → reopen 1).
+Coverage: native walkthroughs 2026-10-02 and 2026-10-03 (launch 1 window → closed 0 → reopen 1; the
+Window menu lists Dashboard and Assistant once each).
 

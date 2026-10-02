@@ -106,8 +106,12 @@ Assistant window (⇧⌘A, toolbar): native split view, conversation sidebar, to
 new dialogue, project scope and dashboard action, central transcript, evidence
 disclosure, composer and Send/Stop. Returning users see stored history. Empty state
 explains the job and offers concrete starter questions; loading/error states preserve
-input. Settings: CLI executable picker, workspace directory picker, connection test,
-language (EN/RU), and visible backend/version status. Absolute executable path, argv
+input. Settings: program and workspace fields with pickers, Save and check connection,
+language (English/Русский), and visible backend/version status. A first launch looks for
+the engine at `~/.local/bin/project-observatory`, then in the virtual environment README →
+Install creates (`~/.local/share/project-observatory-venv/bin/`), then Homebrew's prefixes;
+no engine is `backend-missing` with the path and an installation-guide link, a folder
+without `workspace.json` names `project-observatory full init`. Absolute executable path, argv
 array, no shell interpolation. The app never edits other agents' MCP configs. No hidden
 enrollment or automatic service takeover: a server starts only from Start server.
 
@@ -127,15 +131,25 @@ changes invalidate in-flight UI callbacks; late results cannot paint a different
 workspace. Closing the window does not kill a detached accepted job; reopening
 can resume it. Stop explicitly cancels the job, not unrelated processes.
 
-Design: native controls and system semantic colors; one central token map for
-spacing, widths and accent. System font, keyboard shortcuts, selectable answer text,
-VoiceOver labels, clear focused controls, reduced-motion-compatible static layout.
-No custom animation; the chat is native, the dashboard is the workspace's own pages.
-Main actions remain reachable at 900×620.
-Native controls are the component layer, not a web component kit. Visual direction
-is quiet macOS utility; observable target is readable evidence beside an answer,
-not a tile dashboard. No Figma publication requested. Native UI inspection is
-required; screenshot review alone is not an accessibility certification.
+Design (2026-10-03): one PassionCode product. Every window — dashboard, assistant,
+Settings, alerts and menus — is dark (`NSApp.appearance` is Dark Aqua) and drawn from
+the design system's own colour roles, the values the dashboard's pages use
+(`dashboard/brand/passioncode-tokens.css`). They are defined once, in
+`macos/Sources/ObservatoryCore/Palette.swift`, and the views read them through
+`macos/Sources/ObservatoryApp/Theme.swift`: gold (`--pc-accent`) for the primary action,
+the selected conversation and the focus ring, with `--pc-on-accent` text on it; semantic
+roles for state only (warning: a person is needed; negative: a failure; positive: ready;
+info: running). No system blue: buttons, fields, the language switch and the conversation
+list draw their own states. `PaletteTests` compares every value with the vendored CSS,
+holds every text pair the app draws to WCAG AA (4.5:1) and the focus ring to 3:1, and
+refuses a system colour in any view. The field's resting edge is the design system's
+`--pc-border-strong` (2.5:1 on panel, as on the dashboard's own inputs); fields are
+identified by their label and AA placeholder and get the 3:1 gold ring on focus.
+System font, keyboard shortcuts, selectable answer text, VoiceOver labels and the
+selected state as an accessibility trait. Motion is colour on hover and press, 120 ms,
+and none under Reduce Motion; no other animation. Main actions remain reachable at
+900×620. Native UI inspection is required; screenshot review alone is not an
+accessibility certification.
 
 ## Distribution and linked repositories
 

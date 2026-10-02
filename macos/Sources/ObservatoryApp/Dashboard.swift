@@ -187,6 +187,7 @@ struct DashboardView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 620)
+        .passionCodeWindow()
         .navigationTitle(web.title.isEmpty ? "Project Observatory" : web.title)
         .navigationSubtitle(subtitle)
         .toolbar { toolbar }
@@ -220,64 +221,74 @@ struct DashboardView: View {
 
     @ViewBuilder private var banner: some View {
         if case .files(_, let at, let alwaysOn, let busy) = m.dashboardMode {
-            HStack(spacing: 10) {
-                Image(systemName: "externaldrive").accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(m.t("The dashboard server is not running — these are the saved pages", "Сервер дашборда не запущен — показаны сохранённые страницы")
-                         + (at.map { m.t(" from ", " от ") + m.when($0) } ?? "") + ".").font(.callout).bold()
-                    Text(busy ? m.message("dashboard-port-busy")
-                              : m.t("Reading works as usual; buttons that change keys need the server.", "Чтение работает как обычно; кнопкам, которые меняют ключи, нужен сервер."))
-                        .font(.caption).foregroundStyle(.secondary)
-                    if let e = m.dashboardError { Text(rendered(e)).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
-                }
-                Spacer()
+            Banner(tone: busy ? .warning : .neutral, symbol: "externaldrive",
+                   title: m.t("The dashboard server is not running — these are the saved pages", "Сервер дашборда не запущен — показаны сохранённые страницы")
+                       + (at.map { m.t(" from ", " от ") + m.when($0) } ?? "") + ".",
+                   detail: [busy ? m.message("dashboard-port-busy")
+                                 : m.t("Reading works as usual. Start server serves the same pages on 127.0.0.1.",
+                                       "Чтение работает как обычно. «Запустить сервер» отдаёт те же страницы на 127.0.0.1."),
+                            m.dashboardError].compactMap { $0 }.joined(separator: "\n")) {
                 if m.dashboardWorking { ProgressView().controlSize(.small) }
                 Button(alwaysOn ? m.t("Restart server", "Перезапустить сервер") : m.t("Start server", "Запустить сервер")) { Task { await m.startServer() } }
-                    .disabled(m.dashboardWorking || busy)
+                    .buttonStyle(SecondaryButtonStyle()).disabled(m.dashboardWorking || busy)
             }
-            .padding(.horizontal, 14).padding(.vertical, 8).background(.yellow.opacity(0.12))
-            Divider()
         }
     }
 
     private func placeholder<C: View>(@ViewBuilder _ c: () -> C) -> some View {
-        VStack { Spacer(); c(); Spacer() }.frame(maxWidth: .infinity)
+        VStack { Spacer(); c(); Spacer() }.frame(maxWidth: .infinity).background(Theme.bg)
     }
     private func notBuilt(_ busy: Bool) -> some View {
         placeholder {
             VStack(spacing: 14) {
-                Image(systemName: "square.grid.2x2").font(.system(size: 40)).foregroundStyle(.secondary).accessibilityHidden(true)
-                Text(m.t("This workspace has no dashboard yet", "У этой папки данных ещё нет дашборда")).font(.title2).bold()
-                Text(m.t("Build it from the registry — local, no model call.", "Постройте его из реестра — локально, без вызова модели.")).foregroundStyle(.secondary)
-                if busy { Text(m.message("dashboard-port-busy")).font(.callout).foregroundStyle(.secondary) }
+                Image(systemName: "square.grid.2x2").font(.system(size: 40)).foregroundStyle(Theme.muted).accessibilityHidden(true)
+                Text(m.t("This workspace has no dashboard yet", "У этой папки данных ещё нет дашборда")).font(.title2.bold()).foregroundStyle(Theme.text)
+                Text(m.t("Build it from the registry — local, no model call.", "Постройте его из реестра — локально, без вызова модели.")).foregroundStyle(Theme.muted)
+                if busy { Text(m.message("dashboard-port-busy")).font(.callout).foregroundStyle(Tone.warning.color).multilineTextAlignment(.center).frame(maxWidth: 560) }
                 HStack {
                     Button(m.t("Build the dashboard", "Построить дашборд")) { Task { await m.buildDashboard() } }
-                        .buttonStyle(.borderedProminent).disabled(m.dashboardWorking)
+                        .buttonStyle(PrimaryButtonStyle()).disabled(m.dashboardWorking)
                     if m.dashboardWorking { ProgressView().controlSize(.small) }
                 }
-                if let e = m.dashboardError { Text(rendered(e)).font(.callout).foregroundStyle(.red).textSelection(.enabled).frame(maxWidth: 560) }
+                if let e = m.dashboardError { Text(rendered(e)).font(.callout).foregroundStyle(Tone.negative.color).textSelection(.enabled).frame(maxWidth: 560) }
             }.padding()
+        }
+    }
+    /// A first launch is not a failure: no engine yet, or no workspace yet, says so.
+    private var unavailableTitle: String {
+        switch m.dashboardFailure?.code {
+        case "backend-missing": return m.t("Observatory is not installed yet", "Observatory ещё не установлен")
+        case "unknown-workspace": return m.t("This folder is not a workspace yet", "Эта папка ещё не папка данных")
+        default: return m.t("The dashboard cannot be opened", "Дашборд не открывается")
         }
     }
     private var unavailable: some View {
         placeholder {
             VStack(spacing: 14) {
-                Image(systemName: "exclamationmark.triangle").font(.system(size: 40)).foregroundStyle(.secondary).accessibilityHidden(true)
-                Text(m.t("The dashboard cannot be opened", "Дашборд не открывается")).font(.title2).bold()
-                if let e = m.dashboardError { Text(rendered(e)).multilineTextAlignment(.center).textSelection(.enabled).frame(maxWidth: 560) }
+                Image(systemName: "exclamationmark.triangle").font(.system(size: 40))
+                    .foregroundStyle(AssistantView.tone(m.dashboardFailure?.code).color).accessibilityHidden(true)
+                Text(unavailableTitle).font(.title2.bold()).foregroundStyle(Theme.text)
+                if let e = m.dashboardError {
+                    Text(rendered(e)).foregroundStyle(Theme.text).multilineTextAlignment(.center).textSelection(.enabled).frame(maxWidth: 560)
+                }
                 HStack {
-                    Button(m.t("Retry", "Повторить")) { Task { await m.refreshDashboard() } }.buttonStyle(.borderedProminent)
-                    SettingsLink { Text(m.t("Settings", "Настройки")) }
+                    Button(m.t("Retry", "Повторить")) { Task { await m.refreshDashboard() } }.buttonStyle(PrimaryButtonStyle())
+                    SettingsLink { Text(m.t("Settings", "Настройки")) }.buttonStyle(SecondaryButtonStyle())
+                    if m.dashboardFailure?.code == "backend-missing" {
+                        Link(m.t("Installation guide", "Как установить"), destination: Model.installGuide).buttonStyle(SecondaryButtonStyle())
+                    }
                 }
             }.padding()
         }
     }
     private func loadFailure(_ err: String) -> some View {
         VStack(spacing: 12) {
-            Text(m.t("The page did not load", "Страница не загрузилась")).font(.title3).bold()
-            Text(err).foregroundStyle(.secondary).textSelection(.enabled)
-            Button(m.t("Reload", "Обновить")) { web.reload() }.buttonStyle(.borderedProminent)
-        }.padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            Text(m.t("The page did not load", "Страница не загрузилась")).font(.title3.bold()).foregroundStyle(Theme.text)
+            Text(err).foregroundStyle(Theme.muted).textSelection(.enabled)
+            Button(m.t("Reload", "Обновить")) { web.reload() }.buttonStyle(PrimaryButtonStyle())
+        }
+        .padding(24).background(Theme.raised, in: RoundedRectangle(cornerRadius: Theme.radiusPanel))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radiusPanel).strokeBorder(Theme.border))
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
