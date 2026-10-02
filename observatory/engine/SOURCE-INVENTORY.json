@@ -680,8 +680,9 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "bytes": 1671
+      "export_sha256": "3516db57b60235fc8a7ff27522da10194efbce745a0e204b092c1187ab02afb3",
+      "bytes": 1761,
+      "upstream_modified": true
     },
     {
       "path": "docs/CLI-COMPATIBILITY.md",
@@ -693,15 +694,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "053ac424fd5c821e83c2b1d61638b398daa928449fc6b778f7841d9bc4f2fe68",
-      "bytes": 10848,
+      "export_sha256": "b05fe1cf11515cb8fc0eaee18f7498bacae7f5bfefcf2053e89c2d3a659f3df8",
+      "bytes": 12147,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "ba58a12d4298cfd4fbb6c653d38ef7b483475738cbf5a59a4cb3ae121c58dfe5",
-      "bytes": 17309,
+      "export_sha256": "bdf35ff27442c537048f36cc82296d412447b5a408b3fad155fcf33c43eb169d",
+      "bytes": 40529,
       "upstream_modified": true
     },
     {
@@ -1042,8 +1043,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "e2eb071bd688b5fc4f1f736cd91daa4facd9aff2ea5cda484c091cb33588a07c",
-      "bytes": 56116,
+      "export_sha256": "9a88a3aa4687d3694cfbfb4299cf3d34016f4c1cb6a2a7fd379b2e0b6e1216dd",
+      "bytes": 56156,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -1463,8 +1464,8 @@
     {
       "path": "survey.py",
       "source_sha256": "2c692bcd4b6deac11f6608cce06abe134b748382d7037e43a6d2034d193aac0f",
-      "export_sha256": "65d4ebec9eb7ea806e81a335d7f1db53de70a4f8e85fd9212e111b195a465632",
-      "bytes": 53588,
+      "export_sha256": "ddda42546f4e21bdff3c373f2b36092a122720e742f93b2cd717eecf6f7b55a2",
+      "bytes": 54884,
       "python_comments_removed": 210,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
