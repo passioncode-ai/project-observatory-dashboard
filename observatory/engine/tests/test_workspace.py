@@ -70,10 +70,32 @@ class WorkspaceTests(unittest.TestCase):
         warnings = json.loads(self.run_cli('doctor').stdout)['coverage_warnings']
         self.assertTrue(any(w['source'] == 'sessions' and 'does not exist' in w['problem'] for w in warnings))
 
+    def test_doctor_names_an_unset_or_missing_projects_source(self):
+        # The base scan reads `sources.projects`; with it unset, `full local` used to
+        # end in a FileNotFoundError traceback while doctor reported no gap at all.
+        self.run_cli('init')
+        warnings = json.loads(self.run_cli('doctor').stdout)['coverage_warnings']
+        row = next((w for w in warnings if w['source'] == 'projects'), None)
+        self.assertIsNotNone(row, warnings)
+        self.assertEqual(row['collector'], 'filesystem')
+        self.assertIn('not configured', row['problem'])
+        self.assertEqual(row['fix'], 'project-observatory full configure sources projects PATH')
+        self.run_cli('configure', 'sources', 'projects', str(self.base / 'gone-projects'))
+        warnings = json.loads(self.run_cli('doctor').stdout)['coverage_warnings']
+        self.assertTrue(any(w['source'] == 'projects' and 'does not exist' in w['problem'] for w in warnings), warnings)
+        (self.base / 'gone-projects').mkdir()
+        self.assertEqual(json.loads(self.run_cli('doctor').stdout)['coverage_warnings'], [])
+
+    def configure_projects(self):
+        projects = self.base / 'projects'
+        projects.mkdir(exist_ok=True)
+        self.run_cli('configure', 'sources', 'projects', str(projects))
+
     def test_doctor_names_a_configured_source_that_was_deleted_with_its_fix(self):
         # The sessions collector reads the companion's database: pointed at a file
         # that is gone, every tick logs DEGRADED, so doctor must not stay silent.
         self.run_cli('init')
+        self.configure_projects()
         db = self.base / 'companion.db'
         db.write_bytes(b'')
         transcripts = self.base / 'transcripts'
@@ -145,6 +167,16 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(len(registry['projects']),1)
         self.assertIn('example-project',(self.home/'docs/dashboard/projects.html').read_text())
         self.assertFalse((self.user/'.config/agentgateway').exists())
+    def test_local_before_a_projects_source_says_what_to_do(self):
+        # A new user's first `full local` before `configure sources projects`.
+        self.run_cli('init')
+        p=self.run_cli('local',ok=False)
+        out=p.stdout+p.stderr
+        self.assertNotEqual(p.returncode,0)
+        self.assertNotIn('Traceback',out)
+        self.assertIn('project-observatory full configure sources projects',out)
+        self.assertNotIn('purity checks',out)
+        self.assertNotIn('\033[',out)      # colour is for a terminal, not a pipe
     def test_independent_homes(self):
         self.run_cli('init');first=json.loads((self.home/'workspace.json').read_text())
         other=self.base/'other';self.env['OBSERVATORY_HOME']=str(other)

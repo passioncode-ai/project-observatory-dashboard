@@ -191,6 +191,24 @@ def test_the_scan_refuses_when_git_cannot_run() -> None:
           "156 projects become 206" in p.stderr, p.stderr[-300:])
 
 
+def test_an_unconfigured_projects_source_is_a_typed_refusal() -> None:
+    """A new user who runs `full local` before `configure sources projects` met a
+    FileNotFoundError traceback. The scan now says which source and which command."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-fsnosrc-"))
+    dest = d / "local.json"
+    p = scan(dest, data=d / "unconfigured" / "projects")
+    check("it exits 2", p.returncode == 2, f"exit {p.returncode}: {p.stderr[-200:]}")
+    check("without a traceback", "Traceback" not in p.stderr, p.stderr[-300:])
+    check("naming the configure command",
+          "project-observatory full configure sources projects" in p.stderr, p.stderr[-300:])
+    check("and writing nothing", not dest.is_file())
+    afile = d / "a-file"
+    afile.write_text("x", encoding="utf-8")
+    p = scan(dest, data=afile)
+    check("a file where the folder should be is refused the same way",
+          p.returncode == 2 and "Traceback" not in p.stderr and "not a directory" in p.stderr, p.stderr[-300:])
+
+
 def test_a_refused_scan_leaves_the_previous_file_intact() -> None:
     d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-fskeep-"))
     dest = d / "local.json"
@@ -432,6 +450,7 @@ if __name__ == "__main__":
                test_the_probes_return_a_reason_they_could_not_run,
                test_the_scan_refuses_when_git_cannot_run,
                test_a_refused_scan_leaves_the_previous_file_intact,
+               test_an_unconfigured_projects_source_is_a_typed_refusal,
                test_the_emitter_refuses_a_wholesale_swing,
                test_an_ordinary_emit_is_not_refused,
                test_a_stopping_tick_records_why_it_stopped,
