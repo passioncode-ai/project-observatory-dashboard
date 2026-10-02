@@ -3,6 +3,48 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.12.0 — 2026-10-02
+
+A minor release: the Mac app opens on the dashboard, has its icon, always comes back to a window,
+and what it starts can be stopped again.
+
+### Changed
+
+- **The app opens on the dashboard.** Its main window is the workspace's dashboard: live when the
+  workspace's own server is verified on 127.0.0.1, the built pages from disk when it is not (they
+  are self-contained), under a banner with **Start server**; an unbuilt workspace offers **Build
+  the dashboard**. Navigation stays inside this workspace's pages and everything else opens in the
+  browser; the page's confirm and prompt are native sheets; the app's language and the page's
+  follow each other; the window's chrome is dark like the pages; rebuilt pages reload in place.
+  The assistant moved to its own window (⇧⌘A).
+- `project-observatory full assistant dashboard` names the server state (`verified`, `absent`,
+  `other-workspace`) and the built pages; `serve` and `build` are the explicit actions behind the
+  app's buttons (an installed always-on server is restarted through its launchd job).
+
+### Fixed
+
+- **What the app started could not be stopped.** posix_spawn hands the calling thread's signal
+  mask to the child and a Swift worker thread blocks the asynchronous signals, so every process the
+  0.11.0 app started inherited a blocked SIGTERM: a server it started ignored `full open --stop`,
+  and an assistant runner kept waiting on the model after Stop. The app now spawns with a clean
+  mask, and `serverd` and `run_job` unblock their stop signals whoever starts them.
+- **No window after closing it.** Clicking the Dock icon, or launching again, did not recreate the
+  closed main window; the app now always ends with the dashboard on screen.
+- **No icon.** The app shows the product mark, rasterized on the macOS icon grid at every size.
+- `macos/scripts/install-app.sh` installs the app and forgets Launch Services registrations of the
+  same bundle left by builds elsewhere, which Spotlight could open instead.
+- An engine that answers the dashboard action in the 0.11.0 shape is named incompatible instead of
+  being shown as a workspace without a dashboard.
+- **Finding titles read in Russian.** Every finding carries a message id and its arguments
+  (`title_id`, `title_args`) beside the English `title`, which is rendered from them; the
+  dashboard shows the title in the reader's language with correct plural forms, and a test fails
+  when a rule's title has no id or no translation. Several English titles change wording: "(s)" is
+  replaced by the proper singular or plural, and two titles were reworded so a second count needs no
+  agreement. Anything matching on the old title text sees the new wording. Details and actions stay
+  as their rules write them.
+- An estate with no scan yet no longer reads "Measured not measured" ("Измерено не измерено") in
+  every page's header.
+
 ## 0.11.0 — 2026-10-02
 
 A minor release: the native Mac app and its shared assistant, and an agent channel an agent can
