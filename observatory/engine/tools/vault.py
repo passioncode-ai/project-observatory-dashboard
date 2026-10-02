@@ -9,6 +9,7 @@
     tools/vault.py settle <project> <env> <NAME> --how "…"   # close a leak, with evidence
     tools/vault.py moved <project> <env> <NAME> --how "…"    # record a movement done elsewhere
     tools/vault.py movements [project]                 # the movement journal
+    tools/vault.py remove <project> <env> <NAME> [--retired] [--force]  # delete a slot, or only its archives
     tools/vault.py leaks                               # the register, oldest unrotated first
     tools/vault.py backup                              # run the store's encrypted backup now
 
@@ -576,7 +577,48 @@ def cmd_inject(a) -> int:
     return 0
 
 
+@_serialized
+def cmd_remove(a) -> int:
+    """Delete a slot (value and metadata), or with --retired only the archives a
+    rotation left. Journalled; refused while a leak of the slot is open unless
+    --force, because removing the local copy settles nothing at the provider."""
+    slot = _slot(a.project, a.env, a.name)
+    secret = f"{a.project}/{a.env}/{a.name}"
+    archives = sorted(slot.parent.glob(f"{slot.name}.retired-*")) if slot.parent.is_dir() else []
+    for p in archives:
+        _no_symlinks(p)
+    if a.retired:
+        if not archives:
+            die(f"nothing at {secret} to remove: no retired archive")
+        for p in archives:
+            p.unlink()
+        journal("remove-retired", secret, removed=len(archives))
+        print(f"removed {len(archives)} retired archive(s) of {secret}; the slot is kept")
+        return 0
+    if not slot.is_file():
+        die(f"nothing at {secret} to remove; `vault.py list {a.project}` shows the slots")
+    if _unsettled_for(secret) and not a.force:
+        die(f"{secret} has an open leak; removing the local copy settles nothing at the "
+            f"provider. Settle it (`vault.py settle …`) or pass --force")
+    meta = _meta_path(slot)
+    _no_symlinks(meta)
+    slot.unlink()
+    meta.unlink(missing_ok=True)
+    for p in archives:
+        p.unlink()
+    journal("remove", secret, archives_removed=len(archives), forced=bool(a.force))
+    print(f"removed {secret}" + (f" and {len(archives)} retired archive(s)" if archives else "")
+          + "; the value was not printed")
+    return 0
+
+
 def cmd_backup(a) -> int:
+    import configuration
+    if not (configuration.load().get("sources") or {}).get("gateway_root"):
+        # The placeholder path a missing source resolves to (`<home>/disabled/…`)
+        # names a folder nobody made; say which setting is missing instead.
+        die("no backup script is configured: set sources.gateway_root to the folder that "
+            "holds backup-secrets.sh (project-observatory full configure sources gateway_root PATH)")
     if not BACKUP.is_file():
         die(f"{BACKUP} is not on this machine")
     p = subprocess.run(["bash", str(BACKUP)], capture_output=True, text=True, timeout=600)
@@ -601,6 +643,9 @@ def main(argv: list[str]) -> int:
     p = sub.add_parser("leaks");  p.add_argument("--check", action="store_true")
     p = sub.add_parser("list");   p.add_argument("project", nargs="?"); p.add_argument("env", nargs="?")
     p = sub.add_parser("inject"); p.add_argument("project"); p.add_argument("env"); p.add_argument("dir")
+    p = sub.add_parser("remove"); p.add_argument("project"); p.add_argument("env"); p.add_argument("name")
+    p.add_argument("--retired", action="store_true", help="remove only the archives rotation left; keep the slot")
+    p.add_argument("--force", action="store_true", help="remove even while a leak of it is open")
     sub.add_parser("backup")
     a = ap.parse_args(argv[1:])
     try:
@@ -608,7 +653,7 @@ def main(argv: list[str]) -> int:
             validate_names(a.project, getattr(a, "env", None), getattr(a, "name", None))
         return {"put": cmd_put, "settle": cmd_settle, "moved": cmd_moved, "movements": cmd_movements,
                 "rotate": cmd_rotate, "leak": cmd_leak, "leaks": cmd_leaks,
-                "list": cmd_list, "inject": cmd_inject, "backup": cmd_backup}[a.cmd](a)
+                "list": cmd_list, "inject": cmd_inject, "backup": cmd_backup, "remove": cmd_remove}[a.cmd](a)
     except VaultBoundaryError as exc:
         print(f"vault: {exc}", file=sys.stderr)
         return 2

@@ -418,9 +418,45 @@ def test_the_mandatory_rules_ship_as_a_skill() -> None:
 
 
 
+def test_remove_takes_a_slot_or_its_archives_on_the_record() -> None:
+    """There was no way to remove a slot or a rotation's archive except by hand
+    in the store, outside the journal."""
+    s = fresh()
+    vault(s, "put", "demo", "local", "API_TOKEN", stdin="synthetic-remove-value-one")
+    vault(s, "rotate", "demo", "local", "API_TOKEN", stdin="synthetic-remove-value-two")
+    p = vault(s, "remove", "demo", "local", "API_TOKEN", "--retired")
+    check("--retired removes the archives and keeps the slot", p.returncode == 0
+          and not list((s / "demo/local").glob("API_TOKEN.retired-*")) and (s / "demo/local/API_TOKEN").is_file(),
+          p.stdout + p.stderr)
+    vault(s, "leak", "demo", "local", "API_TOKEN", "--where", "pasted into a fixture review thread #12")
+    p = vault(s, "remove", "demo", "local", "API_TOKEN")
+    check("a slot with an open leak is not removed without --force", p.returncode != 0
+          and (s / "demo/local/API_TOKEN").is_file() and "--force" in p.stderr, p.stderr[:200])
+    p = vault(s, "remove", "demo", "local", "API_TOKEN", "--force")
+    check("--force removes the slot and its metadata", p.returncode == 0
+          and not (s / "demo/local/API_TOKEN").exists() and not (s / "demo/local/API_TOKEN.meta.json").exists(),
+          p.stdout + p.stderr)
+    check("and never prints a value", "synthetic-remove-value" not in p.stdout + p.stderr)
+    moves = [json.loads(x) for x in (s / "movements.jsonl").read_text(encoding="utf-8").splitlines()]
+    check("both removals are journalled", [m["event"] for m in moves if m["event"].startswith("remove")]
+          == ["remove-retired", "remove"], str([m["event"] for m in moves]))
+    check("the journal holds no value", "synthetic-remove-value" not in (s / "movements.jsonl").read_text())
+    p = vault(s, "remove", "demo", "local", "API_TOKEN")
+    check("removing what is not there is a typed refusal", p.returncode != 0 and "nothing at" in p.stderr,
+          p.stderr[:160])
+
+
+def test_backup_without_a_gateway_names_the_setting() -> None:
+    p = vault(fresh(), "backup")
+    check("no backup script configured is said as such", p.returncode != 0
+          and "sources.gateway_root" in p.stderr and "disabled" not in p.stderr, p.stderr[:200])
+
+
 if __name__ == "__main__":
     print("the vault — one door in, one door out, leaks on the record\n")
-    for fn in (test_a_value_travels_only_on_stdin,
+    for fn in (test_remove_takes_a_slot_or_its_archives_on_the_record,
+               test_backup_without_a_gateway_names_the_setting,
+               test_a_value_travels_only_on_stdin,
                test_put_list_rotate_and_the_archive,
                test_the_vocabulary_is_enforced,
                test_inject_refuses_a_committable_env_and_writes_an_ignored_one,
