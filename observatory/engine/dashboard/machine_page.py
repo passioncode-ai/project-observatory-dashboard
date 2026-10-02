@@ -19,6 +19,9 @@ ROWS = 20
 NUM = ' class="num"'
 EMPTY = ' class="empty"'
 HEADING = ' class="machine-h"'
+#: What an empty table says when its survey has not run. "Every worktree is
+#: clean" over checkouts nobody looked at is a claim, not an empty state.
+UNMEASURED = "Not measured yet — run project-observatory full machine"
 
 
 def _e(v) -> str:
@@ -101,7 +104,7 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     parts.append(_table(t, "Memory by project",
                         [("Project", False), ("Processes", True), ("Memory", True)],
                         [[_e(p["project"]), _e(p["processes"]), _gb(p["rss_mb"])] for p in (procs.get("projects") or [])[:ROWS]],
-                        "No process runs inside a project folder."))
+                        "No process runs inside a project folder." if m.get("processes") else UNMEASURED))
     disk = m.get("disk") or {}
     parts.append(_table(t, "Where the disk goes",
                         [("Place", False), ("Kind", False), ("Size", True), ("How it comes back", False)],
@@ -122,12 +125,12 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                           _e(w.get("branch") or ""), _e(t(w["state"])) + (" · " + _e(t("in use")) if w.get("busy") else ""),
                           _e(w.get("idle_days", ""))]
                          for w in sorted(idle, key=lambda w: -(w.get("idle_days") or 0))[:ROWS]],
-                        "Every worktree is clean and in recent use."))
+                        "Every worktree is clean and in recent use." if git else UNMEASURED))
     parts.append(_table(t, "Branches holding the only copy",
                         [("Repository", False), ("Branch", False), ("Commits", True), ("Idle days", True)],
                         [[_e(b["repository"].split(":", 1)[-1]), _e(b["name"]), _e(b.get("ahead")), _e(b.get("idle_days"))]
                          for b in sorted(git.get("uniqueBranches") or [], key=lambda b: -(b.get("idle_days") or 0))[:ROWS]],
-                        "No branch holds commits found nowhere else."))
+                        "No branch holds commits found nowhere else." if git else UNMEASURED))
     cleanup = m.get("cleanup") or {}
     counts = cleanup.get("counts") or {}
     parts.append(_table(t, "Cleanup plan",
@@ -135,7 +138,7 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                         [[_e(t(k)), _e(t("auto") if k in ("branch-merged", "branch-pushed", "worktree-missing",
                                                           "worktree-clean", "build-artifacts") else t("manual")), _e(v)]
                          for k, v in counts.items() if v],
-                        "Nothing to clean."))
+                        "Nothing to clean." if cleanup else UNMEASURED))
     parts.append(t.mark("The auto tier loses nothing and runs on the tick when features.auto_cleanup is on; "
                         "the manual tier archives first: project-observatory full cleanup --apply --include manual",
                         tag="p", attrs=' class="machine-hint"'))
@@ -147,7 +150,15 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                         "Nothing was cleaned in the last 7 days."))
     degraded = m.get("degraded") or []
     if degraded:
-        items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span> — {_e(d.get("reason"))}</li>' for d in degraded)
+        # A reason with a `code` is a message id, so the Russian page reads Russian;
+        # one without (a collector's own words) is shown as written.
+        def reason(d: dict) -> str:
+            if d.get("code") == "not-surveyed":
+                return t.mark("not surveyed yet — enable features.machine_watch, or run project-observatory full machine")
+            if d.get("code") == "unreadable":
+                return t.mark("unreadable: {error}", error=d.get("error", ""))
+            return _e(d.get("reason"))
+        items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span> — {reason(d)}</li>' for d in degraded)
         parts.append(f'<section class="card panel">{t.mark("Not measured", tag="h2", attrs=HEADING)}<ul>{items}</ul></section>')
     parts.append("</section>")
     return "".join(parts)
@@ -158,4 +169,7 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
 DYNAMIC = ("cache", "toolchain", "build", "simulator", "vm", "worktrees", "user", "swap", "memory",
            "regenerable", "command", "history", "manual", "auto", "clean", "dirty", "missing", "unreadable",
            "branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts",
-           "branch-unique", "worktree-dirty", "removed", "pruned", "skipped", "failed")
+           "branch-unique", "worktree-dirty", "removed", "pruned", "skipped", "failed",
+           # Empty states chosen by whether their survey ran (see UNMEASURED).
+           UNMEASURED, "Every worktree is clean and in recent use.", "No branch holds commits found nowhere else.",
+           "Nothing to clean.", "No process runs inside a project folder.")

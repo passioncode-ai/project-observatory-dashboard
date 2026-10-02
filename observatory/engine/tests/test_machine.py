@@ -399,6 +399,28 @@ class Page(Base):
         self.assertIn("git-hygiene.json", json.dumps(summary["degraded"]))
 
 
+class Unmeasured(Base):
+    def test_nothing_measured_is_never_shown_as_all_clean(self):
+        # With no git-hygiene survey and no cleanup plan the page said "Every
+        # worktree is clean…", "No branch holds commits found nowhere else" and
+        # "Nothing to clean" — claims about checkouts nobody looked at.
+        import machine_view, machine_page
+        from i18n import Translator
+        summary = machine_view.summary()
+        en = machine_page.machine_html({"machine": summary}, Translator("en"))
+        for claim in ("Every worktree is clean", "No branch holds commits found nowhere else", "Nothing to clean."):
+            self.assertNotIn(claim, en)
+        self.assertIn("Not measured yet", en)
+        self.assertIn("project-observatory full machine", en)
+        # The degraded reasons are message ids, so the Russian page is Russian.
+        ru = machine_page.machine_html({"machine": summary}, Translator("ru"))
+        import re
+        shown = re.sub(r'data-t(-args)?="[^"]*"', "", ru)     # the ids themselves are English by design
+        self.assertNotIn("not surveyed yet", shown)
+        self.assertNotIn("Not measured yet", shown)
+        self.assertIn("project-observatory full machine", ru)
+
+
 class Tool(Base):
     """The MCP tool an agent reads: bounded by default, whole only on request."""
 
