@@ -21,11 +21,16 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 # CFBundleVersion counts commits, so every build from a newer source is a newer
 # bundle to Launch Services; the short version is the engine release it ships beside.
 BUILD=$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)
+# Any python3 will do, the macOS 3.9 one included: no tomllib (3.11+), so the
+# version is read from `[project]` with a pattern rather than a TOML parser.
 python3 - "$ROOT" "$APP" "$BUILD" <<'PY'
-import plistlib,sys,tomllib
+import plistlib,re,sys
 from pathlib import Path
 root,app,build=Path(sys.argv[1]),Path(sys.argv[2]),sys.argv[3]
-version=tomllib.loads((root/'pyproject.toml').read_text())['project']['version']
+project=re.search(r'^\[project\]\s*$(.*?)(?=^\[|\Z)',(root/'pyproject.toml').read_text(),re.M|re.S)
+found=project and re.search(r'^version\s*=\s*"([^"]+)"',project.group(1),re.M)
+if not found: sys.exit('build-app.sh: no [project] version in pyproject.toml')
+version=found.group(1)
 doc={'CFBundleName':'Project Observatory','CFBundleDisplayName':'Project Observatory',
      'CFBundleIdentifier':'ai.passioncode.observatory','CFBundleExecutable':'ProjectObservatory',
      'CFBundlePackageType':'APPL','CFBundleShortVersionString':version,'CFBundleVersion':build,

@@ -116,6 +116,14 @@ import ObservatoryCore
         if origin?.isLive == true { onLiveFailure?() }
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { reload() }
+    /// No credential, ever: see `DashboardOrigin.challenge`.
+    func webView(_ webView: WKWebView, respondTo challenge: URLAuthenticationChallenge) async
+        -> (URLSession.AuthChallengeDisposition, URLCredential?) {
+        switch DashboardOrigin.challenge(challenge.protectionSpace.authenticationMethod) {
+        case .performDefault: return (.performDefaultHandling, nil)
+        case .cancel: return (.cancelAuthenticationChallenge, nil)
+        }
+    }
 
     // MARK: the page's confirm() and prompt() — native sheets, never a silent "yes"
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
@@ -183,8 +191,11 @@ struct DashboardView: View {
         .navigationSubtitle(subtitle)
         .toolbar { toolbar }
         .task {
-            web.onPageLocale = { [weak m] code in m?.adoptPageLocale(code) }
-            web.onLiveFailure = { [weak m] in Task { await m?.refreshDashboard() } }
+            // The controller outlives this view; it holds the model weakly, by a local
+            // reference (a weak capture of the property wrapper itself is a warning).
+            let model = m
+            web.onPageLocale = { [weak model] code in model?.adoptPageLocale(code) }
+            web.onLiveFailure = { [weak model] in Task { await model?.refreshDashboard() } }
             await m.refreshDashboard()
             await m.refresh()
         }

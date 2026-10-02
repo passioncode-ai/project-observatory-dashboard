@@ -107,4 +107,11 @@ final class BridgeTests: XCTestCase {
         do { _ = try await Backend(executable: "echo", workspace: "/tmp").call("status"); XCTFail() }
         catch { XCTAssertEqual(error as? BridgeError, .configuration) }
     }
+    func testMissingExecutableIsNamedMissingNotMisconfigured() async throws {
+        // A new user's first launch: nothing installed at the default path. "Choose the
+        // path in Settings" does not help someone who has no engine to choose.
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "/project-observatory").path
+        do { _ = try await Backend(executable: missing, workspace: "/srv/example-ws").call("status"); XCTFail() }
+        catch { XCTAssertEqual((error as? BridgeError)?.code, "backend-missing"); XCTAssertEqual((error as? BridgeError)?.detail, missing) }
+    }
 }

@@ -181,5 +181,27 @@ import ObservatoryCore
         XCTAssertTrue(String(out.characters).contains("• item"))
         XCTAssertEqual(money(0.000279944), "$0.0003")
     }
+    func testDefaultEngineIsFoundWhereTheReadmeInstallsIt() {
+        let home = "/srv/example-home"
+        let venv = home + "/.local/share/project-observatory-venv/bin/project-observatory"
+        // README → Install puts the engine in its own virtual environment.
+        XCTAssertEqual(Model.defaultExecutable(home: home) { $0 == venv }, venv)
+        // A link on PATH wins over the environment it points into.
+        XCTAssertEqual(Model.defaultExecutable(home: home) { $0 == venv || $0 == home + "/.local/bin/project-observatory" },
+                       home + "/.local/bin/project-observatory")
+        XCTAssertEqual(Model.defaultExecutable(home: home) { $0 == "/opt/homebrew/bin/project-observatory" },
+                       "/opt/homebrew/bin/project-observatory")
+        // Nothing installed: the documented location, so the message names a real step.
+        XCTAssertEqual(Model.defaultExecutable(home: home) { _ in false }, venv)
+    }
+    func testFirstRunMessagesNameTheInstallAndInitSteps() {
+        let model = Model(defaults: defaults())
+        let missing = model.message("backend-missing", "/srv/example-home/bin/project-observatory")
+        XCTAssertTrue(missing.contains("/srv/example-home/bin/project-observatory"))
+        XCTAssertTrue(missing.contains("Install"))
+        XCTAssertTrue(model.message("unknown-workspace").contains("project-observatory full init"))
+        model.russian = true
+        XCTAssertTrue(model.message("backend-missing", "/x").contains("Установите"))
+        XCTAssertTrue(model.message("unknown-workspace").contains("project-observatory full init"))
+    }
 }
-

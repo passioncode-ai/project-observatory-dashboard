@@ -74,10 +74,20 @@ enum DashboardMode: Equatable {
     init(defaults: UserDefaults = .standard,
          transport: ((String, [String: String]) async throws -> [String: Any])? = nil) {
         self.defaults = defaults; self.transport = transport
-        let cli = defaults.string(forKey: "executable") ?? NSHomeDirectory() + "/.local/bin/project-observatory"
+        let cli = defaults.string(forKey: "executable") ?? Self.defaultExecutable(home: NSHomeDirectory())
         let home = defaults.string(forKey: "workspace") ?? NSHomeDirectory() + "/.local/share/project-observatory-full"
         executable = cli; activeExecutable = cli; workspace = home; activeWorkspace = home
         russian = defaults.object(forKey: "russian") as? Bool ?? Locale.preferredLanguages.first?.hasPrefix("ru") ?? false
+    }
+    /// Where a first launch looks for the engine, before anything was chosen in
+    /// Settings: a link on PATH first, then the virtual environment README → Install
+    /// creates, then Homebrew's prefixes. With none present, the documented location —
+    /// the message then names a real install step instead of an arbitrary path.
+    nonisolated static func defaultExecutable(home: String, exists: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }) -> String {
+        let venv = home + "/.local/share/project-observatory-venv/bin/project-observatory"
+        let candidates = [home + "/.local/bin/project-observatory", venv,
+                          "/opt/homebrew/bin/project-observatory", "/usr/local/bin/project-observatory"]
+        return candidates.first(where: exists) ?? venv
     }
     private var backend: Backend { Backend(executable: activeExecutable, workspace: activeWorkspace) }
     func t(_ en: String, _ ru: String) -> String { russian ? ru : en }
@@ -103,6 +113,9 @@ enum DashboardMode: Equatable {
         case "backend-incompatible":
             return t("This Observatory engine is too old for this app — it needs version 0.12 or newer. Update it with `project-observatory full update`, then Refresh.",
                      "Этот движок Observatory слишком старый для приложения — нужна версия 0.12 или новее. Обновите его командой `project-observatory full update` и нажмите «Обновить».") + extra
+        case "backend-missing":
+            return t("No Observatory engine was found at \(detail ?? "the chosen path"). Install it as README → Install describes (a Python 3.11+ virtual environment), then choose its `project-observatory` in Settings.",
+                     "Движок Observatory не найден по пути \(detail ?? "из настроек"). Установите его, как описано в README → Install (виртуальное окружение Python 3.11+), и выберите его `project-observatory` в настройках.")
         case "backend-configuration":
             return t("Choose the absolute path of the project-observatory program and its workspace folder in Settings.",
                      "Укажите в настройках абсолютный путь к программе project-observatory и её папку данных.")
@@ -119,7 +132,8 @@ enum DashboardMode: Equatable {
         case "dashboard-build-failed":
             return t("The dashboard could not be built. Run `project-observatory full local` once; it measures this machine and builds the pages.", "Дашборд не удалось построить. Один раз выполните `project-observatory full local` — она измерит машину и построит страницы.")
         case "unknown-workspace":
-            return t("This folder is not an Observatory workspace. Choose the folder `project-observatory full init` created.", "Эта папка не является папкой данных Observatory. Выберите папку, созданную `project-observatory full init`.")
+            return t("This folder is not an Observatory workspace yet. Create it with `project-observatory full init` (with OBSERVATORY_HOME set to it), or choose an existing workspace in Settings.",
+                     "Эта папка ещё не папка данных Observatory. Создайте её командой `project-observatory full init` (с OBSERVATORY_HOME, указывающим на неё) или выберите существующую папку в настройках.")
         case "dashboard-workspace-mismatch", "dashboard-unavailable":
             return t("No running dashboard was verified for this workspace. Start its server with `project-observatory full open --serve`, then try again.", "Для этой папки данных не найден подтверждённый дэшборд. Запустите её сервер командой `project-observatory full open --serve` и попробуйте снова.")
         case "agent-disabled": return t("The agent is turned off in this workspace. Turn it on with `project-observatory full configure features agent true`, then Refresh.", "В этой папке данных агент выключен. Включите его командой `project-observatory full configure features agent true` и нажмите «Обновить».")
