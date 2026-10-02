@@ -288,6 +288,17 @@ class UpdateTest(unittest.TestCase):
         code, doc = self.run_cli()
         self.assertEqual((code, doc["status"], doc["target"], doc["update_available"]), (0, "preview", NEWER, True))
         self.assertTrue(any("stop" in s for s in doc["would"]))
+        # The preview says where the snapshot really goes: with no passphrase it
+        # stays in the workspace, unencrypted; with one, encrypted into the root.
+        line = next(s for s in doc["would"] if s.startswith("snapshot"))
+        self.assertIn("unencrypted", line)
+        import backup_vault
+        backup_vault.set_passphrase(self.home, "synthetic passphrase for a preview")
+        _, doc = self.run_cli()
+        line = next(s for s in doc["would"] if s.startswith("snapshot"))
+        self.assertIn("encrypted", line)
+        self.assertIn(str(backup_vault.root_info(self.home)["path"]), line)
+        backup_vault.passphrase_file(self.home).unlink()
         self.assertEqual(self.tree(), before, "a preview writes nothing")
         self.assertEqual(self.services.calls, [], "a preview does not even ask launchd")
 
