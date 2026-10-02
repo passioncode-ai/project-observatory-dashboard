@@ -1,13 +1,16 @@
 # Project Observatory for macOS
 
-This branch adds a native SwiftUI client and a shared advisory assistant. It is a
-**candidate**, separate from the installed 0.10.0 release. The conversation lives
-in its own Mac window; no agent chat is embedded in the dashboard.
+A native SwiftUI client and a shared advisory assistant. The app needs an engine
+that serves `observatory-assistant/1` — **0.11.0 or newer**; an older release
+answers `unknown step: assistant`, which the app reports as an incompatible engine
+with the update command. The conversation lives in its own Mac window; no agent
+chat is embedded in the dashboard.
 
 - [Specification and boundaries](SPEC.md)
 - [Requirements and decomposition](PLAN.md)
 - [Scenarios](SCENARIOS.md), [flows and screens](FLOWS.md)
-- [Verification and release handoff](../runs/2026-10-01-macos-app/README.md)
+- [First verification](../runs/2026-10-01-macos-app/README.md) and the
+  [audit and repair that followed](../runs/2026-10-02-app-agent-audit/README.md)
 
 ## Build and connect
 
@@ -25,7 +28,10 @@ Set `OBSERVATORY_SWIFT_BUILD` to reuse a build directory outside the checkout;
 
 Open the app, then Settings. Choose the absolute path to `project-observatory` and
 a private initialized workspace outside the source tree. Save and check the
-connection. A backend must implement `observatory-assistant/1`; 0.10.0 does not.
+connection. Settings then show the engine version, the protocol and whether the
+assistant is ready, or the step that is missing. A typed workspace path is resolved
+like a picked one (the engine refuses a path through a symbolic link such as `/tmp`).
+A backend must implement `observatory-assistant/1`; 0.10.x does not.
 Source QA can use a small executable launcher for `python -m observatory`, with
 its working directory set to this checkout and a **synthetic workspace**. Do not
 replace a production tagged installation with this branch for testing.
@@ -44,13 +50,16 @@ printf '%s' '{"question":"What needs attention?","request_id":"example-request-0
 ```
 
 `ask` returns `conversation_id` and `job`. Use `job` or `cancel` with
-`{"id":"job-…"}` on stdin; `get` accepts `{"id":"chat-…"}`. Repeat the same
+`{"id":"job-…"}` on stdin (assistant jobs only); `get` and `delete` accept
+`{"id":"chat-…"}`. A missing workspace answers `unknown-workspace`, a full disk
+`disk-full`. Repeat the same
 request id only with identical input to recover its existing job. Requests are
 serialized: a different active question is refused as `assistant-busy`.
 
 The existing MCP server also advertises:
 
-- `observatory_assistant_status`: readiness and private conversation summaries;
+- `observatory_assistant_status`: readiness and private conversation summaries
+  (`includeProjects: true` adds the project list a scope picker needs);
 - `observatory_assistant_ask`: the same ask contract, local history and model costs;
 - `observatory_assistant_conversation`: read a conversation;
 - existing `fabric.job.get` and `fabric.job.cancel`: follow/stop the shared job.
@@ -70,13 +79,22 @@ open the default workspace after settings change.
 `store/assistant/conversations/` and `store/assistant/requests.json` use private
 700/600 directories/files. The runner uses the existing `store/jobs/` store.
 Questions are limited to 6,000 characters, a dialogue to 32 turns, the workspace to
-100 dialogues and 1,000 request ids. New work is refused at a limit; history is
-not silently deleted. Assistant job records are retained with their conversation,
-not pruned by the generic seven-day job retention. The request index keeps input
-hashes. Do not include this private state in Git or support attachments.
+100 dialogues and 1,000 tracked request ids. A dialogue leaves only when it is
+deleted (File → Delete Conversation, ⌘⌫, or `assistant delete`), with its request
+ids and job records; history is never removed to make room. Assistant job records
+follow the generic seven-day job retention once their conversation holds the
+terminal state, and a request id is kept while its job exists — replaying one after
+that starts a new request. The request index keeps input hashes. Do not include
+this private state in Git or support attachments.
 
 Model context contains up to seven recent turns and 24,000 characters of
-allowlisted evidence. The workflow has a 300-second deadline. A model answer is
+allowlisted evidence, spent in order: this machine's disk and memory (unscoped
+questions), then findings most severe first (up to 15, matched to a scoped project
+through its repositories, site domains and folder secrets), then projects. Every
+source cut short is named in the answer with its count. The workflow has a
+300-second deadline, disarmed before the answer is committed. The app runs the CLI
+in its own process group, so a timeout or Stop also ends what the CLI started; the
+detached job runner has its own session and is not affected. A model answer is
 advice and is not written into the canonical registry as an approved fact.
 Closing the app leaves an accepted job running. Stop cancels it; provider usage
 already incurred can still be charged. Changing settings leaves old jobs in the

@@ -212,22 +212,37 @@ async def run() -> None:
             res = await session.call_tool("observatory_status", {"limit": 2, "detail": "full"})
             check("observatory_status: detail=full still carries the organization the capability omits",
                   all("organization" in p for p in payload(res).get("projects", [])), str(payload(res))[:160])
-            # The default an agent gets is a bounded SUMMARY page: the unpaged estate
-            # was 254,000 characters on a real machine, which no agent host reads.
+            # The published contract is the default: every project, every row meeting
+            # the closed item schema (the v0.2.0 probes call this tool with no limit).
             res = await session.call_tool("observatory_status", {})
             check("observatory_status: the text copy is compact JSON, not indented",
                   "\n" not in res.content[0].text and json.loads(res.content[0].text) == payload(res),
                   res.content[0].text[:80])
             data = payload(res)
-            rows = data.get("projects", [])
-            check("observatory_status: the default page is bounded and counts the whole scope",
-                  0 < len(rows) <= 25 and data["counts"]["projects"] >= len(rows), str(data.get("counts")))
-            check("observatory_status: default rows are summaries (no description, sites, organization)",
-                  all(not {"description", "sites", "organization", "stack"} & set(p) for p in rows),
-                  str(sorted(rows[0]) if rows else []))
+            item = next(d["outputSchema"] for d in __import__("interop").tool_definitions()
+                        if d["name"] == "estate.survey")["properties"]["projects"]["items"]["properties"]
+            check("observatory_status: unpaged it is every project, as the published contract says",
+                  len(data["projects"]) == data["counts"]["projects"] and "nextCursor" not in data,
+                  str(data.get("counts")))
+            check("observatory_status: by default every row carries only published fields",
+                  all(set(p) <= set(item) for p in data["projects"]),
+                  str([sorted(set(p) - set(item)) for p in data["projects"]][:1]))
+            res = await session.call_tool("observatory_status", {"limit": 5, "detail": "summary"})
+            rows = payload(res)["projects"]
+            check("observatory_status: summary rows drop description, sites, stack",
+                  rows and all(not {"description", "sites", "organization", "stack"} & set(p) for p in rows))
             check("observatory_status: a summary row keeps every field the published item schema requires",
                   all({"id", "name", "ownership", "lifecycle", "repositories", "membershipRules"} <= set(p)
                       for p in rows))
+            # The bounded entry point an agent starts from.
+            res = await session.call_tool("observatory_overview", {"top": 3})
+            ov = payload(res)
+            check("observatory_overview: tiers add up to the projects counted",
+                  sum(ov["activityTiers"].values()) == ov["counts"]["projects"], str(ov.get("activityTiers")))
+            check("observatory_overview: small, bounded lists, and a degraded list",
+                  len(res.content[0].text) < 20000 and len(ov["recentlyActive"]) <= 3
+                  and len(ov["findings"]["mostSevere"]) <= 3 and "degraded" in ov,
+                  f"{len(res.content[0].text)} characters")
             res = await session.call_tool("observatory_status", {"limit": 3})
             data = payload(res)
             check("observatory_status: a short page names where to continue",

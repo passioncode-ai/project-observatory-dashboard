@@ -239,12 +239,12 @@ def test_the_ceiling_message_does_not_blame_the_wrong_spender() -> None:
 def test_the_served_instructions_describe_the_served_surface() -> None:
     src = (ROOT / "mcp/server.py").read_text(encoding="utf-8")
     tools = src.count("@server.tool(")
-    # THIRTEEN with the three shared assistant tools; the
+    # FOURTEEN with the three shared assistant tools and the overview; the
     # capability tools are counted apart, below. The count is asserted
     # rather than the names because the instructions below are what an LLM client
     # reads to decide what to call, and a tool that exists while the string says
     # otherwise is the drift this test was written for.
-    check("the server serves thirteen observatory tools", tools == 13, str(tools))
+    check("the server serves fourteen observatory tools", tools == 14, str(tools))
     manifest = json.loads((ROOT / "fabric-agent.json").read_text(encoding="utf-8"))
     served = set(re.findall(r'@server\.capability\("([^"]+)"\)', src))
     import interop
