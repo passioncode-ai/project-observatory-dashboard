@@ -369,11 +369,28 @@ def test_the_findings_build_makes_no_network_call_for_this() -> None:
               "different set of findings depending on the weather")
 
 
+def test_a_key_without_a_limit_is_not_a_spent_key() -> None:
+    """OpenRouter answers `limit: null, limit_remaining: null` for a key that has
+    no limit at all. `remaining = limit_remaining or 0.0` read that as a key with
+    nothing left, and every call — a newcomer's first question included — was
+    refused as "the limit on this KEY is spent: 0.0000 of None"."""
+    unlimited = {**KEY_BUSY, "limit": None, "limit_remaining": None, "limit_reset": None}
+    P = providers_with(day=0.0, month=0.0, key=unlimited)
+    try:
+        verdict = P.check_budget("openrouter")
+        check("an unlimited key permits spending", verdict is None, str(verdict))
+        check("and its remaining limit is unknown, not zero",
+              P.wallet_state().get("key_remaining") is None, str(P.wallet_state().get("key_remaining")))
+    finally:
+        restore()
+
+
 if __name__ == "__main__":
     print("the budget's subject — a ceiling that governs what the system controls\n")
     for fn in (test_a_neighbours_spending_no_longer_stops_this_system,
                test_this_systems_own_overspend_still_stops_it,
                test_a_spent_key_still_stops_everything,
+               test_a_key_without_a_limit_is_not_a_spent_key,
                test_the_verdict_no_longer_depends_on_the_provider_being_reachable,
                test_velocity_is_still_local_and_still_fires,
                test_the_key_snapshot_is_written_where_a_findings_build_can_read_it,

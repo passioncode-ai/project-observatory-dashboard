@@ -399,7 +399,10 @@ def wallet_state() -> dict:
     }
     if pu:
         state["key_limit"] = pu["limit"]
-        state["key_remaining"] = round(pu["limit_remaining"] or 0.0, 6)
+        # `limit_remaining: null` is a key with NO limit, not one with nothing left:
+        # reading it as 0.0 refused every call made with an unlimited key.
+        state["key_remaining"] = (None if pu["limit_remaining"] is None
+                                  else round(float(pu["limit_remaining"]), 6))
         state["key_limit_reset"] = pu["limit_reset"]
         state["key_total"] = round(pu["total"], 6)
     return state
