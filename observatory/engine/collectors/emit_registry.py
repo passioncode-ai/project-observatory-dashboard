@@ -519,21 +519,35 @@ for _dg in _acc_doc["degraded"]:
 # block names its curated file by hand.
 CRED_SRC = paths.SCRATCH / "openrouter.json"
 credentials: list = []
-if CRED_SRC.is_file():
-    import credentials_registry
-    _cscan = json.loads(CRED_SRC.read_text(encoding="utf-8"))
-    _vault = pathlib.Path(os.environ.get(
-        "OBSERVATORY_VAULT_DIR",
-        paths.source_path("secret_store", paths.SECRETS) / 'projects'))
-    credentials, _cedges = credentials_registry.records(_cscan, _vault, out_projs)
-    for e in _cedges:
-        add_rel(e["id"], e["type"], e["from"], e["to"], e["source_refs"], e.get("rule"), e)
-    _cdoc = credentials_registry.document(credentials, _cscan, OBS)
-    _stamped("credentials.json", _cdoc)
-    _ct = _cdoc["totals"]
-    print(f"credentials.json: {_ct['credentials']} credential(s), "
-          f"{_ct['claimed_by_a_project']} claimed, {_ct['unclaimed']} unclaimed, "
-          f"{_ct['leaked_unrotated']} leaked and unrotated")
+# ALWAYS, not only after an OpenRouter scan. The vault, the machine's own
+# secrets and the projects' secret files are read here at emit time; gating the
+# whole document on the OpenRouter listing meant a key added with `vault.py put`
+# never reached the Keys page on a workspace without that integration. A
+# missing listing is named in `degraded` when OpenRouter is switched on.
+import credentials_registry
+_cscan = json.loads(CRED_SRC.read_text(encoding="utf-8")) if CRED_SRC.is_file() else {}
+if not CRED_SRC.is_file():
+    try:
+        import configuration
+        _or_on = (configuration.load().get("integrations") or {}).get("openrouter") is True
+    except Exception:                                                  # noqa: BLE001
+        _or_on = False
+    _cscan = {"scanned_at": OBS, "degraded": [] if not _or_on else [
+        {"source": "openrouter.json",
+         "reason": "OpenRouter has not been scanned; its keys are not listed. "
+                   "`project-observatory full openrouter` lists them."}]}
+_vault = pathlib.Path(os.environ.get(
+    "OBSERVATORY_VAULT_DIR",
+    paths.source_path("secret_store", paths.SECRETS) / 'projects'))
+credentials, _cedges = credentials_registry.records(_cscan, _vault, out_projs)
+for e in _cedges:
+    add_rel(e["id"], e["type"], e["from"], e["to"], e["source_refs"], e.get("rule"), e)
+_cdoc = credentials_registry.document(credentials, _cscan, OBS)
+_stamped("credentials.json", _cdoc)
+_ct = _cdoc["totals"]
+print(f"credentials.json: {_ct['credentials']} credential(s), "
+      f"{_ct['claimed_by_a_project']} claimed, {_ct['unclaimed']} unclaimed, "
+      f"{_ct['leaked_unrotated']} leaked and unrotated")
 
 # ---- env files -----------------------------------------------------------
 # WHAT EACH PROJECT HOLDS ON THIS DISK, as names. The credential document above

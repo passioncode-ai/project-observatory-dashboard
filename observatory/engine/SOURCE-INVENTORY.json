@@ -85,8 +85,8 @@
     {
       "path": "collectors/emit_registry.py",
       "source_sha256": "ff8edc591196dd1278b0766ea8216973f5cc3951ff702b417bdb053305e8170d",
-      "export_sha256": "66a0221a975cacf8383640877b0d94b8240c2a720e7f6c0023ccb4c61e6f3c11",
-      "bytes": 51476,
+      "export_sha256": "9517ee207590fe009fc9994de89a59c2226b0ef48b61d3cb77d228b00c3861fa",
+      "bytes": 52335,
       "python_comments_removed": 213,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -1858,8 +1858,8 @@
       "path": "tests/test_credentials.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4419e6554760d4f74d752b62e57d59fc42addf4d5c98a7766742e9270a5b9ed8",
-      "bytes": 23797
+      "export_sha256": "ba7bae648bdea759faf97b01a41b68fa3148e7d8198e17ae7d7a051270f0ea5d",
+      "bytes": 25818
     },
     {
       "path": "tests/test_curation_paths.py",
