@@ -18,7 +18,7 @@ ST-03: another agent invokes the same capability. Product outcome: unobserved.
 | SCN-006 | CLI/MCP caller obtains the same answer | draft |
 
 These scenarios are specified from the autonomous implementation brief, not human usability validation;
-coverage below distinguishes tested core/state behavior from the still-unverified native walkthrough. See [receipts](../runs/2026-10-01-macos-app/README.md).
+coverage below names the regression tests and the native walkthrough run on 2026-10-02. See [receipts](../runs/2026-10-01-macos-app/README.md).
 
 ## SCN-001 — First launch and connection recovery
 Status: draft
@@ -31,7 +31,7 @@ Steps: open → connection status; missing CLI → choose executable/workspace i
 Settings → Test connection → compatible status → empty conversation.
 Expected result: no automatic dependency install, no model call, usable next action.
 Errors & recovery: invalid path/protocol/timeout shows retry/settings, keeps selections.
-Coverage: core/bridge/model regression tests; native walkthrough unverified.
+Coverage: core/bridge/model regression tests; native walkthrough run 2026-10-02 against a workspace copy ([receipt](../runs/2026-10-02-app-agent-audit/README.md)).
 
 ## SCN-002 — Evidence-bound answer
 Status: draft
@@ -44,7 +44,7 @@ Steps: type → Send → persisted pending turn → working indicator/Stop → a
 model/cost and expandable evidence → follow-up uses bounded previous context.
 Expected result: cited facts and degraded sources visible; no implicit mutation.
 Errors & recovery: invalid reference/provider schema refuses the result, retains question.
-Coverage: core/bridge/model regression tests; native walkthrough unverified.
+Coverage: core/bridge/model regression tests; native walkthrough run 2026-10-02 against a workspace copy ([receipt](../runs/2026-10-02-app-agent-audit/README.md)).
 
 ## SCN-003 — Disabled provider or failed request
 Status: draft
@@ -56,7 +56,7 @@ Trigger: attempt Send.
 Steps: preflight → distinct error and next action; repair configuration → deliberate retry.
 Expected result: no fake response, no automatic spend loop, input/history preserved.
 Errors & recovery: full disk refuses before spending; errors do not expose raw provider text.
-Coverage: core/bridge/model regression tests; native walkthrough unverified.
+Coverage: core/bridge/model regression tests; native walkthrough run 2026-10-02 against a workspace copy ([receipt](../runs/2026-10-02-app-agent-audit/README.md)).
 
 ## SCN-004 — Stop, close and resume
 Status: draft
@@ -69,7 +69,7 @@ Steps: Stop → cancellation recorded; reopen → stored terminal state. Close w
 Stop → job continues; reopen → pending or completed answer recovered.
 Expected result: cancelled cannot become completed; dead runner becomes interrupted.
 Errors & recovery: missing/corrupt job is named, not recreated; retry is a new request.
-Coverage: core/bridge/model regression tests; native walkthrough unverified.
+Coverage: core/bridge/model regression tests; native walkthrough run 2026-10-02 against a workspace copy ([receipt](../runs/2026-10-02-app-agent-audit/README.md)).
 
 ## SCN-005 — Change workspace without stale output
 Status: draft
@@ -81,7 +81,7 @@ Trigger: select workspace B in settings.
 Steps: apply → invalidate UI generation → connect B → show B history.
 Expected result: late A response never enters B; old draft and project scope are cleared when the backend/workspace changes; A accepted job persists independently. Dashboard opens only after the backend verifies the selected workspace.
 Errors & recovery: failed B connection offers settings; no fallback into A disguised as B.
-Coverage: core/bridge/model regression tests; native walkthrough unverified.
+Coverage: core/bridge/model regression tests; native walkthrough run 2026-10-02 against a workspace copy ([receipt](../runs/2026-10-02-app-agent-audit/README.md)).
 
 ## SCN-006 — CLI/MCP caller obtains the same answer
 Status: draft
@@ -95,4 +95,4 @@ shared conversation; fabric.job.cancel → terminal cancellation.
 Expected result: advertised MCP input contract, trace propagation and shared Fabric job envelope; no duplicate spend on replay.
 Errors & recovery: changed input under same request id rejected; different busy request
 is not silently joined; unknown ids never create jobs.
-Coverage: core/bridge/model regression tests; native walkthrough unverified.
+Coverage: core/bridge/model regression tests; native walkthrough run 2026-10-02 against a workspace copy ([receipt](../runs/2026-10-02-app-agent-audit/README.md)).

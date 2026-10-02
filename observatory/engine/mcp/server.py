@@ -91,10 +91,12 @@ server = InteropServer(
         "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run the "
         "`use` command it hands back instead of opening a file.\n"
         "DEGRADED: every answer carries `degraded`; empty asserts full coverage, a "
-        "non-empty one names what could not be read. A missing `degraded` is a bug.\n"
-        "READ, bounded and paged with `limit` and `cursor` → `nextCursor`, totals covering "
-        "the whole scope: `observatory_status` gives a summary page, `detail: full` adds "
-        "descriptions; `observatory_project`; `observatory_timeline`; `observatory_findings` "
+        "non-empty one names what could not be read. Treat a missing `degraded` as a bug.\n"
+        "START with `observatory_overview`: counts, tiers, recent projects, the most severe "
+        "findings and the disk, in a few KB.\n"
+        "READ, paged with `limit` and `cursor` → `nextCursor`, totals covering the whole "
+        "scope: `observatory_status` (unpaged it is EVERY project, hundreds of KB — pass "
+        "`limit` and `detail: summary`); `observatory_project`; `observatory_timeline`; `observatory_findings` "
         "filters by `projectId`; `observatory_recall`; `observatory_machine` gives an "
         "overview, `section` or `explainPid` the detail; `observatory_assistant_status`; "
         "`observatory_assistant_conversation`.\n"
@@ -210,6 +212,47 @@ def observatory_assistant_conversation(id: str) -> dict:
 
 
 @server.tool()
+def observatory_overview(
+    top: Annotated[int, Field(ge=1, le=50, description="How many projects and findings to "
+                                                       "name in each list.")] = 10,
+) -> dict[str, Any]:
+    """START HERE: the estate in one small answer — counts, projects by activity tier, the
+    most recently active projects, findings by severity with the most severe named, and
+    this machine's free disk and memory. A few KB on any estate; each list names the
+    tool that pages the rest."""
+    degraded: list[dict] = []
+    # The same project set `counts` describes (external clones excluded), so the
+    # tiers add up to `counts.projects`; the rows are not returned, only tallied.
+    survey = survey_mod.survey({"kind": "estate"})
+    projects = survey.get("projects", [])
+    tiers: dict[str, int] = {}
+    for p in projects:
+        tiers[p.get("activityTier") or "unknown"] = tiers.get(p.get("activityTier") or "unknown", 0) + 1
+    recent = sorted((p for p in projects if p.get("lastActivityOn")),
+                    key=lambda p: p["lastActivityOn"], reverse=True)[:top]
+    out: dict[str, Any] = {
+        "surveyedAt": survey.get("surveyedAt"), "counts": survey.get("counts"),
+        "activityTiers": tiers, "estateWork": survey.get("estateWork"),
+        "recentlyActive": [{"id": p["id"], "name": p.get("name"), "activityTier": p.get("activityTier"),
+                            "lastActivityOn": p.get("lastActivityOn")} for p in recent],
+        "next": {"projects": "observatory_status with limit and detail=summary",
+                 "oneProject": "observatory_project", "findings": "observatory_findings",
+                 "machine": "observatory_machine"},
+        "degraded": degraded + list(survey.get("degraded") or [])}
+    f = observatory_findings(severity="warning", limit=top)
+    out["findings"] = {"counts": f.get("counts", {}), "builtAt": f.get("builtAt"),
+                       "mostSevere": [{k: x.get(k) for k in ("id", "severity", "subject", "title")}
+                                      for x in f.get("findings", [])]}
+    out["degraded"] += f.get("degraded", [])
+    m = observatory_machine()
+    disk = (m.get("disk") or {}).get("volume")
+    out["machine"] = {"measuredAt": m.get("measuredAt"), "disk": disk,
+                      "memory": m.get("memory")} if (disk or m.get("memory")) else None
+    out["degraded"] += m.get("degraded", [])
+    return out
+
+
+@server.tool()
 def observatory_status(
     scope: Annotated[dict[str, Any] | None,
                      Field(description="The shape the published input schema declares: "
@@ -233,21 +276,22 @@ def observatory_status(
                                                "answer carries the current estate and says so "
                                                "in `degraded`. Omit it.")] = None,
     limit: Annotated[int | None, Field(ge=1, le=200,
-                     description="Projects per page. Omitted: 25 for an estate or owner "
-                                 "scope — the whole estate is far larger than a tool "
-                                 "result an agent can read — and `counts` still covers "
-                                 "the whole scope; follow `nextCursor` for the rest.")] = None,
+                     description="Projects per page; `counts` still covers the whole scope and "
+                                 "`nextCursor` continues. Omitted means EVERY project — the "
+                                 "published contract — which is hundreds of KB on a real "
+                                 "estate: an agent passes a limit, or starts with "
+                                 "observatory_overview.")] = None,
     cursor: Annotated[str | None,
                       Field(description="Continue after this project id, from a previous "
                                         "answer's `nextCursor`. The walk loses and repeats "
                                         "nothing, but a project appearing mid-walk still "
                                         "shifts it — no parameter freezes the estate.")] = None,
-    detail: Annotated[Literal["summary", "full"] | None,
-                      Field(description="summary = identity, ownership, lifecycle, activity "
-                                        "and repositories (about 400 characters a project); "
-                                        "full = also description, sites, stack, folders and "
-                                        "organization. Omitted: full for one project, summary "
-                                        "otherwise.")] = None,
+    detail: Annotated[Literal["published", "summary", "full"],
+                      Field(description="published (default) = the fields of the published "
+                                        "survey schema; summary = identity, ownership, "
+                                        "lifecycle, activity and repositories, about 400 "
+                                        "characters a project; full = published plus the "
+                                        "organization and recorded resources.")] = "published",
 ) -> dict[str, Any]:
     """Survey a scope: a page of its projects, with repositories and last activity.
 
@@ -278,26 +322,32 @@ def observatory_status(
     bad = _scope_error(kind, value)
     if bad:
         return bad
-    # A BOUNDED DEFAULT, measured: the unpaged estate was 254,000 characters on a
-    # real machine of 178 projects, past what an agent host accepts as one tool
-    # result, so the tool answered nothing usable at all. `estate.survey` keeps
-    # the published "no limit means everything" and does not come through here.
-    if limit is None and kind != "project":
-        limit = DEFAULT_STATUS_PAGE
+    # THE PUBLISHED CONTRACT BY DEFAULT. The v0.2.0 manifest declares this tool as
+    # what `estate.survey` runs on (`requiredFeatures: tool:observatory_status`) and
+    # its probes call it with no limit, expecting every project and an answer that
+    # meets the closed item schema — which `organization`/`resources` broke on any
+    # estate that records an organization. Those two now come only with
+    # detail=full. The default stays "no limit means everything": changing it is a
+    # contract revision, not a fix; a bounded entry point for agents is
+    # observatory_overview.
     out = survey_mod.survey(_scope(kind, value), include_external=includeExternal,
                             as_of_scan_id=asOfScanId, limit=limit, cursor=cursor)
-    if (detail or ("full" if kind == "project" else "summary")) == "summary" and "projects" in out:
+    if "projects" not in out or detail == "full":
+        return out
+    if detail == "summary":
         out["projects"] = [_summary_row(p) for p in out["projects"]]
-    return out
+        return out
+    return _published_shape(_survey_schema(), out, set())
 
 
-DEFAULT_STATUS_PAGE = 25
+def _survey_schema() -> dict:
+    return next(d["outputSchema"] for d in interop.tool_definitions() if d["name"] == "estate.survey")
 #: What a summary row keeps: every field the published item schema requires, so
 #: a summary page still validates against capability-output.schema.json, plus
 #: the activity a reader ranks projects by.
 SUMMARY_FIELDS = ("id", "name", "ownership", "lifecycle", "activityTier",
                   "lastActivityOn", "lastSessionOn", "membershipRules")
-SUMMARY_REPOSITORY_FIELDS = ("id", "host", "nameWithOwner", "archived")
+SUMMARY_REPOSITORY_FIELDS = ("id", "host", "nameWithOwner", "archived", "discoveredBy")
 
 
 def _summary_row(p: dict) -> dict:
@@ -802,13 +852,12 @@ def capability_estate_survey(arguments: dict[str, Any], span: Any) -> Answer:
         cursor=arguments.get("cursor"))
     if "error" in out:
         return Answer(out)
-    schema = next(d["outputSchema"] for d in interop.tool_definitions() if d["name"] == "estate.survey")
     dropped: set[str] = set()
-    shaped = _published_shape(schema, out, dropped)
+    shaped = _published_shape(_survey_schema(), out, dropped)
     # Project rows carry the same fields at the same path; name each once.
     names = sorted({re.sub(r"^projects\.", "", d) for d in dropped})
     notes = ([f"fields outside the published v0.2.0 survey schema are omitted here: "
-              f"{', '.join(names)}; observatory_status carries them"] if names else [])
+              f"{', '.join(names)}; observatory_status with detail=full carries them"] if names else [])
     return Answer(shaped, notes)
 
 

@@ -27,10 +27,16 @@ remain their own surface. This scope is what MAC-03 verifies.
 `project-observatory full assistant <action>` accepts a bounded JSON object on stdin
 for actions with input and emits one JSON response on stdout. No user question or
 credential goes in argv. Errors are typed codes, never raw provider responses.
-`status` reports protocol `observatory-assistant/1`, workspace availability,
-agent feature/provider configuration and conversation summaries without spending.
-`ask` starts `agent.ask`; `get` reads a conversation; `job` polls; `cancel` stops;
-`list` lists conversations; `dashboard` verifies the selected workspace before returning a loopback URL. Unknown actions/fields/ids fail closed.
+`status` reports protocol `observatory-assistant/1`, `workspace_available`,
+agent feature/provider configuration (`provider_status` names why no provider is
+usable, never with a character of a key), `project_count`, `degraded` and
+conversation summaries without spending; a path that is not a workspace answers
+`unknown-workspace`. `ask` starts `agent.ask`; `get` reads a conversation and stores
+any reconciled turn state; `job` polls and `cancel` stops **assistant jobs only**;
+`delete` removes a conversation that has no open turn, with its request ids and job
+records; `list` lists conversations; `dashboard` verifies the selected workspace
+before returning a loopback URL. Unknown actions/fields/ids fail closed. A full
+disk is `disk-full`, an unwritable workspace `workspace-unwritable`.
 
 `agent.ask` accepts question (1..6000 chars), optional conversation id, optional
 project id, and caller request id for deduplication. The CLI and additive `observatory_assistant_ask` MCP tool return a
@@ -47,8 +53,12 @@ assistant job has its own wall-time limit and no infinite conversation loop.
 The core stores private conversation records below `store/assistant/`, modes
 700/600, with atomic writes and a workspace lock around mutations. Conversations
 have opaque ids. Truncate model context to recent turns and a fixed evidence
-budget; retain original history locally. Limit a conversation to 32 turns and bound message lengths and document
-retention; never silently delete history to make disk space. A full/unwritable
+budget spent machine → findings → projects, naming every trimmed source with a
+`code` and its counts; retain original history locally. Limit a conversation to 32
+turns and bound message lengths and document retention; never silently delete
+history to make disk space — a conversation leaves only by an explicit delete.
+Terminal assistant jobs follow the generic job retention; a terminal turn is the
+record and is never re-derived from a pruned job. A full/unwritable
 store refuses the operation before model spend. Interrupted turns stay visible.
 
 ## Evidence and provider boundary
@@ -79,8 +89,13 @@ language (EN/RU), and visible backend/version status. Absolute executable path,
 argv array, no shell interpolation. The app never edits other agents' MCP configs.
 No hidden enrollment or automatic service takeover.
 
-Native process bridge uses bounded output, timeout, cancellation and exit status.
-Malformed/incompatible protocol is a recoverable configuration error. Settings
+Native process bridge uses bounded output, timeout, cancellation and exit status,
+spawning the CLI in its own process group so a timeout or Stop ends what the CLI
+started; a write to a child that exited is EPIPE, never SIGPIPE. Malformed or
+incompatible protocol is a recoverable configuration error: an engine without the
+assistant is `backend-incompatible` with its first stderr line, any other non-JSON
+failure `backend-failed` with its first stderr line. One request id per draft until
+accepted, so a retry after a timeout replays it instead of spending again. Settings
 changes invalidate in-flight UI callbacks; late results cannot paint a different
 workspace. Closing the window does not kill a detached accepted job; reopening
 can resume it. Stop explicitly cancels the job, not unrelated processes.
