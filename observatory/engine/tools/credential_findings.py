@@ -28,6 +28,12 @@ NO TIMESTAMP INSIDE A FINDING: every date quoted is a date the registry
 already holds, so the same inputs always produce the same rows.
 """
 from __future__ import annotations
+import pathlib as _pathlib
+import sys as _sys
+_DASHBOARD = str(_pathlib.Path(__file__).resolve().parents[1] / "dashboard")
+if _DASHBOARD not in _sys.path:
+    _sys.path.append(_DASHBOARD)  # `finding_types.titled`: a title is a message id
+from finding_types import titled  # noqa: E402
 
 
 def _config_label(name: str) -> str:
@@ -63,7 +69,7 @@ def lifetime_cap(creds: list[dict]) -> list[dict]:
             "type": "credential.lifetime_cap",
             "subject": c["id"],
             "severity": "warning",
-            "title": f"{_short(c)} is capped for its lifetime, not per month",
+            **titled("{key} is capped for its lifetime, not per month", key=_short(c)),
             "detail": (f"Its limit is {c['limit']} with no reset, so it spends down "
                        f"once and then stops — months later, and with nothing on the "
                        f"day it happens to say why. A monthly budget behaves the same "
@@ -85,8 +91,7 @@ def unclaimed(creds: list[dict]) -> list[dict]:
         "type": "credential.unclaimed",
         "subject": "estate:credentials-unclaimed",
         "severity": "info",
-        "title": (f"{len(rows)} credentials belong to no project here"
-                  if len(rows) > 1 else "1 credential belongs to no project here"),
+        **titled("{n} credentials belong to no project here", n=len(rows)),
         "detail": (f"Nothing measured says who uses them and nothing curated claims "
                    f"them: {_listed([_short(c) for c in rows])}. An unclaimed "
                    f"credential is one nobody will dare rotate, because the blast "
@@ -107,7 +112,7 @@ def untracked(creds: list[dict]) -> list[dict]:
             "type": "credential.untracked",
             "subject": c["id"],
             "severity": "warning",
-            "title": f"{_short(c)} is known only because it leaked",
+            **titled("{key} is known only because it leaked", key=_short(c)),
             "detail": (f"It was recorded where it was SEEN"
                        + (f" on {c['leaked_on']}" if c.get("leaked_on") else "")
                        + ", and the estate holds no record of the credential itself — "
@@ -129,9 +134,7 @@ def shared_rotation(creds: list[dict]) -> list[dict]:
         "type": "credential.shared_rotation",
         "subject": "estate:credentials-shared",
         "severity": "info",
-        "title": (f"{len(rows)} credentials are used by more than one project"
-                  if len(rows) > 1 else
-                  "1 credential is used by more than one project"),
+        **titled("{n} credentials are used by more than one project", n=len(rows)),
         "detail": ("Rotating one of these changes what every project sharing it must "
                    "hold, at the same moment: "
                    + "; ".join(f"{_short(c)} → {len(c['used_by'])} projects"
@@ -160,7 +163,7 @@ def unsigned(creds: list[dict]) -> list[dict]:
         "type": "credential.unsigned",
         "subject": "estate:credentials",
         "severity": "info",
-        "title": f"{len(bare)} credential(s) carry no statement of what they are for",
+        **titled("{n} credentials carry no statement of what they are for", n=len(bare)),
         "detail": (f"{_listed([b.split(':', 1)[-1] for b in bare])}. A credential "
                    f"with no purpose cannot be retired, delegated or judged when "
                    f"it leaks — «is this still needed» has no answer, so it is "
@@ -198,8 +201,7 @@ def rotation_due(creds: list[dict], today: str) -> list[dict]:
             "type": "credential.rotation_due",
             "subject": c["id"],
             "severity": "warning",
-            "title": (f"{_short(c)} was last set {age} day(s) ago and its own "
-                      f"policy says every {days}"),
+            **titled("{key} was last set {n} days ago and its own policy says every {days}", key=_short(c), n=age, days=days),
             "detail": (f"The policy is this credential's own — `rotation_days` in "
                        f"its signature — and it is {age - days} day(s) past. "
                        f"{'It was rotated' if c.get('rotated_on') else 'It has never been rotated; the date is when it was created'} "
@@ -232,7 +234,7 @@ def project_file_exposed(creds: list[dict]) -> list[dict]:
             "type": "credential.project_file_in_git",
             "subject": "estate:project-secrets",
             "severity": "critical",
-            "title": f"{len(tracked)} secret file(s) beside the code are tracked by git",
+            **titled("{n} secret files beside the code are tracked by git", n=len(tracked)),
             "detail": (f"{_listed(tracked)}. The value is in the repository's history and "
                        f"on every clone of it; removing the file from the working tree "
                        f"does not remove it from the history, so rotation is the remedy "
@@ -246,7 +248,7 @@ def project_file_exposed(creds: list[dict]) -> list[dict]:
             "type": "credential.project_file_unignored",
             "subject": "estate:project-secrets",
             "severity": "warning",
-            "title": f"{len(loose)} secret file(s) beside the code are neither tracked nor ignored",
+            **titled("{n} secret files beside the code are neither tracked nor ignored", n=len(loose)),
             "detail": (f"{_listed(loose)}. One `git add -A` from the row above, and "
                        f"indistinguishable from a safe file in every listing that does "
                        f"not ask git the second question."),
@@ -260,7 +262,7 @@ def project_file_exposed(creds: list[dict]) -> list[dict]:
             "type": "credential.project_file_readable",
             "subject": "estate:project-secrets",
             "severity": "warning",
-            "title": f"{len(open_mode)} secret file(s) beside the code are readable by more than their owner",
+            **titled("{n} secret files beside the code are readable by more than their owner", n=len(open_mode)),
             "detail": f"{_listed(open_mode)}. One `chmod 600` loop, not N decisions.",
             "action": "`chmod 600` them",
         })
@@ -306,7 +308,7 @@ def register_unreadable(broken: list[dict]) -> list[dict]:
             "type": "credential.register_unreadable",
             "subject": f"register:{b.get('register')}",
             "severity": "warning",
-            "title": f"the curated register {b.get('register')} exists and could not be read",
+            **titled("the curated register {register} exists and could not be read", register=b.get("register")),
             "detail": (f"{b.get('problem')}. Everything in it — signatures, curated "
                        f"memberships — is absent from this build, and the rules that "
                        f"would have named that absence are withheld so the board does "

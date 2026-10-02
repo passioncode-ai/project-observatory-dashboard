@@ -16,6 +16,12 @@ invisible to the system that is supposed to know what exists (measured
 NO TIMESTAMP INSIDE A FINDING: the dates quoted are the document's.
 """
 from __future__ import annotations
+import pathlib as _pathlib
+import sys as _sys
+_DASHBOARD = str(_pathlib.Path(__file__).resolve().parents[1] / "dashboard")
+if _DASHBOARD not in _sys.path:
+    _sys.path.append(_DASHBOARD)  # `finding_types.titled`: a title is a message id
+from finding_types import titled  # noqa: E402
 
 
 def _config_label(name: str) -> str:
@@ -66,8 +72,11 @@ def findings(doc: dict | None, today: str = "") -> list[dict]:
             "type": "analytics.property_unclaimed",
             "subject": "estate:analytics",
             "severity": "info",
-            "title": (f"{len(unclaimed)} analytics propert{'y' if len(unclaimed) == 1 else 'ies'} "
-                      f"with {traffic} belong to no project here"),
+            **(titled("{n} analytics properties with {users} summed users in 30 days belong to no project here", n=len(unclaimed), users=users)
+                 if measured and not unknown else
+                 titled("{n} analytics properties with {users} summed users in 30 days ({unknown} unmeasured) belong to no project here", n=len(unclaimed), users=users, unknown=unknown)
+                 if measured else
+                 titled("{n} analytics properties with unknown traffic ({unknown} unmeasured) belong to no project here", n=len(unclaimed), unknown=unknown)),
             "detail": (f"Measured traffic first: {named}. User counts are sums across properties, "
                        f"not distinct people across products. A property is joined to a project by what "
                        f"it declares about itself — a web stream's host through the "
@@ -88,7 +97,7 @@ def findings(doc: dict | None, today: str = "") -> list[dict]:
             "type": "analytics.property_unreadable",
             "subject": "estate:analytics",
             "severity": "warning",
-            "title": f"{len(broken)} analytics propert{'y' if len(broken) == 1 else 'ies'} have unknown traffic",
+            **titled("{n} analytics properties have unknown traffic", n=len(broken)),
             "detail": (f"{_listed(sorted(broken))}. Their traffic is unknown here, which "
                        f"is not the same as zero — nothing on this board should be read "
                        f"as saying they are quiet."),
@@ -107,7 +116,8 @@ def findings(doc: dict | None, today: str = "") -> list[dict]:
                 "type": "analytics.api_disabled",
                 "subject": f"credential:{d.get('source', 'google')}",
                 "severity": "info",
-                "title": f"a Google API is switched off for {d.get('source', 'a credential')}",
+                **(titled("a Google API is switched off for {source}", source=d["source"]) if "source" in d
+                     else titled("a Google API is switched off for a credential")),
                 "detail": (f"{str(d.get('reason'))[:240]} — the API is not enabled in this "
                            f"credential's Cloud project, which reads as a permission problem "
                            f"and is not one."
@@ -130,7 +140,7 @@ def findings(doc: dict | None, today: str = "") -> list[dict]:
                 "type": "analytics.stale",
                 "subject": "estate:analytics",
                 "severity": "warning",
-                "title": f"the analytics numbers are {age} day(s) old",
+                **titled("the analytics numbers are {n} days old", n=age),
                 "detail": (f"Measured {scanned}; the scan is gated to twice a day, so this "
                            f"means the tick has not run rather than that Google was quiet. "
                            f"Every traffic figure on the page is that old."),
@@ -169,8 +179,7 @@ def organization_findings(doc: dict | None, projects: list[dict], orgs_doc: dict
                 "type": "analytics.property_wrong_account",
                 "subject": pid,
                 "severity": "warning",
-                "title": (f"{prop.get('name') or prop.get('property')} sits in "
-                          f"{prop.get('account_name') or account}, not in {org.get('label') or project['organization']}'s account"),
+                **titled("{property} sits in {account}, not in {org}'s account", property=prop.get("name") or prop.get("property"), account=prop.get("account_name") or account, org=org.get("label") or project["organization"]),
                 "detail": (f"{prop.get('property')} measures {pid}, whose organization is "
                            f"{project['organization']} ({project.get('organization_source')}: "
                            f"{project.get('organization_why', '')}). That organization's properties "
@@ -187,7 +196,7 @@ def organization_findings(doc: dict | None, projects: list[dict], orgs_doc: dict
                     "type": "analytics.legacy_account_property",
                     "subject": "estate:analytics",
                     "severity": "warning",
-                    "title": f"{len(extra)} new propert{'y' if len(extra) == 1 else 'ies'} in legacy account {legacy}",
+                    **titled("{n} new properties in legacy account {account}", n=len(extra), account=legacy),
                     "detail": (f"{_listed(sorted(p.get('name') or p.get('property') for p in extra))}. "
                                f"{legacy} is kept only for {', '.join(allowed or []) or 'what it already holds'}; "
                                f"new properties belong in their owner's account."),
@@ -202,7 +211,7 @@ def organization_findings(doc: dict | None, projects: list[dict], orgs_doc: dict
                 "type": "analytics.organization_account_unreadable",
                 "subject": "estate:analytics",
                 "severity": "warning",
-                "title": f"{(org or {}).get('label') or org_name}'s analytics account {expected} is not readable",
+                **titled("{org}'s analytics account {account} is not readable", org=(org or {}).get("label") or org_name, account=expected),
                 "detail": ("No service account this machine holds reads it, so a property there is "
                            "invisible here and the two checks above cannot see a misplaced one."),
                 "action": f"grant a service account read access to {expected}",

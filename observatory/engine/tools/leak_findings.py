@@ -15,6 +15,12 @@ first is there at all rather than hiding it.
 """
 from __future__ import annotations
 import re
+import pathlib as _pathlib
+import sys as _sys
+_DASHBOARD = str(_pathlib.Path(__file__).resolve().parents[1] / "dashboard")
+if _DASHBOARD not in _sys.path:
+    _sys.path.append(_DASHBOARD)  # `finding_types.titled`: a title is a message id
+from finding_types import titled  # noqa: E402
 
 LISTED = 6
 
@@ -51,9 +57,7 @@ def sightings(doc: dict | None) -> list[dict]:
             "type": "secret.seen_outside_its_home",
             "subject": "estate:leak-sightings",
             "severity": "critical",
-            "title": (f"{len(subjects)} credentials appear in files they do not live in"
-                      if len(subjects) > 1 else
-                      "1 credential appears in a file it does not live in"),
+            **titled("{n} credentials appear in files they do not live in", n=len(subjects)),
             "detail": ("Measured by searching for the values this estate actually "
                        "holds, not for anything key-shaped — so each of these is the "
                        "value itself, sitting somewhere else: "
@@ -74,9 +78,7 @@ def sightings(doc: dict | None) -> list[dict]:
             "type": "secret.identifier_seen",
             "subject": "estate:leak-identifiers",
             "severity": "info",
-            "title": (f"{len(subjects)} account identifiers appear outside their files"
-                      if len(subjects) > 1 else
-                      "1 account identifier appears outside its file"),
+            **titled("{n} account identifiers appear outside their files", n=len(subjects)),
             "detail": ("These matched the same search and are probably harmless: an "
                        "account id is thirty-two hex characters, which no shape test "
                        "can tell from a secret, and it is public by design. They are "
@@ -101,7 +103,7 @@ def suppression(doc: dict | None) -> list[dict]:
         out.append({
             "type": "secret.sighting_suppressed", "subject": "estate:leak-suppressions",
             "severity": "info",
-            "title": f"{len(gone)} sighting(s) suppressed by a recorded decision",
+            **titled("{n} sightings suppressed by a recorded decision", n=len(gone)),
             "detail": ("Still seen, not reported as leaks, because a suppression with a reason "
                        "covers them: " + "; ".join(f"{g['secret']} in {_where(g['where'])} — {g['reason']}"
                                                   for g in gone[:LISTED])
@@ -113,7 +115,7 @@ def suppression(doc: dict | None) -> list[dict]:
         out.append({
             "type": "secret.suppression_not_applied", "subject": "estate:leak-suppressions",
             "severity": "warning",
-            "title": f"{len(bad)} suppression rule(s) not applied",
+            **titled("{n} suppression rules not applied", n=len(bad)),
             "detail": "; ".join(f"rule {b.get('rule')}: {b['problem']}" for b in bad[:LISTED]),
             "action": "fix or remove the rule in config/leak_suppressions.json; an expired one "
                       "means its sightings are reported again",
@@ -133,8 +135,8 @@ def unscanned(doc: dict | None) -> list[dict]:
         # A file that could not be opened is a hole in the measurement, not a
         # choice of window: warning, not info.
         "severity": "warning" if unreadable else "info",
-        "title": (f"the leak scan could not read {len(unreadable)} source(s)" if unreadable else
-                  f"the leak scan did not read {len(notes)} source(s)"),
+        **(titled("the leak scan could not read {n} sources", n=len(unreadable)) if unreadable else
+                  titled("the leak scan did not read {n} sources", n=len(notes))),
         "detail": ("A clean scan is only as wide as what it opened: "
                    + "; ".join(f"{n['what']} — {n['why']}" for n in notes[:LISTED])
                    + "."),
@@ -151,7 +153,7 @@ def findings(doc: dict | None) -> list[dict]:
             "type": "secret.leak_scan_unmeasured",
             "subject": "estate:leak-scan-coverage",
             "severity": "warning",
-            "title": "the leak scan had nothing to look for",
+            **titled("the leak scan had nothing to look for"),
             "detail": ("It ran and found nothing because it knows no values on this "
                        "machine — no env scan, no vault, no installed key. A clean "
                        "report from it means UNMEASURED, and the difference is the "

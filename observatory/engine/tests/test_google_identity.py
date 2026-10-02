@@ -133,7 +133,7 @@ class GoogleIdentityTests(unittest.TestCase):
         self.assertNotIn("0 user", finding["title"])
         known = observation(name="Measured fixture", property="properties/456", standing="unclaimed")
         partial = google_findings.findings({"properties": [known, unknown]})[0]
-        self.assertIn("100 summed user(s)", partial["title"])
+        self.assertIn("100 summed users", partial["title"])
         self.assertIn("1 unmeasured", partial["title"])
         self.assertIn("Unknown fixture (unknown)", partial["detail"])
 

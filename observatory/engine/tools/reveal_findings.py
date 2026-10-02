@@ -27,6 +27,12 @@ import collections
 import datetime
 import json
 import pathlib
+import pathlib as _pathlib
+import sys as _sys
+_DASHBOARD = str(_pathlib.Path(__file__).resolve().parents[1] / "dashboard")
+if _DASHBOARD not in _sys.path:
+    _sys.path.append(_DASHBOARD)  # `finding_types.titled`: a title is a message id
+from finding_types import titled  # noqa: E402
 
 #: Reveals of ONE subject inside the window that make a burst. Six is chosen
 #: from the measurement: a person opening a page reveals a variable once or
@@ -74,7 +80,7 @@ def findings(journal: pathlib.Path, now: datetime.datetime | None = None) -> lis
             "type": "secret.journal_unreadable",
             "subject": "estate:keyserver-journal",
             "severity": "warning",
-            "title": "the keyserver's audit journal could not be read whole",
+            **titled("the keyserver's audit journal could not be read whole"),
             "detail": (f"{journal.name}: {problem}. Every row in it is a reveal, mint, "
                        f"limit or revoke somebody made; a journal the board cannot read "
                        f"is a record nobody can answer from."),
@@ -96,7 +102,7 @@ def findings(journal: pathlib.Path, now: datetime.datetime | None = None) -> lis
             "type": "secret.reveal_burst",
             "subject": f"reveal:{subject}",
             "severity": "warning",
-            "title": (f"{subject} was revealed {len(hits)} times in {WINDOW_HOURS} hours"),
+            **titled("{subject} was revealed {n} times in {hours} hours", subject=subject, n=len(hits), hours=WINDOW_HOURS),
             "detail": (f"Between {first:%Y-%m-%d %H:%M}Z and {last:%H:%M}Z, by {who}. A "
                        f"person opening a page reveals a variable once; a caller that "
                        f"re-reads one name this often is a loop that never kept the value "
@@ -114,7 +120,7 @@ def findings(journal: pathlib.Path, now: datetime.datetime | None = None) -> lis
             "type": "secret.reveal_unnamed",
             "subject": "estate:keyserver-callers",
             "severity": "info",
-            "title": f"{len(unnamed)} reveal(s) in {WINDOW_HOURS} hours came from a caller that did not name itself",
+            **titled("{n} reveals in {hours} hours came from a caller that did not name itself", n=len(unnamed), hours=WINDOW_HOURS),
             "detail": (f"Subjects: {', '.join(subjects[:LISTED])}"
                        f"{' and more' if len(subjects) > LISTED else ''}. The header "
                        f"`X-Observatory-Caller` was added later; a reveal without it "

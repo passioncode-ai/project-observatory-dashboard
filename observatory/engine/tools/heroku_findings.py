@@ -30,6 +30,12 @@ the registry already holds — the day of a deploy — never the moment this ran
 """
 from __future__ import annotations
 from datetime import date
+import pathlib as _pathlib
+import sys as _sys
+_DASHBOARD = str(_pathlib.Path(__file__).resolve().parents[1] / "dashboard")
+if _DASHBOARD not in _sys.path:
+    _sys.path.append(_DASHBOARD)  # `finding_types.titled`: a title is a message id
+from finding_types import titled  # noqa: E402
 
 
 def _config_label(name: str) -> str:
@@ -84,7 +90,7 @@ def app_down(apps: list[dict]) -> list[dict]:
             "type": "heroku.app_down",
             "subject": a["id"],
             "severity": "critical" if suspended else "warning",
-            "title": (f"{a['name']} is paid for and not serving"),
+            **titled("{app} is paid for and not serving", app=a["name"]),
             "detail": (f"{what}{since}. It bills ${a['monthly_cost']:.0f} a month "
                        f"and belongs to "
                        + (f"{a['project'].split(':', 1)[1]}" if a.get("project")
@@ -110,7 +116,7 @@ def paying_for_nothing(apps: list[dict]) -> list[dict]:
             "type": "heroku.paying_for_nothing",
             "subject": a["id"],
             "severity": "warning",
-            "title": f"{a['name']} pays for resources it cannot use",
+            **titled("{app} pays for resources it cannot use", app=a["name"]),
             "detail": (f"No dyno is scaled, and {plans} still bills "
                        f"${a['monthly_cost']:.0f} a month."
                        + (" Code was never deployed to this application at all — "
@@ -137,9 +143,7 @@ def orphan_app(apps: list[dict]) -> list[dict]:
         "type": "heroku.orphan_app",
         "subject": "estate:heroku-orphans",
         "severity": "warning",
-        "title": (f"{len(orphans)} running applications belong to no project here"
-                  if len(orphans) > 1 else
-                  "1 running application belongs to no project here"),
+        **titled("{n} running applications belong to no project here", n=len(orphans)),
         "detail": (f"Heroku is running them and this registry cannot say what they "
                    f"are for: {_listed([a['name'] for a in orphans])}. Together "
                    f"${cost:.0f} a month. A link is only made where something was "
@@ -167,7 +171,7 @@ def no_local_clone(apps: list[dict]) -> list[dict]:
         "type": "heroku.no_local_clone",
         "subject": "estate:heroku-unclonned",
         "severity": "info",
-        "title": f"{len(absent)} of {len(apps)} Heroku applications have no checkout here",
+        **titled("{n} of {total} Heroku applications have no checkout here", n=len(absent), total=len(apps)),
         "detail": ("Nothing on this machine can read or rebuild them; the source is "
                    "wherever it was last pushed from."
                    + (f" Entire team(s) absent: {', '.join(whole)}." if whole else "")
@@ -190,7 +194,7 @@ def snapshot_stale(doc: dict, age: int) -> list[dict]:
         "type": "heroku.snapshot_stale",
         "subject": "estate:heroku-snapshot",
         "severity": "warning",
-        "title": f"the Heroku snapshot is {age} days old, so nothing is being said about it",
+        **titled("the Heroku snapshot is {n} days old, so nothing is being said about it", n=age),
         "detail": (f"`registry/heroku-apps.json` was measured on {doc.get('scanned_on')} "
                    f"and every rule about applications is withheld past "
                    f"{STALE_AFTER_DAYS} days. A crashed dyno reported from a stale "

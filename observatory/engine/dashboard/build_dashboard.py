@@ -535,8 +535,11 @@ def _findings_panel(FINDINGS: dict, links: dict | None = None) -> dict:
     # WHAT THE OPERATOR SILENCED, beside what speaks (S5). Withheld from the
     # list and the counts, shown here with the reason — a silence nobody can
     # see later is the silence this file refuses.
+    # The title's message id and arguments travel with it, so a silenced row
+    # reads in the reader's language like an open one.
     silenced = [{"id": f["id"], "type": f["type"], "severity": f["severity"],
-                 "title": f["title"], "acked": f["acked"]}
+                 "title": f["title"], "acked": f["acked"],
+                 **{k: f[k] for k in ("title_id", "title_args") if k in f}}
                 for f in FINDINGS["findings"] if f.get("acked")]
     return {"counts": FINDINGS["counts"],
             "built_at": FINDINGS.get("built_at"),
@@ -1493,7 +1496,7 @@ footer ul { margin: 0 0 var(--space-3); padding-left: var(--space-4); }
 __NAV__
 <header>
   __H1__
-  <p class="sub">__SUB__ <span data-t>Measured</span> <span class="mono" id="upd"></span><span data-t>; registry content last changed</span>
+  <p class="sub">__SUB__ <span id="upd-label" data-t>Measured</span> <span class="mono" id="upd"></span><span data-t>; registry content last changed</span>
   <span class="mono" id="content-stamp"></span>.</p>
 <div class="tiles" id="tiles"></div>
   <h3 id="work-h" data-t>Activity</h3>
@@ -1688,6 +1691,10 @@ function T(id, args) {
   return text.replace(/\{([a-z_][a-z0-9_]*)\}/g, (m, k) => !(k in args) ? m
     : (typeof args[k] === "number" && Number.isInteger(args[k]) ? NUM(args[k]) : String(args[k])));
 }
+// A finding's title in the reader's language: its message id and arguments
+// (`finding_types.titled` in the rule modules). A findings.json written before
+// titles carried an id has only the English `title`, and shows it.
+const findingTitle = f => f.title_id ? T(f.title_id, f.title_args || {}) : f.title;
 function localizeStatic(root) {
   root.querySelectorAll("[data-t]").forEach(el => {
     let args;
@@ -1730,9 +1737,13 @@ document.addEventListener("keydown", ev => {
 
 // Two timestamps, each labelled: when the estate was last MEASURED, and when
 // the registry's content last changed.
-document.getElementById("upd").textContent = D.measured
-  ? D.measured.replace("T", " ").replace("Z", " UTC")
-  : T("not measured");
+// Never "Measured not measured": with no scan yet the label itself says so.
+if (D.measured) {
+  document.getElementById("upd").textContent = D.measured.replace("T", " ").replace("Z", " UTC");
+} else {
+  document.getElementById("upd-label").textContent = T("Not measured yet");
+  document.getElementById("upd").textContent = "";
+}
 const cs = document.getElementById("content-stamp");
 if (cs) cs.textContent = D.updated || "—";
 const S = D.stats;
@@ -3737,7 +3748,7 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
       const fid = "f-" + String(f.id).replace(/[^A-Za-z0-9_.:-]+/g, "-");
       const subj = subjectHref(f);
       return `<div class="f${f.severity === "critical" ? "" : " f" + f.severity}${foldCls}" id="${E(fid)}" data-type="${E(f.type)}" data-sev="${E(f.severity)}">${chip(word, kind)}` +
-        `<span class="t"><span class="ftl" title="${E(f.type)}">${E(typeLabel(f.type))}</span>${E(f.title)}` +
+        `<span class="t"><span class="ftl" title="${E(f.type)}">${E(typeLabel(f.type))}</span>${E(findingTitle(f))}` +
         (subj ? ` <a class="plink fsubj" href="${E(subj[0])}" title="${T("open {name}", {name: E(subj[1])})}">→ ${E(subj[1])}</a>` : "") +
         (PAGE === "findings" ? ` <a class="fperma" href="#${E(fid)}" title="${T("link to this row")}">#</a>` : "") +
         `</span>` +
@@ -3751,7 +3762,7 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
     // Silenced findings are listed with who silenced them, when and why,
     // and the command that brings each back.
     ((F.silenced || []).length ? `<details class="silenced"><summary>${T("{n} silenced — not on the page or in the counters; here you see who, when and why", {n: F.silenced.length})}</summary>` +
-      F.silenced.map(s => `<div class="f fsilenced">${chip(T("silenced"))}<span class="t">${E(s.title)}</span>` +
+      F.silenced.map(s => `<div class="f fsilenced">${chip(T("silenced"))}<span class="t">${E(findingTitle(s))}</span>` +
         `<span class="d">${E(s.acked.why || T("no reason"))} — ${E(s.acked.by || "?")}` +
         `${s.acked.until ? ", " + T("until {date}", {date: E(s.acked.until)}) : ""}</span>` +
         `<span class="act"><button class="chip-btn ack" type="button" data-cmd="${E(toolCommand("ack.py", ["--undo", s.id]))}">${T("Command: {label}", {label: T("restore")})}</button></span></div>`).join("") +

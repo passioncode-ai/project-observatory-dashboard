@@ -13,10 +13,19 @@ type this table does not name, so a new rule is never blank — it is merely
 untranslated until its label lands here. `tests/test_dashboard_shell.py` reads
 the rule modules and fails when a type they can emit has no label.
 
-The rule's own title, detail and action stay as the rule wrote them: they are
-built from measurements by f-strings in the rule modules (`tools/*findings*.py`)
-and carry no message id to translate. This table is what makes the list
-navigable in either language until they do.
+A finding's TITLE is a message id too. Each rule builds it with `titled(id,
+**args)`, which returns three keys: `title_id` (the English text with `{named}`
+placeholders), `title_args` (the values, integers or plain text) and `title`,
+the English rendering of the same pair through the same catalog the page reads
+(`i18n.translate`). So `title` — what MCP, the notifier and the logs read — is
+derived from the id and cannot drift from it, and the page renders the pair in
+the reader's language. A count that drives agreement is the `n` argument, and
+its id is a plural entry in `locales/en.json` and `ru.json`. A reason a
+collector or provider wrote is passed as an argument verbatim and stays in its
+own language. `tests/test_i18n.py` reads the rule modules and fails when a
+finding title carries no id, or an id has no translation.
+
+The detail and action stay as the rule wrote them, in English.
 """
 from __future__ import annotations
 
@@ -167,3 +176,18 @@ def labels_for(types) -> dict[str, str]:
     """The labels of the types given, for the page's payload. A type this table
     does not name is left out, and the page shows its raw id instead."""
     return {t: LABELS[t] for t in sorted(set(types)) if t in LABELS}
+
+
+def titled(msgid: str, **args) -> dict:
+    """`{"title", "title_id", "title_args"}` for a finding, spread into it.
+
+    `title` is `msgid` rendered in English with `args` — a plural id picks its
+    form by `n` — through `i18n.translate`, the function the page's `T()`
+    mirrors. Arguments are kept JSON-plain so both renderings read them alike:
+    an integer stays a number (grouped by the reader's language), anything
+    else — a float included, whose `str` and JavaScript's `String` disagree —
+    becomes its text here, once."""
+    import i18n  # beside this module; its directory is on the path whenever this is
+    plain = {k: v if isinstance(v, int) and not isinstance(v, bool) else str(v)
+             for k, v in args.items()}
+    return {"title": i18n.translate(msgid, "en", **plain), "title_id": msgid, "title_args": plain}

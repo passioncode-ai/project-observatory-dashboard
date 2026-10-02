@@ -81,7 +81,7 @@ def test_an_unnamed_caller_is_counted_only_once_the_header_exists() -> None:
     out = rf.findings(planted(rows), NOW)
     un = [f for f in out if f["type"] == "secret.reveal_unnamed"]
     check("the unnamed row counts rows that HAVE the key and no name",
-          len(un) == 1 and un[0]["title"].startswith("3 reveal(s)"), str([f["title"] for f in un]))
+          len(un) == 1 and un[0]["title"].startswith("3 reveals "), str([f["title"] for f in un]))
     check("and lists the subjects", "b/.env:Y" in un[0]["detail"] and "c/.env:Z" in un[0]["detail"], un[0]["detail"][:160])
 
 

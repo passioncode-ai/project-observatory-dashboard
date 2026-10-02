@@ -253,6 +253,67 @@ def test_a_number_meets_its_noun_in_the_right_case() -> None:
           str(got.get("counts")))
 
 
+def test_a_finding_title_reads_in_the_readers_language() -> None:
+    """A finding's title is a message id and its arguments, rendered by `T()`.
+
+    Built twice from one synthetic findings file — once in each language — and
+    executed: the Russian page says the counted title in Russian with the plural
+    form its number takes, the English page says the rule's English, and a
+    finding written before titles carried an id still shows its `title`."""
+    sys.path.insert(0, str(ROOT / "dashboard"))
+    from finding_types import titled
+    rows = [{"id": "mcp.unreachable:estate:mcp", "type": "mcp.unreachable", "subject": "estate:mcp",
+             "severity": "info", **titled("{n} MCP servers Claude could not reach", n=3),
+             "detail": "synthetic", "action": "synthetic", "evidence": []},
+            {"id": "work.unattributed:fixture", "type": "work.unattributed", "subject": "session-name:fixture",
+             "severity": "info", "title": "Synthetic title from an older build",
+             "detail": "synthetic", "action": "synthetic", "evidence": []}]
+    seen = {}
+    for locale in ("en", "ru"):
+        d = pathlib.Path(tmpdir.mkdtemp(prefix=f"observatory-title-{locale}-"))
+        env = dashboard_fixture.seed(d)
+        (d / "registry/findings.json").write_text(json.dumps(
+            {"counts": {"info": 2, "warning": 0, "critical": 0}, "findings": rows}))
+        p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT,
+                           env={**env, "OBSERVATORY_LOCALE": locale}, capture_output=True, text=True)
+        check(f"the {locale} page builds", p.returncode == 0, p.stderr[-300:])
+        seen[locale] = {needle: render(pathlib.Path(env["OBSERVATORY_DASHBOARD"]), count=needle)
+                        for needle in ("3 MCP-сервера недоступны для Claude", "3 MCP servers Claude could not reach",
+                                       "Synthetic title from an older build")}
+    if any(v is None for got in seen.values() for v in got.values()):
+        print("  SKIP  node is not on this machine")
+        return
+    n = {locale: {needle: sum((got.get("counts") or {}).values()) for needle, got in by.items()}
+         for locale, by in seen.items()}
+    check("the Russian page renders the title in Russian, in the plural its number takes",
+          n["ru"]["3 MCP-сервера недоступны для Claude"] >= 1 and n["ru"]["3 MCP servers Claude could not reach"] == 0,
+          str(n["ru"]))
+    check("the English page renders the same title in English",
+          n["en"]["3 MCP servers Claude could not reach"] >= 1 and n["en"]["3 MCP-сервера недоступны для Claude"] == 0,
+          str(n["en"]))
+    check("a title with no id still renders, in both languages",
+          all(n[l]["Synthetic title from an older build"] >= 1 for l in n), str(n))
+
+
+def test_an_unmeasured_estate_does_not_say_measured_not_measured() -> None:
+    """A workspace with no scan yet printed "Измерено не измерено" (and "Measured not
+    measured") in every page's header: the label must carry the absence itself."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-unmeasured-"))
+    env = dashboard_fixture.seed(d)
+    p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT,
+                       env={**env, "OBSERVATORY_LOCALE": "ru", "OBSERVATORY_DB": str(d / "absent.db")},
+                       capture_output=True, text=True)
+    check("the page builds with no store", p.returncode == 0, p.stderr[-300:])
+    got = {needle: render(pathlib.Path(env["OBSERVATORY_DASHBOARD"]), count=needle)
+           for needle in ("Ещё не измерено", "Измерено не")}
+    if any(v is None for v in got.values()):
+        print("  SKIP  node is not on this machine")
+        return
+    n = {k: sum((v.get("counts") or {}).values()) for k, v in got.items()}
+    check("the header says the estate is not measured yet, once", n["Ещё не измерено"] >= 1, str(n))
+    check("and never 'Measured not measured'", n["Измерено не"] == 0, str(n))
+
+
 def test_no_panel_renders_an_object_as_text() -> None:
     """`[object Object]` is what a page says when a field means two things.
 
@@ -380,6 +441,8 @@ if __name__ == "__main__":
                test_the_detail_panel_names_what_a_project_is_made_of,
                test_the_info_rows_remain_visible_in_the_attention_preview,
                test_a_number_meets_its_noun_in_the_right_case,
+               test_a_finding_title_reads_in_the_readers_language,
+               test_an_unmeasured_estate_does_not_say_measured_not_measured,
                test_no_panel_renders_an_object_as_text,
                test_a_metric_that_moved_says_so_on_the_page,
                test_a_single_sample_renders_no_movement,

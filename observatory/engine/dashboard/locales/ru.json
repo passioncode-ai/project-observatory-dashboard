@@ -1,5 +1,6 @@
 {
  "$/mo": "$/мес",
+ "${env} holds a key for a different provider": "${env} содержит ключ другого провайдера",
  "(according to Cloudflare)": "(по данным Cloudflare)",
  "(from a link)": "(из ссылки)",
  "+ config and empty": "+ конфиг и пустые",
@@ -211,6 +212,7 @@
  "No process survey yet.": "Процессы ещё не опрошены.",
  "No values on this page or in the registry: a “shared value” is established by a salted fingerprint, and the salt lives outside git and never leaves the machine.": "Значений нет ни в этой странице, ни в реестре: «общее значение» установлено солёным отпечатком, а соль лежит вне git и не покидает машину.",
  "Not measured": "Не измерено",
+ "Not measured yet": "Ещё не измерено",
  "Nothing found": "Ничего не найдено",
  "Nothing found with this narrowing — {what}.": "Ничего не найдено с этим сужением — {what}.",
  "Nothing to clean.": "Очищать нечего.",
@@ -374,7 +376,12 @@
  "Worktree with unpushed work": "Worktree с незапушенной работой",
  "Worktrees to look at": "Worktree, на которые стоит посмотреть",
  "Your browser keeps no settings here; set interface.locale in the workspace instead.": "Браузер не сохраняет здесь настройки; задайте interface.locale в workspace.",
+ "a Google API is switched off for a credential": "API Google выключен для одного из ключей",
+ "a Google API is switched off for {source}": "API Google выключен для {source}",
  "a different value": "другое значение",
+ "a lost turn is in the receipt and not in the fault log": "потерянный ход есть в квитанции, но не в журнале сбоев",
+ "a session is following {skill} {version} — a MAJOR version behind": "сессия работает по {skill} {version} — отстаёт на МАЖОРНУЮ версию",
+ "a session is following {skill} {version} — behind the shipped text": "сессия работает по {skill} {version} — отстаёт от поставляемого текста",
  "a sum across properties does not mean unique people across them": "сумма по ресурсам не означает уникальных людей между ними",
  "accept": "принять",
  "account": "аккаунт",
@@ -432,6 +439,18 @@
  "ceiling {value}/mo": "потолок {value}/мес",
  "ceiling…": "потолок…",
  "clean": "чистый",
+ "cleanup removed {n} items in 24 hours": {
+  "few": "очистка удалила {n} объекта за 24 часа",
+  "many": "очистка удалила {n} объектов за 24 часа",
+  "one": "очистка удалила {n} объект за 24 часа",
+  "other": "очистка удалила {n} объекта за 24 часа"
+ },
+ "cleanup removed {n} items in 24 hours, {gb} GB of build output": {
+  "few": "очистка удалила {n} объекта за 24 часа, {gb} ГБ результатов сборки",
+  "many": "очистка удалила {n} объектов за 24 часа, {gb} ГБ результатов сборки",
+  "one": "очистка удалила {n} объект за 24 часа, {gb} ГБ результатов сборки",
+  "other": "очистка удалила {n} объекта за 24 часа, {gb} ГБ результатов сборки"
+ },
  "clicks/day": "кликов/сут",
  "clipboard unavailable": "буфер недоступен",
  "clipboard unavailable — copy it from the hint": "буфер недоступен — скопируйте из подсказки",
@@ -556,6 +575,7 @@
  "leak closed": "утечка закрыта",
  "leak not closed": "утечка не закрыта",
  "leak recorded": "утечка записана",
+ "leaked test fixtures could not be swept": "брошенные тестовые фикстуры не удалось убрать",
  "lifecycle@@active": "активен",
  "lifecycle@@archived": "в архиве",
  "lifetime": "пожизненный",
@@ -603,6 +623,7 @@
  "no local folders": "локальных папок нет",
  "no local store — history and metrics are unavailable": "нет локального хранилища — история и метрики недоступны",
  "no measurements": "измерений нет",
+ "no model has been asked anything recently, so the empty quarantine list says nothing about health": "моделям давно ничего не задавали, поэтому пустой список карантина ничего не говорит об их состоянии",
  "no note": "нет заметки",
  "no owner": "владельца нет",
  "no project": "нет проекта",
@@ -612,6 +633,7 @@
  "no repositories": "репозиториев нет",
  "no repository": "нет репозитория",
  "no reset": "без сброса",
+ "no scan since {date}": "сканов не было с {date}",
  "no sites declared": "сайтов не заявлено",
  "no store: activity not measured": "хранилища нет, движение не измерено",
  "no users": "нет пользователей",
@@ -715,6 +737,7 @@
  "probe@@needs authentication": "нужен вход",
  "product": "продукт",
  "production": "прод",
+ "project key {key} could not be matched to one recorded project": "ключ проекта {key} не удалось сопоставить ровно с одним записанным проектом",
  "project or name not determined": "проект или имя не определены",
  "properties measured: {n}": "измерено ресурсов: {n}",
  "property settings": "настройки property",
@@ -726,6 +749,8 @@
  "reads it": "читает его",
  "reclaimable": "вернётся",
  "record a leak…": "отметить утечку…",
+ "recorded work git contradicts": "записанная работа противоречит git",
+ "recorded work no clone here can witness": "записанную работу не подтверждает ни один клон на этой машине",
  "refused on purpose": "отказаны намеренно",
  "regenerable": "пересоздаётся",
  "registrar not stated": "регистратор не указан",
@@ -745,6 +770,7 @@
  "resources recorded: {n}. Anything you create for it — analytics, Firebase/Google Cloud, servers, cloud or payment accounts, Figma files — is reported with observatory_propose {\"resources\": [...]} in the same turn": "учтено ресурсов: {n}. Всё, что вы для него создаёте, — аналитика, Firebase/Google Cloud, серверы, облачные и платёжные аккаунты, файлы Figma — регистрируется через observatory_propose {\"resources\": [...]} в том же ходе",
  "restart": "перезапуск",
  "restore": "вернуть",
+ "retention did not complete, so nothing was erased": "очистка по сроку хранения не завершилась — ничего не стёрто",
  "retention erases a proposal after {n} d": "ретеншен стирает предложение через {n} дн",
  "review": "ревью",
  "revoke": "отозвать",
@@ -766,10 +792,12 @@
  "rotated": "ротирован",
  "rotated every {n} d": "ротация раз в {n} дн.",
  "row not found — rescan": "строка не найдена — пересканируйте",
+ "rows were erased but the file was not scrubbed": "строки стёрты, но файл не вычищен",
  "rules: show": "правила: показать",
  "running": "работает",
  "s@@sessions-abbrev": "с",
  "same as local": "то же, что локально",
+ "saved acknowledgements could not be read": "не удалось прочитать сохранённые заглушки",
  "scan {date}": "скан {date}",
  "search: “{text}”": "поиск: «{text}»",
  "secret": "секрет",
@@ -816,11 +844,69 @@
  "switched on by a link": "включён ссылкой",
  "template": "шаблон",
  "test": "тест",
+ "the API key has spent {spent} of {limit} this month; this project accounts for {own}": "API-ключ потратил {spent} из {limit} в этом месяце; на этот проект приходится {own}",
+ "the Heroku snapshot is {n} days old, so nothing is being said about it": {
+  "few": "снимку Heroku {n} дня — по нему ничего не сообщается",
+  "many": "снимку Heroku {n} дней — по нему ничего не сообщается",
+  "one": "снимку Heroku {n} день — по нему ничего не сообщается",
+  "other": "снимку Heroku {n} дня — по нему ничего не сообщается"
+ },
+ "the agent could not interpret {n} projects it took": {
+  "few": "агент не смог интерпретировать {n} взятых проекта",
+  "many": "агент не смог интерпретировать {n} взятых проектов",
+  "one": "агент не смог интерпретировать {n} взятый проект",
+  "other": "агент не смог интерпретировать {n} взятых проекта"
+ },
+ "the analytics numbers are {n} days old": {
+  "few": "данным аналитики {n} дня",
+  "many": "данным аналитики {n} дней",
+  "one": "данным аналитики {n} день",
+  "other": "данным аналитики {n} дня"
+ },
  "the buttons act: this page is served by {server}": "кнопки действуют: страницу отдаёт {server}",
  "the commit from the description of release v{n}": "коммит из описания релиза v{n}",
+ "the companion could not record {n} turns": {
+  "few": "компаньон не смог записать {n} хода диалога",
+  "many": "компаньон не смог записать {n} ходов диалога",
+  "one": "компаньон не смог записать {n} ход диалога",
+  "other": "компаньон не смог записать {n} хода диалога"
+ },
  "the connection dropped": "соединение оборвалось",
+ "the curated register {register} exists and could not be read": "курируемый реестр {register} существует, но не читается",
+ "the dashboard has not been verified to render at all": "не проверено, что дашборд вообще рендерится",
+ "the dashboard would render blank — its script dies at load": "дашборд отрендерится пустым — его скрипт падает при загрузке",
  "the door's ledger: name at the provider, ceiling, spend, date minted": "леджер двери: имя у провайдера, потолок, расход, дата выпуска",
+ "the free space on this volume could not be measured": "свободное место на этом томе не удалось измерить",
+ "the identity map could not be read": "карта идентичности не читается",
+ "the installed companion differs from this repository": "установленный компаньон отличается от этого репозитория",
+ "the keyserver's audit journal could not be read whole": "журнал аудита сервера ключей не удалось прочитать целиком",
+ "the last clean smoke verdict describes an older build of the page": "последний чистый вердикт smoke-проверки относится к более старой сборке страницы",
+ "the leak register did not parse, so no leak's status is known": "реестр утечек не разобран — статус ни одной утечки неизвестен",
+ "the leak scan could not read {n} sources": {
+  "few": "скан утечек не смог прочитать {n} источника",
+  "many": "скан утечек не смог прочитать {n} источников",
+  "one": "скан утечек не смог прочитать {n} источник",
+  "other": "скан утечек не смог прочитать {n} источника"
+ },
+ "the leak scan did not read {n} sources": {
+  "few": "скан утечек не прочитал {n} источника",
+  "many": "скан утечек не прочитал {n} источников",
+  "one": "скан утечек не прочитал {n} источник",
+  "other": "скан утечек не прочитал {n} источника"
+ },
+ "the leak scan had nothing to look for": "скану утечек нечего было искать",
+ "the local server is installed and has never reported": "локальный сервер установлен, но ни разу не отозвался",
+ "the local server's last heartbeat is {minutes} minutes old": "последний сигнал локального сервера был {minutes} мин назад",
+ "the machine survey is {hours} hours old": "опросу машины {hours} ч",
+ "the model quarantine list did not parse, so no model's health is known": "список карантина моделей не разобран — состояние ни одной модели неизвестно",
+ "the model was built with {n} sources unmeasured": {
+  "few": "модель построена с {n} неизмеренными источниками",
+  "many": "модель построена с {n} неизмеренными источниками",
+  "one": "модель построена с {n} неизмеренным источником",
+  "other": "модель построена с {n} неизмеренными источниками"
+ },
  "the movement journal is empty": "журнал движений пуст",
+ "the observatory's own MCP server is declared in no agent": "собственный MCP-сервер обсерватории не объявлен ни в одном агенте",
  "the observatory's own server is declared": "собственный сервер обсерватории объявлен",
  "the observatory's own server is not declared": "собственный сервер обсерватории не объявлен",
  "the observer is not running — start it in a terminal": "наблюдатель не запущен — запустить в терминале",
@@ -828,16 +914,41 @@
  "the observer was not running when measured": "при измерении наблюдатель не был запущен",
  "the observer was running when measured": "при измерении наблюдатель работал",
  "the queue could not be read: {error}": "очередь не прочиталась: {error}",
+ "the registry has never been diffed": "реестр ни разу не сравнивался",
+ "the registry has not been diffed for {hours}h": "реестр не сравнивался уже {hours} ч",
  "the registry is empty: no project measured yet —": "реестр пуст: ни одного проекта ещё не измерено —",
  "the renewal price is not measured here": "цена продления здесь не измеряется",
  "the same value · a rotation touches every one": "то же значение · ротация затронет всех",
+ "the scheduled tick's `{step}` step exited {code}": "шаг `{step}` планового запуска завершился с кодом {code}",
+ "the smoke receipt carries no verdict this can read: {verdict}": "в квитанции smoke-проверки нет читаемого вердикта: {verdict}",
  "the source is outside our GitHub": "источник вне нашего GitHub",
  "the source is unknown": "источник неизвестен",
  "the store did not open: {error}": "хранилище не открылось: {error}",
+ "the store failed its integrity check ({verdict})": "хранилище не прошло проверку целостности ({verdict})",
+ "the store failed {n} times in the last {days} days: {codes}": {
+  "few": "хранилище сбоило {n} раза за последние {days} дн.: {codes}",
+  "many": "хранилище сбоило {n} раз за последние {days} дн.: {codes}",
+  "one": "хранилище сбоило {n} раз за последние {days} дн.: {codes}",
+  "other": "хранилище сбоило {n} раза за последние {days} дн.: {codes}"
+ },
+ "the store holds no scan at all": "в хранилище нет ни одного скана",
  "the store is unreadable: {error}": "хранилище нечитаемо: {error}",
+ "the store's last integrity check was {hours}h ago": "последняя проверка целостности хранилища была {hours} ч назад",
+ "the tick has skipped {n} cycles in a row": {
+  "few": "плановый запуск пропустил {n} цикла подряд",
+  "many": "плановый запуск пропустил {n} циклов подряд",
+  "one": "плановый запуск пропустил {n} цикл подряд",
+  "other": "плановый запуск пропустил {n} цикла подряд"
+ },
  "the value is set in:": "значение есть в:",
  "the whole queue": "вся очередь",
+ "the wiki's copy of the registry has not been committed for {hours}h": "копия реестра в вики не коммитится уже {hours} ч",
+ "the wiki's copy of the registry is not being committed": "копия реестра в вики не коммитится",
+ "the wiki's link check has never completed": "проверка ссылок вики ни разу не завершилась",
+ "the wiki's links have not been checked since {date}": "ссылки вики не проверялись с {date}",
  "the zone in Cloudflare": "зона в Cloudflare",
+ "the {plugin} plugin has never run: {reason}": "плагин {plugin} ни разу не запускался: {reason}",
+ "the {plugin} plugin is not producing measurements": "плагин {plugin} не выдаёт измерений",
  "tile@@{n} Heroku apps": {
   "few": "{n} приложения Heroku",
   "many": "{n} приложений Heroku",
@@ -977,9 +1088,16 @@
   "other": "{n} сайта не резолвятся"
  },
  "toolchain": "инструменты",
+ "traffic outside the estate's projects: {n} hosts — {outside} by decision, {pending} pending, {unclassified} of the top-listed unclassified": {
+  "few": "трафик вне проектов эстейта: {n} хоста — по решению {outside}, ждут решения {pending}, не классифицировано среди верхних {unclassified}",
+  "many": "трафик вне проектов эстейта: {n} хостов — по решению {outside}, ждут решения {pending}, не классифицировано среди верхних {unclassified}",
+  "one": "трафик вне проектов эстейта: {n} хост — по решению {outside}, ждут решения {pending}, не классифицировано среди верхних {unclassified}",
+  "other": "трафик вне проектов эстейта: {n} хоста — по решению {outside}, ждут решения {pending}, не классифицировано среди верхних {unclassified}"
+ },
  "type {type}": "тип {type}",
  "unchanged since {date}": "без изменений с {date}",
  "uncommitted": "незакоммиченное",
+ "under {gib} GiB free on the volume holding this repository": "на томе с этим репозиторием свободно меньше {gib} ГиБ",
  "unit@@credits": "кред.",
  "unowned": "ничей",
  "unowned@@property": "ничей",
@@ -1000,6 +1118,12 @@
  "what is it": "что это",
  "what the registrar says": "что говорит регистратор",
  "what was minted": "что выпущено",
+ "whether {n} domains are on registrar hold could not be read": {
+  "few": "не удалось узнать, заблокированы ли регистратором {n} домена",
+  "many": "не удалось узнать, заблокированы ли регистратором {n} доменов",
+  "one": "не удалось узнать, заблокирован ли регистратором {n} домен",
+  "other": "не удалось узнать, заблокированы ли регистратором {n} домена"
+ },
  "with a folder": "с папкой",
  "with a note": "с заметкой",
  "with a site": "с сайтом",
@@ -1010,8 +1134,28 @@
  "worktrees": "worktree",
  "writing and rotating a project secret from here is {refused} — the value travels only through stdin": "запись и ротация секрета проекта отсюда {refused} — значение идёт только через stdin",
  "zone": "зона",
+ "{app} is paid for and not serving": "{app} оплачивается и не работает",
+ "{app} is still running the value retired from {slot} on {date}": "{app} всё ещё использует значение, выведенное из {slot} {date}",
+ "{app} pays for resources it cannot use": "{app} платит за ресурсы, которые не может использовать",
  "{crit} critical / {warn} warning": "{crit} критично / {warn} внимание",
+ "{domain} is on registrar hold": "{domain} заблокирован регистратором",
  "{files} and {templates} in {projects}": "{files} и {templates} в {projects}",
+ "{folder} still points at {was}, which moved to {now}": "{folder} всё ещё указывает на {was}, а он переехал в {now}",
+ "{gb} GB free on the disk ({pct}%)": "на диске свободно {gb} ГБ ({pct}%)",
+ "{gb} GB of memory is swapped to disk": "{gb} ГБ памяти выгружено в своп",
+ "{gib} GiB of leaked test fixtures swept": "убрано {gib} ГиБ брошенных тестовых фикстур",
+ "{host} expires in {days} days": "{host}: домен истекает через {days} дн.",
+ "{host} is owned and resolves nowhere": "{host}: домен наш, но никуда не резолвится",
+ "{key} is capped for its lifetime, not per month": "{key}: лимит на весь срок жизни, а не на месяц",
+ "{key} is known only because it leaked": "{key}: известен только по утечке",
+ "{key} was last set {n} days ago and its own policy says every {days}": {
+  "few": "{key}: задан {n} дня назад, а по его же политике — раз в {days} дн.",
+  "many": "{key}: задан {n} дней назад, а по его же политике — раз в {days} дн.",
+  "one": "{key}: задан {n} день назад, а по его же политике — раз в {days} дн.",
+  "other": "{key}: задан {n} дня назад, а по его же политике — раз в {days} дн."
+ },
+ "{model} is configured in the chain and no longer exists at the provider": "{model} есть в цепочке, но у провайдера её больше нет",
+ "{model} is skipped by the model chain: {reason}": "цепочка моделей пропускает {model}: {reason}",
  "{money}/mo": "{money}/мес",
  "{name} copied": "{name} скопирован",
  "{n} Cloudflare zones": {
@@ -1021,7 +1165,67 @@
   "other": "{n} зоны Cloudflare"
  },
  "{n} Heroku changes this week are missing from the journal — the operator's rule: whoever moved it records it in the same step": "изменений на Heroku за неделю без записи в журнале: {n} — правило оператора: записывает тот, кто двигал, в тот же ход",
+ "{n} MCP servers Claude could not reach": {
+  "few": "{n} MCP-сервера недоступны для Claude",
+  "many": "{n} MCP-серверов недоступны для Claude",
+  "one": "{n} MCP-сервер недоступен для Claude",
+  "other": "{n} MCP-сервера недоступны для Claude"
+ },
+ "{n} MCP servers carry a key in their URL": {
+  "few": "{n} MCP-сервера держат ключ в URL",
+  "many": "{n} MCP-серверов держат ключ в URL",
+  "one": "{n} MCP-сервер держит ключ в URL",
+  "other": "{n} MCP-сервера держат ключ в URL"
+ },
+ "{n} MCP servers wait for a browser sign-in": {
+  "few": "{n} MCP-сервера ждут входа в браузере",
+  "many": "{n} MCP-серверов ждут входа в браузере",
+  "one": "{n} MCP-сервер ждёт входа в браузере",
+  "other": "{n} MCP-сервера ждут входа в браузере"
+ },
+ "{n} account identifiers appear outside their files": {
+  "few": "{n} идентификатора аккаунтов замечены вне своих файлов",
+  "many": "{n} идентификаторов аккаунтов замечены вне своих файлов",
+  "one": "{n} идентификатор аккаунта замечен вне своего файла",
+  "other": "{n} идентификатора аккаунтов замечены вне своих файлов"
+ },
  "{n} active this week": "{n} в работе за неделю",
+ "{n} analytics properties have unknown traffic": {
+  "few": "у {n} ресурсов аналитики неизвестен трафик",
+  "many": "у {n} ресурсов аналитики неизвестен трафик",
+  "one": "у {n} ресурса аналитики неизвестен трафик",
+  "other": "у {n} ресурсов аналитики неизвестен трафик"
+ },
+ "{n} analytics properties with unknown traffic ({unknown} unmeasured) belong to no project here": {
+  "few": "{n} ресурса аналитики с неизвестным трафиком (без измерения: {unknown}) не относятся ни к одному проекту",
+  "many": "{n} ресурсов аналитики с неизвестным трафиком (без измерения: {unknown}) не относятся ни к одному проекту",
+  "one": "{n} ресурс аналитики с неизвестным трафиком (без измерения: {unknown}) не относится ни к одному проекту",
+  "other": "{n} ресурса аналитики с неизвестным трафиком (без измерения: {unknown}) не относятся ни к одному проекту"
+ },
+ "{n} analytics properties with {users} summed users in 30 days ({unknown} unmeasured) belong to no project here": {
+  "few": "{n} ресурса аналитики ({users} польз. за 30 дн. в сумме, без измерения: {unknown}) не относятся ни к одному проекту",
+  "many": "{n} ресурсов аналитики ({users} польз. за 30 дн. в сумме, без измерения: {unknown}) не относятся ни к одному проекту",
+  "one": "{n} ресурс аналитики ({users} польз. за 30 дн. в сумме, без измерения: {unknown}) не относится ни к одному проекту",
+  "other": "{n} ресурса аналитики ({users} польз. за 30 дн. в сумме, без измерения: {unknown}) не относятся ни к одному проекту"
+ },
+ "{n} analytics properties with {users} summed users in 30 days belong to no project here": {
+  "few": "{n} ресурса аналитики ({users} польз. за 30 дн. в сумме) не относятся ни к одному проекту",
+  "many": "{n} ресурсов аналитики ({users} польз. за 30 дн. в сумме) не относятся ни к одному проекту",
+  "one": "{n} ресурс аналитики ({users} польз. за 30 дн. в сумме) не относится ни к одному проекту",
+  "other": "{n} ресурса аналитики ({users} польз. за 30 дн. в сумме) не относятся ни к одному проекту"
+ },
+ "{n} answers contradicted themselves and were not recorded": {
+  "few": "{n} ответа противоречили сами себе и не записаны",
+  "many": "{n} ответов противоречили сами себе и не записаны",
+  "one": "{n} ответ противоречил сам себе и не записан",
+  "other": "{n} ответа противоречили сами себе и не записаны"
+ },
+ "{n} applications would not report their configuration": {
+  "few": "{n} приложения не отдали свою конфигурацию",
+  "many": "{n} приложений не отдали свою конфигурацию",
+  "one": "{n} приложение не отдало свою конфигурацию",
+  "other": "{n} приложения не отдали свою конфигурацию"
+ },
  "{n} apps": {
   "few": "{n} приложения",
   "many": "{n} приложений",
@@ -1029,13 +1233,73 @@
   "other": "{n} приложения"
  },
  "{n} as local": "{n} как локально",
+ "{n} changes have waited over {hours}h for the agent to interpret them": {
+  "few": "{n} изменения ждут интерпретации агентом дольше {hours} ч",
+  "many": "{n} изменений ждут интерпретации агентом дольше {hours} ч",
+  "one": "{n} изменение ждёт интерпретации агентом дольше {hours} ч",
+  "other": "{n} изменения ждут интерпретации агентом дольше {hours} ч"
+ },
  "{n} checkouts not counted": "не посчитано чекаутов: {n}",
  "{n} checkouts with work only on this disk": "чекаутов с работой только на этом диске: {n}",
+ "{n} conclusions unindexed for over {hours}h": {
+  "few": "{n} вывода не проиндексированы дольше {hours} ч",
+  "many": "{n} выводов не проиндексированы дольше {hours} ч",
+  "one": "{n} вывод не проиндексирован дольше {hours} ч",
+  "other": "{n} вывода не проиндексированы дольше {hours} ч"
+ },
+ "{n} conclusions were written in another language": {
+  "few": "{n} вывода написаны на другом языке",
+  "many": "{n} выводов написаны на другом языке",
+  "one": "{n} вывод написан на другом языке",
+  "other": "{n} вывода написаны на другом языке"
+ },
+ "{n} conclusions will be erased unreviewed within 14 days": {
+  "few": "{n} вывода будут стёрты непроверенными в течение 14 дней",
+  "many": "{n} выводов будут стёрты непроверенными в течение 14 дней",
+  "one": "{n} вывод будет стёрт непроверенным в течение 14 дней",
+  "other": "{n} вывода будут стёрты непроверенными в течение 14 дней"
+ },
  "{n} copies in this same project": {
   "few": "{n} копии в этом же проекте",
   "many": "{n} копий в этом же проекте",
   "one": "{n} копия в этом же проекте",
   "other": "{n} копии в этом же проекте"
+ },
+ "{n} copies of somebody else's work are behind their upstreams": {
+  "few": "{n} копии чужих репозиториев отстают от upstream",
+  "many": "{n} копий чужих репозиториев отстают от upstream",
+  "one": "{n} копия чужого репозитория отстаёт от upstream",
+  "other": "{n} копии чужих репозиториев отстают от upstream"
+ },
+ "{n} credentials appear in files they do not live in": {
+  "few": "{n} ключа замечены в чужих файлах",
+  "many": "{n} ключей замечены в чужих файлах",
+  "one": "{n} ключ замечен в чужом файле",
+  "other": "{n} ключа замечены в чужих файлах"
+ },
+ "{n} credentials are held by more than one project": {
+  "few": "{n} ключа хранятся в нескольких проектах",
+  "many": "{n} ключей хранятся в нескольких проектах",
+  "one": "{n} ключ хранится в нескольких проектах",
+  "other": "{n} ключа хранятся в нескольких проектах"
+ },
+ "{n} credentials are used by more than one project": {
+  "few": "{n} ключа используются несколькими проектами",
+  "many": "{n} ключей используются несколькими проектами",
+  "one": "{n} ключ используется несколькими проектами",
+  "other": "{n} ключа используются несколькими проектами"
+ },
+ "{n} credentials belong to no project here": {
+  "few": "{n} ключа не относятся ни к одному проекту",
+  "many": "{n} ключей не относятся ни к одному проекту",
+  "one": "{n} ключ не относится ни к одному проекту",
+  "other": "{n} ключа не относятся ни к одному проекту"
+ },
+ "{n} credentials carry no statement of what they are for": {
+  "few": "{n} ключа без указанного назначения",
+  "many": "{n} ключей без указанного назначения",
+  "one": "{n} ключ без указанного назначения",
+  "other": "{n} ключа без указанного назначения"
  },
  "{n} d": "{n} дн.",
  "{n} declarations": {
@@ -1044,12 +1308,48 @@
   "one": "{n} объявление",
   "other": "{n} объявления"
  },
+ "{n} declines gave no reason": {
+  "few": "{n} отказа без причины",
+  "many": "{n} отказов без причины",
+  "one": "{n} отказ без причины",
+  "other": "{n} отказа без причины"
+ },
+ "{n} detached server processes hold {mb} MB": {
+  "few": "{n} отсоединённых серверных процесса занимают {mb} МБ",
+  "many": "{n} отсоединённых серверных процессов занимают {mb} МБ",
+  "one": "{n} отсоединённый серверный процесс занимает {mb} МБ",
+  "other": "{n} отсоединённых серверных процесса занимают {mb} МБ"
+ },
  "{n} differ": "{n} отличается",
+ "{n} empty credential slots have a value in another project": {
+  "few": "{n} пустых слота ключей заполнены в другом проекте",
+  "many": "{n} пустых слотов ключей заполнены в другом проекте",
+  "one": "{n} пустой слот ключа заполнен в другом проекте",
+  "other": "{n} пустых слота ключей заполнены в другом проекте"
+ },
  "{n} entries": {
   "few": "{n} записи",
   "many": "{n} записей",
   "one": "{n} запись",
   "other": "{n} записи"
+ },
+ "{n} env files are untracked but not ignored": {
+  "few": "{n} env-файла не отслеживаются, но и не игнорируются",
+  "many": "{n} env-файлов не отслеживаются, но и не игнорируются",
+  "one": "{n} env-файл не отслеживается, но и не игнорируется",
+  "other": "{n} env-файла не отслеживаются, но и не игнорируются"
+ },
+ "{n} env files holding credentials are readable beyond their owner": {
+  "few": "{n} env-файла с ключами доступны не только владельцу",
+  "many": "{n} env-файлов с ключами доступны не только владельцу",
+  "one": "{n} env-файл с ключами доступен не только владельцу",
+  "other": "{n} env-файла с ключами доступны не только владельцу"
+ },
+ "{n} findings could not be delivered to the notification centre": {
+  "few": "{n} находки не удалось доставить в центр уведомлений",
+  "many": "{n} находок не удалось доставить в центр уведомлений",
+  "one": "{n} находку не удалось доставить в центр уведомлений",
+  "other": "{n} находки не удалось доставить в центр уведомлений"
  },
  "{n} folders": {
   "few": "{n} папки",
@@ -1057,15 +1357,57 @@
   "one": "{n} папка",
   "other": "{n} папки"
  },
+ "{n} folders agents worked in over {days} days are not in the registry": {
+  "few": "{n} папки, где агенты работали за {days} дн., не внесены в реестр",
+  "many": "{n} папок, где агенты работали за {days} дн., не внесены в реестр",
+  "one": "{n} папка, где агенты работали за {days} дн., не внесена в реестр",
+  "other": "{n} папки, где агенты работали за {days} дн., не внесены в реестр"
+ },
+ "{n} frozen weeks carry no session figure and never can": {
+  "few": "{n} замороженные недели без данных о сессиях — и их уже не будет",
+  "many": "{n} замороженных недель без данных о сессиях — и их уже не будет",
+  "one": "{n} замороженная неделя без данных о сессиях — и их уже не будет",
+  "other": "{n} замороженные недели без данных о сессиях — и их уже не будет"
+ },
  "{n} go before {date}": "{n} уйдёт до {date}",
  "{n} h": "{n} ч",
+ "{n} hosts could not be probed, so their liveness is unknown": {
+  "few": "{n} хоста не удалось проверить — их доступность неизвестна",
+  "many": "{n} хостов не удалось проверить — их доступность неизвестна",
+  "one": "{n} хост не удалось проверить — его доступность неизвестна",
+  "other": "{n} хоста не удалось проверить — их доступность неизвестна"
+ },
  "{n} identical conclusions; the newest is shown": {
   "few": "{n} одинаковых вывода; показан новейший",
   "many": "{n} одинаковых выводов; показан новейший",
   "one": "{n} одинаковый вывод; показан новейший",
   "other": "{n} одинакового вывода; показан новейший"
  },
+ "{n} idle branches hold the only copy of their commits": {
+  "few": "{n} простаивающие ветки хранят единственную копию своих коммитов",
+  "many": "{n} простаивающих веток хранят единственную копию своих коммитов",
+  "one": "{n} простаивающая ветка хранит единственную копию своих коммитов",
+  "other": "{n} простаивающие ветки хранят единственную копию своих коммитов"
+ },
+ "{n} idle worktrees hold uncommitted work": {
+  "few": "{n} простаивающих worktree с незакоммиченной работой",
+  "many": "{n} простаивающих worktree с незакоммиченной работой",
+  "one": "{n} простаивающий worktree с незакоммиченной работой",
+  "other": "{n} простаивающих worktree с незакоммиченной работой"
+ },
  "{n} in one agent only": "только в одном агенте: {n}",
+ "{n} key movements at Heroku that no agent recorded": {
+  "few": "{n} перемещения ключей в Heroku не записаны ни одним агентом",
+  "many": "{n} перемещений ключей в Heroku не записаны ни одним агентом",
+  "one": "{n} перемещение ключа в Heroku не записано ни одним агентом",
+  "other": "{n} перемещения ключей в Heroku не записаны ни одним агентом"
+ },
+ "{n} ledger records await review": {
+  "few": "{n} записи леджера ждут проверки",
+  "many": "{n} записей леджера ждут проверки",
+  "one": "{n} запись леджера ждёт проверки",
+  "other": "{n} записи леджера ждут проверки"
+ },
  "{n} linked": {
   "few": "{n} привязано",
   "many": "{n} привязано",
@@ -1093,12 +1435,48 @@
   "one": "{n} имя",
   "other": "{n} имени"
  },
+ "{n} new properties in legacy account {account}": {
+  "few": "{n} новых ресурса в старом аккаунте {account}",
+  "many": "{n} новых ресурсов в старом аккаунте {account}",
+  "one": "{n} новый ресурс в старом аккаунте {account}",
+  "other": "{n} новых ресурса в старом аккаунте {account}"
+ },
  "{n} not rotated — vault.py leaks": "не ротировано: {n} — vault.py leaks",
  "{n} notes": {
   "few": "{n} заметки",
   "many": "{n} заметок",
   "one": "{n} заметка",
   "other": "{n} заметки"
+ },
+ "{n} of this estate's checkouts are behind their remotes": {
+  "few": "{n} собственных клона отстают от remote",
+  "many": "{n} собственных клонов отстают от remote",
+  "one": "{n} собственный клон отстаёт от remote",
+  "other": "{n} собственных клона отстают от remote"
+ },
+ "{n} of {total} Heroku applications have no checkout here": {
+  "few": "приложения Heroku без клона на этой машине: {n} из {total}",
+  "many": "приложения Heroku без клона на этой машине: {n} из {total}",
+  "one": "приложения Heroku без клона на этой машине: {n} из {total}",
+  "other": "приложения Heroku без клона на этой машине: {n} из {total}"
+ },
+ "{n} of {total} skip sites are judged gaps: the property is assertable and nothing asserts it yet": {
+  "few": "мест пропуска с признанным пробелом: {n} из {total} — свойство проверяемо, но его пока ничто не проверяет",
+  "many": "мест пропуска с признанным пробелом: {n} из {total} — свойство проверяемо, но его пока ничто не проверяет",
+  "one": "мест пропуска с признанным пробелом: {n} из {total} — свойство проверяемо, но его пока ничто не проверяет",
+  "other": "мест пропуска с признанным пробелом: {n} из {total} — свойство проверяемо, но его пока ничто не проверяет"
+ },
+ "{n} of {total} skip sites do not say which suite carries the property they skip": {
+  "few": "мест пропуска без указания набора, который проверяет пропущенное свойство: {n} из {total}",
+  "many": "мест пропуска без указания набора, который проверяет пропущенное свойство: {n} из {total}",
+  "one": "мест пропуска без указания набора, который проверяет пропущенное свойство: {n} из {total}",
+  "other": "мест пропуска без указания набора, который проверяет пропущенное свойство: {n} из {total}"
+ },
+ "{n} of {total} skip sites do not say which suite carries the property they skip; judged gaps awaiting a fixture: {gaps}": {
+  "few": "мест пропуска без указания набора, который проверяет пропущенное свойство: {n} из {total}; признанные пробелы, ждущие фикстуры: {gaps}",
+  "many": "мест пропуска без указания набора, который проверяет пропущенное свойство: {n} из {total}; признанные пробелы, ждущие фикстуры: {gaps}",
+  "one": "мест пропуска без указания набора, который проверяет пропущенное свойство: {n} из {total}; признанные пробелы, ждущие фикстуры: {gaps}",
+  "other": "мест пропуска без указания набора, который проверяет пропущенное свойство: {n} из {total}; признанные пробелы, ждущие фикстуры: {gaps}"
  },
  "{n} only here": "{n} только тут",
  "{n} open": {
@@ -1119,11 +1497,65 @@
   "many": "{n} источников",
   "other": "{n} источника"
  },
+ "{n} production secrets cannot be compared with this machine's": {
+  "few": "{n} секрета продакшена нельзя сравнить с локальными",
+  "many": "{n} секретов продакшена нельзя сравнить с локальными",
+  "one": "{n} секрет продакшена нельзя сравнить с локальными",
+  "other": "{n} секрета продакшена нельзя сравнить с локальными"
+ },
+ "{n} production secrets exist only at the provider (applications: {apps})": {
+  "few": "{n} секрета продакшена есть только у провайдера (приложений: {apps})",
+  "many": "{n} секретов продакшена есть только у провайдера (приложений: {apps})",
+  "one": "{n} секрет продакшена есть только у провайдера (приложений: {apps})",
+  "other": "{n} секрета продакшена есть только у провайдера (приложений: {apps})"
+ },
+ "{n} production secrets hold the same value as a `.env` on this machine": {
+  "few": "{n} секрета продакшена совпадают со значениями из `.env` на этой машине",
+  "many": "{n} секретов продакшена совпадают со значениями из `.env` на этой машине",
+  "one": "{n} секрет продакшена совпадает со значением из `.env` на этой машине",
+  "other": "{n} секрета продакшена совпадают со значениями из `.env` на этой машине"
+ },
+ "{n} project ids in the ledger are not in the registry": {
+  "few": "{n} id проектов из леджера отсутствуют в реестре",
+  "many": "{n} id проектов из леджера отсутствуют в реестре",
+  "one": "{n} id проекта из леджера отсутствует в реестре",
+  "other": "{n} id проектов из леджера отсутствуют в реестре"
+ },
+ "{n} project ids in the ledger belong to a project that has since been published": {
+  "few": "{n} id проектов в леджере относятся к проекту, который с тех пор опубликован",
+  "many": "{n} id проектов в леджере относятся к проекту, который с тех пор опубликован",
+  "one": "{n} id проекта в леджере относится к проекту, который с тех пор опубликован",
+  "other": "{n} id проектов в леджере относятся к проекту, который с тех пор опубликован"
+ },
  "{n} projects": {
   "few": "{n} проекта",
   "many": "{n} проектов",
   "one": "{n} проект",
   "other": "{n} проекта"
+ },
+ "{n} projects declare they are active and have not moved": {
+  "few": "{n} проекта объявлены активными, но не двигаются",
+  "many": "{n} проектов объявлены активными, но не двигаются",
+  "one": "{n} проект объявлен активным, но не двигается",
+  "other": "{n} проекта объявлены активными, но не двигаются"
+ },
+ "{n} projects have a code graph older than their code": {
+  "few": "у {n} проектов граф кода старше самого кода",
+  "many": "у {n} проектов граф кода старше самого кода",
+  "one": "у {n} проекта граф кода старше самого кода",
+  "other": "у {n} проектов граф кода старше самого кода"
+ },
+ "{n} projects have released nothing and stopped": {
+  "few": "{n} проекта ничего не выпустили и остановились",
+  "many": "{n} проектов ничего не выпустили и остановились",
+  "one": "{n} проект ничего не выпустил и остановился",
+  "other": "{n} проекта ничего не выпустили и остановились"
+ },
+ "{n} projects have wiki notes older than their last commit": {
+  "few": "у {n} проектов заметки в вики старше последнего коммита",
+  "many": "у {n} проектов заметки в вики старше последнего коммита",
+  "one": "у {n} проекта заметки в вики старше последнего коммита",
+  "other": "у {n} проектов заметки в вики старше последнего коммита"
  },
  "{n} read as a secret": "читаются как секрет: {n}",
  "{n} repos": {
@@ -1139,6 +1571,48 @@
   "other": "{n} репозитория требуют внимания"
  },
  "{n} retired": "{n} отставных",
+ "{n} retired secret values are over a month old and presumably never revoked": {
+  "few": "{n} выведенных значения секретов старше месяца и, вероятно, не отозваны",
+  "many": "{n} выведенных значений секретов старше месяца и, вероятно, не отозваны",
+  "one": "{n} выведенное значение секрета старше месяца и, вероятно, не отозвано",
+  "other": "{n} выведенных значения секретов старше месяца и, вероятно, не отозваны"
+ },
+ "{n} reveals in {hours} hours came from a caller that did not name itself": {
+  "few": "{n} раскрытия за {hours} ч сделаны безымянными вызовами",
+  "many": "{n} раскрытий за {hours} ч сделаны безымянными вызовами",
+  "one": "{n} раскрытие за {hours} ч сделано безымянным вызовом",
+  "other": "{n} раскрытия за {hours} ч сделаны безымянными вызовами"
+ },
+ "{n} rows from {plugin} were refused": {
+  "few": "{n} строки от {plugin} отклонены",
+  "many": "{n} строк от {plugin} отклонены",
+  "one": "{n} строка от {plugin} отклонена",
+  "other": "{n} строки от {plugin} отклонены"
+ },
+ "{n} running applications belong to no project here": {
+  "few": "{n} работающих приложения не относятся ни к одному проекту",
+  "many": "{n} работающих приложений не относятся ни к одному проекту",
+  "one": "{n} работающее приложение не относится ни к одному проекту",
+  "other": "{n} работающих приложения не относятся ни к одному проекту"
+ },
+ "{n} secret files beside the code are neither tracked nor ignored": {
+  "few": "{n} файла секретов рядом с кодом не отслеживаются и не игнорируются",
+  "many": "{n} файлов секретов рядом с кодом не отслеживаются и не игнорируются",
+  "one": "{n} файл секретов рядом с кодом не отслеживается и не игнорируется",
+  "other": "{n} файла секретов рядом с кодом не отслеживаются и не игнорируются"
+ },
+ "{n} secret files beside the code are readable by more than their owner": {
+  "few": "{n} файла секретов рядом с кодом доступны не только владельцу",
+  "many": "{n} файлов секретов рядом с кодом доступны не только владельцу",
+  "one": "{n} файл секретов рядом с кодом доступен не только владельцу",
+  "other": "{n} файла секретов рядом с кодом доступны не только владельцу"
+ },
+ "{n} secret files beside the code are tracked by git": {
+  "few": "{n} файла секретов рядом с кодом лежат в git",
+  "many": "{n} файлов секретов рядом с кодом лежат в git",
+  "one": "{n} файл секретов рядом с кодом лежит в git",
+  "other": "{n} файла секретов рядом с кодом лежат в git"
+ },
  "{n} secrets": {
   "few": "{n} секрета",
   "many": "{n} секретов",
@@ -1163,6 +1637,30 @@
   "one": "{n} сессия",
   "other": "{n} сессии"
  },
+ "{n} sessions of work on {name}, which this registry does not list": {
+  "few": "{n} сессии работы над {name}, которого нет в реестре",
+  "many": "{n} сессий работы над {name}, которого нет в реестре",
+  "one": "{n} сессия работы над {name}, которого нет в реестре",
+  "other": "{n} сессии работы над {name}, которого нет в реестре"
+ },
+ "{n} sessions of work on {name}, whose folder {where} is gone": {
+  "few": "{n} сессии работы над {name}, чья папка {where} исчезла",
+  "many": "{n} сессий работы над {name}, чья папка {where} исчезла",
+  "one": "{n} сессия работы над {name}, чья папка {where} исчезла",
+  "other": "{n} сессии работы над {name}, чья папка {where} исчезла"
+ },
+ "{n} sessions with ambiguous project attribution for {name}": {
+  "few": "{n} сессии с неоднозначной привязкой к проекту {name}",
+  "many": "{n} сессий с неоднозначной привязкой к проекту {name}",
+  "one": "{n} сессия с неоднозначной привязкой к проекту {name}",
+  "other": "{n} сессии с неоднозначной привязкой к проекту {name}"
+ },
+ "{n} sightings suppressed by a recorded decision": {
+  "few": "{n} обнаружения подавлены записанным решением",
+  "many": "{n} обнаружений подавлены записанным решением",
+  "one": "{n} обнаружение подавлено записанным решением",
+  "other": "{n} обнаружения подавлены записанным решением"
+ },
  "{n} silenced": "заглушено: {n}",
  "{n} silenced — not on the page or in the counters; here you see who, when and why": "заглушено {n} — на странице и в счётчиках их нет; здесь видно, кто, когда и почему",
  "{n} sites": {
@@ -1170,6 +1668,12 @@
   "many": "{n} сайтов",
   "one": "{n} сайт",
   "other": "{n} сайта"
+ },
+ "{n} suppression rules not applied": {
+  "few": "{n} правила подавления не применены",
+  "many": "{n} правил подавления не применены",
+  "one": "{n} правило подавления не применено",
+  "other": "{n} правила подавления не применены"
  },
  "{n} templates": {
   "few": "{n} шаблона",
@@ -1193,13 +1697,85 @@
   "other": "{n} переменные"
  },
  "{n} waiting:": "{n} ждёт:",
+ "{n} wikilinks in the wiki resolve to nothing": {
+  "few": "{n} вики-ссылки никуда не ведут",
+  "many": "{n} вики-ссылок никуда не ведут",
+  "one": "{n} вики-ссылка никуда не ведёт",
+  "other": "{n} вики-ссылки никуда не ведут"
+ },
  "{n} with the key in the URL": "с ключом в URL: {n}",
  "{n} without a project": "{n} без проекта",
  "{n}, oldest from {date}": "{n}, старейший от {date}",
+ "{org}'s analytics account {account} is not readable": "аккаунт аналитики {org} ({account}) не читается",
+ "{origin} holds {gb} GB in {n} processes": {
+  "few": "{origin} занимает {gb} ГБ в {n} процессах",
+  "many": "{origin} занимает {gb} ГБ в {n} процессах",
+  "one": "{origin} занимает {gb} ГБ в {n} процессе",
+  "other": "{origin} занимает {gb} ГБ в {n} процессах"
+ },
+ "{path} is committed to git": "{path} закоммичен в git",
  "{path} is outside the configured projects folder — the observatory does not scan it; recorded in sessions-seen.jsonl. To observe it, move it into the projects folder or change sources.projects": "{path} вне настроенной папки проектов — обсерватория её не сканирует; записано в sessions-seen.jsonl. Чтобы наблюдать — переместите в папку проектов или измените sources.projects",
  "{percent}% of {total} GB": "{percent}% из {total} GB",
+ "{plugin}'s newest measurement is from {date}": "последнее измерение {plugin} — от {date}",
  "{prior}; the queue could not be read: {error}": "{prior}; очередь не прочиталась: {error}",
+ "{project} has no folder and no repository, so nothing about it can be measured": "{project}: нет ни папки, ни репозитория, поэтому измерить ничего нельзя",
+ "{project} has {n} commits and no remote": {
+  "few": "у {project} {n} коммита и нет remote",
+  "many": "у {project} {n} коммитов и нет remote",
+  "one": "у {project} {n} коммит и нет remote",
+  "other": "у {project} {n} коммита и нет remote"
+ },
+ "{project} publishes {host}, which is dark": "{project} публикует {host}, а он не отвечает",
+ "{property} sits in {account}, not in {org}'s account": "{property} находится в {account}, а не в аккаунте {org}",
+ "{receipt} names {n} sources that do not apply here": {
+  "few": "{receipt}: {n} источника здесь неприменимы",
+  "many": "{receipt}: {n} источников здесь неприменимы",
+  "one": "{receipt}: {n} источник здесь неприменим",
+  "other": "{receipt}: {n} источника здесь неприменимы"
+ },
+ "{receipt} reports {n} sources it could not measure": {
+  "few": "{receipt}: не удалось измерить {n} источника",
+  "many": "{receipt}: не удалось измерить {n} источников",
+  "one": "{receipt}: не удалось измерить {n} источник",
+  "other": "{receipt}: не удалось измерить {n} источника"
+ },
+ "{reclaimable} GiB can be freed by reinstalling, against {free} GiB free on the volume": "переустановкой можно освободить {reclaimable} ГиБ при {free} ГиБ свободных на томе",
+ "{repo} could not be compared with its remote": "{repo} не удалось сравнить с remote",
+ "{repo} has a branch that exists on no remote": "в {repo} есть ветка, которой нет ни на одном remote",
+ "{repo} has a clone whose state could not be determined": "состояние клона {repo} не удалось определить",
+ "{repo} has diverged from its remote": "{repo} разошёлся со своим remote",
+ "{repo} has {n} extra checkouts holding work no remote has": {
+  "few": "у {repo} {n} дополнительных клона с работой, которой нет ни на одном remote",
+  "many": "у {repo} {n} дополнительных клонов с работой, которой нет ни на одном remote",
+  "one": "у {repo} {n} дополнительный клон с работой, которой нет ни на одном remote",
+  "other": "у {repo} {n} дополнительных клона с работой, которой нет ни на одном remote"
+ },
+ "{repo} holds commits that are on no remote": "в {repo} есть коммиты, которых нет ни на одном remote",
+ "{repo} holds unpushed commits while its remote has moved": "в {repo} незапушенные коммиты, а remote ушёл вперёд",
+ "{repo} is behind its remote": "{repo} отстаёт от remote",
+ "{repo} may be behind its remote": "{repo}, возможно, отстаёт от remote",
+ "{repo} reports a clone state this system cannot read": "{repo} сообщает состояние клона, которое эта система не распознаёт",
+ "{secret} was seen leaking and has no recorded settlement": "{secret}: замечена утечка, закрытие не записано",
+ "{secret} was seen leaking and was closed only by a local rotate": "{secret}: замечена утечка, закрыта только локальной ротацией",
+ "{secret} was seen leaking {n} days ago and has no recorded settlement": {
+  "few": "{secret}: утечка замечена {n} дня назад, закрытие не записано",
+  "many": "{secret}: утечка замечена {n} дней назад, закрытие не записано",
+  "one": "{secret}: утечка замечена {n} день назад, закрытие не записано",
+  "other": "{secret}: утечка замечена {n} дня назад, закрытие не записано"
+ },
+ "{secret} was seen leaking {n} days ago and was closed only by a local rotate": {
+  "few": "{secret}: утечка замечена {n} дня назад, закрыта только локальной ротацией",
+  "many": "{secret}: утечка замечена {n} дней назад, закрыта только локальной ротацией",
+  "one": "{secret}: утечка замечена {n} день назад, закрыта только локальной ротацией",
+  "other": "{secret}: утечка замечена {n} дня назад, закрыта только локальной ротацией"
+ },
  "{sessions} sessions, {worked} wk with work": "{sessions} сессий, {worked} нед. с работой",
+ "{subject} was revealed {n} times in {hours} hours": {
+  "few": "{subject}: {n} раскрытия за {hours} ч",
+  "many": "{subject}: {n} раскрытий за {hours} ч",
+  "one": "{subject}: {n} раскрытие за {hours} ч",
+  "other": "{subject}: {n} раскрытия за {hours} ч"
+ },
  "{weeks} wk, {commits} commits": "{weeks} нед., {commits} коммитов",
  "{zones} in {accounts}": "{zones} в {accounts}",
  "“show” and “copy” act: this page is served by {server}, and every reveal is written to {log} before the file is read": "«показать» и «копировать» действуют: страницу отдаёт {server}, и каждое раскрытие пишется в {log} до того, как файл будет прочитан"

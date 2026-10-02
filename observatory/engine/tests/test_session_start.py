@@ -142,12 +142,12 @@ def test_the_sightings_come_back_as_one_board_row_minus_what_a_tick_has_joined()
     out = sf.findings(seen, {"joined-since"}, data, now)
     check("one info row", len(out) == 1 and out[0]["severity"] == "info" and out[0]["type"] == "project.seen_unobserved", str(out))
     check("it counts the two folders still unknown — not the one a tick joined, not the one older than the window",
-          out[0]["title"].startswith("2 folder(s)"), out[0]["title"])
+          out[0]["title"].startswith("2 folders ") and out[0]["title_args"]["n"] == 2, out[0]["title"])
     check("worst-first: the folder two sessions opened comes before the one opened once, with its remote as owner/name",
           out[0]["detail"].index("still-stray (2 sess.)") < out[0]["detail"].index("elsewhere (1 sess., Org/elsewhere)"),
           out[0]["detail"][:200])
     check("no sightings, no row", sf.findings(d / "missing.jsonl", set(), data, now) == [])
-    check("every sighting joined since: no row", sf.findings(seen, {"joined-since", "still-stray"}, data, now)[0]["title"].startswith("1 folder(s)"))
+    check("every sighting joined since: no row", sf.findings(seen, {"joined-since", "still-stray"}, data, now)[0]["title"].startswith("1 folder "))
     src = (ROOT / "tools/build_findings.py").read_text(encoding="utf-8")
     check("the board reads the sightings through session_findings", "import session_findings" in src and "sessions-seen.jsonl" in src)
 
