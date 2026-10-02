@@ -295,9 +295,7 @@ def status() -> dict:
     auto = known.get("autoUpdate", extra.get("autoUpdate", False))
     if have and not auto:
         problems.append("auto-update is off: `project-observatory full agent install` turns it on")
-    for k in ENV_KEYS:
-        if env.get(k) != wanted[k]:
-            problems.append(f"{k} is {env.get(k)!r} in Claude Code settings; hooks need {wanted[k]!r}")
+    problems += hook_env_problems({"env": env})
     return {"plugin": PLUGIN, "installed_version": have, "shipped_version": ship,
             "marketplace_source": source, "auto_update": bool(auto),
             "hook_env": {k: env.get(k) for k in ENV_KEYS}, "ok": not problems, "problems": problems}
@@ -305,7 +303,9 @@ def status() -> dict:
 
 def hook_env_problems(settings: dict) -> list[str]:
     env, wanted = settings.get("env") or {}, workspace_env()
-    return [f"{k} is {env.get(k)!r} in Claude Code settings; hooks need {wanted[k]!r}"
+    # "not set" for an absent variable: `None` is Python's word, not the user's.
+    return [(f"{k} is {env[k]!r}" if env.get(k) is not None else f"{k} is not set")
+            + f" in Claude Code settings; hooks need {wanted[k]!r}"
             for k in ENV_KEYS if env.get(k) != wanted[k]]
 
 

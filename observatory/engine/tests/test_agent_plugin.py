@@ -215,6 +215,9 @@ class AgentPluginTests(unittest.TestCase):
         before = self.run_cli("agent", "status", code=1)
         self.assertNotIn("not installed", " ".join(before["problems"]))
         self.assertTrue(all("in Claude Code settings" in p for p in before["problems"]), before["problems"])
+        # An unset variable reads "not set", not Python's `None`.
+        self.assertTrue(all("not set in Claude Code settings" in p for p in before["problems"]), before["problems"])
+        self.assertFalse(any("None" in p for p in before["problems"]), before["problems"])
         out = self.run_cli("agent", "install")
         self.assertEqual(out["status"], "managed-elsewhere")
         self.assertEqual(out["plugin"], "observatory-log@passioncode")
