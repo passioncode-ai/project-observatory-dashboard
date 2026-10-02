@@ -432,6 +432,13 @@
       "upstream_modified": true
     },
     {
+      "path": "dashboard/finding_types.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "33e1e73a3942ef6a97f6e21941132eb25a9dc6992635fac312d17f09d79c4389",
+      "bytes": 9589
+    },
+    {
       "path": "dashboard/i18n.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -485,6 +492,13 @@
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
       "upstream_modified": true
+    },
+    {
+      "path": "dashboard/subject_links.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "87d39994969f4094ec0b78d6cb7e5f4d432b940ba5cb9f6240fe05daee168190",
+      "bytes": 7228
     },
     {
       "path": "dashboard/workspace.css",
@@ -3749,7 +3763,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 472,
+  "file_count": 474,
   "excluded": [
     "git-history",
     "operator-registries",
