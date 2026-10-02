@@ -51,11 +51,26 @@ Synthetic names only in this public record.
   reopen → 1; dark window chrome; Russian finding titles and dates. Screenshots carry real
   project names and stay in the operator's private repository.
 
+## Release and one machine
+
+- [PR #117](https://github.com/passioncode-ai/project-observatory-dashboard/pull/117) merged by
+  rebase (`c1d697c`) after the three required rows passed on its head; no CLA box — opening the
+  pull request is the agreement.
+- [v0.12.0](https://github.com/passioncode-ai/project-observatory-dashboard/releases/tag/v0.12.0):
+  wheel built from a clean checkout of the tag, `check_package.py` 0 failures (482 runtime files),
+  sha256 `e1f77ca07eb4c049ddac530f0d5b4ea65b4ffff3ad067a56d53bc27ff1f605e4`; the downloaded asset
+  is byte-identical and matches `SHA256SUMS`.
+- One operator machine: `full update --version 0.12.0 --apply` — `rolled_back: false`,
+  `degraded: []`, no service left unrestarted; `--version` 0.12.0, `doctor` without problems, the
+  server answers as 0.12.0 and `assistant dashboard` reports it `verified` for the workspace.
+  `full findings` and `full dashboard` were run once so the titles carry ids before the next
+  scheduled cycle (143 of 143).
+- The app: built from the tag (release, build 138), installed by `install-app.sh --open`, which
+  forgot two stale registrations; one registration remains. It opened in front on the live
+  dashboard, with Russian finding titles after a reload.
+
 ## Open work and the exact next task
 
-1. Required checks → merge → tag `v0.12.0` → GitHub release with wheel and `SHA256SUMS`
-   → `full update` on the machine → `macos/scripts/build-app.sh` from the tag →
-   `macos/scripts/install-app.sh --open` → check the installed app opens on the dashboard.
-2. Carried: finding details and actions are still English (titles are done); the Mac app has
+1. Done (above). Carried: finding details and actions are still English (titles are done); the Mac app has
    no Developer ID signature or notarization (needs the maintainer's credentials); the system
    menus (File, Edit, View) follow the system language, as in every macOS app.
