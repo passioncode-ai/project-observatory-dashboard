@@ -204,4 +204,12 @@ import ObservatoryCore
         XCTAssertTrue(model.message("backend-missing", "/x").contains("Установите"))
         XCTAssertTrue(model.message("unknown-workspace").contains("project-observatory full init"))
     }
+    func testLanguageGivenAsALaunchArgumentIsRead() {
+        // `-russian YES` on the command line arrives in the argument domain as a
+        // string, not a Bool; it still selects the language.
+        let d = defaults(); d.set("YES", forKey: "russian")
+        XCTAssertTrue(Model(defaults: d).russian)
+        d.set(false, forKey: "russian")
+        XCTAssertFalse(Model(defaults: d).russian)
+    }
 }

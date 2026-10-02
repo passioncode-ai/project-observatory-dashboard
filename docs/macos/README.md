@@ -10,7 +10,9 @@ command.
   serve this workspace, not just any server on the port).
 - **Saved pages** when it does not: the built pages in `docs/dashboard/` are
   self-contained, so reading never waits; a banner names their build time and offers
-  **Start server**. An installed always-on server is restarted through its launchd job.
+  **Start server**, which serves the same pages on 127.0.0.1 (an installed always-on
+  server is restarted through its launchd job instead). Key actions on the Keys page are
+  commands to copy in both modes; live key actions are `tools/keyserver.py`'s.
 - **Not built yet**: **Build the dashboard** runs the local `dashboard` step.
 
 - [Specification and boundaries](SPEC.md)
@@ -36,12 +38,26 @@ of those instead — and opens it. The script signs it ad hoc for local QA. It d
 Set `OBSERVATORY_SWIFT_BUILD` to reuse a build directory outside the checkout;
 `OBSERVATORY_SWIFT_CONFIGURATION=debug` selects the debug build.
 
-Open the app, then Settings. Choose the absolute path to `project-observatory` and
-a private initialized workspace outside the source tree. Save and check the
-connection. Settings then show the engine version, the protocol and whether the
-assistant is ready, or the step that is missing. A typed workspace path is resolved
-like a picked one (the engine refuses a path through a symbolic link such as `/tmp`).
-A backend must implement `observatory-assistant/1`; 0.10.x does not.
+On first launch the app looks for the engine at `~/.local/bin/project-observatory`, then
+in the virtual environment [README → Install](../../README.md#install) creates
+(`~/.local/share/project-observatory-venv/bin/project-observatory`), then in
+`/opt/homebrew/bin` and `/usr/local/bin`, and opens the workspace at
+`~/.local/share/project-observatory-full`. With no engine there it says «Observatory is
+not installed yet» and links the installation guide; a folder that is not a workspace
+names `project-observatory full init`; a workspace without pages offers **Build the
+dashboard**. Settings (⌘,) takes the absolute path to `project-observatory` and a
+private initialized workspace outside the source tree; **Save and check connection**
+then shows the engine version, the protocol and whether the assistant is ready, or the
+step that is missing. A typed workspace path is resolved like a picked one (the engine
+refuses a path through a symbolic link such as `/tmp`). The engine must serve
+`observatory-assistant/1` with the dashboard actions: 0.12.0 or newer.
+
+The app is dark in every window and uses the PassionCode colour roles of the dashboard
+itself — gold for the primary action, selection and focus — defined once in
+`macos/Sources/ObservatoryCore/Palette.swift`; `PaletteTests` holds them to the vendored
+token file and to WCAG AA. Nothing in the app reads or writes the macOS Keychain, and the
+dashboard view cancels any password or client-certificate challenge rather than letting
+WebKit consult the login keychain.
 Source QA can use a small executable launcher for `python -m observatory`, with
 its working directory set to this checkout and a **synthetic workspace**. Do not
 replace a production tagged installation with this branch for testing.

@@ -20,11 +20,14 @@ The workspace's dashboard pages in a web view, under the native title bar: the p
 title as the window title, «Live» or «Saved pages · <time>» as the subtitle. Toolbar:
 back, forward, overview, reload, open in browser, assistant. Saved pages carry a banner
 with Start server; an unbuilt workspace shows Build the dashboard; an unreadable engine
-shows the reason with Retry and Settings. The assistant (SCR-01) is its own window.
+shows the reason with Retry and Settings — on a first launch «Observatory is not installed
+yet» with an installation-guide link, or «This folder is not a workspace yet» with the
+`full init` command. The assistant (SCR-01) is its own window.
 
 ## SCR-01 — Assistant window
 
-Left: conversation list and connection/version status. Right: transcript with
+Left: conversation list (the selected one on an accent-soft fill with a gold bar) and
+connection/version status (positive ready, warning setup needed, negative not connected). Right: transcript with
 question, advisory answer, model/cost, suggested steps, missing-source notes and
 expandable evidence. Bottom: project scope, composer, Send/Stop and provider
 sharing disclosure. New conversation, Refresh and Dashboard are explicit actions.
@@ -34,7 +37,7 @@ Text remains selectable. Failed requests preserve the draft or saved question.
 
 ## SCR-02 — Settings
 
-Executable and workspace use native pickers and editable absolute paths. Save and
+Program and workspace use native pickers and editable absolute paths. Save and
 check is the application boundary: editing text alone cannot redirect a running
 request. Language selects English/Russian. Failure explains the next configuration
 action and leaves the input intact. Changing workspace never cancels an old job.
@@ -42,13 +45,13 @@ action and leaves the input intact. Changing workspace never cancels an old job.
 ## Native visual direction
 
 The dashboard window shows the workspace's own pages (decision of 2026-10-02, SPEC);
-the assistant uses native macOS utility conventions: split view, system font, semantic system colors,
-compact toolbar and one reading column. No decorative tiles, custom animation or
-embedded browser chat. `Design` in `macos/Sources/ObservatoryApp/App.swift` owns the
-shared spacing and transcript width. Native controls supply their platform states.
-The first version rejected a web wrapper for the main window; the operator then asked
-for the dashboard to be what opens, so the dashboard window wraps the pages while the
-assistant stays native.
+the assistant and Settings are native SwiftUI in the same PassionCode dark register as
+those pages: the design system's colour roles defined once (`Palette`, read through
+`Theme`), gold for the primary action, selection and focus, semantic colours for state
+only, borders as elevation, compact toolbar and one reading column. No decorative tiles,
+custom animation or embedded browser chat. The first version rejected a web wrapper for
+the main window; the operator then asked for the dashboard to be what opens, so the
+dashboard window wraps the pages while the assistant stays native.
 
 Scenarios govern placement and actions; the draft brand pack governs strings.
 EN/RU errors and the provider disclosure are in `Model.swift` / `App.swift`.

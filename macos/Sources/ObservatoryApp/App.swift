@@ -13,6 +13,9 @@ import AppKit
         // to a child that already exited must fail a write, never end the app.
         signal(SIGPIPE, SIG_IGN)
         NSApp.setActivationPolicy(.regular)
+        // One dark PassionCode product: menus, alerts, sheets and the Settings window
+        // follow the dashboard's dark pages whatever the system appearance is.
+        NSApp.appearance = NSAppearance(named: .darkAqua)
         // A launch from Finder, the Dock or `open` brings the window forward: the
         // macOS 14 cooperative call, which the system honours for a user-started app.
         NSApp.activate()
@@ -43,16 +46,19 @@ import AppKit
         WindowGroup("Project Observatory", id: WindowID.dashboard) {
             // The pages are dark by design (PassionCode tokens, `color-scheme: dark`):
             // the window's chrome matches them instead of framing them in light grey.
-            DashboardView().environmentObject(model).environmentObject(web).preferredColorScheme(.dark)
+            DashboardView().environmentObject(model).environmentObject(web)
         }
         .defaultSize(width: 1320, height: 860)
         .commands { AppCommands(model: model, web: web) }
 
         // The assistant is one window away, never in front of the dashboard.
+        // SwiftUI lists this window in the Window menu itself; the shortcut lives on
+        // the scene, so the menu does not carry a second "Assistant" item.
         Window(model.t("Assistant", "Ассистент"), id: WindowID.assistant) {
             AssistantView().environmentObject(model).frame(minWidth: 900, minHeight: 620)
         }
         .defaultSize(width: 1080, height: 760)
+        .keyboardShortcut("a", modifiers: [.command, .shift])
 
         Settings { SettingsView().environmentObject(model) }
     }
@@ -90,7 +96,6 @@ struct AppCommands: Commands {
         }
         CommandGroup(before: .windowList) {
             Button(model.t("Dashboard", "Дашборд")) { openWindow(id: WindowID.dashboard) }.keyboardShortcut("1")
-            Button(model.t("Assistant", "Ассистент")) { openWindow(id: WindowID.assistant) }.keyboardShortcut("a", modifiers: [.command, .shift])
             Divider()
         }
     }
