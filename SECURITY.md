@@ -73,6 +73,21 @@ without the full keyserver's reveal or provisioning features. Its child-secret
 runner suppresses output rather than using the full engine's streaming filter.
 The two interfaces have distinct state formats and security tests.
 
+## macOS Keychain
+
+Observatory keeps no secret in the macOS Keychain and reads none from it. Vault
+slots, provider key files and the backup passphrase (`secrets/backup-passphrase`)
+are files with private modes. The credential-free remote probe (`git ls-remote`)
+empties git's credential-helper list for its own commands, so `osxkeychain` is never
+asked; a remote that wants a password is reported unreachable. The Mac app's
+dashboard view cancels every password and client-certificate challenge rather than
+let WebKit consult the login keychain. A tracked script that launches a
+Chromium-family browser must pass `--use-mock-keychain` and `--password-store=basic`
+(`tests/test_keychain_and_app_scripts.py`). Opt-in integrations that run a provider's
+own CLI (`gh`, `heroku`, `claude`) go through that CLI's login, wherever the CLI keeps
+it; the Heroku scan takes a session token from `heroku auth:token` for the run and
+stores none of it.
+
 ## Upgrades and backups
 
 Unknown future workspace/config/database formats are refused. Supported database

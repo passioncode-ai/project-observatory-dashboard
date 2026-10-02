@@ -88,9 +88,11 @@ python tools/check_public_release.py --history
 ```sh
 observatory                              # the short name; with no arguments it opens the dashboard
 project-observatory full open            # builds the pages if needed, opens them as local files
-project-observatory full open --serve    # serves them on 127.0.0.1:47311 (needed for the keys page's live actions)
+project-observatory full open --serve    # serves them read-only on 127.0.0.1:47311 (GET only; changes nothing)
 project-observatory full open --stop     # stops that server; it runs detached, so closing the terminal does not
 ```
+
+The Keys and ENV pages' buttons (mint, cap, revoke, mark a leak, reveal one inventoried value) act only when the page is served by the token-guarded credential server, `python "$(project-observatory full-path)/tools/keyserver.py"` (127.0.0.1:7717 by default, `--port N`). Opened any other way, those pages hand over the command instead. Putting or rotating a vault value is never done from a page: it goes through `tools/vault.py` on stdin ([enter credentials locally](docs/ONBOARDING.md#enter-credentials-locally)).
 
 ### Choose the dashboard's language
 
@@ -101,7 +103,7 @@ project-observatory full configure interface locale ru   # or: en
 project-observatory full open --rebuild
 ```
 
-Each reader can also switch with **EN / RU** in the navigation rail; that choice stays in the browser and works for pages opened as local files. Interface strings are translated; the texts the finding rules write stay in English. To add or change a string, see [Contributing](CONTRIBUTING.md#interface-strings).
+Each reader can also switch with **EN / RU** in the navigation rail; that choice stays in the browser and works for pages opened as local files. Interface strings and finding titles are translated; a finding's details and suggested action stay in English. To add or change a string, see [Contributing](CONTRIBUTING.md#interface-strings).
 
 `--no-browser` prints the address instead of opening it; `--rebuild` rebuilds the pages first; `--port` picks another loopback port. The pages live in `$OBSERVATORY_HOME/docs/dashboard/`, and `project-observatory full local` refreshes what they show. The server binds `127.0.0.1` only.
 
@@ -113,7 +115,7 @@ project-observatory full agent status    # installed vs shipped version, auto-up
 project-observatory full agent uninstall # removes the plugin and only the settings install added
 ```
 
-`install` adds the `passioncode-ai/project-observatory-dashboard` marketplace to Claude Code, installs `observatory-log@observatory-log`, turns plugin auto-update on and sets `OBSERVATORY_ROOT`/`OBSERVATORY_HOME` in Claude Code's user settings so the hooks find your workspace. It backs up `~/.claude/settings.json` once and keeps every other setting. Pass `--no-auto-update` to keep updates manual (`claude plugin update observatory-log@observatory-log`). An earlier directory-sourced install is replaced by the GitHub one. When another channel already installs the plugin under its own id (the PassionCode launcher's `observatory-log@passioncode`), `install` writes only the hook environment and never adds a second copy, and `status` names that channel. Without the helper: `/plugin marketplace add passioncode-ai/project-observatory-dashboard`, then `/plugin install observatory-log@observatory-log`. Restart Claude Code sessions after any change; plugins load at session start.
+`install` adds the `passioncode-ai/project-observatory-dashboard` marketplace to Claude Code, installs `observatory-log@observatory-log`, turns plugin auto-update on and sets `OBSERVATORY_ROOT`, `OBSERVATORY_HOME` and `OBSERVATORY_PYTHON` in Claude Code's user settings so the hooks find your engine, workspace and interpreter. It backs up `~/.claude/settings.json` once and keeps every other setting. Pass `--no-auto-update` to keep updates manual (`claude plugin update observatory-log@observatory-log`). An earlier directory-sourced install is replaced by the GitHub one. When another channel already installs the plugin under its own id (the PassionCode launcher's `observatory-log@passioncode`), `install` writes only the hook environment and never adds a second copy, and `status` names that channel. Without the helper: `/plugin marketplace add passioncode-ai/project-observatory-dashboard`, then `/plugin install observatory-log@observatory-log`. Restart Claude Code sessions after any change; plugins load at session start.
 
 ## What the complete engine does
 
@@ -156,9 +158,9 @@ project-observatory full workspace-backup --writers-stopped
 project-observatory full upgrade --apply --writers-stopped
 ```
 
-Read [compatibility and recovery](docs/COMPATIBILITY.md) before upgrading. The original `full backup` retains its database-only meaning. `workspace-backup` covers the managed workspace; externally referenced stores require separate backups. With a passphrase set (`full backup-passphrase set`), every backup is encrypted into one backups root — on macOS `~/Documents/Project Observatory/Backups` by default, so iCloud carries it off the machine; see [encrypted backups](docs/ONBOARDING.md#encrypted-backups-off-this-disk).
+Read [compatibility and recovery](docs/COMPATIBILITY.md) before upgrading. The original `full backup` retains its database-only meaning. `workspace-backup` covers the managed workspace; externally referenced stores require separate backups. With a passphrase set (`full backup-passphrase set`), every backup is encrypted into one backups root — on macOS `~/Documents/Project Observatory/Backups` by default (when `~/Documents` exists; otherwise `<workspace>/backups`), so iCloud can carry it off the machine; see [encrypted backups](docs/ONBOARDING.md#encrypted-backups-off-this-disk).
 
-**Existing 0.1 commands remain available.** `project-observatory init`, `scan`, `serve`, `secret`, `leaks` and the other original commands keep their previous namespace and state format. They are documented in the [0.1 compatibility guide](docs/PORTABLE-0.1.md). The full engine has a separate default home; it never silently reinterprets the portable workspace. [CLI contract](observatory/engine/docs/CLI-COMPATIBILITY.md).
+**Existing 0.1 commands remain available.** `project-observatory init`, `scan`, `serve`, `secret`, `leaks` and the other original commands keep their previous namespace and state format. They are documented in the [0.1 compatibility guide](docs/PORTABLE-0.1.md). The full engine has a separate default home; it never silently reinterprets the portable workspace, and the 0.1 commands refuse a complete-engine workspace (exit 2) rather than write into it — give them their own folder with `--home`. [CLI contract](observatory/engine/docs/CLI-COMPATIBILITY.md).
 
 ## Verify and contribute
 
@@ -186,8 +188,13 @@ Contributions are accepted under the [CLA](CLA.md).
 
 Part of [PassionCode.ai](https://passioncode.ai/) — the design system is [PassionCode 1.0.0](https://passioncode.ai/design-system/). Observatory is also the observation component of the [ssheleg harness](https://skills.sshlg.me/harness/): skills guide the work; Observatory records and checks the state around it.
 
-## Native macOS client candidate
+## Mac app
 
-This branch also contains a separate SwiftUI application and shared CLI/MCP assistant.
-See [build, configuration and release boundaries](docs/macos/README.md). The current
-tagged engine does not yet include this candidate; the chat is outside the dashboard.
+0.12.0 ships a native macOS app (macOS 14+) that opens on this dashboard: live when the workspace's own server answers, otherwise the saved pages with a **Start server** button, and **Build the dashboard** when there are none yet. An advisory assistant is one window away (⇧⌘A). Build and install it from a checkout:
+
+```sh
+macos/scripts/build-app.sh                 # dist/macos/Project Observatory.app, signed ad hoc for local use
+macos/scripts/install-app.sh --open        # into /Applications (or ~/Applications), then opens it
+```
+
+On first launch it looks for the engine at `~/.local/bin/project-observatory`, then in the virtual environment from [Install](#install) (`~/.local/share/project-observatory-venv/bin/project-observatory`), then in `/opt/homebrew/bin` and `/usr/local/bin`, and uses the default workspace; anything else is chosen in **Settings** (the engine's absolute path and an initialized workspace). Details, the assistant's setup and its limits: [docs/macos/README.md](docs/macos/README.md).
