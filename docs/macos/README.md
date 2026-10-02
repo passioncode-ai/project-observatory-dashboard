@@ -113,7 +113,8 @@ original workspace and rejects their late UI callbacks.
 ## Distribution
 
 Release prerequisites: local gates, native scenario walkthrough, required hosted
-checks, normal PR/CLA review, then a tagged compatible engine and app artifact.
+checks, the normal pull request (opening it is the CLA agreement — nothing to tick), then a
+tagged compatible engine and app artifact.
 For Developer ID signing supply `OBSERVATORY_SIGN_IDENTITY` to the build script.
 Notarization is a separate release step using the maintainer's Keychain profile:
 
@@ -126,4 +127,4 @@ spctl --assess --type execute 'dist/macos/Project Observatory.app'
 ```
 
 These are release instructions, not evidence those operations have run. No signing
-credentials, Apple agreements or CLA are supplied or accepted by automation.
+credentials or Apple agreements are supplied or accepted by automation.

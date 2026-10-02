@@ -27,7 +27,8 @@ Synthetic names only in this public record.
 - **The icon is the product mark** (`dashboard/brand/observatory-mark.svg`, pinned in its
   manifest), rasterized on the macOS grid — not a newly generated image, so the Dock, the
   dashboard's rail and its favicon show one glyph.
-- **One release PR** (feature + version), as AGENTS.md allows for the release itself.
+- **One release PR** (feature + version), as AGENTS.md allows for the release itself. Opening it
+  is the CLA agreement; no box to tick (organisation decision of 2026-10-02).
 
 ## Checks actually run
 
@@ -52,10 +53,9 @@ Synthetic names only in this public record.
 
 ## Open work and the exact next task
 
-1. Human step: the contributor ticks the CLA box on the release pull request.
-2. Then: required checks → merge → tag `v0.12.0` → GitHub release with wheel and `SHA256SUMS`
+1. Required checks → merge → tag `v0.12.0` → GitHub release with wheel and `SHA256SUMS`
    → `full update` on the machine → `macos/scripts/build-app.sh` from the tag →
    `macos/scripts/install-app.sh --open` → check the installed app opens on the dashboard.
-3. Carried: finding details and actions are still English (titles are done); the Mac app has
+2. Carried: finding details and actions are still English (titles are done); the Mac app has
    no Developer ID signature or notarization (needs the maintainer's credentials); the system
    menus (File, Edit, View) follow the system language, as in every macOS app.
