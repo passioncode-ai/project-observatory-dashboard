@@ -390,6 +390,21 @@ def fetch_verified(fetcher: Fetcher, release: Release, work: Path) -> tuple[Path
 
 # --- the rollback wheel -------------------------------------------------------
 
+def _snapshot_destination(base: Path) -> str:
+    """Where the pre-update snapshot really goes, as the preview says it: with a
+    backup passphrase, encrypted into the backups root; without one, plaintext
+    inside the workspace's own `backups/`."""
+    try:
+        encrypted = backup_vault.passphrase(base) is not None
+        root = backup_vault.root_info(base)["path"]
+    except (config.ConfigurationError, OSError):
+        encrypted, root = False, None
+    if encrypted and root is not None:
+        return f"snapshot the workspace with the running release, encrypted into {root}"
+    return (f"snapshot the workspace with the running release under {base / 'backups'}, "
+            f"unencrypted (no backup passphrase is set)")
+
+
 def cached_wheel(base: Path, version: str) -> Path | None:
     """A wheel kept by an earlier update, trusted only if its receipt still matches."""
     folder = base / CACHE
@@ -689,7 +704,7 @@ def preview(base: Path, current: str, release: Release, deps: Dependencies, args
     if has_ws:
         would += ["stop this workspace's launchd tick and server if loaded" if not args.writers_stopped
                   else "leave writers alone (--writers-stopped: you stopped them)",
-                  "snapshot the workspace under backups/ with the running release"]
+                  _snapshot_destination(base)]
     would += [f"install the wheel with its [full] extra into {sys.executable}"]
     if has_ws:
         would += ["run the new release's `upgrade --apply --writers-stopped` in a new process"]
