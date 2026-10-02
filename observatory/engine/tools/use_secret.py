@@ -236,7 +236,7 @@ def cmd_names(args) -> int:
         seen.add(key)
         print(f"  {name.ljust(width)}  {cls:11}  {where}")
     print(f"\n{len(seen)} name(s). Values are never printed — to USE one:\n"
-          f"  tools/use_secret.py run {args.project} <NAME> -- <command>")
+          f"  python \"$(project-observatory full-path)/tools/use_secret.py\" run [--env ENV] {args.project} <NAME> -- <command>")
     return 0
 
 
@@ -258,6 +258,12 @@ def cmd_run(args) -> int:
     if not args.command:
         print("nothing to run — put the command after `--`", file=sys.stderr)
         return 2
+    if args.command[0].startswith("-"):
+        # `run P NAME --env local -- cmd`: argparse hands everything after the
+        # names to the command, so `--env` would be RUN as a program.
+        print(f"use_secret: {args.command[0]} came after the names; flags go first: "
+              f"run --env ENV PROJECT NAME -- COMMAND", file=sys.stderr)
+        return 2
     values: dict[str, str] = {}
     wheres: dict[str, str] = {}
     for n in names:
@@ -276,8 +282,17 @@ def cmd_run(args) -> int:
     if args.as_name and len(names) == 1:
         child_env[args.as_name] = values[names[0]]
     longest = max(len(v.encode("utf-8", "surrogateescape")) for v in values.values())
-    proc = subprocess.Popen(args.command, env=child_env,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        proc = subprocess.Popen(args.command, env=child_env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except (FileNotFoundError, PermissionError) as exc:
+        # The row above recorded an intended use; this one says it never ran.
+        audit("use-failed", f"{args.project}:{','.join(names)}",
+              {"command": args.command[0], "reason": type(exc).__name__})
+        print(f"use_secret: command not found: {args.command[0]}"
+              if isinstance(exc, FileNotFoundError) else
+              f"use_secret: command not executable: {args.command[0]}", file=sys.stderr)
+        return 127 if isinstance(exc, FileNotFoundError) else 126
     import threading
     threads = [
         threading.Thread(target=pump, args=(proc.stdout, sys.stdout.buffer, values, longest)),
