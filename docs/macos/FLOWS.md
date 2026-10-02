@@ -27,7 +27,8 @@ yet» with an installation-guide link, or «This folder is not a workspace yet»
 ## SCR-01 — Assistant window
 
 Left: conversation list (the selected one on an accent-soft fill with a gold bar) and
-connection/version status (positive ready, warning setup needed, negative not connected). Right: transcript with
+connection/version status (positive ready, warning setup needed, negative not connected).
+⌥⌘↑ / ⌥⌘↓ (File menu) walk the conversations from the keyboard. Right: transcript with
 question, advisory answer, model/cost, suggested steps, missing-source notes and
 expandable evidence. Bottom: project scope, composer, Send/Stop and provider
 sharing disclosure. New conversation, Refresh and Dashboard are explicit actions.
