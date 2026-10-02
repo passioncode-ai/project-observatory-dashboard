@@ -151,7 +151,7 @@ def open_dashboard(explicit_home: str | None = None) -> int:
     name = program()
     print(f"No Project Observatory workspace at {home}.\n"
           f"  {name} full init        create one, then `{name} full onboard` for the next steps\n"
-          f"  {name} demo             see a synthetic estate first\n"
+          f"  {name} --home \"$HOME/observatory-demo\" demo   see a synthetic estate first, in a folder of its own\n"
           f"  {name} --home PATH ...  or OBSERVATORY_HOME=PATH to use a workspace elsewhere\n"
           f"Once it exists, `{name}` on its own opens the dashboard.")
     return 0

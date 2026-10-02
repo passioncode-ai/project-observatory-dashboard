@@ -100,3 +100,30 @@ class BareCommand(unittest.TestCase):
             self.assertEqual(cli.parser().prog, "observatory")
         with patch("sys.argv", ["/usr/local/bin/project-observatory"]):
             self.assertEqual(cli.parser().prog, "project-observatory")
+
+
+class PortableCommandsLeaveTheFullWorkspaceAlone(unittest.TestCase):
+    """The no-workspace hint offered `demo`; with OBSERVATORY_HOME exported as the
+    README says, `demo` wrote 0.1-format state into the complete engine's workspace."""
+
+    def test_a_portable_command_refuses_a_complete_workspace_without_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve() / "workspace"
+            home.mkdir()
+            (home / "workspace.json").write_text("{}")
+            before = sorted(p.name for p in Path(tmp).resolve().rglob("*"))
+            out = io.StringIO()
+            with patch.dict(os.environ, {"OBSERVATORY_HOME": str(home)}), patch("sys.stdout", out):
+                self.assertEqual(cli.main(["demo"]), 2)
+            self.assertIn("--home", out.getvalue())
+            self.assertIn("full", out.getvalue())
+            self.assertEqual(before, sorted(p.name for p in Path(tmp).resolve().rglob("*")))
+
+    def test_the_hint_points_demo_at_a_home_of_its_own(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = io.StringIO()
+            with patch.dict(os.environ, {"OBSERVATORY_HOME": str(Path(tmp) / "absent")}), \
+                    patch("observatory.full_cli.run"), patch("sys.stdout", out):
+                cli.main([])
+            demo_line = next(line for line in out.getvalue().splitlines() if " demo" in line)
+            self.assertIn("--home", demo_line)
