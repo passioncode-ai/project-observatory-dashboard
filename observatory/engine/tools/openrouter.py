@@ -176,7 +176,7 @@ def stash_value(value: str, label: str, origin: str) -> int:
     except RuntimeError as exc:
         print(f"refused: this key cannot manage keys — {exc}\n  a PROVISIONING "
               f"key is minted at openrouter.ai/settings/provisioning-keys; an "
-              f"inference key belongs in `tools/install_key.py` instead",
+              f"inference key belongs in `python \"$(project-observatory full-path)/tools/install_key.py\"` instead",
               file=sys.stderr)
         return 1
     dest = ADMIN_STORE / label
@@ -507,7 +507,7 @@ def cmd_rotate(name: str | None, leaked: bool) -> int:
             bad += 1
     if leaked and not bad and targets:
         print("the leaked values are dead; settle the register with "
-              "`./tools/vault.py rotate` for each row it names")
+              "`python \"$(project-observatory full-path)/tools/vault.py\" rotate` for each row it names")
     return 1 if bad else 0
 
 

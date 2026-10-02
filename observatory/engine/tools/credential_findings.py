@@ -118,7 +118,7 @@ def untracked(creds: list[dict]) -> list[dict]:
                        + ", and the estate holds no record of the credential itself — "
                          "so after a rotation nothing here can tell whether the value "
                          "in service is the new one."),
-            "action": (f"tools/vault.py put {c.get('vault_project') or '<project>'} "
+            "action": (f"python \"$(project-observatory full-path)/tools/vault.py\" put {c.get('vault_project') or '<project>'} "
                        f"{c.get('env') or '<env>'} {_short(c)} — value on stdin — then "
                        f"rotate it at its issuer"),
         })
@@ -206,7 +206,7 @@ def rotation_due(creds: list[dict], today: str) -> list[dict]:
                        f"its signature — and it is {age - days} day(s) past. "
                        f"{'It was rotated' if c.get('rotated_on') else 'It has never been rotated; the date is when it was created'} "
                        f"on {str(since)[:10]}."),
-            "action": ("rotate it through its door, then `tools/vault.py moved` "
+            "action": ("rotate it through its door, then `python \"$(project-observatory full-path)/tools/vault.py\" moved` "
                        "if the value went anywhere else"),
         })
     return out

@@ -239,7 +239,7 @@ def test_a_secret_that_exists_only_at_the_provider_is_counted_not_copied() -> No
     check("it counts secrets with no copy here — and not config, not twins, not unreadable apps",
           rows[0]["title"].startswith("3 production secrets exist only at the provider (applications: 2)"), rows[0]["title"])
     check("worst application first", rows[0]["detail"].index("a (2)") < rows[0]["detail"].index("b (1)"), rows[0]["detail"][:120])
-    check("the remedy is the vault, by name, on stdin", "vault.py put" in rows[0]["action"] and "config:get" in rows[0]["action"])
+    check("the remedy is the vault, by name, on stdin", 'vault.py" put' in rows[0]["action"] and "config:get" in rows[0]["action"])
     check("no value and no fingerprint in the row", "sk-" not in json.dumps(rows) and "fingerprint" not in rows[0]["title"])
 
 

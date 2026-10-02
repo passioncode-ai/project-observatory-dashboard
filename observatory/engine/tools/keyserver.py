@@ -409,8 +409,8 @@ ACTIONS = {"mint": act_mint, "limit": act_limit, "revoke": act_revoke,
 
 #: Refused on purpose, with the reason the caller needs rather than a 404.
 REFUSED = {
-    "put": "a value travels on stdin and nowhere else — run `tools/vault.py put` yourself",
-    "rotate": "a value travels on stdin and nowhere else — run `tools/vault.py rotate` yourself",
+    "put": "a value travels on stdin and nowhere else — run `python \"$(project-observatory full-path)/tools/vault.py\" put` yourself",
+    "rotate": "a value travels on stdin and nowhere else — run `python \"$(project-observatory full-path)/tools/vault.py\" rotate` yourself",
 }
 
 

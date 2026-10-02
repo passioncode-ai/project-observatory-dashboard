@@ -68,7 +68,7 @@ def sightings(doc: dict | None) -> list[dict]:
                        + ". A session transcript outlives the key it quotes, is "
                          "copied by every backup, and is read back by tools that "
                          "summarise it."),
-            "action": ("confirm each, then `tools/vault.py leak <project> <env> "
+            "action": ("confirm each, then `python \"$(project-observatory full-path)/tools/vault.py\" leak <project> <env> "
                        "<NAME> --where \"<the file>\"` to put it on the register; "
                        "rotating is the decision that clears it"),
         })
