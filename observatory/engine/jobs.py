@@ -207,7 +207,11 @@ def prune(now: datetime | None = None) -> int:
         with _locked(job_id):
             doc = _read(job_id)
             at = _parse((doc or {}).get("updatedAt"))
-            if doc and doc.get("capability") != "agent.ask" and doc.get("status") in TERMINAL and at and now - at > RETENTION:
+            # Assistant jobs too: their conversation already holds the terminal
+            # state and the answer, and each job file carries the question and the
+            # whole answer envelope, so keeping them forever duplicated private
+            # dialogue outside store/assistant/ and slowed every later ask.
+            if doc and doc.get("status") in TERMINAL and at and now - at > RETENTION:
                 path.unlink(missing_ok=True)
                 removed += 1
         if not path.exists():
