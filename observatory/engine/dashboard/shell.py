@@ -129,6 +129,28 @@ def nav_html(page: str, counts: dict[str, int | str], t: Translator | None = Non
             + "</aside>")
 
 
+def domain_totals(domains: list[dict], zones: list[dict]) -> tuple[int, int]:
+    """(rows, rows without a project) of the domains page: every registrar
+    name, plus every Cloudflare zone no registrar lists — the same join
+    `renderDomains` draws, so the overview tile, the badge and the table agree.
+    A registrar name takes its projects from the registry's domain links; a
+    zone-only row from the zone's own project."""
+    names = {d.get("name") for d in domains}
+    zone_only = [z for z in zones if z.get("name") not in names]
+    unowned = (sum(1 for d in domains if not d.get("projects"))
+               + sum(1 for z in zone_only if not z.get("project")))
+    return len(domains) + len(zone_only), unowned
+
+
+def env_default_count(env: dict) -> int:
+    """How many variables the ENV page shows before any chip is pressed:
+    live files only, secrets and anything whose value is set in another
+    project — `envDefault` in the page script, counted the same way."""
+    return sum(1 for f in env.get("files") or [] if f.get("kind") != "template"
+               for v in f.get("variables") or []
+               if v.get("class") == "secret" or v.get("available_in"))
+
+
 def counts_of(payload: dict) -> dict[str, int | str]:
     """The badge beside each page name — computed once, carried by every page,
     so a page that holds no rows of a kind still says how many exist."""
@@ -139,7 +161,9 @@ def counts_of(payload: dict) -> dict[str, int | str]:
     mcp = payload.get("mcp") or {}
     env = payload.get("env") or {}
     creds = payload.get("creds") or {}
-    # Navigation badges count the destination's inventory. Overview and Health
+    # Navigation badges count what the destination shows when it opens — the
+    # number its own "Showing N of …" line starts from — so a badge and the
+    # page it names never count two different units. Overview and Health
     # are summaries, not inventories; severity and review totals belong in
     # their labelled content rather than beside an unrelated route name.
     return {
@@ -147,12 +171,12 @@ def counts_of(payload: dict) -> dict[str, int | str]:
         "health": "",
         "findings": open_findings or "",
         "projects": len(payload.get("rows") or []),
-        "domains": len({d["name"] for d in payload.get("domains") or []}
-                       | {z["name"] for z in payload.get("zones") or []}),
+        "domains": domain_totals(payload.get("domains") or [], payload.get("zones") or [])[0],
         "heroku": len(heroku.get("apps") or []) if heroku else "",
         "creds": len(creds.get("credentials") or []) if creds else "",
-        "env": ((env.get("totals") or {}).get("secrets") if env else "") or "",
-        "mcp": (mcp.get("totals") or {}).get("distinct_servers", "") if mcp else "",
+        "env": (env_default_count(env) if env else "") or "",
+        # Declarations, as the MCP page lists them (one row per agent's entry).
+        "mcp": (len(mcp.get("servers") or []) or (mcp.get("totals") or {}).get("declarations", "")) if mcp else "",
         "traffic": ((payload.get("google") or {}).get("totals") or {}).get("properties", "") or "",
     }
 
@@ -206,8 +230,11 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
                    + t.mark("Cloudflare zones: {n}", n=len(payload.get("zones") or [])),
         "heroku": t.mark("{n} apps", n=counts["heroku"] or 0),
         "creds": t.mark("{n} entries", n=counts["creds"] or 0),
-        "env": t.mark("{n} secret variables", n=counts["env"] or 0),
-        "mcp": t.mark("{n} servers", n=counts["mcp"] or 0),
+        # The badge's number with its unit, then the population it is drawn from.
+        "env": t.mark("{n} variables", n=counts["env"] or 0) + " · "
+               + t.mark("{n} read as a secret", n=((payload.get("env") or {}).get("totals") or {}).get("secrets", 0)),
+        "mcp": t.mark("{n} declarations", n=counts["mcp"] or 0) + " · "
+               + t.mark("{n} servers", n=((payload.get("mcp") or {}).get("totals") or {}).get("distinct_servers", 0)),
         "traffic": _traffic_line(payload, t),
         # TWO NUMBERS, because one of them is the reason to open the page: the
         # observer's state, and how many rows are waiting for a person (S4/F9).

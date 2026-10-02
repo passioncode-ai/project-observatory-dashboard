@@ -185,13 +185,21 @@ def test_a_population_with_no_row_is_counted_where_it_cannot_be_listed() -> None
     s = d["stats"]
     reg = json.loads((paths.REGISTRY / "projects.json").read_text(encoding="utf-8"))
     dom = json.loads((paths.REGISTRY / "domains.json").read_text(encoding="utf-8"))
-    on_rows = {x["host"] for r in d["rows"] for x in (r.get("sites") or [])}
-    expected = len({x["name"] for x in dom["domains"]} - on_rows)
+    zf = paths.REGISTRY / "cloudflare-zones.json"
+    zones = json.loads(zf.read_text(encoding="utf-8"))["zones"] if zf.is_file() else []
+    # THE DOMAINS PAGE'S OWN ROWS: every registrar name, plus every zone no
+    # registrar lists; "no project" is the page's own filter over them. The
+    # tile once counted registrar names against project SITES, and the page
+    # it linked to showed another number (browser audit, 2026-10-02).
+    names = {x["name"] for x in d["domains"]}
+    zone_only = [z for z in zones if z["name"] not in names]
+    expected = (sum(1 for x in d["domains"] if not x.get("projects"))
+                + sum(1 for z in zone_only if not z.get("project")))
     check("the count of domains on no row is exact",
           s.get("domains_no_row") == expected,
-          f"payload says {s.get('domains_no_row')}, the registry and the rows say {expected}")
-    check("and the total it qualifies is the registry's own",
-          s.get("domains") == len(dom["domains"]), str(s.get("domains")))
+          f"payload says {s.get('domains_no_row')}, the domains page's rows say {expected}")
+    check("and the total it qualifies is the domains page's own",
+          s.get("domains") == len(dom["domains"]) + len(zone_only), str(s.get("domains")))
     html = build().read_text(encoding="utf-8")
     check("both hidden populations are RENDERED, not merely carried",
           "domains without a project" in html and "inactive repos" in html,

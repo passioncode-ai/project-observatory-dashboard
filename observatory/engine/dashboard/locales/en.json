@@ -8,7 +8,127 @@
   "one": "{n} project",
   "other": "{n} projects"
  },
+ "of@@{n} apps": {
+  "one": "{n} app",
+  "other": "{n} apps"
+ },
+ "of@@{n} declarations": {
+  "one": "{n} declaration",
+  "other": "{n} declarations"
+ },
+ "of@@{n} entries": {
+  "one": "{n} entry",
+  "other": "{n} entries"
+ },
+ "of@@{n} names": {
+  "one": "{n} name",
+  "other": "{n} names"
+ },
+ "of@@{n} projects": {
+  "one": "{n} project",
+  "other": "{n} projects"
+ },
+ "of@@{n} properties": {
+  "one": "{n} property",
+  "other": "{n} properties"
+ },
+ "of@@{n} variables": {
+  "one": "{n} variable",
+  "other": "{n} variables"
+ },
  "s@@sessions-abbrev": "s",
+ "tile@@{n} Heroku apps": {
+  "one": "{n} Heroku app",
+  "other": "{n} Heroku apps"
+ },
+ "tile@@{n} Heroku apps without a project": {
+  "one": "{n} Heroku app without a project",
+  "other": "{n} Heroku apps without a project"
+ },
+ "tile@@{n} apps down": {
+  "one": "{n} app down",
+  "other": "{n} apps down"
+ },
+ "tile@@{n} archived projects": {
+  "one": "{n} archived project",
+  "other": "{n} archived projects"
+ },
+ "tile@@{n} archived repos": {
+  "one": "{n} archived repo",
+  "other": "{n} archived repos"
+ },
+ "tile@@{n} clones out of sync": {
+  "one": "{n} clone out of sync",
+  "other": "{n} clones out of sync"
+ },
+ "tile@@{n} commits on no remote": {
+  "one": "{n} commit on no remote",
+  "other": "{n} commits on no remote"
+ },
+ "tile@@{n} commits, 28 d": {
+  "one": "{n} commit, 28 d",
+  "other": "{n} commits, 28 d"
+ },
+ "tile@@{n} commits, 7 d": {
+  "one": "{n} commit, 7 d",
+  "other": "{n} commits, 7 d"
+ },
+ "tile@@{n} declared active, measured dormant": {
+  "one": "{n} declared active, measured dormant",
+  "other": "{n} declared active, measured dormant"
+ },
+ "tile@@{n} dirty working copies": {
+  "one": "{n} dirty working copy",
+  "other": "{n} dirty working copies"
+ },
+ "tile@@{n} domains": {
+  "one": "{n} domain",
+  "other": "{n} domains"
+ },
+ "tile@@{n} domains without a project": {
+  "one": "{n} domain without a project",
+  "other": "{n} domains without a project"
+ },
+ "tile@@{n} inactive repos": {
+  "one": "{n} inactive repo",
+  "other": "{n} inactive repos"
+ },
+ "tile@@{n} keys in the registry": {
+  "one": "{n} key in the registry",
+  "other": "{n} keys in the registry"
+ },
+ "tile@@{n} keys leaked": {
+  "one": "{n} key leaked",
+  "other": "{n} keys leaked"
+ },
+ "tile@@{n} keys without a project": {
+  "one": "{n} key without a project",
+  "other": "{n} keys without a project"
+ },
+ "tile@@{n} owners": {
+  "one": "{n} owner",
+  "other": "{n} owners"
+ },
+ "tile@@{n} projects": {
+  "one": "{n} project",
+  "other": "{n} projects"
+ },
+ "tile@@{n} projects in progress, 28 d": {
+  "one": "{n} project in progress, 28 d",
+  "other": "{n} projects in progress, 28 d"
+ },
+ "tile@@{n} projects in progress, 7 d": {
+  "one": "{n} project in progress, 7 d",
+  "other": "{n} projects in progress, 7 d"
+ },
+ "tile@@{n} repositories": {
+  "one": "{n} repository",
+  "other": "{n} repositories"
+ },
+ "tile@@{n} sites do not resolve": {
+  "one": "{n} site does not resolve",
+  "other": "{n} sites do not resolve"
+ },
  "variables@@count": "variables",
  "{n} Cloudflare zones": {
   "one": "{n} Cloudflare zone",
@@ -34,6 +154,10 @@
   "one": "{n} folder",
   "other": "{n} folders"
  },
+ "{n} identical conclusions; the newest is shown": {
+  "one": "{n} identical conclusion; the newest is shown",
+  "other": "{n} identical conclusions; the newest is shown"
+ },
  "{n} linked": {
   "one": "{n} linked",
   "other": "{n} linked"
@@ -41,6 +165,10 @@
  "{n} live files": {
   "one": "{n} live file",
   "other": "{n} live files"
+ },
+ "{n} more are waiting; the page shows the newest. The whole queue:": {
+  "one": "{n} more is waiting; the page shows the newest. The whole queue:",
+  "other": "{n} more are waiting; the page shows the newest. The whole queue:"
  },
  "{n} names": {
   "one": "{n} name",
@@ -66,10 +194,6 @@
   "one": "{n} project",
   "other": "{n} projects"
  },
- "{n} properties": {
-  "one": "{n} property",
-  "other": "{n} properties"
- },
  "{n} repos": {
   "one": "{n} repo",
   "other": "{n} repos"
@@ -77,10 +201,6 @@
  "{n} repos need attention": {
   "one": "{n} repo needs attention",
   "other": "{n} repos need attention"
- },
- "{n} secret variables": {
-  "one": "{n} secret variable",
-  "other": "{n} secret variables"
  },
  "{n} secrets": {
   "one": "{n} secret",
