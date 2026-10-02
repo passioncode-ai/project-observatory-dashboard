@@ -43,6 +43,8 @@ enum DashboardMode: Equatable {
     @Published var ready = false; @Published var busy = false; @Published var job: String?
     @Published var connecting = false; @Published var connected = false
     @Published var agentEnabled = false; @Published var providerConfigured = false
+    /// nil when a model chain and a budget are set; else the engine's `model_status`.
+    @Published var modelState: String?
     /// Bumped whenever the transcript's content changes, so the view can follow it.
     @Published var revision = 0
     @Published var savedAt: Date?
@@ -107,6 +109,8 @@ enum DashboardMode: Equatable {
         if !connected { return t("Not connected to an engine.", "Нет подключения к движку.") }
         if !agentEnabled { return t("The agent is turned off in this workspace.", "В этой папке данных агент выключен.") }
         if !providerConfigured { return t("No model provider is configured.", "Провайдер модели не настроен.") }
+        if modelState == "no-budget" { return t("No spending limit is set.", "Лимит расходов не задан.") }
+        if modelState != nil { return t("No model is chosen.", "Модель не выбрана.") }
         if questionTooLong { return t("The question is longer than \(Self.questionLimit) characters.", "Вопрос длиннее \(Self.questionLimit) символов.") }
         return nil
     }
@@ -142,6 +146,10 @@ enum DashboardMode: Equatable {
             return t("No running dashboard was verified for this workspace. Start its server with `project-observatory full open --serve`, then try again.", "Для этой папки данных не найден подтверждённый дэшборд. Запустите её сервер командой `project-observatory full open --serve` и попробуйте снова.")
         case "agent-disabled": return t("The agent is turned off in this workspace. Turn it on with `project-observatory full configure features agent true`, then Refresh.", "В этой папке данных агент выключен. Включите его командой `project-observatory full configure features agent true` и нажмите «Обновить».")
         case "provider-unconfigured": return t("No model provider is configured. Install a key with `tools/install_key.py --for observatory` (see ONBOARDING), then Refresh.", "Провайдер модели не настроен. Установите ключ через `tools/install_key.py --for observatory` (см. ONBOARDING) и нажмите «Обновить».") + extra
+        case "model-unconfigured": return t("No model is chosen for this workspace. Choose one with `project-observatory full configure model chain MODEL_ID` (an id from your provider's model list), then Refresh.",
+                                            "Для этой папки данных не выбрана модель. Выберите её командой `project-observatory full configure model chain MODEL_ID` (идентификатор из списка моделей провайдера) и нажмите «Обновить».")
+        case "budget-unset": return t("No spending limit is set, so nothing is sent. Set all three with `project-observatory full configure budget daily_ceiling 0.50` (and `monthly_ceiling`, `velocity_ceiling`), then Refresh.",
+                                      "Лимит расходов не задан, поэтому ничего не отправляется. Задайте все три командой `project-observatory full configure budget daily_ceiling 0.50` (а также `monthly_ceiling`, `velocity_ceiling`) и нажмите «Обновить».")
         case "assistant-busy": return t("Another question is running. Open its conversation or wait until it finishes.", "Другой запрос ещё выполняется. Откройте его диалог или дождитесь завершения.")
         case "budget-reached": return t("The configured model budget has been reached.", "Достигнут заданный бюджет модели.")
         case "cancelled": return t("Stopped. Provider usage already incurred may still be charged.", "Остановлено. Уже использованные токены могут быть оплачены.")
@@ -160,6 +168,10 @@ enum DashboardMode: Equatable {
         case "disk-full": return t("The disk is full, so nothing was sent. Free some space and try again.", "Диск заполнен, поэтому ничего не отправлено. Освободите место и попробуйте снова.")
         case "workspace-unwritable", "workspace-write-failed", "OSError": return t("The workspace could not be written. Check its permissions and free space.", "Не удалось записать в папку данных. Проверьте права доступа и свободное место.")
         case "unreadable-history", "linked-history": return t("Stored conversation history could not be read safely; it was left untouched.", "Сохранённую историю не удалось безопасно прочитать; она не изменена.")
+        case "request-id-conflict": return t("That request was already sent with a different question. Send the question again.", "Этот запрос уже был отправлен с другим вопросом. Отправьте вопрос снова.")
+        case "invalid-input", "invalid-conversation-id", "invalid-project-id", "invalid-request-id":
+            return t("The engine refused the app's request (\(code)). The app and the engine may be from different releases: update both, then Refresh.",
+                     "Движок отклонил запрос приложения (\(code)). Возможно, приложение и движок из разных выпусков: обновите оба и нажмите «Обновить».")
         case "completed": return t("The answer was empty.", "Ответ пустой.")
         default: return t("Could not complete the request", "Не удалось выполнить запрос") + " (\(code))." + extra
         }
@@ -174,6 +186,9 @@ enum DashboardMode: Equatable {
         case ("trimmed", "projects"):
             if let shown, let total { return t("\(shown) of \(total) projects were included; choose a project for detail.", "Включено \(shown) из \(total) проектов; выберите проект для подробностей.") }
         case ("freshness-unknown", _): return t("Some snapshots carry no measurement time, so their freshness is unknown.", "У части снимков нет времени измерения, поэтому их свежесть неизвестна.")
+        case ("unavailable", "machine"): return t("The machine snapshot could not be read.", "Не удалось прочитать снимок машины.")
+        case ("unavailable", "projects.json"): return t("The project registry could not be read.", "Не удалось прочитать реестр проектов.")
+        case ("unavailable", "findings.json"): return t("The findings could not be read.", "Не удалось прочитать находки.")
         case ("unavailable", _): return t("\(source) could not be read.", "Не удалось прочитать \(source).")
         case ("relations-unavailable", _): return t("Repository and site links could not be read; only findings naming the project itself are included.", "Связи с репозиториями и сайтами не прочитаны; включены только находки о самом проекте.")
         default: break
@@ -225,9 +240,13 @@ enum DashboardMode: Equatable {
         if !scope.isEmpty && !projects.contains(where: { $0.id == scope }) { scope = "" }
         agentEnabled = doc["agent_enabled"] as? Bool == true
         providerConfigured = doc["provider_configured"] as? Bool == true
-        ready = agentEnabled && providerConfigured
-        failure = ready ? nil : Failure(code: agentEnabled ? "provider-unconfigured" : "agent-disabled",
-                                        detail: agentEnabled && !providerStatus.isEmpty ? providerStatus : nil)
+        // An engine that does not report the model state is judged as before.
+        modelState = doc["model_configured"] as? Bool == false ? (doc["model_status"] as? String ?? "no-model") : nil
+        ready = agentEnabled && providerConfigured && modelState == nil
+        if ready { failure = nil }
+        else if !agentEnabled { failure = Failure(code: "agent-disabled", detail: nil) }
+        else if !providerConfigured { failure = Failure(code: "provider-unconfigured", detail: providerStatus.isEmpty ? nil : providerStatus) }
+        else { failure = Failure(code: modelState == "no-budget" ? "budget-unset" : "model-unconfigured", detail: nil) }
     }
 
     func load(_ id: String) async {

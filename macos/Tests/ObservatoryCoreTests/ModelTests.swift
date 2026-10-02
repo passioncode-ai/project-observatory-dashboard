@@ -212,4 +212,51 @@ import ObservatoryCore
         d.set(false, forKey: "russian")
         XCTAssertFalse(Model(defaults: d).russian)
     }
+    func testANewWorkspaceWithoutAModelOrBudgetIsNotReadyAndSaysWhy() async {
+        // A fresh workspace has no model chain and zero ceilings: "budget reached" was
+        // the answer a newcomer got. The status names the missing step instead.
+        for (state, code, command) in [("no-model", "model-unconfigured", "full configure model chain"),
+                                       ("no-budget", "budget-unset", "full configure budget")] {
+            let model = Model(defaults: defaults()) { _, _ in
+                ["engine_version": "0.12.0", "agent_enabled": true, "provider_configured": true,
+                 "model_configured": false, "model_status": state, "conversations": []]
+            }
+            await model.refresh()
+            XCTAssertFalse(model.ready, state)
+            XCTAssertEqual(model.failure?.code, code)
+            XCTAssertTrue(model.error?.contains(command) == true, model.error ?? "")
+            XCTAssertNotNil(model.sendBlocked)
+        }
+        // An engine that does not report the field is judged as before.
+        let older = Model(defaults: defaults()) { _, _ in
+            ["engine_version": "0.12.0", "agent_enabled": true, "provider_configured": true, "conversations": []]
+        }
+        await older.refresh()
+        XCTAssertTrue(older.ready)
+    }
+    func testEveryErrorTheEngineCanRaiseHasItsOwnWords() throws {
+        // The engine's own `AssistantError('…')` codes are the contract: a code with no
+        // sentence here reaches the person as "Could not complete the request (code)".
+        let src = try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../../observatory/engine/agent/assistant.py").standardizedFileURL, encoding: .utf8)
+        let rx = try NSRegularExpression(pattern: #"AssistantError\('([a-z-]+)'\)"#)
+        let codes = Set(rx.matches(in: src, range: NSRange(src.startIndex..., in: src)).compactMap {
+            Range($0.range(at: 1), in: src).map { String(src[$0]) } })
+        XCTAssertGreaterThan(codes.count, 20, "the engine's codes were not read")
+        let model = Model(defaults: defaults())
+        let generic = String(model.message("something-new").prefix(20))
+        for code in codes.union(["disk-full", "workspace-unwritable", "model-unconfigured", "budget-unset"]) {
+            XCTAssertFalse(model.message(code).hasPrefix(generic), code)
+        }
+    }
+    func testAnUnreadableSourceIsNamedInTheAppsLanguage() {
+        // "Не удалось прочитать machine." mixed the engine's file key into Russian text.
+        let model = Model(defaults: defaults()); model.russian = true
+        for source in ["machine", "projects.json", "findings.json"] {
+            let line = model.limitation(["source": source, "code": "unavailable", "reason": "unavailable"])
+            XCTAssertFalse(line.contains(source), line)
+        }
+        model.russian = false
+        XCTAssertEqual(model.limitation(["source": "machine", "code": "unavailable"]), "The machine snapshot could not be read.")
+    }
 }
