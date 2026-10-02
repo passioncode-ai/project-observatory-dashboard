@@ -488,6 +488,13 @@ def from_store() -> dict:
 #: `project.unobservable`, `work.unwitnessed` and seven more. Dropping more of a
 #: kind the reader can already see is a cap. Dropping the only instance of a
 #: kind is a silence, and it is the one this repository refuses everywhere else.
+def scanned(doc):
+    """A registry document that a scan wrote, or None. `init` writes empty
+    documents with `scanned_on: null` so every reader finds a file; the pages
+    must read those as "not scanned" — never as "measured, and nothing there"."""
+    return doc if isinstance(doc, dict) and doc.get("scanned_on") else None
+
+
 FINDINGS_ON_PAGE = 8                                                                                     
 
 
@@ -582,12 +589,12 @@ def build():
     # not exist; the tab then says the estate was never asked, rather than
     # showing nothing and reading as "you host nothing".
     _hd = paths.REGISTRY / "heroku-apps.json"
-    HEROKU = json.loads(_hd.read_text(encoding="utf-8")) if _hd.is_file() else None
+    HEROKU = scanned(json.loads(_hd.read_text(encoding="utf-8"))) if _hd.is_file() else None
     # NEVER A VALUE, and the document is built so it cannot hold one: a `label`
     # is what the provider calls a key. `tools/check_secrets.py` reads it on
     # every gate run, so the page inherits that guarantee rather than restating it.
     _cd = paths.REGISTRY / "credentials.json"
-    CREDS = json.loads(_cd.read_text(encoding="utf-8")) if _cd.is_file() else None
+    CREDS = scanned(json.loads(_cd.read_text(encoding="utf-8"))) if _cd.is_file() else None
     # WHICH KEYS A PROJECT USES, for its panel. The credential document is
     # heavy and rides only on the keys page; this is the small inverse of its
     # `used_by` edges — a name, its kind, where it sits and the anchor of its
@@ -640,7 +647,7 @@ def build():
     # 156KB of a 1.1MB page and cost a paragraph explaining what had been left
     # out, which is a bad trade for a file opened locally.
     _ed = paths.REGISTRY / "env-inventory.json"
-    ENVD = json.loads(_ed.read_text(encoding="utf-8")) if _ed.is_file() else None
+    ENVD = scanned(json.loads(_ed.read_text(encoding="utf-8"))) if _ed.is_file() else None
     # THE KEYS A PROJECT HOLDS IN ITS OWN `.env` FILES join the panel's key
     # list too. The credential document knows the vault, the machine store and
     # the shared secrets directory — not the variables sitting in a checkout,
@@ -691,7 +698,7 @@ def build():
     # per-project summary rides everywhere, because "how many people came" is a
     # fact about a project and belongs beside the project.
     _gf = paths.REGISTRY / "google-properties.json"
-    GOOGLE = json.loads(_gf.read_text(encoding="utf-8")) if _gf.is_file() else None
+    GOOGLE = scanned(json.loads(_gf.read_text(encoding="utf-8"))) if _gf.is_file() else None
     from collectors.google_registry import normalize_document, project_traffic
     if GOOGLE is not None:
         GOOGLE = normalize_document(GOOGLE)
@@ -723,9 +730,9 @@ def build():
     # a fresh clone without a Cloudflare scan simply has no zones, and the page
     # says so rather than showing an empty table.
     _zf = paths.REGISTRY / "cloudflare-zones.json"
-    ZONES = load("cloudflare-zones.json")["zones"] if _zf.is_file() else None
+    ZONES = (scanned(load("cloudflare-zones.json")) or {}).get("zones") if _zf.is_file() else None
     _mf = paths.REGISTRY / "mcp-servers.json"
-    MCP = load("mcp-servers.json") if _mf.is_file() else None
+    MCP = scanned(load("mcp-servers.json")) if _mf.is_file() else None
     _pf = paths.REGISTRY / "products.json"
     PRODUCTS = load("products.json")["products"] if _pf.is_file() else []
     PRODUCT_OF = {}
@@ -909,7 +916,7 @@ def build():
     # opening one. Deciding still needs the terminal — `tools/review.py` refuses
     # a write without one on purpose — but a queue nobody can look at is a queue
     # nobody works (audit 2026-09-09).
-    PAYLOAD = {"runtime": {"projects": str(paths.DATA), "secrets": str(paths.source_path("secret_store", paths.SECRETS)), "engine": str(paths.ROOT), "home": str(paths.HOME), "python": sys.executable, "scratch": str(paths.SCRATCH)}, "rows": rows, "stats": stats, "owners": owners, "dups": dups,
+    PAYLOAD = {"runtime": {"projects": str(paths.DATA), "secrets": str(paths.source_path("secret_store", paths.SECRETS)), "engine": str(paths.ROOT), "home": str(paths.HOME), "python": sys.executable, "scratch": str(paths.SCRATCH), "user_home": str(Path.home()), "projects_configured": bool((__import__("configuration").load().get("sources") or {}).get("projects"))}, "rows": rows, "stats": stats, "owners": owners, "dups": dups,
                           "queue": store.get("queue") or [],
                           "digest": store.get("digest"),
                           "health": store["health"], "store_degraded": store["degraded"],
@@ -1192,11 +1199,14 @@ button.fold { margin: var(--space-2) 0 0 var(--space-3); }
 .delta { font-family: var(--font-data); }
 .delta.up { color: var(--warn); }
 .delta.down { color: var(--ok); }
+.not-scanned p { margin: 0 0 var(--space-2); }
+.not-scanned .chip-btn { text-transform: none; letter-spacing: 0; white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.empty-estate { flex: 1 1 100%; }
 .spark { display: flex; align-items: center; gap: 4px; color: var(--muted);
          font-size: var(--t-chip); font-family: var(--font-data); }
 .spark svg { display: block; }
-/* The sessions line of a sparkline is drawn fainter than commits. */
-.spark-sess { opacity: 0.6; }
+/* The sessions count beside a sparkline: muted like the rest, never fainter (AA). */
+.spark-sess { white-space: nowrap; }
 .panel { padding: 16px; margin-bottom: 12px; }
 
 /* TABS */
@@ -1496,7 +1506,7 @@ footer ul { margin: 0 0 var(--space-3); padding-left: var(--space-4); }
 __NAV__
 <header>
   __H1__
-  <p class="sub">__SUB__ <span id="upd-label" data-t>Measured</span> <span class="mono" id="upd"></span><span data-t>; registry content last changed</span>
+  <p class="sub">__SUB__ <span id="upd-label" data-t>Measured</span><span class="mono" id="upd"></span><span data-t>; registry content last changed</span>
   <span class="mono" id="content-stamp"></span>.</p>
 <div class="tiles" id="tiles"></div>
   <h3 id="work-h" data-t>Activity</h3>
@@ -1642,6 +1652,16 @@ const engineCommand = (file, args = []) =>
 const toolCommand = (name, args = []) => engineCommand("tools/" + name, args);
 const cliCommand = (...args) => engineCommand("observatory.py", args);
 const privateInput = command => command + " < " + shellArg("/absolute/path/to/private-input");
+// The command a person types, as the docs spell it: `project-observatory full …`,
+// with this workspace named when the page knows it.
+const fullCommand = (...args) =>
+  (RUNTIME.home ? "OBSERVATORY_HOME=" + shellArg(RUNTIME.home) + " " : "") +
+  "project-observatory full " + args.join(" ");
+// "Not scanned" with the commands that scan it, each a copy button: the reader
+// learns what is missing and gets the exact next step, never an empty table.
+const notScanned = (said, commands) => `<div class="empty not-scanned"><p>${said}</p>` +
+  commands.map(c => `<p><button class="chip-btn mono" type="button" data-copy="${E(c)}" title="${T("copy the command")}">${E(c)}</button></p>`).join("") +
+  `</div>`;
 
 // __SHARED_BELOW__ — the split pages keep everything above this line inline
 // Everything below is shared by every page and may move to a separate
@@ -1694,7 +1714,10 @@ function T(id, args) {
 // A finding's title in the reader's language: its message id and arguments
 // (`finding_types.titled` in the rule modules). A findings.json written before
 // titles carried an id has only the English `title`, and shows it.
-const findingTitle = f => f.title_id ? T(f.title_id, f.title_args || {}) : f.title;
+// A title is a sentence. Some rule ids start lowercase; one that starts with a
+// placeholder ({project}) begins with a name, which keeps its own case.
+const sentence = (id, text) => /^[a-z]/.test(id || "") ? text.charAt(0).toLocaleUpperCase(LOCALE) + text.slice(1) : text;
+const findingTitle = f => f.title_id ? sentence(f.title_id, T(f.title_id, f.title_args || {})) : sentence(f.title, String(f.title || ""));
 function localizeStatic(root) {
   root.querySelectorAll("[data-t]").forEach(el => {
     let args;
@@ -1739,7 +1762,8 @@ document.addEventListener("keydown", ev => {
 // the registry's content last changed.
 // Never "Measured not measured": with no scan yet the label itself says so.
 if (D.measured) {
-  document.getElementById("upd").textContent = D.measured.replace("T", " ").replace("Z", " UTC");
+  // The space lives with the value, so "Not measured yet" meets the semicolon directly.
+  document.getElementById("upd").textContent = " " + D.measured.replace("T", " ").replace("Z", " UTC");
 } else {
   document.getElementById("upd-label").textContent = T("Not measured yet");
   document.getElementById("upd").textContent = "";
@@ -1817,9 +1841,12 @@ const tileHTML = ts => ts.map(([k, v]) =>
   // An empty registry says how to fill it, instead of showing a row of zeros
   // that would read as "measured, and nothing there".
 document.getElementById("tiles").innerHTML = !D.rows.length
-  ? `<div class="tile empty-estate"><b>—</b><span>${T("the registry is empty: no project measured yet —")}
-       <button class="chip-btn" type="button" data-copy="${E(cliCommand("local"))}" title="${T("copy the command")}">${E(cliCommand("local"))}</button>
-       ${T("builds it from this machine")}</span></div>`
+  ? `<div class="empty-estate">${notScanned(
+       RUNTIME.projects_configured === false
+         ? T("No project measured yet. Name the folder that holds your project checkouts, then measure it:")
+         : T("No project measured yet. Measure this machine's projects folder:"),
+       (RUNTIME.projects_configured === false ? [fullCommand("configure sources projects", "PATH")] : [])
+         .concat([fullCommand("local")]))}</div>`
   : tileHTML(TILES_PRIMARY) +
   (DRIFT ? `<a class="tile" href="projects.html?f=drift"><b>${DRIFT}</b>` +
            `<span>${pluralCaption("tile@@{n} declared active, measured dormant", DRIFT)}</span></a>` : "") +
@@ -1858,7 +1885,7 @@ if (H.server_age_s != null) {
   else if (H.server_age_s < 90) {
     const up = H.server_uptime_s >= 3600
       ? T("{n} h", {n: Math.floor(H.server_uptime_s / 3600)}) : T("{n} min", {n: Math.floor(H.server_uptime_s / 60)});
-    hb.push([T("local server"), T("answered when measured · port {port} · uptime {up}", {port: H.server_port, up})]);
+    hb.push([T("local server"), T("answered when measured · port {port} · uptime {up}", {port: String(H.server_port), up})]);
     if (H.server_at_risk != null)
       hb.push([T("remote at risk"), T("{n} checkouts with work only on this disk", {n: H.server_at_risk})]);
   } else hb.push([T("local server"), T("SILENT for {n} min — store/logs/serverd.err", {n: Math.floor(H.server_age_s / 60)})]);
@@ -2190,7 +2217,7 @@ function spark(weeks) {
     (stotal ? `<polyline points="${line(sess)}" fill="none" stroke="currentColor"` +
               ` stroke-width="1" stroke-dasharray="2 2" opacity="0.55"/>` : "") +
     `</svg><span>${total}</span>` +
-    (stotal ? `<span class="spark-sess" title="${T("sessions")}">+${stotal}${T("s@@sessions-abbrev")}</span>` : "") +
+    (stotal ? `<span class="spark-sess">· ${T("{n} sessions", {n: stotal})}</span>` : "") +
     `</div>`;
 }
 
@@ -2908,8 +2935,8 @@ function keepCred(c, q, section) {
 function renderCreds() {
   const out = document.getElementById("out");
   if (!D.creds) {
-    out.innerHTML = `<p class="empty">${T("Credentials were not scanned")} — ` +
-      `<span class="mono">${E(cliCommand("openrouter"))}</span></p>`;
+    out.innerHTML = notScanned(T("Credentials were not scanned. Add a key to this workspace's vault (the value on stdin), then rebuild:"),
+      [privateInput(toolCommand("vault.py", ["put", "PROJECT", "local", "NAME"])), fullCommand("local")]);
     return;
   }
   const q = document.getElementById("q").value.trim().toLowerCase();
@@ -3161,8 +3188,8 @@ document.addEventListener("click", ev => {
 function renderEnv() {
   const out = document.getElementById("out");
   if (!D.env) {
-    out.innerHTML = '<p class="empty">' + T("Environment files were not scanned") + ' — ' +
-      '<span class="mono">' + E(cliCommand('env')) + '</span></p>';
+    out.innerHTML = notScanned(T("Environment files were not scanned. Scan the projects folder, then rebuild:"),
+      [fullCommand("env"), fullCommand("local")]);
     return;
   }
   const q = document.getElementById("q").value.trim().toLowerCase();
@@ -3297,7 +3324,9 @@ function keepDom(d, q, registrar) {
 function renderMcp() {
   const out = document.getElementById("out");
   if (!D.mcp) {
-    out.innerHTML = `<p class="empty">${T("MCP was not scanned")} — <span class="mono">${E(cliCommand("scan-mcp"))}</span></p>`;
+    out.innerHTML = notScanned(T("MCP was not scanned. Point it at your home, switch it on and scan:"),
+      [fullCommand("configure sources mcp_config_root", shellArg(RUNTIME.user_home || "$HOME")),
+       fullCommand("configure integrations mcp true"), fullCommand("scan-mcp")]);
     return;
   }
   const q = document.getElementById("q").value.trim().toLowerCase();
@@ -3350,8 +3379,8 @@ const RULE_LABEL = { declared: T("declared by the operator"), "declared-host": T
 function renderTraffic() {
   const out = document.getElementById("out");
   if (!D.google) {
-    out.innerHTML = `<p class="empty">${T("Analytics was not scanned")} — ` +
-      `<span class="mono">${E(cliCommand("google"))}</span></p>`;
+    out.innerHTML = notScanned(T("Analytics was not scanned. It needs a Google service account in the secret store; then switch it on and scan:"),
+      [fullCommand("configure integrations google true"), fullCommand("google")]);
     return;
   }
   const ALL = D.google.properties || [];
@@ -3530,8 +3559,8 @@ function renderHeroku() {
   const out = document.getElementById("out");
   if (!D.heroku) {
     // Never scanned is said as such, with the command that scans.
-    out.innerHTML = `<p class="empty">${T("Heroku was not scanned")} — ` +
-      `<span class="mono">${E(cliCommand("heroku"))}</span></p>`;
+    out.innerHTML = notScanned(T("Heroku was not scanned. Log in with the Heroku CLI, then switch it on and scan:"),
+      [fullCommand("configure integrations heroku true"), fullCommand("heroku")]);
     return;
   }
   const q = document.getElementById("q").value.trim().toLowerCase();

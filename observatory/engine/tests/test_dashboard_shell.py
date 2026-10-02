@@ -287,6 +287,33 @@ class AuditFixes(unittest.TestCase):
         page = machine_page.machine_html({"machine": {"measuredAt": "2026-01-02T03:04:05Z"}})
         self.assertIn("Machine surveyed 2026-01-02 03:04:05 UTC", text(page))
 
+    def test_overview_cards_say_not_scanned_and_the_machine_card_is_never_blank(self):
+        # UX-7/UX-11: an unscanned page read "0 apps" on its card, and the
+        # Machine card had no line at all.
+        counts = shell.counts_of({})
+        cards = text(shell.cards_html({}, counts))
+        for page in ("heroku", "creds", "env", "mcp"):
+            self.assertNotIn("0 apps", cards)
+        self.assertGreaterEqual(cards.count("not scanned"), 4, cards)
+        self.assertIn("not surveyed", cards)
+        surveyed = {"machine": {"measuredAt": "2026-01-02T03:04:05Z", "processes": {"count": 3},
+                                "disk": {"volume": {"free_gb": 120}}}}
+        self.assertIn("120 GB free on disk · 3 processes", text(shell.cards_html(surveyed, counts)))
+        self.assertIn("свободно на диске: 120 ГБ · 3 процесса", text(shell.cards_html(surveyed, counts, RU)))
+
+    def test_page_script_fixes_from_the_dashboard_walk(self):
+        src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
+        # UX-12: no space between the label and an empty value ("yet ;").
+        self.assertIn('<span id="upd-label" data-t>Measured</span><span class="mono" id="upd"></span>', src)
+        self.assertIn('textContent = " " + D.measured', src)
+        # UX-8: a port is an identifier, not a number to group ("47,391").
+        self.assertIn("{port: String(H.server_port)", src)
+        # UX-9: a lowercase title id reads as a sentence; a {name} first keeps its case.
+        self.assertIn("const sentence = (id, text) => /^[a-z]/.test", src)
+        # UX-10: the session count is not drawn below AA, and says "sessions".
+        self.assertNotIn(".spark-sess { opacity", src)
+        self.assertIn('T("{n} sessions", {n: stotal})', src)
+
 
 if __name__ == "__main__":
     unittest.main()
