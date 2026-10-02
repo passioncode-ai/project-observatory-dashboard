@@ -437,7 +437,15 @@ EXCLUDED_NAMES={x["name"] for x in _EXCL["names"]}
 for folder,l in local.items():
     if folder.startswith(EXCLUDED_PREFIXES) or folder in EXCLUDED_NAMES: continue
     if l["is_git"] and nwo(l.get("remote")): continue                                
-    rule = (f"{folder}: git repository with no remote, local only"
+    # A remote this merge cannot key (a host other than GitHub or Bitbucket) is
+    # still a remote: the history is published somewhere. Only a checkout with
+    # NO remote is "unpublished"; the other is named by its host alone — a URL
+    # can carry a user or a token, so the whole address never reaches a rule.
+    _remote = (l.get("remote") or "").strip() if l["is_git"] else ""
+    _host = re.sub(r"^[a-z+]+://", "", _remote).split("@")[-1].split("/")[0].split(":")[0] if _remote else ""
+    rule = (f"{folder}: git repository whose remote is on {_host or 'a host'}, which is not inventoried here"
+            if _remote else
+            f"{folder}: git repository with no remote, local only"
             if l["is_git"] else f"{folder}: local folder, not a git repository")
     projects["local:"+folder]={"key":identity.local_key(folder),"name":folder,"anchor":"local-folder",
         "vault":None,"repos":[],"rules":[rule],"sites":[],
@@ -446,7 +454,7 @@ for folder,l in local.items():
         # to today would come out `activity_tier: "unknown"` with an empty
         # `last_activity_on`, in a system whose central question is where work
         # happened. `last_commit` is read by the scan and must not be dropped.
-        "local_only":{"folder":folder,"path":l["path"],"kinds":l["kinds"],"unpublished":l["is_git"],
+        "local_only":{"folder":folder,"path":l["path"],"kinds":l["kinds"],"unpublished":bool(l["is_git"] and not _remote),
                       "commits":int(l.get("commits") or 0),"branch":l.get("branch","") or "",
                       "last_commit":l.get("last_commit","") or "","dirty":int(l.get("dirty") or 0),
                       "readme":l["readme"],"files":l.get("file_count",0),"mtime":l.get("mtime","")}}

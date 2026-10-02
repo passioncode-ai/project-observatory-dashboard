@@ -71,6 +71,13 @@ def test_t31_a_folder_on_disk_is_never_silently_absent() -> None:
     projects = base / "projects"
     projects.mkdir()
     _git_checkout_without_remote(projects / "fixture-local", env)
+    # A remote on a host this engine does not inventory (not GitHub, not
+    # Bitbucket): published, just not listed here. It used to read "no remote at
+    # all" and raise repo.no_remote.
+    _git_checkout_without_remote(projects / "fixture-elsewhere", env)
+    subprocess.run(["git", "-C", str(projects / "fixture-elsewhere"), "remote", "add", "origin",
+                    "https://git.example.invalid/team/fixture-elsewhere.git"], env=env,
+                   check=True, capture_output=True)
     (projects / "fixture-plain").mkdir()
     (projects / "fixture-plain" / "README.md").write_text("Synthetic plain folder\n")
     (projects / "fixture-excluded").mkdir()
@@ -108,6 +115,15 @@ def test_t31_a_folder_on_disk_is_never_silently_absent() -> None:
           unpublished.get("local_only", {}).get("unpublished") is True
           and any("no remote" in rule for rule in unpublished.get("membership_rules", [])),
           str(unpublished.get("membership_rules")))
+    elsewhere = local.get("fixture-elsewhere", {})
+    check("a remote on another host is not 'no remote at all'",
+          elsewhere.get("local_only", {}).get("unpublished") is False
+          and not any("no remote" in rule for rule in elsewhere.get("membership_rules", [])),
+          str(elsewhere.get("local_only")) + str(elsewhere.get("membership_rules")))
+    check("and its rule names the host, never the whole address",
+          any("git.example.invalid" in rule for rule in elsewhere.get("membership_rules", []))
+          and not any("/team/" in rule for rule in elsewhere.get("membership_rules", [])),
+          str(elsewhere.get("membership_rules")))
     plain = local.get("fixture-plain", {})
     check("T31 a plain folder is recorded as not a git repository",
           plain.get("local_only", {}).get("unpublished") is False, str(plain.get("local_only")))
