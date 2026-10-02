@@ -74,8 +74,14 @@ def test_the_volume_problem_is_real_and_the_page_solves_it() -> None:
     check("the fixture has enough projects to page", n >= 6, str(n))
     # PORTED-DIVERGED: proportions of an eight-project estate instead of the
     # 100 KB threshold measured on a large one.
-    check("an unpaged estate is the expensive answer", big > least * 3,
-          f"{big:,} bytes for {n} projects vs {least:,} for one")
+    # THE MARGINAL COST, not a fixed ratio: a ratio of totals moved below 3 when
+    # a fixed part of every answer (a degraded reason naming its command) grew
+    # by a few bytes, with paging untouched. What must hold is that the unpaged
+    # answer pays for every project the page leaves out.
+    per_project = (small - least) / 4
+    check("an unpaged estate is the expensive answer",
+          per_project > 0 and big - least >= 0.9 * (n - 1) * per_project and big > least * 2,
+          f"{big:,} bytes for {n} projects vs {least:,} for one; {per_project:,.0f} per project")
     check("and a page costs less than the estate it is cut from", small < big,
           f"{small:,} vs {big:,}")
     check("the page returns exactly what was asked for", len(page["projects"]) == 5,
