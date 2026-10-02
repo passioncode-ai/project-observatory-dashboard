@@ -261,6 +261,19 @@ class WorkspaceTests(unittest.TestCase):
         agent=json.loads(self.run_cli('doctor').stdout)['agent']
         self.assertEqual(agent['model_status'],'no-budget')
         self.assertIn('project-observatory full configure budget daily_ceiling',' '.join(agent['next']))
+    def test_local_refreshes_the_env_inventory(self):
+        # `local` never ran `env`, so the ENV page and observatory_credentials
+        # kept the inventory of whenever `full env` was last typed by hand.
+        self.run_cli('init')
+        projects=self.base/'projects';(projects/'alpha-web').mkdir(parents=True)
+        (projects/'alpha-web'/'package.json').write_text('{"name":"alpha-web"}')
+        (projects/'alpha-web'/'.env').write_text('EXAMPLE_PORT=3000\n')
+        self.run_cli('configure','sources','projects',str(projects))
+        self.run_cli('local')
+        doc=json.loads((self.home/'registry/env-inventory.json').read_text())
+        self.assertTrue(doc.get('scanned_on'),doc)
+        self.assertIn('EXAMPLE_PORT',json.dumps(doc['files']))
+        self.assertNotIn('3000',json.dumps(doc['files']))
     def test_independent_homes(self):
         self.run_cli('init');first=json.loads((self.home/'workspace.json').read_text())
         other=self.base/'other';self.env['OBSERVATORY_HOME']=str(other)

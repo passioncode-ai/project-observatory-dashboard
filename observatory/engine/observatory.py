@@ -335,7 +335,10 @@ GROUPS = {
     "scan":  ["scan-fs", "scan-gh", "scan-vault", "scan-sessions"],
     # `smoke` records the verdict `findings` reads on the next run; without it
     # every `local` left `dashboard.unverified` about the page it had just built.
-    "local": ["scan-fs", "merge", "emit", "validate", "scan-events",
+    # `env` reads the projects' env files for NAMES and keyed fingerprints — local,
+    # no network — so the ENV page and observatory_credentials are as current as
+    # the rest of the board, not as old as the last hand-typed `full env`.
+    "local": ["scan-fs", "env", "merge", "emit", "validate", "scan-events",
               "findings", "dashboard", "smoke", "smoke-pages"],
     # `dashboard` is IN the gate, not assumed before it: `design` and `smoke` both
     # read docs/projects-dashboard.html, which git ignores — so on a fresh clone
