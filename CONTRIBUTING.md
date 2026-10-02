@@ -62,7 +62,10 @@ predecessor; never copy that predecessor's Git history or operational documents.
 Dependency constraint updates require the Python/OS CI matrix, not just a local
 import check. Build a wheel and run `tools/check_package.py` against it.
 
-Update scenarios, onboarding and documentation with behavior. Keep unsupported
+Update scenarios, onboarding and documentation with behavior. The engine ships its own
+copies of `docs/ONBOARDING.md`, `docs/COMPATIBILITY.md` and `docs/AGENT-ONBOARDING.md`
+(what a wheel user and `full onboard` read): edit the ones under `docs/`, then run
+`python tools/sync_engine_docs.py`; `tests/test_engine_doc_copies.py` fails on drift. Keep unsupported
 features and unexecuted tests clearly labelled. Public copy must cite reviewed
 facts and never turn occurrence counts into unique-secret or breach counts.
 New public assets require an explicit path and content review before entering
