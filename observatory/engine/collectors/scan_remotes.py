@@ -50,9 +50,18 @@ ENV = {
 }
 
 
+#: Credential-free means no credential STORE either. `GIT_ASKPASS` and
+#: `GIT_TERMINAL_PROMPT` stop prompts, but a remote that answers 401 still makes
+#: git ask every configured credential helper first — on macOS that is
+#: `osxkeychain`, and from an unattended tick it can raise a Keychain dialog in
+#: front of the operator. An empty `credential.helper` resets the helper list
+#: (system, global and repository alike) for this one command.
+NO_HELPERS = ["-c", "credential.helper="]
+
+
 def git(args: list[str], cwd: pathlib.Path | None = None, timeout: int = 10):
     try:
-        r = subprocess.run(["git", *args], cwd=cwd, env=ENV, capture_output=True,
+        r = subprocess.run(["git", *NO_HELPERS, *args], cwd=cwd, env=ENV, capture_output=True,
                            text=True, timeout=timeout)
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except subprocess.TimeoutExpired:
