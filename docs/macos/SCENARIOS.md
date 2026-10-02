@@ -16,6 +16,9 @@ ST-03: another agent invokes the same capability. Product outcome: unobserved.
 | SCN-004 | Stop, close and resume | draft |
 | SCN-005 | Change workspace without stale output | draft |
 | SCN-006 | CLI/MCP caller obtains the same answer | draft |
+| SCN-007 | Opening the app shows the dashboard | draft |
+| SCN-008 | No server: saved pages, then Start server | draft |
+| SCN-009 | Window closed, Dock click brings it back | draft |
 
 These scenarios are specified from the autonomous implementation brief, not human usability validation;
 coverage below names the regression tests and the native walkthrough run on 2026-10-02. See [receipts](../runs/2026-10-01-macos-app/README.md).
@@ -96,3 +99,43 @@ Expected result: advertised MCP input contract, trace propagation and shared Fab
 Errors & recovery: changed input under same request id rejected; different busy request
 is not silently joined; unknown ids never create jobs.
 Coverage: core/bridge/model regression tests; native walkthrough run 2026-10-02 against a workspace copy ([receipt](../runs/2026-10-02-app-agent-audit/README.md)).
+
+## SCN-007 — Opening the app shows the dashboard
+Status: draft
+Product: unobserved
+Persona: P-01
+Traces: ST-01, JTBD-01, FLW-05
+Preconditions: installed app; a compatible engine and an initialized workspace.
+Trigger: the operator opens Project Observatory (Dock, Launchpad, Spotlight, Finder).
+Steps: launch → the dashboard window comes forward → its overview loads, live when the
+workspace's server answers → toolbar offers back/forward, overview, reload, browser, assistant.
+Expected result: the dashboard, never the assistant, is what opens; the window title is the page's.
+Errors & recovery: an unreadable engine or workspace shows the reason with Retry and Settings.
+Coverage: Model and navigation tests; native walkthrough 2026-10-02 ([receipt](../runs/2026-10-02-dashboard-first-app/README.md)).
+
+## SCN-008 — No server: saved pages, then Start server
+Status: draft
+Product: unobserved
+Persona: P-01
+Traces: ST-01, JTBD-01, FLW-05
+Preconditions: built pages exist; the workspace's server is not running.
+Trigger: the app opens or comes back to the front.
+Steps: saved pages shown under a banner naming their build time → Start server → the
+window switches to the live dashboard; an installed always-on server is restarted instead.
+Expected result: reading never waits for a server; a server starts only on request.
+Errors & recovery: a port held by another workspace is named and Start is disabled; a failed
+start names its log; no pages at all → Build the dashboard.
+Coverage: engine `serve`/`build` tests, Model tests; native walkthrough 2026-10-02.
+
+## SCN-009 — Window closed, Dock click brings it back
+Status: draft
+Product: unobserved
+Persona: P-01
+Traces: ST-02, JTBD-01, FLW-05
+Preconditions: the app runs with no window open.
+Trigger: Dock icon click, or launching the app again.
+Steps: reopen → the dashboard window is created and comes forward.
+Expected result: the app is never running without a way back to its window.
+Errors & recovery: none expected; ⌘1 (Window → Dashboard) does the same.
+Coverage: native walkthrough 2026-10-02 (launch 1 window → closed 0 → reopen 1).
+

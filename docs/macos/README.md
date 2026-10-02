@@ -1,10 +1,17 @@
 # Project Observatory for macOS
 
-A native SwiftUI client and a shared advisory assistant. The app needs an engine
-that serves `observatory-assistant/1` — **0.11.0 or newer**; an older release
-answers `unknown step: assistant`, which the app reports as an incompatible engine
-with the update command. The conversation lives in its own Mac window; no agent
-chat is embedded in the dashboard.
+A native window onto the workspace's **dashboard** — the app opens on it — with a
+shared advisory assistant one window away (⇧⌘A). The app needs an engine that serves
+`observatory-assistant/1` with the `dashboard`/`serve`/`build` actions — **0.12.0 or
+newer**; an older release is reported as an incompatible engine with the update
+command.
+
+- **Live** when the workspace's own server answers on 127.0.0.1 (it is verified to
+  serve this workspace, not just any server on the port).
+- **Saved pages** when it does not: the built pages in `docs/dashboard/` are
+  self-contained, so reading never waits; a banner names their build time and offers
+  **Start server**. An installed always-on server is restarted through its launchd job.
+- **Not built yet**: **Build the dashboard** runs the local `dashboard` step.
 
 - [Specification and boundaries](SPEC.md)
 - [Requirements and decomposition](PLAN.md)
@@ -21,8 +28,11 @@ swift test --package-path macos
 macos/scripts/build-app.sh
 ```
 
-The bundle is `dist/macos/Project Observatory.app`. The script signs it ad hoc for
-local QA. It does not claim a Developer ID, notarization or an App Store release.
+The bundle is `dist/macos/Project Observatory.app`, with its icon rasterized from the
+product mark at every size. `macos/scripts/install-app.sh --open` installs it into
+`/Applications` (or `~/Applications`), quits a running copy, forgets Launch Services
+registrations of the same bundle left by QA builds elsewhere — Spotlight could open one
+of those instead — and opens it. The script signs it ad hoc for local QA. It does not claim a Developer ID, notarization or an App Store release.
 Set `OBSERVATORY_SWIFT_BUILD` to reuse a build directory outside the checkout;
 `OBSERVATORY_SWIFT_CONFIGURATION=debug` selects the debug build.
 

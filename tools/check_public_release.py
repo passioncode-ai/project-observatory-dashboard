@@ -126,9 +126,12 @@ def scan_path(relative: str, deny: list[str]) -> dict[str, int]:
 # Xcode user state or SwiftPM caches are admitted by this list.
 NATIVE_SOURCES = {
     "macos/Package.swift", "macos/scripts/build-app.sh",
-    "macos/Sources/ObservatoryCore/Bridge.swift",
+    "macos/scripts/make-icon.swift", "macos/scripts/install-app.sh",
+    "macos/Sources/ObservatoryCore/Bridge.swift", "macos/Sources/ObservatoryCore/Navigation.swift",
     "macos/Sources/ObservatoryApp/App.swift", "macos/Sources/ObservatoryApp/Model.swift",
+    "macos/Sources/ObservatoryApp/Assistant.swift", "macos/Sources/ObservatoryApp/Dashboard.swift",
     "macos/Tests/ObservatoryCoreTests/BridgeTests.swift", "macos/Tests/ObservatoryCoreTests/ModelTests.swift",
+    "macos/Tests/ObservatoryCoreTests/NavigationTests.swift",
 }
 
 
