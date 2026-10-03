@@ -503,6 +503,48 @@ class CleanupNeverLosesWork(unittest.TestCase):
             self.cleanup.git = real
 
 
+class RemoteReason(unittest.TestCase):
+    """An unreachable remote is reported with git's CAUSE, not its boilerplate.
+
+    For an SSH failure git prints the cause first and its generic advice last
+    ("… and the repository exists."); keeping the last line put that advice in
+    front of the operator as the reason (NU-R3-2)."""
+
+    def setUp(self) -> None:
+        self.d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-remote-reason-")).resolve()
+        shim = self.d / "ssh"
+        # Stands in for ssh, offline: the message ssh prints for a name that
+        # does not resolve, and ssh's exit code.
+        shim.write_text("#!/bin/sh\necho 'ssh: Could not resolve hostname git.example.invalid: "
+                        "nodename nor servname provided, or not known' >&2\nexit 255\n", encoding="utf-8")
+        shim.chmod(0o755)
+        self.saved = os.environ.get("PATH", "")
+        os.environ["PATH"] = f"{self.d}{os.pathsep}{self.saved}"
+        self.repo = self.d / "beta-api"
+        bare(self.d, "init", "-q", "-b", "main", str(self.repo))
+
+    def tearDown(self) -> None:
+        os.environ["PATH"] = self.saved
+
+    def test_the_first_line_that_names_the_cause_is_kept(self) -> None:
+        import scan_remotes
+        _, got = scan_remotes.probe({"folder": "beta-api", "path": str(self.repo),
+                                     "remote": "ssh://git@git.example.invalid/beta-api.git", "branch": "main"})
+        self.assertFalse(got["reachable"], got)
+        self.assertTrue(got["reason"].startswith("ssh: Could not resolve hostname git.example.invalid"), got)
+        self.assertLessEqual(len(got["reason"]), 200)
+
+    def test_the_choice_of_line(self) -> None:
+        import scan_remotes
+        self.assertEqual(scan_remotes.failure_reason(
+            "warning: redirecting\nfatal: could not read Username for 'https://example.invalid': "
+            "terminal prompts disabled\n"),
+            "fatal: could not read Username for 'https://example.invalid': terminal prompts disabled")
+        self.assertEqual(scan_remotes.failure_reason("\n\n"), "unknown")
+        self.assertEqual(scan_remotes.failure_reason("something odd\nmore"), "something odd")
+        self.assertEqual(len(scan_remotes.failure_reason("fatal: " + "x" * 400)), 200)
+
+
 class NoBareGit(unittest.TestCase):
     """Structural: no engine module spawns git except through `safe_git`.
 
