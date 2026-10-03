@@ -577,6 +577,42 @@ def hosting_context(relations: list[dict]) -> tuple[dict[str, str], dict[str, st
     return env_of, account_of
 
 
+def history_gap(project: dict, repos: list[dict], horizon_days: int | None,
+                today: str | None = None) -> dict | None:
+    """Why a project with measured commits has no recorded history, or None.
+
+    The panel's "What happened" list is the event store, and an empty list read
+    "no commits in the window" — a statement about the SUBJECT. For a project
+    the registry measured commits in, inside the window, that sentence is false:
+    the history was not RECORDED. Two causes are known here: the project's
+    ownership is one the event scan refuses by rule (`estate.records_events`),
+    or the scan has not read the checkout (never run since it appeared, or git
+    could not answer). The page names which, with the newest measured commit,
+    instead of asserting an absence nobody measured.
+    """
+    import estate
+    lo = project.get("local_only") or {}
+    commits = int(lo.get("commits") or 0)
+    newest = lo.get("last_commit") or ""
+    for r in repos:
+        local = r.get("local") or {}
+        commits += int(local.get("commits") or 0)
+        newest = max(newest, local.get("last_commit_on") or "")
+    if not commits or not newest:
+        return None
+    if horizon_days:
+        now = datetime.strptime(today, "%Y-%m-%d") if today else datetime.now(timezone.utc).replace(tzinfo=None)
+        if newest[:10] < (now - timedelta(days=horizon_days)).strftime("%Y-%m-%d"):
+            return None
+    ownership = project.get("ownership")
+    if not estate.records_events(ownership):
+        # One literal per message: the catalog check reads `"text": "…"` whole.
+        return {"text": "history not recorded: this project is classed {ownership}, and only your own projects' commits are recorded (newest measured commit {date}). If it is yours, list its owner in {file}.",
+                "args": {"ownership": ownership, "date": newest[:10], "file": "config/ownership.json"}}
+    return {"text": "history not recorded: the checkout's newest commit is {date}, but no commit reached the event store. The events scan has not read it yet, or git could not answer — run {command}.",
+            "args": {"date": newest[:10], "command": "project-observatory full local"}}
+
+
 def build():
     pdoc, rdoc = load("projects.json"), load("repositories.json")
     projects, repos = pdoc["projects"], {r["id"]: r for r in rdoc["repositories"]}
@@ -905,11 +941,25 @@ def build():
 
     owners = [o for o, _ in Counter(r["owner"] for r in rows).most_common()]
     store = from_store()
+    try:
+        from collectors.scan_events import retention_horizon_days
+        _horizon = retention_horizon_days()
+    except Exception as exc:                                                    
+        # The window only narrows the explanation below; without it every
+        # measured commit counts as inside it, which errs towards explaining.
+        print(f"  retention window unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
+        _horizon = None
+    _by_id = {p["id"]: p for p in projects}
     for r in rows:
         r["weeks"] = store["weeks"].get(r["id"], [])
         r["metrics"] = store["metrics"].get(r["id"], [])
         r["timeline"] = store["timeline"].get(r["id"], [])
         r["notes"] = store["notes"].get(r["id"], [])
+        if not r["timeline"]:
+            _gap = history_gap(_by_id[r["id"]],
+                               [repos[i] for i in members.get(r["id"], []) if i in repos], _horizon)
+            if _gap:
+                r["history_gap"] = _gap
     # THE QUEUE, READ-ONLY. 401 revisions sit `proposed` and the default outcome
     # for every one of them is expiry at 90 days; the only door was a terminal
     # command, so the operator could not even SEE what was waiting without
@@ -2350,7 +2400,7 @@ function detail(id) {
           `</li>`).join("")}</ul>`
       : `<p class="none">${T("part of no product — group it in {file}", {file: "config/products.json"})}</p>`}
     <h3>${T("What happened")}</h3>
-    ${gone || list(r.timeline, T("no commits in the window"),
+    ${gone || list(r.timeline, r.history_gap ? E(T(r.history_gap.text, r.history_gap.args)) : T("no commits in the window"),
       c => `<li><span class="mono">${E(c.at)}</span> ${E(c.what)}
             <span class="none">${E(c.who)}</span></li>`)}
     <h3>${T("What the observatory concluded")}</h3>

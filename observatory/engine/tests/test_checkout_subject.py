@@ -275,6 +275,58 @@ def test_an_unreadable_checkout_is_a_fault_not_a_quiet_project() -> None:
           any("project:local-solo" in json.dumps(x) for x in deg), json.dumps(deg)[:300])
 
 
+def test_a_remote_on_an_uninventoried_host_is_still_read() -> None:
+    """A git folder whose remote is on a host this merge cannot key (a
+    self-hosted forge, a bare repository on another disk) became a `local-only`
+    project with `unpublished: false`, and `targets()` admitted only
+    `unpublished` folders — so its commits were never read, and the project
+    panel said "no commits in the window" for a checkout committed to that day.
+    `commits` is what the filesystem scan measured; a folder with history is a
+    target whatever its remote, and a folder with none (not git) stays out."""
+    import scan_events as S
+    importlib.reload(S)
+    projects = [
+        {"id": "project:local-elsewhere", "name": "elsewhere",
+         "local_only": {"folder": "elsewhere", "path": "/x/elsewhere", "unpublished": False,
+                        "commits": 2, "last_commit": "2026-01-02"}},
+        {"id": "project:local-notgit", "name": "notgit",
+         "local_only": {"folder": "notgit", "path": "/x/notgit", "unpublished": False,
+                        "commits": 0}},
+    ]
+    by_label = {t["label"]: t for t in S.targets(projects, {}, {})}
+    check("a folder with history and an un-inventoried remote is a target",
+          "project:local-elsewhere" in by_label, str(sorted(by_label)))
+    check("keyed by its project, with no repository id",
+          by_label.get("project:local-elsewhere", {}).get("repo_id", "x") is None
+          and by_label.get("project:local-elsewhere", {}).get("project_id")
+          == "project:local-elsewhere", str(by_label.get("project:local-elsewhere")))
+    check("and a folder with no commits still is not", "project:local-notgit" not in by_label,
+          str(sorted(by_label)))
+
+
+def test_its_history_reaches_the_store_and_is_counted() -> None:
+    d, env = planted()
+    repo = d / "solo"
+    bare = d / "elsewhere.git"
+    subprocess.run(["git", "init", "--bare", str(bare)], capture_output=True, check=True)
+    git(["remote", "add", "origin", str(bare)], repo)
+    reg = pathlib.Path(env["OBSERVATORY_REGISTRY"])
+    doc = json.loads((reg / "projects.json").read_text(encoding="utf-8"))
+    doc["projects"][0]["local_only"].update(unpublished=False, commits=3)
+    (reg / "projects.json").write_text(json.dumps(doc))
+    p = run_scan(env)
+    con = sqlite3.connect(d / "observatory.db")
+    n = con.execute("SELECT count(*) FROM events WHERE kind = 'commit'").fetchone()[0]
+    row = con.execute("SELECT counts_json FROM scans ORDER BY started_at DESC LIMIT 1").fetchone()
+    con.close()
+    check("all three commits are recorded", n == 3, f"{n} / {(p.stdout + p.stderr)[-300:]}")
+    counts = json.loads(row[0]) if row and row[0] else {}
+    check("and the scan counts them as their own source",
+          counts.get("checkouts_remote_not_inventoried") == 1
+          and counts.get("checkouts_unpublished") == 0, json.dumps(counts))
+    check("naming it on stdout", "remote is on a host not inventoried" in p.stdout, p.stdout[-400:])
+
+
 if __name__ == "__main__":
     print("the loop's subject — a checkout, not a repository\n")
     for fn in (test_the_recorder_does_not_keep_its_own_copy_of_the_rule,
@@ -286,7 +338,9 @@ if __name__ == "__main__":
                test_the_rollup_counts_them_without_a_repository,
                test_the_new_source_is_counted_rather_than_folded_in,
                test_an_external_project_is_still_refused,
-               test_an_unreadable_checkout_is_a_fault_not_a_quiet_project):
+               test_an_unreadable_checkout_is_a_fault_not_a_quiet_project,
+               test_a_remote_on_an_uninventoried_host_is_still_read,
+               test_its_history_reaches_the_store_and_is_counted):
         fn()
     print()
     if FAILURES:

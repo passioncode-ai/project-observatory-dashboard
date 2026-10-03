@@ -54,11 +54,13 @@ def node() -> str | None:
     return shutil.which("node")
 
 
-def render(page: pathlib.Path, count: str | None = None) -> dict | None:
+def render(page: pathlib.Path, count: str | None = None,
+           hash: str | None = None) -> dict | None:
     exe = node()
     if exe is None:
         return None
-    args = [exe, str(HARNESS), str(page)] + (["--count", count] if count else [])
+    args = ([exe, str(HARNESS), str(page)] + (["--count", count] if count else [])
+            + (["--hash", hash] if hash else []))
     p = subprocess.run(args, cwd=ROOT,
                        capture_output=True, text=True, timeout=300)
     try:
@@ -447,6 +449,58 @@ def test_a_single_sample_renders_no_movement() -> None:
           not (got.get("counts") or {}), str(got.get("counts")))
 
 
+def _rebuild(root: pathlib.Path, env: dict) -> pathlib.Path:
+    p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT, env=env,
+                       capture_output=True, text=True, timeout=600)
+    check("the dashboard rebuilds", p.returncode == 0, p.stderr[-300:])
+    return pathlib.Path(env["OBSERVATORY_DASHBOARD"])
+
+
+def test_the_panel_says_why_history_was_not_recorded() -> None:
+    """"No commits in the window" for a project the registry measured commits in.
+
+    A local folder whose remote is on a host nothing inventories, and a
+    repository classed `external`, both carried `commits: 2` and a last commit
+    of that day in the registry, and the panel said "What happened: no commits
+    in the window" — a statement about the subject, when the truth was that the
+    history was never recorded. The panel now says which, and why."""
+    if node() is None:
+        check("node is available", True, " [uncoverable: executing the page needs node]")
+        return
+    root = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-history-gap-"))
+    env = dashboard_fixture.seed(root)
+    reg = root / "registry/projects.json"
+    doc = json.loads(reg.read_text(encoding="utf-8"))
+    quiet = next(x for x in doc["projects"] if x["name"] == "Fixture B")
+    today = __import__("datetime").date.today().isoformat()
+    quiet["ownership"] = "local-only"
+    quiet["local_only"] = {"folder": "fixture-b", "path": str(root / "estate/fixture-b"),
+                           "unpublished": False, "commits": 2, "last_commit": today}
+    reg.write_text(json.dumps(doc), encoding="utf-8")
+    r = render(_rebuild(root, env), hash=quiet["id"])
+    panel = (r or {}).get("panel", "")
+    check("the panel opened", "What happened" in panel, panel[:200])
+    check("it does not claim there were no commits",
+          "no commits in the window" not in panel, panel[-600:])
+    check("it says the history was not recorded, and when the newest commit was",
+          "history not recorded" in panel and today in panel, panel[-600:])
+
+    quiet["ownership"] = "external"
+    reg.write_text(json.dumps(doc), encoding="utf-8")
+    panel = (render(_rebuild(root, env), hash=quiet["id"]) or {}).get("panel", "")
+    check("an external project says it is excluded by ownership, and where to change it",
+          "external" in panel and "config/ownership.json" in panel
+          and "no commits in the window" not in panel, panel[-600:])
+
+    quiet["ownership"] = "local-only"
+    quiet["local_only"].update(commits=0, last_commit="")
+    reg.write_text(json.dumps(doc), encoding="utf-8")
+    panel = (render(_rebuild(root, env), hash=quiet["id"]) or {}).get("panel", "")
+    check("a folder that measured no commits still says there were none",
+          "no commits in the window" in panel and "history not recorded" not in panel,
+          panel[-600:])
+
+
 def test_the_harness_itself_can_fail() -> None:
     """A green from a harness that cannot go red is not evidence."""
     if node() is None:
@@ -490,6 +544,7 @@ if __name__ == "__main__":
                test_a_stub_document_is_not_scanned_and_says_how_to_scan,
                test_a_metric_that_moved_says_so_on_the_page,
                test_a_single_sample_renders_no_movement,
+               test_the_panel_says_why_history_was_not_recorded,
                test_the_harness_itself_can_fail):
         fn()
     print()
