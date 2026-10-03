@@ -97,7 +97,7 @@ struct AppCommands: Commands {
             Button(model.t("Reload", "Обновить")) { Task { await model.refreshDashboard(); web.reload() } }.keyboardShortcut("r")
             Divider()
             Button(model.t("Start Server", "Запустить сервер")) { Task { await model.startServer() } }
-                .disabled(model.dashboardWorking)
+                .disabled(!model.canStartServer)
             Button(model.t("Rebuild Pages", "Перестроить страницы")) { Task { await model.buildDashboard(); web.reload() } }
                 .disabled(model.dashboardWorking)
             Button(model.t("Open in Browser", "Открыть в браузере")) { if let u = web.currentURL { NSWorkspace.shared.open(u) } }

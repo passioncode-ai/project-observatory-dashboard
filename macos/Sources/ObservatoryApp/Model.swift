@@ -373,6 +373,12 @@ enum DashboardMode: Equatable {
             dashboardMode = .unavailable; dashboardFailure = failure(of: error)
         }
     }
+    /// Whether «Start server» can do anything now: saved pages shown, the port free,
+    /// nothing running. The banner's button and the Dashboard menu ask this one question.
+    var canStartServer: Bool {
+        guard !dashboardWorking, case .files(_, _, _, let portBusy) = dashboardMode else { return false }
+        return !portBusy
+    }
     /// «Start server»: the operator's explicit act, never a side effect of opening the app.
     func startServer() async { await dashboardAction("serve", timeout: 75) }
     /// «Build the dashboard» from the registry — local, no provider call.
