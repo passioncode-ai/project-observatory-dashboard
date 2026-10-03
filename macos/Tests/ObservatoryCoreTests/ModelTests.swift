@@ -309,4 +309,33 @@ import ObservatoryCore
             XCTAssertFalse(text.contains("`tools/install_key.py"), text)
         }
     }
+    func testATypedOrPickedWorkspaceUnderTmpIsSavedThroughItsRealPath() throws {
+        // The engine refuses a path through a symbolic link, and /tmp is one
+        // (to /private/tmp). Foundation's `resolvingSymlinksInPath` strips a
+        // leading /private again, so /private/tmp/ws came back as /tmp/ws — the
+        // engine refused every workspace under /tmp, typed or picked.
+        let dir = "/tmp/observatory-resolve-" + UUID().uuidString
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: false)
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: dir) }
+        XCTAssertEqual(Model.resolved(dir), "/private" + dir)
+        XCTAssertEqual(Model.resolved("/private" + dir), "/private" + dir)
+        XCTAssertEqual(Model.resolved(" /private" + dir + " "), "/private" + dir)
+        // a folder that does not exist yet resolves through its parent
+        XCTAssertEqual(Model.resolved(dir + "/not-yet"), "/private" + dir + "/not-yet")
+        XCTAssertEqual(Model.resolved("relative/path"), "relative/path")
+    }
+    func testTheDashboardIsOneWindowThatEveryCommandBringsForward() throws {
+        // A WindowGroup opens ANOTHER window on every openWindow(id:): ⌘1, Window →
+        // Dashboard, Dashboard → Overview and the assistant's Dashboard button each
+        // added one (five after a short session), and all but one were blank —
+        // they share one web view. A `Window` scene is single: the same calls
+        // bring it forward. It lists itself in the Window menu, so the app adds
+        // no second item there.
+        let app = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/ObservatoryApp/App.swift"), encoding: .utf8)
+        XCTAssertFalse(app.contains("WindowGroup("), "the dashboard must not be a WindowGroup")
+        XCTAssertTrue(app.contains("Window(model.t(\"Dashboard\", \"Дашборд\"), id: WindowID.dashboard)"))
+        XCTAssertFalse(app.contains("CommandGroup(before: .windowList)"), "no second Dashboard item in the Window menu")
+    }
 }

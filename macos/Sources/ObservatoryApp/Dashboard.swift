@@ -13,6 +13,8 @@ import ObservatoryCore
     @Published var title = ""
     @Published var loadError: String?
     private(set) var origin: DashboardOrigin?
+    /// The newest `WebViewHost` box; only it may hold the view.
+    weak var host: NSView?
     private var shownSeed = -1, shownRussian: Bool?
     private var observers: [NSKeyValueObservation] = []
     /// A language chosen on the page itself travels back to the app, which adopts it.
@@ -150,12 +152,19 @@ import ObservatoryCore
     }
 }
 
+/// Hosts the controller's one web view. SwiftUI can build a new host (a mode
+/// change rebuilds the branch) while an old one still receives an update; the
+/// old host then took the view back and left with it. Only the NEWEST host may
+/// hold the view.
 struct WebViewHost: NSViewRepresentable {
+    let web: WebController
     let view: WKWebView
     func makeNSView(context: Context) -> NSView {
-        let box = NSView(); place(view, in: box); return box
+        let box = NSView(); web.host = box; place(view, in: box); return box
     }
-    func updateNSView(_ box: NSView, context: Context) { if view.superview !== box { place(view, in: box) } }
+    func updateNSView(_ box: NSView, context: Context) {
+        if web.host === box, view.superview !== box { place(view, in: box) }
+    }
     private func place(_ v: WKWebView, in box: NSView) {
         v.removeFromSuperview(); v.translatesAutoresizingMaskIntoConstraints = false; box.addSubview(v)
         NSLayoutConstraint.activate([v.leadingAnchor.constraint(equalTo: box.leadingAnchor), v.trailingAnchor.constraint(equalTo: box.trailingAnchor),
@@ -179,7 +188,7 @@ struct DashboardView: View {
             case .checking: placeholder { ProgressView(m.t("Opening the dashboard…", "Открываю дашборд…")) }
             case .live, .files:
                 ZStack {
-                    WebViewHost(view: web.view)
+                    WebViewHost(web: web, view: web.view)
                     if let err = web.loadError { loadFailure(err) }
                 }
             case .notBuilt(let busy): notBuilt(busy)
