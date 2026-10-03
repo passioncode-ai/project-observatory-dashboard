@@ -424,8 +424,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "9cc1f2562ed259cb6b98a9fe06da51157b4cc255bc56eeeda604e35320c0952d",
-      "bytes": 238104,
+      "export_sha256": "8c3586932971f7c4a1c9c961720e094be7b9ce333675f310ee02889a60e00c76",
+      "bytes": 238399,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -456,8 +456,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "df31e754a92928b7faadf48bff94dcde602e8bb88f7bb51eafdcfdc418690eff",
-      "bytes": 130880
+      "export_sha256": "2249905721fb22bd16fc8d5c0264c9fd46501fdeac64814bc5ac51326019df80",
+      "bytes": 130904
     },
     {
       "path": "dashboard/machine_page.py",
@@ -1538,8 +1538,8 @@
       "path": "tests/focus_check.js",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fce76664084f61eecd333e6b2e8056e41cbc524cbebeddaf3a42a12e5184cfeb",
-      "bytes": 5434
+      "export_sha256": "f1cedcd97ff6b68575d87247499421da5f15c2131084c34db4bcacdb6396e1ea",
+      "bytes": 5794
     },
     {
       "path": "tests/live_estate.py",
@@ -1910,8 +1910,8 @@
     {
       "path": "tests/test_dashboard_render.py",
       "source_sha256": "48ff53d5e309194a35d8b1b6a1f9bffee2191a720be5a5d7493560dc8fa946fc",
-      "export_sha256": "fd5211e887a8c0aa62a1356d401a670b72c3f3eff88f9dd0f8082f444a46861a",
-      "bytes": 39137,
+      "export_sha256": "36bb3b77fcc483ac2a816622c00b44b14d35ca27f37e5e1661c5ed22b60d7dd5",
+      "bytes": 40827,
       "python_comments_removed": 13,
       "python_docstrings_removed": 12,
       "tool_descriptions_retained": 0,
