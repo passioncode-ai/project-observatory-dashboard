@@ -293,6 +293,44 @@ class KeyserverBoundaryTests(unittest.TestCase):
         self.assertNotIn(synthetic, str(caught.exception))
         self.assertFalse(keyserver.AUDIT.exists(), "a refused id must not become a journal row")
 
+    def _vault_env(self):
+        store = self.root / "vault" / "projects"
+        return store, patch.dict(os.environ, {"OBSERVATORY_VAULT_DIR": str(store)})
+
+    def test_leak_route_cannot_be_turned_into_vault_options(self):
+        """Body fields were handed to vault.py as positional argv: `project:
+        "--help"` printed help, exited 0 and the route answered 200 `marked`
+        with nothing recorded; `where: "--force"` came back as usage text."""
+        store, env = self._vault_env()
+        with env:
+            for body in ({"project": "--help", "env": "prod", "name": "CF_API_TOKEN",
+                          "where": "somewhere long enough"},
+                         {"project": "alpha-web", "env": "--force", "name": "CF_API_TOKEN",
+                          "where": "somewhere long enough"},
+                         {"project": "alpha-web", "env": "prod", "name": "-h",
+                          "where": "somewhere long enough"},
+                         {"project": ["alpha-web"], "env": "prod", "name": "CF_API_TOKEN",
+                          "where": "somewhere long enough"}):
+                with self.assertRaises(ValueError, msg=str(body)):
+                    keyserver.act_leak(body)
+            self.assertFalse((store / "leaks.jsonl").exists(), "a refused body recorded something")
+            out = keyserver.act_leak({"project": "alpha-web", "env": "prod", "name": "CF_API_TOKEN",
+                                      "where": "--force pushed to a fork, seen in its CI log"})
+            self.assertEqual(out["marked"], "alpha-web/prod/CF_API_TOKEN")
+            rows = [json.loads(line) for line in (store / "leaks.jsonl").read_text().splitlines()]
+            self.assertEqual([r["where"] for r in rows], ["--force pushed to a fork, seen in its CI log"])
+
+    def test_leak_route_needs_the_vaults_receipt(self):
+        """Exit 0 is not a receipt: a vault that printed help and exited 0 was
+        reported as a recorded leak."""
+        silent = self.root / "silent_vault.py"
+        silent.write_text("import sys\nsys.exit(0)\n")
+        store, env = self._vault_env()
+        with env, patch.object(keyserver, "VAULT", silent):
+            with self.assertRaises(RuntimeError):
+                keyserver.act_leak({"project": "alpha-web", "env": "prod", "name": "CF_API_TOKEN",
+                                    "where": "a CI log, job 4412"})
+
     def test_explicit_reveal_is_inventory_scoped_and_audited_without_value(self):
         keyserver.paths.SCRATCH.mkdir()
         keyserver.paths.DATA.mkdir()
