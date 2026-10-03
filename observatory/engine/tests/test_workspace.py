@@ -229,11 +229,19 @@ class WorkspaceTests(unittest.TestCase):
         projects=self.base/'projects';(projects/'alpha-web').mkdir(parents=True)
         (projects/'alpha-web'/'package.json').write_text('{"name":"alpha-web"}')
         self.run_cli('configure','sources','projects',str(projects))
-        for _ in range(2):
-            self.run_cli('local')
+        # ONE run: the first board a new user opens. Two runs here hid that the
+        # first one still said "not verified" — `findings` runs before `smoke`.
+        self.run_cli('local')
         types={f.get('type') for f in json.loads((self.home/'registry/findings.json').read_text())['findings']}
         self.assertNotIn('dashboard.unverified',types)
         self.assertNotIn('dashboard.blank',types)
+        # and the page itself says so: the board the user reads was built after the verdict
+        page=(self.home/'docs/dashboard/findings.html').read_text()
+        self.assertNotIn('dashboard.unverified',page)
+        # a second run keeps it clean (the receipt describes the page on disk)
+        self.run_cli('local')
+        types={f.get('type') for f in json.loads((self.home/'registry/findings.json').read_text())['findings']}
+        self.assertNotIn('dashboard.unverified',types)
     def test_configure_sets_the_model_chain_and_the_budget(self):
         # A fresh models.json has chain [] and every ceiling 0.0, and nothing
         # offered a way to set them but editing the file by hand.

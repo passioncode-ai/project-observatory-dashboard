@@ -121,6 +121,7 @@ STEPS = {
     "smoke":     ["node", "dashboard/smoke.js", "docs/projects-dashboard.html"],
     "smoke-pages": [PY, "dashboard/smoke_pages.py"],
     "findings":  [PY, "tools/build_findings.py"],
+    "settle":    [PY, "tools/settle_board.py"],
     "notify":    [PY, "tools/notify_findings.py"],
     "corroborate": [PY, "tools/corroborate.py"],
     "export-ledger": [PY, "tools/export_ledger.py"],
@@ -335,11 +336,13 @@ GROUPS = {
     "scan":  ["scan-fs", "scan-gh", "scan-vault", "scan-sessions"],
     # `smoke` records the verdict `findings` reads on the next run; without it
     # every `local` left `dashboard.unverified` about the page it had just built.
+    # `settle` closes the first run, which has no earlier verdict: it rebuilds
+    # the board once when the only row missing is the verdict smoke just gave.
     # `env` reads the projects' env files for NAMES and keyed fingerprints — local,
     # no network — so the ENV page and observatory_credentials are as current as
     # the rest of the board, not as old as the last hand-typed `full env`.
     "local": ["scan-fs", "env", "merge", "emit", "validate", "scan-events",
-              "findings", "dashboard", "smoke", "smoke-pages"],
+              "findings", "dashboard", "smoke", "smoke-pages", "settle"],
     # `dashboard` is IN the gate, not assumed before it: `design` and `smoke` both
     # read docs/projects-dashboard.html, which git ignores — so on a fresh clone
     # the gate failed on an artefact no step of it built. Building an ignored file
@@ -411,6 +414,7 @@ NEEDS = {
     "validate-plugin":  ["claude-cli"],
     "smoke":            ["node"],
     "smoke-pages":      ["node"],
+    "settle":           ["node"],
     "test-env-tab":     ["node"],
 }
 
