@@ -138,25 +138,26 @@ enum DashboardMode: Equatable {
         case "dashboard-start-failed":
             return t("The dashboard server did not start. Its log is store/logs/serverd.out in the workspace; `project-observatory full open --serve` shows the reason.", "Сервер дашборда не запустился. Его журнал — store/logs/serverd.out в папке данных; причину покажет `project-observatory full open --serve`.")
         case "dashboard-build-failed":
-            return t("The dashboard could not be built. Run `project-observatory full local` once; it measures this machine and builds the pages.", "Дашборд не удалось построить. Один раз выполните `project-observatory full local` — она измерит машину и построит страницы.")
+            return t("The dashboard could not be built. Run `project-observatory full local` once; it measures this machine and builds the pages.", "Дашборд не удалось построить. Один раз выполните `project-observatory full local` — команда измерит машину и построит страницы.")
         case "unknown-workspace":
             return t("This folder is not an Observatory workspace yet. Create it with `project-observatory full init` (with OBSERVATORY_HOME set to it), or choose an existing workspace in Settings.",
                      "Эта папка ещё не папка данных Observatory. Создайте её командой `project-observatory full init` (с OBSERVATORY_HOME, указывающим на неё) или выберите существующую папку в настройках.")
         case "dashboard-workspace-mismatch", "dashboard-unavailable":
-            return t("No running dashboard was verified for this workspace. Start its server with `project-observatory full open --serve`, then try again.", "Для этой папки данных не найден подтверждённый дэшборд. Запустите её сервер командой `project-observatory full open --serve` и попробуйте снова.")
+            return t("No running dashboard was verified for this workspace. Start its server with `project-observatory full open --serve`, then try again.", "Не подтверждено, что дашборд этой папки данных запущен. Запустите её сервер командой `project-observatory full open --serve` и попробуйте снова.")
         case "agent-disabled": return t("The agent is turned off in this workspace. Turn it on with `project-observatory full configure features agent true`, then Refresh.", "В этой папке данных агент выключен. Включите его командой `project-observatory full configure features agent true` и нажмите «Обновить».")
-        case "provider-unconfigured": return t("No model provider is configured. Install a key with `tools/install_key.py --for observatory` (see ONBOARDING), then Refresh.", "Провайдер модели не настроен. Установите ключ через `tools/install_key.py --for observatory` (см. ONBOARDING) и нажмите «Обновить».") + extra
+        case "provider-unconfigured": return t("No model provider is configured. Install its key from a protected file on stdin: `python \"$(project-observatory full-path)/tools/install_key.py\" --for observatory < KEY_FILE` (see ONBOARDING), then Refresh.",
+                                              "Провайдер модели не настроен. Установите его ключ из защищённого файла через stdin: `python \"$(project-observatory full-path)/tools/install_key.py\" --for observatory < KEY_FILE` (см. ONBOARDING) и нажмите «Обновить».") + extra
         case "model-unconfigured": return t("No model is chosen for this workspace. Choose one with `project-observatory full configure model chain MODEL_ID` (an id from your provider's model list), then Refresh.",
                                             "Для этой папки данных не выбрана модель. Выберите её командой `project-observatory full configure model chain MODEL_ID` (идентификатор из списка моделей провайдера) и нажмите «Обновить».")
         case "budget-unset": return t("No spending limit is set, so nothing is sent. Set all three with `project-observatory full configure budget daily_ceiling 0.50` (and `monthly_ceiling`, `velocity_ceiling`), then Refresh.",
                                       "Лимит расходов не задан, поэтому ничего не отправляется. Задайте все три командой `project-observatory full configure budget daily_ceiling 0.50` (а также `monthly_ceiling`, `velocity_ceiling`) и нажмите «Обновить».")
         case "assistant-busy": return t("Another question is running. Open its conversation or wait until it finishes.", "Другой запрос ещё выполняется. Откройте его диалог или дождитесь завершения.")
         case "budget-reached": return t("The configured model budget has been reached.", "Достигнут заданный бюджет модели.")
-        case "cancelled": return t("Stopped. Provider usage already incurred may still be charged.", "Остановлено. Уже использованные токены могут быть оплачены.")
+        case "cancelled": return t("Stopped. Provider usage already incurred may still be charged.", "Остановлено. Уже израсходованное у провайдера может быть списано.")
         case "interrupted", "runner-failed": return t("The runner stopped before an answer was saved. Send the question again.", "Процесс остановился до сохранения ответа. Отправьте вопрос снова.")
         case "provider-failed", "assistant-timeout", "job-failed": return t("The model did not return an answer. Your question is saved; try again.", "Модель не вернула ответ. Вопрос сохранён; попробуйте ещё раз.")
         case "invalid-evidence", "invalid-answer": return t("The model's answer cited facts it was not given, so it was refused. Try again.", "Ответ модели ссылался на факты, которых ей не давали, поэтому он отклонён. Попробуйте ещё раз.")
-        case "conversation-full": return t("This conversation has reached its 32 turns. Start a new conversation.", "В этом диалоге уже 32 хода. Начните новый диалог.")
+        case "conversation-full": return t("This conversation has reached its limit of 32 turns. Start a new conversation.", "В этом диалоге уже 32 хода. Начните новый диалог.")
         case "history-full": return t("100 conversations are stored. Delete old ones to start another.", "Сохранено 100 диалогов. Удалите старые, чтобы начать новый.")
         case "request-history-full": return t("Too many recent requests are still tracked. Try again later.", "Слишком много недавних запросов ещё отслеживается. Попробуйте позже.")
         case "conversation-busy": return t("Wait for the answer before deleting this conversation.", "Дождитесь ответа, прежде чем удалять диалог.")
@@ -413,6 +414,9 @@ enum DashboardMode: Equatable {
             question = ""; scope = ""; projects = []; version = ""
             generation = UUID(); activeExecutable = executable; activeWorkspace = workspace
             stopPolling(); busy = false; job = nil; sending = false
+            // A build or start for the old workspace may still be running; its end
+            // is dropped as stale, so its `dashboardWorking = false` never comes.
+            dashboardWorking = false; dashboardFailure = nil
             selected = nil; turns = []; conversations = []; ready = false; connected = false
         }
         savedAt = nil

@@ -274,4 +274,39 @@ import ObservatoryCore
         model.selectAdjacent(-1); XCTAssertEqual(model.selected, "chat-a")
         model.busy = true; model.selectAdjacent(1); XCTAssertEqual(model.selected, "chat-a")
     }
+    func testChangingWorkspaceDuringABuildLeavesTheNewWorkspaceUsable() async {
+        // A build (up to 300 s) or a start for workspace A was still running when
+        // Settings switched to B: its end was dropped as stale, and with it the
+        // reset of `dashboardWorking` — Build, Start and Rebuild stayed disabled in B.
+        var waiting: CheckedContinuation<[String: Any], Error>?
+        let started = expectation(description: "build started")
+        let model = Model(defaults: defaults()) { action, _ in
+            switch action {
+            case "build": return try await withCheckedThrowingContinuation { waiting = $0; started.fulfill() }
+            case "dashboard": return ["server": "absent"]
+            default: return ["engine_version": "new", "agent_enabled": true, "provider_configured": true, "conversations": []]
+            }
+        }
+        let build = Task { await model.buildDashboard() }
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertTrue(model.dashboardWorking)
+        model.workspace = "/srv/example-ws-b"
+        await model.saveSettings()
+        XCTAssertFalse(model.dashboardWorking, "the new workspace's Build and Start must be usable")
+        waiting?.resume(returning: ["server": "absent", "files": "/srv/example-ws-a/docs/dashboard/index.html"])
+        await build.value
+        XCTAssertFalse(model.dashboardWorking)
+        XCTAssertEqual(model.dashboardMode, .notBuilt(portBusy: false), "A's late answer never reaches B")
+    }
+    func testTheProviderStepNamesAToolAnInstalledUserHas() {
+        // `tools/install_key.py` exists only in a source checkout; an installed
+        // engine reaches it through `project-observatory full-path`.
+        let model = Model(defaults: defaults())
+        for ru in [false, true] {
+            model.russian = ru
+            let text = model.message("provider-unconfigured")
+            XCTAssertTrue(text.contains("$(project-observatory full-path)/tools/install_key.py\" --for observatory"), text)
+            XCTAssertFalse(text.contains("`tools/install_key.py"), text)
+        }
+    }
 }

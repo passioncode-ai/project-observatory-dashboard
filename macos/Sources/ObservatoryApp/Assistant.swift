@@ -296,6 +296,8 @@ struct SettingsView: View {
                 TextField(hint, text: text).focused($field, equals: id).focusEffectDisabled()
                     .fieldChrome(focused: field == id).accessibilityLabel(title)
                 Button(m.t("Choose…", "Выбрать…")) { choose(directory) }.buttonStyle(SecondaryButtonStyle())
+                    // Two "Choose…" buttons read the same to VoiceOver; each names its field.
+                    .accessibilityLabel(m.t("Choose", "Выбрать") + ": " + title)
             }
         }
     }

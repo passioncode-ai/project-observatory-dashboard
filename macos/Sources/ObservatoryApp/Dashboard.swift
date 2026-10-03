@@ -213,7 +213,7 @@ struct DashboardView: View {
 
     private var subtitle: String {
         switch m.dashboardMode {
-        case .live: return m.t("Live", "Вживую")
+        case .live: return m.t("Live", "С сервера")
         case .files(_, let at, _, _): return m.t("Saved pages", "Сохранённые страницы") + (at.map { " · " + m.when($0) } ?? "")
         default: return ""
         }
@@ -225,7 +225,7 @@ struct DashboardView: View {
                    title: m.t("The dashboard server is not running — these are the saved pages", "Сервер дашборда не запущен — показаны сохранённые страницы")
                        + (at.map { m.t(" from ", " от ") + m.when($0) } ?? "") + ".",
                    detail: [busy ? m.message("dashboard-port-busy")
-                                 : m.t("Reading works as usual. Start server serves the same pages on 127.0.0.1.",
+                                 : m.t("Reading works as usual. “Start server” serves the same pages on 127.0.0.1.",
                                        "Чтение работает как обычно. «Запустить сервер» отдаёт те же страницы на 127.0.0.1."),
                             m.dashboardError].compactMap { $0 }.joined(separator: "\n")) {
                 if m.dashboardWorking { ProgressView().controlSize(.small) }
