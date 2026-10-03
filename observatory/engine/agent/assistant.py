@@ -410,7 +410,11 @@ def run_question(job):
 def parser():
     """Shared by `main` and the gate's parse-only check (`observatory.refusal`)."""
     import argparse
-    ap=argparse.ArgumentParser(prog='project-observatory full assistant',description=__doc__)
+    # Not __doc__: it cites the app's specification by a repository path that an
+    # installed engine does not ship.
+    ap=argparse.ArgumentParser(prog='project-observatory full assistant',
+        description='The assistant protocol (observatory-assistant/1) the Mac app speaks: one action; '
+                    'ask, get, job, cancel and delete read one JSON object on stdin; one JSON object on stdout.')
     ap.add_argument('action',choices=['status','ask','list','get','job','cancel','delete','dashboard','serve','build'])
     return ap
 

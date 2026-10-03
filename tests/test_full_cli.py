@@ -80,14 +80,27 @@ class BareCommand(unittest.TestCase):
             run.assert_called_once_with(["open"], str(home))
 
     def test_bare_without_a_workspace_says_where_to_start(self):
+        # Exit 2, not 0: the request was "open the dashboard" and nothing was
+        # opened. The guidance goes to stderr like every other refusal, so a
+        # script that tests the exit code is not told it worked.
         with tempfile.TemporaryDirectory() as tmp:
-            out = io.StringIO()
+            out, err = io.StringIO(), io.StringIO()
             with patch.dict(os.environ, {"OBSERVATORY_HOME": str(Path(tmp) / "absent")}), \
-                    patch("observatory.full_cli.run") as run, patch("sys.stdout", out):
-                self.assertEqual(cli.main([]), 0)
+                    patch("observatory.full_cli.run") as run, patch("sys.stdout", out), patch("sys.stderr", err):
+                self.assertEqual(cli.main([]), 2)
             run.assert_not_called()
-            self.assertIn("full init", out.getvalue())
-            self.assertIn("demo", out.getvalue())
+            self.assertEqual(out.getvalue(), "")
+            self.assertIn("full init", err.getvalue())
+            self.assertIn("demo", err.getvalue())
+
+    def test_home_help_names_both_defaults(self):
+        # The portable commands and `full` choose different default homes, and
+        # `full` reads OBSERVATORY_FULL_HOME first; the help said only one.
+        text = cli.parser().format_help()
+        flat = " ".join(text.split())
+        self.assertIn("~/.local/share/project-observatory-full", flat)
+        self.assertIn("OBSERVATORY_FULL_HOME", flat)
+        self.assertIn("~/.local/share/project-observatory ", flat)
 
     def test_short_name_is_an_installed_entry_point(self):
         text = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
@@ -123,7 +136,7 @@ class PortableCommandsLeaveTheFullWorkspaceAlone(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = io.StringIO()
             with patch.dict(os.environ, {"OBSERVATORY_HOME": str(Path(tmp) / "absent")}), \
-                    patch("observatory.full_cli.run"), patch("sys.stdout", out):
+                    patch("observatory.full_cli.run"), patch("sys.stderr", out):
                 cli.main([])
             demo_line = next(line for line in out.getvalue().splitlines() if " demo" in line)
             self.assertIn("--home", demo_line)

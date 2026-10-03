@@ -411,6 +411,14 @@ def _tick_health(base: Path, doc: dict) -> dict:
                               scheduler_enabled=bool((doc.get("features") or {}).get("scheduler")))
 
 
+def _switches(doc: dict, section: str) -> dict:
+    """{name: on} for every known name, sorted; a switch is on only when `true`,
+    the rule `configuration.enabled` applies."""
+    found = doc.get(section, {}) if isinstance(doc.get(section), dict) else {}
+    names = sorted(set(config.known_names(section)) | set(found))
+    return {name: found.get(name) is True for name in names}
+
+
 def doctor(base: Path) -> dict:
     runtime = require_runtime()
     config.validate_workspace(base, required=True)
@@ -418,9 +426,15 @@ def doctor(base: Path) -> dict:
     database = validate_data(base, integrity=True)
     return {"version": config.VERSION, "runtime": runtime, "database": database, "workspace_format": config.WORKSPACE_VERSION,
             "configuration_schema": doc["schema_version"],
-            "sources": {k: {"configured": True, "exists": Path(v).expanduser().exists()} for k, v in doc.get("sources", {}).items()},
-            "integrations": doc.get("integrations", {}),
-            "features": doc.get("features", {}),
+            # EVERY name `configure` accepts, on or off: the onboarding says
+            # "list current settings with doctor", and a fresh workspace listed
+            # `{}`. Unknown names a hand-edited file carries are kept as found.
+            "sources": {**{k: {"configured": True, "exists": Path(v).expanduser().exists()}
+                           for k, v in doc.get("sources", {}).items()},
+                        **{k: {"configured": False} for k in sorted(config.known_names("sources"))
+                           if not doc.get("sources", {}).get(k)}},
+            "integrations": _switches(doc, "integrations"),
+            "features": _switches(doc, "features"),
             "interface": {"locale": doc.get("interface", {}).get("locale", "en")},
             "coverage_warnings": coverage_warnings(doc),
             "backups": __import__("backup_vault").status(base),

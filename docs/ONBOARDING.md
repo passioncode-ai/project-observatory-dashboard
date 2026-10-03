@@ -97,7 +97,8 @@ the author's accounts or data.
 
 ## Choose integrations individually
 
-List current settings with `doctor`. Enable a selected integration with
+List current settings with `doctor`: it names every integration and feature `configure`
+accepts with `true` or `false`, and every source with whether it is configured. Enable a selected integration with
 `project-observatory full configure integrations NAME true`. An unknown integration,
 feature or source name is refused (exit 2) with the list of known names. The collector's
 installed help and source describe its exact input format. Start with the
@@ -153,6 +154,7 @@ The `projects` source is the exception: the filesystem scan always runs, so a mi
 | `companion_home`, `companion_db` | a memory companion's home and database file (claude-mem) | `sessions` integration (`companion_db`), `companion_remediation` |
 | `gateway_root` | an optional directory whose `bin/` holds a credential backup script | `vault.py backup` |
 | `domain_export` | a registrar's domain CSV export | `domains` integration |
+| `cloudflare_snapshot` | a JSON snapshot of your Cloudflare zones, kept as evidence | `validate` (snapshot parity; reported as degraded when unset) |
 | `secrets` | overrides where the workspace keeps its own credential files | provider tools |
 
 The `mcp` integration reads the declarations from the agent configs under
@@ -285,7 +287,7 @@ into any agent configuration; only this explicit command does.
 
 `observatory` (the short name of `project-observatory`) with no arguments opens the
 dashboard of the workspace in `OBSERVATORY_HOME`, or the default one; with no workspace yet it says
-how to create one. Open it explicitly with `project-observatory full open` (local files) or
+how to create one, on stderr, and exits 2, because nothing was opened. Open it explicitly with `project-observatory full open` (local files) or
 `project-observatory full open --serve` (a read-only loopback server on
 127.0.0.1:47311; it answers GET only and changes nothing).
 
@@ -304,7 +306,9 @@ project-observatory full open --stop              # or: --stop --port PORT, if y
 ```
 
 `--stop` ends only a server that serves this workspace and that `--serve`
-started. A server installed as an always-on agent with `serverd.py --install`
+started. With nothing answering on the port it exits 0 with `"stopped": false` and the
+reason, because the state asked for already holds; a server it must not stop (another
+workspace's, or one that is not this engine's) is refused with exit 2. A server installed as an always-on agent with `serverd.py --install`
 is restarted by launchd, so `--stop` refuses it and names
 `python "$(project-observatory full-path)/tools/serverd.py" --uninstall`, which
 stops it and keeps it off.

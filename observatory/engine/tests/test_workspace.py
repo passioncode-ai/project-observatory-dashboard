@@ -53,6 +53,23 @@ class WorkspaceTests(unittest.TestCase):
         self.assertTrue(files[1].is_file(), "re-init restores a missing identity")
         self.assertNotEqual(before[1], files[1].read_bytes())
         self.assertEqual(before[0], files[0].read_bytes())
+    def test_doctor_lists_every_known_name_with_its_state(self):
+        # A fresh doctor said `integrations: {}` and `features: {}` while the
+        # onboarding says "list current settings with doctor": every name the
+        # `configure` command accepts is listed, on or off, and every source
+        # says whether it is configured.
+        sys.path.insert(0, str(ROOT))
+        import configuration
+        self.run_cli('init')
+        self.run_cli('configure', 'integrations', 'github', 'true')
+        doc = json.loads(self.run_cli('doctor').stdout)
+        self.assertEqual(set(doc['integrations']), set(configuration.known_names('integrations')))
+        self.assertEqual(set(doc['features']), set(configuration.known_names('features')))
+        self.assertEqual(set(doc['sources']), set(configuration.known_names('sources')))
+        self.assertIs(doc['integrations']['github'], True)
+        self.assertIs(doc['integrations']['heroku'], False)
+        self.assertTrue(all(v is False for v in doc['features'].values()))
+        self.assertEqual(doc['sources']['cloudflare_snapshot'], {'configured': False})
     def test_doctor_names_enabled_switches_with_missing_sources(self):
         self.run_cli('init')
         self.run_cli('configure', 'integrations', 'sessions', 'true')

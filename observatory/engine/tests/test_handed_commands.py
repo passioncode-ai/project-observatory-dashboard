@@ -365,6 +365,20 @@ class SubcommandHelp(unittest.TestCase):
         self.assertEqual(sorted(set(cli.WORKSPACE_COMMANDS) - words), [])
         self.assertIn("migrate-local", p.stdout)
 
+    def test_help_names_documents_by_a_path_an_installed_user_has(self):
+        # `docs/CLI-COMPATIBILITY.md` exists only beneath the engine directory,
+        # and `docs/macos/SPEC.md` is not shipped at all: a bare relative path in
+        # help resolves nowhere from the directory a person types in.
+        top = self.run_cli("--help").stdout
+        self.assertIn('"$(project-observatory full-path)/docs/CLI-COMPATIBILITY.md"', top)
+        self.assertNotRegex(top, r"(?<![/\w])docs/CLI-COMPATIBILITY\.md")
+        assistant = self.run_cli("assistant", "--help")
+        self.assertEqual(assistant.returncode, 0)
+        self.assertNotIn("docs/macos", assistant.stdout)
+        configure = self.run_cli("configure")
+        self.assertEqual(configure.returncode, 2)
+        self.assertIn("usage: project-observatory full configure", configure.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
