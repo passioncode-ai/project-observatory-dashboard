@@ -708,8 +708,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "7cf0b92e7b4fd7456ed09808848e53ea38a667811f102786c59e126357b7f5d2",
-      "bytes": 47397,
+      "export_sha256": "cb7bd2563f0e9200e6c2924c533c5b4ded644204800734a93edf13756f4f9cf9",
+      "bytes": 47400,
       "upstream_modified": true
     },
     {
@@ -723,8 +723,8 @@
       "path": "engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1b4ad3207e4346ba5239a66532ca900255e02342f728675e0219fcee9858f5b5",
-      "bytes": 51596
+      "export_sha256": "036a891f10367da92305e59111a303cabac303dda9a5ca70a85eb3d8cf22a970",
+      "bytes": 52182
     },
     {
       "path": "estate.py",
@@ -1693,8 +1693,8 @@
       "path": "tests/test_agent_plugin.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c2792f93f71c2056f1ce04e26c774baf62e30ece462ef1d5187ab1c40a44517b",
-      "bytes": 20729
+      "export_sha256": "75b204318c36e80d45f0046cb32032b25762fc928b14c5e81303ef9c58da98cd",
+      "bytes": 21522
     },
     {
       "path": "tests/test_agent_queue.py",
@@ -1942,8 +1942,8 @@
       "path": "tests/test_dashboard_stop.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "724771e66c9ab085f6435792100b013610802e1f9efba9629dfab1ba3d5690e7",
-      "bytes": 6745
+      "export_sha256": "f7b6a68decff290f0c001f4e6b2cee3435ede0e790d8c8535e266afcc6727605",
+      "bytes": 7668
     },
     {
       "path": "tests/test_dashboard_store.py",
@@ -2012,8 +2012,8 @@
       "path": "tests/test_engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "154fad548be18916b00c2310311e183d04aff43e36786d21adde0a515fc178a5",
-      "bytes": 35764
+      "export_sha256": "e8edc485da25db2211610ff39abf0f1fb488284c78f98c28e2a40474ebad0899",
+      "bytes": 36223
     },
     {
       "path": "tests/test_env_inventory.py",
@@ -3222,8 +3222,8 @@
       "path": "tools/agent_plugin.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "54592f1602b796771936695c17a137eb25064f089bc3865f1753955bf25523ad",
-      "bytes": 20627
+      "export_sha256": "1304ccd5d4dbefdf64753dd741ba7453c5f3607b11d5d081b80f0f6a21a903f9",
+      "bytes": 21137
     },
     {
       "path": "tools/audit_vault_links.py",
@@ -3356,8 +3356,8 @@
       "path": "tools/dashboard_open.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "94dfbc07a1ea3fe375e6218321073ba43228809458177fb0c8a7533e98cb3b39",
-      "bytes": 11044
+      "export_sha256": "cd3e5e778ad10188f10449c93e4e2c340f31681d83b5d52611e2cb8818996fb2",
+      "bytes": 11781
     },
     {
       "path": "tools/env_findings.py",
