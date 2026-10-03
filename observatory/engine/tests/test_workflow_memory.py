@@ -743,6 +743,73 @@ class ReviewFindings(WorkflowCase):
         self.assertEqual(gone, 1)
 
 
+def vault_reader(slots=(), env=(), blind=False):
+    """A stand-in for `observatory_credentials`: slots as (env, NAME), env-file
+    secrets as NAME. Names only — the real reader never sees a value either."""
+    def read(project: str) -> dict:
+        out = {"project": project.split(":", 1)[-1],
+               "vault": [{"name": n, "env": e} for e, n in slots],
+               "env": [{"name": n, "class": "secret"} for n in env], "degraded": []}
+        if blind:
+            out["degraded"].append({"source": "vault", "reason": "no vault here"})
+        return out
+    return read
+
+
+class Credentials(WorkflowCase):
+    """Every credential an agent uses comes from the vault, by name (AGENT-SECRETS.md)."""
+
+    NEEDS = [{"project": "alpha-web", "env": "prod", "name": "STRIPE_KEY", "purpose": "charge"},
+             {"project": "alpha-web", "env": "local", "name": "DB_URL"},
+             {"project": "alpha-web", "env": "prod", "name": "SENTRY_DSN"}]
+
+    def test_a_handoff_says_where_each_key_is(self) -> None:
+        wf = self.start(body=body(credentials=self.NEEDS))
+        reader = vault_reader(slots=[("prod", "STRIPE_KEY")], env=["DB_URL"])
+        h = self.handoff(wf, credential_reader=reader)
+        self.assertTrue(h["credentialsMissing"])
+        pack = W.handoff_get(self.conn, h["handoffId"])["pack"]
+        states = {c["name"]: c["state"] for c in pack["credentials"]}
+        self.assertEqual(states, {"STRIPE_KEY": "vault", "DB_URL": "env-only",
+                                  "SENTRY_DSN": "missing"})
+        by = {c["name"]: c for c in pack["credentials"]}
+        self.assertIn("--vault-only alpha-web STRIPE_KEY", by["STRIPE_KEY"]["use"])
+        self.assertIn("vault.py\" put alpha-web local DB_URL", by["DB_URL"]["put"])
+        self.assertEqual(list(pack)[list(pack).index("constraints") + 1], "credentials",
+                         "credentials come right after the constraints")
+
+    def test_acceptance_reads_the_vault_again(self) -> None:
+        wf = self.start(body=body(credentials=self.NEEDS[:1]))
+        h = self.handoff(wf, credential_reader=vault_reader())
+        self.assertTrue(h["credentialsMissing"])
+        got = self.accept(h["handoffId"], credential_reader=vault_reader(
+            slots=[("prod", "STRIPE_KEY")]))
+        self.assertFalse(got["credentialsMissing"], "the key was put in the vault meanwhile")
+        self.assertEqual(got["credentials"][0]["state"], "vault")
+
+    def test_an_unreadable_vault_is_unknown_not_missing(self) -> None:
+        wf = self.start(body=body(credentials=self.NEEDS[:1]))
+        latest = W.checkpoint_latest(self.conn, wf["workflowId"],
+                                     credential_reader=vault_reader(blind=True))
+        self.assertEqual(latest["credentials"][0]["state"], "unknown")
+        self.assertFalse(latest["credentialsMissing"])
+
+    def test_a_value_is_never_a_credential_address(self) -> None:
+        bad = [{"project": "alpha-web", "name": SHAPED_KEY},
+               {"project": "alpha-web", "name": "OK", "purpose": f"use {SHAPED_KEY}"},
+               {"project": "alpha-web", "name": "OK", "env": "staging"},
+               {"project": "alpha-web", "name": "OK", "value": "x"}]
+        for i, c in enumerate(bad):
+            with self.assertRaises(W.InvalidInput, msg=str(i)):
+                self.start(idempotency_key=f"key-cred-bad-{i}", body=body(credentials=[c]))
+
+    def test_redaction_names_the_slot_a_value_lives_in(self) -> None:
+        wf = self.start(body=body(notes=f"the key was {KNOWN_VALUE}"),
+                        redactor=redactor({KNOWN_VALUE: "vault:alpha-web/prod/STRIPE_KEY"}))
+        stored = W.checkpoint_latest(self.conn, wf["workflowId"])["checkpoint"]["body"]
+        self.assertIn("[redacted:vault:alpha-web/prod/STRIPE_KEY]", stored["notes"])
+
+
 class Migration(unittest.TestCase):
     def test_a_pre_workflow_store_gains_the_shape_and_keeps_its_rows(self) -> None:
         with tempfile.TemporaryDirectory(prefix="observatory-wf-mig-") as d:

@@ -377,6 +377,18 @@ def cmd_rotate(a) -> int:
           "verifying revocation and consumers")
     print("  the RETIRED value still works until revoked at its provider — "
           "revoke it there, then delete the archive when you no longer need it")
+    # THE SERVICES STILL ON THE OLD VALUE. A service reads its keys once, when
+    # `use_secret.py serve` starts it, so it keeps the old one until restarted.
+    # Naming them is what turns "consumers were checked" from a promise into a
+    # list.
+    import use_secret
+    running = use_secret.consumers(a.project, a.env, a.name)
+    if running:
+        print(f"  {len(running)} service(s) started with this slot read it at start and "
+              f"still hold the old value until restarted:")
+        for row in running:
+            print(f"    {row['consumer']} (started {row.get('at', '?')}): "
+                  f"launchctl kickstart -k gui/$(id -u)/{row['consumer']}")
     return 0
 
 

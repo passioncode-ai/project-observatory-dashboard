@@ -117,6 +117,11 @@ ACCOUNT_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}")
 PROVIDER = re.compile(r"[a-z0-9][a-z0-9._-]{0,31}")
 MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,95}")
 PROJECT_ID = re.compile(r"[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._/:-]{0,199}")
+#: A credential as the vault names it: the project's folder (or its registry
+#: id), the environment, and the variable name. Never a value.
+CRED_PROJECT = re.compile(r"(?:project:)?[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+CRED_NAME = re.compile(r"[A-Z_][A-Z0-9_]{0,127}")
+CRED_ENVS = ("local", "stage", "prod")
 SESSION_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
@@ -277,7 +282,7 @@ def checkpoint_body(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise InvalidInput("body must be an object")
     known = {"goal", "plan", "done", "open", "decisions", "constraints", "artifacts",
-             "questions", "memory_refs", "notes"}
+             "questions", "memory_refs", "notes", "credentials"}
     unknown = set(raw) - known
     if unknown:
         raise InvalidInput(f"body has unknown fields: {', '.join(sorted(unknown))}; "
@@ -310,6 +315,7 @@ def checkpoint_body(raw: Any) -> dict[str, Any]:
     for d in body["done"]:
         if "evidence" in d:
             d["evidence"] = [_short_commits(e) for e in d["evidence"]]
+    body["credentials"] = _credentials(raw.get("credentials"))
     body["questions"] = _strings(raw.get("questions"), "body.questions", 50, 1000)
     body["memory_refs"] = [_short_commits(r) for r in
                            _strings(raw.get("memory_refs"), "body.memory_refs", 100, 300)]
@@ -317,6 +323,98 @@ def checkpoint_body(raw: Any) -> dict[str, Any]:
     if notes is not None:
         body["notes"] = notes
     return {k: v for k, v in body.items() if v not in ([], None)} | {"goal": body["goal"]}
+
+
+def _credentials(raw: Any) -> list[dict]:
+    """The credentials a workflow needs, by name: `{project, env, name, purpose}`.
+
+    Every credential an agent uses comes from Observatory's vault (the rule in
+    docs/design/AGENT-SECRETS.md). Declaring them here lets a handoff check, before
+    the next executor starts, that each one is in the vault — and lets the
+    Agents view show a workflow that is about to fail for a missing key. A value
+    in any field is refused, not redacted: this field holds addresses only."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > 50:
+        raise InvalidInput("body.credentials must be a list of at most 50 objects")
+    out, seen = [], set()
+    for i, item in enumerate(raw):
+        where = f"body.credentials[{i}]"
+        if not isinstance(item, dict) or set(item) - {"project", "env", "name", "purpose"}:
+            raise InvalidInput(f"{where} must be {{project, env, name, purpose}}")
+        row = {"project": _require(CRED_PROJECT, item.get("project"), f"{where}.project"),
+               "env": item.get("env", "local"),
+               "name": _require(CRED_NAME, item.get("name"), f"{where}.name")}
+        if row["env"] not in CRED_ENVS:
+            raise InvalidInput(f"{where}.env must be one of {', '.join(CRED_ENVS)}")
+        purpose = _string(item.get("purpose"), f"{where}.purpose", 200)
+        if purpose is not None:
+            if memory_redact.credential_kind(purpose):
+                raise InvalidInput(f"{where}.purpose looks like it carries a credential; "
+                                   f"name the key, never paste it")
+            row["purpose"] = purpose
+        key = (row["project"], row["env"], row["name"])
+        if key not in seen:
+            seen.add(key)
+            out.append(row)
+    return out
+
+
+def credential_states(declared: list[dict],
+                      reader: Callable[[str], dict] | None = None) -> tuple[list[dict], list[dict]]:
+    """Where each declared credential is, read now: `vault`, `env-only`,
+    `missing` or `unknown`, with the command that uses it. Never a value.
+
+    `env-only` is a key the project holds in its own `.env` and not in the
+    vault: it works, and it breaks the rule — an agent's keys live in the vault.
+    `unknown` is said when the vault directory cannot be listed, because
+    "missing" would then be a guess."""
+    if not declared:
+        return [], []
+    reader = reader or _survey_credentials
+    answers: dict[str, dict] = {}
+    degraded: list[dict] = []
+    out = []
+    for c in declared:
+        project = c["project"]
+        if project not in answers:
+            try:
+                answers[project] = reader(project)
+            except Exception as exc:                                            # noqa: BLE001
+                answers[project] = {"vault": [], "env": [], "degraded": [
+                    {"source": "vault", "reason": f"unreadable: {type(exc).__name__}"}]}
+                degraded.append({"source": f"credentials:{project}",
+                                 "reason": f"could not be read: {type(exc).__name__}"})
+        a = answers[project]
+        folder = a.get("project") or project.split(":", 1)[-1]
+        vault_blind = any(d.get("source") == "vault" for d in a.get("degraded", []))
+        in_vault = any(v.get("name") == c["name"] and v.get("env") == c["env"]
+                       for v in a.get("vault", []))
+        in_env = any(e.get("name") == c["name"] and e.get("class") == "secret"
+                     for e in a.get("env", []))
+        state = ("vault" if in_vault else "unknown" if vault_blind
+                 else "env-only" if in_env else "missing")
+        row = dict(c, state=state)
+        if state == "vault":
+            row["use"] = (f"python \"$(project-observatory full-path)/tools/use_secret.py\" run "
+                          f"--env {c['env']} --vault-only {folder} {c['name']} -- <command>")
+        else:
+            row["put"] = (f"python \"$(project-observatory full-path)/tools/vault.py\" put "
+                          f"{folder} {c['env']} {c['name']} < <protected file>")
+        out.append(row)
+    return out, degraded
+
+
+def _survey_credentials(project: str) -> dict:
+    import survey
+    return survey.credentials(project)
+
+
+def _blocking(states: list[dict]) -> bool:
+    """True when the next executor cannot run a declared step: a key that is not
+    in the vault. `env-only` blocks too — continuing on it would carry a breach
+    of the rule into another session."""
+    return any(s["state"] in ("missing", "env-only") for s in states)
 
 
 def executor_shape(raw: Any, field: str = "executor") -> dict[str, str]:
@@ -463,8 +561,10 @@ def _lapse_expired(conn: sqlite3.Connection, workflow_id: str, now: datetime) ->
                  (_iso(now), workflow_id, _iso(now)))
 
 
-def checkpoint_latest(conn: sqlite3.Connection, workflow_id: str) -> dict:
-    """The workflow, its latest checkpoint and who holds it. Reads only."""
+def checkpoint_latest(conn: sqlite3.Connection, workflow_id: str,
+                      credential_reader: Callable[[str], dict] | None = None) -> dict:
+    """The workflow, its latest checkpoint and who holds it, and where each
+    declared credential is now. Reads only."""
     wf = _workflow(conn, workflow_id)
     ckpt = _latest_checkpoint(conn, workflow_id)
     now = _now()
@@ -487,7 +587,15 @@ def checkpoint_latest(conn: sqlite3.Connection, workflow_id: str) -> dict:
             "closedAt": wf["closed_at"],
             "checkpoint": None if ckpt is None else _checkpoint_view(ckpt),
             "lease": _lease_view(_active(conn, workflow_id)),
-            "pendingHandoff": _lease_view(offer), "lapsedHandoff": lapsed}
+            "pendingHandoff": _lease_view(offer), "lapsedHandoff": lapsed,
+            **_credential_view(ckpt, credential_reader)}
+
+
+def _credential_view(ckpt: sqlite3.Row | None, reader) -> dict:
+    declared = json.loads(ckpt["body_json"] or "{}").get("credentials", []) if ckpt else []
+    creds, degraded = credential_states(declared, reader)
+    return {"credentials": creds, "credentialsMissing": _blocking(creds),
+            "degraded": degraded}
 
 
 def handoff_get(conn: sqlite3.Connection, handoff_id: str) -> dict:
@@ -698,6 +806,7 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
                    workflow_id: str, to: Any, reason: str, transcript: Any = None,
                    offer_ttl_seconds: int = OFFER_TTL_DEFAULT, lease_token: str | None = None,
                    force: bool = False,
+                   credential_reader: Callable[[str], dict] | None = None,
                    git_reader: Callable[[str], dict] | None = None,
                    related_reader: Callable[..., tuple[list[dict], list[dict]]] | None = None,
                    redactor: memory_redact.Redactor | None = None) -> dict:
@@ -758,6 +867,8 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
     related, related_degraded = related_reader(conn, body=body, project_id=wf["project_id"],
                                                workflow_id=workflow_id)
     degraded += related_degraded
+    creds, creds_degraded = credential_states(body.get("credentials", []), credential_reader)
+    degraded += creds_degraded
     redactor = redactor or memory_redact.Redactor()
     request = {"workflowId": workflow_id, "to": target, "reason": reason, "transcript": session,
                "offerTtlSeconds": offer_ttl_seconds, "checkpoint": ckpt["revision"],
@@ -788,6 +899,10 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
             "from": None if active is None else json.loads(active["executor_json"] or "{}"),
             # FIRST, and verbatim: the restrictive mode is what a summary drops.
             "constraints": body.get("constraints", []),
+            # SECOND: the keys the work needs, where each one is now. A step
+            # that needs a key the vault does not hold fails half-way; saying so
+            # here stops the next executor before it starts.
+            "credentials": creds, "credentialsMissing": _blocking(creds),
             "checkpoint": _checkpoint_view(latest),
             "git": snapshots, "related": related, "degraded": degraded,
             "instructions": ("Continue this workflow from the checkpoint's open steps. Obey "
@@ -823,7 +938,7 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
                      (_ref(), workflow_id, json.dumps(target), hid, _iso(now), _iso(expires)))
         return {"handoffId": hid, "workflowId": workflow_id, "expiresAt": _iso(expires),
                 "checkpointRevision": latest["revision"], "degraded": degraded,
-                "redacted": pack_report.as_dict()}
+                "credentialsMissing": _blocking(creds), "redacted": pack_report.as_dict()}
 
     return _atomic(conn, owner, "handoff.create", idempotency_key, request, work)
 
@@ -862,7 +977,8 @@ def _handoff_authority(conn: sqlite3.Connection, workflow_id: str, active: sqlit
 
 
 def handoff_accept(conn: sqlite3.Connection, *, owner: str, idempotency_key: str,
-                   handoff_id: str, executor: Any = None, session_id: str | None = None) -> dict:
+                   handoff_id: str, executor: Any = None, session_id: str | None = None,
+                   credential_reader: Callable[[str], dict] | None = None) -> dict:
     """Take the workflow: the offer becomes the active lease, the old one ends.
 
     The answer carries the new lease token and the pack, constraints first.
@@ -880,6 +996,15 @@ def handoff_accept(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
     # every Claude session shares one identity, so without it a second session
     # repeating the key and the handoff id would receive the first one's token.
     request = {"handoffId": handoff_id, "executor": who, "sessionId": session_id}
+    # The credentials are read FRESH, before the transaction (the vault is
+    # files, not this store): a key put into the vault after the pack was made
+    # counts, and one removed since does too. From the checkpoint in force.
+    current = conn.execute(
+        "SELECT l.body_json FROM workflow_leases w JOIN ledger l"
+        " ON l.memory_id = 'ckpt:' || w.workflow_id WHERE w.handoff_id = ?"
+        " ORDER BY l.revision DESC LIMIT 1", (handoff_id,)).fetchone()
+    declared = json.loads(current[0] or "{}").get("credentials", []) if current else []
+    creds, creds_degraded = credential_states(declared, credential_reader)
 
     def work() -> dict:
         now = _now()
@@ -935,6 +1060,8 @@ def handoff_accept(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
                 "checkpoint": None if latest is None else _checkpoint_view(latest),
                 "checkpointAdvanced": latest is not None and packed is not None
                 and latest["revision"] != packed,
+                "credentials": creds, "credentialsMissing": _blocking(creds),
+                "degraded": creds_degraded,
                 "pack": pack}
 
     answer = _atomic(conn, owner, "handoff.accept", idempotency_key, request, work)

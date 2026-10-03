@@ -45,9 +45,14 @@ including the flag that said "do not push":
   "decisions": [{"id": "D-1", "choice": "stream rows", "why": "the table is large"}],
   "constraints": ["read-only: do not push"],
   "artifacts": [{"kind": "git", "path": "/absolute/checkout", "branch": "feature"}],
+  "credentials": [{"project": "alpha-web", "env": "prod", "name": "STRIPE_KEY", "purpose": "charge"}],
   "questions": [], "memory_refs": [], "notes": "…"
 }
 ```
+
+`credentials` lists the keys the workflow needs, by name only — `{project, env, name,
+purpose}` — and every read and handoff reports where each one is now
+([AGENT-SECRETS.md](AGENT-SECRETS.md)).
 
 `goal` is required. An unknown field is refused, because a field the next executor is not told
 to read is state that silently does not travel. The body is at most 64 KiB; a log is linked as
@@ -92,7 +97,9 @@ Two partial unique indexes make "one active, one offered" a property of the tabl
 
 Assembled by the engine, immutable once written:
 
-1. `constraints`: the latest checkpoint's constraints, first and verbatim.
+1. `constraints`: the latest checkpoint's constraints, first and verbatim. Then
+   `credentials`: each declared key's state (`vault`, `env-only`, `missing`, `unknown`) with
+   the command to use or store it, and `credentialsMissing`.
 2. `checkpoint`: the latest checkpoint, with its body.
 3. `git`: a fresh read of each git artifact's checkout — branch, a 12-character head and the
    paths that differ, never file contents. It is read through `safe_git`, so the checkout's

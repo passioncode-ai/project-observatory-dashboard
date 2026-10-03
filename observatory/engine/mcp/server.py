@@ -971,8 +971,9 @@ def observatory_checkpoint_write(
         "Typed state, not prose: goal (required), plan [{step_id,title,needs}], done "
         "[{step_id,result,evidence}], open [{step_id,next_action}], decisions "
         "[{id,choice,why}], constraints [str] (shown to the next executor first), artifacts "
-        "[{kind: git|file|url|other, path, branch, head, ref, note}], questions, memory_refs, "
-        "notes. Secrets are redacted on the way in."))],
+        "[{kind: git|file|url|other, path, branch, head, ref, note}], credentials "
+        "[{project, env, name, purpose}] (keys by NAME, from the vault — never a value), "
+        "questions, memory_refs, notes. Secrets are redacted on the way in."))],
     workflowId: Annotated[str | None, Field(description="Omit to start a workflow; the answer "
                                                         "carries its id and your `leaseId`.")] = None,
     leaseId: Annotated[str | None, Field(description="The token from the first write or from "

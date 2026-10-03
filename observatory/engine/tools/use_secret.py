@@ -3,8 +3,10 @@
 
     T="$(project-observatory full-path)/tools"          # the installed engine's tools
     python "$T/use_secret.py" names <project>                    what this project has
-    python "$T/use_secret.py" run [--env ENV] <project> <NAME>[,<NAME>…] -- <command…>
+    python "$T/use_secret.py" run [--env ENV] [--vault-only] <project> <NAME>[,<NAME>…] -- <command…>
     python "$T/use_secret.py" where [--env ENV] <project> <NAME>             which slot it would resolve
+    python "$T/use_secret.py" serve [--env ENV] [--consumer LABEL] <project> <NAME>[,…] -- <service…>
+                                                       a long-running service, vault only
 
 WHY THIS EXISTS. The secrets rule already says an agent works with NAMES after
 an inject — and without this file there was no way to HONOUR that for a one-off
@@ -54,6 +56,7 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import paths  # noqa: E402
+import credential_shape  # noqa: E402
 sys.path.insert(0, str(ROOT / "tools"))
 import vault as private_files
 
@@ -173,11 +176,34 @@ def _held_in(project: str, name: str) -> tuple[list[str], list[str]]:
     return envs, files
 
 
-def resolve(project: str, name: str, env: str | None = None) -> tuple[str, str]:
+#: `OBSERVATORY_VAULT_ONLY=1` in an agent's or a service's environment makes
+#: `--vault-only` the default for everything it runs: the rule for agents is that
+#: every credential comes from the vault, and a fallback to a project's `.env`
+#: that only prints a note would let the rule erode one key at a time.
+VAULT_ONLY_ENV = "OBSERVATORY_VAULT_ONLY"
+
+
+def vault_only_default() -> bool:
+    return os.environ.get(VAULT_ONLY_ENV, "") not in ("", "0", "false", "no")
+
+
+def resolve(project: str, name: str, env: str | None = None,
+            vault_only: bool = False) -> tuple[str, str]:
     """(value, where it came from). Raises LookupError naming where it looked
-    and where the name DOES live, so the next command is the right one."""
+    and where the name DOES live, so the next command is the right one.
+
+    `vault_only` refuses the `.env` fallback: a name held only in a project's
+    env file is an error that says how to move it into the vault."""
     slot, got_env = vault_slot(project, name, env)
     files = env_candidates(project, name, env)
+    if slot is None and vault_only:
+        held = f" It is in {files[0].relative_to(paths.DATA)}, which is not the vault." \
+            if files else ""
+        raise LookupError(
+            f"{name} is not in the vault under projects/{project}/{{{env or ','.join(ENVS)}}}, "
+            f"and only the vault is read here (--vault-only, or {VAULT_ONLY_ENV}).{held} "
+            f"Store it with `{PUT} {project} {env or 'local'} {name}` and a protected file "
+            f"on stdin; an agent's credentials live in the vault.")
     if slot is not None:
         if files:
             print(f"note: {name} is in the vault ({project}/{got_env}) and in "
@@ -310,7 +336,8 @@ def cmd_names(args) -> int:
 
 def cmd_where(args) -> int:
     try:
-        _, where = resolve(args.project, args.name, args.env)
+        _, where = resolve(args.project, args.name, args.env,
+                           vault_only=args.vault_only or vault_only_default())
     except LookupError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -336,7 +363,8 @@ def cmd_run(args) -> int:
     wheres: dict[str, str] = {}
     for n in names:
         try:
-            values[n], wheres[n] = resolve(args.project, n, args.env)
+            values[n], wheres[n] = resolve(args.project, n, args.env,
+                                           vault_only=args.vault_only or vault_only_default())
         except LookupError as exc:
             print(str(exc), file=sys.stderr)
             return 2
@@ -374,6 +402,84 @@ def cmd_run(args) -> int:
     proc.stdout.close()
     proc.stderr.close()
     return rc
+
+
+#: A consumer label as launchd and Fabric name a service (`com.example.agent`).
+CONSUMER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+
+
+def consumers(project: str, env: str, name: str) -> list[dict]:
+    """The services that started with this slot, newest first, one row per
+    consumer label: what a rotation has to restart. Read from the audit
+    journal's `serve` rows, so the record and the use are one write."""
+    if not AUDIT.is_file():
+        return []
+    latest: dict[str, dict] = {}
+    for line in AUDIT.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if row.get("action") != "serve" or row.get("project") != project:
+            continue
+        if f"vault:{project}/{env}/{name}" not in (row.get("from") or {}).values():
+            continue
+        latest[row.get("consumer", "?")] = row
+    return sorted(latest.values(), key=lambda r: r.get("at", ""), reverse=True)
+
+
+def cmd_serve(args) -> int:
+    """Start a long-running service with its credentials, from the vault only.
+
+    `run` pumps the child's output through a scrubber and stays as its parent,
+    which suits a one-off command and not a service: launchd's signals would
+    reach the pump, the service's own log handling would be wrapped, and a
+    restart would need both. So `serve` resolves the values, records the
+    consumer, and REPLACES itself with the service (`exec`): the service gets
+    launchd's signals directly, keeps its own output, and the values exist only
+    in its environment. It never reads a project's `.env` — a service is exactly
+    what the vault-only rule is for.
+
+    The consumer row is what `vault.py rotate` reads to say which services to
+    restart: a value is read once, at start, so a rotation does not reach a
+    running service until it restarts."""
+    names = [n.strip() for n in args.names.split(",") if n.strip()]
+    if not names or not args.command:
+        print("serve needs NAMES and a command after `--`", file=sys.stderr)
+        return 2
+    if args.command[0].startswith("-"):
+        print(f"use_secret: {args.command[0]} came after the names; flags go first: "
+              f"serve --env ENV --consumer LABEL PROJECT NAME -- COMMAND", file=sys.stderr)
+        return 2
+    label = args.consumer or os.environ.get("XPC_SERVICE_NAME") or \
+        pathlib.PurePath(args.command[0]).name
+    if not CONSUMER.fullmatch(label or "") or credential_shape.find(label):
+        print("use_secret: --consumer must be a service label such as com.example.agent",
+              file=sys.stderr)
+        return 2
+    values: dict[str, str] = {}
+    wheres: dict[str, str] = {}
+    for n in names:
+        try:
+            values[n], wheres[n] = resolve(args.project, n, args.env, vault_only=True)
+        except LookupError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    audit("serve", f"{args.project}:{','.join(names)}",
+          {"project": args.project, "from": wheres, "consumer": label, "pid": os.getpid(),
+           "command": args.command[0], "argv_len": len(args.command)})
+    child_env = dict(os.environ)
+    child_env.update(values)
+    try:
+        os.execvpe(args.command[0], args.command, child_env)
+    except (FileNotFoundError, PermissionError) as exc:
+        audit("serve-failed", f"{args.project}:{','.join(names)}",
+              {"project": args.project, "consumer": label, "command": args.command[0],
+               "reason": type(exc).__name__})
+        print(f"use_secret: cannot start {args.command[0]}: {type(exc).__name__}",
+              file=sys.stderr)
+        return 127 if isinstance(exc, FileNotFoundError) else 126
+    return 0                                                            # pragma: no cover
 
 
 #: Programs that read their SOURCE from stdin. A secret piped into one of these
@@ -451,6 +557,9 @@ def main(argv: list[str]) -> int:
     p.add_argument("project")
     p.add_argument("name")
     p.add_argument("--env", choices=ENVS)
+    p.add_argument("--vault-only", action="store_true",
+                   help=f"read the vault and never a project's .env ({VAULT_ONLY_ENV}=1 "
+                        f"makes it the default)")
     p.set_defaults(fn=cmd_where)
 
     p = sub.add_parser("run", help="run a command with the value in its environment")
@@ -459,9 +568,22 @@ def main(argv: list[str]) -> int:
     p.add_argument("--env", choices=ENVS)
     p.add_argument("--as", dest="as_name",
                    help="also export it under this name (one variable only)")
+    p.add_argument("--vault-only", action="store_true",
+                   help=f"read the vault and never a project's .env ({VAULT_ONLY_ENV}=1 "
+                        f"makes it the default; the rule for agents and services)")
     p.add_argument("command", nargs=argparse.REMAINDER,
                    help="after `--`, the command to run")
     p.set_defaults(fn=cmd_run)
+
+    p = sub.add_parser("serve", help="start a long-running service with its keys from the "
+                                     "vault (exec; records the consumer for rotations)")
+    p.add_argument("project")
+    p.add_argument("names", help="one NAME, or several separated by commas")
+    p.add_argument("--env", choices=ENVS)
+    p.add_argument("--consumer", help="the service's label (default: launchd's "
+                                      "XPC_SERVICE_NAME, else the program name)")
+    p.add_argument("command", nargs=argparse.REMAINDER, help="after `--`, the service")
+    p.set_defaults(fn=cmd_serve)
 
     p = sub.add_parser("pipe", help="value on stdin -> env NAME -> run, output scrubbed")
     p.add_argument("name", help="the environment variable the command will read")

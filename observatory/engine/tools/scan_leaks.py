@@ -153,7 +153,9 @@ def known_values() -> tuple[dict[str, str], list[dict], list[dict]]:
                                             "its shape is not distinctive enough for "
                                             "a text match to be evidence")})
                     continue
-                values.setdefault(value, f"{f['project']}/{name}")
+                # A LABEL THAT SAYS WHERE IT LIVES: `env:` and the project, so a
+                # redaction marker or a finding names the home of the value.
+                values.setdefault(value, f"env:{f['project']}/{name}")
 
     # 2. the vault's slots
     if VAULT.is_dir():
@@ -172,7 +174,9 @@ def known_values() -> tuple[dict[str, str], list[dict], list[dict]]:
                                         "its shape is not distinctive enough for a "
                                         "text match to be evidence")})
                 continue
-            values.setdefault(value, f"vault:{slot.parent.parent.name}/{slot.name}")
+            # `vault:<project>/<env>/<NAME>`, the address the rest of the
+            # engine uses for a slot (`openrouter.py --to`, the keyserver).
+            values.setdefault(value, f"vault:{slot.parent.parent.name}/{slot.parent.name}/{slot.name}")
 
     # 3. the OpenRouter destinations
     for label, path in DESTINATIONS.items():

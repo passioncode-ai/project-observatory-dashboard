@@ -226,6 +226,78 @@ def test_names_lists_without_values() -> None:
     check("and it exits cleanly either way", p.returncode == 0, p.stderr[-120:])
 
 
+def test_vault_only_refuses_a_project_env_file() -> None:
+    """An agent's credentials live in the vault. With `--vault-only`, or
+    `OBSERVATORY_VAULT_ONLY=1` in its environment, a name held only in the
+    project's `.env` is an error that says how to move it — not a silent
+    fallback that lets the rule erode one key at a time."""
+    d, env = estate()
+    child = careless_child(d, "DEMO_API_KEY")
+    for label, extra, flag in (("--vault-only", {}, ["--vault-only"]),
+                               ("OBSERVATORY_VAULT_ONLY=1", {"OBSERVATORY_VAULT_ONLY": "1"}, [])):
+        p = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "run", *flag,
+                            "demo", "DEMO_API_KEY", "--", sys.executable, str(child)],
+                           env={**env, **extra}, capture_output=True, text=True, timeout=60)
+        check(f"{label}: the env-file fallback is refused", p.returncode != 0
+              and "not in the vault" in p.stderr, p.stderr[-200:])
+        check(f"{label}: and the refusal says how to store it", "vault.py" in p.stderr
+              and "put demo" in p.stderr, p.stderr[-200:])
+        check(f"{label}: and the child never ran", "len:" not in p.stdout, p.stdout[-80:])
+        check(f"{label}: and no value was printed", PLANTED not in p.stdout + p.stderr,
+              "IT LEAKED")
+    p = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "run",
+                        "demo", "DEMO_API_KEY", "--", sys.executable, str(child)],
+                       env={**env, "OBSERVATORY_VAULT_ONLY": "0"}, capture_output=True,
+                       text=True, timeout=60)
+    check("without it the fallback still works", f"len: {len(PLANTED)}" in p.stdout,
+          p.stderr[-160:])
+
+
+def test_serve_starts_a_service_from_the_vault_and_rotation_names_it() -> None:
+    """A long-running agent service: values from the vault only, the process
+    REPLACED by the service (same pid, launchd's signals reach it directly, its
+    output is its own), and the consumer recorded so a rotation can name it."""
+    d, env = estate()
+    env = {**env, "OBSERVATORY_VAULT_DIR": str(d / "vault")}
+    first = "sk-" + "or-v1-" + "Q1w2E3r4" * 4
+    second = "sk-" + "or-v1-" + "Z9x8C7v6" * 4
+    put = subprocess.run([sys.executable, str(ROOT / "tools/vault.py"), "put", "demo", "local",
+                          "SERVICE_KEY"], input=first, env=env, capture_output=True, text=True,
+                         timeout=60)
+    check("a slot is put for the service", put.returncode == 0, put.stderr[-200:])
+    svc = d / "service.py"
+    svc.write_text("import os, sys\n"
+                   "print('pid', os.getpid())\n"
+                   "print('len', len(os.environ.get('SERVICE_KEY', '')))\n", encoding="utf-8")
+    p = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "serve",
+                        "--consumer", "com.example.agent", "demo", "SERVICE_KEY", "--",
+                        sys.executable, str(svc)], env=env, capture_output=True, text=True,
+                       timeout=60)
+    check("the service starts with the key", f"len {len(first)}" in p.stdout,
+          p.stdout[-200:] + p.stderr[-200:])
+    rows = [json.loads(l) for l in (d / "state" / "logs" / "secret-use.jsonl").read_text(
+        encoding="utf-8").splitlines() if '"serve"' in l]
+    pid_line = next((l for l in p.stdout.splitlines() if l.startswith("pid ")), "pid ?")
+    check("and it IS the process serve was (exec, no pump in between)",
+          rows and str(rows[-1].get("pid")) == pid_line.split()[1], f"{rows} / {pid_line}")
+    check("the consumer is recorded by label, the value is not",
+          rows and rows[-1].get("consumer") == "com.example.agent"
+          and first not in json.dumps(rows), str(rows))
+    only_env = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "serve",
+                               "demo", "DEMO_API_KEY", "--", sys.executable, str(svc)],
+                              env=env, capture_output=True, text=True, timeout=60)
+    check("serve never reads a project's .env", only_env.returncode != 0
+          and "not in the vault" in only_env.stderr, only_env.stderr[-200:])
+    rot = subprocess.run([sys.executable, str(ROOT / "tools/vault.py"), "rotate", "demo",
+                          "local", "SERVICE_KEY"], input=second, env=env, capture_output=True,
+                         text=True, timeout=60)
+    check("a rotation names the service still on the old value",
+          rot.returncode == 0 and "com.example.agent" in rot.stdout
+          and "launchctl kickstart -k" in rot.stdout, rot.stdout[-300:] + rot.stderr[-200:])
+    check("and prints neither value", first not in rot.stdout + rot.stderr
+          and second not in rot.stdout + rot.stderr, "IT LEAKED")
+
+
 def test_where_reports_the_source_it_would_take() -> None:
     d, env = estate()
     p = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "where",
@@ -396,6 +468,8 @@ if __name__ == "__main__":
                test_pipe_with_a_missing_program_is_typed,
                test_names_lists_without_values,
                test_where_reports_the_source_it_would_take,
+               test_vault_only_refuses_a_project_env_file,
+               test_serve_starts_a_service_from_the_vault_and_rotation_names_it,
                test_the_leak_scan_finds_a_planted_value,
                test_the_file_a_value_lives_in_is_not_a_sighting,
                test_an_undistinctive_value_is_named_rather_than_hunted,

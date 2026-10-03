@@ -134,9 +134,9 @@ def test_the_scrub_replaces_every_copy_and_keeps_no_value_anywhere() -> None:
     db, ch = home / "claude-mem.db", home / "chroma" / "chroma.sqlite3"
     check("the parent table holds no value", count(db, f"SELECT count(*) FROM observations WHERE instr(facts, '{VALUE}')>0") == 0)
     check("and reads REDACTED with the variable's name",
-          count(db, "SELECT count(*) FROM observations WHERE instr(facts, '[REDACTED:demo/DEMO_API_KEY]')>0") == 1)
+          count(db, "SELECT count(*) FROM observations WHERE instr(facts, '[REDACTED:env:demo/DEMO_API_KEY]')>0") == 1)
     check("both occurrences in one cell were replaced",
-          count(db, "SELECT count(*) FROM observations WHERE facts LIKE '%[REDACTED:demo/DEMO_API_KEY] twice: [REDACTED:demo/DEMO_API_KEY]%'") == 1)
+          count(db, "SELECT count(*) FROM observations WHERE facts LIKE '%[REDACTED:env:demo/DEMO_API_KEY] twice: [REDACTED:env:demo/DEMO_API_KEY]%'") == 1)
     check("the external-content FTS followed its parent through the trigger",
           count(db, f"SELECT count(*) FROM observations_fts WHERE observations_fts MATCH '{VALUE}'") == 0
           and count(db, "SELECT count(*) FROM observations_fts WHERE observations_fts MATCH 'REDACTED'") == 1)

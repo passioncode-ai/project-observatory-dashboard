@@ -3,7 +3,8 @@ name: handling-secrets
 description: >-
   Use when an agent needs to store, use, rotate or record exposure of a project's
   credentials through Project Observatory: "use a secret", "rotate a key",
-  "record a leak", «используй ключ», «ротируй ключ», «запиши утечку».
+  "record a leak", "give an agent its keys", «используй ключ», «ротируй ключ»,
+  «запиши утечку», «ключи для агента».
   Keeps credential values out of prompts and command arguments, uses named slots,
   and records changes without copying values into reports. NOT for granting
   provider permissions or choosing a project's authentication architecture.
@@ -50,7 +51,7 @@ for it. A name or note shaped like a credential is refused, never stored.
 |---|---|
 | Store a credential supplied locally | `vault.py put PROJECT ENV NAME`, value on stdin |
 | List slots | `vault.py list PROJECT ENV` |
-| Run a command using a slot | `use_secret.py run [--env ENV] PROJECT NAME -- COMMAND ARGUMENTS` (flags before PROJECT) |
+| Run a command using a slot | `use_secret.py run [--env ENV] [--vault-only] PROJECT NAME -- COMMAND ARGUMENTS` (flags before PROJECT) |
 | Receive a value from another local command | `use_secret.py pipe NAME -- COMMAND ARGUMENTS` |
 | Populate a project's ignored environment file | `vault.py inject PROJECT ENV DIRECTORY` |
 | Record an exposure | `vault.py leak PROJECT ENV NAME --where "location and evidence, no value"` |
@@ -80,6 +81,36 @@ filter prevents every leak.
 **Stdin carries one thing.** Never pipe a secret into `python3 -`, `node -` or
 `sh -s`, or combine a secret pipe with a heredoc program. A program goes in a
 file; the secret goes through the named runner. A parse error can echo input.
+
+## Building an agent or a service
+
+**Every credential an agent or a service uses comes from Project Observatory, by
+name.** That holds for a one-shot agent, a long-running agent service and code an
+agent writes for one. Concretely:
+
+- **Issue or store it here.** A provider door issues straight into a slot; a value
+  the user has goes in with `vault.py put PROJECT ENV NAME` (value on stdin).
+- **Discover it by name.** `observatory_credentials` (MCP) or `use_secret.py names
+  PROJECT` list what exists; neither returns a value.
+- **Inject it at run time, from the vault only.** A command: `use_secret.py run
+  --vault-only [--env ENV] PROJECT NAME -- COMMAND`. A long-running service (a launchd
+  job): `use_secret.py serve [--env ENV] --consumer LABEL PROJECT NAME[,NAME] -- COMMAND` in
+  its plist — it replaces itself with the service and records the consumer, so `vault.py
+  rotate` names the services to restart. Set `OBSERVATORY_VAULT_ONLY=1` in an agent's
+  environment so every command it runs refuses a project's `.env` fallback.
+- **No copies.** No `.env` of the agent's own, no key file beside its data, no value
+  in code, configuration, a commit, a prompt, a log or agent memory. A remote
+  platform's copy is recorded with `vault.py moved PROJECT ENV NAME --at PROVIDER`.
+- **Declare what a workflow needs.** A checkpoint carries `credentials: [{project,
+  env, name, purpose}]` — names only, a value is refused. A handoff and its
+  acceptance report each one as `vault`, `env-only` (works, and breaks this rule)
+  or `missing`, with the command to use or store it, and `credentialsMissing` stops
+  the next executor before the step that would fail.
+
+A value written into agent memory by mistake is replaced on the way in by a
+marker that names its slot (`[redacted:vault:PROJECT/ENV/NAME]`); treat that as an
+exposure and record it with `vault.py leak`. The design is
+[AGENT-SECRETS.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/AGENT-SECRETS.md).
 
 ## Provider integrations
 
