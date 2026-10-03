@@ -487,7 +487,8 @@ credential tools live: tools/vault.py, tools/use_secret.py, tools/install_key.py
 Local excludes metric plugins, provider collectors, secret scans and model calls.
 Plugin execution remains an explicit command and can use enabled integrations.
 Source-only historical gates are not part of the public acceptance check.
-See docs/CLI-COMPATIBILITY.md for command and state compatibility.
+See "$(project-observatory full-path)/docs/CLI-COMPATIBILITY.md" for command and
+state compatibility.
 """
 
 

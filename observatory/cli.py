@@ -103,7 +103,11 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=program(), description="Local observation for agent-operated projects. "
                                 "No implicit scans or provider requests. With no arguments, opens the dashboard.")
     p.add_argument("--version", action="version", version=__version__)
-    p.add_argument("--home", help="Private state directory (otherwise OBSERVATORY_HOME or ~/.local/share/project-observatory)")
+    # Two defaults, because the two command sets keep separate workspaces: `full`
+    # (and the bare command, which opens its dashboard) never reads the portable one.
+    p.add_argument("--home", help="Private state directory. Portable commands: otherwise OBSERVATORY_HOME "
+                   "or ~/.local/share/project-observatory . `full` and the bare command: otherwise "
+                   "OBSERVATORY_FULL_HOME, then OBSERVATORY_HOME, or ~/.local/share/project-observatory-full")
     cmds = p.add_subparsers(dest="cmd")
     for name in ("init", "doctor", "demo", "scan", "status", "dashboard", "export"):
         cmds.add_parser(name)
@@ -149,12 +153,14 @@ def open_dashboard(explicit_home: str | None = None) -> int:
     if (home / "workspace.json").is_file():
         return run(["open"], explicit_home)
     name = program()
+    # Exit 2 and stderr: the dashboard was asked for and nothing was opened, so a
+    # script testing the exit code must not read this as success.
     print(f"No Project Observatory workspace at {home}.\n"
           f"  {name} full init        create one, then `{name} full onboard` for the next steps\n"
           f"  {name} --home \"$HOME/observatory-demo\" demo   see a synthetic estate first, in a folder of its own\n"
           f"  {name} --home PATH ...  or OBSERVATORY_HOME=PATH to use a workspace elsewhere\n"
-          f"Once it exists, `{name}` on its own opens the dashboard.")
-    return 0
+          f"Once it exists, `{name}` on its own opens the dashboard.", file=sys.stderr)
+    return 2
 
 
 def main(argv: list[str] | None = None) -> int:

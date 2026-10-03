@@ -191,6 +191,17 @@ Tests: [`tests/test_handed_commands.py`](../tests/test_handed_commands.py)
 `test_every_subcommand_help_exits_zero_names_itself_and_runs_nothing`,
 `test_full_help_lists_every_workspace_command`).
 
+## Exit codes and doctor settings
+
+Exit codes of the entry points: `project-observatory` with no arguments exits 2
+(on stderr, with where to start) when there is no workspace to open; up to 0.12.0
+it exited 0. With a workspace it exits with `full open`'s code. `full open
+--stop` exits 0 with `"stopped": false` when nothing answers on the port, because
+the stopped state already holds, and 2 when it refuses a server it must not stop.
+`full doctor` lists every known integration and feature as `true` or `false` and
+every known source as configured or not (it listed only the names set before);
+names a hand-edited settings file carries are kept.
+
 ## Regression receipt for this change
 
 Executed in the isolated full-engine source, using synthetic fixtures only:
