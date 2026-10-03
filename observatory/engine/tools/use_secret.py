@@ -82,18 +82,41 @@ def scan() -> dict:
     return json.loads(src.read_text(encoding="utf-8"))
 
 
-def env_candidates(project: str, name: str) -> list[pathlib.Path]:
+#: The vault's environment words and the env-file environments each one
+#: means (`collectors/environments.py` spells a file's environment).
+FILE_ENVS = {"local": {"local", "development", "test"},
+             "stage": {"staging", "review"},
+             "prod": {"production"}}
+USE = 'python "$(project-observatory full-path)/tools/use_secret.py"'
+PUT = 'python "$(project-observatory full-path)/tools/vault.py" put'
+
+
+def _file_environment(path: str) -> str | None:
+    sys.path.insert(0, str(ROOT / "collectors"))
+    import environments
+    return environments.file_environment(pathlib.PurePath(path).name)
+
+
+def env_candidates(project: str, name: str, env: str | None = None) -> list[pathlib.Path]:
     """Files in this project that the inventory says hold this variable.
 
     LIVE BEFORE TEMPLATE, and `.env` before `.env.staging`: a template holds no
     value by construction, and picking `.env.production` for a command an agent
     typed by hand would be the wrong default in the most expensive direction.
+
+    WITH AN EXPLICIT `--env`, ONLY FILES OF THAT ENVIRONMENT. `--env prod` used
+    to fall through to the project's unlabeled `.env` — the development file —
+    and run a production command on a development key without a word. A file
+    whose name says no environment (`.env`) answers only when no environment
+    was asked for.
     """
     rows = []
     for f in scan().get("files", []):
         if f.get("project") != project:
             continue
         if name not in {v.get("name") for v in f.get("variables", [])}:
+            continue
+        if env and _file_environment(f.get("path", "")) not in FILE_ENVS[env]:
             continue
         rows.append(f)
     rows.sort(key=lambda f: (f.get("kind") != "env",
@@ -135,10 +158,22 @@ def vault_slot(project: str, name: str, env: str | None) -> tuple[pathlib.Path |
     return None, None
 
 
+def _held_in(project: str, name: str) -> tuple[list[str], list[str]]:
+    """(vault environments holding NAME, env files holding it) — names only."""
+    envs = [e for e in ENVS if (VAULT / project / e / name).is_file()]
+    files = []
+    for f in scan().get("files", []):
+        if f.get("project") == project and name in {v.get("name") for v in f.get("variables", [])}:
+            label = _file_environment(f.get("path", ""))
+            files.append(f"{f.get('path')} ({label or 'no environment in its name'})")
+    return envs, files
+
+
 def resolve(project: str, name: str, env: str | None = None) -> tuple[str, str]:
-    """(value, where it came from). Raises LookupError naming both places."""
+    """(value, where it came from). Raises LookupError naming where it looked
+    and where the name DOES live, so the next command is the right one."""
     slot, got_env = vault_slot(project, name, env)
-    files = env_candidates(project, name)
+    files = env_candidates(project, name, env)
     if slot is not None:
         if files:
             print(f"note: {name} is in the vault ({project}/{got_env}) and in "
@@ -149,12 +184,24 @@ def resolve(project: str, name: str, env: str | None = None) -> tuple[str, str]:
         value = read_env_value(f, name)
         if value:
             return value, f"env:{f.relative_to(paths.DATA)}"
+    searched = env or ",".join(ENVS)
+    envs, held = _held_in(project, name)
+    found = []
+    if envs:
+        found.append(f"the vault holds it under {', '.join(f'{project}/{e}' for e in envs)}"
+                     + (f" — run with `--env {envs[0]}`" if env else ""))
+    if held:
+        found.append(f"env files that hold it: {'; '.join(held)}"
+                     + (" — an explicit --env reads only files named for that environment"
+                        if env else ""))
     raise LookupError(
-        f"{name} is not in the vault under projects/{project}/"
-        f"{{{','.join(ENVS)}}} and not in any env file the inventory lists for "
-        f"{project}. `python \"$(project-observatory full-path)/tools/use_secret.py\" names {project}` "
-        f"shows what is there; "
-        f"the vault put command for {project}, local, {name} accepts a protected file on stdin.")
+        f"{name} is not in the vault under projects/{project}/{{{searched}}}"
+        + (" and not in any env file the inventory lists for that environment" if env else
+           " and not in any env file the inventory lists")
+        + f" for {project}. "
+        + (" ".join(f.capitalize() for f in found) + ". " if found else "")
+        + f"`{USE} names {project}` lists what is there; to store it, `{PUT} {project} "
+        f"{env or 'local'} {name}` with a protected file on stdin.")
 
 
 def _redaction(values: dict[str, str]):
@@ -202,6 +249,22 @@ def pump(src, dst, values: dict[str, str], longest: int) -> None:
             break
 
 
+def project_for_reading(text: str) -> str:
+    """The vault folder a typed PROJECT names, for a READ: the folder the vault
+    already holds under that exact name, else the registry project's folder
+    (a registry id such as `project:local-alpha-web` is accepted). A name two
+    projects claim is refused with both named. The same rule as `vault.py`."""
+    folder, said = private_files.project_folder(text, verb="use")
+    if said:
+        print(f"project: {said}", file=sys.stderr)
+    if folder.startswith("project:"):
+        raise private_files.VaultBoundaryError(
+            "that registry id is not a project in the registry; PROJECT is the project's "
+            "folder name, or the id of a project the registry holds")
+    private_files.validate_names(folder)
+    return folder
+
+
 def cmd_names(args) -> int:
     private_files.validate_names(args.project)
     private_files._no_symlinks(VAULT / args.project)
@@ -237,7 +300,7 @@ def cmd_names(args) -> int:
         seen.add(key)
         print(f"  {name.ljust(width)}  {cls:11}  {where}")
     print(f"\n{len(seen)} name(s). Values are never printed — to USE one:\n"
-          f"  python \"$(project-observatory full-path)/tools/use_secret.py\" run [--env ENV] {args.project} <NAME> -- <command>")
+          f"  {USE} run [--env ENV] {args.project} <NAME> -- <command>")
     return 0
 
 
@@ -347,8 +410,15 @@ def cmd_pipe(args) -> int:
     child_env = dict(os.environ)
     child_env[args.name] = value
     longest = len(value.encode("utf-8", "surrogateescape"))
-    proc = subprocess.Popen(args.command, env=child_env, stdin=subprocess.DEVNULL,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        proc = subprocess.Popen(args.command, env=child_env, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except (FileNotFoundError, PermissionError) as exc:
+        audit("pipe-failed", args.name, {"command": args.command[0], "reason": type(exc).__name__})
+        print(f"use_secret: command not found: {args.command[0]}"
+              if isinstance(exc, FileNotFoundError) else
+              f"use_secret: command not executable: {args.command[0]}", file=sys.stderr)
+        return 127 if isinstance(exc, FileNotFoundError) else 126
     import threading
     threads = [
         threading.Thread(target=pump, args=(proc.stdout, sys.stdout.buffer, values, longest)),
@@ -402,7 +472,14 @@ def main(argv: list[str]) -> int:
             private_files.validate_names("placeholder", name=a.as_name)
         if a.cmd == "pipe":
             private_files.validate_names("placeholder", name=a.name)
+        if getattr(a, "project", None):
+            a.project = project_for_reading(a.project)
         return a.fn(a)
+    except private_files.VaultBoundaryError as exc:
+        # Its messages are written to be shown: they name the field and the
+        # rule, never the input.
+        print(f"use_secret: {exc}", file=sys.stderr)
+        return 2
     except (OSError, ValueError):
         print("use_secret: private filesystem or input validation refused the operation", file=sys.stderr)
         return 2

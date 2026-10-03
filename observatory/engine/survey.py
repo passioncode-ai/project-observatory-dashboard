@@ -700,9 +700,19 @@ def credentials(project_id: str) -> dict:
     # project's id is `project:local-alpha-web`. Taking the suffix as the folder
     # answered two empty lists and a `use` command use_secret could not resolve.
     try:
-        record = next((p for p in _index()[0] if p.get("id") == pid), None)
+        registry = _index()[0]
     except (OSError, ValueError, KeyError):
-        record = None
+        registry = None
+    record = next((p for p in registry or [] if p.get("id") == pid), None)
+    if record is None and registry is not None:
+        # A FOLDER NAME IS A PROJECT NAME TOO: `alpha-web` names the project
+        # whose id is `project:local-alpha-web`, by the vault's own rule.
+        import vault_project
+        res = vault_project.resolve(project_id, registry)
+        if res.project_id and res.how != "ambiguous":
+            pid = res.project_id
+            slug = pid.split(":", 1)[1]
+            record = next((p for p in registry if p.get("id") == pid), None)
     names = [slug] if record is None else []
     for folder in (record or {}).get("local_folders") or []:
         if folder and Path(folder).name not in names:
@@ -763,8 +773,16 @@ def credentials(project_id: str) -> dict:
                     # A SLOT NAME, as use_secret reads one: `NAME.meta.json` and a
                     # rotation's `NAME.retired-…` archive sit beside it and are not slots.
                     if slot.is_file() and re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", slot.name):
-                        out["vault"].append({"name": slot.name, "env": envdir.name})
-                        out["project"] = name
+                        # EACH ROW SAYS WHICH FOLDER HOLDS IT, AND HOW TO USE IT.
+                        # Slots can sit under two folders of one project (its
+                        # folder, and its registry slug from before the vault
+                        # normalised names); one top-level `use` naming the last
+                        # folder read sent `use_secret` to the wrong one for the
+                        # others.
+                        out["vault"].append({
+                            "name": slot.name, "env": envdir.name, "project": name,
+                            "use": (f"python \"$(project-observatory full-path)/tools/use_secret.py\" "
+                                    f"run --env {envdir.name} {name} {slot.name} -- <command>")})
 
     out["totals"] = {
         "env_variables": len(out["env"]),
@@ -773,8 +791,12 @@ def credentials(project_id: str) -> dict:
                         if r["class"] in ("empty", "placeholder")),
         "vault_slots": len(out["vault"]),
     }
-    if not out["vault"] and env_owner:
-        out["project"] = env_owner
+    # The top-level `project` is the folder a NEW slot goes under — the
+    # project's first folder, the one `vault.py put` files it under — or, with
+    # no folder, the folder that holds this project's slots or env files.
+    if record is None or not (record or {}).get("local_folders"):
+        held = [r["project"] for r in out["vault"]]
+        out["project"] = held[0] if held else (env_owner or out["project"])
     out["use"] = (f"python \"$(project-observatory full-path)/tools/use_secret.py\" run [--env ENV] {out['project']} <NAME> -- <command>  "
                   "# injects named values and redacts exact matches from captured output; "
                   "not a sandbox against encoded output or network transmission")

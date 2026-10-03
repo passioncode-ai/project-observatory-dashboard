@@ -702,10 +702,17 @@ def parse_vault_target(target: str | None) -> tuple[str, str, str]:
     sys.path.insert(0, str(ROOT / "tools"))
     import vault
     try:
-        vault.validate_names(*parts)
+        # The project is normalised to its vault FOLDER here, before anything
+        # is minted, by the vault's own rule: a registry id names the same
+        # project as its folder, and a name two projects claim is refused now
+        # rather than after a live token exists.
+        folder, said = vault.project_folder(parts[0], parts[1], parts[2])
+        if said:
+            print(f"project: {said}", file=sys.stderr)
+        vault.validate_names(folder, parts[1], parts[2])
     except vault.VaultBoundaryError as exc:
         raise ValueError(f"--vault {exc}") from None
-    return parts[0], parts[1], parts[2]
+    return folder, parts[1], parts[2]
 
 
 def deliver_to_vault(value: str, project: str, env: str, name: str) -> None:

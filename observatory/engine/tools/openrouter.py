@@ -268,6 +268,29 @@ def deliver(value: str, to: str, *, rotate: bool = False) -> str:
 
 # ─────────────────────────── issue / limits / rotate ─────────────────────────
 
+def vault_destination(to: str) -> str:
+    """A `vault:` destination with its project normalised to the vault FOLDER,
+    checked BEFORE a key is minted: a key minted for a slot the vault then
+    refuses is a live credential with nowhere to go. A registry id names the
+    same project as its folder; a name two projects claim is refused here.
+    Any other destination is returned unchanged."""
+    if not str(to or "").startswith("vault:"):
+        return to
+    parts = to[len("vault:"):].split("/")
+    if len(parts) != 3 or not all(parts):
+        raise ValueError("a vault destination is vault:<project>/<env>/<NAME>")
+    sys.path.insert(0, str(ROOT / "tools"))
+    import vault
+    try:
+        folder, said = vault.project_folder(parts[0], parts[1], parts[2])
+        vault.validate_names(folder, parts[1], parts[2])
+    except vault.VaultBoundaryError as exc:
+        raise ValueError(str(exc)) from None
+    if said:
+        print(f"project: {said}", file=sys.stderr)
+    return f"vault:{folder}/{parts[1]}/{parts[2]}"
+
+
 def find_key(admin: str, name: str) -> dict | None:
     for row in _request("/keys?include_disabled=true", admin).get("data", []):
         if row.get("name") == name:
@@ -287,6 +310,7 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
         raise ValueError("the consumer's name cannot be empty")
     if not math.isfinite(limit) or limit <= 0:
         raise ValueError("a key without a ceiling is an unbounded liability; give one")
+    to = vault_destination(to)
     doc = ledger()
     label, admin = read_admin(account)
     if find_key(admin, name):

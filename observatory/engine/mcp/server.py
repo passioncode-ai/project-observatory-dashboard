@@ -383,7 +383,10 @@ def observatory_project(
 @server.tool()
 def observatory_credentials(
     projectId: Annotated[str, Field(validation_alias=AliasChoices("projectId", "project_id", "project"),
-                                    description="A 'project:<slug>' id, or the bare slug")],
+                                    description="A 'project:<slug>' id, its bare slug, or the "
+                                                "project's folder name — all name the same "
+                                                "project. Each vault row carries the folder that "
+                                                "holds it and its own `use` command.")],
 ) -> dict[str, Any]:
     """Which credentials a project holds, BY NAME — and how to USE one without seeing it.
 
@@ -413,6 +416,10 @@ def _note_unknown(project_id: str, out: dict[str, Any]) -> dict[str, Any]:
     empty `degraded`, which asserts "known project, nothing here". History under
     a former id may still be listed, so the answer is kept and qualified."""
     pid = project_id if project_id.startswith("project:") else f"project:{project_id}"
+    # The project the answer RESOLVED to: `observatory_credentials` accepts a
+    # project's folder name and answers for its registry id.
+    if isinstance(out, dict) and str(out.get("projectId") or "").startswith("project:"):
+        pid = out["projectId"]
     if isinstance(out, dict) and not any(p.get("id") == pid for p in survey_mod._index()[0]):
         out.setdefault("degraded", []).append(
             {"source": "registry", "code": "unknown-project",

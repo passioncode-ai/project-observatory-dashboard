@@ -204,6 +204,10 @@ engine directory:
 python "$(project-observatory full-path)/tools/vault.py" put PROJECT ENV NAME   # the value on stdin
 ```
 
+`PROJECT` is the project's folder name (`alpha-web`, the directory under your `projects` source);
+its registry id (`project:local-alpha-web`, or `local-alpha-web`) is accepted too and normalised to
+that folder, and the command prints which folder it used, so one project keeps one vault directory.
+A name two projects claim (a folder of one, the id of another) is refused with both named.
 `ENV` is one of `local`, `stage` or `prod`, and `NAME` is UPPER_SNAKE_CASE.
 The command accepts the value only on stdin. The same tool manages the slot afterwards —
 `list`, `rotate` (the new value on stdin; the old one is archived at mode 600), `leak` and
@@ -224,7 +228,10 @@ python "$(project-observatory full-path)/tools/use_secret.py" run --env local PR
 ```
 
 Flags come before the project name (`run --env ENV PROJECT NAME -- …`); a flag after it is
-refused with the right order, and a program that does not exist exits 127. The command's
+refused with the right order, and a program that does not exist exits 127 (`pipe` too). With
+`--env`, only that environment's vault slot and env files named for it (`.env.production` for
+`prod`, `.env.staging` for `stage`) are read; an unlabeled `.env` answers only when no `--env` is
+given, and a refusal says which environments do hold the name. The command's
 output is filtered for the exact value. `project-observatory full local` refreshes the
 inventory of `.env` names this reads (`env`, local, names and keyed fingerprints only), and
 the Keys page shows a new slot after the next `full local`. Prefer a human-controlled hidden prompt or a

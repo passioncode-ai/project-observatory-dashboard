@@ -68,6 +68,7 @@ import credential_shape  # noqa: E402
 import leak_register  # noqa: E402
 import paths                                            
 import safe_git  # noqa: E402  — the engine's one git door
+import vault_project  # noqa: E402
 
 GATEWAY = paths.source_path("gateway_root", paths.HOME / "disabled/gateway")
 STORE = pathlib.Path(os.environ.get("OBSERVATORY_VAULT_DIR",
@@ -220,6 +221,52 @@ def _note(field: str, text: str) -> str:
             f"describe the operation and cite references (a short commit id, a ticket, a "
             f"release number), never the value")
     return text
+
+
+_PLAIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+
+def project_folder(text: str, env: str | None = None, name: str | None = None, *,
+                   verb: str = "put") -> tuple[str, str]:
+    """(the vault folder to use, a sentence saying so or "") for a typed PROJECT.
+
+    PROJECT IS THE PROJECT'S FOLDER NAME, and the registry id (`project:<slug>`
+    or the bare slug) is accepted and normalised to it, so one project keeps
+    ONE vault directory whichever name a person types (`vault_project.py`
+    holds the rule and its ambiguity check). Two exceptions, both about what
+    the store already holds rather than what a new slot should be called:
+
+      * a verb that addresses an existing slot (`rotate`, `settle`, `leak`,
+        `remove`, `moved`, `inject`, `list`) keeps the typed folder when a slot
+        or an open leak is already filed under it — slots written before this
+        rule under a registry slug stay reachable, and the sentence says where
+        the project's folder is;
+      * a string two projects claim is refused with both named, never guessed.
+
+    A string the registry does not know is used as typed: an organisation's
+    shared key has a folder of its own.
+    """
+    try:
+        credential_shape.refuse("project", text)
+    except ValueError as exc:
+        raise VaultBoundaryError(str(exc)) from None
+    r = vault_project.resolve(text)
+    if r.how in ("folder", "unknown"):
+        return text, ""
+    if r.how == "unreadable":
+        return text, r.sentence()
+    if verb != "put" and _PLAIN.fullmatch(text or ""):
+        here = STORE / text
+        _no_symlinks(here)
+        holds = (here.is_dir() if not (env and name) else
+                 (here / env / name).is_file() or bool(_unsettled_for(f"{text}/{env}/{name}")))
+        if holds:
+            return text, (f"{text!r} names {r.project_id or 'a registered project'}, whose vault "
+                          f"folder is {r.folder or 'not settled'}; the slot already filed under "
+                          f"{text!r} is used")
+    if r.how == "ambiguous":
+        raise VaultBoundaryError(r.sentence())
+    return r.folder, r.sentence()
 
 
 def _slot(project: str, env: str, name: str) -> pathlib.Path:
@@ -682,6 +729,15 @@ def main(argv: list[str]) -> int:
     a = ap.parse_args(argv[1:])
     try:
         if getattr(a, "project", None):
+            a.project, said = project_folder(a.project, getattr(a, "env", None),
+                                             getattr(a, "name", None), verb=a.cmd)
+            if said:
+                print(f"project: {said}")
+            if a.project.startswith("project:"):
+                raise VaultBoundaryError(
+                    f"{credential_shape.echo(a.project)} is not a project in the registry; "
+                    f"PROJECT is the project's folder name (a registry id is accepted only "
+                    f"for a project the registry holds)")
             validate_names(a.project, getattr(a, "env", None), getattr(a, "name", None))
         return {"put": cmd_put, "settle": cmd_settle, "moved": cmd_moved, "movements": cmd_movements,
                 "rotate": cmd_rotate, "leak": cmd_leak, "leaks": cmd_leaks,

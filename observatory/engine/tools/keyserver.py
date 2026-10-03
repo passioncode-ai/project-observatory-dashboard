@@ -149,7 +149,17 @@ def known_projects() -> set[str]:
 
 
 def check_destination(dest: str) -> str:
-    """The destination, or a refusal that says what a good one looks like."""
+    """The destination, normalised, or a refusal that says what a good one
+    looks like.
+
+    THE SAME PROJECT RULE AS THE VAULT. This refused `vault:local-beta-api/…`
+    (the registry id's slug) while `vault.py put local-beta-api …` accepted it,
+    so one project had two spellings and two directories. Now the project goes
+    through `vault.project_folder`: a registry id or slug is normalised to the
+    project's folder, a name two projects claim is refused with both named, and
+    a name nothing claims is refused unless the vault already holds a folder of
+    that name (an organisation's key has one)."""
+    dest = dest if isinstance(dest, str) else ""
     if dest in DESTINATIONS:
         return dest
     m = VAULT_DEST.match(dest or "")
@@ -157,14 +167,21 @@ def check_destination(dest: str) -> str:
         raise ValueError(
             f"destination must be one of {sorted(DESTINATIONS)} or a vault slot "
             f"`vault:<project>/<env>/<NAME>` — project and env lowercase, the "
-            f"variable UPPER_SNAKE; got {dest!r}")
-    known = known_projects()
-    if known and m.group("project") not in known:
-        raise ValueError(
-            f"no project named {m.group('project')!r} on this machine — a slot "
-            f"under a misspelt project is one nothing will ever read. Known "
-            f"names are in registry/projects.json")
-    return dest
+            f"variable UPPER_SNAKE; got {credential_shape.echo(dest)}")
+    sys.path.insert(0, str(ROOT / "tools"))
+    import vault
+    import vault_project
+    folder, _ = vault.project_folder(m.group("project"), m.group("env"), m.group("name"))
+    if vault_project.resolve(folder).project_id is None:
+        known = known_projects()
+        if known and folder not in known:
+            raise ValueError(
+                f"no project named {credential_shape.echo(folder)} on this machine — a slot "
+                f"under a misspelt project is one nothing will ever read. PROJECT is the "
+                f"project's folder name (or its registry id); known names are in "
+                f"registry/projects.json")
+    vault.validate_names(folder, m.group("env"), m.group("name"))
+    return f"vault:{folder}/{m.group('env')}/{m.group('name')}"
 
 
 def token() -> str:
