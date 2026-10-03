@@ -57,6 +57,31 @@ def integration_off(name: str) -> str | None:
     return None if on else integration
 
 
+#: Which integration each of the merge's own coverage sources belongs to. Read by
+#: the board (`tools/build_findings.py`, which raises no row for a switched-off
+#: one) and by the merge's console summary, which lists those apart from the
+#: degraded ones: an integration the user never turned on is not a failure.
+MERGE_SOURCE_INTEGRATION = {
+    "wiki": "wiki", "github": "github", "sessions.json": "sessions",
+    "remotes.json": "git_remotes", "bitbucket.json": "bitbucket",
+}
+
+
+def merge_source_off(source: str) -> str | None:
+    """The integration a merge coverage source belongs to when the workspace has
+    it OFF, else None. Settings are read directly, for the reason `integration_off`
+    gives: `local` runs offline, and that run mode is not the user's switch."""
+    integration = MERGE_SOURCE_INTEGRATION.get(source)
+    if integration is None:
+        return None
+    try:
+        import configuration
+        on = configuration.load().get("integrations", {}).get(integration) is True
+    except Exception:  # noqa: BLE001 — an unreadable switch is not a switch that is off
+        return None
+    return None if on else integration
+
+
 def _leftover(name: str, integration: str) -> dict:
     """The note that names a receipt an integration that is off left behind."""
     try:

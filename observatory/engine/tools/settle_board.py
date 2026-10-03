@@ -64,7 +64,16 @@ def main() -> int:
             for line in tail:
                 print(f"  {line}", file=sys.stderr)
             return p.returncode
-    print("settle: the board now carries the page's verdict", flush=True)
+    # The counts `findings` printed earlier in the same run described the board
+    # BEFORE this rebuild; the last numbers a person sees must be the board's.
+    try:
+        board = json.loads((paths.REGISTRY / "findings.json").read_text(encoding="utf-8")).get("findings") or []
+        tally = "   ".join(f"{sev} {sum(1 for f in board if f.get('severity') == sev)}"
+                           for sev in ("critical", "warning", "info"))
+        print(f"settle: the board now carries the page's verdict; findings now: {tally}", flush=True)
+    except (OSError, ValueError, AttributeError) as exc:
+        print(f"settle: the board now carries the page's verdict (its counts could not be read: "
+              f"{type(exc).__name__})", flush=True)
     return 0
 
 
