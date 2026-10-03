@@ -6,7 +6,8 @@ while the major version is 0, a minor release may change behaviour and says so h
 ## 0.14.0 — 2026-10-03
 
 A minor release: the organisation's product lifecycle contract applied to the engine (#125,
-#131), agent memory for workflows (#127), and releases built, signed and published in CI.
+#131), agent memory for workflows and its hardening (#127, #130), and releases built, signed and
+published in CI.
 Behaviour changes: the scheduled tick no longer probes MCP servers, and background disk sizing
 no longer opens privacy-guarded places. After updating, run
 `python "$(project-observatory full-path)/tools/install_launchd.py" install` and
@@ -50,6 +51,14 @@ jobs pick up the new plists. The companion plugin `observatory-log` is unchanged
   (`observatory_checkpoint_write`, `_checkpoint_latest`, `observatory_handoff_create`,
   `_accept`, `_get`); migration `0008-agent-memory-workflows`; design in
   `docs/design/AGENT-MEMORY.md`.
+- **Agent memory, hardened (#130).** Twelve findings of an adversarial review fixed: checkpoints
+  and handoff packs stay out of recall, notes and the observer prompt; search serves only a
+  record's latest revision; workflows never cross projects; a handoff needs the lease token (or a
+  limit, crash or restart after two silent minutes) and acceptance is bound to the accepting
+  session; identifier fields refuse credential shapes; the committed ledger export carries
+  workflow rows without their body; an open workflow's checkpoint cannot be tombstoned; a
+  credential store is never read into a pack. Details in
+  `docs/runs/2026-10-03-agent-memory-hardening/README.md`.
 - **Builds clean up after themselves.** `tools/prune_builds.py` keeps the current and previous
   release in `dist/`; `macos/scripts/build-app.sh` runs it.
 
