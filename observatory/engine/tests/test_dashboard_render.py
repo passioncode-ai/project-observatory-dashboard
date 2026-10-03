@@ -689,6 +689,36 @@ def test_the_copy_toast_and_the_swap_tile_read_in_the_readers_words() -> None:
     check("a specific label is kept", specific.startswith("Command: silence — "), specific)
 
 
+def test_an_empty_registry_page_gives_its_command_and_no_filter_bar() -> None:
+    """Heroku, Traffic and MCP say what to run when they hold nothing; Domains
+    and Keys said only "Empty here — the registry holds no row of this kind",
+    under a full filter bar that could narrow nothing. Each now names how its
+    rows arrive, with the command, and the filter bar is hidden while the page
+    has no row at all."""
+    if node() is None:
+        check("node is available", True, " [uncoverable: executing the page needs node]")
+        return
+    root = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-empty-pages-"))
+    env = dashboard_fixture.seed(root)
+    _credentials(root, [])
+    _rebuild(root, env)
+    pages = root / "pages"
+    for page, needle in (("domains", "scan-cloudflare"), ("creds", "vault.py")):
+        out = (render(pages / f"{page}.html", show="out") or {}).get("shown", "")
+        check(f"the empty {page} page gives the command that fills it", needle in out, out[:300])
+        check(f"and not only the bare sentence", "Empty here" not in out, out[:200])
+        p = subprocess.run([node(), str(FOCUS), str(pages / f"{page}.html"), "--eval",
+                            'document.querySelector(".controls").classList.contains("no-rows")'],
+                           cwd=ROOT, capture_output=True, text=True, timeout=300)
+        got = json.loads(p.stdout or "{}")
+        check(f"the {page} filter bar is hidden while it has no row", got.get("value") is True, p.stdout[-200:])
+    p = subprocess.run([node(), str(FOCUS), str(pages / "projects.html"), "--eval",
+                        'document.querySelector(".controls").classList.contains("no-rows")'],
+                       cwd=ROOT, capture_output=True, text=True, timeout=300)
+    check("a page with rows keeps its filter bar", json.loads(p.stdout or "{}").get("value") is False,
+          p.stdout[-200:])
+
+
 def test_the_harness_itself_can_fail() -> None:
     """A green from a harness that cannot go red is not evidence."""
     if node() is None:
@@ -738,6 +768,7 @@ if __name__ == "__main__":
                test_the_declared_and_measured_states_are_labelled,
                test_links_and_summaries_have_names_and_one_tab_stop_per_row,
                test_the_copy_toast_and_the_swap_tile_read_in_the_readers_words,
+               test_an_empty_registry_page_gives_its_command_and_no_filter_bar,
                test_the_harness_itself_can_fail):
         fn()
     print()
