@@ -70,6 +70,18 @@ arbitrary plugin. Inspect the generated `docs/dashboard/index.html` beneath
 `OBSERVATORY_HOME`. These pages contain private project information. They do not
 belong on the public marketing website.
 
+**A wholesale change to the registry is refused, not written.** Each `full local` (and each
+scheduled tick) compares the new `projects.json` and `repositories.json` with the previous ones,
+because a collector failure (a missing `git`, an unreadable folder) shows up as projects
+appearing or vanishing in bulk. The emit step stops with `emit REFUSED: … would go from N to M`
+and writes nothing when a count moves by more than 25% **and** by more than five records
+added, or more than one record lost; a registry that would fall to zero is refused at any size.
+Adding a project or two to a small workspace, or removing one, passes. When the change is
+genuine (you pointed `projects` at a new folder of many checkouts, or deleted several on
+purpose), run it once with `OBSERVATORY_ALLOW_BULK=1 project-observatory full local`; the
+next run compares against the new registry. The first emit into an empty workspace is never
+refused.
+
 A workspace path must not pass through a symbolic link (on macOS `/tmp` is one):
 `init` refuses such a path and prints the resolved `OBSERVATORY_HOME` to use instead.
 

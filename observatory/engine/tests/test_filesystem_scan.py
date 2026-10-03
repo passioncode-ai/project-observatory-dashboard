@@ -31,9 +31,10 @@ Three fixes, at three depths:
 2. A PREFLIGHT: with `git` unrunnable and git folders present, the scan writes
    nothing and exits non-zero, so the last good `local.json` survives. A missing
    tool is one fact about the machine, not 99 claims about the estate.
-3. The emitter refuses a swing over ±25% against the previous registry, with
-   `OBSERVATORY_ALLOW_BULK=1` for a genuine bulk change. That is the second line
-   and it guards every cause rather than this one.
+3. The emitter refuses a swing over ±25% against the previous registry — past an
+   absolute floor too, so a small estate gaining a project is not a "swing" —
+   with `OBSERVATORY_ALLOW_BULK=1` for a genuine bulk change. That is the second
+   line and it guards every cause rather than this one.
 
 **And stopping became a result somebody can read.** `tick.sh`'s three early
 exits — merge failed, emit failed or refused, validator red — each did `exit 0`
@@ -227,38 +228,103 @@ def test_a_refused_scan_leaves_the_previous_file_intact() -> None:
 
 # ─────────── the emitter's second line ─────────────────────────────────
 
-def test_the_emitter_refuses_a_wholesale_swing() -> None:
-    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-bulk-"))
+def _emit(d: pathlib.Path, env: dict, **extra) -> subprocess.CompletedProcess:
+    return subprocess.run([PY, "collectors/emit_registry.py", str(d / "raw")], cwd=ROOT,
+                          env=dict(env, **extra), capture_output=True, text=True, timeout=900)
+
+
+def _set_projects(d: pathlib.Path, n: int) -> None:
+    """Give the model exactly `n` projects, cloned from the fixture's own shape,
+    so the emitter sees the one input it reads change and nothing else."""
+    path = d / "raw/model.json"
+    model = json.loads(path.read_text(encoding="utf-8"))
+    # The seeded project with no repository is the template; it is kept beside
+    # the model so a later call that has already emptied the model still has it.
+    keep = d / "project-shape.json"
+    if not keep.is_file():
+        keep.write_text(json.dumps(model["projects"]["fixture-b"]), encoding="utf-8")
+    shape = json.loads(keep.read_text(encoding="utf-8"))
+    model["projects"] = {f"fixture-{i:02d}": dict(shape, name=f"Fixture {i:02d}")
+                         for i in range(n)}
+    path.write_text(json.dumps(model), encoding="utf-8")
+
+
+def _registered(d: pathlib.Path) -> int:
+    return len(json.loads((d / "registry/projects.json").read_text(encoding="utf-8"))["projects"])
+
+
+def _bulk_estate(prefix: str, n: int) -> tuple[pathlib.Path, dict]:
+    d = pathlib.Path(tmpdir.mkdtemp(prefix=prefix))
     env = emitter_fixture.seed(d)
-    env.pop('OBSERVATORY_ALLOW_BULK', None)
-    baseline = subprocess.run([PY, 'collectors/emit_registry.py', str(d/'raw')],
-                              cwd=ROOT, env=env, capture_output=True, text=True)
-    check('baseline emit succeeds', baseline.returncode == 0, baseline.stderr[-300:])
-    if baseline.returncode:
-        return
-    # Halve the model's projects: a swing far past the limit, from the one input
-    # the emitter reads.
-    model = json.loads((d / "raw/model.json").read_text(encoding="utf-8"))
-    keys = sorted(model["projects"])[: len(model["projects"]) // 2]
-    model["projects"] = {k: model["projects"][k] for k in keys}
-    (d / "raw/model.json").write_text(json.dumps(model), encoding="utf-8")
+    env.pop("OBSERVATORY_ALLOW_BULK", None)
+    _set_projects(d, n)
+    p = _emit(d, env)
+    check(f"baseline emit of {n} projects succeeds", p.returncode == 0, p.stderr[-300:])
+    return d, env
+
+
+def test_the_emitter_refuses_a_wholesale_swing() -> None:
+    # A mass LOSS: 12 projects falling to 6 is the shape a collector failure
+    # leaves, and it is past both the ratio and the absolute floor.
+    d, env = _bulk_estate("observatory-bulk-", 12)
+    _set_projects(d, 6)
     before = (d / "registry/projects.json").read_bytes()
-    p = subprocess.run([PY, "collectors/emit_registry.py", str(d / "raw")], cwd=ROOT,
-                       env=env, capture_output=True, text=True, timeout=900)
+    p = _emit(d, env)
     check("the emit is refused", p.returncode != 0, f"exit {p.returncode}")
     check("naming both counts and the limit",
-          "would go from" in p.stderr and "limit ±25%" in p.stderr, p.stderr[-300:])
+          "would go from 12 to 6" in p.stderr and "limit ±25%" in p.stderr, p.stderr[-300:])
     check("the registry is untouched",
           (d / "registry/projects.json").read_bytes() == before)
     check("and the refusal names the override",
           "OBSERVATORY_ALLOW_BULK=1" in p.stderr, p.stderr[-160:])
-    q = subprocess.run([PY, "collectors/emit_registry.py", str(d / "raw")], cwd=ROOT,
-                       env=dict(env, OBSERVATORY_ALLOW_BULK="1"),
-                       capture_output=True, text=True, timeout=900)
+    q = _emit(d, env, OBSERVATORY_ALLOW_BULK="1")
     check("the override proceeds", q.returncode == 0, (q.stdout + q.stderr)[-200:])
     check("and then the registry does change",
           (d / "registry/projects.json").read_bytes() != before,
           "an override that changes nothing is not an override")
+
+
+def test_a_small_estate_grows_without_an_override() -> None:
+    """A new user's fourth project. 3 → 4 is +33%, past the ratio, and was
+    refused: the whole pipeline stopped at `emit` and the dashboard went stale on
+    the day somebody added their first real folder. A handful of projects is
+    ordinary work at any size, so growth is refused only past the ratio AND past
+    an absolute floor."""
+    d, env = _bulk_estate("observatory-bulk-grow-", 3)
+    _set_projects(d, 4)
+    p = _emit(d, env)
+    check("3 → 4 projects emits without OBSERVATORY_ALLOW_BULK", p.returncode == 0,
+          (p.stdout + p.stderr)[-300:])
+    check("and the fourth project is registered", _registered(d) == 4, str(_registered(d)))
+    _set_projects(d, 9)
+    p = _emit(d, env)
+    check("4 → 9 (five more, at the floor) still emits", p.returncode == 0,
+          (p.stdout + p.stderr)[-300:])
+    _set_projects(d, 16)
+    p = _emit(d, env)
+    check("9 → 16 (seven more, past the floor and the ratio) is refused",
+          p.returncode != 0 and "would go from 9 to 16" in p.stderr, (p.stdout + p.stderr)[-300:])
+    check("and the refusal says how to accept a folder just added",
+          "OBSERVATORY_ALLOW_BULK=1" in p.stderr and "added" in p.stderr, p.stderr[-400:])
+
+
+def test_a_shrink_stays_strict() -> None:
+    """Mass loss is the failure this guard exists for, so its floor is lower:
+    one project gone is somebody archiving a folder, two or more past the ratio
+    is refused, and an estate falling to nothing is refused at any size."""
+    d, env = _bulk_estate("observatory-bulk-shrink-", 3)
+    _set_projects(d, 2)
+    p = _emit(d, env)
+    check("3 → 2 (one project removed) emits", p.returncode == 0, (p.stdout + p.stderr)[-300:])
+    d, env = _bulk_estate("observatory-bulk-shrink4-", 4)
+    _set_projects(d, 2)
+    p = _emit(d, env)
+    check("4 → 2 (two lost, −50%) is refused", p.returncode != 0, (p.stdout + p.stderr)[-300:])
+    d, env = _bulk_estate("observatory-bulk-wipe-", 1)
+    _set_projects(d, 0)
+    p = _emit(d, env)
+    check("1 → 0 (an estate emptied) is refused", p.returncode != 0 and "would go from 1 to 0" in p.stderr,
+          (p.stdout + p.stderr)[-300:])
 
 
 def test_an_ordinary_emit_is_not_refused() -> None:
@@ -457,6 +523,8 @@ if __name__ == "__main__":
                test_a_refused_scan_leaves_the_previous_file_intact,
                test_an_unconfigured_projects_source_is_a_typed_refusal,
                test_the_emitter_refuses_a_wholesale_swing,
+               test_a_small_estate_grows_without_an_override,
+               test_a_shrink_stays_strict,
                test_an_ordinary_emit_is_not_refused,
                test_a_stopping_tick_records_why_it_stopped,
                test_all_three_early_exits_go_through_bail,
