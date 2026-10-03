@@ -3089,8 +3089,10 @@ function renderCreds() {
       ? E(c.rotated_on) + `<div class="anchor">×${c.rotations || 1}</div>`
       // Never rotated: show when it was issued, or since when it has sat
       // here, before admitting "never".
+      // A vault slot was STORED (`vault.py put`); only a provider's key is minted.
       : c.created_on
-        ? `<span class="mono">${T("minted {date}", {date: E(c.created_on)})}</span>`
+        ? `<span class="mono">${c.kind === "project-secret" ? T("stored {date}", {date: E(c.created_on)})
+                                                           : T("minted {date}", {date: E(c.created_on)})}</span>`
         : c.installed_on
           ? `<span class="mono">${T("here since {date}", {date: E(c.installed_on)})}</span>`
           : `<span class="unlinked">${T("never")}</span>`)}
@@ -3154,7 +3156,12 @@ function movementsSection() {
     </tr>`).join("");
   return `<h2 id="movements">${T("Key movements")}</h2>
     ${un.length ? `<div class="card"><p class="dmeta">${T("{n} Heroku changes this week are missing from the journal — the operator's rule: whoever moved it records it in the same step", {n: un.length})}</p>
-      <ul class="dlist">${unrows}</ul></div>` : `<p class="none">${T("every movement this week is recorded — Heroku has no change without a journal row")}</p>`}
+      <ul class="dlist">${unrows}</ul></div>`
+      // "Nothing unrecorded" is a comparison against Heroku's releases; with
+      // Heroku never scanned there was no comparison, and saying everything
+      // is recorded would read as a clean result nobody measured.
+      : D.heroku ? `<p class="none">${T("every movement this week is recorded — Heroku has no change without a journal row")}</p>`
+      : `<p class="none">${T("Heroku was not scanned, so its configuration changes were not compared with the journal")}</p>`}
     ${rows ? `<div class="card"><table><colgroup><col style="width:12%"><col style="width:12%"><col style="width:30%"><col style="width:14%"><col></colgroup>
       <thead><tr><th>${T("When")}</th><th>${T("What")}</th><th>${T("Key")}</th><th>${T("Who")}</th><th>${T("Where / how")}</th></tr></thead>
       <tbody>${rows}</tbody></table></div>

@@ -1789,5 +1789,7 @@
   "other": "{n} процесса"
  },
  "history not recorded: this project is classed {ownership}, and only your own projects' commits are recorded (newest measured commit {date}). If it is yours, list its owner in {file}.": "история не записана: проект отнесён к классу {ownership}, а записываются только коммиты ваших собственных проектов (последний измеренный коммит — {date}). Если проект ваш, укажите его владельца в {file}.",
- "history not recorded: the checkout's newest commit is {date}, but no commit reached the event store. The events scan has not read it yet, or git could not answer — run {command}.": "история не записана: последний коммит в рабочей копии — {date}, но ни один коммит не попал в хранилище событий. Сканер событий ещё не прочитал её или git не ответил — запустите {command}."
+ "history not recorded: the checkout's newest commit is {date}, but no commit reached the event store. The events scan has not read it yet, or git could not answer — run {command}.": "история не записана: последний коммит в рабочей копии — {date}, но ни один коммит не попал в хранилище событий. Сканер событий ещё не прочитал её или git не ответил — запустите {command}.",
+ "stored {date}": "сохранён {date}",
+ "Heroku was not scanned, so its configuration changes were not compared with the journal": "Heroku не сканировался, поэтому изменения его конфигурации не сверялись с журналом"
 }

@@ -188,5 +188,8 @@ console.log(JSON.stringify({
   tiles: clip(written.tiles, 200),
   // One project's panel, written only when `--hash` opened it.
   panel: clip(written.panel, 12000),
+  // `--show ID`: what the script wrote into that element, bounded and saying so.
+  ...(process.argv.includes("--show")
+    ? {shown: clip(written[process.argv[process.argv.indexOf("--show") + 1]], 60000)} : {}),
   listeners: listeners.length,
 }, null, 1));
