@@ -134,6 +134,7 @@ NATIVE_SOURCES = {
     "macos/Sources/ObservatoryApp/Theme.swift",
     "macos/Tests/ObservatoryCoreTests/BridgeTests.swift", "macos/Tests/ObservatoryCoreTests/ModelTests.swift",
     "macos/Tests/ObservatoryCoreTests/NavigationTests.swift", "macos/Tests/ObservatoryCoreTests/PaletteTests.swift",
+    "macos/Tests/ObservatoryCoreTests/DashboardWindowTests.swift",
 }
 
 
