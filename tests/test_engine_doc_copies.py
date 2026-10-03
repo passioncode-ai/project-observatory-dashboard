@@ -37,6 +37,24 @@ class EngineDocCopies(unittest.TestCase):
                 self.assertEqual((ENGINE_DOCS / name).read_text(encoding="utf-8"), derived(name),
                                  f"observatory/engine/docs/{name} drifted from docs/{name}")
 
+    def test_the_sync_tool_parses_its_arguments_and_help_writes_nothing(self):
+        # `--help` used to be ignored: the tool ran in write mode and printed
+        # "written: none". Help must print usage and touch no copy; an unknown
+        # argument is refused rather than read as "write".
+        import subprocess
+        import sys
+        tool = ROOT / "tools/sync_engine_docs.py"
+        before = {name: (ENGINE_DOCS / name).stat().st_mtime_ns for name in COPIES}
+        shown = subprocess.run([sys.executable, str(tool), "--help"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        self.assertIn("usage: sync_engine_docs.py", shown.stdout)
+        self.assertIn("--check", shown.stdout)
+        self.assertNotIn("written", shown.stdout)
+        refused = subprocess.run([sys.executable, str(tool), "--chek"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("unrecognized arguments", refused.stderr)
+        self.assertEqual({name: (ENGINE_DOCS / name).stat().st_mtime_ns for name in COPIES}, before)
+
     def test_the_deps_step_installs_the_sdk_the_package_pins(self):
         pinned = re.search(r'"mcp==([\d.]+)"', (ROOT / "pyproject.toml").read_text(encoding="utf-8")).group(1)
         step = (ROOT / "observatory/engine/observatory.py").read_text(encoding="utf-8")
