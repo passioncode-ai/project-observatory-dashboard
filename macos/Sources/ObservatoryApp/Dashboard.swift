@@ -209,7 +209,10 @@ struct DashboardView: View {
             await m.refreshDashboard()
             await m.refresh()
         }
-        .onChange(of: m.dashboardMode) { _, mode in show(mode) }
+        // `initial`: a window opened while the mode is already settled — reopened
+        // after the workspace changed in Settings — shows THIS mode's pages. The web
+        // view outlives the window, and without it kept the previous workspace's page.
+        .onChange(of: m.dashboardMode, initial: true) { _, mode in show(mode) }
         .onChange(of: m.localeSeed) { _, _ in show(m.dashboardMode) }
         // The scheduled cycle rebuilt the pages: reload the one being read, in place.
         .onChange(of: m.dashboardBuiltAt) { old, new in if old != nil, new != nil, old != new { web.reload() } }
