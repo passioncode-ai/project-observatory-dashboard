@@ -14,6 +14,8 @@ What is measured, each a number with what it is out of:
 
 * **recall@5 and MRR** over 40 questions whose answer is one record, half in
   Russian with the question in another word form than the record (MEM-5);
+* **checkpoint bodies**: 8 questions whose answer is in a workflow checkpoint's
+  decisions, constraints, results or notes, never in its goal or next action;
 * **abstention**: of 20 questions nothing in memory answers, how many come back
   empty — a search that always returns something answers from the best of the bad;
 * **handoff**: 10 workflows interrupted mid-step; whether each pack carries the
@@ -106,6 +108,15 @@ def run(corpus_path: pathlib.Path = CORPUS, coverage: float | None = None) -> di
         for r in corpus["records"]:
             refs[r["ref"]] = L.append(conn, owner=OWNER, statement=r["statement"],
                                       project_id=r["project"], confidence=0.5)["memoryId"]
+        # Checkpoints whose answers sit only in the body. Written before the
+        # abstention questions, so a body that widens the index is measured
+        # against them too.
+        checkpoints = corpus.get("checkpoints") or {}
+        for i, c in enumerate(checkpoints.get("records", [])):
+            wf = W.checkpoint_write(conn, owner=OWNER, idempotency_key=f"eval-ckpt-{i:04d}",
+                                    step_id="S1", status="in_progress", project_id=c["project"],
+                                    body=c["body"], redactor=quiet)
+            refs[c["ref"]] = f"ckpt:{wf['workflowId']}"
         _index(conn, indexer)
 
         ranks = _ranks(survey, corpus["questions"], refs)
@@ -117,6 +128,9 @@ def run(corpus_path: pathlib.Path = CORPUS, coverage: float | None = None) -> di
         empty = [abstained(q["question"]) for q in corpus["unanswerable"]]
         wrongly_abstained = [q["expect"] for q in corpus["questions"]
                              if abstained(q["question"])]
+
+        ckpt_questions = checkpoints.get("questions", [])
+        ckpt_ranks = _ranks(survey, ckpt_questions, refs)
 
         # --- the held-out hard split: paraphrases and near-miss questions ------
         hard = corpus.get("hard") or {}
@@ -208,6 +222,12 @@ def run(corpus_path: pathlib.Path = CORPUS, coverage: float | None = None) -> di
         "abstention": {"n": len(empty), "emptyAnswers": sum(empty),
                        "rate": round(sum(empty) / len(empty), 3),
                        "answerableRefused": wrongly_abstained},
+        "checkpointBodies": {**_score(ckpt_ranks),
+                             "byLanguage": {lang: _score([r for r, q in zip(ckpt_ranks, ckpt_questions)
+                                                          if q["lang"] == lang])
+                                            for lang in ("en", "ru")},
+                             "missed": [q["question"] for r, q in zip(ckpt_ranks, ckpt_questions)
+                                        if r is None]},
         "hard": {"paraphrases": {**_score(hard_ranks),
                                  "missed": [q["expect"] for r, q in zip(hard_ranks, hard.get("paraphrases", []))
                                             if r is None]},
@@ -234,6 +254,9 @@ def main(argv: list[str]) -> int:
           f"(en {r['byLanguage']['en']['recall@5']}, ru {r['byLanguage']['ru']['recall@5']})")
     print(f"abstention  {out['abstention']['emptyAnswers']} of {out['abstention']['n']} "
           f"unanswerable questions came back empty")
+    c = out["checkpointBodies"]
+    print(f"checkpoints recall@5 {c['recall@5']}  MRR {c['mrr']} over {c['n']} questions "
+          f"answered only by a checkpoint's body")
     h = out["hard"]
     print(f"hard        paraphrase recall@5 {h['paraphrases']['recall@5']}; "
           f"{h['adversarialAbstention']['emptyAnswers']} of {h['adversarialAbstention']['n']} "

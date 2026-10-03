@@ -285,16 +285,16 @@ def _search_stems(conn: sqlite3.Connection) -> str:
     conn.execute("CREATE VIRTUAL TABLE search_notes USING fts5("
                  "memory_id UNINDEXED, revision UNINDEXED, statement, why, stems)")
     rows = conn.execute(
-        "SELECT l.memory_id, l.revision, l.statement, l.why FROM ledger l"
+        "SELECT l.memory_id, l.revision, l.statement, l.why, l.body_json FROM ledger l"
         " JOIN (SELECT memory_id, MAX(revision) r FROM ledger GROUP BY memory_id) m"
         "   ON m.memory_id = l.memory_id AND m.r = l.revision"
         " WHERE l.memory_id NOT IN (SELECT memory_id FROM tombstones)"
         "   AND trim(coalesce(l.statement, '')) != ''").fetchall() \
         if "tombstones" in tables else []
-    for mid, rev, statement, why in rows:
+    for mid, rev, statement, why, body in rows:
         conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why, stems)"
                      " VALUES (?,?,?,?,?)",
-                     (mid, rev, statement, why or "", textkeys.stems_of(statement, why)))
+                     (mid, rev, statement, why or "", textkeys.stems_of(statement, why, body)))
     return (f"search_notes rebuilt with stems from {len(rows)} current record(s)"
             + ("" if textkeys.STEMMER else "; no stemmer installed, keys are lower-cased words"))
 

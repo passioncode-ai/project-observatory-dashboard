@@ -2,10 +2,14 @@
 """The agent-memory evaluation set runs, and what must already hold, holds.
 
 `tools/memory_eval.py` measures retrieval, abstention, handoffs, injection,
-forgetting and freshness on a synthetic corpus. Retrieval and abstention are a
-baseline that OBS-03 improves, so they are printed, not gated. Handoff completeness,
-the injection boundary and forgetting are properties the engine already promises,
-so they are asserted.
+forgetting and freshness on a synthetic corpus. Handoff completeness, the injection
+boundary and forgetting are properties the engine promises, so they are asserted.
+
+Retrieval, abstention, checkpoint bodies and freshness were a baseline until OBS-03
+reached them; they are gated now at what was measured (lexical search is
+deterministic, so the numbers do not wobble). A change that lowers one changes the
+line here, with its measurement in the commit — never silently. The held-out hard
+split is printed, not gated: paraphrases are similarity's to find (OBS-04).
 """
 from __future__ import annotations
 
@@ -46,6 +50,20 @@ def test_the_evaluation_runs_and_the_promises_hold() -> None:
     check("a forgotten record is served by no search and no listing",
           out["forgetting"]["search"] and out["forgetting"]["listing"], str(out["forgetting"]))
     check("the evaluation spent nothing", "never spends" in out["search"])
+    r = out["retrieval"]
+    check("every answerable question finds its record in the top five, in both languages",
+          r["recall@5"] == 1.0 and all(v["recall@5"] == 1.0 for v in r["byLanguage"].values()),
+          str(r))
+    check("and first", r["mrr"] == 1.0, str(r["mrr"]))
+    a = out["abstention"]
+    check("every question nothing answers comes back empty",
+          a["emptyAnswers"] == a["n"] == 20, str(a))
+    check("and no answerable one does", a["answerableRefused"] == [], str(a))
+    c = out["checkpointBodies"]
+    check("a checkpoint is found by its decisions, constraints, results and notes",
+          c["n"] == 8 and c["recall@5"] == 1.0, str(c))
+    check("a record is searchable before the index pass",
+          out["freshness"]["searchableBeforeTheIndexPass"], str(out["freshness"]))
 
 
 if __name__ == "__main__":

@@ -216,7 +216,7 @@ def _index_lexically(conn: sqlite3.Connection, row: dict) -> None:
     conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why, stems)"
                  " VALUES (?,?,?,?,?)",
                  (row["memory_id"], row["revision"], row["statement"], row["why"] or "",
-                  textkeys.stems_of(row["statement"], row["why"])))
+                  textkeys.stems_of(row["statement"], row["why"], row.get("body"))))
 
 
 def _carried(prior: sqlite3.Row | None) -> dict:

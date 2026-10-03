@@ -606,5 +606,156 @@
     "lang": "ru"
    }
   ]
+ },
+ "checkpoints": {
+  "_note": "workflow checkpoints whose answers sit only in the body — a decision, a constraint, a result, a note — never in the goal or the next action",
+  "records": [
+   {
+    "ref": "ckpt-invoices",
+    "project": "project:alpha-web",
+    "lang": "en",
+    "body": {
+     "goal": "Move invoices to the new ledger",
+     "decisions": [
+      {
+       "choice": "Keep cents as integers, never floats",
+       "why": "rounding drift broke reconciliation"
+      }
+     ],
+     "constraints": [
+      "Do not touch the payout schedule until finance signs off"
+     ],
+     "done": [
+      {
+       "step_id": "S1",
+       "result": "Historical invoices backfilled in three batches"
+      }
+     ],
+     "open": [
+      {
+       "step_id": "S2",
+       "next_action": "switch readers to the new ledger"
+      }
+     ]
+    }
+   },
+   {
+    "ref": "ckpt-docs-search",
+    "project": "project:beta-api",
+    "lang": "en",
+    "body": {
+     "goal": "Rebuild the documentation search",
+     "decisions": [
+      {
+       "choice": "Ship BM25 before any vector model",
+       "why": "the build host has no GPU"
+      }
+     ],
+     "done": [
+      {
+       "step_id": "S1",
+       "result": "Hyphenated product names are tokenized as one word"
+      }
+     ],
+     "open": [
+      {
+       "step_id": "S2",
+       "next_action": "measure the result page latency"
+      }
+     ]
+    }
+   },
+   {
+    "ref": "ckpt-onboarding",
+    "project": "project:alpha-web",
+    "lang": "ru",
+    "body": {
+     "goal": "Переделать онбординг мобильного приложения",
+     "decisions": [
+      {
+       "choice": "Убрать регистрацию с первого экрана",
+       "why": "половина пользователей уходила на форме"
+      }
+     ],
+     "constraints": [
+      "Не менять тексты оплаты без юриста"
+     ],
+     "done": [
+      {
+       "step_id": "S1",
+       "result": "Экран выбора целей сокращён до трёх вариантов"
+      }
+     ],
+     "open": [
+      {
+       "step_id": "S2",
+       "next_action": "собрать воронку по новым шагам"
+      }
+     ]
+    }
+   },
+   {
+    "ref": "ckpt-db-move",
+    "project": "project:beta-api",
+    "lang": "ru",
+    "body": {
+     "goal": "Перенести базу на новый кластер",
+     "decisions": [
+      {
+       "choice": "Переключать запись только после сверки контрольных сумм"
+      }
+     ],
+     "notes": "Реплика отстаёт на минуту под нагрузкой",
+     "open": [
+      {
+       "step_id": "S2",
+       "next_action": "назначить окно работ"
+      }
+     ]
+    }
+   }
+  ],
+  "questions": [
+   {
+    "question": "Why are cents stored as integers?",
+    "expect": "ckpt-invoices",
+    "lang": "en"
+   },
+   {
+    "question": "Who has to sign off before the payout schedule changes?",
+    "expect": "ckpt-invoices",
+    "lang": "en"
+   },
+   {
+    "question": "How are hyphenated product names tokenized?",
+    "expect": "ckpt-docs-search",
+    "lang": "en"
+   },
+   {
+    "question": "Why is there no vector model on the build host?",
+    "expect": "ckpt-docs-search",
+    "lang": "en"
+   },
+   {
+    "question": "Почему убрали регистрацию с первого экрана?",
+    "expect": "ckpt-onboarding",
+    "lang": "ru"
+   },
+   {
+    "question": "Кто должен проверить тексты оплаты?",
+    "expect": "ckpt-onboarding",
+    "lang": "ru"
+   },
+   {
+    "question": "На сколько отстаёт реплика под нагрузкой?",
+    "expect": "ckpt-db-move",
+    "lang": "ru"
+   },
+   {
+    "question": "После чего переключается запись?",
+    "expect": "ckpt-db-move",
+    "lang": "ru"
+   }
+  ]
  }
 }

@@ -953,7 +953,7 @@ def coverage_floor(n_keys: int) -> float:
     Calibrated on the evaluation set (tools/memory_eval.py): high enough that a
     question nothing answers comes back empty instead of matched on one shared
     word, low enough that a short question still finds its record. A question of
-    one or two subject words needs one of them; a longer one needs half."""
+    one or two subject words needs one of them; a longer one, `COVERAGE` of them."""
     if n_keys <= 2:
         return 1 / max(n_keys, 1)
     return COVERAGE

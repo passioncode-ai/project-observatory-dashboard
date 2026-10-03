@@ -93,7 +93,8 @@ def indexable(conn: sqlite3.Connection, memory_id: str, revision: int) -> sqlite
     means by a tombstone: `ledger.live()`, `survey.search`, `review.py` and
     `build_findings.py` all join on `memory_id`."""
     return conn.execute(
-        "SELECT l.memory_id, l.revision, l.statement, l.why, l.project_id, l.state, l.kind"
+        "SELECT l.memory_id, l.revision, l.statement, l.why, l.project_id, l.state, l.kind,"
+        " l.body_json"
         " FROM ledger l LEFT JOIN tombstones t"
         "   ON t.memory_id = l.memory_id"
         " WHERE l.memory_id = ? AND l.revision = ? AND t.memory_id IS NULL",
@@ -157,7 +158,7 @@ def index_batch(conn: sqlite3.Connection, rows: list[sqlite3.Row], have_vec: boo
             conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why, stems)"
                          " VALUES (?,?,?,?,?)",
                          (r["memory_id"], r["revision"], r["statement"], r["why"] or "",
-                          textkeys.stems_of(r["statement"], r["why"])))
+                          textkeys.stems_of(r["statement"], r["why"], r["body_json"])))
             if have_vec:
                 # Older revisions leave the vector index too, whether or not
                 # this one is embedded: a workflow record never is, and a stale

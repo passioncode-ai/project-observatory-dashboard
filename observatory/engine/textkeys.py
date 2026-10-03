@@ -20,6 +20,7 @@ lower-cased and cut the same way, and `STEMMER` says so for the caller to report
 """
 from __future__ import annotations
 
+import json
 import re
 
 try:
@@ -75,6 +76,38 @@ def query_keys(text: str | None) -> list[str]:
     return out
 
 
-def stems_of(statement: str | None, why: str | None) -> str:
-    """The lexical index's `stems` column for one record."""
-    return " ".join(keys(f"{statement or ''}\n{why or ''}"))
+#: The prose of a checkpoint body: what a later question asks a step about. A
+#: checkpoint's statement carries only its goal and next actions, so without these
+#: a decision, a constraint or a result was in memory and could not be found.
+#: Paths, refs, commits and credential names are identifiers, not prose — they are
+#: matched by the fields that hold them, never by word form.
+_BODY_LISTS = (("plan", "title"), ("done", "result"), ("open", "next_action"),
+               ("decisions", "choice"), ("decisions", "why"), ("artifacts", "note"))
+_BODY_STRINGS = ("constraints", "questions")
+
+
+def body_prose(body: dict | str | None) -> str:
+    """The searchable text of a checkpoint body (a dict or its stored JSON)."""
+    if isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except ValueError:
+            return ""
+    if not isinstance(body, dict):
+        return ""
+    parts: list[str] = []
+    for field, key in _BODY_LISTS:
+        for item in body.get(field) or []:
+            if isinstance(item, dict) and isinstance(item.get(key), str):
+                parts.append(item[key])
+    for field in _BODY_STRINGS:
+        parts.extend(x for x in body.get(field) or [] if isinstance(x, str))
+    if isinstance(body.get("notes"), str):
+        parts.append(body["notes"])
+    return "\n".join(parts)
+
+
+def stems_of(statement: str | None, why: str | None, body: dict | str | None = None) -> str:
+    """The lexical index's `stems` column for one record: its statement, its why and,
+    for a checkpoint, the prose of its body."""
+    return " ".join(keys(f"{statement or ''}\n{why or ''}\n{body_prose(body)}"))

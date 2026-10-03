@@ -1,0 +1,98 @@
+{
+ "corpus": {
+  "records": 40,
+  "questions": 40,
+  "unanswerable": 20
+ },
+ "search": "lexical only — the evaluation never spends; vectors are OBS-04's to add",
+ "retrieval": {
+  "n": 40,
+  "recall@5": 1.0,
+  "mrr": 1.0,
+  "byLanguage": {
+   "en": {
+    "n": 20,
+    "recall@5": 1.0,
+    "mrr": 1.0
+   },
+   "ru": {
+    "n": 20,
+    "recall@5": 1.0,
+    "mrr": 1.0
+   }
+  },
+  "missed": []
+ },
+ "abstention": {
+  "n": 20,
+  "emptyAnswers": 20,
+  "rate": 1.0,
+  "answerableRefused": []
+ },
+ "checkpointBodies": {
+  "n": 8,
+  "recall@5": 1.0,
+  "mrr": 0.938,
+  "byLanguage": {
+   "en": {
+    "n": 4,
+    "recall@5": 1.0,
+    "mrr": 1.0
+   },
+   "ru": {
+    "n": 4,
+    "recall@5": 1.0,
+    "mrr": 0.875
+   }
+  },
+  "missed": []
+ },
+ "hard": {
+  "paraphrases": {
+   "n": 15,
+   "recall@5": 0.067,
+   "mrr": 0.067,
+   "missed": [
+    "export-stream",
+    "export-timeout",
+    "auth-refresh",
+    "rate-limit",
+    "deploy-order",
+    "queue-dlq",
+    "backup-restore",
+    "switch-account",
+    "vault-keys",
+    "stall-detect",
+    "dashboard-live",
+    "dns-migration",
+    "price-test",
+    "cron-overlap"
+   ]
+  },
+  "adversarialAbstention": {
+   "n": 10,
+   "emptyAnswers": 9
+  }
+ },
+ "handoff": {
+  "n": 10,
+  "passed": 10,
+  "failedChecks": []
+ },
+ "injection": {
+  "reachedThePackAsData": true,
+  "neverAConstraint": true,
+  "packSaysDataNotInstructions": true
+ },
+ "forgetting": {
+  "search": true,
+  "listing": true,
+  "purgeReceipts": {
+   "search_notes": "purged",
+   "vec_notes": "absent"
+  }
+ },
+ "freshness": {
+  "searchableBeforeTheIndexPass": true
+ }
+}
