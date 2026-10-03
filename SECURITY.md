@@ -32,6 +32,14 @@ provides values to one child process and filters exact known values from its
 captured output. Encodings, transformations, direct network transmissions and
 files written by that child are outside this filter. Run only trusted commands.
 
+`tools/use_secret.py header` is the one door that prints a value: one JSON header
+object for Claude Code's MCP `headersHelper`, which Claude Code puts into the HTTP
+request. It reads the vault only and answers only when stdout is not a terminal and
+`CLAUDE_CODE_MCP_SERVER_URL` names the scheme, host and port the operator bound the
+slot to with `tools/vault.py bind`; each call is audited without the value. A
+process that sets that variable to the bound URL and reads stdout receives the
+value, so the binding limits accidents and is not a sandbox.
+
 The credential UI can reveal a selected inventoried value after an explicit,
 authenticated local request. Reveal is deliberately different from a report;
 users must not copy its result into an agent transcript or public issue.

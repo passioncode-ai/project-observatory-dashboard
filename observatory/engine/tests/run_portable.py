@@ -113,6 +113,8 @@ BOUNDARY += ('vault_project',)
 BOUNDARY += ('lifecycle', 'lifecycle_watch')
 # Agent memory: checkpoints, one executor per workflow, handoff packs.
 BOUNDARY += ('workflow_memory',)
+# The header door: a vault value for one MCP server's headersHelper, and its binding.
+BOUNDARY += ('secret_header',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',

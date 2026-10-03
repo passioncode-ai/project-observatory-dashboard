@@ -244,6 +244,51 @@ pipe from an already authenticated provider tool. Do not put a secret in a chat,
 command argument, test fixture or tracked file. Read the installed
 `handling-secrets` skill before an agent works with these commands.
 
+**An HTTP MCP server's bearer, from the vault, through Claude Code's `headersHelper`.** Claude
+Code runs a server's `headersHelper` command on each new connection and puts the JSON object it
+prints into the request headers, not into the conversation. Its documentation
+(<https://code.claude.com/docs/en/mcp>, "Use dynamic headers for custom authentication") says:
+"Claude Code runs the helper fresh on each connection, at session start and on reconnect",
+"Claude Code runs the command in a shell and gives up on it after 10 seconds", and it sets
+`CLAUDE_CODE_MCP_SERVER_NAME` ("the name of the MCP server") and `CLAUDE_CODE_MCP_SERVER_URL`
+("the URL of the MCP server") for the helper. `use_secret.py header` relies on that last
+variable. Store the value, bind the slot to the server once, then name the door in the server's
+entry:
+
+```sh
+python "$(project-observatory full-path)/tools/vault.py" put PROJECT prod NAME   # the value on stdin
+python "$(project-observatory full-path)/tools/vault.py" bind PROJECT prod NAME --header-for https://mcp.example.com
+```
+
+```json
+{
+  "mcpServers": {
+    "example-server": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "headersHelper": "/path/to/venv/bin/python \"$(project-observatory full-path)/tools/use_secret.py\" header --env prod PROJECT NAME"
+    }
+  }
+}
+```
+
+Give the interpreter by its absolute path, the one `project-observatory` is installed in
+(`python -c 'import sys; print(sys.executable)'` from that environment), since Claude Code
+chooses the helper's working directory and `PATH`. The door prints exactly
+`{"Authorization": "Bearer <value>"}` and a newline; `--name X-Api-Key` changes the header and
+`--scheme ""` prints the bare value. It reads the vault only, never an env file or the
+environment, and refuses, printing nothing on stdout, when stdout is a terminal, when
+`CLAUDE_CODE_MCP_SERVER_URL` is unset or names a scheme, host or port other than the binding,
+when the slot is not bound, when `--name` or `--scheme` is not an RFC 7230 token, or when the
+value carries a control character. `--header-for` takes an https URL or a bare host (https on
+the default port); the path is not part of the binding, and plain http, userinfo, a query or a
+fragment are refused. `vault.py bind … --clear` removes the binding; `vault.py list` shows it;
+both verbs are journalled in the movements journal. Each `header` call adds a row to the
+`secret-use.jsonl` audit (served or refused, the server's name and host, the parent process),
+never the value. The binding narrows an accident (`header … | cat` in an agent's shell is
+refused for want of the server's URL); it is not a sandbox, because anything that can set that
+variable to the bound URL and read stdout receives the value.
+
 Slots are private files under the workspace by default. A separate
 `sources.secret_store` is optional and belongs to the user. File permissions
 limit local access; this is not a claim that the default files are encrypted at
