@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "agent"))
 import paths
 from store import db as store_db
+from store import ledger
 import store_faults
 import providers
 
@@ -91,7 +92,7 @@ def indexable(conn: sqlite3.Connection, memory_id: str, revision: int) -> sqlite
     means by a tombstone: `ledger.live()`, `survey.search`, `review.py` and
     `build_findings.py` all join on `memory_id`."""
     return conn.execute(
-        "SELECT l.memory_id, l.revision, l.statement, l.why, l.project_id, l.state"
+        "SELECT l.memory_id, l.revision, l.statement, l.why, l.project_id, l.state, l.kind"
         " FROM ledger l LEFT JOIN tombstones t"
         "   ON t.memory_id = l.memory_id"
         " WHERE l.memory_id = ? AND l.revision = ? AND t.memory_id IS NULL",
@@ -121,10 +122,18 @@ def index_batch(conn: sqlite3.Connection, rows: list[sqlite3.Row], have_vec: boo
         return 0, 0.0, 0, True
     written, cost, tokens = 0, 0.0, 0
     vectors = None
-    if have_vec:
+    # A WORKFLOW'S RECORDS ARE LEXICAL ONLY. A checkpoint is written after every
+    # step of every workflow, and its text is the work in progress of a project:
+    # sending each revision to the configured embedding provider would spend per
+    # step and carry project-internal state off the machine, which
+    # docs/design/AGENT-MEMORY.md rules out until a local embedding model indexes them. They
+    # are found by workflow id, and by the lexical index for related records.
+    embedded = [i for i, r in enumerate(rows) if _embeddable(r)]
+    if have_vec and embedded:
         try:
-            res = providers.embed([text_of(r) for r in rows])
-            vectors, cost, tokens = res["vectors"], res["cost"], res["tokens"]
+            res = providers.embed([text_of(rows[i]) for i in embedded])
+            got, cost, tokens = res["vectors"], res["cost"], res["tokens"]
+            vectors = {i: got[k] for k, i in enumerate(embedded)}
         except providers.ProviderError as exc:
             print(f"  embedding unavailable ({type(exc).__name__}: {exc});"
                   f" writing the lexical index only — these revisions stay QUEUED so a "
@@ -144,7 +153,7 @@ def index_batch(conn: sqlite3.Connection, rows: list[sqlite3.Row], have_vec: boo
             conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why)"
                          " VALUES (?,?,?,?)",
                          (r["memory_id"], r["revision"], r["statement"], r["why"] or ""))
-            if vectors is not None:
+            if vectors is not None and i in vectors:
                 from sqlite_vec import serialize_float32
                 conn.execute("DELETE FROM vec_notes WHERE memory_id = ? AND revision = ?",
                              (r["memory_id"], r["revision"]))
@@ -152,7 +161,13 @@ def index_batch(conn: sqlite3.Connection, rows: list[sqlite3.Row], have_vec: boo
                              " VALUES (?,?,?)",
                              (r["memory_id"], r["revision"], serialize_float32(vectors[i])))
             written += 1
-    return written, cost, tokens, (vectors is not None or not have_vec)
+    return written, cost, tokens, (vectors is not None or not have_vec or not embedded)
+
+
+def _embeddable(row: sqlite3.Row) -> bool:
+    """False for the kinds that are never sent to an embedding provider."""
+    keys = row.keys()
+    return "kind" not in keys or row["kind"] not in ledger.WORKFLOW_KINDS
 
 
 def cmd_index(conn: sqlite3.Connection, limit: int) -> int:

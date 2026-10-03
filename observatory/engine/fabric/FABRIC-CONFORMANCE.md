@@ -35,11 +35,13 @@ The capability definitions and effects come from `../fabric-agent.json`:
 | `machine.mcp.refresh` | `none`, job | `machine.mcp.refresh`, then `fabric.job.get` / `fabric.job.cancel` | — |
 
 The older `observatory_*` tools stay, unchanged, for hosts that call them. The full
-server lists fourteen of them — the seven above plus `observatory_overview`,
-`observatory_credentials`, `observatory_findings`, `observatory_machine` and the three
-`observatory_assistant_*` tools — and with the six capability tools and the two job
-tools that is 22 tools, all defined through `../mcp/server.py` (`tools/list`, measured
-2026-10-03).
+server lists nineteen of them — the seven above plus `observatory_overview`,
+`observatory_credentials`, `observatory_findings`, `observatory_machine`, the three
+`observatory_assistant_*` tools and the five workflow-memory tools
+(`observatory_checkpoint_write`, `_latest`, `observatory_handoff_create`, `_accept`,
+`_get`) — and with the six capability tools and the two job tools that is 27 tools, all
+defined through `../mcp/server.py` (`tools/list`, measured 2026-10-03). The workflow
+tools are protocol surface, not capabilities: the pinned contract has no memory family.
 
 ## fabric-interop/0.1
 

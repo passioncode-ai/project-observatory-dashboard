@@ -156,6 +156,34 @@ def test_a_registry_proposal_reaches_the_operator() -> None:
           str(store["health"].get("registry_proposals")))
 
 
+def test_agent_workflows_reach_the_operator() -> None:
+    """Workflows and handoff offers are written by agents over MCP; the health
+    panel is where the operator sees them. Driven end to end through the store."""
+    d, conn = fixture_db()
+    from store import workflow as W
+    import memory_redact
+    quiet = memory_redact.Redactor(known_loader=lambda: {})
+    wf = W.checkpoint_write(conn, owner="agent:fixture", idempotency_key="dead-data-0001",
+                            step_id="S1", status="done", body={"goal": "a fixture goal"},
+                            redactor=quiet)
+    W.handoff_create(conn, owner="service:fixture", idempotency_key="dead-data-0002",
+                     workflow_id=wf["workflowId"], reason="limit", to={"provider": "fixture"},
+                     git_reader=lambda path: {"path": path},
+                     related_reader=lambda c, **kw: ([], []), redactor=quiet)
+    conn.close()
+    sys.path.insert(0, str(ROOT / "dashboard"))
+    import importlib
+    import paths
+    importlib.reload(paths)
+    import build_dashboard
+    importlib.reload(build_dashboard)
+    health = build_dashboard.from_store()["health"]
+    check("the health panel counts the open workflow", health.get("workflows_open") == 1,
+          str(health.get("workflows_open")))
+    check("and the handoff waiting for a session", health.get("handoffs_waiting") == 1,
+          str(health.get("handoffs_waiting")))
+
+
 def written_and_never_read(root: pathlib.Path) -> list[str]:
     """Tables with a writer and no reader outside the file that writes them.
 
@@ -230,6 +258,7 @@ if __name__ == "__main__":
                test_a_rename_produces_a_delta,
                test_the_agent_receives_the_meaning_not_only_the_numbers,
                test_a_registry_proposal_reaches_the_operator,
+               test_agent_workflows_reach_the_operator,
                test_no_table_is_written_and_never_read,
                test_the_rule_catches_a_planted_dead_table,
                test_the_computed_and_unconsumed_field_is_gone):
