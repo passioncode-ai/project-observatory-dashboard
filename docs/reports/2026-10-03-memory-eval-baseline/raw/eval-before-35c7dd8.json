@@ -1,0 +1,54 @@
+{
+ "corpus": {
+  "records": 40,
+  "questions": 40,
+  "unanswerable": 20
+ },
+ "search": "lexical only — the evaluation never spends; vectors are OBS-04's to add",
+ "retrieval": {
+  "n": 40,
+  "recall@5": 0.975,
+  "mrr": 0.931,
+  "byLanguage": {
+   "en": {
+    "n": 20,
+    "recall@5": 1.0,
+    "mrr": 1.0
+   },
+   "ru": {
+    "n": 20,
+    "recall@5": 0.95,
+    "mrr": 0.863
+   }
+  },
+  "missed": [
+   "switch-account"
+  ]
+ },
+ "abstention": {
+  "n": 20,
+  "emptyAnswers": 5,
+  "rate": 0.25
+ },
+ "handoff": {
+  "n": 10,
+  "passed": 10,
+  "failedChecks": []
+ },
+ "injection": {
+  "reachedThePackAsData": true,
+  "neverAConstraint": true,
+  "packSaysDataNotInstructions": true
+ },
+ "forgetting": {
+  "search": true,
+  "listing": true,
+  "purgeReceipts": {
+   "search_notes": "purged",
+   "vec_notes": "absent"
+  }
+ },
+ "freshness": {
+  "searchableBeforeTheIndexPass": false
+ }
+}

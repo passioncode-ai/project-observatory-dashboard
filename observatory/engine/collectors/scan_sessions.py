@@ -234,6 +234,88 @@ def verdict_for(folders: set[str]) -> tuple[str, list[str]]:
 
 
 def scan() -> dict:
+    """Sessions from BOTH sources: the Stop hook's own `session` records in the
+    ledger, and — where it is still installed — the companion's store.
+
+    The hook's records come first because they are this engine's own: one per
+    Claude Code session, already attributed to a project id by the hook, and
+    present on every machine with the plugin. The companion was retired on
+    machines that used it, and a history read only from it was degraded for
+    ever. A session in both is one session; its earliest start and its larger
+    turn count are kept."""
+    companion = _scan_companion()
+    own, own_degraded = _from_ledger()
+    merged: dict[tuple[str, str], dict] = {}
+    for row in [*companion["sessions"], *own]:
+        key = (row["session_id"], row["project_id"])
+        prev = merged.get(key)
+        if prev is None:
+            merged[key] = dict(row)
+            continue
+        prev["prompts"] = max(prev["prompts"], row["prompts"])
+        prev["started_at"] = min(x for x in (prev["started_at"], row["started_at"]) if x) \
+            if (prev["started_at"] or row["started_at"]) else None
+        prev["started_on"] = (prev["started_at"] or prev["started_on"] or "")[:10]
+        prev["ended_on"] = max(prev["ended_on"] or "", row["ended_on"] or "")
+    out = dict(companion)
+    out["sessions"] = sorted(merged.values(), key=lambda s: (s["project_id"], s["session_id"]))
+    out["sources"] = ["ledger:session", str(STORE)]
+    out["counts"] = dict(companion["counts"], sessions=len(out["sessions"]),
+                         projects=len({s["project_id"] for s in out["sessions"]}),
+                         from_stop_hook=len(own))
+    degraded = list(companion.get("degraded") or [])
+    not_applicable = list(companion.get("not_applicable") or [])
+    if own:
+        # THE COMPANION'S ABSENCE NO LONGER COSTS THE HISTORY. Its messages
+        # said "activity falls back to commits alone", which stops being true
+        # once the hook's records answer; they are kept, as not-applicable.
+        moved = [d for d in degraded if d.get("source") == "claude-mem"
+                 and "falls back to commits alone" in d.get("reason", "")]
+        degraded = [d for d in degraded if d not in moved]
+        not_applicable += [dict(d, reason=d["reason"].replace(
+            "activity falls back to commits alone",
+            "the Stop hook's own session records are the history")) for d in moved]
+        for d in not_applicable:
+            d["reason"] = d["reason"].replace(
+                "activity rests on commits alone",
+                "the Stop hook's own session records are the history")
+    out["degraded"] = degraded + own_degraded
+    if not_applicable:
+        out["not_applicable"] = not_applicable
+    return out
+
+
+def _from_ledger() -> tuple[list[dict], list[dict]]:
+    """The Stop hook's `session` records: one memory per session, a revision per
+    turn that moved files. Read-only; attribution is the hook's own."""
+    cutoff = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp()
+                                    - WINDOW_DAYS * 86400, timezone.utc
+                                    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not paths.DB.is_file():
+        # No store yet is a workspace where nothing has been recorded: a
+        # measured empty, not a failure to read one.
+        return [], []
+    try:
+        conn = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT l.session_id AS sid, l.project_id AS pid, min(l.created_at) AS started,"
+            "       max(l.created_at) AS ended, count(*) AS turns"
+            " FROM ledger l LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
+            " WHERE l.kind = 'session' AND l.session_id IS NOT NULL"
+            "   AND l.project_id IS NOT NULL AND t.memory_id IS NULL AND l.created_at >= ?"
+            " GROUP BY l.session_id, l.project_id", (cutoff,)).fetchall()
+        conn.close()
+    except sqlite3.Error as exc:
+        return [], [{"source": "ledger", "reason": f"the Stop hook's session records could "
+                                                   f"not be read ({type(exc).__name__})"}]
+    return [{"session_id": r["sid"], "project_id": r["pid"], "claude_mem_project": "",
+             "matched_by": "stop-hook", "started_on": (r["started"] or "")[:10],
+             "ended_on": (r["ended"] or "")[:10], "started_at": r["started"],
+             "prompts": r["turns"]} for r in rows], []
+
+
+def _scan_companion() -> dict:
     projects = json.loads((paths.REGISTRY / "projects.json")
                           .read_text(encoding="utf-8"))["projects"]
     index, conflicts = build_index(projects)

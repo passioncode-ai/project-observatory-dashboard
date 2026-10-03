@@ -249,8 +249,12 @@ INSERT INTO vec_meta (projection_version, embedding_provider, embedding_model, d
 -- It carries no meaning. Losing it is a rebuild — `indexer.py rebuild` — not a
 -- data loss, and that is the invariant the whole separation exists to protect.
 
+-- `stems`: every word's search key (textkeys.py) — Snowball stems, Russian cut
+-- to six characters — so a question finds a record in another word form.
+-- Written in the same transaction as the ledger revision (ledger.insert_revision),
+-- so a record is searchable the moment it exists; the indexer rewrites it.
 CREATE VIRTUAL TABLE IF NOT EXISTS search_notes USING fts5(
-  memory_id UNINDEXED, revision UNINDEXED, statement, why);
+  memory_id UNINDEXED, revision UNINDEXED, statement, why, stems);
 
 -- ROLLUPS: small, permanent, and NOT rebuildable once the raw events age out.
 --

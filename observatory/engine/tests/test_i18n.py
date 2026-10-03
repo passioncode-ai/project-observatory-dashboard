@@ -95,12 +95,22 @@ def machine_page_ids() -> set[str]:
     return ids | set(machine_page.DYNAMIC)
 
 
+def agents_page_ids() -> set[str]:
+    """The Agents page's ids: `t`/`mark` literals and the values it translates
+    through a variable (`agents_page.DYNAMIC`)."""
+    ids, _ = _python_ids(DASH / "agents_page.py")
+    sys.path.insert(0, str(DASH))
+    import agents_page
+    return ids | {x for x in agents_page.DYNAMIC if x}
+
+
 def source_ids() -> set[str]:
     """Every message id named in the dashboard's code and static markup."""
     ids, template = _python_ids(DASH / "build_dashboard.py")
     shell_ids, _ = _python_ids(DASH / "shell.py")
     ids |= shell_ids
     ids |= machine_page_ids()
+    ids |= agents_page_ids()
     literal = r'(["\'])((?:\\.|(?!\1).)+?)\1'
     for m in re.finditer(r"\bT\(\s*" + literal, template):
         ids.add(m.group(2).replace('\\"', '"').replace("\\'", "'"))

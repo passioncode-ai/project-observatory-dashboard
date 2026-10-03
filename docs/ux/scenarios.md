@@ -1,7 +1,7 @@
 # Product scenarios by runtime
 
 The [full dashboard redesign](DASHBOARD-REDESIGN.md) specified the ten original operator
-screens and acceptance UI-01–09; the Machine page, the eleventh, came later. Their behavior is
+screens and acceptance UI-01–09; the Machine page, the eleventh, and the Agents page, the twelfth, came later. Their behavior is
 recorded as OSS-13–22 in the full-engine scenario base linked below, alongside existing safety
 contracts.
 

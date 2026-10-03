@@ -32,6 +32,8 @@ from __future__ import annotations
 #: `clone.<state>` is one rule with one type per checkout state
 #: (`tools/build_findings.SYNC_FINDINGS`); each state is named here in full.
 LABELS: dict[str, str] = {
+    "agent.secret_fallback_used": "An agent's run read a key from a .env",
+    "agent.secret_outside_vault": "An agent's secrets outside the vault",
     "acks.unreadable": "Silence file unreadable",
     "analytics.api_disabled": "Google API switched off",
     "analytics.legacy_account_property": "Analytics property in a legacy account",
@@ -157,6 +159,7 @@ LABELS: dict[str, str] = {
     "secret.reveal_burst": "Burst of value reveals",
     "secret.reveal_unnamed": "Value revealed by an unnamed caller",
     "secret.seen_outside_its_home": "Secret seen outside its home",
+    "secret.seen_in_agent_memory": "Secret written into agent memory",
     "secret.sighting_suppressed": "Leak sightings suppressed",
     "secret.suppression_not_applied": "Leak suppression not applied",
     "server.silent": "Local server silent",

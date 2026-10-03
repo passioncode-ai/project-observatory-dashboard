@@ -51,6 +51,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import pathlib
 import re
 import secrets
@@ -92,6 +93,13 @@ OFFER_TTL_MIN, OFFER_TTL_MAX = 60, 86400
 SILENCE_SECONDS = 120
 #: REASONS that may be claimed without the token, under the silence rule.
 REASONS_WITHOUT_TOKEN = ("limit", "crash", "restart")
+#: A workflow is STALLED when it is open, someone holds it, and neither a
+#: checkpoint nor a turn of a session executing it has been seen for this long.
+#: Thirty minutes is longer than any one step should run without a checkpoint;
+#: the Stop hook records a session's turn only when its files moved, so a
+#: session thinking for a long time without touching anything can read as
+#: stalled — the view says which signal it saw last, not that the agent died.
+STALL_SECONDS = 1800
 #: One offer per workflow per this many seconds without the token, so a loop of
 #: superseding offers cannot fill the store with packs.
 OFFER_INTERVAL_SECONDS = 60
@@ -117,6 +125,11 @@ ACCOUNT_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}")
 PROVIDER = re.compile(r"[a-z0-9][a-z0-9._-]{0,31}")
 MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,95}")
 PROJECT_ID = re.compile(r"[a-z][a-z0-9-]{0,31}:[A-Za-z0-9][A-Za-z0-9._/:-]{0,199}")
+#: A credential as the vault names it: the project's folder (or its registry
+#: id), the environment, and the variable name. Never a value.
+CRED_PROJECT = re.compile(r"(?:project:)?[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+CRED_NAME = re.compile(r"[A-Z_][A-Z0-9_]{0,127}")
+CRED_ENVS = ("local", "stage", "prod")
 SESSION_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
@@ -277,7 +290,7 @@ def checkpoint_body(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise InvalidInput("body must be an object")
     known = {"goal", "plan", "done", "open", "decisions", "constraints", "artifacts",
-             "questions", "memory_refs", "notes"}
+             "questions", "memory_refs", "notes", "credentials"}
     unknown = set(raw) - known
     if unknown:
         raise InvalidInput(f"body has unknown fields: {', '.join(sorted(unknown))}; "
@@ -310,6 +323,7 @@ def checkpoint_body(raw: Any) -> dict[str, Any]:
     for d in body["done"]:
         if "evidence" in d:
             d["evidence"] = [_short_commits(e) for e in d["evidence"]]
+    body["credentials"] = _credentials(raw.get("credentials"))
     body["questions"] = _strings(raw.get("questions"), "body.questions", 50, 1000)
     body["memory_refs"] = [_short_commits(r) for r in
                            _strings(raw.get("memory_refs"), "body.memory_refs", 100, 300)]
@@ -317,6 +331,98 @@ def checkpoint_body(raw: Any) -> dict[str, Any]:
     if notes is not None:
         body["notes"] = notes
     return {k: v for k, v in body.items() if v not in ([], None)} | {"goal": body["goal"]}
+
+
+def _credentials(raw: Any) -> list[dict]:
+    """The credentials a workflow needs, by name: `{project, env, name, purpose}`.
+
+    Every credential an agent uses comes from Observatory's vault (the rule in
+    docs/design/AGENT-SECRETS.md). Declaring them here lets a handoff check, before
+    the next executor starts, that each one is in the vault — and lets the
+    Agents view show a workflow that is about to fail for a missing key. A value
+    in any field is refused, not redacted: this field holds addresses only."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > 50:
+        raise InvalidInput("body.credentials must be a list of at most 50 objects")
+    out, seen = [], set()
+    for i, item in enumerate(raw):
+        where = f"body.credentials[{i}]"
+        if not isinstance(item, dict) or set(item) - {"project", "env", "name", "purpose"}:
+            raise InvalidInput(f"{where} must be {{project, env, name, purpose}}")
+        row = {"project": _require(CRED_PROJECT, item.get("project"), f"{where}.project"),
+               "env": item.get("env", "local"),
+               "name": _require(CRED_NAME, item.get("name"), f"{where}.name")}
+        if row["env"] not in CRED_ENVS:
+            raise InvalidInput(f"{where}.env must be one of {', '.join(CRED_ENVS)}")
+        purpose = _string(item.get("purpose"), f"{where}.purpose", 200)
+        if purpose is not None:
+            if memory_redact.credential_kind(purpose):
+                raise InvalidInput(f"{where}.purpose looks like it carries a credential; "
+                                   f"name the key, never paste it")
+            row["purpose"] = purpose
+        key = (row["project"], row["env"], row["name"])
+        if key not in seen:
+            seen.add(key)
+            out.append(row)
+    return out
+
+
+def credential_states(declared: list[dict],
+                      reader: Callable[[str], dict] | None = None) -> tuple[list[dict], list[dict]]:
+    """Where each declared credential is, read now: `vault`, `env-only`,
+    `missing` or `unknown`, with the command that uses it. Never a value.
+
+    `env-only` is a key the project holds in its own `.env` and not in the
+    vault: it works, and it breaks the rule — an agent's keys live in the vault.
+    `unknown` is said when the vault directory cannot be listed, because
+    "missing" would then be a guess."""
+    if not declared:
+        return [], []
+    reader = reader or _survey_credentials
+    answers: dict[str, dict] = {}
+    degraded: list[dict] = []
+    out = []
+    for c in declared:
+        project = c["project"]
+        if project not in answers:
+            try:
+                answers[project] = reader(project)
+            except Exception as exc:                                            # noqa: BLE001
+                answers[project] = {"vault": [], "env": [], "degraded": [
+                    {"source": "vault", "reason": f"unreadable: {type(exc).__name__}"}]}
+                degraded.append({"source": f"credentials:{project}",
+                                 "reason": f"could not be read: {type(exc).__name__}"})
+        a = answers[project]
+        folder = a.get("project") or project.split(":", 1)[-1]
+        vault_blind = any(d.get("source") == "vault" for d in a.get("degraded", []))
+        in_vault = any(v.get("name") == c["name"] and v.get("env") == c["env"]
+                       for v in a.get("vault", []))
+        in_env = any(e.get("name") == c["name"] and e.get("class") == "secret"
+                     for e in a.get("env", []))
+        state = ("vault" if in_vault else "unknown" if vault_blind
+                 else "env-only" if in_env else "missing")
+        row = dict(c, state=state)
+        if state == "vault":
+            row["use"] = (f"python \"$(project-observatory full-path)/tools/use_secret.py\" run "
+                          f"--env {c['env']} --vault-only {folder} {c['name']} -- <command>")
+        else:
+            row["put"] = (f"python \"$(project-observatory full-path)/tools/vault.py\" put "
+                          f"{folder} {c['env']} {c['name']} < <protected file>")
+        out.append(row)
+    return out, degraded
+
+
+def _survey_credentials(project: str) -> dict:
+    import survey
+    return survey.credentials(project)
+
+
+def _blocking(states: list[dict]) -> bool:
+    """True when the next executor cannot run a declared step: a key that is not
+    in the vault. `env-only` blocks too — continuing on it would carry a breach
+    of the rule into another session."""
+    return any(s["state"] in ("missing", "env-only") for s in states)
 
 
 def executor_shape(raw: Any, field: str = "executor") -> dict[str, str]:
@@ -463,8 +569,10 @@ def _lapse_expired(conn: sqlite3.Connection, workflow_id: str, now: datetime) ->
                  (_iso(now), workflow_id, _iso(now)))
 
 
-def checkpoint_latest(conn: sqlite3.Connection, workflow_id: str) -> dict:
-    """The workflow, its latest checkpoint and who holds it. Reads only."""
+def checkpoint_latest(conn: sqlite3.Connection, workflow_id: str,
+                      credential_reader: Callable[[str], dict] | None = None) -> dict:
+    """The workflow, its latest checkpoint and who holds it, and where each
+    declared credential is now. Reads only."""
     wf = _workflow(conn, workflow_id)
     ckpt = _latest_checkpoint(conn, workflow_id)
     now = _now()
@@ -487,7 +595,99 @@ def checkpoint_latest(conn: sqlite3.Connection, workflow_id: str) -> dict:
             "closedAt": wf["closed_at"],
             "checkpoint": None if ckpt is None else _checkpoint_view(ckpt),
             "lease": _lease_view(_active(conn, workflow_id)),
-            "pendingHandoff": _lease_view(offer), "lapsedHandoff": lapsed}
+            "pendingHandoff": _lease_view(offer), "lapsedHandoff": lapsed,
+            **_credential_view(ckpt, credential_reader)}
+
+
+def _credential_view(ckpt: sqlite3.Row | None, reader) -> dict:
+    declared = json.loads(ckpt["body_json"] or "{}").get("credentials", []) if ckpt else []
+    creds, degraded = credential_states(declared, reader)
+    return {"credentials": creds, "credentialsMissing": _blocking(creds),
+            "degraded": degraded}
+
+
+LIST_CURSOR = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\|wf_[0-9a-f]{16}")
+
+
+def workflow_list(conn: sqlite3.Connection, *, project_id: str | None = None,
+                  status: str = "open", limit: int = 20, cursor: str | None = None) -> dict:
+    """Workflows, newest first, each with where it stands — the way an agent
+    finds its workflow again after a compaction lost the id, and the rows the
+    Agents view and the operator's `full workflow list` show.
+
+    Per row: the latest step and its status, the goal, the executor holding it
+    (never the token), a pending handoff, how long since the last checkpoint,
+    and how many steps were kept after a lost lease. `total` counts the whole
+    scope; `nextCursor` continues it."""
+    if status not in ("open", "closed", "all"):
+        raise InvalidInput("status must be open, closed or all")
+    if project_id is not None:
+        _require(PROJECT_ID, project_id, "projectId")
+    if not isinstance(limit, int) or not 1 <= limit <= 200:
+        raise InvalidInput("limit must be 1..200")
+    if cursor is not None and not LIST_CURSOR.fullmatch(cursor):
+        raise InvalidInput("cursor is not one a previous answer handed out")
+    where, args = [], []
+    if status != "all":
+        where.append("w.status = ?")
+        args.append(status)
+    if project_id is not None:
+        where.append("w.project_id = ?")
+        args.append(project_id)
+    scope = (" WHERE " + " AND ".join(where)) if where else ""
+    total = conn.execute(f"SELECT count(*) FROM workflows w{scope}", args).fetchone()[0]
+    page_where = list(where)
+    page_args = list(args)
+    if cursor:
+        at, wid = cursor.split("|", 1)
+        page_where.append("(w.created_at, w.workflow_id) < (?, ?)")
+        page_args += [at, wid]
+    page_scope = (" WHERE " + " AND ".join(page_where)) if page_where else ""
+    rows = conn.execute(f"SELECT w.* FROM workflows w{page_scope}"
+                        " ORDER BY w.created_at DESC, w.workflow_id DESC LIMIT ?",
+                        (*page_args, limit + 1)).fetchall()
+    more, rows = len(rows) > limit, rows[:limit]
+    now = _now()
+    out = []
+    for w in rows:
+        wid = w["workflow_id"]
+        ckpt = _latest_checkpoint(conn, wid)
+        body = json.loads(ckpt["body_json"] or "{}") if ckpt else {}
+        offer = _offer(conn, wid)
+        live_offer = offer is not None and _parse(offer["expires_at"]) > now
+        kept = conn.execute("SELECT count(*) FROM ledger l LEFT JOIN tombstones t"
+                            " ON t.memory_id = l.memory_id WHERE l.workflow_id = ?"
+                            " AND l.kind = 'step_result' AND l.state = 'proposed'"
+                            " AND t.memory_id IS NULL", (wid,)).fetchone()[0]
+        handoffs = conn.execute("SELECT count(*) FROM workflow_leases WHERE workflow_id = ?"
+                                " AND handoff_id IS NOT NULL AND accepted_at IS NOT NULL",
+                                (wid,)).fetchone()[0]
+        last_session = conn.execute("SELECT max(created_at) FROM ledger WHERE kind = 'session'"
+                                    " AND workflow_id = ?", (wid,)).fetchone()[0]
+        seen = max(x for x in (ckpt["created_at"] if ckpt else None, last_session) if x) \
+            if (ckpt or last_session) else None
+        quiet = None if seen is None else int((now - _parse(seen)).total_seconds())
+        held = _active(conn, wid)
+        out.append({
+            "workflowId": wid, "projectId": w["project_id"], "status": w["status"],
+            "createdAt": w["created_at"], "closedAt": w["closed_at"],
+            "goal": (body.get("goal") or "")[:200],
+            "step": None if ckpt is None else {
+                "stepId": ckpt["step_id"], "status": _status_of(ckpt),
+                "revision": ckpt["revision"], "at": ckpt["created_at"]},
+            "silentSeconds": None if ckpt is None else
+            int((now - _parse(ckpt["created_at"])).total_seconds()),
+            "lastSessionAt": last_session,
+            "stalled": w["status"] == "open" and held is not None and quiet is not None
+            and quiet > STALL_SECONDS,
+            "lease": _lease_view(held),
+            "pendingHandoff": _lease_view(offer) if live_offer else None,
+            "handoffs": handoffs, "keptSteps": kept})
+    answer = {"status": status, "projectId": project_id, "count": len(out), "total": total,
+              "workflows": out}
+    if more and out:
+        answer["nextCursor"] = f"{rows[-1]['created_at']}|{rows[-1]['workflow_id']}"
+    return answer
 
 
 def handoff_get(conn: sqlite3.Connection, handoff_id: str) -> dict:
@@ -609,10 +809,11 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
             conn.execute("INSERT INTO workflows (workflow_id, project_id, created_by, created_at,"
                          " status) VALUES (?,?,?,?, 'open')", (wid, project_id, owner, _iso(now)))
             token = _new_token()
+            held_ref = _ref()
             conn.execute("INSERT INTO workflow_leases (lease_ref, workflow_id, state, token,"
                          " holder, executor_json, granted_at, accepted_at)"
                          " VALUES (?,?, 'active', ?,?,?,?,?)",
-                         (_ref(), wid, token, owner, json.dumps(who), _iso(now), _iso(now)))
+                         (held_ref, wid, token, owner, json.dumps(who), _iso(now), _iso(now)))
             prior = None
             pid = project_id
         else:
@@ -642,6 +843,7 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
                                       f"A retry needs a new idempotency key: this one now "
                                       f"answers with this refusal.", kept))
                 return {"error": "LeaseLost", "keptAs": kept}
+            held_ref = active["lease_ref"]
             prior = _latest_checkpoint(conn, wid)
             if expected_revision is not None and (prior is None or
                                                   prior["revision"] != expected_revision):
@@ -659,7 +861,11 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
             state="observed", confidence=None, owner=owner, classification="project-internal",
             valid_from=None, valid_to=None,
             supersedes=[] if prior is None else [f"{mid}@{prior['revision']}"],
+            # WHICH LEASE WROTE IT: the Agents view draws one lane per executor,
+            # and a timestamp of second resolution cannot tell a step written in
+            # the second a handoff was accepted from one written just before.
             conflicts_with=[], provenance=[{"source": "checkpoint", "status": status,
+                                            "lease": held_ref,
                                             "redacted": report.as_dict()}],
             evidence=[], created_at=_iso(now), workflow_id=wid, step_id=step_id,
             executor=who or None, body=clean))
@@ -677,6 +883,9 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
         return answer
 
     answer = _atomic(conn, owner, "checkpoint.write", idempotency_key, request, work)
+    if not answer.get("replayed"):
+        _journal_known("checkpoint", answer.get("workflowId") or workflow_id, step_id,
+                       report.as_dict())
     if lost:
         raise lost[0]
     if answer.get("error") == "LeaseLost":
@@ -684,6 +893,33 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
         raise LeaseLost(f"{workflow_id}: this write was refused before and kept as "
                         f"{answer['keptAs']}", answer["keptAs"])
     return answer
+
+
+#: Where a write that replaced one of the workspace's KNOWN secret values is
+#: recorded — names of slots, never values. `tools/agent_secret_findings.py`
+#: turns it into a finding with the command that puts the exposure on the
+#: register: the write succeeded redacted, but the value was in an agent's hands.
+REDACTIONS = "memory-redactions.jsonl"
+
+
+def _journal_known(kind: str, workflow_id: str | None, step_id: str | None,
+                   report: dict) -> None:
+    if not report or not report.get("knownValues"):
+        return
+    import paths
+    row = {"at": _iso(_now()), "kind": kind, "workflowId": workflow_id, "stepId": step_id,
+           "names": report.get("knownNames", []), "count": report.get("knownValues")}
+    target = pathlib.Path(paths.STATE) / "logs" / REDACTIONS
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        # The write itself succeeded redacted; losing the note about it is a
+        # smaller failure than refusing the memory, and the leak scan over the
+        # store (scan_leaks) is the second net.
+        pass
 
 
 def _new_token() -> str:
@@ -698,6 +934,7 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
                    workflow_id: str, to: Any, reason: str, transcript: Any = None,
                    offer_ttl_seconds: int = OFFER_TTL_DEFAULT, lease_token: str | None = None,
                    force: bool = False,
+                   credential_reader: Callable[[str], dict] | None = None,
                    git_reader: Callable[[str], dict] | None = None,
                    related_reader: Callable[..., tuple[list[dict], list[dict]]] | None = None,
                    redactor: memory_redact.Redactor | None = None) -> dict:
@@ -717,8 +954,10 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
     """
     if not owner or not owner.strip():
         raise L.OwnerRequired("a handoff must name who created it")
-    if owner == L.OPERATOR:
-        raise L.OwnerRefused("a handoff is created as `agent:` or `service:` over this path")
+    if owner == L.OPERATOR and not force:
+        raise L.OwnerRefused("the operator moves a workflow with the forced handoff from a "
+                             "terminal; over this path a handoff is created as `agent:` or "
+                             "`service:`")
     _require(WORKFLOW_ID, workflow_id, "workflowId")
     if reason not in REASONS:
         raise InvalidInput(f"reason must be one of {', '.join(REASONS)}")
@@ -758,6 +997,8 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
     related, related_degraded = related_reader(conn, body=body, project_id=wf["project_id"],
                                                workflow_id=workflow_id)
     degraded += related_degraded
+    creds, creds_degraded = credential_states(body.get("credentials", []), credential_reader)
+    degraded += creds_degraded
     redactor = redactor or memory_redact.Redactor()
     request = {"workflowId": workflow_id, "to": target, "reason": reason, "transcript": session,
                "offerTtlSeconds": offer_ttl_seconds, "checkpoint": ckpt["revision"],
@@ -788,6 +1029,10 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
             "from": None if active is None else json.loads(active["executor_json"] or "{}"),
             # FIRST, and verbatim: the restrictive mode is what a summary drops.
             "constraints": body.get("constraints", []),
+            # SECOND: the keys the work needs, where each one is now. A step
+            # that needs a key the vault does not hold fails half-way; saying so
+            # here stops the next executor before it starts.
+            "credentials": creds, "credentialsMissing": _blocking(creds),
             "checkpoint": _checkpoint_view(latest),
             "git": snapshots, "related": related, "degraded": degraded,
             "instructions": ("Continue this workflow from the checkpoint's open steps. Obey "
@@ -823,9 +1068,12 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
                      (_ref(), workflow_id, json.dumps(target), hid, _iso(now), _iso(expires)))
         return {"handoffId": hid, "workflowId": workflow_id, "expiresAt": _iso(expires),
                 "checkpointRevision": latest["revision"], "degraded": degraded,
-                "redacted": pack_report.as_dict()}
+                "credentialsMissing": _blocking(creds), "redacted": pack_report.as_dict()}
 
-    return _atomic(conn, owner, "handoff.create", idempotency_key, request, work)
+    answer = _atomic(conn, owner, "handoff.create", idempotency_key, request, work)
+    if not answer.get("replayed"):
+        _journal_known("handoff", workflow_id, None, answer.get("redacted") or {})
+    return answer
 
 
 def _handoff_authority(conn: sqlite3.Connection, workflow_id: str, active: sqlite3.Row | None,
@@ -862,7 +1110,8 @@ def _handoff_authority(conn: sqlite3.Connection, workflow_id: str, active: sqlit
 
 
 def handoff_accept(conn: sqlite3.Connection, *, owner: str, idempotency_key: str,
-                   handoff_id: str, executor: Any = None, session_id: str | None = None) -> dict:
+                   handoff_id: str, executor: Any = None, session_id: str | None = None,
+                   credential_reader: Callable[[str], dict] | None = None) -> dict:
     """Take the workflow: the offer becomes the active lease, the old one ends.
 
     The answer carries the new lease token and the pack, constraints first.
@@ -880,6 +1129,15 @@ def handoff_accept(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
     # every Claude session shares one identity, so without it a second session
     # repeating the key and the handoff id would receive the first one's token.
     request = {"handoffId": handoff_id, "executor": who, "sessionId": session_id}
+    # The credentials are read FRESH, before the transaction (the vault is
+    # files, not this store): a key put into the vault after the pack was made
+    # counts, and one removed since does too. From the checkpoint in force.
+    current = conn.execute(
+        "SELECT l.body_json FROM workflow_leases w JOIN ledger l"
+        " ON l.memory_id = 'ckpt:' || w.workflow_id WHERE w.handoff_id = ?"
+        " ORDER BY l.revision DESC LIMIT 1", (handoff_id,)).fetchone()
+    declared = json.loads(current[0] or "{}").get("credentials", []) if current else []
+    creds, creds_degraded = credential_states(declared, credential_reader)
 
     def work() -> dict:
         now = _now()
@@ -935,6 +1193,8 @@ def handoff_accept(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
                 "checkpoint": None if latest is None else _checkpoint_view(latest),
                 "checkpointAdvanced": latest is not None and packed is not None
                 and latest["revision"] != packed,
+                "credentials": creds, "credentialsMissing": _blocking(creds),
+                "degraded": creds_degraded,
                 "pack": pack}
 
     answer = _atomic(conn, owner, "handoff.accept", idempotency_key, request, work)
@@ -1101,7 +1361,8 @@ def related_records(conn: sqlite3.Connection, *, body: dict, project_id: str | N
 # ──────────────────────────────── retention ────────────────────────────────
 
 def retention_candidates(conn: sqlite3.Connection, *, closed_checkpoint_days: int,
-                         handoff_days: int, cutoff: Callable[[int], str]) -> list[dict]:
+                         handoff_days: int, cutoff: Callable[[int], str],
+                         exempt_owners: tuple[str, ...] = ("operator",)) -> list[dict]:
     """Workflow records past their horizon.
 
     A checkpoint is kept while its workflow is open, whatever its age — the
@@ -1117,8 +1378,11 @@ def retention_candidates(conn: sqlite3.Connection, *, closed_checkpoint_days: in
         " JOIN workflows w ON w.workflow_id = l.workflow_id"
         " LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
         " WHERE t.memory_id IS NULL AND l.kind = 'checkpoint'"
-        "   AND w.status = 'closed' AND w.closed_at < ?",
-        (cutoff(closed_checkpoint_days),)).fetchall()
+        "   AND w.status = 'closed' AND w.closed_at < ?"
+        # The operator's rows are never erased by age, here as in every other
+        # retention query: a workflow the operator closed keeps its last word.
+        f"   AND l.owner NOT IN ({','.join('?' * len(exempt_owners))})",
+        (cutoff(closed_checkpoint_days), *exempt_owners)).fetchall()
     out = [dict(r, horizon_days=closed_checkpoint_days,
                 reason=f"checkpoint of a workflow closed more than {closed_checkpoint_days} days ago")
            for r in rows]
@@ -1126,11 +1390,66 @@ def retention_candidates(conn: sqlite3.Connection, *, closed_checkpoint_days: in
         "SELECT l.memory_id, l.revision, l.state, l.owner, l.created_at, l.kind,"
         "       substr(l.statement, 1, 70) AS gist"
         " FROM ledger l LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
-        " WHERE t.memory_id IS NULL AND l.kind = 'handoff' AND l.created_at < ?",
-        (cutoff(handoff_days),)).fetchall()
+        " WHERE t.memory_id IS NULL AND l.kind = 'handoff' AND l.created_at < ?"
+        f"   AND l.owner NOT IN ({','.join('?' * len(exempt_owners))})",
+        (cutoff(handoff_days), *exempt_owners)).fetchall()
     out += [dict(r, horizon_days=handoff_days,
                  reason=f"handoff older than {handoff_days} days") for r in rows]
     return out
+
+
+def close_workflow(conn: sqlite3.Connection, *, workflow_id: str, by: str, why: str,
+                   idempotency_key: str) -> dict:
+    """The operator closes a workflow nobody will continue, without its lease.
+
+    Otherwise an abandoned workflow stays open for ever, and an open workflow's
+    checkpoint is kept whatever its age. This is the operator's act — the CLI
+    asks for a terminal before calling it — and it leaves a trace in the
+    ledger: a final revision of the checkpoint, written by the operator, saying
+    why. Every lease and pending offer ends with it."""
+    if by != L.OPERATOR:
+        raise L.OwnerRefused("closing a workflow without its lease is the operator's act; an "
+                             "executor closes its own with a final checkpoint (`close`)")
+    _require(WORKFLOW_ID, workflow_id, "workflowId")
+    reason = _string(why, "why", 500, required=True)
+    if memory_redact.credential_kind(reason):
+        raise InvalidInput("why looks like it carries a credential; say what happened, "
+                           "not a value")
+
+    def work() -> dict:
+        now = _now()
+        wf = _workflow(conn, workflow_id)
+        if wf["status"] != "open":
+            raise WorkflowClosed(f"{workflow_id} was already closed at {wf['closed_at']}")
+        prior = _latest_checkpoint(conn, workflow_id)
+        revision = None
+        if prior is not None:
+            mid = _checkpoint_id(workflow_id)
+            revision = prior["revision"] + 1
+            L.insert_revision(conn, dict(
+                memory_id=mid, revision=revision, kind="checkpoint",
+                project_id=prior["project_id"], agent_id=prior["agent_id"], run_id=None,
+                session_id=None, function="working", scope="run",
+                statement=f"{prior['statement']} — closed by the operator: {reason}"[:L.MAX_TEXT],
+                why=reason, state="observed", confidence=None, owner=L.OPERATOR,
+                classification=prior["classification"], valid_from=None, valid_to=None,
+                supersedes=[f"{mid}@{prior['revision']}"], conflicts_with=[],
+                provenance=[{"source": "checkpoint", "status": _status_of(prior),
+                             "closedBy": L.OPERATOR}],
+                evidence=[], created_at=_iso(now), workflow_id=workflow_id,
+                step_id=prior["step_id"],
+                executor=json.loads(prior["executor_json"]) if prior["executor_json"] else None,
+                body=json.loads(prior["body_json"] or "{}")))
+        conn.execute("UPDATE workflows SET status = 'closed', closed_at = ?, closed_by = ?"
+                     " WHERE workflow_id = ?", (_iso(now), L.OPERATOR, workflow_id))
+        ended = conn.execute("UPDATE workflow_leases SET state = 'ended', ended_at = ?,"
+                             " ended_reason = 'closed' WHERE workflow_id = ? AND state IN"
+                             " ('active','offered')", (_iso(now), workflow_id)).rowcount
+        return {"workflowId": workflow_id, "closed": True, "closedAt": _iso(now),
+                "checkpointRevision": revision, "leasesEnded": ended}
+
+    return _atomic(conn, by, "workflow.close", idempotency_key,
+                   {"workflowId": workflow_id, "why": reason}, work)
 
 
 def prune_leases(conn: sqlite3.Connection, *, cutoff_iso: str) -> int:

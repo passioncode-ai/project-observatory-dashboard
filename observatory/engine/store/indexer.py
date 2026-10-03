@@ -23,6 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "agent"))
 import paths
+import textkeys
 from store import db as store_db
 from store import ledger
 import store_faults
@@ -92,7 +93,8 @@ def indexable(conn: sqlite3.Connection, memory_id: str, revision: int) -> sqlite
     means by a tombstone: `ledger.live()`, `survey.search`, `review.py` and
     `build_findings.py` all join on `memory_id`."""
     return conn.execute(
-        "SELECT l.memory_id, l.revision, l.statement, l.why, l.project_id, l.state, l.kind"
+        "SELECT l.memory_id, l.revision, l.statement, l.why, l.project_id, l.state, l.kind,"
+        " l.body_json"
         " FROM ledger l LEFT JOIN tombstones t"
         "   ON t.memory_id = l.memory_id"
         " WHERE l.memory_id = ? AND l.revision = ? AND t.memory_id IS NULL",
@@ -146,6 +148,9 @@ def index_batch(conn: sqlite3.Connection, rows: list[sqlite3.Row], have_vec: boo
     # announces two functions below. `tick.sh` swallowed the traceback into a log
     # line. Nothing needed it: `load_vec` does the loading and
     # `serialize_float32` is imported at its own use site, under `vectors`.
+    # A store whose lexical index predates search keys (migration 0009) — a
+    # hand-made fixture — is written without them, as `ledger` writes it.
+    keyed = "stems" in [c[1] for c in conn.execute("PRAGMA table_info(search_notes)")]
     with conn:
         for i, r in enumerate(rows):
             # `<=`, not `=`: a new revision REPLACES the record in the index.
@@ -153,9 +158,16 @@ def index_batch(conn: sqlite3.Connection, rows: list[sqlite3.Row], have_vec: boo
             # a separate, live-looking result.
             conn.execute("DELETE FROM search_notes WHERE memory_id = ? AND revision <= ?",
                          (r["memory_id"], r["revision"]))
-            conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why)"
-                         " VALUES (?,?,?,?)",
-                         (r["memory_id"], r["revision"], r["statement"], r["why"] or ""))
+            if keyed:
+                body = r["body_json"] if "body_json" in r.keys() else None
+                conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why, stems)"
+                             " VALUES (?,?,?,?,?)",
+                             (r["memory_id"], r["revision"], r["statement"], r["why"] or "",
+                              textkeys.stems_of(r["statement"], r["why"], body)))
+            else:
+                conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why)"
+                             " VALUES (?,?,?,?)",
+                             (r["memory_id"], r["revision"], r["statement"], r["why"] or ""))
             if have_vec:
                 # Older revisions leave the vector index too, whether or not
                 # this one is embedded: a workflow record never is, and a stale

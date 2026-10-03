@@ -6,7 +6,7 @@ The scanner and store are real. Only their source data and locations are fixture
 Lost-project finding remedies are driven by tests/test_lost_projects.py.
 """
 from __future__ import annotations
-import importlib, importlib.util, json, pathlib, sqlite3, subprocess, sys, tempfile
+import importlib, importlib.util, json, os, pathlib, sqlite3, subprocess, sys, tempfile
 from unittest.mock import patch
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT/'tests'))
@@ -166,6 +166,39 @@ def test_missing_corrupt_or_changed_source_degrades():
         check('seconds instead of milliseconds cannot claim silence', not out['sessions'] and any('milliseconds' in d['reason'] for d in out['degraded']))
 
 
+def test_the_stop_hook_records_are_the_history_without_the_companion():
+    """The companion was retired; the Stop hook's own `session` records answer
+    on their own, and the companion's absence stops reading as lost history."""
+    with session_estate() as f:
+        import importlib
+        os.environ['OBSERVATORY_DB'] = str(f.root/'store.db')
+        try:
+            import paths as real_paths
+            importlib.reload(real_paths)
+            from store import db as sdb, ledger as L
+            importlib.reload(sdb)
+            conn = sdb.connect(f.root/'store.db')
+            first = L.append(conn, owner='agent:observatory-log', kind='session',
+                             statement='turn one', project_id='project:alpha',
+                             session_id='0f8fad5b-d9cb-469f-a165-70867728950e')
+            L.append(conn, owner='agent:observatory-log', kind='session', statement='turn two',
+                     memory_id=first['memoryId'], expected_revision=1, project_id='project:alpha',
+                     session_id='0f8fad5b-d9cb-469f-a165-70867728950e')
+            conn.close()
+        finally:
+            os.environ.pop('OBSERVATORY_DB', None)
+        f.collector.STORE = f.root/'absent'/'claude-mem.db'
+        out = f.collector.scan()
+        mine = [s for s in out['sessions'] if s['matched_by'] == 'stop-hook']
+        check('the hook\'s session is read', len(mine) == 1 and mine[0]['project_id'] == 'project:alpha'
+              and mine[0]['prompts'] == 2, str(mine))
+        check('and the companion\'s absence is not a degradation of the history',
+              not any(d['source'] == 'claude-mem' for d in out['degraded']), str(out['degraded']))
+        check('it is said as not applicable instead',
+              any('Stop hook' in d['reason'] for d in out.get('not_applicable', [])),
+              str(out.get('not_applicable')))
+
+
 def test_empty_source_is_a_measured_empty_result():
     with session_estate() as f:
         conn=sqlite3.connect(f.source);conn.execute('DELETE FROM session_summaries');conn.commit();conn.close()
@@ -243,6 +276,7 @@ if __name__ == '__main__':
                test_dangling_repository_owner_cannot_receive_work,
                test_missing_corrupt_or_changed_source_degrades,
                test_empty_source_is_a_measured_empty_result,
+               test_the_stop_hook_records_are_the_history_without_the_companion,
                test_emitter_preserves_session_date_and_citation,
                test_session_events_cannot_inflate_a_rollup,):
         fn()

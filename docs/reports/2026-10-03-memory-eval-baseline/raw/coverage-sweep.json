@@ -1,0 +1,92 @@
+[
+ {
+  "coverage": 0.2,
+  "recall@5": 1.0,
+  "mrr": 1.0,
+  "abstained": 16,
+  "answerableRefused": 0,
+  "checkpointRecall@5": 1.0,
+  "nearMissAbstained": 2
+ },
+ {
+  "coverage": 0.25,
+  "recall@5": 1.0,
+  "mrr": 1.0,
+  "abstained": 17,
+  "answerableRefused": 0,
+  "checkpointRecall@5": 1.0,
+  "nearMissAbstained": 3
+ },
+ {
+  "coverage": 0.3,
+  "recall@5": 1.0,
+  "mrr": 1.0,
+  "abstained": 18,
+  "answerableRefused": 0,
+  "checkpointRecall@5": 1.0,
+  "nearMissAbstained": 6
+ },
+ {
+  "coverage": 0.34,
+  "recall@5": 1.0,
+  "mrr": 1.0,
+  "abstained": 20,
+  "answerableRefused": 0,
+  "checkpointRecall@5": 1.0,
+  "nearMissAbstained": 9
+ },
+ {
+  "coverage": 0.4,
+  "recall@5": 1.0,
+  "mrr": 1.0,
+  "abstained": 20,
+  "answerableRefused": 0,
+  "checkpointRecall@5": 1.0,
+  "nearMissAbstained": 9
+ },
+ {
+  "coverage": 0.45,
+  "recall@5": 1.0,
+  "mrr": 1.0,
+  "abstained": 20,
+  "answerableRefused": 0,
+  "checkpointRecall@5": 1.0,
+  "nearMissAbstained": 9
+ },
+ {
+  "coverage": 0.5,
+  "recall@5": 1.0,
+  "mrr": 1.0,
+  "abstained": 20,
+  "answerableRefused": 0,
+  "checkpointRecall@5": 1.0,
+  "nearMissAbstained": 9
+ },
+ {
+  "coverage": 0.55,
+  "recall@5": 0.95,
+  "mrr": 0.95,
+  "abstained": 20,
+  "answerableRefused": 2,
+  "checkpointRecall@5": 0.875,
+  "nearMissAbstained": 10
+ },
+ {
+  "coverage": 0.6,
+  "recall@5": 0.95,
+  "mrr": 0.95,
+  "abstained": 20,
+  "answerableRefused": 2,
+  "checkpointRecall@5": 0.875,
+  "nearMissAbstained": 10
+ },
+ {
+  "coverage": 0.7,
+  "recall@5": 0.75,
+  "mrr": 0.75,
+  "abstained": 20,
+  "answerableRefused": 10,
+  "checkpointRecall@5": 0.625,
+  "nearMissAbstained": 10
+ }
+]

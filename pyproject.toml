@@ -43,7 +43,7 @@ observatory = "observatory.cli:main"
 packages = ["observatory"]
 
 [project.optional-dependencies]
-full = ["mcp==2.2.0", "jsonschema==4.26.0", "sqlite-vec==0.1.9", "google-auth==2.58.1", "cryptography==50.0.1"]
+full = ["mcp==2.2.0", "jsonschema==4.26.0", "sqlite-vec==0.1.9", "google-auth==2.58.1", "cryptography==50.0.1", "snowballstemmer==3.1.1"]
 
 [tool.setuptools.package-data]
 observatory = ["engine/**/*", "engine/skill/.claude-plugin/*.json", "engine/skill/plugins/*/.claude-plugin/*.json"]

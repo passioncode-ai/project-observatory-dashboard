@@ -64,7 +64,8 @@ def lock(base: Path):
 #: tests/test_engine_doc_copies.py keeps this equal to pyproject.toml's extra.
 #: Checked as installed DISTRIBUTIONS, not importable modules: the engine's own
 #: `mcp/` package sits on sys.path and would answer for the absent MCP SDK.
-FULL_DISTRIBUTIONS = ["mcp", "jsonschema", "sqlite-vec", "google-auth", "cryptography"]
+FULL_DISTRIBUTIONS = ["mcp", "jsonschema", "sqlite-vec", "google-auth", "cryptography",
+                      "snowballstemmer"]
 #: The tested dependency set, shipped inside the engine (see requirements-full.lock).
 LOCK_FILE = config.SOURCE / "requirements-full.lock"
 

@@ -194,7 +194,29 @@ def insert_revision(conn: sqlite3.Connection, row: dict) -> int:
     cur = conn.execute(
         "INSERT INTO outbox (memory_id, revision, projection_version) VALUES (?,?,?)",
         (row["memory_id"], row["revision"], store_db.PROJECTION_VERSION))
+    _index_lexically(conn, row)
     return cur.lastrowid
+
+
+def _index_lexically(conn: sqlite3.Connection, row: dict) -> None:
+    """The record enters the lexical index IN THIS TRANSACTION.
+
+    It waited for the indexer's pass, up to a tick, so a checkpoint written a
+    second ago was not found by a search and a handoff read memory that lagged
+    the work. FTS5 lives in this same SQLite file, so the revision and its
+    lexical entry commit together; the indexer still consumes the outbox for the
+    vector index and rewrites the lexical row idempotently. A store built without
+    the lexical index (a hand-made fixture) is left as it is."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(search_notes)")]
+    if "stems" not in cols:
+        return
+    import textkeys
+    conn.execute("DELETE FROM search_notes WHERE memory_id = ? AND revision <= ?",
+                 (row["memory_id"], row["revision"]))
+    conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why, stems)"
+                 " VALUES (?,?,?,?,?)",
+                 (row["memory_id"], row["revision"], row["statement"], row["why"] or "",
+                  textkeys.stems_of(row["statement"], row["why"], row.get("body"))))
 
 
 def _carried(prior: sqlite3.Row | None) -> dict:
@@ -249,6 +271,11 @@ def append(
     conflicts_with: list[str] | None = None,
     provenance: list[dict] | None = None,
     evidence: list[dict] | None = None,
+    #: The workflow this record is part of — for a session record, the workflow
+    #: the session executes (`OBSERVATORY_WORKFLOW_ID`, set by whoever started
+    #: it). It may change between revisions: a session can move to another
+    #: workflow. Checkpoints and packs never come through here.
+    workflow_id: str | None = None,
 ) -> dict:
     """Append a revision. Returns the accepted revision and a consistency cursor.
 
@@ -287,13 +314,7 @@ def append(
             "a record must carry a statement. An empty conclusion cannot be "
             "reviewed, indexed or corrected — if there is nothing to say, do not "
             "append.")
-    for field, value in (("statement", statement), ("why", why)):
-        if value is not None and len(value) > MAX_TEXT:
-            raise LedgerError(
-                f"{field} is {len(value):,} characters; the limit is {MAX_TEXT:,}. "
-                f"A record is the minimal claim, not a transcript — link the "
-                f"transcript as evidence instead. The live ledger's longest "
-                f"statement is 406 characters.")
+    check_text_bounds(statement, why)
     if owner != OPERATOR and state != "proposed" and memory_id is None:
         raise LedgerError(
             f"{owner} may not create a record already in state {state!r}; "
@@ -334,7 +355,7 @@ def append(
         owner=owner, classification=classification, valid_from=valid_from,
         valid_to=valid_to, supersedes=supersedes, conflicts_with=conflicts_with or [],
         provenance=provenance or [], evidence=evidence or [], created_at=created,
-        **_carried(prior)))
+        **{**_carried(prior), **({"workflow_id": workflow_id} if workflow_id else {})}))
     return {"memoryId": mid, "revision": revision, "state": state, "owner": owner,
             "supersedes": supersedes, "consistencyCursor": cursor, "createdAt": created}
 
@@ -477,6 +498,13 @@ def tombstone(conn: sqlite3.Connection, memory_id: str, *, reason: str,
             "INSERT OR REPLACE INTO tombstones (memory_id, revision, reason, approved_by,"
             " created_at) VALUES (?,?,?,?,?)",
             [(memory_id, rev, reason, approved_by, now) for rev in revisions])
+        # THE LEXICAL ROWS GO WITH THE TOMBSTONE. A record enters the lexical
+        # index in the transaction that writes it (`_index_lexically`), so it
+        # leaves in the one that erases it: waiting for retention's purge would
+        # keep an erased statement searchable in the file. The vector index needs
+        # its extension loaded and is still purged by retention, with receipts.
+        if "stems" in [r[1] for r in conn.execute("PRAGMA table_info(search_notes)")]:
+            conn.execute("DELETE FROM search_notes WHERE memory_id = ?", (memory_id,))
     return {"memoryId": memory_id, "revision": row["revision"],
             "revisions": revisions, "reason": reason, "approvedBy": approved_by,
             "note": "every revision tombstoned; ledger rows retained; purge the "
@@ -559,6 +587,20 @@ def live(conn: sqlite3.Connection, project_id: str | None = None,
 #: never in a general listing: one pack is up to 128 KB, so a page of ten could
 #: be a megabyte where the reader was promised a few KB. Their structured
 #: columns leave every other row too — a step's result keeps its statement.
+def check_text_bounds(statement: str | None, why: str | None) -> None:
+    """Refuse a statement or why longer than MAX_TEXT.
+
+    Callers that transform text before appending — the wire's redaction — call
+    this FIRST, so an oversized input is refused before any work is spent on it."""
+    for field, value in (("statement", statement), ("why", why)):
+        if value is not None and len(value) > MAX_TEXT:
+            raise LedgerError(
+                f"{field} is {len(value):,} characters; the limit is {MAX_TEXT:,}. "
+                f"A record is the minimal claim, not a transcript — link the "
+                f"transcript as evidence instead. The live ledger's longest "
+                f"statement is 406 characters.")
+
+
 def not_workflow(alias: str = "l") -> str:
     """The SQL condition that leaves workflow records out of a general reader.
 

@@ -43,7 +43,7 @@ def estate():
         spec = importlib.util.spec_from_file_location('sessions_fixture_collector', ROOT / 'collectors/scan_sessions.py')
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         module.paths = SimpleNamespace(ROOT=root, CURATION=root/'collectors', REGISTRY=root/'registry', DATA=root/'estate',
-                                       config_file=lambda name: root/'collectors'/name)
+                                       DB=root/'store.db', config_file=lambda name: root/'collectors'/name)
         module.STORE = source
         from store import db
         with patch.object(db, 'DB_PATH', root/'events.db'):

@@ -14,6 +14,7 @@ person or an agent between pulses talks to files. This daemon is the third shape
     http://127.0.0.1:47311/          the dashboard page, always the newest build
     http://127.0.0.1:47311/health    pid, uptime, versions, tick lease, last tick
     http://127.0.0.1:47311/remote    every project's remote-sync state, summarised
+    http://127.0.0.1:47311/agents    the Agents page section, rendered now (its live refresh)
     http://127.0.0.1:47311/leaks     the vault's leak register status (names only)
     http://127.0.0.1:47311/skills    shipped skill versions vs what sessions report
     http://127.0.0.1:47311/.well-known/fabric-service   who answers, which build, is it healthy
@@ -532,6 +533,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         self._json(page)
 
+    def _agents(self) -> None:
+        """The Agents page's section, rendered now from the store (read-only),
+        in the reader's language: the page's live refresh. The same renderer as
+        the built page, so the two can never disagree about what is shown."""
+        sys.path.insert(0, str(ROOT / "dashboard"))
+        import agents_page
+        import agents_view
+        import i18n
+        query = parse_qs(urlsplit(self.path).query)
+        locale = (query.get("locale") or ["en"])[0]
+        if locale not in i18n.LOCALES:
+            locale = "en"
+        try:
+            markup = agents_page.agents_html({"agents": agents_view.summary()},
+                                             i18n.Translator(locale), live=True)
+        except Exception as exc:  # noqa: BLE001 — the page keeps what it shows
+            self._json({"error": f"the agents view could not be read: {type(exc).__name__}"}, 503)
+            return
+        body = markup.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self._body(body)
+
     def do_GET(self):                                     # noqa: N802
         note_request()
         if not local_request(self.headers.get("Host", ""), self.headers.get("Origin"),
@@ -598,10 +624,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(refresh_leaks())
         elif route == "/skills":
             self._json(refresh_skills())
+        elif route == "/agents":
+            self._agents()
         else:
             self._json({"error": "no such route",
                         "routes": ["/", "/dashboard/<page>.html", "/health", "/remote",
-                                   "/leaks", "/skills", "/.well-known/fabric-service",
+                                   "/leaks", "/skills", "/agents", "/.well-known/fabric-service",
                                    "/fabric/v1/events"]}, 404)
 
     def do_POST(self):                                    # noqa: N802
