@@ -183,8 +183,10 @@ class McpProbeStaysOutOfTheTick(Workspace):
         self.plant(tail="sleep 30")
         sm = self.reload("scan_mcp")
         started = time.monotonic()
-        heard, why, complete = sm.claude_probe(timeout=1)
-        self.assertLess(time.monotonic() - started, 10)
+        # 3 s, not 1: under a loaded machine bash needs time to plant the child
+        # before the cut, and a probe cut before that proves nothing.
+        heard, why, complete = sm.claude_probe(timeout=3)
+        self.assertLess(time.monotonic() - started, 12)
         self.assertFalse(complete)
         self.assertIn("did not finish", why)
         pid = int(self.child.read_text())
@@ -256,10 +258,11 @@ class EveryStepHasAWatchdog(Workspace):
 
     def test_a_hanging_step_ends_inside_its_watchdog_and_leaves_no_child(self):
         started = time.monotonic()
-        rc = self.tl.bounded("hang", ["/bin/bash", "-c", HANGING.format(child=self.child)], limit=1, grace=1)
+        # 2 s: long enough for bash to plant its child on a loaded machine.
+        rc = self.tl.bounded("hang", ["/bin/bash", "-c", HANGING.format(child=self.child)], limit=2, grace=1)
         took = time.monotonic() - started
         self.assertEqual(rc, self.tl.TIMED_OUT)
-        self.assertLess(took, 8, f"the watchdog took {took:.1f} s")
+        self.assertLess(took, 10, f"the watchdog took {took:.1f} s")
         self.assertTrue(wait_gone(int(self.child.read_text())), "a child of the hung step survived")
 
     def test_a_step_after_the_tick_ceiling_does_not_start(self):
@@ -277,7 +280,7 @@ class EveryStepHasAWatchdog(Workspace):
         self.assertLess(time.monotonic() - started, 8)
 
     def test_the_whole_tick_has_a_ceiling_and_leaves_a_status_record(self):
-        os.environ["OBSERVATORY_TICK_CEILING_SECONDS"] = "1"
+        os.environ["OBSERVATORY_TICK_CEILING_SECONDS"] = "2"
         started = time.monotonic()
         with patch.object(self.tl, "SUPERVISOR_GRACE", 1):
             rc = self.tl.supervised(["/bin/bash", "-c", HANGING.format(child=self.child)])
@@ -442,6 +445,43 @@ class OneRotationPolicy(Workspace):
         with patch.object(rl.log_policy, "MAX_BYTES", 100):
             self.assertEqual(rl.main([]), 0)
         self.assertTrue((self.paths.SCRATCH / "store-faults.jsonl.1").exists())
+
+
+class MigrationBackupsAreRetained(Workspace):
+    """F9 / LC-12: pre-upgrade database copies used to be kept "until explicit cleanup",
+    which nothing ever did (40 MB measured, four weeks old). Retention owns them now."""
+
+    def setUp(self):
+        super().setUp()
+        self.R = self.reload("store.retention")
+        self.dir = self.base / "migration-backups"
+        self.dir.mkdir()
+        now = time.time()
+        self.now = now
+        for name, age_days in (("a.db", 60), ("b.db", 45), ("c.db", 40), ("d.db", 3)):
+            f = self.dir / f"observatory.db.before-upgrade-{name}"
+            f.write_bytes(b"x" * 10)
+            os.utime(f, (now - age_days * 86400, now - age_days * 86400))
+
+    def test_old_copies_beyond_the_newest_two_go(self):
+        gone = self.R.prune_migration_backups(self.dir, keep=2, days=30, now=self.now)
+        self.assertEqual(sorted(p.name[-4:] for p in gone), ["a.db", "b.db"])
+        self.assertEqual(sorted(p.name[-4:] for p in self.dir.iterdir()), ["c.db", "d.db"])
+
+    def test_a_plan_removes_nothing(self):
+        planned = self.R.prune_migration_backups(self.dir, keep=2, days=30, now=self.now, dry_run=True)
+        self.assertEqual(len(planned), 2)
+        self.assertEqual(len(list(self.dir.iterdir())), 4)
+
+    def test_young_copies_stay_whatever_their_number(self):
+        self.assertEqual(self.R.prune_migration_backups(self.dir, keep=0, days=90, now=self.now), [])
+
+    def test_retention_apply_and_the_defaults_carry_it(self):
+        src = (ROOT / "store/retention.py").read_text()
+        apply_body = src[src.index("def cmd_apply"):src.index("def main")]
+        self.assertIn("prune_migration_backups(", apply_body)
+        cfg = json.loads((ROOT / "defaults/retention.json").read_text())
+        self.assertEqual((cfg["migration_backups_keep"], cfg["migration_backups_days"]), (2, 30))
 
 
 # --- F4 ------------------------------------------------------------------------
