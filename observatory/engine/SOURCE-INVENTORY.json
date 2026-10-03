@@ -252,8 +252,8 @@
     {
       "path": "collectors/scan_filesystem.py",
       "source_sha256": "c99bffa1518af8a0bba6600890a7bde2fb1643fb004feb635ffdaacdb64d562c",
-      "export_sha256": "9eb67ac8c0745aeedea2512403d1eda4bd9da3b575e2da0e5a544e03cb85c5fd",
-      "bytes": 21187,
+      "export_sha256": "e698b655168c28222c005d5503a437933b4a550434054b07c6adea78041d78c9",
+      "bytes": 21609,
       "python_comments_removed": 96,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
@@ -2050,8 +2050,8 @@
       "path": "tests/test_filesystem_scan.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5f00f43f31268a67aaffa43f36f04e7eda7501d8a65b4b92450abe18a24e4cf6",
-      "bytes": 23978
+      "export_sha256": "4c8446071f3063bceaca01f81e11b5fdde997080b6bdee3079387940ec898af3",
+      "bytes": 24347
     },
     {
       "path": "tests/test_finding_rules.py",
