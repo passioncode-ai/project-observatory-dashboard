@@ -140,7 +140,8 @@ tagged compatible engine and app artifact.
 - notarization and staple, through `actions/notarize@v1`;
 - Sigstore attestation, plus `SHA256SUMS` and its GPG signature, through `release-publish.yml@v1`.
 
-An approver from `release-approvers` other than the tag's author releases it. The local path
+A person from `release-approvers` approves the run, and may be whoever pushed the tag; an agent
+never approves it. The local path
 below is for debugging and for checking the scripts; its output is never attached to a release.
 
 
