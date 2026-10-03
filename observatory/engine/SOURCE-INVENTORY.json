@@ -1582,8 +1582,8 @@
     {
       "path": "tests/render_dashboard.mjs",
       "source_sha256": "3c780d5f57168d4aa3be0904fa4c0bb0f9acf854d81de7c42898eaf6fc59b0ec",
-      "export_sha256": "a1a60d8696f43457f551a4492a1d8c9d61e00714bb18f621c6ead7bb29964a9e",
-      "bytes": 8863,
+      "export_sha256": "d4c26e7c2e626a938a16097b0631303bad1fc840ab4968a9ccb7230609d27242",
+      "bytes": 9249,
       "upstream_modified": true
     },
     {
@@ -3102,8 +3102,8 @@
       "path": "tests/test_workspace_redesign.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "79214029d6dbf386ff12e2a00585979a93b595ff7e0aef37db42ab1504a1326e",
-      "bytes": 20673
+      "export_sha256": "5db43585f0b33017257e832d94d42912f3869153183c306a177edc2798529842",
+      "bytes": 20321
     },
     {
       "path": "tests/test_workspace_scheduler.py",
