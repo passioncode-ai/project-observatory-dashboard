@@ -58,6 +58,7 @@ from pydantic import AliasChoices, Field
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from capability_tools import Answer, InteropServer                                 # noqa: E402
 
+import credential_shape
 import interop                                                                    
 import paths
 import proposals                                                                  
@@ -90,8 +91,11 @@ server = InteropServer(
         "independent corroboration.\n"
         "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run the "
         "`use` command it hands back instead of opening a file.\n"
-        "DEGRADED: every answer carries `degraded`; empty asserts full coverage, a "
-        "non-empty one names what could not be read. Treat a missing `degraded` as a bug.\n"
+        "DEGRADED: every read answer carries `degraded`: empty asserts full coverage, "
+        "non-empty names what could not be read or was ignored. Treat a missing one on a read "
+        "as a bug; writes and job handles follow their published schemas, which have none. A "
+        "refusal is a typed answer with `error`; isError means malformed input, an unknown "
+        "tool or an answer outside its published schema.\n"
         "START with `observatory_overview`: counts, tiers, recent projects, the most severe "
         "findings and the disk, in a few KB.\n"
         "READ, paged with `limit` and `cursor` → `nextCursor`, totals covering the whole "
@@ -163,7 +167,7 @@ def _owner_error(owner: str) -> dict[str, Any] | None:
     if CALLER_ID.match(owner or ""):
         return None
     return {"error": "owner refused",
-            "detail": f"{owner!r} is not an identity this wire accepts",
+            "detail": f"{credential_shape.echo(owner)} is not an identity this wire accepts",
             "hint": "owner must be `agent:<name>` or `service:<name>`. The operator's "
                     "authority cannot be claimed over stdio, which has no caller "
                     "identity to check it against — promote or reject a record with "
@@ -208,7 +212,10 @@ def observatory_assistant_conversation(id: str) -> dict:
     try:
         return assistant.get_conversation(id)
     except assistant.AssistantError as exc:
-        return {"error": str(exc), "id": id, "degraded": []}
+        # The id is quoted only in the shape this server mints; anything else
+        # (a key pasted into the wrong field) is described by its length.
+        return {"error": str(exc), "id": credential_shape.shown(id, pattern=assistant.CID, own_id=True),
+                "degraded": []}
 
 
 @server.tool()
@@ -406,7 +413,33 @@ def observatory_credentials(
     `available_in` is the opposite — a slot empty here whose name holds a live
     value elsewhere.
     """
+    bad = _project_id_refusal(projectId, bare=True)
+    if bad:
+        return bad
     return _note_unknown(projectId, survey_mod.credentials(projectId))
+
+
+#: A bare project name (a folder, or an id without its prefix).
+BARE_PROJECT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+
+def _project_id_refusal(value: str, *, bare: bool = False) -> dict[str, Any] | None:
+    """A project argument that is no project id at all — malformed, or shaped
+    like a credential — is refused as a typed answer, and is NOT echoed.
+
+    Before this an unknown `projectId` came back whole in `projectId`,
+    `project` and the `use` command of observatory_credentials, so a key
+    pasted into the field went straight back into the transcript."""
+    ok = (survey_mod.PROJECT_ID.fullmatch(value or "") is not None
+          or (bare and BARE_PROJECT.fullmatch(value or "") is not None))
+    if ok and not credential_shape.shaped(value):
+        return None
+    return {"error": "invalid project id",
+            "projectId": credential_shape.shown(value),
+            "hint": "a 'project:<slug>' id" + (", its bare slug or the project's folder name"
+                                                if bare else "")
+                    + "; call observatory_status to list what exists",
+            "degraded": []}
 
 
 def _note_unknown(project_id: str, out: dict[str, Any]) -> dict[str, Any]:
@@ -511,7 +544,11 @@ def observatory_timeline(
                                                    "only events at or after it")] = None,
     limit: Annotated[int, Field(ge=1, le=500, description="Events per answer, newest first.")] = 25,
 ) -> dict[str, Any]:
-    "Commits and recorded events for one project, newest first."
+    """Commits and recorded events for one project, newest first. A `since` that
+    is not an ISO-8601 date or timestamp is not applied, and `degraded` says so."""
+    bad = _project_id_refusal(projectId)
+    if bad:
+        return bad
     return _note_unknown(projectId, survey_mod.timeline(projectId, since=since, limit=limit))
 
 
@@ -556,6 +593,15 @@ def observatory_recall(
     # becomes UnexpectedToolError on the wire, which tells the caller the server
     # broke rather than that something could not be read.
     degraded: list[dict[str, str]] = []
+    if cursor is not None and not RECALL_CURSOR.fullmatch(cursor):
+        # A CURSOR THAT NAMES NO POSITION, said rather than silently restarted:
+        # the ledger compared it as a string and returned page one again, so a
+        # caller holding a corrupt cursor walked the same records forever.
+        degraded.append({"source": "cursor",
+                         "reason": f"cursor {credential_shape.echo(cursor)} names no position "
+                                   f"(a previous answer's `nextCursor`); this page starts from "
+                                   f"the newest record"})
+        cursor = None
     try:
         conn = store_db.connect()
     except Exception as exc:
@@ -590,6 +636,10 @@ def observatory_recall(
     if more and rows:
         out["nextCursor"] = L.live_cursor(rows[-1])
     return out
+
+
+#: `L.live_cursor`'s shape: `<created_at>|<memory_id>`.
+RECALL_CURSOR = re.compile(r"\d{4}-\d{2}-\d{2}[0-9T:.+Z -]*\|[A-Za-z0-9:._-]{1,128}")
 
 
 def _write_error(exc: Exception) -> dict[str, Any]:
@@ -657,7 +707,8 @@ def observatory_findings(
             and (include_acknowledged or not x.get("acked"))]
     if projectId:
         if not any(p.get("id") == projectId for p in survey_mod._index()[0]):
-            return {"error": "unknown project", "projectId": projectId,
+            return {"error": "unknown project",
+                    "projectId": credential_shape.shown(projectId, pattern=survey_mod.PROJECT_ID),
                     "hint": "call observatory_status to list what exists", "degraded": []}
         about = survey_mod.finding_matcher(projectId)
         rows = [x for x in rows if about(x.get("subject") or "")]
@@ -668,7 +719,7 @@ def observatory_findings(
     if cursor:
         at = next((i for i, x in enumerate(rows) if x.get("id") == cursor), None)
         if at is None:
-            return {"error": "unknown cursor", "cursor": cursor,
+            return {"error": "unknown cursor", "cursor": credential_shape.shown(cursor),
                     "hint": "start again without `cursor`; findings are rebuilt every tick",
                     "degraded": []}
         rows = rows[at + 1:]
@@ -727,6 +778,11 @@ def observatory_record(
     It cannot be written as anything else: an automated writer proposes, and
     something else promotes. `owner` is required — this server does not invent
     caller identity.
+
+    NO `degraded` ON THE ACCEPTED ANSWER, deliberately: the published v0.2.0
+    manifest runs `project.record` on this tool, and its closed record schema
+    has no such field (the conformance probe validates this tool's answer
+    against it). The server's instructions say writes follow their schemas.
     """
     bad = _owner_error(owner)
     if bad:
@@ -789,7 +845,8 @@ def observatory_propose(
     why = proposals.refusal(targetId, patch, evidence or [])
     if why:
         return {"error": "unappliable-proposal", "detail": why,
-                "appliable": {k: sorted(v) for k, v in proposals.appliable().items()}}
+                "appliable": {k: sorted(v) for k, v in proposals.appliable().items()},
+                "degraded": []}
     try:
         registry_ids = {p["id"] for p in json.loads(
             (paths.REGISTRY / "projects.json").read_text(encoding="utf-8"))["projects"]}
@@ -877,8 +934,13 @@ def capability_project_detail(arguments: dict[str, Any], span: Any) -> dict[str,
 
 @server.capability("project.timeline")
 def capability_project_timeline(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
-    return observatory_timeline(projectId=arguments["projectId"], since=arguments.get("since"),
-                                limit=arguments.get("limit", 100))
+    """The timeline, cut to the published schema: its `degraded` rows carry only
+    `source` and `reason`, and the unknown-project row's `code` made every
+    answer for an unknown id fail the capability's own contract."""
+    out = observatory_timeline(projectId=arguments["projectId"], since=arguments.get("since"),
+                               limit=arguments.get("limit", 100))
+    schema = next(d["outputSchema"] for d in interop.tool_definitions() if d["name"] == "project.timeline")
+    return _published_shape(schema, out, set())
 
 
 @server.capability("project.record")

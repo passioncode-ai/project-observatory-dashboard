@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import activity
+import credential_shape
 import degradations
 import identity
 import paths
@@ -291,11 +292,13 @@ def survey(scope: dict | None = None, include_external: bool = False,
             row = conn.execute("SELECT id FROM scans WHERE id = ?", (as_of_scan_id,)).fetchone()
             if row is None:
                 degraded.append({"source": "store",
-                                 "reason": f"scan {as_of_scan_id} is not recorded; answered "
+                                 "reason": f"scan {credential_shape.echo(as_of_scan_id)} is not "
+                                           f"recorded; answered "
                                            f"from the registry as it is now"})
             else:
                 degraded.append({"source": "store",
-                                 "reason": f"scan {as_of_scan_id} is recorded, but the "
+                                 "reason": f"scan {credential_shape.echo(as_of_scan_id)} is recorded, "
+                                           f"but the "
                                            f"registry is not versioned per scan, so this "
                                            f"answer carries the CURRENT estate and `scanId` "
                                            f"names the scan it reflects"})
@@ -336,7 +339,7 @@ def survey(scope: dict | None = None, include_external: bool = False,
         # must continue after it, which `>` already does.
         if not str(cursor).startswith("project:"):
             degraded.append({"source": "cursor",
-                             "reason": f"cursor {str(cursor)[:40]!r} is not a "
+                             "reason": f"cursor {credential_shape.echo(str(cursor))} is not a "
                                        f"project id, so it names no position in "
                                        f"this list; the page starts from the "
                                        f"beginning and a walk using it will "
@@ -511,7 +514,11 @@ def project_detail(project_id: str, timeline_limit: int = 10,
     # `_scope_error` exists on the wire.
     result = survey({"kind": "project", "value": project_id}, include_external=True)
     if not result["projects"]:
-        return {"error": "unknown project", "projectId": project_id,
+        # The id is quoted only when it is a well-formed, non-credential-shaped
+        # project id: a key pasted into this field must not come back in the
+        # refusal (and from there into a transcript).
+        return {"error": "unknown project",
+                "projectId": credential_shape.shown(project_id, pattern=PROJECT_ID),
                 "hint": "call observatory_status to list what exists",
                 "degraded": result["degraded"]}
     out = {"surveyedAt": result["surveyedAt"], "scanId": result["scanId"],
@@ -804,7 +811,42 @@ def credentials(project_id: str) -> dict:
     return out
 
 
+#: A project id a refusal may quote back; anything else is described by length.
+PROJECT_ID = re.compile(r"project:[A-Za-z0-9._/-]{1,180}")
+
+
+def valid_since(since: str | None) -> bool:
+    """An ISO-8601 date or timestamp — the only `since` a filter can honour.
+
+    The filter is a string comparison on `occurred_at`, so `since: "garbage"`
+    sorted after every timestamp and answered `events: []` with an empty
+    `degraded`: "nothing happened" where the truth was "the filter meant
+    nothing"."""
+    if since is None:
+        return True
+    try:
+        datetime.fromisoformat(str(since).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return bool(re.match(r"\d{4}-\d{2}-\d{2}", str(since)))
+
+
 def timeline(project_id: str, since: str | None = None, limit: int = 100) -> dict:
+    """Commits and recorded events, newest first. A `since` that is no date is
+    NOT applied, and `degraded` says so instead of answering an empty list."""
+    if valid_since(since):
+        return _timeline(project_id, since, limit)
+    out = _timeline(project_id, None, limit)
+    out["since"] = None
+    out.setdefault("degraded", []).append({
+        "source": "since",
+        "reason": f"since {credential_shape.echo(since)} is not an ISO-8601 date or "
+                  f"timestamp, so it was not applied: these are the newest events "
+                  f"unfiltered"})
+    return out
+
+
+def _timeline(project_id: str, since: str | None = None, limit: int = 100) -> dict:
     # A STORE THAT WILL NOT OPEN IS A DEGRADATION, not a traceback. This had no
     # guard at all: `store/observatory.db` was found CORRUPT on 2026-09-06 —
     # 434 MB with no SQLite header — and in that state this function raised
