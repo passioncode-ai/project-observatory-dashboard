@@ -5,6 +5,18 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.15.0 — 2026-10-04
+
+A minor release: agent memory grows into something agents and the operator use every day —
+credentials only through Observatory, recovery after a lost session, the Agents page, and a
+search that answers in either language's word forms and says when it found nothing — plus the
+header door for HTTP MCP servers. The companion plugin `observatory-log` moves to 0.15.0 (the
+`handling-secrets` skill gained `use_secret header` and `vault.py bind`).
+
+Upgrading runs migration `0009-search-stems`, which rebuilds the lexical search index from the
+ledger with search keys; nothing is lost, and the index is a projection. The `[full]` extra adds
+`snowballstemmer` 3.1.1 (BSD-3-Clause); `full update` installs it from the lock.
+
 ### Added
 
 - **A vault bearer for an HTTP MCP server, through Claude Code's `headersHelper`.**
@@ -19,9 +31,36 @@ while the major version is 0, a minor release may change behaviour and says so h
   slot's metadata and never with its value, the one server the header door may serve it to;
   `--clear` removes it. Only https is accepted (a bare host means https on the default port).
   Both are journalled in the movements journal, and `vault.py list` shows the binding.
+- **Agents get every credential from Observatory, by name.** A workflow declares the keys it
+  needs (`credentials` in a checkpoint); the handoff pack says which are in the vault, only in an
+  env file, or missing. `use_secret.py run --vault-only` (or `OBSERVATORY_VAULT_ONLY=1`) refuses
+  a `.env` fallback; `use_secret.py serve` starts a long-running service with its keys and
+  records it as the key's consumer; `vault.py rotate` names the consumers to restart. Values an
+  agent writes into memory are replaced by the slot's name before they are stored and journalled
+  (`memory-redactions.jsonl`). Design: `docs/design/AGENT-SECRETS.md`.
+- **Findings for an agent's keys:** `secret.seen_in_agent_memory`, `agent.secret_outside_vault`
+  and `agent.secret_fallback_used`; the leak scan reads the Observatory store too.
+- **Agents find and recover their work.** `observatory_workflow_list` lists a project's
+  workflows with their stalls and last session; a session that lost its lease token may hand
+  the workflow to itself after the silence rule; `full workflow list|show|handoff|close` is the
+  operator's command. A step written without the lease is kept as a proposal, not lost.
+- **Sessions linked to workflows.** The Stop hook records the workflow a session worked on, and
+  a workflow silent for 30 minutes reads as stalled.
+- **The Agents page.** Live counters, what needs you, workflows by project, a lane per executor
+  with its handoffs, and sessions — refreshed every 15 seconds, in English and Russian.
+- **Search in word forms, by checkpoint body, with an honest "nothing found".** Russian and
+  English words are matched by their stems, a checkpoint is found by its decisions, results,
+  constraints and notes, and a hit must carry a share of the question's subject words; when none
+  does, the answer says `abstain` with its reason. A record is searchable the moment it is
+  written. Measured on the evaluation set (`tools/memory_eval.py`): recall@5 0.975 → 1.0,
+  unanswerable questions answered empty 5 → 20 of 20. The vector arm's own floor comes with local
+  embeddings.
 
-The `handling-secrets` skill gained both commands, so the companion plugin `observatory-log`
-needs a version bump at the next release (its three manifests and every `SKILL.md`).
+### Fixed
+
+- **Redaction of a long note no longer takes an hour.** Two credential-shape patterns were
+  quadratic in their input (about an hour on a 2 MB note); they are linear, and
+  `observatory_record` checks its length bound before redacting.
 
 ## 0.14.0 — 2026-10-03
 
