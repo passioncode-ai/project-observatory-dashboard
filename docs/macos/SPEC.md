@@ -103,7 +103,7 @@ the page's own `observatory.locale`; a choice made on the page is read back afte
 each load and adopted. Re-checked when the app becomes active.
 
 Assistant window (⇧⌘A, toolbar): native split view, conversation sidebar, toolbar with
-new dialogue, project scope and dashboard action, central transcript, evidence
+new conversation, refresh and dashboard (the project scope sits above the composer), central transcript, evidence
 disclosure, composer and Send/Stop. Returning users see stored history. Empty state
 explains the job and offers concrete starter questions; loading/error states preserve
 input. Settings: program and workspace fields with pickers, Save and check connection,

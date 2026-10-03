@@ -101,6 +101,12 @@ was renamed. Since 0.6.0 `machine` and `cleanup` are too; `cleanup` without
 [`WORKSPACE_COMMANDS`](../observatory.py), [`workspace.main`](../workspace.py),
 and [`workspace_upgrade.py`](../workspace_upgrade.py) implement the separation.
 
+`open`, `agent`, `onboard` and `version` are workspace commands too, and `assistant` is
+dispatched beside them: it speaks the `observatory-assistant/1` protocol, one JSON object on
+stdin and one on stdout, with the actions `status`, `ask`, `list`, `get`, `job`, `cancel`,
+`delete`, `dashboard`, `serve` and `build` (`agent/assistant.py`). The Mac app depends on that
+contract; nothing existing was renamed for any of them.
+
 In 0.7.0 `update` and `profile` became workspace commands; nothing existing was
 renamed and `upgrade` keeps its meaning (the workspace half only). `update` previews
 by default, `--check` exits 0 (up to date), 10 (update available) or 3 (could not

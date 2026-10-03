@@ -166,7 +166,8 @@ import ObservatoryCore
                      "invalid-evidence", "conversation-busy", "backend-failed", "provider-unconfigured"] {
             XCTAssertFalse(model.message(code).hasPrefix(String(generic.prefix(20))), code)
         }
-        XCTAssertTrue(model.message("backend-incompatible").contains("full update"))
+        // `full update` alone only previews; the step that updates is `--apply`.
+        XCTAssertTrue(model.message("backend-incompatible").contains("full update --apply"))
     }
     func testQuestionLimitCountsCodePointsLikeTheEngine() {
         let model = Model(defaults: defaults())

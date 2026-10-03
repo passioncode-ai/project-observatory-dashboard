@@ -55,6 +55,6 @@ the main window; the operator then asked for the dashboard to be what opens, so 
 dashboard window wraps the pages while the assistant stays native.
 
 Scenarios govern placement and actions; the draft brand pack governs strings.
-EN/RU errors and the provider disclosure are in `Model.swift` / `App.swift`.
+EN/RU errors are in `Model.swift`, the provider disclosure in `Assistant.swift`.
 No visual or accessibility pass is inferred from compilation; the acceptance
 matrix is in the [run receipt](../runs/2026-10-01-macos-app/README.md).

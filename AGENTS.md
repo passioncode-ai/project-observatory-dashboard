@@ -31,7 +31,7 @@ organisation members).
 |---|---|
 | `observatory/*.py` | the launcher and the old 0.1 portable CLI, kept working |
 | `observatory/engine/` | the complete engine: collectors, findings, store, dashboard, MCP server, tools |
-| `observatory/engine/tests/` | engine suites, run by `tests/run_portable.py` in sandboxes |
+| `observatory/engine/tests/` | engine suites, run by `observatory/engine/tests/run_portable.py` in sandboxes |
 | `observatory/engine/skill/` | the `observatory-log` plugin; `.claude-plugin/` at the root publishes it |
 | `tests/` | root tests: launcher, packaging, release gates, version and plugin consistency |
 | `macos/` | the native Mac app (SwiftUI): sources, tests, `scripts/build-app.sh` and `scripts/install-app.sh`; [docs/macos/](docs/macos/README.md) |
@@ -157,7 +157,7 @@ tasks are the operator's and which a contributor can take.
 2. Merge that pull request through the required checks, then tag the merge commit `vX.Y.Z`.
 3. Publish a GitHub release for the tag with the built wheel and `SHA256SUMS`; re-download the
    asset and compare its digest with the one inspected by `tools/check_package.py`.
-4. Every machine then runs `project-observatory full update`.
+4. Every machine then runs `project-observatory full update --apply` (without `--apply` it only previews).
 5. Record the release in `docs/runs/<date>-<slug>/`.
 
 ## Shared backlog

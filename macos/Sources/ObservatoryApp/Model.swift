@@ -119,8 +119,8 @@ enum DashboardMode: Equatable {
         let extra = detail.map { " (\($0))" } ?? ""
         switch code {
         case "backend-incompatible":
-            return t("This Observatory engine is too old for this app — it needs version 0.12 or newer. Update it with `project-observatory full update`, then Refresh.",
-                     "Этот движок Observatory слишком старый для приложения — нужна версия 0.12 или новее. Обновите его командой `project-observatory full update` и нажмите «Обновить».") + extra
+            return t("This Observatory engine is too old for this app — it needs version 0.12 or newer. Update it with `project-observatory full update --apply`, then Refresh.",
+                     "Этот движок Observatory слишком старый для приложения — нужна версия 0.12 или новее. Обновите его командой `project-observatory full update --apply` и нажмите «Обновить».") + extra
         case "backend-missing":
             return t("No Observatory engine was found at \(detail ?? "the chosen path"). Install it as README → Install describes (a Python 3.11+ virtual environment), then choose its `project-observatory` in Settings.",
                      "Движок Observatory не найден по пути \(detail ?? "из настроек"). Установите его, как описано в README → Install (виртуальное окружение Python 3.11+), и выберите его `project-observatory` в настройках.")

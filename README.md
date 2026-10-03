@@ -23,6 +23,7 @@ mkdir -p ~/observatory-release && cd ~/observatory-release
 base=https://github.com/passioncode-ai/project-observatory-dashboard/releases/download/v$V
 curl -sSLO "$base/project_observatory-$V-py3-none-any.whl" && curl -sSLO "$base/SHA256SUMS"
 shasum -a 256 -c SHA256SUMS --ignore-missing                 # → OK
+brew install python@3.14                                     # macOS; on Linux use your distribution's 3.11+
 PYTHON="$(brew --prefix python@3.14)/bin/python3.14"         # on Linux, e.g. PYTHON=python3.12
 "$PYTHON" -c 'import sqlite3; c = sqlite3.connect(":memory:"); c.enable_load_extension(True)'   # AttributeError: this build cannot load sqlite-vec
 "$PYTHON" -m venv ~/.local/share/project-observatory-venv

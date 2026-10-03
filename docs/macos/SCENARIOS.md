@@ -21,7 +21,7 @@ ST-03: another agent invokes the same capability. Product outcome: unobserved.
 | SCN-009 | Window closed, Dock click brings it back | draft |
 
 These scenarios are specified from the autonomous implementation brief, not human usability validation;
-coverage below names the regression tests and the native walkthroughs run on 2026-10-02 and 2026-10-03. See [receipts](../runs/2026-10-01-macos-app/README.md).
+coverage below names the regression tests and the native walkthroughs run on 2026-10-02 and in the two 2026-10-03 audits. See [receipts](../runs/2026-10-01-macos-app/README.md).
 
 ## SCN-001 — First launch and connection recovery
 Status: draft
@@ -33,7 +33,8 @@ Trigger: user opens app.
 Steps: open → the engine is looked for where README → Install puts it → no engine:
 «Observatory is not installed yet» with the path, Settings and an installation guide;
 a folder that is not a workspace: the `full init` command → choose program/workspace in
-Settings → Save and check connection → compatible status → empty conversation.
+Settings → Save and check connection → compatible status → the dashboard (or Build the
+dashboard); the assistant shows its empty conversation when opened (⇧⌘A).
 Expected result: no automatic dependency install, no model call, usable next action.
 Errors & recovery: invalid path/protocol/timeout shows retry/settings, keeps selections.
 Coverage: core/bridge/model regression tests (`testMissingExecutableIsNamedMissingNotMisconfigured`,
@@ -89,7 +90,11 @@ Trigger: select workspace B in settings.
 Steps: apply → invalidate UI generation → connect B → show B history.
 Expected result: late A response never enters B; old draft and project scope are cleared when the backend/workspace changes; A accepted job persists independently. Dashboard opens only after the backend verifies the selected workspace.
 Errors & recovery: failed B connection offers settings; no fallback into A disguised as B.
-Coverage: core/bridge/model regression tests; native walkthrough run 2026-10-02 against a workspace copy ([receipt](../runs/2026-10-02-app-agent-audit/README.md)).
+Coverage: core/bridge/model regression tests (`testLateWorkspaceResponseCannotReplaceNewState`,
+`testChangingWorkspaceDuringABuildLeavesTheNewWorkspaceUsable`); native walkthrough 2026-10-03 with a
+stub provider ([run 2](../reports/2026-10-03-observatory-audit-run-2/README.md)): a question outstanding in A, Settings switched to B → B's
+state and none of A's turns, A's job completed in A's own store. Whether the dashboard window then
+paints B's pages was not confirmed natively (the QA windows were occluded); it is run 3's.
 
 ## SCN-006 — CLI/MCP caller obtains the same answer
 Status: draft
@@ -103,7 +108,9 @@ shared conversation; fabric.job.cancel → terminal cancellation.
 Expected result: advertised MCP input contract, trace propagation and shared Fabric job envelope; no duplicate spend on replay.
 Errors & recovery: changed input under same request id rejected; different busy request
 is not silently joined; unknown ids never create jobs.
-Coverage: core/bridge/model regression tests; native walkthrough run 2026-10-02 against a workspace copy ([receipt](../runs/2026-10-02-app-agent-audit/README.md)).
+Coverage: core/bridge/model regression tests and the MCP wire suite; a raw MCP stdio walk
+2026-10-03 ([run 1](../reports/2026-10-03-observatory-audit-run-1/README.md)); a malformed
+argument or unknown tool is a typed `invalid-input` / `unknown-tool` ([run 2](../reports/2026-10-03-observatory-audit-run-2/README.md)).
 
 ## SCN-007 — Opening the app shows the dashboard
 Status: draft
@@ -144,6 +151,7 @@ Trigger: Dock icon click, or launching the app again.
 Steps: reopen → the dashboard window is created and comes forward.
 Expected result: the app is never running without a way back to its window.
 Errors & recovery: none expected; ⌘1 (Window → Dashboard) does the same.
-Coverage: native walkthroughs 2026-10-02 and 2026-10-03 (launch 1 window → closed 0 → reopen 1; the
-Window menu lists Dashboard and Assistant once each).
-
+Coverage: native walkthroughs 2026-10-02 and 2026-10-03 (launch 1 window → closed 0 → reopen 1). Run 2
+found that ⌘1, Window → Dashboard and Dashboard → Overview each ADDED a window (a WindowGroup); the
+dashboard is one `Window` now — Close All → 0, reopen → 1, again → 1 — and the Window menu lists
+Dashboard and Assistant once each ([run 2](../reports/2026-10-03-observatory-audit-run-2/README.md)).
