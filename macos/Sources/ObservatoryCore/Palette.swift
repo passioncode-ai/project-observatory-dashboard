@@ -5,7 +5,8 @@ import Foundation
 /// there byte for byte). Defined ONCE here: the app's views read `Theme`, which
 /// reads this, and a test compares every value with the vendored CSS and checks
 /// the text pairs the app draws against WCAG AA. PassionCode is dark by design,
-/// so there is one set, not a light and a dark twin.
+/// so there is one set, not a light and a dark twin: the token file's opt-in light
+/// palette (1.1.0) is used by neither the app nor the dashboard pages.
 public enum Palette {
     public struct RGB: Equatable, Sendable, CustomStringConvertible {
         public let hex: UInt32
@@ -33,7 +34,7 @@ public enum Palette {
     public static let text = RGB(0xfff9f0)
     public static let textMuted = RGB(0xb6aabc)
     public static let border = RGB(0x342b3a)
-    public static let borderStrong = RGB(0x5c4e63)
+    public static let borderStrong = RGB(0x6f5e77)
     public static let accent = RGB(0xffd21a)
     public static let accentHover = RGB(0xffdf5e)
     public static let onAccent = RGB(0x211900)
@@ -85,12 +86,12 @@ public enum Palette {
                   ("text on info-soft", text, infoSoft), ("muted on info-soft", textMuted, infoSoft)]
         return pairs
     }()
-    /// Non-text marks that must be seen: WCAG 1.4.11, 3:1. The focus ring is held to it.
-    /// A field's resting edge is the design system's `--pc-border-strong`, as on the
-    /// dashboard's own inputs, and measures 2.5:1 on panel — under 3:1. That token is
-    /// canonical (vendored, not edited here); the app identifies its fields by their
-    /// label and muted placeholder (both AA) and draws the 3:1 accent ring on focus.
+    /// Non-text marks that must be seen: WCAG 1.4.11, 3:1. The focus ring is held to it,
+    /// and so is a control's resting edge — the design system's `--pc-border-strong`,
+    /// as on the dashboard's own inputs — on every surface a field or button sits on.
     public static let uiPairs: [(name: String, fg: RGB, bg: RGB)] = [
         ("focus ring on bg", accent, bg), ("focus ring on panel", accent, panel), ("focus ring on raised", accent, panelRaised),
+        ("control edge on bg", borderStrong, bg), ("control edge on panel", borderStrong, panel),
+        ("control edge on raised", borderStrong, panelRaised),
     ]
 }

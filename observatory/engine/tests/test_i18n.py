@@ -513,6 +513,36 @@ class VendoredDesignSystem(unittest.TestCase):
             data = (DASH / "brand" / f["vendored"]).read_bytes()
             self.assertEqual(hashlib.sha256(data).hexdigest(), f["sha256"], f["vendored"])
 
+    def test_dark_control_edge_meets_three_to_one(self):
+        """WCAG 1.4.11: a field's or button's resting edge (`--pc-border-strong`) is seen
+        on every surface the dashboard draws one on. The dark value pinned before
+        design system 1.1.0 measured 2.5:1 on panel."""
+        css = (DASH / "brand/passioncode-tokens.css").read_text(encoding="utf-8")
+        block = re.search(r"(?m)^:root\s*\{(.*?)^\}", css, re.S).group(1)   # the dark contract
+        tokens = dict(re.findall(r"(--pc-[a-z-]+):\s*#([0-9a-f]{6});", block))
+
+        def luminance(hex6):
+            def linear(c):
+                c /= 255
+                return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+            r, g, b = (int(hex6[i:i + 2], 16) for i in (0, 2, 4))
+            return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+
+        def contrast(a, b):
+            la, lb = sorted((luminance(a), luminance(b)), reverse=True)
+            return (la + 0.05) / (lb + 0.05)
+
+        for surface in ("--pc-bg", "--pc-panel", "--pc-panel-raised"):
+            ratio = contrast(tokens["--pc-border-strong"], tokens[surface])
+            self.assertGreaterEqual(ratio, 3.0, f"--pc-border-strong on {surface}: {ratio:.2f}:1")
+
+    def test_pages_stay_on_the_dark_contract(self):
+        """The vendored file carries an opt-in light palette since 1.1.0; the
+        dashboard is the dark product and names its theme so it never opts in."""
+        template = (DASH / "build_dashboard.py").read_text(encoding="utf-8")
+        self.assertIn('data-theme="dark"', template)
+        self.assertNotIn('data-theme="light"', template)
+
 
 if __name__ == "__main__":
     unittest.main()

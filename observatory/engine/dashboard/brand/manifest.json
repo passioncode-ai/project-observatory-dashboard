@@ -1,19 +1,19 @@
 {
   "system": "PassionCode",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "repository": "https://github.com/passioncode-ai/passioncode-ai.github.io",
-  "commit": "508e91793fcb79d6a59bd2265551dbc76f7a8f97",
+  "commit": "dfcfd8c0bef370a5b0141266333e70273366dd73",
   "files": [
     {
       "source": "design-system/tokens.css",
       "vendored": "passioncode-tokens.css",
-      "sha256": "a2ff52c6323de40aecd055a89c6629c25c94a6ce96eed7cd31ee333f210284ce"
+      "sha256": "e006575d6505ea08c5dac7dcbd8945a695e72522a482d1a8d4f0d53f9e0cc819"
     },
     {
       "source": "assets/observatory-mark.svg",
       "vendored": "observatory-mark.svg",
       "sha256": "d239e7c92df588af719630f36e17457f66d40dbec5b04ddbdadeccc622d3040c",
-      "note": "Product-owned glyph drawn on the Switchboard mark's tile and stroke geometry; the canonical copy is added to the site's assets when Observatory joins passioncode.ai."
+      "note": "Product-owned glyph drawn on the Switchboard mark's tile and stroke geometry; the canonical copy is the site's assets/observatory-mark.svg, byte-identical at the pinned commit."
     }
   ]
 }

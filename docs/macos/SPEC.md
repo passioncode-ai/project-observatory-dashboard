@@ -141,10 +141,11 @@ the selected conversation and the focus ring, with `--pc-on-accent` text on it; 
 roles for state only (warning: a person is needed; negative: a failure; positive: ready;
 info: running). No system blue: buttons, fields, the language switch and the conversation
 list draw their own states. `PaletteTests` compares every value with the vendored CSS,
-holds every text pair the app draws to WCAG AA (4.5:1) and the focus ring to 3:1, and
-refuses a system colour in any view. The field's resting edge is the design system's
-`--pc-border-strong` (2.5:1 on panel, as on the dashboard's own inputs); fields are
-identified by their label and AA placeholder and get the 3:1 gold ring on focus.
+holds every text pair the app draws to WCAG AA (4.5:1), and the focus ring and a control's
+resting edge to 3:1 (WCAG 1.4.11), and refuses a system colour in any view. That edge is the
+design system's `--pc-border-strong`, `#6f5e77` since PassionCode 1.1.0 (3.26:1 on panel; the
+dashboard's inputs use the same token); fields also carry their label and AA placeholder and
+get the gold ring on focus.
 System font, keyboard shortcuts, selectable answer text, VoiceOver labels and the
 selected state as an accessibility trait. Motion is colour on hover and press, 120 ms,
 and none under Reduce Motion; no other animation. Main actions remain reachable at

@@ -8,8 +8,15 @@ final class PaletteTests: XCTestCase {
 
     func testEveryRoleIsTheVendoredDesignSystemValue() throws {
         let css = try String(contentsOf: root.appendingPathComponent("observatory/engine/dashboard/brand/passioncode-tokens.css"), encoding: .utf8)
+        // Only the plain `:root` block: the app is the dark contract. Since 1.1.0 the
+        // file also carries an opt-in `:root[data-theme="light"]` palette, whose values
+        // would otherwise overwrite the dark ones read before them.
         var declared: [String: UInt32] = [:]
+        var selector = ""
         for line in css.components(separatedBy: "\n") {
+            if let brace = line.firstIndex(of: "{") { selector = line[..<brace].trimmingCharacters(in: .whitespaces); continue }
+            if line.contains("}") { selector = ""; continue }
+            guard selector == ":root" else { continue }
             let parts = line.trimmingCharacters(in: .whitespaces).components(separatedBy: ":")
             guard parts.count == 2, parts[0].hasPrefix("--pc-"),
                   let hash = parts[1].firstIndex(of: "#") else { continue }
