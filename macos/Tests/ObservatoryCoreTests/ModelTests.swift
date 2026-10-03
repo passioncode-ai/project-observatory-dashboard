@@ -2,12 +2,7 @@ import XCTest
 @testable import ObservatoryApp
 import ObservatoryCore
 @MainActor final class ModelTests: XCTestCase {
-    func defaults() -> UserDefaults {
-        let name = "observatory-tests-" + UUID().uuidString
-        let defaults = UserDefaults(suiteName: name)!
-        addTeardownBlock { defaults.removePersistentDomain(forName: name) }
-        return defaults
-    }
+    func defaults() -> UserDefaults { scratchDefaults() }
     func testLateWorkspaceResponseCannotReplaceNewState() async throws {
         var waiting: CheckedContinuation<[String: Any], Error>?
         var calls = 0
@@ -208,10 +203,13 @@ import ObservatoryCore
     func testLanguageGivenAsALaunchArgumentIsRead() {
         // `-russian YES` on the command line arrives in the argument domain as a
         // string, not a Bool; it still selects the language.
-        let d = defaults(); d.set("YES", forKey: "russian")
-        XCTAssertTrue(Model(defaults: d).russian)
-        d.set(false, forKey: "russian")
-        XCTAssertFalse(Model(defaults: d).russian)
+        // Real UserDefaults parse it, not the in-memory stand-in: the registration
+        // domain is in memory too, and a suite that is only read writes no file.
+        let real = UserDefaults(suiteName: "observatory-tests-launch-argument")!
+        real.register(defaults: ["russian": "YES"])
+        XCTAssertTrue(Model(defaults: real).russian)
+        real.register(defaults: ["russian": false])
+        XCTAssertFalse(Model(defaults: real).russian)
     }
     func testANewWorkspaceWithoutAModelOrBudgetIsNotReadyAndSaysWhy() async {
         // A fresh workspace has no model chain and zero ceilings: "budget reached" was

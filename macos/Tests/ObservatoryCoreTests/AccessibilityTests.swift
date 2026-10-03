@@ -85,9 +85,7 @@ import ApplicationServices
     }
 
     private func model(russian: Bool, answers: @escaping (String) -> [String: Any]) -> Model {
-        let name = "observatory-ax-tests-" + UUID().uuidString
-        let d = UserDefaults(suiteName: name)!
-        addTeardownBlock { d.removePersistentDomain(forName: name) }
+        let d = scratchDefaults("observatory-ax-tests")
         d.set("/srv/example-ws", forKey: "workspace"); d.set("/usr/bin/false", forKey: "executable"); d.set(russian, forKey: "russian")
         return Model(defaults: d) { action, _ in answers(action) }
     }
@@ -132,9 +130,7 @@ import ApplicationServices
             ["server": "absent"],
         ]
         for (i, answer) in answers.enumerated() {
-            let name = "observatory-ax-dash-" + UUID().uuidString
-            let d = UserDefaults(suiteName: name)!
-            addTeardownBlock { d.removePersistentDomain(forName: name) }
+            let d = scratchDefaults("observatory-ax-dash")
             d.set(base, forKey: "workspace"); d.set("/usr/bin/false", forKey: "executable")
             let m = Model(defaults: d) { action, _ in action == "dashboard" ? answer : self.status(ready: true) }
             let w = await host(DashboardView().environmentObject(m).environmentObject(WebController()))

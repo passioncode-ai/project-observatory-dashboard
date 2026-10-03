@@ -29,9 +29,7 @@ import ObservatoryCore
     }
 
     private func model(_ workspace: String, current: @escaping () -> String) -> Model {
-        let name = "observatory-dash-tests-" + UUID().uuidString
-        let defaults = UserDefaults(suiteName: name)!
-        addTeardownBlock { defaults.removePersistentDomain(forName: name) }
+        let defaults = scratchDefaults("observatory-dash-tests")
         defaults.set(workspace, forKey: "workspace"); defaults.set("/usr/bin/false", forKey: "executable")
         return Model(defaults: defaults) { action, _ in
             switch action {
