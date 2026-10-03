@@ -701,8 +701,22 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "8d985e8a8acdb6d1b70c56903d483426f0151b923155749d7f6ae4efa7afc850",
-      "bytes": 45790,
+      "export_sha256": "8fac07d259d481daca66985e797fc67f5ea5db1350db6ac555e06c4d4a9eebef",
+      "bytes": 45877,
+      "upstream_modified": true
+    },
+    {
+      "path": "docs/ONBOARDING.md",
+      "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
+      "export_sha256": "8fac07d259d481daca66985e797fc67f5ea5db1350db6ac555e06c4d4a9eebef",
+      "bytes": 45877,
+      "upstream_modified": true
+    },
+    {
+      "path": "docs/ONBOARDING.md",
+      "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
+      "export_sha256": "8fac07d259d481daca66985e797fc67f5ea5db1350db6ac555e06c4d4a9eebef",
+      "bytes": 45877,
       "upstream_modified": true
     },
     {
@@ -2673,8 +2687,8 @@
       "path": "tests/test_remedy_fits.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "aa4b12d2786aa3025715cd48185b4451953ffb462027a43b00808e48b71b9461",
-      "bytes": 13910
+      "export_sha256": "ed0176e63e89294e53fc22d6f948b5a3b5a0059f0a1050b68dcf90bf6c5b54e6",
+      "bytes": 15359
     },
     {
       "path": "tests/test_remote_env.py",
@@ -3227,8 +3241,8 @@
     {
       "path": "tools/build_findings.py",
       "source_sha256": "03136ce1f366d180307f7f0c17ab41a3de82631103750f081a6d79758569e0b3",
-      "export_sha256": "3e354f69595c709560413d5fd76f371bc2265ee695986bb96858a824c8643b09",
-      "bytes": 252952,
+      "export_sha256": "b71c6f76bf7a0ebffbdc42e250deb2f53257e7691adc254b9c1222593b9cccd0",
+      "bytes": 254064,
       "python_comments_removed": 996,
       "python_docstrings_removed": 28,
       "tool_descriptions_retained": 0,
@@ -3806,7 +3820,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 480,
+  "file_count": 482,
   "excluded": [
     "git-history",
     "operator-registries",

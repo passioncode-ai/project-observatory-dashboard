@@ -218,6 +218,28 @@ def test_two_classes_at_once_carry_both_remedies() -> None:
     check("and neither is repeated", act.count("OWNED_ORGS") == 1, act)
 
 
+def test_an_unprobed_remote_scan_is_told_which_command_runs_it() -> None:
+    """With `git_remotes` on and the probe not yet run, the merge's optional
+    input `remotes.json` is missing; the row's action read "this degradation's
+    class has no recorded remedy … nothing here can tell you what to run",
+    though `project-observatory full remotes` produces it. And its detail said
+    "170-odd repositories are unaffected" on a two-project workspace: a number
+    from one estate, printed on every other."""
+    import build_findings as B
+    rows = B.merge_findings([{"source": "remotes.json",
+                              "reason": "optional collector output unavailable; not measured"}],
+                            integrations={"git_remotes": True})
+    act = rows[0]["action"] if rows else ""
+    check("the action names the command that produces it",
+          "project-observatory full remotes" in act and "no recorded remedy" not in act, act)
+    detail = rows[0]["detail"] if rows else ""
+    check("and the detail states no number measured elsewhere", "170" not in detail, detail)
+    for source in ("sessions.json", "bitbucket.json"):
+        rows = B.merge_findings([{"source": source, "reason": "not measured"}])
+        act = rows[0]["action"] if rows else ""
+        check(f"`{source}` has a remedy of its own", "no recorded remedy" not in act, act)
+
+
 def test_an_unknown_class_is_given_no_invented_cure() -> None:
     """The third outcome. A degradation source nobody has written a remedy for
     must not inherit one: a wrong remedy is followed, and the reader's evidence
@@ -269,6 +291,7 @@ if __name__ == "__main__":
                test_every_degradation_class_has_its_own_remedy,
                test_the_ownership_reason_does_not_get_the_gh_cure,
                test_a_transfer_reason_still_gets_the_gh_cure,
+               test_an_unprobed_remote_scan_is_told_which_command_runs_it,
                test_two_classes_at_once_carry_both_remedies,
                test_an_unknown_class_is_given_no_invented_cure,
                test_the_session_loss_is_claimed_only_when_a_checkout_exists,
