@@ -38,6 +38,7 @@ from __future__ import annotations
 import json, os, pathlib, re, stat, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import leak_register  # noqa: E402
+import vault_project  # noqa: E402  — which project a vault folder names, shared with the write doors
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import environments  # noqa: E402  — one spelling of an environment name (DEPLOYMENTS.md)
 import paths                                                                             
@@ -572,7 +573,20 @@ def records(scan: dict, store: pathlib.Path, projects: list[dict]) -> tuple[list
         # they were. Folder first, name second: the same order `in_project`
         # uses below.
         _vp = c.get("vault_project")
-        _vault_owner = (by_folder.get(_vp) or by_name.get(_vp)) if _vp else None
+        # ONE RESOLVER, shared with every write door (`vault_project.py`): a
+        # folder, a registry id's slug or a registry name all name a project,
+        # so a slot filed under `local-alpha-web` (the slug, before the vault
+        # normalised it) belongs to `project:local-alpha-web` instead of reading
+        # as an organisation's key. A name two projects claim is NOT guessed.
+        _res = vault_project.resolve(_vp, projects) if _vp else None
+        _vault_owner = _res.project_id if _res is not None and _res.how != "ambiguous" else None
+        if _res is not None and _res.how == "ambiguous" and c["kind"] == "project-secret" \
+                and not c.get("unclaimed_reason"):
+            c["unclaimed_reason"] = (
+                f"ambiguous: the vault folder {_vp!r} is claimed by more than one project "
+                f"({'; '.join(_res.candidates)}); the slot is attributed to none of them. "
+                f"Move it under the right project's folder with `vault.py put` and `remove`, "
+                f"or name the owner in the curated file")
         if c["kind"] in ("project-secret", "leaked-untracked") and _vault_owner:
             # Only a real slot says which environment it is filed under; a leak
             # record borrows the register's wording and proves no environment.

@@ -38,8 +38,11 @@ names. Never ask the user to paste a credential into the conversation.
    Never read a value file to discover whether it exists.
 
 All commands below are Python scripts under `OBSERVATORY_ROOT/tools`. `PROJECT`,
-`ENV` and `NAME` are placeholders for existing user-selected names. `ENV` is
-`local`, `stage` or `prod`; choose production only when the task calls for it.
+`ENV` and `NAME` are placeholders for existing user-selected names. `PROJECT` is
+the project's folder name; its registry id (`project:<slug>` or the bare slug) is
+accepted and normalised to that folder, and a name two projects claim is refused.
+`ENV` is `local`, `stage` or `prod`; choose production only when the task calls
+for it. A name or note shaped like a credential is refused, never stored.
 
 ## Use the named door
 

@@ -181,9 +181,38 @@ def test_a_name_that_resolves_nowhere_says_where_it_looked() -> None:
     check("it refuses", p.returncode == 2, str(p.returncode))
     check("and names the vault and the inventory, not just 'not found'",
           "vault" in p.stderr and "inventory" in p.stderr, p.stderr[-160:])
-    # The refusal names the vault's put verb in words rather than as a script
-    # path, because the script lives wherever the engine was installed.
-    check("and says how to add it", "vault put command" in p.stderr, p.stderr[-160:])
+    # The refusal names the installed command — `$(project-observatory
+    # full-path)` resolves wherever the engine was installed — with this
+    # project, environment and name filled in, so it can be run as written.
+    check("and says how to add it, as the installed command",
+          'full-path)/tools/vault.py" put demo local NOT_HERE' in p.stderr, p.stderr[-260:])
+
+
+def test_an_explicit_env_never_falls_back_to_an_unlabeled_env_file() -> None:
+    """`--env prod` silently took the project's unlabeled `.env` — the
+    development file — and the refusal for a slot held only in another
+    environment said it was in none of `{local,stage,prod}`."""
+    d, env = estate()
+    p = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "where", "--env", "prod",
+                        "demo", "DEMO_API_KEY"], env=env, capture_output=True, text=True, timeout=60)
+    check("an explicit --env prod does not resolve to the unlabeled .env",
+          p.returncode == 2 and "demo/.env" not in p.stdout, p.stdout + p.stderr[-200:])
+    check("the refusal names the environment searched and the file that holds it",
+          "{prod}" in p.stderr and "demo/.env (no environment in its name)" in p.stderr
+          and PLANTED not in p.stdout + p.stderr, p.stderr[-300:])
+    p = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "where",
+                        "demo", "DEMO_API_KEY"], env=env, capture_output=True, text=True, timeout=60)
+    check("with no --env the unlabeled file still answers", "demo/.env" in p.stdout, p.stderr[-200:])
+
+
+def test_pipe_with_a_missing_program_is_typed() -> None:
+    d, env = estate()
+    p = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "pipe", "DEMO_API_KEY",
+                        "--", "observatory-no-such-program-example"], input="synthetic-piped-value",
+                       env=env, capture_output=True, text=True, timeout=60)
+    check("pipe with a missing program exits 127 and says which",
+          p.returncode == 127 and "command not found: observatory-no-such-program-example" in p.stderr
+          and "input validation" not in p.stderr, f"exit {p.returncode}: {p.stderr[-200:]}")
 
 
 def test_names_lists_without_values() -> None:
@@ -363,6 +392,8 @@ if __name__ == "__main__":
                test_and_not_the_transcript,
                test_a_value_split_across_a_buffer_is_still_removed,
                test_a_name_that_resolves_nowhere_says_where_it_looked,
+               test_an_explicit_env_never_falls_back_to_an_unlabeled_env_file,
+               test_pipe_with_a_missing_program_is_typed,
                test_names_lists_without_values,
                test_where_reports_the_source_it_would_take,
                test_the_leak_scan_finds_a_planted_value,
