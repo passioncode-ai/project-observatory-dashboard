@@ -457,6 +457,29 @@ def test_the_commit_subject_says_what_moved() -> None:
     check("the subject is not the registry's SIZE", "projects," not in subject, subject)
 
 
+def test_a_scheduled_commit_never_asks_for_a_signing_key() -> None:
+    """The tick commits the registry (and the wiki projection) unattended. With
+    `commit.gpgsign` on in the user's Git config, that commit ran the signing
+    program — gpg's pinentry, or an SSH signer — which can put a passphrase or
+    Keychain dialog in front of the operator from a background job. The planted
+    signer leaves a marker if either committer ever runs it."""
+    import commit_registry as cr
+    import commit_projection as cp
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-sign-"))
+    marker = d / "signer-ran"
+    signer = d / "signer.sh"
+    signer.write_text(f"#!/bin/sh\ntouch '{marker}'\nexit 1\n", encoding="utf-8")
+    signer.chmod(0o755)
+    git("init", "-q", cwd=d)
+    for k, v in (("user.email", "fixture@example.invalid"), ("user.name", "Fixture"),
+                 ("commit.gpgsign", "true"), ("gpg.program", str(signer))):
+        git("config", k, v, cwd=d)
+    for name, mod in (("commit_registry", cr), ("commit_projection", cp)):
+        code, out = mod.git("commit", "--allow-empty", "-q", "-m", f"fixture {name}", cwd=d)
+        check(f"{name}: the unattended commit succeeds without signing", code == 0, out[-200:])
+    check("and no signing program ran", not marker.exists())
+
+
 def test_the_volatile_set_claims_only_what_is_true() -> None:
     """The first version of that comment said their history lived in the store."""
     import commit_registry as cr
@@ -481,7 +504,8 @@ if __name__ == "__main__":
                test_the_naming_convention_still_holds,
                test_the_wire_can_still_tell_stale_from_quiet,
                test_the_commit_subject_says_what_moved,
-               test_the_volatile_set_claims_only_what_is_true):
+               test_the_volatile_set_claims_only_what_is_true,
+               test_a_scheduled_commit_never_asks_for_a_signing_key):
         fn()
     print()
     if FAILURES:
