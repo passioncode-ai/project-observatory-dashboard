@@ -201,6 +201,11 @@ def test_an_unconfigured_projects_source_is_a_typed_refusal() -> None:
     check("without a traceback", "Traceback" not in p.stderr, p.stderr[-300:])
     check("naming the configure command",
           "project-observatory full configure sources projects" in p.stderr, p.stderr[-300:])
+    # The placeholder `<workspace>/unconfigured/projects` is not a folder anyone
+    # chose: naming it as "the projects source" sent a new user looking for it.
+    check("saying that no folder is configured, not naming the placeholder as one",
+          "no projects folder is configured yet" in p.stderr and "unconfigured" not in p.stderr,
+          p.stderr[-300:])
     check("and writing nothing", not dest.is_file())
     afile = d / "a-file"
     afile.write_text("x", encoding="utf-8")

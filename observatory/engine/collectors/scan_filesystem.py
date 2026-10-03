@@ -259,6 +259,13 @@ EXCLUDED_PREFIXES, EXCLUDED_NAMES = exclusions()
 # The source itself first: a new user who runs `full local` before naming a
 # projects folder met a FileNotFoundError traceback from `os.listdir` below. The
 # placeholder path (`<home>/unconfigured/projects`) is what an unset source reads as.
+if not DATA.is_dir() and DATA.parent.name == "unconfigured" and not DATA.exists():
+    # The placeholder an unset source reads as: say that, not its path.
+    print("scan_filesystem: no projects folder is configured yet.\n"
+          "  Point Observatory at the folder that holds your project checkouts:\n"
+          "  project-observatory full configure sources projects PATH",
+          file=sys.stderr)
+    sys.exit(2)
 if not DATA.is_dir():
     print(f"scan_filesystem: the projects source {DATA} "
           f"{'is not a directory' if DATA.exists() else 'does not exist'}.\n"
