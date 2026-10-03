@@ -258,6 +258,9 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             # folders agents opened that the registry never joined
                             # — read by session_findings
                             "store/raw/sessions-seen.jsonl",
+                            # the lifecycle watch (collectors/scan_lifecycle.py),
+                            # written by the tick's `lifecycle` step before this one
+                            "store/raw/lifecycle.json",
                             "store/raw/bitbucket.json", "store/raw/domains_live.json",
                             "store/raw/local.json", "store/raw/model.json",
                             "store/raw/projection.json", "store/raw/vault.json",

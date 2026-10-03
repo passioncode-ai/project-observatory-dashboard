@@ -189,7 +189,7 @@ def _observer(health: dict, t: Translator) -> str:
         return t.mark("observer not measured")
     if age == -1:
         return t.mark("the observer was not running when measured")
-    if age < 90:
+    if age < (health.get("server_silent_after_s") or 90):
         return t.mark("the observer was running when measured")
     return t.mark("not answering for {n} min when measured", n=int(age // 60))
 

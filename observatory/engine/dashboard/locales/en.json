@@ -353,6 +353,14 @@
   "one": "{n} live file",
   "other": "{n} live files"
  },
+ "{n} logs of {product} are past their cap": {
+  "one": "{n} log of {product} is past its cap",
+  "other": "{n} logs of {product} are past their cap"
+ },
+ "{n} logs of {product} are readable by other accounts": {
+  "one": "{n} log of {product} is readable by other accounts",
+  "other": "{n} logs of {product} are readable by other accounts"
+ },
  "{n} more are waiting; the page shows the newest. The whole queue:": {
   "one": "{n} more is waiting; the page shows the newest. The whole queue:",
   "other": "{n} more are waiting; the page shows the newest. The whole queue:"
@@ -404,6 +412,10 @@
  "{n} processes": {
   "one": "{n} process",
   "other": "{n} processes"
+ },
+ "{n} processes of {product} outlived their parent": {
+  "one": "{n} process of {product} outlived its parent",
+  "other": "{n} processes of {product} outlived their parent"
  },
  "{n} production secrets cannot be compared with this machine's": {
   "one": "{n} production secret cannot be compared with this machine's",
@@ -492,6 +504,10 @@
  "{n} servers": {
   "one": "{n} server",
   "other": "{n} servers"
+ },
+ "{n} session servers of {product} run replaced code": {
+  "one": "{n} session server of {product} runs replaced code",
+  "other": "{n} session servers of {product} run replaced code"
  },
  "{n} sessions": {
   "one": "{n} session",

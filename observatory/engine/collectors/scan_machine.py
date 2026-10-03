@@ -369,6 +369,39 @@ def _stamp_age(stamp: str | None) -> float:
         return float("inf")
 
 
+#: Places a job with no person present must not open (lifecycle LC-06), relative to
+#: the home directory. macOS guards each behind a privacy consent: Documents,
+#: Downloads, Desktop and the media folders by name, iCloud Drive, and every other
+#: app's container ("data from other apps"). A `du` of one from the tick raised that
+#: consent at night as "python3.14 would like to access…" (measured 2026-10-02: the
+#: AppData grant was rewritten the same second the tick sized an OrbStack container).
+PROTECTED = ("Documents", "Downloads", "Desktop", "Pictures", "Movies", "Music",
+             "Library/Mobile Documents", "Library/Containers", "Library/Group Containers",
+             "Library/Mail", "Library/Messages", "Library/Safari", "Library/Calendars",
+             "Library/Reminders", "Library/Application Support/AddressBook",
+             "Library/Application Support/CallHistoryDB", "Library/Application Support/MobileSync")
+
+
+def protected_place(path: pathlib.Path, home: pathlib.Path | None = None) -> bool:
+    """True when `path` is, or is inside, a privacy-guarded place of `home`.
+
+    Decided by the path alone, never by a flag in the config: a workspace that adds
+    `~/Downloads` to its own machine.json must not thereby send the tick into it.
+    The check runs before any stat, because even looking at a container can count
+    as access."""
+    home = pathlib.Path.home() if home is None else home
+    try:
+        rel = pathlib.PurePath(os.path.normpath(str(path))).relative_to(os.path.normpath(str(home)))
+    except ValueError:
+        return False
+    parts = rel.parts
+    for guarded in PROTECTED:
+        g = pathlib.PurePath(guarded).parts
+        if parts[:len(g)] == g:
+            return True
+    return False
+
+
 def survey_disk(previous: dict | None, force: bool) -> dict:
     """Size the configured places within a time BUDGET per run.
 
@@ -378,16 +411,24 @@ def survey_disk(previous: dict | None, force: bool) -> dict:
     each run measures the places whose numbers are oldest first, stops when
     `disk_budget_seconds` is spent, and keeps every other place's last number
     with its own `measured_at`. A place that never fits is reported, not guessed.
-    `--disk` (the operator, at a terminal) takes `disk_budget_seconds_manual`."""
+    `--disk` (the operator, at a terminal) takes `disk_budget_seconds_manual`.
+
+    PROTECTED PLACES ARE MANUAL ONLY. Without `--disk` a place `protected_place`
+    names is not sized, not even stat'ed: it is listed in `manual_only` with its
+    last manual number, if any. Only a person's `--disk` run measures it."""
     cfg = machine_config()
     every = float(cfg.get("every_hours", 12)) * 3600
     budget = float(cfg.get("disk_budget_seconds_manual" if force else "disk_budget_seconds", 900 if force else 90))
     per = float(cfg.get("disk_location_timeout_seconds", 60))
     prev = {r["path"]: r for r in ((previous or {}).get("disk") or {}).get("locations") or [] if isinstance(r, dict)}
     out = {"volume": volume(), "thresholds": {k: cfg.get(k) for k in ("free_space_warning_percent", "free_space_critical_percent")}}
-    wanted = []
+    wanted, manual_only = [], []
     for loc in cfg.get("locations") or []:
         path = pathlib.Path(os.path.expanduser(loc["path"]))
+        if not force and protected_place(path):
+            manual_only.append({"path": loc["path"], "label": loc.get("label", loc["path"]),
+                                "reason": "privacy-guarded: sized only by `full machine --disk`"})
+            continue
         if path.exists():
             wanted.append((loc, path))
     due = sorted((x for x in wanted if force or _stamp_age(prev.get(x[0]["path"], {}).get("measured_at")) >= every),
@@ -416,9 +457,16 @@ def survey_disk(previous: dict | None, force: bool) -> dict:
     if swap and swap["gb"] > 0:
         rows.append({"path": swap["path"], "kind": "swap", "label": "Swap files (memory written to disk)",
                      "reclaim": "memory", "gb": swap["gb"], "measured_at": now()})
+    # A guarded place keeps its last MANUAL number on the page, marked as such.
+    for m in manual_only:
+        old = prev.get(m["path"])
+        if old and "gb" in old:
+            rows.append({**{k: old[k] for k in ("path", "kind", "label", "reclaim", "command") if k in old},
+                         "gb": old["gb"], "measured_at": old.get("measured_at"), "manual_only": True})
     rows.sort(key=lambda r: -r["gb"])
     pending = len([1 for loc, _p in wanted if loc["path"] not in measured and loc["path"] not in prev])
-    out.update({"locations": rows, "measured_at": now(), "measured_now": len(measured), "never_measured": pending})
+    out.update({"locations": rows, "measured_at": now(), "measured_now": len(measured), "never_measured": pending,
+                "manual_only": manual_only})
     if degraded:
         out["degraded"] = degraded
     return out

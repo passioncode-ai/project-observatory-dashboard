@@ -54,11 +54,20 @@ split is deliberate — one measurer, one live reader — and it is the extensio
 point: a future watcher adds a `refresh_*` function and a route, never a second
 scanner. It also does not spend: no model, no network beyond localhost.
 
-THE HEARTBEAT IS A RECEIPT. Every cycle writes `store/raw/serverd.json` (through
+THE HEARTBEAT IS A RECEIPT, WRITTEN ON CHANGE. `store/raw/serverd.json` (through
 the atomic writer): pid, port, uptime, the remote summary, open-leak count,
 skill versions. `tools/build_findings.py` reads it and raises `server.silent`
 when the plist says the daemon should be up but the heartbeat is stale — the
 board is where silence becomes visible, same as every other component here.
+
+IDLE MEANS IDLE (lifecycle LC-08). The beat used to re-read ~200 KB of registry
+and rewrite the 15 KB receipt every 20 s whatever happened — about 4,300 writes
+a day on an estate where nothing moved. Now each input is re-read only when its
+file changed (`_memo`), the receipt is written only when its content changed or
+KEEPALIVE_SECONDS have passed (that rewrite is what proves the server alive),
+and the beat slows from REFRESH_SECONDS to IDLE_SECONDS when no client has asked
+anything for CLIENT_WINDOW_SECONDS. The receipt carries `silent_after_s`, the
+age past which its readers call it silent, so they never assume the old 20 s.
 
 SECURITY. Binds 127.0.0.1 only. Serves NO secret values anywhere: `/leaks` is
 names, places and dates from the register, which never held values to begin
@@ -105,7 +114,18 @@ PLIST = install_launchd.plist_path(LABEL)
 #: `AT_RISK`; spelled here because the daemon must not import the findings
 #: builder (it reads receipts the builder writes — a cycle).
 AT_RISK = ("ahead", "local-only-branch", "unpushed-and-remote-moved", "diverged")
+#: The beat while a client (a host's probe, the page, an agent) has asked recently.
 REFRESH_SECONDS = 20
+#: The beat with no client: nothing reads the snapshot sooner than this matters.
+IDLE_SECONDS = 120
+#: A request within this window keeps the beat at REFRESH_SECONDS.
+CLIENT_WINDOW_SECONDS = 300
+#: An unchanged receipt is still rewritten this often: its `at` is the liveness proof.
+KEEPALIVE_SECONDS = 300
+#: Age past which a reader calls the receipt silent: a keepalive plus a slow beat, with room.
+SILENT_AFTER_SECONDS = KEEPALIVE_SECONDS + IDLE_SECONDS + 60
+#: The server's own launchd logs are rotated at start and at most this often.
+LOG_ROTATE_SECONDS = 3600
 STARTED = time.time()
 # The application version, stated once in configuration.py. A literal here said
 # 0.1.0 in /health and in the Server header through every release up to 0.3.3.
@@ -127,12 +147,47 @@ def _read_json(p: pathlib.Path):
         return None
 
 
+#: name -> (signature of the files it was computed from, the value).
+_MEMO: dict[str, tuple[tuple, object]] = {}
+_MEMO_LOCK = threading.Lock()
+
+
+def _signature(files) -> tuple:
+    """(path, mtime_ns, size) per file, None for one that is absent: what "changed" means."""
+    sig = []
+    for f in files:
+        try:
+            st = os.stat(f)
+            sig.append((str(f), st.st_mtime_ns, st.st_size))
+        except OSError:
+            sig.append((str(f), None))
+    return tuple(sig)
+
+
+def _memo(name: str, files, compute):
+    """`compute()` again only when one of `files` changed since the last call."""
+    sig = _signature(files)
+    with _MEMO_LOCK:
+        hit = _MEMO.get(name)
+        if hit and hit[0] == sig:
+            return hit[1]
+    value = compute()
+    with _MEMO_LOCK:
+        _MEMO[name] = (sig, value)
+    return value
+
+
 def refresh_remote() -> dict:
     """The remote axis, summarised from what the collectors last measured.
 
     Absent is not zero: when the registry cannot be read the summary SAYS so
-    instead of reporting an estate with no risk.
+    instead of reporting an estate with no risk. Re-read only when the file changed.
     """
+    reg = paths.REGISTRY / "repositories.json"
+    return _memo("remote", [reg], _remote_summary)
+
+
+def _remote_summary() -> dict:
     doc = _read_json(paths.REGISTRY / "repositories.json")
     if not doc:
         return {"readable": False, "measured_from": None, "states": {},
@@ -162,10 +217,19 @@ def refresh_remote() -> dict:
             "at_risk": sorted(risky, key=lambda x: (x["sync"], x["repo"] or ""))[:100]}
 
 
-def refresh_leaks() -> dict:
-    reg = pathlib.Path(os.environ.get(
+def _leak_register() -> pathlib.Path:
+    return pathlib.Path(os.environ.get(
         "OBSERVATORY_VAULT_DIR",
         paths.source_path("secret_store", paths.SECRETS) / "projects")) / "leaks.jsonl"
+
+
+def refresh_leaks() -> dict:
+    """The register's status, re-read only when the register changed."""
+    return _memo("leaks", [_leak_register()], _leak_summary)
+
+
+def _leak_summary() -> dict:
+    reg = _leak_register()
     if not reg.is_file():
         return {"register": False, "open": 0, "total": 0}
     rows, settled = [], set()
@@ -192,7 +256,12 @@ def refresh_leaks() -> dict:
 
 
 def refresh_skills() -> dict:
-    """Shipped skill versions beside what sessions have reported using."""
+    """Shipped skill versions beside what sessions have reported using, re-read on change."""
+    files = sorted((ROOT / "skill/plugins/observatory-log/skills").glob("*/SKILL.md"))
+    return _memo("skills", [*files, paths.SCRATCH / "skill-sessions.json"], _skill_summary)
+
+
+def _skill_summary() -> dict:
     # ONE READER of the frontmatter version: `skill_check.shipped_version`,
     # which strips the YAML quotes. A second copy here kept them, so /health
     # and /skills served "\"0.13.1\"" beside the handshake's 0.13.1.
@@ -215,13 +284,19 @@ def _tick_health() -> dict:
         return {"verdict": "unknown", "why": f"{type(exc).__name__}: {exc}"}
 
 
+#: (content of the last receipt written, time.time() of that write).
+_LAST_RECEIPT: list = [None, 0.0]
+
+
 def heartbeat() -> dict:
+    """The receipt, written only when its content changed or the keepalive is due."""
     lease = _read_json(paths.SCRATCH / "tick-lease.json") or {}
     tick = _read_json(paths.SCRATCH / "tick.json") or {}
     doc = {
         "at": now_z(), "pid": os.getpid(), "port": PORT, "version": VERSION,
         "workspace": str(paths.HOME),
         "uptime_s": int(time.time() - STARTED),
+        "silent_after_s": SILENT_AFTER_SECONDS,
         "remote": refresh_remote(),
         "leaks": refresh_leaks(),
         "skills": refresh_skills(),
@@ -230,8 +305,44 @@ def heartbeat() -> dict:
                  # Alive or not, judged from outside the tick (tick_health, PB-132).
                  "health": _tick_health()},
     }
-    atomic.write_json(RECEIPT, doc)
+    content = json.dumps({k: v for k, v in doc.items() if k not in ("at", "uptime_s")},
+                         sort_keys=True, ensure_ascii=False, default=str)
+    stamp = time.time()
+    if content != _LAST_RECEIPT[0] or stamp - _LAST_RECEIPT[1] >= KEEPALIVE_SECONDS:
+        atomic.write_json(RECEIPT, doc)
+        _LAST_RECEIPT[0], _LAST_RECEIPT[1] = content, stamp
     return doc
+
+
+#: time.monotonic() of the last HTTP request, None before the first.
+LAST_REQUEST: list = [None]
+#: Set by a request that arrives while the beat is slow, so the next snapshot is not 2 minutes away.
+WAKE = threading.Event()
+
+
+def beat_interval(now: float, last_request: float | None) -> float:
+    """REFRESH_SECONDS while a client asked within CLIENT_WINDOW_SECONDS, else IDLE_SECONDS."""
+    if last_request is None or now - last_request > CLIENT_WINDOW_SECONDS:
+        return IDLE_SECONDS
+    return REFRESH_SECONDS
+
+
+def note_request() -> None:
+    now = time.monotonic()
+    idle = beat_interval(now, LAST_REQUEST[0]) == IDLE_SECONDS
+    LAST_REQUEST[0] = now
+    if idle:
+        WAKE.set()
+
+
+def rotate_own_logs() -> None:
+    """serverd.err/.out are held open by launchd: copied and truncated, never renamed (LC-12)."""
+    try:
+        import log_policy
+        for f in service_identity.log_files():
+            log_policy.rotate(f, copy_truncate=True)
+    except Exception as exc:  # noqa: BLE001 — a rotation must never stop the server
+        print(f"log rotation: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 class Runtime:
@@ -422,6 +533,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._json(page)
 
     def do_GET(self):                                     # noqa: N802
+        note_request()
         if not local_request(self.headers.get("Host", ""), self.headers.get("Origin"),
                              self.headers.get("Sec-Fetch-Site"), self.server.server_address[1]):
             self._json({"error": "only local browser origins are accepted"}, 403)
@@ -546,9 +658,15 @@ def serve(port: int) -> int:
     stop = threading.Event()
 
     def beat():
+        rotated = time.monotonic()
+        rotate_own_logs()
         while not stop.is_set():
             beat_once(RUNTIME)
-            stop.wait(REFRESH_SECONDS)
+            if time.monotonic() - rotated >= LOG_ROTATE_SECONDS:
+                rotate_own_logs()
+                rotated = time.monotonic()
+            WAKE.wait(beat_interval(time.monotonic(), LAST_REQUEST[0]))
+            WAKE.clear()
 
     def on_term(_signum, _frame):
         # SIGTERM is how launchd stops a job: say `stopping`, stop the beat,
@@ -557,6 +675,7 @@ def serve(port: int) -> int:
         # another one.
         RUNTIME.stopping()
         stop.set()
+        WAKE.set()
         threading.Thread(target=srv.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGTERM, on_term)
@@ -581,7 +700,8 @@ def serve(port: int) -> int:
 def build_plist() -> dict:
     return {
         "Label": LABEL,
-        "ProgramArguments": [sys.executable,
+        # The venv's interpreter or a keg's `opt` link, never a Cellar path (LC-05).
+        "ProgramArguments": [install_launchd.stable_interpreter(sys.executable),
                              str(ROOT / "tools/serverd.py"), "--run", "--port", str(PORT)],
         "RunAtLoad": True,
         "KeepAlive": True,
@@ -621,6 +741,16 @@ def install() -> int:
     if PLIST.is_symlink():
         print(f"Not installed: {PLIST} is a symbolic link", file=sys.stderr)
         return 1
+    # The plist is linted before anything is written: a refused plist leaves no descriptor.
+    try:
+        doc = build_plist()
+    except configuration.ConfigurationError as exc:
+        print(f"Not installed: {exc}", file=sys.stderr)
+        return 1
+    problems = install_launchd.lint_plist(doc)
+    if problems:
+        print("Not installed: " + "; ".join(problems), file=sys.stderr)
+        return 1
     install_launchd.prepare_logs(("serverd.err", "serverd.out"), paths.STATE / "logs")
     PLIST.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -632,7 +762,7 @@ def install() -> int:
         print(f"Not installed: {exc}", file=sys.stderr)
         return 1
     try:
-        fs.launchd_install(LABEL, PLIST, plistlib.dumps(build_plist()),
+        fs.launchd_install(LABEL, PLIST, plistlib.dumps(doc),
                            origin=f"http://127.0.0.1:{PORT}",
                            service_id=service_identity.SERVICE_ID,
                            instance=service_identity.instance())
@@ -685,7 +815,7 @@ def status() -> int:
     age = time.time() - datetime.datetime.strptime(
         doc["at"], "%Y-%m-%dT%H:%M:%SZ").replace(
         tzinfo=datetime.timezone.utc).timestamp()
-    alive = age < REFRESH_SECONDS * 3
+    alive = age < float(doc.get("silent_after_s") or REFRESH_SECONDS * 3)
     print(f"{'UP' if alive else 'SILENT'} — last heartbeat {int(age)}s ago, "
           f"pid {doc.get('pid')}, port {doc.get('port')}, "
           f"uptime {doc.get('uptime_s')}s")

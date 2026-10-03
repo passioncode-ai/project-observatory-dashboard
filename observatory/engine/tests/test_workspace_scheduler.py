@@ -58,8 +58,8 @@ class WorkspaceScheduler(unittest.TestCase):
         with patch.dict(os.environ, {'PROVIDER_TOKEN':'synthetic-secret-never-copy'}):
             tick = self.launch.build(1800)
             server = self.server.build_plist()
-        for plan in (tick, server):
-            self.assertEqual(set(plan['EnvironmentVariables']), {'HOME','PATH','OBSERVATORY_HOME','OBSERVATORY_PYTHON'})
+        for plan, extra in ((tick, {'OBSERVATORY_TICK_CEILING_SECONDS'}), (server, set())):
+            self.assertEqual(set(plan['EnvironmentVariables']), {'HOME','PATH','OBSERVATORY_HOME','OBSERVATORY_PYTHON'} | extra)
             self.assertEqual(plan['EnvironmentVariables']['OBSERVATORY_HOME'],str(self.home))
             self.assertNotIn(b'synthetic-secret',plistlib.dumps(plan))
             self.assertTrue(plan['StandardOutPath'].startswith(str(self.home)))
@@ -78,11 +78,17 @@ class WorkspaceScheduler(unittest.TestCase):
         user_bin, writable, missing = base / 'bin', base / 'shared', base / 'absent'
         user_bin.mkdir(mode=0o755); writable.mkdir(); writable.chmod(0o777)
         group_own = base / 'brew'; group_own.mkdir(); group_own.chmod(0o775)
-        joined = os.pathsep.join([str(user_bin), 'relative/bin', str(writable), str(missing), str(user_bin), str(group_own)])
+        no_tools = base / 'plugin-bin'; no_tools.mkdir(mode=0o755)
+        # Only a directory holding one of the engine's tools joins the PATH (LC-05).
+        for folder, tool in ((user_bin, 'gh'), (writable, 'git'), (group_own, 'heroku')):
+            exe = folder / tool
+            exe.write_text('#!/bin/sh\n'); exe.chmod(0o755)
+        joined = os.pathsep.join([str(user_bin), 'relative/bin', str(writable), str(missing), str(user_bin),
+                                  str(no_tools), str(group_own)])
         entries = self.launch.launch_path(joined).split(os.pathsep)
         self.assertEqual(entries[0], str(user_bin), 'the installer\'s own tools come first')
         self.assertEqual(entries.count(str(user_bin)), 1)
-        for bad in ('relative/bin', str(writable), str(missing)):
+        for bad in ('relative/bin', str(writable), str(missing), str(no_tools)):
             self.assertNotIn(bad, entries)
         self.assertIn('/usr/bin', entries, 'system directories are always present')
         self.assertIn(str(group_own), entries, 'a group-writable directory this user owns (Homebrew) is kept')

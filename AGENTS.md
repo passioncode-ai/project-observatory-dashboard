@@ -139,6 +139,57 @@ files and the gate. Run `agent_sync.py acquire <file>` before editing one and
 reserved yet; a register that gains one is declared under `idRegisters` and taken with
 `agent_sync.py reserve <REG>`.
 
+## Lifecycle
+
+The organisation's [lifecycle contract](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/lifecycle.md)
+(LC-01…LC-15) holds here. What this product leaves running, and who stops it (LC-09):
+
+| Process | Started by | Cadence | With no window | Stopped by | Idle budget |
+|---|---|---|---|---|---|
+| tick: `tools/tick_lease.py run -- bash tools/tick.sh`, launchd `org.project-observatory.<sha16 of the workspace path>.tick` | `python "$(project-observatory full-path)/tools/install_launchd.py" install` | `StartInterval 1800`, `RunAtLoad false`, Background, Nice 5 | runs every 30 min after the last one ended | `install_launchd.py uninstall`; `full update` stops and restarts it | none between ticks; each step under a watchdog (`DEFAULT_STEP_SECONDS` 900 s), the whole tick under a 1500 s ceiling below the interval, `ExitTimeOut` 30 s above the supervisor's 10 s + 5 s grace |
+| server: `tools/serverd.py --run`, launchd `org.project-observatory.<sha16>.server`, HTTP on `127.0.0.1:47311` (`OBSERVATORY_SERVER_PORT`) | `serverd.py --install` | `RunAtLoad` + `KeepAlive`, `ExitTimeOut` 40 s above its 30 s drain | always up; beat 20 s while a client asked within 5 min, else 120 s; receipt written on change, at least every 300 s | `serverd.py --uninstall` (stays off); `full update` restarts it | ~0.2 CPU-s/min measured before the change, ~40 MB RSS; no subprocess on a timer |
+| per-session MCP server `mcp/server.py` | each agent session that declares it (`claude mcp add observatory …`) | one per session | lives as long as its session | the session (stdin EOF); answers `stale-server` once an update replaced its code | ~18 MB idle; no timer |
+| job runner `tools/run_job.py <id>` (`machine.mcp.refresh`, `agent.ask`) | the MCP server or the app, on a request | per request | until the job ends | the job ends; `fabric.job.cancel` stops its process group | — |
+| on-demand MCP probe (`claude mcp list` and the servers it starts) | `full scan-mcp` or `machine.mcp.refresh` only — never the tick | per request | until the CLI answers or 180 s | its own process group is killed on exit or timeout | — |
+| keyserver `tools/keyserver.py` on `127.0.0.1:7717` | a person, by hand | — | while the terminal runs it | Ctrl-C | — |
+| plugin `observatory-log` hooks | Claude Code: `SessionStart` (15 s), `Stop` (20 s) | per session start and per agent turn | nothing resident | the hook's own timeout | — |
+| `Project Observatory.app` | the person (not a login item) | — | stays in the Dock after its window closes; no polling at idle | Quit; `install-app.sh` quits it before replacing it | ~80 MB, 0% CPU |
+
+- **No background job touches a protected place** (LC-06): disk sizing skips Documents, Downloads,
+  Desktop, media folders, iCloud Drive and other apps' containers unless a person runs
+  `full machine --disk` (`collectors/scan_machine.py#protected_place`).
+- **Logs** (LC-12): one policy in `observatory/engine/log_policy.py` — 5 generations of 5 MB, mode
+  0600, launchd-held files copied and truncated — applied by the tick's `logs` step and by the
+  server to its own `serverd.err`/`.out`. The logs live in the workspace's `store/logs/`, not
+  `~/Library/Logs/<Product>/`: one account can hold several workspaces, and each keeps its own.
+- **Plists** (LC-05): a minimal `PATH` (the directories holding the engine's tools, then the
+  system ones) and the interpreter by its virtual-environment or Homebrew `opt` path; the
+  installers refuse a plist naming a Cellar path (`install_launchd.lint_plist`).
+- **The lifecycle watch** (`collectors/scan_lifecycle.py`, findings `lifecycle.*`) reports, per
+  owning product, orphaned processes, session servers on replaced code, jobs past their interval
+  and logs past their cap or readable by others.
+- **Deferred, with the reason:**
+  - *Stable signed identity for the jobs (LC-05).* macOS privacy consents follow the code
+    identity of the interpreter that runs, and Homebrew's python is ad hoc signed: a
+    `brew upgrade` still voids every consent the tick was given, even through the `opt` link.
+    The fix is a launcher executable inside the app bundle, signed by the release workflow
+    with the app, that spawns (not execs) the virtual environment's python as its child and is
+    the plists' `ProgramArguments[0]`, so the launcher stays the responsible process. Open: it
+    changes the app bundle the release workflow builds and signs, and the installers'
+    dependency on an installed app.
+  - The app itself is Developer ID signed, notarised and stapled by
+    `.github/workflows/release.yml` (F12 closed there); a local `build-app.sh` build stays ad
+    hoc unless `OBSERVATORY_SIGN_IDENTITY` is set, and is never attached to a release.
+
+**Build output (LC-15).** Release artefacts are `dist/project_observatory-<version>-*.whl`,
+`dist/project_observatory-<version>.tar.gz` and `dist/macos/Project Observatory.app`. At most
+the current and the previous release stay: `macos/scripts/build-app.sh` runs
+`tools/prune_builds.py` after every build (older wheels and sdists removed, other Observatory
+bundles beside the new one unregistered from LaunchServices and removed), and the wheel build is
+`python -m pip wheel --no-deps . --wheel-dir dist && python tools/prune_builds.py`. Caches have
+caps: `macos/.build` (SwiftPM) 2 GB and `build/` (setuptools) 200 MB; an agent that built runs
+`python tools/prune_builds.py --clean-caches` before ending its run when a cap is passed.
+
 ## Decisions and receipts
 
 A unit of work leaves its record in `docs/runs/<date>-<slug>/README.md`: what shipped (PRs,

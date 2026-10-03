@@ -266,7 +266,7 @@ class UpdateTest(unittest.TestCase):
                       installer=self.installer, services=self.services,
                       engine=lambda home: self.engine,
                       origin=lambda: {"kind": "wheel", "version": CURRENT},
-                      idle_timeout=0)
+                      idle_timeout=0, sessions=lambda: [])
         values.update(overrides)
         return self.mod.Dependencies(**values)
 
@@ -505,6 +505,30 @@ class UpdateTest(unittest.TestCase):
         code, doc = self.run_cli("--apply")
         self.assertEqual(code, 0, doc)
         self.assertEqual(doc["next"], "Restart Claude Code sessions")
+
+    def test_session_servers_on_the_previous_release_are_reported(self):
+        # Lifecycle LC-11: an update names every product process it could not reach.
+        self.gh.publish(NEWER)
+        running = [{"pid": 4242, "elapsed": "03:10:00"}, {"pid": 4343, "elapsed": "00:05"}]
+        code, doc = self.run_cli("--apply", sessions=lambda: running)
+        self.assertEqual(code, 0, doc)
+        servers = doc["session_servers"]
+        self.assertEqual((servers["running_previous_release"], servers["pids"], servers["signalled"]),
+                         (2, [4242, 4343], 0))
+        self.assertIn("stale-server", servers["why"])
+        rows = [json.loads(line) for line in (self.home / "store/logs/update.jsonl").read_text().splitlines()]
+        self.assertEqual(rows[-1]["session_servers_left"], 2)
+
+    def test_the_census_reads_only_this_engines_server(self):
+        server = str(self.mod.config.SOURCE / "mcp" / "server.py")
+        table = (f"  101 03:10:00 /venv/bin/python {server} --stdio\n"
+                 f"  102 00:05 /usr/bin/python3 /elsewhere/mcp/server.py\n"
+                 f"  103 01:00 /venv/bin/python {server} --home /w --token=abc\n")
+        fake = type("P", (), {"stdout": table})()
+        with patch.object(self.mod.subprocess, "run", lambda *a, **k: fake):
+            found = self.mod.session_servers()
+        self.assertEqual(found, [{"pid": 101, "elapsed": "03:10:00"}, {"pid": 103, "elapsed": "01:00"}])
+        self.assertNotIn("abc", json.dumps(found))
 
     def test_services_not_loaded_nothing_is_stopped(self):
         self.services.state = {"tick": False, "server": False}
