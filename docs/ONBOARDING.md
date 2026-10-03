@@ -184,14 +184,19 @@ The `mcp` integration reads the declarations from the agent configs under
 `mcp_config_root` — `~/.claude.json` (user and project scopes), `~/.cursor/mcp.json`,
 `~/.config/opencode/opencode.json`, `~/.codex/config.toml`, `~/.gemini/settings.json`
 and `~/.kiro/settings/mcp.json` — for names, transports and whether a key is present,
-never a value, and asks `claude mcp list` whether Claude reaches them. A config that is
-absent or does not parse is recorded as such, and the `machine.mcp.inventory` MCP tool
-names it in `degraded`. That command health-checks every
-server before it prints, so it gets up to 180 seconds; on a machine with many
-servers raise the limit with `OBSERVATORY_MCP_PROBE_TIMEOUT` (seconds, 1 to 3600),
-set in the shell that runs `tools/install_launchd.py install` so the scheduled tick carries it.
-A probe that still runs out of time is degraded, not failed: servers it reported
-keep their verdict and the rest are `not-probed`.
+never a value. A config that is absent or does not parse is recorded as such, and the
+`machine.mcp.inventory` MCP tool names it in `degraded`. Whether Claude reaches each
+server is asked of `claude mcp list` **only on request** — `project-observatory full
+scan-mcp` or the `machine.mcp.refresh` tool — never by the scheduled tick: that command
+starts every stdio server Claude knows and can refresh your Claude login, which no
+background job may do. The tick reads the configs alone and carries the last
+requested verdict forward with its time (`liveness_at`). The probe runs in its own
+process group, killed as a whole when it answers or times out, so no server it started
+outlives it. It health-checks every server before it prints, so it gets up to 180
+seconds; on a machine with many servers raise the limit with
+`OBSERVATORY_MCP_PROBE_TIMEOUT` (seconds, 1 to 3600). A probe that still runs out of
+time is degraded, not failed: servers it reported keep their verdict and the rest are
+`not-probed`.
 
 ## Enter credentials locally
 
@@ -403,12 +408,22 @@ python "$ENGINE/tools/install_launchd.py" install      # the tick, every 30 minu
 python "$ENGINE/tools/serverd.py" --install            # the always-on dashboard server; --status | --uninstall
 ```
 
-A launchd job does not inherit your shell. The installer writes the directories
-of the `PATH` it runs with (absolute, existing, writable by no other account;
-group-writable only when you or root own it, as Homebrew's directories are)
-followed by the system directories into the job, so tools such as `claude`,
-`heroku` or `gh` resolve as they do in your terminal. After installing a tool
-in a new directory, run both installers above again.
+A launchd job does not inherit your shell. The installer writes a minimal `PATH`
+into the job: only the directories of the `PATH` it runs with that hold one of
+the tools the engine calls (`git`, `gh`, `heroku`, `wrangler`, `node`, `claude`,
+`dig`, `curl`, …), followed by the system directories — every entry absolute,
+existing and writable by no other account (group-writable only when you or root
+own it, as Homebrew's directories are). Plugin and version-manager directories
+your shell collected stay out. The interpreter is named by its virtual-environment
+path or Homebrew's `opt` link, never a versioned `Cellar` path, and the installers
+refuse a plist that names one. After installing a tool in a new directory, run
+both installers above again.
+
+The tick is bounded: every step runs in its own process group under a wall-clock
+limit (15 minutes, 20 for the leak scan), the whole tick stops at a 25-minute
+ceiling below its 30-minute interval, and `store/raw/tick-run.json` records each
+run's start, end, outcome and reason. A stopped step is a failed step in the log
+and on the board, never a hung tick.
 
 ## The machine: what runs, where the disk goes, cleanup
 

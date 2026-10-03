@@ -9,6 +9,10 @@ CONFIG=${OBSERVATORY_SWIFT_CONFIGURATION:-release}
 swift build --package-path "$ROOT/macos" --scratch-path "$SCRATCH" -c "$CONFIG"
 BIN=$(swift build --package-path "$ROOT/macos" --scratch-path "$SCRATCH" -c "$CONFIG" --show-bin-path)
 APP="$OUT/Project Observatory.app"
+# The bundle this replaces is forgotten by LaunchServices first, so no stale copy
+# answers an `open` (lifecycle LC-15).
+LSREG=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+if [[ -d "$APP" && -x "$LSREG" ]]; then "$LSREG" -u "$APP" 2>/dev/null || true; fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/ProjectObservatory" "$APP/Contents/MacOS/ProjectObservatory"
@@ -50,4 +54,7 @@ else
 fi
 codesign --verify --strict "$APP"
 plutil -lint "$APP/Contents/Info.plist"
+# Builds clean up after themselves (LC-15): other bundles beside this one, release
+# files in dist/ older than the previous release, and a report of caches past their cap.
+python3 "$ROOT/tools/prune_builds.py" --dist "$ROOT/dist" --app "$APP" >&2
 printf '%s\n' "$APP"

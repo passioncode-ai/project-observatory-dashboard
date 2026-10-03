@@ -27,7 +27,7 @@ Two facts about the coordination tool shape everything here:
   far more.
 """
 from __future__ import annotations
-import argparse, importlib.util, json, os, pathlib, sys, subprocess, fcntl, signal
+import argparse, importlib.util, json, os, pathlib, sys, subprocess, fcntl, signal, time
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -350,6 +350,7 @@ FEATURE_STEPS = {
     # cleanup that acts on it. `cleanup` runs its auto tier only when
     # features.auto_cleanup is ALSO true; with it off, the step writes the plan.
     "machine": "machine_watch", "git-hygiene": "machine_watch", "cleanup": "machine_watch",
+    "lifecycle": "machine_watch",
 }
 
 
@@ -359,6 +360,131 @@ INTEGRATION_STEPS = {
     "heroku": "heroku", "openrouter": "openrouter", "scan-cloudflare": "cloudflare",
     "scan-mcp": "mcp", "remote-env": "remote_env", "google": "google",
 }
+
+
+# region tick-watchdog — docs: docs/runs/2026-10-03-lifecycle-contract/README.md#f5-f6-every-step-is-bounded
+#: Exit status of a step or tick the watchdog stopped, GNU `timeout`'s convention.
+TIMED_OUT = 124
+#: Seconds a step's process group gets between SIGTERM and SIGKILL.
+STEP_GRACE = 5
+#: Seconds the supervisor gives the whole tick group between SIGTERM and SIGKILL.
+#: The tick plist's ExitTimeOut sits above SUPERVISOR_GRACE + STEP_GRACE, so
+#: launchd never SIGKILLs the supervisor while it is still stopping its children.
+SUPERVISOR_GRACE = 10
+#: A step's own wall-clock limit. The slowest steps measured on a loaded machine
+#: (2026-10-03, last 30 ticks): leaks 849 s, git-hygiene 418 s, scan-fs 374 s.
+DEFAULT_STEP_SECONDS = 900
+STEP_SECONDS = {"leaks": 1200}
+#: The whole tick's ceiling, below the 30-minute interval (lifecycle LC-03: a
+#: watchdog shorter than the interval). `install_launchd.build` lowers it for a
+#: shorter interval and writes it into the plist.
+DEFAULT_CEILING_SECONDS = 1500
+CEILING_ENV = "OBSERVATORY_TICK_CEILING_SECONDS"
+DEADLINE_ENV = "OBSERVATORY_TICK_DEADLINE"
+
+
+def ceiling_seconds() -> float:
+    raw = os.environ.get(CEILING_ENV, "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return float(DEFAULT_CEILING_SECONDS)
+    return value if 1 <= value <= 3600 else float(DEFAULT_CEILING_SECONDS)
+
+
+def _step_marker() -> pathlib.Path:
+    """Where the running step's process group is written, for the supervisor's sweep."""
+    return paths.STATE / "tick-step.pgid"
+
+
+def _stop_group(pgid: int, grace: float) -> None:
+    """SIGTERM the group, SIGKILL whatever is left after `grace` seconds."""
+    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 1.0)):
+        try:
+            os.killpg(pgid, sig)
+        except (ProcessLookupError, PermissionError):
+            return
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(pgid, 0)
+            except (ProcessLookupError, PermissionError):
+                return
+            time.sleep(0.05)
+
+
+def bounded(name: str, command: list[str], *, limit: float | None = None,
+            grace: float = STEP_GRACE) -> int:
+    """Run one tick step in a process group of its own, under a wall-clock watchdog.
+
+    The step gets the smaller of its own limit and the time left before the
+    tick's ceiling (`OBSERVATORY_TICK_DEADLINE`, set by the supervisor); with no
+    time left it does not start. On the limit, or when this runner is told to
+    stop, the step's WHOLE group is stopped — a collector's `git` or `du`
+    included — and the exit is TIMED_OUT (or 128 + the signal). The group id is
+    left in `tick-step.pgid` while the step runs, so a supervisor that had to
+    SIGKILL this runner can still reach the group (`supervised`)."""
+    limit = float(STEP_SECONDS.get(name, DEFAULT_STEP_SECONDS) if limit is None else limit)
+    deadline = os.environ.get(DEADLINE_ENV, "").strip()
+    if deadline:
+        try:
+            limit = min(limit, float(deadline) - time.time())
+        except ValueError:
+            pass
+    if limit <= 0:
+        print("not started — the tick's ceiling has been reached", flush=True)
+        return TIMED_OUT
+    marker = _step_marker()
+    child = subprocess.Popen(command, cwd=ROOT, start_new_session=True)
+    try:
+        marker.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        marker.write_text(str(child.pid), encoding="utf-8")
+    except OSError:
+        pass                     # the sweep is a second line of defence, not the first
+    stopped: list[int] = []
+
+    def stop(signum, frame):
+        stopped.append(signum)
+        raise InterruptedError(signum)
+    previous = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
+    try:
+        return child.wait(timeout=limit)
+    except subprocess.TimeoutExpired:
+        print(f"exceeded its {limit:.0f} s limit — the step's process group was stopped", flush=True)
+        return TIMED_OUT
+    except InterruptedError:
+        return 128 + stopped[-1]
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+        if child.poll() is None or stopped:
+            _stop_group(child.pid, grace)
+            child.wait()
+        else:
+            # The leader is done; anything it left in its group goes with it.
+            _stop_group(child.pid, min(grace, 1.0))
+        try:
+            if marker.read_text(encoding="utf-8").strip() == str(child.pid):
+                marker.unlink()
+        except OSError:
+            pass
+
+
+def record_run(started: str, outcome: str, code: int | None, reason: str) -> None:
+    """`store/raw/tick-run.json`: start, end, outcome, reason — one per run (LC-03).
+
+    Written by the supervisor, which outlives the tick script, so a tick stopped
+    at its ceiling or by a signal still leaves a record; `tick.json` is the
+    script's own and is missing exactly then."""
+    doc = {"started_at": started, "ended_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "outcome": outcome, "exit": code, "reason": reason}
+    try:
+        import atomic
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        atomic.write_json(paths.SCRATCH / "tick-run.json", doc)
+    except Exception as exc:                                                      # noqa: BLE001
+        print(f"the tick-run receipt could not be written: {type(exc).__name__}: {exc}", file=sys.stderr)
+# endregion tick-watchdog
 
 
 def step_allowed(name: str) -> bool:
@@ -388,31 +514,50 @@ def supervised(command: list[str]) -> int:
         except BlockingIOError:
             print("tick skipped: another run holds this workspace's lock")
             return 0
+        ceiling = ceiling_seconds()
+        started = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         env = {**os.environ, "OBSERVATORY_HOME": str(paths.HOME),
-               "OBSERVATORY_TICK_SUPERVISOR_PID": str(os.getpid())}
+               "OBSERVATORY_TICK_SUPERVISOR_PID": str(os.getpid()),
+               DEADLINE_ENV: f"{time.time() + ceiling:.0f}"}
+        _step_marker().unlink(missing_ok=True)
         child = subprocess.Popen(command, cwd=ROOT, env=env, start_new_session=True)
         interrupted = []
         def stop(signum, frame):
             interrupted.append(signum)
             raise InterruptedError("Tick supervisor received a stop signal")
-        previous = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT)}
+        previous = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
+        outcome, code, reason = "failed", None, ""
         try:
-            return child.wait()
+            code = child.wait(timeout=ceiling)
+            outcome = "finished" if code == 0 else "failed"
+            reason = "" if code == 0 else f"the tick script exited {code}"
+            return code
+        except subprocess.TimeoutExpired:
+            outcome, code = "timeout", TIMED_OUT
+            reason = f"the tick reached its {ceiling:.0f} s ceiling and was stopped"
+            print(f"tick stopped: {reason}", file=sys.stderr)
+            return TIMED_OUT
         except InterruptedError:
-            return 128 + interrupted[-1]
+            outcome, code = "interrupted", 128 + interrupted[-1]
+            reason = f"signal {interrupted[-1]} reached the supervisor"
+            return code
         finally:
             # Keep the lock until the complete child process group has stopped.
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
             if child.poll() is None:
-                try:
-                    os.killpg(child.pid, signal.SIGTERM)
-                    child.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(child.pid, signal.SIGKILL)
-                    child.wait()
-                except ProcessLookupError:
-                    child.wait()
+                _stop_group(child.pid, SUPERVISOR_GRACE)
+                child.wait()
+            # A step runner killed before it could stop its own group left the
+            # group's id behind: that group goes too.
+            try:
+                pgid = int(_step_marker().read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                pgid = 0
+            if pgid > 1:
+                _stop_group(pgid, 0.5)
+                _step_marker().unlink(missing_ok=True)
+            record_run(started, outcome, code, reason)
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
@@ -421,12 +566,25 @@ def supervised(command: list[str]) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("action", choices=["acquire", "release", "status", "run", "allowed"])
+    ap.add_argument("action", choices=["acquire", "release", "status", "run", "allowed", "step"])
     ap.add_argument("arguments", nargs=argparse.REMAINDER)
     args = ap.parse_args()
     if args.action == "run":
         command = args.arguments[1:] if args.arguments[:1] == ["--"] else args.arguments
         return supervised(command)
+    if args.action == "step":
+        # step [--ungated] NAME -- COMMAND...: the feature gate, then the watchdog.
+        rest = list(args.arguments)
+        gated = True
+        if rest[:1] == ["--ungated"]:
+            gated, rest = False, rest[1:]
+        if len(rest) < 3 or rest[1] != "--":
+            ap.error("step needs NAME -- COMMAND...")
+        name, command = rest[0], rest[2:]
+        if gated and not step_allowed(name):
+            print("disabled in workspace settings", flush=True)
+            return 0
+        return bounded(name, command)
     if args.action == "allowed":
         return 0 if len(args.arguments) == 1 and step_allowed(args.arguments[0]) else 1
     return {"acquire": acquire, "release": release, "status": status}[args.action]()

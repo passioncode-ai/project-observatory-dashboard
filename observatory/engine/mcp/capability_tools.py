@@ -35,10 +35,25 @@ from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 from pydantic import ValidationError
 from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
 
+import code_freshness
 import configuration
 import credential_shape
 import interop
 import jobs
+
+#: The version file this server process was started from (lifecycle LC-10). A
+#: call after an update replaced it answers `stale-server` instead of running
+#: previous-release code against the new release's workspace.
+FRESHNESS = code_freshness.Freshness(configuration.SOURCE / "configuration.py", configuration.VERSION)
+
+
+def stale_answer() -> CallToolResult | None:
+    stale = FRESHNESS.check()
+    if stale is None:
+        return None
+    return _error("stale-server",
+                  f"{stale['reason']}; this server still runs {stale['running']}. Restart the "
+                  f"session (or reconnect this MCP server) so it starts from the installed code.")
 
 
 @dataclass
@@ -236,6 +251,9 @@ class InteropServer(MCPServer):
 
     # ── calling ──────────────────────────────────────────────────────────────
     async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
+        stale = stale_answer()
+        if stale is not None:
+            return stale
         is_job_tool = self._job_tools and name in (interop.JOB_GET, interop.JOB_CANCEL)
         is_assistant = name == "observatory_assistant_ask"
         if name not in self._definitions and not is_job_tool and not is_assistant:
