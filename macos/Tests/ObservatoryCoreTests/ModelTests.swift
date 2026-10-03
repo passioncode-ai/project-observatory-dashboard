@@ -338,4 +338,12 @@ import ObservatoryCore
         XCTAssertTrue(app.contains("Window(model.t(\"Dashboard\", \"Дашборд\"), id: WindowID.dashboard)"))
         XCTAssertFalse(app.contains("CommandGroup(before: .windowList)"), "no second Dashboard item in the Window menu")
     }
+    func testAnUnmeasuredMachineIsNotCalledUnreadable() {
+        let model = Model(defaults: defaults())
+        let text = model.limitation(["source": "machine", "code": "not-measured", "reason": "not measured yet"])
+        XCTAssertTrue(text.contains("project-observatory full machine"), text)
+        XCTAssertFalse(text.contains("could not be read"), text)
+        model.russian = true
+        XCTAssertTrue(model.limitation(["source": "machine", "code": "not-measured"]).contains("ещё не измерены"))
+    }
 }

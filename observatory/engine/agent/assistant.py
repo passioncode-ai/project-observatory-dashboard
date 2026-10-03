@@ -192,6 +192,7 @@ def evidence(project_id=None):
             places=sorted((l for l in disk.get('locations') or [] if isinstance(l,dict)),key=lambda l:-(l.get('gb') or 0))[:5]
             if places:facts['largest_locations']=[{'label':str(l.get('label') or l.get('path') or '')[:80],'gb':l.get('gb')} for l in places]
             add('This machine: startup disk volume and memory','store/raw/machine.json',doc.get('measured_at'),facts)
+        except FileNotFoundError:degraded.append({'source':'machine','code':'not-measured','reason':'not measured yet: run `project-observatory full machine`'})
         except (ValueError,OSError,AttributeError,TypeError):degraded.append({'source':'machine','code':'unavailable','reason':'unavailable'})
     shown=0
     for f in findings[:MAX_FINDINGS]:
