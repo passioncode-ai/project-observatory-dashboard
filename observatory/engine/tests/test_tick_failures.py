@@ -60,7 +60,7 @@ def discarding_steps(src: str) -> list[str]:
     for i, line in enumerate(src.splitlines(), 1):
         if "while IFS= read -r l" not in line:
             continue
-        if line.strip().startswith('"$@"'):        # inside `step` itself
+        if line.strip().startswith(('"$@"', '"$PY" tools/tick_lease.py step "$name"')):   # inside `step` itself
             continue
         if "tick_lease.py release" in line:        # the declared exemption
             continue
@@ -104,7 +104,13 @@ def test_the_helper_depends_on_pipefail_and_that_line_is_watched() -> None:
     # The helper first asks the workspace whether the step is enabled
     # (`"$PY" tools/tick_lease.py allowed <name>`); `PY=true` answers yes so the
     # pipeline under test is the only thing that can fail.
-    prog = ('log(){ :; }\nPY=true\nFAILED_STEPS=""\n' + body
+    # The helper runs each step through the watchdog (`tick_lease.py step NAME --
+    # CMD…`); this stand-in for the interpreter runs CMD itself, so the pipeline
+    # under test is the only thing that can fail.
+    fake = pathlib.Path(tmpdir.mkdtemp()) / "fakepy"
+    fake.write_text('#!/bin/bash\nwhile [ "$1" != "--" ]; do shift; done; shift; exec "$@"\n')
+    fake.chmod(0o755)
+    prog = (f'log(){{ :; }}\nPY={fake}\nFAILED_STEPS=""\n' + body
             + '\nstep "boom" sh -c "echo hi; exit 7"\necho "[$FAILED_STEPS]"\n')
     with_pf = subprocess.run(["bash", "-c", "set -o pipefail\n" + prog],
                              capture_output=True, text=True, timeout=60)

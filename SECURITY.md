@@ -136,9 +136,10 @@ Two things can still reach the login Keychain, each only when you turn it on:
 - **Opt-in integrations that run a provider's own CLI** inherit your environment and
   that CLI's login. `gh` (the `github` integration: `collectors/scan_github.py`, and
   `collectors/merge.py` when it resolves transferred repositories) and `claude`
-  (the `mcp` integration: `claude mcp list` in `collectors/scan_mcp.py`) keep
-  their tokens in the login Keychain on macOS by default, so a locked keychain can show an unlock dialog when
-  a scheduled scan runs them. `heroku` keeps its token in `~/.netrc`; the Heroku scan
+  (the `mcp` integration: `claude mcp list` in `collectors/scan_mcp.py`, run only
+  when you ask for a probe with `full scan-mcp` or `machine.mcp.refresh`, never by
+  the scheduled tick) keep their tokens in the login Keychain on macOS by default,
+  so a locked keychain can show an unlock dialog when a scan runs them. `heroku` keeps its token in `~/.netrc`; the Heroku scan
   takes a session token from `heroku auth:token` for the run and stores none of it.
   Leave the integration off, or keep the CLI logged in with a file-based token, if no
   dialog may ever appear.

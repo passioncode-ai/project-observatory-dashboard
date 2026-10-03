@@ -1,0 +1,5 @@
+{
+ "_why": "What the lifecycle watch (collectors/scan_lifecycle.py) attributes to which product, beyond this engine itself (built in, from its own paths) and every installed fabric-service descriptor (its launchd label and log files). Copy to config/lifecycle.json to add a product. Each product may name `labels` (launchd label globs), `children` (path fragments of processes that must always have a live parent), `session_servers` (`match`: a path fragment of a per-session server; `code`: a file an update replaces, so a server started before its mtime runs replaced code), `logs` (files or directories) and `log_cap_bytes`. `{engine}` is this engine's directory, `{state}` the workspace store, `~` the home directory. The cap defaults to the contract's 5 MB (lifecycle LC-12).",
+ "log_cap_bytes": 5242880,
+ "products": []
+}

@@ -1,5 +1,5 @@
 {
- "_why": "Where disk goes outside the projects folder, and what each place is. `~` is the user's home; a missing path is skipped, never an error. `reclaim` says how the space comes back: `regenerable` (a tool rebuilds it on demand), `command` (the tool's own cleanup, named in `command`), `history` (someone's record — never deleted by the observatory), `manual` (needs a person). Measured every `every_hours`, because sizing a large tree takes minutes. Thresholds raise findings; nothing here deletes anything.",
+ "_why": "Where disk goes outside the projects folder, and what each place is. `~` is the user's home; a missing path is skipped, never an error. `reclaim` says how the space comes back: `regenerable` (a tool rebuilds it on demand), `command` (the tool's own cleanup, named in `command`), `history` (someone's record — never deleted by the observatory), `manual` (needs a person). Measured every `every_hours`, because sizing a large tree takes minutes. Thresholds raise findings; nothing here deletes anything. `manual_only` marks a privacy-guarded place (another app's container, Downloads): the tick never opens it, only `full machine --disk` run by a person sizes it (lifecycle LC-06; the rule is the path, `scan_machine.protected_place`, not this flag).",
  "every_hours": 12,
  "disk_budget_seconds": 90,
  "disk_budget_seconds_manual": 900,
@@ -91,14 +91,16 @@
    "kind": "vm",
    "label": "OrbStack VM disk",
    "reclaim": "command",
-   "command": "docker system df"
+   "command": "docker system df",
+   "manual_only": true
   },
   {
    "path": "~/Library/Containers/com.docker.docker",
    "kind": "vm",
    "label": "Docker Desktop VM disk",
    "reclaim": "command",
-   "command": "docker system df"
+   "command": "docker system df",
+   "manual_only": true
   },
   {
    "path": "~/.codex/worktrees",
@@ -134,7 +136,8 @@
    "path": "~/Downloads",
    "kind": "user",
    "label": "Downloads",
-   "reclaim": "manual"
+   "reclaim": "manual",
+   "manual_only": true
   }
  ]
 }

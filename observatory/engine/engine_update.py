@@ -27,7 +27,14 @@ the Python environment, the background jobs and the workspace:
    dependencies land at the versions that release was tested with;
 5. run the new release's `upgrade --apply --writers-stopped` in a new process;
 6. verify the installed version, the pinned dependencies and `doctor`;
-7. restart exactly the jobs step 2 stopped.
+7. restart exactly the jobs step 2 stopped;
+8. name the per-session MCP servers still running the previous release
+   (`session_servers`, lifecycle LC-11). They are NOT signalled: each belongs to a
+   live agent session, and a stdio server that dies under its client is a failed
+   connection the client does not restart on its own, while a server left running
+   answers its next call `stale-server` (mcp/capability_tools.py) and the agent
+   knows exactly what happened and what to do. The report lists their pids as
+   the processes this update could not reach.
 
 A failure after step 4 reinstalls the rollback wheel. When the workspace was
 changed by then (a committed upgrade), the pre-update snapshot is restored at the
@@ -606,6 +613,24 @@ class NewEngine:
         return code, redact_tail(err if code else "")
 
 
+def session_servers() -> list[dict]:
+    """Per-session MCP servers started from this engine's `mcp/server.py`: pid and how long it has run.
+
+    Read from `ps` (pid, elapsed time, command) and matched on the server's path;
+    nothing else of a command line is kept, since an argument can carry a token."""
+    server = str(config.SOURCE / "mcp" / "server.py")
+    try:
+        p = subprocess.run(["ps", "-axo", "pid=,etime=,args="], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    found = []
+    for line in p.stdout.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3 and parts[0].isdigit() and server in parts[2] and int(parts[0]) != os.getpid():
+            found.append({"pid": int(parts[0]), "elapsed": parts[1]})
+    return found
+
+
 @dataclasses.dataclass
 class Dependencies:
     fetcher: Fetcher = dataclasses.field(default_factory=Fetcher)
@@ -614,6 +639,7 @@ class Dependencies:
     engine: Callable[[Path], object] = NewEngine
     origin: Callable[[], dict] = install_origin
     idle_timeout: float = 60.0
+    sessions: Callable[[], list[dict]] = session_servers
 
 
 # --- the workspace side ---------------------------------------------------------
@@ -980,7 +1006,17 @@ class Transaction:
         if failed:
             report["services_not_restarted"] = failed
             report["human_steps"] = [f["fix"] for f in failed]
-        self.step("updated", services_not_restarted=[f["service"] for f in failed])
+        try:
+            running = list(self.deps.sessions())
+        except Exception:  # noqa: BLE001 — the update is done; the census is advice
+            running = []
+        report["session_servers"] = {
+            "running_previous_release": len(running), "pids": [r.get("pid") for r in running],
+            "signalled": 0,
+            "why": ("each belongs to a live agent session; it answers its next call `stale-server` "
+                    "and is replaced when that session restarts or reconnects the server")}
+        self.step("updated", services_not_restarted=[f["service"] for f in failed],
+                  session_servers_left=len(running))
         report["next"] = plugin_advice()
         return (EXIT_SERVICES if failed else EXIT_OK), report
 

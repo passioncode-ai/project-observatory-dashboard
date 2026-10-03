@@ -440,6 +440,9 @@ def from_store() -> dict:
                 beat = json.loads(sd.read_text(encoding="utf-8"))
                 age_s = heartbeat_age_s(beat.get("at", ""))
                 out["health"]["server_age_s"] = age_s
+                # The receipt is written on change, so "silent" is the age it names
+                # itself (serverd SILENT_AFTER_SECONDS); 90 s for an older server.
+                out["health"]["server_silent_after_s"] = beat.get("silent_after_s") or 90
                 out["health"]["server_port"] = beat.get("port")
                 out["health"]["server_uptime_s"] = beat.get("uptime_s")
                 r = beat.get("remote") or {}
@@ -1976,7 +1979,7 @@ if (H.metrics != null) hb.push([T("plugin measurements"), NUM(H.metrics)]);
 // states, spelled apart.
 if (H.server_age_s != null) {
   if (H.server_age_s === -1) hb.push([T("local server"), T("not running")]);
-  else if (H.server_age_s < 90) {
+  else if (H.server_age_s < (H.server_silent_after_s || 90)) {
     const up = H.server_uptime_s >= 3600
       ? T("{n} h", {n: Math.floor(H.server_uptime_s / 3600)}) : T("{n} min", {n: Math.floor(H.server_uptime_s / 60)});
     hb.push([T("local server"), T("answered when measured · port {port} · uptime {up}", {port: String(H.server_port), up})]);
@@ -2017,7 +2020,7 @@ if (H.spend_today != null)
 }
 {
   const state = H.server_age_s == null ? null
-    : H.server_age_s === -1 ? "down" : H.server_age_s < 90 ? "up" : "silent";
+    : H.server_age_s === -1 ? "down" : H.server_age_s < (H.server_silent_after_s || 90) ? "up" : "silent";
   const fix = SERVERD_FIX[state];
   document.getElementById("health").innerHTML = (hb.length
     ? hb.map(([k, v]) => `<div class="hrow"><span>${E(k)}</span><b>${E(String(v))}</b></div>`).join("")

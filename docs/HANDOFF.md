@@ -60,6 +60,14 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
+**2026-10-03, the product lifecycle contract (branch `claude/lifecycle-contract`, not
+released):** the tick no longer runs `claude mcp list`, sizes no privacy-guarded place, bounds
+every step and itself, the server idles, every log rotates, a session server on replaced code
+answers `stale-server`, plists carry a minimal PATH, builds prune, and a lifecycle watch reports
+each product's orphans, stale servers, overruns and oversized logs. Findings fixed and deferred,
+tests and the exact next task:
+[runs/2026-10-03-lifecycle-contract](runs/2026-10-03-lifecycle-contract/README.md).
+
 **2026-10-03, agent memory for workflows (OBS-02, merged `d6f2b33`, not released):** a checkpoint after every
 step, one executor per workflow by lease token, and an immutable handoff pack the engine
 assembles, so a workflow continues on another account, model or session when the one that

@@ -1603,6 +1603,11 @@ def collect() -> list[dict]:
         except (OSError, ValueError):
             continue
     out.extend(machine_findings.findings(paths.SCRATCH, paths.STATE / "logs", _mc))
+    # THE LIFECYCLE WATCH: orphaned product processes, session servers on replaced
+    # code, jobs past their interval, logs past their cap — per owning product
+    # (collectors/scan_lifecycle.py). Silent when the collector has never run.
+    import lifecycle_findings
+    out.extend(lifecycle_findings.from_file(paths.SCRATCH / "lifecycle.json"))
     import organizations
     _pj = paths.REGISTRY / "projects.json"
     out.extend(google_findings.organization_findings(

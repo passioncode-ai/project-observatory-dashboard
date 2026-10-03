@@ -7,7 +7,7 @@ is 30 minutes because a tick over a quiet machine costs nothing and the
 interesting resolution here is "did work happen this half hour", not seconds.
 """
 from __future__ import annotations
-import argparse, plistlib, subprocess, sys, os, pathlib, hashlib, stat
+import argparse, plistlib, subprocess, sys, os, pathlib, hashlib, re, shutil, stat
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -36,33 +36,90 @@ def scheduler_allowed() -> bool:
 SYSTEM_PATH = ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin")
 
 
-def launch_path(current: str | None = None) -> str:
-    """PATH for launchd jobs: the installing user's directories, then the system ones.
+#: The programs the engine's jobs run by name. Only the directories that hold one
+#: of these join the plist's PATH (lifecycle LC-05). `claude` is listed for the
+#: on-demand MCP probe a person may start through the server, never the tick.
+TOOLS = ("git", "gh", "heroku", "wrangler", "node", "claude", "dig", "curl", "witr", "lsof", "xcrun")
 
-    launchd starts jobs with a bare PATH, so tools the collectors call - `claude`
-    (MCP inventory), `heroku`, `gh`, `wrangler` - vanished whenever they lived in
-    ~/.local/bin or a version manager's directory. The installer's own PATH is
-    kept in its order, restricted to absolute, existing directories that no other
-    account can write: never world-writable, and group-writable only when owned by
-    this user or root (Homebrew's /opt/homebrew/bin is user-owned, admin-writable).
-    A PATH entry another account can write lets it plant a binary the job runs.
-    See docs/ONBOARDING.md "Enable background ...".
+
+def _safe_dir(entry: str) -> bool:
+    """An absolute, existing directory no other account can write."""
+    if not entry or not os.path.isabs(entry):
+        return False
+    try:
+        info = os.stat(entry)
+    except OSError:
+        return False
+    if not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o002:
+        return False
+    return not (info.st_mode & 0o020 and info.st_uid not in (os.getuid(), 0))
+
+
+def launch_path(current: str | None = None) -> str:
+    """A minimal PATH for launchd jobs: the directories holding the engine's TOOLS, then the system ones.
+
+    launchd starts jobs with a bare PATH, so tools the collectors call - `heroku`,
+    `gh`, `wrangler` - vanished whenever they lived in ~/.local/bin or a version
+    manager's directory. The installer's whole PATH used to be copied instead, and
+    with it every directory an interactive shell had collected: plugin `bin`
+    folders of versions since deleted were measured in both plists on 2026-10-03.
+    Now only a directory of the installer's PATH that holds one of TOOLS is kept, in
+    the installer's order, followed by the system directories. Every entry must be
+    absolute, existing and writable by no other account: never world-writable, and
+    group-writable only when owned by this user or root (Homebrew's
+    /opt/homebrew/bin is user-owned, admin-writable). A PATH entry another account
+    can write lets it plant a binary the job runs. See docs/ONBOARDING.md "Enable
+    background ...".
     """
+    source = current if current is not None else os.environ.get("PATH", "")
     out: list[str] = []
-    for entry in [*(current if current is not None else os.environ.get("PATH", "")).split(os.pathsep),
-                  *SYSTEM_PATH]:
-        if not entry or not os.path.isabs(entry) or entry in out:
+    for entry in source.split(os.pathsep):
+        if entry in out or entry in SYSTEM_PATH or not _safe_dir(entry):
             continue
-        try:
-            info = os.stat(entry)
-        except OSError:
-            continue
-        if not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o002:
-            continue
-        if info.st_mode & 0o020 and info.st_uid not in (os.getuid(), 0):
-            continue
-        out.append(entry)
+        if any(os.access(os.path.join(entry, tool), os.X_OK) for tool in TOOLS):
+            out.append(entry)
+    out += [entry for entry in SYSTEM_PATH if entry not in out and _safe_dir(entry)]
     return os.pathsep.join(out)
+
+
+#: `<prefix>/Cellar/<formula>/<version>/<rest>`: a Homebrew keg by its versioned path.
+_CELLAR = re.compile(r"^(?P<prefix>.*)/Cellar/(?P<formula>[^/]+)/[^/]+/(?P<rest>.+)$")
+
+
+def stable_interpreter(executable: str) -> str:
+    """The interpreter path a plist may name: never a Homebrew Cellar path.
+
+    A Cellar path names one version (`…/Cellar/python@3.14/3.14.7/…`) and is
+    deleted by the next `brew upgrade`, leaving a job that cannot start. The keg's
+    `opt` link (`…/opt/python@3.14/…`) survives upgrades; a virtual environment's
+    `bin/python` is used as it is. The path is never resolved through symlinks:
+    resolving is exactly what turns a stable link back into a Cellar path.
+
+    What this does NOT fix (lifecycle LC-05, deferred): macOS privacy consents are
+    keyed to the code identity of the binary that runs, and Homebrew's python is
+    ad hoc signed, so an upgrade still voids them — a Developer ID signed launcher
+    is the fix, recorded in AGENTS.md → Lifecycle."""
+    m = _CELLAR.match(executable)
+    if not m:
+        return executable
+    linked = f"{m.group('prefix')}/opt/{m.group('formula')}/{m.group('rest')}"
+    if os.path.exists(linked):
+        return linked
+    raise configuration.ConfigurationError(
+        f"The engine runs on a versioned Homebrew path ({executable}) with no `opt` link to use "
+        "instead; install it into a virtual environment and run the installer from there")
+
+
+def lint_plist(doc: dict) -> list[str]:
+    """What makes a plist unfit to install: a Cellar path in its program or environment (LC-05)."""
+    problems = []
+    for i, arg in enumerate(doc.get("ProgramArguments") or []):
+        if "/Cellar/" in str(arg):
+            problems.append(f"ProgramArguments[{i}] names a versioned Homebrew path: {arg}")
+    for key, value in (doc.get("EnvironmentVariables") or {}).items():
+        if "/Cellar/" in str(value):
+            problems.append(f"EnvironmentVariables.{key} names a versioned Homebrew path")
+    return problems
 
 
 #: Numeric limits a tick step reads from its environment. launchd starts the job
@@ -82,7 +139,7 @@ def _seconds(value: str) -> bool:
 def environment() -> dict[str, str]:
     # OBSERVATORY_PYTHON: tick.sh runs every step with the interpreter that
     # installed this engine, not whatever python3 is first on PATH.
-    env = {"PATH": launch_path(), "OBSERVATORY_PYTHON": sys.executable,
+    env = {"PATH": launch_path(), "OBSERVATORY_PYTHON": stable_interpreter(sys.executable),
            "HOME": str(pathlib.Path.home()), "OBSERVATORY_HOME": str(paths.HOME)}
     for name in TICK_LIMITS:
         value = os.environ.get(name, "").strip()
@@ -106,9 +163,29 @@ def uid() -> int:
     return os.getuid()
 
 
+def tick_ceiling(interval: int) -> int:
+    """The tick's whole-run ceiling: the supervisor's default, and always under the interval."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import tick_lease
+    return int(min(tick_lease.DEFAULT_CEILING_SECONDS, interval * 5 // 6))
+
+
+def exit_timeout() -> int:
+    """launchd's SIGTERM-to-SIGKILL wait for the tick, above everything the supervisor waits.
+
+    launchd printed `exit timeout = 5` for a plist without the key while the
+    supervisor waited 10 s for its children: on a bootout launchd SIGKILLed the
+    supervisor first and the children ran on with the lock released (F6)."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import tick_lease
+    return int(tick_lease.SUPERVISOR_GRACE + tick_lease.STEP_GRACE + 15)
+
+
 def build(interval: int) -> dict:
     if interval < 60:
         raise ValueError("Tick interval must be at least 60 seconds")
+    env = environment()
+    env["OBSERVATORY_TICK_CEILING_SECONDS"] = str(tick_ceiling(interval))
     return {
         "Label": LABEL,
         "ProgramArguments": ["/bin/bash", str(ROOT / "tools/tick.sh")],
@@ -120,12 +197,13 @@ def build(interval: int) -> dict:
         "ProcessType": "Background",
         "LowPriorityIO": True,
         "Nice": 5,
+        "ExitTimeOut": exit_timeout(),
         # PATH and HOME only, and no secret ever. A plist is a world-readable
         # file: a key in EnvironmentVariables here would be plaintext where every
         # process on the machine can read it. The agent resolves its key at run
         # time from the machine's secret store — see agent/providers.py
         # KEY_FILES, and tests/test_key.py which asserts this dict stays clean.
-        "EnvironmentVariables": environment(),
+        "EnvironmentVariables": env,
         "Umask": 0o077,
     }
 
@@ -207,7 +285,16 @@ def main() -> int:
         print(f"removed {LABEL} and its plist")
         return 0
 
-    payload = plistlib.dumps(build(args.interval))
+    try:
+        doc = build(args.interval)
+    except configuration.ConfigurationError as exc:
+        print(f"Not installed: {exc}", file=sys.stderr)
+        return 1
+    problems = lint_plist(doc)
+    if problems:
+        print("Not installed: " + "; ".join(problems), file=sys.stderr)
+        return 1
+    payload = plistlib.dumps(doc)
     prepare_logs(("tick.log", "tick.err"))
     PLIST.parent.mkdir(parents=True, exist_ok=True)
     if PLIST.is_symlink():
