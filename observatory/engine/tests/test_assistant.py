@@ -227,6 +227,20 @@ class AssistantTests(unittest.TestCase):
             'disk': {'volume': {'free_gb': 29.0, 'total_gb': 460.0, 'free_percent': 6.3},
                      'locations': [{'label': f'Cache {i}', 'gb': float(i), 'kind': 'cache'} for i in range(12)]}}))
 
+    def test_an_unmeasured_machine_is_named_not_measured_with_its_command(self):
+        # A workspace where `full machine` never ran said "the machine snapshot
+        # could not be read" — a failure, about something nobody had measured.
+        self.real_estate(projects=2, findings=1)
+        self.a.paths.SCRATCH.joinpath('machine.json').unlink()
+        ctx = self.a.evidence()
+        rows = [d for d in ctx['degraded'] if d.get('source') == 'machine']
+        self.assertEqual([d.get('code') for d in rows], ['not-measured'], ctx['degraded'])
+        self.assertIn('project-observatory full machine', rows[0]['reason'])
+        # an unreadable snapshot is still "unavailable"
+        self.a.paths.SCRATCH.joinpath('machine.json').write_text('{not json')
+        rows = [d for d in self.a.evidence()['degraded'] if d.get('source') == 'machine']
+        self.assertEqual([d.get('code') for d in rows], ['unavailable'])
+
     def test_disk_evidence_survives_a_large_estate(self):
         self.real_estate()
         ctx = self.a.evidence()

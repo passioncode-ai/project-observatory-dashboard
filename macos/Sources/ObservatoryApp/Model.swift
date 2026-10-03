@@ -187,6 +187,7 @@ enum DashboardMode: Equatable {
         case ("trimmed", "projects"):
             if let shown, let total { return t("\(shown) of \(total) projects were included; choose a project for detail.", "Включено \(shown) из \(total) проектов; выберите проект для подробностей.") }
         case ("freshness-unknown", _): return t("Some snapshots carry no measurement time, so their freshness is unknown.", "У части снимков нет времени измерения, поэтому их свежесть неизвестна.")
+        case ("not-measured", "machine"): return t("This machine's disk and memory are not measured yet: run `project-observatory full machine`.", "Диск и память этой машины ещё не измерены: выполните `project-observatory full machine`.")
         case ("unavailable", "machine"): return t("The machine snapshot could not be read.", "Не удалось прочитать снимок машины.")
         case ("unavailable", "projects.json"): return t("The project registry could not be read.", "Не удалось прочитать реестр проектов.")
         case ("unavailable", "findings.json"): return t("The findings could not be read.", "Не удалось прочитать находки.")
