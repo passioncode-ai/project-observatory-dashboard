@@ -347,4 +347,29 @@ import ObservatoryCore
         model.russian = true
         XCTAssertTrue(model.limitation(["source": "machine", "code": "not-measured"]).contains("ещё не измерены"))
     }
+    /// Dashboard → Start Server was enabled whatever the mode: with the port held by
+    /// another workspace's server (the banner's own button is disabled there), on a
+    /// live dashboard, and with no pages built. Menu and banner now ask one question.
+    func testStartServerIsOfferedOnlyWhereItCanStart() async throws {
+        let ws = "/srv/example-ws", pages = ws + "/docs/dashboard/index.html"
+        let d = defaults(); d.set(ws, forKey: "workspace")
+        var answer: [String: Any] = ["server": "absent", "files": pages]
+        let model = Model(defaults: d) { _, _ in answer }
+        XCTAssertFalse(model.canStartServer, "nothing is known before the first check")
+        await model.refreshDashboard()
+        XCTAssertTrue(model.canStartServer, "saved pages, free port")
+        model.dashboardWorking = true
+        XCTAssertFalse(model.canStartServer, "a build or start is running")
+        model.dashboardWorking = false
+        answer = ["server": "other-workspace", "files": pages]; await model.refreshDashboard()
+        XCTAssertFalse(model.canStartServer, "the port is another workspace's")
+        answer = ["server": "verified", "url": "http://127.0.0.1:47311/dashboard/index.html", "files": pages]; await model.refreshDashboard()
+        XCTAssertFalse(model.canStartServer, "already live")
+        answer = ["server": "absent"]; await model.refreshDashboard()
+        XCTAssertFalse(model.canStartServer, "no pages to serve: Build comes first")
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/ObservatoryApp/App.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains(".disabled(!model.canStartServer)"), "the menu item asks the same question")
+    }
 }

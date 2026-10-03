@@ -242,7 +242,7 @@ struct DashboardView: View {
                             m.dashboardError].compactMap { $0 }.joined(separator: "\n")) {
                 if m.dashboardWorking { ProgressView().controlSize(.small) }
                 Button(alwaysOn ? m.t("Restart server", "Перезапустить сервер") : m.t("Start server", "Запустить сервер")) { Task { await m.startServer() } }
-                    .buttonStyle(SecondaryButtonStyle()).disabled(m.dashboardWorking || busy)
+                    .buttonStyle(SecondaryButtonStyle()).disabled(!m.canStartServer)
             }
         }
     }
