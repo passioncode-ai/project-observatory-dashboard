@@ -360,14 +360,43 @@ for key in sorted(projs):
 # from was +32% and −13%. A threshold between them catches it and never fires on
 # ordinary work.
 #
+# A RATIO ALONE IS WRONG FOR A SMALL ESTATE, so each direction also has an
+# absolute floor. A new user with three projects who adds a fourth is +33%, and
+# the ratio alone refused it: the pipeline stopped at `emit`, every later step
+# (the dashboard included) never ran, and the pages went stale on the day
+# somebody added their first real folder. A swing is refused only when it is past
+# the ratio AND past the floor:
+#   growth  — more than GROW_FLOOR records added (the measured failure added 50);
+#   shrink  — more than SHRINK_FLOOR records lost. Mass loss is the failure this
+#             guard exists for, so its floor is lower: one project gone is
+#             somebody archiving a folder, two or more past the ratio is refused;
+#   wipe    — a non-empty registry falling to nothing is refused at any size,
+#             because "everything vanished" is a collector failure's signature.
+#
 # A first emit has no baseline and is never refused. And a legitimate bulk change
 # is not blocked, only made deliberate: `OBSERVATORY_ALLOW_BULK=1` proceeds, and
-# the refusal names it.
+# the refusal names it. docs/ONBOARDING.md describes the guard for a user.
+BULK_RATIO = 0.25
+GROW_FLOOR = 5
+SHRINK_FLOOR = 1
+
+
+def bulk_verdict(was: int, now: int) -> bool:
+    """True when `was` → `now` records is a swing the emitter must refuse."""
+    if not was:
+        return False
+    if not now:
+        return True
+    delta = now - was
+    if abs(delta) / was <= BULK_RATIO:
+        return False
+    return delta > GROW_FLOOR if delta > 0 else -delta > SHRINK_FLOOR
+
+
 def _bulk_refusal() -> str:
     import os as _os
     if _os.environ.get("OBSERVATORY_ALLOW_BULK"):
         return ""
-    limit = 0.25
     for name, key, new in (("projects.json", "projects", out_projs),
                            ("repositories.json", "repositories", out_repos)):
         f = INV / name
@@ -377,16 +406,20 @@ def _bulk_refusal() -> str:
             was = len(json.loads(f.read_text(encoding="utf-8"))[key])
         except (ValueError, OSError, KeyError):
             continue
-        if not was:
-            continue
-        change = (len(new) - was) / was
-        if abs(change) > limit:
+        if bulk_verdict(was, len(new)):
+            change = (len(new) - was) / was
+            grew = len(new) > was
+            floor = (f"more than {GROW_FLOOR} added" if grew
+                     else f"more than {SHRINK_FLOOR} lost")
+            hint = ("If you just added a projects folder, or the change is otherwise "
+                    "genuine, re-run with OBSERVATORY_ALLOW_BULK=1." if grew else
+                    "If you removed those projects on purpose, re-run with "
+                    "OBSERVATORY_ALLOW_BULK=1.")
             return (f"{name} would go from {was} to {len(new)} "
-                    f"({change:+.0%}, limit ±{limit:.0%}). A swing this size is a "
-                    f"collector failure far more often than it is real work — a "
-                    f"missing `git` alone accounts for +32% of projects. Nothing "
-                    f"was written. If the change is genuine, re-run with "
-                    f"OBSERVATORY_ALLOW_BULK=1.")
+                    f"({change:+.0%}, limit ±{BULK_RATIO:.0%} and {floor}). A swing "
+                    f"this size is a collector failure far more often than it is real "
+                    f"work — a missing `git` alone accounts for +32% of projects. "
+                    f"Nothing was written. {hint}")
     return ""
 
 _refusal = _bulk_refusal()
