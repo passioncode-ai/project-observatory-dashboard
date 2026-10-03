@@ -971,6 +971,52 @@ class OperatorCommand(unittest.TestCase):
         self.assertIn("HandoffRefused", err)
 
 
+class Sessions(WorkflowCase):
+    """W4: a running session is tied to the workflow it executes; a stall is derived."""
+
+    def test_a_session_record_carries_its_workflow(self) -> None:
+        wf = self.start()
+        rec = L.append(self.conn, owner="agent:observatory-log", kind="session",
+                       statement="turn", project_id="project:alpha-web",
+                       session_id="0f8fad5b-d9cb-469f-a165-70867728950e",
+                       workflow_id=wf["workflowId"])
+        again = L.append(self.conn, owner="agent:observatory-log", kind="session",
+                         statement="next turn", memory_id=rec["memoryId"], expected_revision=1,
+                         project_id="project:alpha-web")
+        row = L.current(self.conn, again["memoryId"])
+        self.assertEqual(row["workflow_id"], wf["workflowId"], "carried to the next turn")
+        listed = W.workflow_list(self.conn)["workflows"][0]
+        self.assertIsNotNone(listed["lastSessionAt"])
+
+    def test_a_silent_held_workflow_is_stalled_until_a_session_moves(self) -> None:
+        wf = self.start()
+        self.silence(wf, seconds=W.STALL_SECONDS + 60)
+        self.assertTrue(W.workflow_list(self.conn)["workflows"][0]["stalled"])
+        L.append(self.conn, owner="agent:observatory-log", kind="session", statement="turn",
+                 project_id="project:alpha-web", workflow_id=wf["workflowId"],
+                 session_id="0f8fad5b-d9cb-469f-a165-70867728950e")
+        self.assertFalse(W.workflow_list(self.conn)["workflows"][0]["stalled"],
+                         "a session turn on the workflow is a sign of life")
+
+    def test_the_stop_hook_records_the_workflow_from_its_environment(self) -> None:
+        sys.path.insert(0, str(ROOT / "tests"))
+        import watched_repo
+        work, repo, env = watched_repo.build()
+        wid = "wf_0123456789abcdef"
+        got = watched_repo.record({**env, "OBSERVATORY_WORKFLOW_ID": wid}, "s-linked", repo)
+        self.assertIn('"recorded": true', got.stdout.replace(" ", "").replace('":true', '": true'),
+                      got.stdout + got.stderr)
+        conn = sqlite3.connect(work / "observatory.db")
+        row = conn.execute("SELECT workflow_id FROM ledger WHERE session_id = 's-linked'"
+                           " ORDER BY revision DESC LIMIT 1").fetchone()
+        self.assertEqual(row[0], wid)
+        (repo / "more.txt").write_text("more\n", encoding="utf-8")
+        watched_repo.record({**env, "OBSERVATORY_WORKFLOW_ID": "not-a-workflow"}, "s-bogus", repo)
+        row = conn.execute("SELECT workflow_id FROM ledger WHERE session_id = 's-bogus'").fetchone()
+        conn.close()
+        self.assertIsNone(row[0], "a value not shaped like a workflow id is not stored")
+
+
 class Migration(unittest.TestCase):
     def test_a_pre_workflow_store_gains_the_shape_and_keeps_its_rows(self) -> None:
         with tempfile.TemporaryDirectory(prefix="observatory-wf-mig-") as d:

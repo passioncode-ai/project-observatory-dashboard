@@ -17,7 +17,7 @@ Any refusal is `{"recorded": false, "reason": …}` — never a traceback, becau
 the caller is a hook that must degrade silently.
 """
 from __future__ import annotations
-import argparse, json, re, sqlite3, subprocess, sys, pathlib
+import argparse, json, os, re, sqlite3, subprocess, sys, pathlib
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -320,6 +320,15 @@ def main() -> int:
                               "queue instead of correcting the last",
                     "project": project_id})
 
+    # THE WORKFLOW THIS SESSION EXECUTES, when whoever started it said so (the
+    # account manager or Fabric sets `OBSERVATORY_WORKFLOW_ID`). It links a
+    # running session to the workflow it holds, so "who is working on this
+    # now" is answered by a live session rather than by the last checkpoint
+    # alone. Anything not shaped like a workflow id is ignored, not stored.
+    workflow_id = os.environ.get("OBSERVATORY_WORKFLOW_ID") or None
+    if workflow_id is not None and not re.fullmatch(r"wf_[0-9a-f]{16}", workflow_id):
+        workflow_id = None
+
     conn = store_db.connect()
     try:
         prior = None
@@ -330,7 +339,7 @@ def main() -> int:
             # would report `recorded: false` for the rest of the session; with
             # it the turn starts a fresh record, which is what an erasure means.
             row = conn.execute(
-                "SELECT l.memory_id, l.revision, l.why, l.statement, l.state"
+                "SELECT l.memory_id, l.revision, l.why, l.statement, l.state, l.workflow_id"
                 " FROM ledger l JOIN (SELECT memory_id, MAX(revision) r FROM ledger"
                 "   WHERE session_id = ? AND kind = 'session' GROUP BY memory_id) m"
                 "  ON m.memory_id = l.memory_id AND m.r = l.revision"
@@ -362,7 +371,8 @@ def main() -> int:
         if prior is not None and (prior["state"] or "") != "proposed":
             continues = prior["memory_id"]
             prior = None
-        if prior is not None and prior["statement"] == statement:
+        if prior is not None and prior["statement"] == statement \
+                and (workflow_id is None or prior["workflow_id"] == workflow_id):
             # Nothing moved since the last turn. Appending here would add a
             # revision that says exactly what the previous one said, and
             # append-only is a reason to be careful about what gets appended.
@@ -375,6 +385,7 @@ def main() -> int:
             memory_id=prior["memory_id"] if prior else None,
             expected_revision=prior["revision"] if prior else None,
             project_id=project_id, session_id=args.session_id or None,
+            workflow_id=workflow_id,
             function="episodic", scope="project", state="proposed",
             # NO CONFIDENCE, deliberately. This record restates a `git status`
             # — "166 files changed, +14051/-809" — and a fact anyone can re-run

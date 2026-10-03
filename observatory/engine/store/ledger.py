@@ -249,6 +249,11 @@ def append(
     conflicts_with: list[str] | None = None,
     provenance: list[dict] | None = None,
     evidence: list[dict] | None = None,
+    #: The workflow this record is part of — for a session record, the workflow
+    #: the session executes (`OBSERVATORY_WORKFLOW_ID`, set by whoever started
+    #: it). It may change between revisions: a session can move to another
+    #: workflow. Checkpoints and packs never come through here.
+    workflow_id: str | None = None,
 ) -> dict:
     """Append a revision. Returns the accepted revision and a consistency cursor.
 
@@ -334,7 +339,7 @@ def append(
         owner=owner, classification=classification, valid_from=valid_from,
         valid_to=valid_to, supersedes=supersedes, conflicts_with=conflicts_with or [],
         provenance=provenance or [], evidence=evidence or [], created_at=created,
-        **_carried(prior)))
+        **{**_carried(prior), **({"workflow_id": workflow_id} if workflow_id else {})}))
     return {"memoryId": mid, "revision": revision, "state": state, "owner": owner,
             "supersedes": supersedes, "consistencyCursor": cursor, "createdAt": created}
 

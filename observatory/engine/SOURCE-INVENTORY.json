@@ -360,8 +360,8 @@
     {
       "path": "collectors/scan_sessions.py",
       "source_sha256": "7ef0f186297d701c09fda43bbbb3a66959c0234e4bacc02313b7fb434d701fce",
-      "export_sha256": "e9eb5e29abe4eae115cf2da2b8219c5384050b30df1e62ee237dcc63207ff262",
-      "bytes": 29840,
+      "export_sha256": "16a1b0a347060d05c8abe62c9b2a0d99d63824499ed783090416d26fc0cc513c",
+      "bytes": 34401,
       "python_comments_removed": 121,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -1464,8 +1464,8 @@
     {
       "path": "store/ledger.py",
       "source_sha256": "8cd7cf400ad3a1d633f85eb58f0667dc0a52b97144bf13ce02a7143acfaa8ca9",
-      "export_sha256": "0fa5740e3de5cc3c1fbe42f850c89f6ecd6e34e58193cdca9c05729d4e6561e7",
-      "bytes": 31142,
+      "export_sha256": "95a6d2e64cf43a61a97f8f85b3ab1f017b62631d66c0f7265a1d65d88de51bfa",
+      "bytes": 31539,
       "python_comments_removed": 60,
       "python_docstrings_removed": 15,
       "tool_descriptions_retained": 0,
@@ -1512,8 +1512,8 @@
       "path": "store/workflow.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "731332ed1f3a8e03e27e48f363f27048fb57e7744a1bee88550844b7aeab08e8",
-      "bytes": 75147
+      "export_sha256": "6b001545b0ad9d23006544ab95ed08c5a50b31ed916940826093dddd2749025d",
+      "bytes": 76220
     },
     {
       "path": "store_faults.py",
@@ -1660,8 +1660,8 @@
       "path": "tests/session_fixture.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3f578c13a86524c8c4e519604a2366a5ac9f93067ac57ab12c1ded262e2a17c2",
-      "bytes": 3179
+      "export_sha256": "b41fe4291895ec48af2f203a74ccfd5cf4ca6e0cdf3bca37cbb9e277cbd118f1",
+      "bytes": 3199
     },
     {
       "path": "tests/source_reader.py",
@@ -2872,8 +2872,8 @@
       "path": "tests/test_sessions.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "708429f0521265378ae9529048400f2522ce84c42d03a0de13cddc34f0d66b11",
-      "bytes": 15443
+      "export_sha256": "b2773cb2e3912580018f9ebf4156696814cfa52a9cd842293953a12d078f569f",
+      "bytes": 17408
     },
     {
       "path": "tests/test_shared_ancestry.py",
@@ -3153,8 +3153,8 @@
       "path": "tests/test_workflow_memory.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d72893ebef0d36e69d02b38601c30c8bb3d6ff91fc926ad4c827a676337f70b6",
-      "bytes": 52043
+      "export_sha256": "05626ff20ec91c278d8d11a1f1975aab4f5630a32530182ca83d5b72e36ad701",
+      "bytes": 54793
     },
     {
       "path": "tests/test_workspace.py",
@@ -3607,8 +3607,8 @@
     {
       "path": "tools/record_turn.py",
       "source_sha256": "424602905763c916d14026733edd68dcbda519ac41d469344b30d2d1f770df24",
-      "export_sha256": "17ef96239a9920a55834966f26afc76b77e53d00aab7fb7ac4e0c80f46e94f8a",
-      "bytes": 21912,
+      "export_sha256": "b5fa7fedf58dbd8d0f2390c4c7c59cd6590b1f836f71bc5d19863b9f7dae08dd",
+      "bytes": 22615,
       "python_comments_removed": 119,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,

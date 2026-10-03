@@ -163,6 +163,23 @@ The review queue (`project-observatory full review`) names a step kept after a l
 such, with its workflow and the `workflow show` command: the decision is whether that work still
 matters to the workflow, not whether a conclusion is true.
 
+## Sessions and stalls
+
+- **A session names the workflow it executes.** Whoever starts a session for a workflow (the
+  account manager, Fabric) sets `OBSERVATORY_WORKFLOW_ID`. The Stop hook
+  (`tools/record_turn.py`) writes it on the session's record, and later revisions carry it. A
+  value not shaped like a workflow id is ignored. A checkpoint's `sessionId` links the other
+  way.
+- **The session history reads the hook's own records.** `collectors/scan_sessions.py` reads the
+  ledger's `session` records first, and the companion's store only where it is still installed.
+  With the hook's records present, the companion's absence is reported as not applicable, not
+  as lost history.
+- **A stall is derived, not declared.** `observatory_workflow_list` marks a workflow `stalled`
+  when it is open, held, and neither a checkpoint nor a turn of a session executing it has been
+  seen for 30 minutes (`STALL_SECONDS`). The Stop hook records a turn only when files moved, so
+  a long think without edits can read as a stall. The view says which signal it saw last
+  (`silentSeconds`, `lastSessionAt`), not that the agent died.
+
 ## What the operator sees
 
 The dashboard's Health panel counts the open workflows and the handoffs waiting for a session

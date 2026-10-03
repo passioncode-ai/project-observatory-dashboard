@@ -92,6 +92,13 @@ OFFER_TTL_MIN, OFFER_TTL_MAX = 60, 86400
 SILENCE_SECONDS = 120
 #: REASONS that may be claimed without the token, under the silence rule.
 REASONS_WITHOUT_TOKEN = ("limit", "crash", "restart")
+#: A workflow is STALLED when it is open, someone holds it, and neither a
+#: checkpoint nor a turn of a session executing it has been seen for this long.
+#: Thirty minutes is longer than any one step should run without a checkpoint;
+#: the Stop hook records a session's turn only when its files moved, so a
+#: session thinking for a long time without touching anything can read as
+#: stalled — the view says which signal it saw last, not that the agent died.
+STALL_SECONDS = 1800
 #: One offer per workflow per this many seconds without the token, so a loop of
 #: superseding offers cannot fill the store with packs.
 OFFER_INTERVAL_SECONDS = 60
@@ -654,6 +661,12 @@ def workflow_list(conn: sqlite3.Connection, *, project_id: str | None = None,
         handoffs = conn.execute("SELECT count(*) FROM workflow_leases WHERE workflow_id = ?"
                                 " AND handoff_id IS NOT NULL AND accepted_at IS NOT NULL",
                                 (wid,)).fetchone()[0]
+        last_session = conn.execute("SELECT max(created_at) FROM ledger WHERE kind = 'session'"
+                                    " AND workflow_id = ?", (wid,)).fetchone()[0]
+        seen = max(x for x in (ckpt["created_at"] if ckpt else None, last_session) if x) \
+            if (ckpt or last_session) else None
+        quiet = None if seen is None else int((now - _parse(seen)).total_seconds())
+        held = _active(conn, wid)
         out.append({
             "workflowId": wid, "projectId": w["project_id"], "status": w["status"],
             "createdAt": w["created_at"], "closedAt": w["closed_at"],
@@ -663,7 +676,10 @@ def workflow_list(conn: sqlite3.Connection, *, project_id: str | None = None,
                 "revision": ckpt["revision"], "at": ckpt["created_at"]},
             "silentSeconds": None if ckpt is None else
             int((now - _parse(ckpt["created_at"])).total_seconds()),
-            "lease": _lease_view(_active(conn, wid)),
+            "lastSessionAt": last_session,
+            "stalled": w["status"] == "open" and held is not None and quiet is not None
+            and quiet > STALL_SECONDS,
+            "lease": _lease_view(held),
             "pendingHandoff": _lease_view(offer) if live_offer else None,
             "handoffs": handoffs, "keptSteps": kept})
     answer = {"status": status, "projectId": project_id, "count": len(out), "total": total,
