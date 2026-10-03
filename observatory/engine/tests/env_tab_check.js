@@ -95,7 +95,7 @@ function makeDom(opts) {
     navigator: {},
     window: { matchMedia: () => ({ matches: false, addEventListener() {} }) },
     ResizeObserver: class { observe() {} },
-    // The page reads the address for a pressed filter chip (DEC-0233); both of
+    // The page reads the address for a pressed filter chip; both of
     // these are things every browser provides and this stub did not.
     URLSearchParams, Intl,
     // The reader's language choice, as the EN/RU switch stores it.
@@ -129,7 +129,7 @@ try {
 const out = dom.byId("out").innerHTML;
 check("the ENV tab renders without throwing", true);
 check("it writes a table rather than an empty state", out.includes("<table>"), out.slice(0, 120));
-// The header cell is a sortable button since D-11 (DEC-0246): the word is
+// The header cell is a sortable button: the word is
 // still there, wrapped in `th[data-sort="name"] > button.sort`.
 check("the table is the ENV one",
       out.includes("<th>Variable</th>") || /<th aria-sort="[a-z]+" data-sort="name"><button class="sort"[^>]*>Variable<\/button><\/th>/.test(out),

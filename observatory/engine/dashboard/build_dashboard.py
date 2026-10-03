@@ -371,7 +371,7 @@ def from_store() -> dict:
                            "what": clip_words(pay.get("subject") or "", 110),
                            "repo": pay.get("repo") or ""})
         # What the observatory CONCLUDED, with its confidence and its state — the
-        # agent proposes and never asserts (AGENTS.md rule 3), so a reader must
+        # agent proposes and never asserts (a model may only propose), so a reader must
         # see `proposed` beside the sentence or the caveat is lost.
         # THE TOMBSTONE JOIN, and this query had none. Every other
         # read of the ledger is record-wide — `live()`, the search, the review

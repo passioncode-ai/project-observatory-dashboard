@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """What a collector said about its own coverage, read the same way everywhere.
 
-AGENTS.md rule 7: a source that could not be read appears in `degraded` with its
+Honest degradation: a source that could not be read appears in `degraded` with its
 reason, and never as an empty result in place of a partial one. Every collector
 writes that list; this is the one function that reads it.
 

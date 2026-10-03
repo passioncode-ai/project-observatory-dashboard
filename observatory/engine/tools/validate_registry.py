@@ -100,7 +100,7 @@ def main():
         if a["id"]!="heroku:"+a["name"]: errors.append(f"heroku id mismatch: {a['id']}")
         if a["state"] not in STATES: errors.append(f"unknown heroku state: {a['id']} {a['state']}")
         # A LINK AND ITS RULE ARE ONE FACT. Either both are present or neither
-        # is: a project with no rule is the guess AGENTS.md rule 2 forbids, and
+        # is: a project with no rule is the guess the never-infer-from-a-name rule forbids, and
         # a rule with no project is a rule that fired on nothing.
         if bool(a.get("project")) != bool(a.get("link_rule")):
             errors.append(f"heroku link without its rule, or rule without a link: {a['id']}")

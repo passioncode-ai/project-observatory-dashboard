@@ -78,7 +78,7 @@ def sources_for(home: pathlib.Path) -> dict[str, pathlib.Path]:
 
 SOURCES = sources_for(HOME)
 #: The observatory's own server, which must be declared somewhere or its nine
-#: tools are unreachable (credentials audit G14).
+#: tools are unreachable to every agent on the machine.
 OWN_SERVER = "observatory"
 #: Seconds `claude mcp list` may take. 60 and then 120 were measured too short on
 #: machines with many servers; the CLI checks each one before printing.

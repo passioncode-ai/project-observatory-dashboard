@@ -10,7 +10,7 @@ reason there are five: `suspended` is Heroku's decision and `down` is the
 application's own crash; `resources-only` pays for a database with no dyno and
 `idle` pays for nothing.
 
-The second is the link, and AGENTS.md rule 2 governs it: **never infer from a
+The second is the link, and one rule governs it: **never infer from a
 name.** An app can deploy from a folder with an unrelated name, or from a
 monorepo while a folder carrying the app's own name sits beside it with a remote
 to the same application. A name-match gets both wrong and looks confident doing
