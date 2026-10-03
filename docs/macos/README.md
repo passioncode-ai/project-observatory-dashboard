@@ -4,7 +4,8 @@ A native window onto the workspace's **dashboard** — the app opens on it — w
 shared advisory assistant one window away (⇧⌘A). The app needs an engine that serves
 `observatory-assistant/1` with the `dashboard`/`serve`/`build` actions — **0.12.0 or
 newer**; an older release is reported as an incompatible engine with the update
-command.
+command (`project-observatory full update --apply`, which releases before 0.7.0 do not
+have: [ONBOARDING → staying in step](../ONBOARDING.md#staying-in-step)).
 
 - **Live** when the workspace's own server answers on 127.0.0.1 (it is verified to
   serve this workspace, not just any server on the port).
@@ -34,7 +35,7 @@ The bundle is `dist/macos/Project Observatory.app`, with its icon rasterized fro
 product mark at every size. `macos/scripts/install-app.sh --open` installs it into
 `/Applications` (or `~/Applications`), quits a running copy, forgets Launch Services
 registrations of the same bundle left by QA builds elsewhere — Spotlight could open one
-of those instead — and opens it. The script signs it ad hoc for local QA. It does not claim a Developer ID, notarization or an App Store release.
+of those instead — and opens it. `build-app.sh` signs the bundle ad hoc for local QA (with a Developer ID when `OBSERVATORY_SIGN_IDENTITY` is set) and `install-app.sh` verifies that signature. Neither claims a Developer ID, notarization or an App Store release.
 Set `OBSERVATORY_SWIFT_BUILD` to reuse a build directory outside the checkout;
 `OBSERVATORY_SWIFT_CONFIGURATION=debug` selects the debug build.
 

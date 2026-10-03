@@ -27,9 +27,10 @@ names. Never ask the user to paste a credential into the conversation.
    `OBSERVATORY_ROOT`, or obtain its path with `project-observatory full-path`.
    Do not guess a checkout location or inspect another account's files.
 2. Select the user's initialized `OBSERVATORY_HOME`. Run
-   `python3 "$OBSERVATORY_ROOT/observatory.py" doctor`. A missing workspace
+   `project-observatory full doctor`. A missing workspace
    needs the documented onboarding before secret operations.
-3. Run `python3 "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.13.1`.
+3. Run `"$OBSERVATORY_PYTHON" "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.13.1`
+   (`full agent install` records that interpreter; the stock macOS `python3` is too old).
    If stale, read the installed skill once and follow its compatible commands.
    Do not turn an unavailable version check into a retry loop.
 4. Inspect names using `tools/use_secret.py names PROJECT` or `tools/vault.py

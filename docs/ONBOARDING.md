@@ -679,5 +679,5 @@ On first launch it looks for the engine at `~/.local/bin/project-observatory`, t
 then `/opt/homebrew/bin` and `/usr/local/bin`, with the default workspace; otherwise choose
 the engine's absolute path and an initialized workspace in **Settings**. The assistant
 needs the setup in [Enable background or paid actions deliberately](#enable-background-or-paid-actions-deliberately).
-It uses the existing MCP server and engine; it registers no second server. Details:
+It runs the installed engine's `full assistant` command; it needs no MCP server and registers none. Details:
 [macOS app](macos/README.md).

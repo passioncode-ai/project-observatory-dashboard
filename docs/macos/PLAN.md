@@ -43,8 +43,7 @@ machine. Do not stop other sessions or overwrite their worktrees.
 
 ## Current status / resume
 
-Implementation and focused checks are complete; see the [run record](../runs/2026-10-01-macos-app/README.md)
-for executed checks and explicit native-UI/release gates. Next: native scenario walkthrough
-once window automation is available, then review the candidate for normal PR integration.
-Main baseline 4e03a1c; resource cleanup PR #109 remains separate. No production installation
-or parent submodule pin is changed to this unmerged candidate.
+Shipped in 0.12.0 (the app opens on the dashboard); native walkthroughs ran on 2026-10-02 and
+in the 2026-10-03 audits ([run 1](../reports/2026-10-03-observatory-audit-run-1/README.md),
+[run 2](../reports/2026-10-03-observatory-audit-run-2/README.md)). Open: Developer ID signing and
+notarization, which need the maintainer's Apple credentials, and the items run 2 lists for run 3.
