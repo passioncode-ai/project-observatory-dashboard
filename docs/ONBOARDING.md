@@ -175,7 +175,7 @@ The `projects` source is the exception: the filesystem scan always runs, so a mi
 | `wiki` | a Markdown knowledge base, e.g. an Obsidian vault | `wiki` integration, `wiki_projection` |
 | `secret_store` | a private directory of provider credentials and project slots (`projects/`) | vault, OpenRouter, Google, Cloudflare analytics |
 | `companion_home`, `companion_db` | a memory companion's home and database file (claude-mem) | `sessions` integration (`companion_db`), `companion_remediation` |
-| `gateway_root` | an optional directory whose `bin/` holds a credential backup script | `vault.py backup` |
+| `gateway_root` | an optional directory holding `backup-secrets.sh`, at its root or in its `bin/` (the root is tried first): a bash script run with no arguments, whose output and exit code are `vault.py backup`'s | `vault.py backup` |
 | `domain_export` | a registrar's domain CSV export | `domains` integration |
 | `cloudflare_snapshot` | a JSON snapshot of your Cloudflare zones, kept as evidence | `validate` (snapshot parity; reported as degraded when unset) |
 | `secrets` | overrides where the workspace keeps its own credential files | provider tools |
