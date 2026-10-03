@@ -132,8 +132,16 @@ original workspace and rejects their late UI callbacks.
 Release prerequisites: local gates, native scenario walkthrough, required hosted
 checks, the normal pull request (opening it is the CLA agreement — nothing to tick), then a
 tagged compatible engine and app artifact.
-For Developer ID signing supply `OBSERVATORY_SIGN_IDENTITY` to the build script.
-Notarization is a separate release step using the maintainer's Keychain profile:
+### Signing
+
+Without `OBSERVATORY_SIGN_IDENTITY` the build script signs ad hoc
+(`codesign --sign -`), which touches no keychain. For Developer ID signing supply
+`OBSERVATORY_SIGN_IDENTITY` to the build script: `codesign` then reads that
+identity's private key from the login Keychain (`macos/scripts/build-app.sh`), and
+macOS can ask for the keychain password or for permission to use the key. That
+dialog is expected: signing is the release operator's explicit act, run by hand, and
+nothing in Observatory signs on a schedule. Notarization is a separate release step
+using the maintainer's Keychain profile, which reads the Keychain too:
 
 ```sh
 ditto -c -k --keepParent 'dist/macos/Project Observatory.app' dist/Project-Observatory.zip
