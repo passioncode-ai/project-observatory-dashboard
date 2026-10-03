@@ -2612,6 +2612,11 @@ document.addEventListener("click", ev => {
   SORT.dir = next === "none" ? "" : next;
   try { sessionStorage.setItem("observatory.sort." + PAGE, JSON.stringify(SORT)); } catch (e) {                      }
   render();
+  // The render replaced the header that held focus, and focus fell to <body>:
+  // a keyboard reader who pressed Enter was thrown to the top of the page.
+  // Focus returns to the same column's new button, as the sort select does.
+  const again = document.querySelector(`th[data-sort="${String(key).replace(/["\\]/g, "\\$&")}"] .sort`);
+  if (again && again.focus) again.focus();
 });
 const lower = s => String(s || "").toLowerCase() || null;
 const dateOr = s => (s ? String(s) : null);
@@ -2632,6 +2637,11 @@ document.addEventListener("click", ev => {
   const q = document.getElementById("q"); if (q) q.value = "";
   if (sel) sel.value = "";
   render();
+  // The reset button lived in the empty state the render just removed, so
+  // focus would fall to <body>. It moves to the first control of the narrowing
+  // it cleared: the search box, or the first filter chip where there is none.
+  const next = q || (seg && seg.querySelector(".chip-btn[data-f]"));
+  if (next && next.focus) next.focus();
 });
 
 function render() {
@@ -3905,6 +3915,9 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
       bar.querySelectorAll("[data-sev]").forEach(b => b.setAttribute("aria-pressed", "false"));
       bar.querySelector(".ftype").value = ""; bar.querySelector(".fq").value = "";
       apply();
+      // The reset button is removed by `apply()`; focus goes to the findings
+      // search box rather than falling to <body>.
+      bar.querySelector(".fq").focus();
     });
     // A finding named in the URL hash is unfolded and scrolled into view.
     const reveal = () => {

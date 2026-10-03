@@ -424,8 +424,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "305eb3094a4835d0a1a6cfb83572213475838e364c4147135d092286caca432f",
-      "bytes": 233619,
+      "export_sha256": "0f68adc9cf63bc54fa5c62755c9fed00f945cc058d4b99e5bfe58574e4dabf91",
+      "bytes": 234512,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -1535,6 +1535,13 @@
       "bytes": 21800
     },
     {
+      "path": "tests/focus_check.js",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "fce76664084f61eecd333e6b2e8056e41cbc524cbebeddaf3a42a12e5184cfeb",
+      "bytes": 5434
+    },
+    {
       "path": "tests/live_estate.py",
       "source_sha256": "cdd283c7ee31d6daa1f0e23ebd0c57389115d5d9a0a0142f97c94b1b850ab7eb",
       "export_sha256": "d5d2d8f448fd2624a144480a961c5fae7a27d770681e3a309f2aab28a3cb9fc1",
@@ -1592,8 +1599,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "790e2411bda13406bc834178138949de69fc3db13ed6636e07d8b82cdb3ec239",
-      "bytes": 15313,
+      "export_sha256": "0ae0fe39eb4a7769c453167843ec259f2beafabcd80b3e0b96f1e795cd45e2ea",
+      "bytes": 15331,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -1903,8 +1910,8 @@
     {
       "path": "tests/test_dashboard_render.py",
       "source_sha256": "48ff53d5e309194a35d8b1b6a1f9bffee2191a720be5a5d7493560dc8fa946fc",
-      "export_sha256": "6aa3f23c2ff2b489295a526165a12030422bb0779155b113fad35038fcf8f03a",
-      "bytes": 29751,
+      "export_sha256": "24d19e150a1b2b264a03432d7ecf30ca6e91e5ac57bd83e3ddf5559d7d354e1b",
+      "bytes": 32226,
       "python_comments_removed": 13,
       "python_docstrings_removed": 12,
       "tool_descriptions_retained": 0,
@@ -3799,7 +3806,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 479,
+  "file_count": 480,
   "excluded": [
     "git-history",
     "operator-registries",

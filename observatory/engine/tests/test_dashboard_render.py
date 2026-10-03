@@ -501,6 +501,53 @@ def test_the_panel_says_why_history_was_not_recorded() -> None:
           panel[-600:])
 
 
+FOCUS = ROOT / "tests/focus_check.js"
+
+
+def focus_after(page: pathlib.Path) -> dict:
+    p = subprocess.run([node(), str(FOCUS), str(page)], cwd=ROOT,
+                       capture_output=True, text=True, timeout=300)
+    try:
+        return json.loads(p.stdout)
+    except ValueError:
+        check("the focus harness returned JSON", False, (p.stdout + p.stderr)[-300:])
+        return {}
+
+
+def test_keyboard_focus_survives_sort_and_reset() -> None:
+    """Enter on a sortable header, or on "reset" in an empty result, re-renders
+    the table, the control that held focus is replaced, and focus fell to
+    <body>: a keyboard reader was thrown to the top of the page. The sort
+    returns focus to the same column's re-rendered button; a reset moves it to
+    the search box, the first control of the narrowing it just cleared.
+
+    `tests/focus_check.js` is a stub DOM, so it proves the handlers ask for the
+    re-rendered control by its key and focus it; the selectors are checked
+    against the markup the builder writes, below."""
+    if node() is None:
+        check("node is available", True, " [uncoverable: executing the page needs node]")
+        return
+    root = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-focus-"))
+    build(root)
+    pages = root / "pages"
+    got = focus_after(pages / "projects.html")
+    check("the projects page runs in the focus harness", got.get("threw") is None, str(got.get("threw")))
+    sort = got.get("sort") or {}
+    check("after a sort, focus is on the same column's sort button",
+          sort.get("focused") == 'doc th[data-sort="name"] .sort', json.dumps(sort))
+    clear = got.get("clear") or {}
+    check("after a reset, focus is on the search box", clear.get("focused") == "#q", json.dumps(clear))
+    got = focus_after(pages / "findings.html")
+    check("the findings page runs in the focus harness", got.get("threw") is None, str(got.get("threw")))
+    fclear = got.get("fclear") or {}
+    check("after the findings reset, focus is on the findings search box",
+          str(fclear.get("focused") or "").endswith(".fbar .fq"), json.dumps(fclear))
+    src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
+    check("the selectors match the markup the builder writes",
+          'data-sort="${E(key)}"><button class="sort"' in src and 'id="q"' in src
+          and 'class="fq"' in src and 'host.querySelector(".fbar")' in src, "")
+
+
 def test_the_harness_itself_can_fail() -> None:
     """A green from a harness that cannot go red is not evidence."""
     if node() is None:
@@ -545,6 +592,7 @@ if __name__ == "__main__":
                test_a_metric_that_moved_says_so_on_the_page,
                test_a_single_sample_renders_no_movement,
                test_the_panel_says_why_history_was_not_recorded,
+               test_keyboard_focus_survives_sort_and_reset,
                test_the_harness_itself_can_fail):
         fn()
     print()
