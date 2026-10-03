@@ -19,7 +19,12 @@ import { readFileSync } from "node:fs";
 const file = process.argv[2];
 const html = readFileSync(file, "utf8");
 
-const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map(m => m[1]);
+// A `src` script is read from beside the page: the split pages carry their
+// shared code in `app.js`, and without it they run only their inline head.
+const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)].map(m => {
+  const src = (m[1].match(/\bsrc="([^"]+)"/) || [])[1];
+  return src ? readFileSync(new URL(src, "file://" + file), "utf8") : m[2];
+});
 if (scripts.length === 0) {
   console.log(JSON.stringify({ error: "the page carries no script" }));
   process.exit(1);
@@ -57,7 +62,7 @@ function makeEl(id) {
     dataset: {},
     addEventListener(type, fn) { listeners.push([id, type, fn]); },
     removeEventListener() {},
-    appendChild() {},
+    appendChild() {}, remove() {}, before() {}, after() {},
     setAttribute() {},
     getAttribute() { return null; },
     focus() {},
@@ -69,7 +74,9 @@ function makeEl(id) {
     checked: false,
     children: [],
     querySelectorAll() { return []; },
-    querySelector() { return null; },
+    // An element, as the document answers: the findings page reads its bar
+    // (`host.querySelector(".fbar")`) and a null here was a harness throw.
+    querySelector(sel) { return makeEl(`${id} ${sel}`); },
   };
   return el;
 }
