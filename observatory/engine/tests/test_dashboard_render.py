@@ -55,12 +55,12 @@ def node() -> str | None:
 
 
 def render(page: pathlib.Path, count: str | None = None,
-           hash: str | None = None) -> dict | None:
+           hash: str | None = None, show: str | None = None) -> dict | None:
     exe = node()
     if exe is None:
         return None
     args = ([exe, str(HARNESS), str(page)] + (["--count", count] if count else [])
-            + (["--hash", hash] if hash else []))
+            + (["--hash", hash] if hash else []) + (["--show", show] if show else []))
     p = subprocess.run(args, cwd=ROOT,
                        capture_output=True, text=True, timeout=300)
     try:
@@ -548,6 +548,47 @@ def test_keyboard_focus_survives_sort_and_reset() -> None:
           and 'class="fq"' in src and 'host.querySelector(".fbar")' in src, "")
 
 
+def _credentials(root: pathlib.Path, credentials: list[dict]) -> None:
+    today = __import__("datetime").date.today().isoformat()
+    (root / "registry/credentials.json").write_text(json.dumps({
+        "schema_version": 1, "scanned_on": today, "credentials": credentials,
+        "totals": {"credentials": len(credentials), "by_kind": {}, "claimed_by_a_project": 0,
+                   "unclaimed": len(credentials), "leaked_unrotated": 0},
+        "destinations": {}, "unlisted_destinations": [], "degraded": [],
+        "registers_unreadable": []}), encoding="utf-8")
+
+
+def test_the_keys_page_says_what_it_measured() -> None:
+    """Two sentences the keys page asserted without the measurement behind them.
+
+    A slot stored with `vault.py put` showed "minted 2026-10-03" in the Rotation
+    column, though nothing was minted: the journal row says `put`, and only a
+    provider's key is minted. And with Heroku never scanned, the movements
+    section said "every movement this week is recorded — Heroku has no change
+    without a journal row": a comparison that was never made, read as a clean
+    result."""
+    if node() is None:
+        check("node is available", True, " [uncoverable: executing the page needs node]")
+        return
+    root = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-keys-page-"))
+    env = dashboard_fixture.seed(root)
+    _credentials(root, [
+        {"id": "credential:vault/alpha-web/prod/API_TOKEN", "kind": "project-secret",
+         "provider": None, "name": "API_TOKEN", "env": "prod", "vault_project": "alpha-web",
+         "created_on": "2026-10-01", "rotated_on": None, "rotations": 0, "source": "vault"},
+        {"id": "credential:openrouter/alpha-web-agent", "kind": "llm-api-key",
+         "provider": "openrouter", "name": "alpha-web-agent", "label": "FAKE-label",
+         "created_on": "2026-09-30", "source": "openrouter-listing"}])
+    out = (render(_rebuild(root, env), hash="creds", show="out") or {}).get("shown", "")
+    check("the keys table rendered", "API_TOKEN" in out, out[:200])
+    check("a stored slot reads 'stored', not 'minted'",
+          "stored 2026-10-01" in out and "minted 2026-10-01" not in out, out[-400:])
+    check("a provider's key still reads 'minted'", "minted 2026-09-30" in out, "")
+    check("with Heroku never scanned, the page does not claim every movement is recorded",
+          "every movement this week is recorded" not in out
+          and "Heroku was not scanned" in out, out[-600:])
+
+
 def test_the_harness_itself_can_fail() -> None:
     """A green from a harness that cannot go red is not evidence."""
     if node() is None:
@@ -593,6 +634,7 @@ if __name__ == "__main__":
                test_a_single_sample_renders_no_movement,
                test_the_panel_says_why_history_was_not_recorded,
                test_keyboard_focus_survives_sort_and_reset,
+               test_the_keys_page_says_what_it_measured,
                test_the_harness_itself_can_fail):
         fn()
     print()
