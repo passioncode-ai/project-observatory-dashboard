@@ -5,6 +5,7 @@ import contextlib
 import datetime
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -59,24 +60,65 @@ def lock(base: Path):
         os.close(fd)
 
 
-def require_runtime() -> dict:
-    """Check the installed SQLite runtime entirely in memory before workspace writes."""
-    message = ("Full engine requires Python with SQLite 3.37+ and loadable extensions, "
-               "plus the locked sqlite-vec dependency. On macOS use Homebrew Python "
-               "3.14 in a virtual environment; reinstall the full package there.")
-    if sqlite3.sqlite_version_info < (3, 37, 0):
-        raise config.ConfigurationError(message)
+#: The `[full]` extra's distributions and the module each one is imported as.
+#: tests/test_engine_doc_copies.py keeps the keys equal to pyproject.toml's extra.
+FULL_MODULES = {"mcp": "mcp", "jsonschema": "jsonschema", "sqlite-vec": "sqlite_vec",
+                "google-auth": "google.auth", "cryptography": "cryptography"}
+#: The tested dependency set, shipped inside the engine (see requirements-full.lock).
+LOCK_FILE = config.SOURCE / "requirements-full.lock"
+
+
+def _absent(module: str) -> bool:
     try:
-        import sqlite_vec
-        with contextlib.closing(sqlite3.connect(":memory:")) as connection:
+        return importlib.util.find_spec(module) is None
+    except (ImportError, ValueError):   # a dotted name whose parent package is absent
+        return True
+
+
+def full_extra_command() -> str:
+    """The one command that installs the `[full]` extra into THIS interpreter at the tested versions.
+
+    The package is not on PyPI: naming the installed version lets pip take the
+    distribution that is already here and fetch only what its extra adds."""
+    lock = f' -c "{LOCK_FILE}"' if LOCK_FILE.is_file() else ""
+    return f"\"{sys.executable}\" -m pip install{lock} 'project-observatory[full]=={config.VERSION}'"
+
+
+def require_runtime() -> dict:
+    """Check the installed SQLite runtime entirely in memory before workspace writes.
+
+    Two different faults look alike from here and have different fixes: an
+    interpreter whose sqlite3 cannot load extensions (choose another Python), and
+    a package installed without its `[full]` extra (install the extra). Each is
+    named with its own remedy, and both when both are true."""
+    interpreter = ("Full engine requires Python with SQLite 3.37+ and loadable extensions; this interpreter "
+                   f"({sys.executable}, SQLite {sqlite3.sqlite_version}) {{why}}. On macOS use Homebrew "
+                   "Python 3.14 in a virtual environment; reinstall the full package there.")
+    missing = sorted(module for module in FULL_MODULES.values() if _absent(module))
+    extra = ("The full engine's dependencies are not installed in this interpreter (missing: "
+             + ", ".join(missing) + "): the package was installed without its `[full]` extra. Install it at "
+             "the tested versions: " + full_extra_command()) if missing else ""
+
+    def refuse(why: str) -> config.ConfigurationError:
+        return config.ConfigurationError(" ".join(filter(None, (interpreter.format(why=why), extra))))
+
+    if sqlite3.sqlite_version_info < (3, 37, 0):
+        raise refuse("is older")
+    with contextlib.closing(sqlite3.connect(":memory:")) as connection:
+        if not hasattr(connection, "enable_load_extension"):
+            raise refuse("cannot load extensions")
+        if missing:
+            raise config.ConfigurationError(extra)
+        try:
+            import sqlite_vec
             connection.enable_load_extension(True)
             try:
                 sqlite_vec.load(connection)
                 connection.execute("SELECT vec_version()").fetchone()
             finally:
                 connection.enable_load_extension(False)
-    except (AttributeError, ImportError, OSError, sqlite3.Error):
-        raise config.ConfigurationError(message) from None
+        except (AttributeError, ImportError, OSError, sqlite3.Error) as exc:
+            raise refuse(f"could not load sqlite-vec ({type(exc).__name__})") from None
     return {"sqlite_version": sqlite3.sqlite_version, "loadable_extensions": True,
             "sqlite_vec": "loadable"}
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Write the engine's copies of the user documents from docs/.
+"""Write the engine's copies of the user documents from docs/, and of the dependency lock.
 
     python tools/sync_engine_docs.py           # rewrite observatory/engine/docs/{ONBOARDING,COMPATIBILITY,AGENT-ONBOARDING}.md
+                                               # and observatory/engine/requirements-full.lock
     python tools/sync_engine_docs.py --check   # exit 1 when a copy differs
 
 The rule lives in tests/test_engine_doc_copies.py (`derived`), so the tool and
@@ -17,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
-from test_engine_doc_copies import COPIES, ENGINE_DOCS, derived  # noqa: E402
+from test_engine_doc_copies import COPIES, ENGINE_DOCS, FILE_COPIES, derived  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -31,6 +32,12 @@ def main(argv: list[str] | None = None) -> int:
             stale.append(name)
             if not check:
                 path.write_text(want, encoding="utf-8")
+    for name, copy in FILE_COPIES.items():
+        want = (ROOT / name).read_bytes()
+        if not copy.is_file() or copy.read_bytes() != want:
+            stale.append(str(copy.relative_to(ROOT)))
+            if not check:
+                copy.write_bytes(want)
     print(("stale: " if check else "written: ") + (", ".join(stale) or "none"))
     return 1 if stale and check else 0
 

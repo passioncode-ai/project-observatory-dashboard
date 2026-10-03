@@ -175,6 +175,10 @@ def allowed_path(rel: Path) -> bool:
         # Runtime source is public; a runtime database or credential directory never is.
         if any(x.startswith(".env") or x in {"registry", "secrets", "raw", "backups", "logs"} for x in engine.parts):
             return False
+        # The tested dependency set ships in the wheel (a release's only asset besides SHA256SUMS),
+        # admitted by exact path: no other lock file belongs in the engine.
+        if str(engine) == "requirements-full.lock":
+            return True
         if engine.parts and engine.parts[0] == "store":
             return len(engine.parts) == 2 and (engine.suffix == ".py" or str(engine) == "store/schema.sql")
         if engine.suffix == ".sh":
