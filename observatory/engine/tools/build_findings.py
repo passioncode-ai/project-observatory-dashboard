@@ -2670,41 +2670,64 @@ def collect() -> list[dict]:
                                 f"AFTER the sighting. Verify old-version revocation and consumers before settlement.")
             return ""
 
+        # ONE FINDING PER SLOT, NOT PER SIGHTING. A slot seen twice is still
+        # one thing to revoke and one `settle` (it closes every open row of the
+        # slot at once), and a finding's id is `type:subject` — two rows of one
+        # slot used to raise two findings with one id, and the duplicate-id
+        # guard below then stopped the whole board build, so one ordinary
+        # second sighting hid every other finding. The oldest open sighting
+        # dates the finding; every sighting is listed in its detail.
+        by_secret: dict[str, list[dict]] = {}
         for r in rows:
             if r.get("id") in settled:
                 continue
-            age_d = hours_since(r.get("at") or "")
+            by_secret.setdefault(str(r.get("secret") or ""), []).append(r)
+        for secret, sightings in by_secret.items():
+            sightings.sort(key=lambda r: r.get("at") or "")
+            first = sightings[0]
+            # Legacy only when EVERY open sighting was closed by an old local
+            # rotate: one fresh sighting makes the slot critical again.
+            legacy = all(r.get("id") in legacy_rotated for r in sightings)
+            age_d = hours_since(first.get("at") or "")
             age_d = None if age_d is None else age_d / 24.0
-            _hint = _rotation_hint(r.get("secret") or "", r.get("at") or "")
+            _hint = _rotation_hint(secret, first.get("at") or "")
+            if len(sightings) == 1:
+                seen = (f"Recorded {first.get('at')}: the value was seen at "
+                        f"{first.get('where', 'an unrecorded place')}. ")
+            else:
+                seen = (f"{len(sightings)} sightings are recorded: "
+                        + "; ".join(f"{r.get('at')} at {r.get('where', 'an unrecorded place')}"
+                                    for r in sightings) + ". ")
             out.append({
-                "type": "secret.leaked_unrotated", "subject": f"secret:{r.get('secret')}",
-                "severity": "warning" if r.get("id") in legacy_rotated else "critical",
+                "type": "secret.leaked_unrotated", "subject": f"secret:{secret}",
+                "severity": "warning" if legacy else "critical",
                 **(titled("{secret} was seen leaking {n} days ago and was closed only by a local rotate",
-                           secret=r.get("secret"), n=int(f"{age_d:.0f}"))
-                    if age_d is not None and age_d >= 1 and r.get("id") in legacy_rotated else
+                           secret=secret, n=int(f"{age_d:.0f}"))
+                    if age_d is not None and age_d >= 1 and legacy else
                     titled("{secret} was seen leaking {n} days ago and has no recorded settlement",
-                           secret=r.get("secret"), n=int(f"{age_d:.0f}"))
+                           secret=secret, n=int(f"{age_d:.0f}"))
                     if age_d is not None and age_d >= 1 else
                     titled("{secret} was seen leaking and was closed only by a local rotate",
-                           secret=r.get("secret"))
-                    if r.get("id") in legacy_rotated else
+                           secret=secret)
+                    if legacy else
                     titled("{secret} was seen leaking and has no recorded settlement",
-                           secret=r.get("secret"))),
+                           secret=secret)),
                 "detail": (("An earlier version marked this leak settled when the local slot "
                             "was replaced; that records neither revocation nor consumer checks. "
-                            if r.get("id") in legacy_rotated else "")
-                           + f"Recorded {r.get('at')}: the value was seen at "
-                           f"{r.get('where', 'an unrecorded place')}. It remains "
+                            if legacy else "")
+                           + seen
+                           + "It remains "
                            f"potentially usable until the old version is revoked at its "
                            f"provider. A local replacement does not prove revocation "
                            f"or consumer verification. The register keeps names and "
                            f"places, never values." + _hint),
                 "action": (f"verify old-version revocation at the provider and the consumers; "
                            f"if a local slot needs replacement, use `python \"$(project-observatory full-path)/tools/vault.py\" rotate "
-                           f"{(r.get('secret') or '//').replace('/', ' ')}` first. "
+                           f"{(secret or '//').replace('/', ' ')}` first. "
                            f"Then record manual settlement with `python \"$(project-observatory full-path)/tools/vault.py\" settle "
-                           f"{(r.get('secret') or '//').replace('/', ' ')} --how \"…\" "
-                           f"--revocation-evidence \"…\" --consumer-evidence \"…\"`. "
+                           f"{(secret or '//').replace('/', ' ')} --how \"…\" "
+                           f"--revocation-evidence \"…\" --consumer-evidence \"…\"` "
+                           f"(it closes every open sighting of the slot). "
                            f"These references are manual attestations, not an automatic provider check."),
                 "evidence": [str(vault_leaks)]})
 
