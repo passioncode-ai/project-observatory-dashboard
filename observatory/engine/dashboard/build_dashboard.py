@@ -826,6 +826,12 @@ def build():
             "description": project.get("description", ""),
             "stack": project.get("stack", []),
             "folders": project.get("local_folders", []),
+            # A local-only project that IS a git repository: the row counted
+            # "0 repos · 1 folder" for a checkout the findings call "Repository
+            # with no remote", so it never said it was a repository at all.
+            "local_git": ("no-remote" if (project.get("local_only") or {}).get("unpublished")
+                          else "elsewhere" if int((project.get("local_only") or {}).get("commits") or 0) > 0
+                          else None),
             "last": project.get("last_activity_on", ""),
             "tier": project.get("activity_tier", ""),
             "note": project.get("canonical_page", "") if project.get("has_vault_note") else "",
@@ -2252,6 +2258,21 @@ const TIER_LABEL = {active: T("active"), cooling: T("cooling"), dormant: T("dorm
 // The registry's own enum words, in the reader's language; a value none of
 // these names (a curated override, a newer collector) is shown as it is.
 const LIFECYCLE_LABEL = {active: T("lifecycle@@active"), archived: T("lifecycle@@archived")};
+// DECLARED AND MEASURED, said as two facts. The lifecycle is what the registry
+// declares, the tier what the activity measured; printed bare side by side
+// they read "active · active" (and the same stutter in Russian) when they agree
+// and as noise when they do not. Agreement is said once; a disagreement
+// labels both, since it is the fact worth seeing.
+function stateLine(r) {
+  const declared = labelOf(LIFECYCLE_LABEL, r.lifecycle) || "";
+  const measured = TIER_LABEL[r.tier] || r.tier || "";
+  if (declared && declared === measured) return T("{state} (declared and measured)", {state: declared});
+  return [declared && T("declared {state}", {state: declared}),
+          measured && T("measured {state}", {state: measured})].filter(Boolean).join(" · ");
+}
+// What a local-only folder is, where the row counts it: a git checkout with
+// no remote, or with one on a host nothing here inventories.
+const LOCAL_GIT_LABEL = {"no-remote": T("git, no remote"), elsewhere: T("git, remote not inventoried")};
 const ANCHOR_LABEL = {repository: T("anchor@@repository"), "vault-folder": T("anchor@@notes-vault folder"),
                       "local-folder": T("anchor@@local folder"), organisation: T("anchor@@organisation")};
 const ROLE_LABEL = {site: T("role@@site"), app: T("role@@app"), admin: T("role@@admin"), api: T("role@@API"),
@@ -2354,12 +2375,12 @@ function row(r) {
   return `<tr data-project="${E(r.id)}">
     <td data-label="${T("Project")}"><div class="name"><a class="plink" href="${link}">${E(r.name)}</a></div>
       <div class="desc">${E(r.description) || `<span class="none">${T("No description")}</span>`}</div>
-      <div class="project-meta">${E(r.owner || T("Owner not stated"))} · ${E(labelOf(LIFECYCLE_LABEL, r.lifecycle) || T("status not stated"))}</div></td>
+      <div class="project-meta">${E(r.owner || T("Owner not stated"))} · ${E(r.lifecycle ? T("declared {state}", {state: labelOf(LIFECYCLE_LABEL, r.lifecycle)}) : T("status not stated"))}</div></td>
     <td data-label="${T("Activity")}"><div>${chip(TIER_LABEL[r.tier] || r.tier || T("activity@@not measured"))}</div>
       <div class="anchor mono">${E(r.last) || T("date not measured")}</div>${spark(r.weeks)}
       ${dirty ? chip(T("{n} repos need attention", {n: dirty}), "warn") : ""}</td>
     <td data-label="${T("Code and sites")}"><div class="resource-links">${repos}${sites}</div>
-      <a class="plink anchor" href="${link}">${T("{n} repos", {n: r.repos.length})} · ${T("{n} sites", {n: r.sites.length})} · ${T("{n} folders", {n: r.folders.length})}</a></td>
+      <a class="plink anchor" href="${link}">${T("{n} repos", {n: r.repos.length})} · ${T("{n} sites", {n: r.sites.length})} · ${T("{n} folders", {n: r.folders.length})}${r.local_git ? " (" + LOCAL_GIT_LABEL[r.local_git] + ")" : ""}</a></td>
     <td data-label="${T("Hosting")}">${(r.heroku || []).length ? hostingGroups(r.heroku) : `<span class="none">${T("No linked apps")}</span>`}</td>
     <td data-label="${T("Audience / 30 days")}">${traffic && traffic.users_30d != null
       ? `<span class="mono">${NUM(traffic.users_30d)}</span><div class="anchor">${T("sum across properties")}${traffic.unknown_properties ? " · " + T("partial") : ""}</div>`
@@ -2402,7 +2423,7 @@ function detail(id) {
   const gone = D.store_degraded
     ? `<p class="none">${E(T(D.store_degraded.text || D.store_degraded, D.store_degraded.args))}</p>` : "";
   box.innerHTML = `${closeHead(r.name)}
-    <p class="dmeta">${E(labelOf(ANCHOR_LABEL, r.anchor))} · ${E(labelOf(LIFECYCLE_LABEL, r.lifecycle))} · ${E(TIER_LABEL[r.tier] || r.tier || "")}
+    <p class="dmeta">${E(labelOf(ANCHOR_LABEL, r.anchor))} · ${E(stateLine(r))}
       · ${T("last activity")} ${E(r.last) || "—"}</p>
     ${r.description ? `<p class="project-description">${E(r.description)}</p>` : ""}
     <h3>${T("What it is made of")}</h3>
