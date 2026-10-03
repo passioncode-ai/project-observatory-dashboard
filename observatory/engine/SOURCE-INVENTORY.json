@@ -2885,8 +2885,8 @@
       "path": "tests/test_tick_repo.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ace92d3527ae6831665e11baf1c452ea2b045e80ff6917dd66c95a2c86eba93e",
-      "bytes": 26062
+      "export_sha256": "a378009fc9775837f365e80ace5fe8ae09084526ae8edbc8724058f7fc26a36a",
+      "bytes": 27435
     },
     {
       "path": "tests/test_tick_standdown.py",
@@ -3259,8 +3259,8 @@
     {
       "path": "tools/commit_projection.py",
       "source_sha256": "01d9eb2296bb221993f6de4f23c2ae9e982b3ec7b324e770d7f9e18e83ba1844",
-      "export_sha256": "faf87cca21cfa2b00f2cae381403347be228bb15791a73fb5ffaf9186e9f6774",
-      "bytes": 7610,
+      "export_sha256": "c13aad3b2e132a7abd3471322887386ba76e862124c45e8d57c3952e5c7c35bd",
+      "bytes": 7801,
       "python_comments_removed": 6,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,
@@ -3269,8 +3269,8 @@
     {
       "path": "tools/commit_registry.py",
       "source_sha256": "b53e05906f78b024ebc1afc6e9894de55677d48950350e11fbf1b1467e110e61",
-      "export_sha256": "da8473842a69558f48bd01ee2866f320aa083e023135be13669ee2e3300846e2",
-      "bytes": 11066,
+      "export_sha256": "d3f195cf70b406ff55e875d351f0ed41a86d8969742c85c52e6bc9a3677d4c6a",
+      "bytes": 11273,
       "python_comments_removed": 19,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,

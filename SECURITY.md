@@ -79,7 +79,9 @@ Observatory keeps no secret in the macOS Keychain and reads none from it. Vault
 slots, provider key files and the backup passphrase (`secrets/backup-passphrase`)
 are files with private modes. The credential-free remote probe (`git ls-remote`)
 empties git's credential-helper list for its own commands, so `osxkeychain` is never
-asked; a remote that wants a password is reported unreachable. The Mac app's
+asked; a remote that wants a password is reported unreachable. The scheduled commits of the
+registry and the wiki projection pass `commit.gpgsign=false`, so a user's signing setup
+(gpg's pinentry, an SSH signer) is never run unattended. The Mac app's
 dashboard view cancels every password and client-certificate challenge rather than
 let WebKit consult the login keychain. A tracked script that launches a
 Chromium-family browser must pass `--use-mock-keychain` and `--password-store=basic`

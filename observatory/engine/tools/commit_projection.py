@@ -32,7 +32,10 @@ LEASE_KEY = PROJECTION
 
 
 def git(*args: str, cwd: pathlib.Path) -> tuple[int, str]:
-    p = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=60)
+    # No signing, as in commit_registry: an unattended commit must not run a
+    # signer that can raise a passphrase or Keychain dialog.
+    p = subprocess.run(["git", "-c", "commit.gpgsign=false", *args], cwd=cwd,
+                       capture_output=True, text=True, timeout=60)
     return p.returncode, (p.stdout + p.stderr).strip()
 
 

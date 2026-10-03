@@ -44,7 +44,10 @@ IN_PROGRESS = ("MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD")
 
 
 def git(*args: str, cwd: pathlib.Path) -> tuple[int, str]:
-    p = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *args], cwd=cwd, capture_output=True, text=True, timeout=60)
+    # No signing: an unattended commit that runs gpg's pinentry or an SSH signer
+    # can put a passphrase or Keychain dialog in front of the operator.
+    p = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+                        "-c", "commit.gpgsign=false", *args], cwd=cwd, capture_output=True, text=True, timeout=60)
     return p.returncode, (p.stdout + p.stderr).strip()
 
 
