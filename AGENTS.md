@@ -154,13 +154,23 @@ tasks are the operator's and which a contributor can take.
    (`tests/test_version_consistency.py` fails until they agree), and add the `## X.Y.Z — date`
    section to `CHANGELOG.md`. A plugin change bumps `observatory-log` separately, in its three
    manifests and every `SKILL.md` (`tests/test_plugin_manifests.py`).
-2. Merge that pull request through the required checks, then tag the merge commit `vX.Y.Z`.
-3. Publish a GitHub release for the tag with the built wheel and `SHA256SUMS`; re-download the
-   asset and compare its digest with the one inspected by `tools/check_package.py`. On a Mac with
-   the maintainer's Developer ID, build the app from a full clone of the tag with
-   `OBSERVATORY_SIGN_IDENTITY` set (a shallow clone numbers the bundle 1), run
-   `macos/scripts/notarize.sh`, attach `ProjectObservatory-<version>-macos.zip` and add its line to
-   `SHA256SUMS` ([docs/macos/README.md](docs/macos/README.md#signing)).
+2. Merge that pull request through the required checks, then push the annotated tag `vX.Y.Z` on
+   the merge commit.
+3. The tag starts `.github/workflows/release.yml`:
+   - It builds the wheel and the Mac app.
+   - It signs the app with the organization's CI Developer ID, notarizes and staples it.
+   - It attests every file (Sigstore), writes `SHA256SUMS` and `SHA256SUMS.asc` (the
+     organization's GPG key), and publishes the release.
+
+   The signing jobs and the publish job wait for an approval in the `release` environment,
+   from `release-approvers` but never from the tag's author
+   ([organization release signing](https://github.com/passioncode-ai/.github/blob/main/release-signing/README.md)).
+   Then:
+   - Re-download the assets and run `shasum -a 256 -c SHA256SUMS` and
+     `gh attestation verify <file> -R passioncode-ai/project-observatory-dashboard`.
+   - To rehearse first, push `vX.Y.Z-rc.N` and run
+     `gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false`.
+   - A locally signed build (`build-app.sh` + `notarize.sh`) is for debugging and is never attached.
 4. Every machine then runs `project-observatory full update --apply` (without `--apply` it only previews).
 5. Record the release in `docs/runs/<date>-<slug>/`.
 
