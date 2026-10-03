@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """A control plane for credentials that never carries one.
 
-    tools/keyserver.py            serve on 127.0.0.1, print the URL, stay up
-    tools/keyserver.py --port N   a different port
-    tools/keyserver.py --once     answer one request and exit (for tests)
+    T="$(project-observatory full-path)/tools"   # the installed engine's tools
+    python "$T/keyserver.py"            serve on 127.0.0.1, print the URL, stay up
+    python "$T/keyserver.py" --port N   a different port
+    python "$T/keyserver.py" --once     answer one request and exit (for tests)
 
 WHY THIS EXISTS AND WHY IT IS NARROW. The dashboard is a file read from
 `file://`: it can show what is true and it cannot change anything. Minting,
@@ -717,10 +718,13 @@ def main(argv: list[str]) -> int:
         return 2
     with Server((a.host, a.port), Handler, tok) as srv:
         shown_host = f"[{a.host}]" if a.host == "::1" else a.host
+        # FLUSHED: with stdout redirected to a file or a pipe these lines sat in
+        # a block buffer while the server ran and were lost when it was stopped,
+        # so a supervisor's log never said where the page or the journal was.
         print(f"keyserver on http://{shown_host}:{srv.server_address[1]} — open it; the page carries "
-              f"its own token")
-        print(f"  audit: {AUDIT}")
-        print(f"  refused by design: vault put and rotate — a value travels on stdin")
+              f"its own token", flush=True)
+        print(f"  audit: {AUDIT}", flush=True)
+        print(f"  refused by design: vault put and rotate — a value travels on stdin", flush=True)
         if a.once:
             srv.handle_request()
         else:

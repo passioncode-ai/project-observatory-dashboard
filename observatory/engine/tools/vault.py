@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """Project secrets: one door in, one door out, and a leak is a recorded fact.
 
-    tools/vault.py put <project> <env> <NAME>          # value on stdin, only
-    tools/vault.py list [project] [env]                # names and metadata, never values
-    tools/vault.py inject <project> <env> <dir>        # write <dir>/.env, only if git ignores it
-    tools/vault.py rotate <project> <env> <NAME>       # new value on stdin; old is archived
-    tools/vault.py leak <project> <env> <NAME> --where "…"   # mark leaked, MUST say where
-    tools/vault.py settle <project> <env> <NAME> --how "…"   # close a leak, with evidence
-    tools/vault.py moved <project> <env> <NAME> --how "…"    # record a movement done elsewhere
-    tools/vault.py movements [project]                 # the movement journal
-    tools/vault.py remove <project> <env> <NAME> [--retired] [--force]  # delete a slot, or only its archives
-    tools/vault.py leaks                               # the register, oldest unrotated first
-    tools/vault.py backup                              # run the store's encrypted backup now
+    T="$(project-observatory full-path)/tools"          # the installed engine's tools
+    python "$T/vault.py" put <project> <env> <NAME> < file   # value on stdin, only
+    python "$T/vault.py" list [project] [env]                # names and metadata, never values
+    python "$T/vault.py" inject <project> <env> <dir>        # write <dir>/.env, only if git ignores it
+    python "$T/vault.py" rotate <project> <env> <NAME>       # new value on stdin; old is archived
+    python "$T/vault.py" leak <project> <env> <NAME> --where "…"   # mark leaked, MUST say where
+    python "$T/vault.py" settle <project> <env> <NAME> --how "…"   # close a leak, with evidence
+    python "$T/vault.py" moved <project> <env> <NAME> --how "…"    # record a movement done elsewhere
+    python "$T/vault.py" movements [project]                 # the movement journal
+    python "$T/vault.py" remove <project> <env> <NAME> [--retired] [--force]  # delete a slot, or only its archives
+    python "$T/vault.py" leaks                               # the register, oldest unrotated first
+    python "$T/vault.py" backup                              # run the store's encrypted backup now
 
 WHERE VALUES LIVE, AND WHY NOT A NEW STORE. Values go under an existing
 credential store whose whole job is holding plaintext credentials safely — a
@@ -719,23 +720,43 @@ def cmd_backup(a) -> int:
     return p.returncode
 
 
+#: What each positional means, shown by every subcommand's --help.
+PROJECT_HELP = ("the project's folder name (e.g. alpha-web); its registry id "
+                "(project:<slug> or the bare slug) is accepted and normalised to that folder")
+ENV_HELP = "local, stage or prod"
+NAME_HELP = "the variable, UPPER_SNAKE_CASE"
+
+
+def _slot_args(p, *, optional: bool = False) -> None:
+    if optional:
+        p.add_argument("project", nargs="?", help=PROJECT_HELP)
+        p.add_argument("env", nargs="?", help=ENV_HELP)
+        return
+    p.add_argument("project", help=PROJECT_HELP)
+    p.add_argument("env", help=ENV_HELP)
+    p.add_argument("name", help=NAME_HELP)
+
+
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description=(__doc__ or "Manage private secret slots and movement records").splitlines()[0])
+    doc = (__doc__ or "Manage private secret slots and movement records").strip("\n")
+    usage = doc.split("\n\n", 2)[1] if doc.count("\n\n") >= 1 else ""
+    ap = argparse.ArgumentParser(description=doc.splitlines()[0], epilog=usage,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("put");    p.add_argument("project"); p.add_argument("env"); p.add_argument("name"); p.add_argument("--force", action="store_true")
-    p = sub.add_parser("rotate"); p.add_argument("project"); p.add_argument("env"); p.add_argument("name")
-    p = sub.add_parser("leak");   p.add_argument("project"); p.add_argument("env"); p.add_argument("name"); p.add_argument("--where", required=True)
-    p = sub.add_parser("settle"); p.add_argument("project"); p.add_argument("env"); p.add_argument("name"); p.add_argument("--how", required=True)
+    p = sub.add_parser("put");    _slot_args(p); p.add_argument("--force", action="store_true")
+    p = sub.add_parser("rotate"); _slot_args(p)
+    p = sub.add_parser("leak");   _slot_args(p); p.add_argument("--where", required=True)
+    p = sub.add_parser("settle"); _slot_args(p); p.add_argument("--how", required=True)
     p.add_argument("--revocation-evidence", help="reference to verified old-version revocation; no secret values")
     p.add_argument("--consumer-evidence", help="reference to consumer checks, or evidence that none remain; no secret values")
-    p = sub.add_parser("moved");  p.add_argument("project"); p.add_argument("env"); p.add_argument("name"); p.add_argument("--how", required=True); p.add_argument("--at", help="the provider: heroku, digitalocean, cloudflare, a dashboard"); p.add_argument("--settle", action="store_true", help="also settle an open leak of it")
+    p = sub.add_parser("moved");  _slot_args(p); p.add_argument("--how", required=True); p.add_argument("--at", help="the provider: heroku, digitalocean, cloudflare, a dashboard"); p.add_argument("--settle", action="store_true", help="also settle an open leak of it")
     p.add_argument("--revocation-evidence", help="required with --settle: old-version revocation evidence")
     p.add_argument("--consumer-evidence", help="required with --settle: consumer verification evidence")
-    p = sub.add_parser("movements"); p.add_argument("project", nargs="?"); p.add_argument("--last", type=int)
+    p = sub.add_parser("movements"); p.add_argument("project", nargs="?", help=PROJECT_HELP); p.add_argument("--last", type=int)
     p = sub.add_parser("leaks");  p.add_argument("--check", action="store_true")
-    p = sub.add_parser("list");   p.add_argument("project", nargs="?"); p.add_argument("env", nargs="?")
-    p = sub.add_parser("inject"); p.add_argument("project"); p.add_argument("env"); p.add_argument("dir")
-    p = sub.add_parser("remove"); p.add_argument("project"); p.add_argument("env"); p.add_argument("name")
+    p = sub.add_parser("list");   _slot_args(p, optional=True)
+    p = sub.add_parser("inject"); p.add_argument("project", help=PROJECT_HELP); p.add_argument("env", help=ENV_HELP); p.add_argument("dir", help="the project directory whose git-ignored .env is written")
+    p = sub.add_parser("remove"); _slot_args(p)
     p.add_argument("--retired", action="store_true", help="remove only the archives rotation left; keep the slot")
     p.add_argument("--force", action="store_true", help="remove even while a leak of it is open")
     sub.add_parser("backup")

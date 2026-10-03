@@ -74,6 +74,31 @@ class VaultBoundaryTests(unittest.TestCase):
             self.assertNotIn(hidden, text)
         self.assertIn("1 name(s)", text)
 
+    def test_help_names_the_installed_path_and_stdin_from_a_file(self):
+        """The doors' --help said `./tools/…` (a checkout path an installed
+        engine does not have) and `pbpaste | ./tools/openrouter.py stash`,
+        contradicting the rule that a value arrives from a protected file."""
+        for tool in ("vault", "use_secret", "keyserver", "openrouter", "cloudflare", "revoke_key"):
+            with self.subTest(tool=tool):
+                p = subprocess.run([sys.executable, str(ROOT / "tools" / f"{tool}.py"), "--help"],
+                                   cwd=ROOT, env=os.environ.copy(), capture_output=True, text=True, timeout=60)
+                self.assertEqual(p.returncode, 0, p.stderr[-300:])
+                self.assertNotIn("./tools/", p.stdout)
+                self.assertNotIn("pbpaste", p.stdout)
+                self.assertIn("project-observatory full-path", p.stdout)
+        p = subprocess.run([sys.executable, str(ROOT / "tools/vault.py"), "put", "--help"], cwd=ROOT,
+                           env=os.environ.copy(), capture_output=True, text=True, timeout=60)
+        self.assertIn("folder name", p.stdout)
+        self.assertIn("UPPER_SNAKE", p.stdout)
+
+    def test_revoke_key_without_a_key_says_how_to_install_one(self):
+        p = subprocess.run([sys.executable, str(ROOT / "tools/revoke_key.py"), "--list"], cwd=ROOT,
+                           env={**os.environ, "OBSERVATORY_STATE": str(self.root / "state")},
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("< ", p.stderr, "the install step: the key file redirected to stdin")
+        self.assertIn("project-observatory full-path", p.stderr)
+
     def test_cli_help_survives_exported_empty_module_docstring(self):
         output = io.StringIO()
         with patch.object(vault, "__doc__", ""), contextlib.redirect_stdout(output):

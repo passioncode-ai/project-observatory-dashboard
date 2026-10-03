@@ -357,6 +357,39 @@ class KeyserverBoundaryTests(unittest.TestCase):
         code, _, raw = self.request(path="/api/no-such-action")
         self.assertIn(b"no-such-action", raw, "a plain identifier is still quoted")
 
+    def test_startup_lines_reach_a_redirected_stdout_at_once(self):
+        """The URL and audit-path lines sat in a block buffer when stdout was a
+        file or a pipe, and were lost when the server was stopped."""
+        import select
+        import subprocess
+        state = self.root / "state"
+        env = {**os.environ, "OBSERVATORY_STATE": str(state)}
+        init = subprocess.run([sys.executable, str(ROOT / "tools/runtime_identity.py"), "init",
+                               "keyserver-token"], env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(init.returncode, 0, init.stderr)
+        proc = subprocess.Popen([sys.executable, str(ROOT / "tools/keyserver.py"), "--port", "0"],
+                                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            seen, fd = b"", proc.stdout.fileno()
+            import time
+            deadline = time.monotonic() + 15
+            while b"audit:" not in seen and time.monotonic() < deadline:
+                ready, _, _ = select.select([fd], [], [], max(0.0, deadline - time.monotonic()))
+                if not ready:
+                    break
+                chunk = os.read(fd, 4096)
+                if not chunk:
+                    break
+                seen += chunk
+            text = seen.decode()
+            self.assertIn("keyserver on http://127.0.0.1:", text, "nothing reached stdout while the server ran")
+            self.assertIn("audit:", text)
+        finally:
+            proc.terminate()
+            proc.wait(timeout=10)
+            proc.stdout.close()
+            proc.stderr.close()
+
     def test_explicit_reveal_is_inventory_scoped_and_audited_without_value(self):
         keyserver.paths.SCRATCH.mkdir()
         keyserver.paths.DATA.mkdir()
