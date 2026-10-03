@@ -367,6 +367,36 @@ def purge_projections(conn: sqlite3.Connection) -> dict:
     return receipts
 
 
+def migration_backup_dir() -> pathlib.Path:
+    """Where `store/compatibility.backup` leaves a copy of the database before each schema upgrade."""
+    return paths.DB.parent / "migration-backups"
+
+
+def prune_migration_backups(directory: pathlib.Path, *, keep: int, days: int,
+                            now: float | None = None, dry_run: bool = False) -> list[pathlib.Path]:
+    """Remove pre-upgrade database copies past their horizon; return what went (or would go).
+
+    These copies were "retained until explicit cleanup", and nothing ever cleaned:
+    40 MB of four-week-old copies were measured on 2026-10-03 (lifecycle LC-12,
+    "retention is enforced automatically"). A copy goes only when it is BOTH beyond
+    the newest `keep` and older than `days`: the copy taken before the latest
+    upgrade is the one a rollback would want, and a burst of upgrades in one week
+    keeps all of its copies until they age. Symbolic links are never followed."""
+    import time as _time
+    directory = pathlib.Path(directory)
+    if directory.is_symlink() or not directory.is_dir():
+        return []
+    copies = sorted((p for p in directory.iterdir()
+                     if p.is_file() and not p.is_symlink() and ".before-upgrade-" in p.name),
+                    key=lambda p: p.stat().st_mtime, reverse=True)
+    horizon = (now if now is not None else _time.time()) - days * 86400
+    out = [p for p in copies[max(keep, 0):] if p.stat().st_mtime < horizon]
+    if not dry_run:
+        for p in out:
+            p.unlink(missing_ok=True)
+    return out
+
+
 def report(**fields) -> None:
     """Write the receipt where a reader can find it, on every path.
 
@@ -408,6 +438,10 @@ def cmd_plan(conn: sqlite3.Connection) -> int:
         "SELECT count(*) FROM ledger WHERE state IN"
         f" ({','.join('?' * len(cfg['ledger']['never']))})",
         tuple(cfg["ledger"]["never"])).fetchone()[0]
+    old = prune_migration_backups(migration_backup_dir(), keep=cfg.get("migration_backups_keep", 2),
+                                  days=cfg.get("migration_backups_days", 30), dry_run=True)
+    print(f"\nmigration backups — would be removed: {len(old)}"
+          + (f" ({', '.join(p.name for p in old[:5])})" if old else ""))
     print(f"\nexempt regardless of age: {exempt} operator-owned revision(s), "
           f"{protected} in a protected state")
     print("nothing was written — this is `plan`")
@@ -476,6 +510,11 @@ def cmd_apply(conn: sqlite3.Connection) -> int:
             conn, cutoff_iso=cutoff(int(cfg["ledger"].get("checkpoint_closed_days", 30))))
               if _has_table(conn, "workflow_leases") else 0)
 
+    # Pre-upgrade database copies are files beside the store, not rows: bounded
+    # here too, so the store's footprint has one owner.
+    migration = prune_migration_backups(migration_backup_dir(), keep=cfg.get("migration_backups_keep", 2),
+                                        days=cfg.get("migration_backups_days", 30))
+
     # THE BYTES, after the rows. Only when something was actually removed: a
     # VACUUM on every tick would rewrite 23 MB forty-eight times a day to
     # compact nothing.
@@ -492,12 +531,12 @@ def cmd_apply(conn: sqlite3.Connection) -> int:
     # tombstone; the volatile deletes and the projection receipts had nothing.
     report(tombstoned=tombstoned, records=records, events=ev, observations=ob,
            deltas=dl, metrics=mt, idempotency=ik, workflow_leases=wl, receipts=receipts,
-           scrub=scrubbing)
+           scrub=scrubbing, migration_backups=[p.name for p in migration])
 
     print(f"tombstoned {records} record(s), {tombstoned} revision(s) — every row retained")
     print(f"deleted: {ev} event(s), {ob} observation(s), {dl} consumed delta(s), "
           f"{mt} metric row(s), {ik} idempotency answer(s), {wl} lease row(s) of closed "
-          f"workflows")
+          f"workflows, {len(migration)} old migration backup(s)")
     print(f"file scrub: {scrubbing['detail']}")
     bad: list[str] = []
     if any(r.get("status") != "absent" for r in receipts.values()):

@@ -674,8 +674,8 @@
     {
       "path": "defaults/retention.json",
       "source_sha256": "de9b1ccafe752c656b664ab183b346c0725a7adcaa97f7daf206feba9d69eb6d",
-      "export_sha256": "833a219a7e9e1d753badb9a20ddfc19b225f1520f0d00752e621b52dc3201919",
-      "bytes": 769,
+      "export_sha256": "b38fe6a36e1f5709475864d3606961a0dbd3dda2fc82d1c02362cfcd01e1934a",
+      "bytes": 832,
       "upstream_modified": true
     },
     {
@@ -1434,8 +1434,8 @@
     {
       "path": "store/compatibility.py",
       "source_sha256": "d3ed7b3502649639bb30d0872dc319183168718a883c392249641fc16e0bec00",
-      "export_sha256": "d3ed7b3502649639bb30d0872dc319183168718a883c392249641fc16e0bec00",
-      "bytes": 3764,
+      "export_sha256": "9bc89b05aceef5339b8096760d9e7cb2b9c49f7828ef79242e3d36c364197903",
+      "bytes": 3858,
       "python_comments_removed": 0,
       "python_docstrings_removed": 6,
       "tool_descriptions_retained": 0,
@@ -1484,8 +1484,8 @@
     {
       "path": "store/retention.py",
       "source_sha256": "18bfbd936b60a23c073945640fce30e6609e72600660bb660a47c93bae37f995",
-      "export_sha256": "4959fad99e3ec35371e40bfbed6e1691e7e0e6d8add4ccdd3d59058bdd93a8fe",
-      "bytes": 28765,
+      "export_sha256": "2c1c0b45440961f82eb08648a5f6a50340e9306c89fe228e569d21fb4d917de2",
+      "bytes": 31072,
       "python_comments_removed": 93,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -2389,8 +2389,8 @@
       "path": "tests/test_lifecycle.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f8d53b7bee53b174b4d68f134265a6a030329c81053929dffde1dfad098c8c8a",
-      "bytes": 27024
+      "export_sha256": "b91ca46a6d3276d422761449da449baf99fa3e00925aa64fe5d4fa688ba2719c",
+      "bytes": 29114
     },
     {
       "path": "tests/test_lifecycle_watch.py",

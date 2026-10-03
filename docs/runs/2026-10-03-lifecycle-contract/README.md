@@ -56,8 +56,12 @@ a failed step in `tick.json` and on the board.
 - **F12 / H5 — ad hoc signed app (LC-05).** Closed on `main` by the notarisation work
   (`macos/scripts/notarize.sh`, `.github/workflows/release.yml`), merged into this branch; this
   run signs nothing.
-- **F9 — 200 MB of pre-migration data.** One machine's leftovers outside this repository; a
-  retention item, not a lifecycle defect of the code.
+- **F9 — 200 MB of pre-migration data.** The engine's part is closed in the follow-up pull
+  request: `store/retention.py` now owns `store/migration-backups/` (the newest two copies and
+  any younger than 30 days stay; `migration_backups_keep`/`_days` in `retention.json`), tested by
+  `test_lifecycle.MigrationBackupsAreRetained`. The other 162 MB is one machine's copy of the
+  private predecessor's store, outside any workspace this engine owns: deleting it is the
+  operator's call, not a retention rule.
 - **F10 — six interpreter starts per agent turn in the plugin hook.** A plugin change with its
   own version bump (`observatory-log`); not in this packet.
 - **Server `ProcessType`.** The audit suggested `Adaptive`/`Background`; it stays `Standard`
@@ -87,6 +91,13 @@ signed by this run), `claude plugin validate --strict` (no plugin file changed).
 branch merged `main` (`baa4664`) — no force-push — keeping both sides of `run_portable.py`,
 `locales/ru.json` and `docs/HANDOFF.md`, and regenerated
 `observatory/engine/SOURCE-INVENTORY.json`. The pull request squash-merges into a linear `main`.
+
+## Follow-up (same day)
+
+Branch `claude/lifecycle-followups`: migration-backup retention (F9, above), and two watchdog
+tests and one probe test given room for a loaded machine (a 1 s limit could cut bash before it
+planted the child the test then looks for). The `CHANGELOG.md` entry for this work is left to
+the release run, which holds that file's lease; the text it needs is in the pull request.
 
 ## Next task
 
