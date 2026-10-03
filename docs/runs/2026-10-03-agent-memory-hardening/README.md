@@ -35,7 +35,17 @@
 
 ## Checks run
 
-CHECKS_PLACEHOLDER
+Run in this worktree on Python 3.14.7, 2026-10-03:
+
+| Command | Result |
+|---|---|
+| `project-observatory full check` | 201 of 203 suites passed in the full run (6,118 assertions, 695 unittest cases, 14 skips). `handed_commands` failed because two messages named the `full workflow` command, which does not exist until W2; the messages were reworded. `backup_vault` timed out under the load of a parallel run. Both were rerun alone and pass (`backup_vault` in 105 s). |
+| `tests/test_workflow_memory.py` | 44 cases pass |
+| `tests/test_search_path.py` | 45 assertions pass, including `test_a_superseded_revision_is_never_served` |
+| `python -m unittest discover -s tests` | 117 pass |
+| `python3.11 -m compileall -q observatory` | passes |
+
+Hosted CI runs on the pull request; this record does not claim it.
 
 ## Next task
 

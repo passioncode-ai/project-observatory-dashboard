@@ -708,8 +708,8 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
     that should hand over often cannot — only for `limit`, `crash` or
     `restart`, only once the executor has been silent for `SILENCE_SECONDS`,
     and no more than one offer per `OFFER_INTERVAL_SECONDS`. `force` is the
-    operator's override from a terminal (`project-observatory full workflow
-    handoff --force`) and is recorded in the pack; the MCP tools never pass it.
+    operator's override, for a terminal command and never passed by the MCP
+    tools, and it is recorded in the pack as `operator-force`.
 
     Creating it does not take the workflow away: the current lease stays in
     force until the pack is accepted, and an offer nobody accepts lapses after

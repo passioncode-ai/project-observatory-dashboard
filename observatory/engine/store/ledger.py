@@ -469,7 +469,7 @@ def tombstone(conn: sqlite3.Connection, memory_id: str, *, reason: str,
         # checkpoint to carry). Close the workflow first, then erase.
         raise LedgerError(
             f"{memory_id} is the checkpoint of open workflow {row['workflow_id']}; close the "
-            f"workflow first (`project-observatory full workflow close`), then erase it")
+            f"workflow first (a final checkpoint with `close`), then erase it")
     revisions = [r["revision"] for r in history(conn, memory_id)]
     now = _now()
     with conn:
