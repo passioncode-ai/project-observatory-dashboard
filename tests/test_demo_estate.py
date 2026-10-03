@@ -36,10 +36,37 @@ class DemoEstate(unittest.TestCase):
             self.assertIn("Atlas Billing", projects)
             self.assertIn("northwind-labs", projects)
             self.assertNotIn(str(real), page, "the demo read the invoking user's workspace")
-            self.assertIn(str(out / "home"), page)
         refused = subprocess.run([sys.executable, str(ROOT / "tools/demo_estate.py"), str(base / "demo-en")],
                                  env=env, capture_output=True, text=True, timeout=60)
         self.assertEqual(refused.returncode, 2, "a non-empty output directory is refused")
+
+
+    def test_no_page_carries_the_builders_home_or_workspace(self):
+        """The demo exists for screenshots, and its empty states printed the
+        builder's machine: `configure sources mcp_config_root '<$HOME>'` on the
+        MCP page and `OBSERVATORY_HOME='<OUT>/home'` in the Heroku, Traffic and
+        MCP commands, against the module's own promise that nothing is read from
+        the machine running it. Built here under a distinctive HOME, and every
+        page is searched for it and for the output directory."""
+        base = Path(tempfile.mkdtemp(prefix="observatory-demo-paths-")).resolve()
+        self.addCleanup(shutil.rmtree, base, True)
+        home = base / "builder-home-q7zx"
+        home.mkdir()
+        out = base / "demo-out-k3wv"
+        env = {**os.environ, "HOME": str(home), "OBSERVATORY_HOME": str(home / "workspace")}
+        env.pop("OBSERVATORY_LOCALE", None)
+        done = subprocess.run([sys.executable, str(ROOT / "tools/demo_estate.py"), str(out)],
+                              env=env, capture_output=True, text=True, timeout=300)
+        self.assertEqual(done.returncode, 0, done.stderr[-600:])
+        pages = sorted((out / "pages").iterdir()) + [out / "page.html"]
+        self.assertGreater(len(pages), 5)
+        needles = {"builder-home-q7zx", "demo-out-k3wv", str(base)}
+        for page in pages:
+            text = page.read_text(encoding="utf-8", errors="replace")
+            for needle in needles:
+                self.assertNotIn(needle, text, f"{page.name} carries {needle!r}")
+        mcp = (out / "pages/mcp.html").read_text(encoding="utf-8")
+        self.assertIn("project-observatory full", mcp)
 
 
 if __name__ == "__main__":

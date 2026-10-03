@@ -613,6 +613,27 @@ def history_gap(project: dict, repos: list[dict], horizon_days: int | None,
             "args": {"date": newest[:10], "command": "project-observatory full local"}}
 
 
+def runtime_paths() -> dict:
+    """The paths the page's copy-a-command buttons are built from.
+
+    A DEMO BUILD CARRIES NONE. `tools/demo_estate.py` renders the real pages
+    over a fictional estate for screenshots, and these paths are the builder's
+    machine: its home in the MCP empty state and its workspace in every
+    `OBSERVATORY_HOME=…` command, visible text in a picture meant for strangers.
+    With `OBSERVATORY_DEMO=1` the block is empty and the page falls back to the
+    neutral spellings it already has: `project-observatory full …` with no
+    workspace, `python3`, paths relative to the engine, and `"$HOME"`.
+    """
+    configured = bool((__import__("configuration").load().get("sources") or {}).get("projects"))
+    if os.environ.get("OBSERVATORY_DEMO") == "1":
+        return {"projects_configured": configured}
+    return {"projects": str(paths.DATA),
+            "secrets": str(paths.source_path("secret_store", paths.SECRETS)),
+            "engine": str(paths.ROOT), "home": str(paths.HOME), "python": sys.executable,
+            "scratch": str(paths.SCRATCH), "user_home": str(Path.home()),
+            "projects_configured": configured}
+
+
 def build():
     pdoc, rdoc = load("projects.json"), load("repositories.json")
     projects, repos = pdoc["projects"], {r["id"]: r for r in rdoc["repositories"]}
@@ -966,7 +987,7 @@ def build():
     # opening one. Deciding still needs the terminal — `tools/review.py` refuses
     # a write without one on purpose — but a queue nobody can look at is a queue
     # nobody works (audit 2026-09-09).
-    PAYLOAD = {"runtime": {"projects": str(paths.DATA), "secrets": str(paths.source_path("secret_store", paths.SECRETS)), "engine": str(paths.ROOT), "home": str(paths.HOME), "python": sys.executable, "scratch": str(paths.SCRATCH), "user_home": str(Path.home()), "projects_configured": bool((__import__("configuration").load().get("sources") or {}).get("projects"))}, "rows": rows, "stats": stats, "owners": owners, "dups": dups,
+    PAYLOAD = {"runtime": runtime_paths(), "rows": rows, "stats": stats, "owners": owners, "dups": dups,
                           "queue": store.get("queue") or [],
                           "digest": store.get("digest"),
                           "health": store["health"], "store_degraded": store["degraded"],
@@ -1684,7 +1705,8 @@ __MACHINE__
 </footer>
 
 <script>
-// THE DATA. `__DATA__` is replaced by the builder with the JSON payload; the
+// THE DATA. The placeholder below is replaced by the builder with the JSON
+// payload (naming it here put a second copy of the payload in this comment); the
 // runtime block carries the paths commands on this page are built from.
 const PAGE = "__PAGE__";
 const PAGE_TITLE = "__PAGE_TITLE__";
@@ -3385,7 +3407,7 @@ function renderMcp() {
   const out = document.getElementById("out");
   if (!D.mcp) {
     out.innerHTML = notScanned(T("MCP was not scanned. Point it at your home, switch it on and scan:"),
-      [fullCommand("configure sources mcp_config_root", shellArg(RUNTIME.user_home || "$HOME")),
+      [fullCommand("configure sources mcp_config_root", RUNTIME.user_home ? shellArg(RUNTIME.user_home) : '"$HOME"'),
        fullCommand("configure integrations mcp true"), fullCommand("scan-mcp")]);
     return;
   }
