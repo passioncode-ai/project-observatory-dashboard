@@ -137,6 +137,22 @@ def test_every_route_answers_and_none_serves_a_value() -> None:
         code, err = get("/nope")
         check("an unknown route is 404 with the route list", code == 404
               and "/health" in json.dumps(err), str(err)[:120])
+        # HEAD was 501 (`curl -I` on any page): a link checker or an uptime
+        # probe saw the server as broken. Same status and headers as GET, no body.
+        for path, want in (("/", 200), ("/health", 200), ("/nope", 404)):
+            c = http.client.HTTPConnection("127.0.0.1", PORT, timeout=5)
+            c.request("HEAD", path)
+            r = c.getresponse()
+            body = r.read()
+            c.close()
+            check(f"HEAD {path} answers {want} like GET, with no body",
+                  r.status == want and body == b"" and r.getheader("Content-Length") not in (None, "0"),
+                  f"{r.status} {r.getheader('Content-Length')} {body[:60]!r}")
+        c = http.client.HTTPConnection("127.0.0.1", PORT, timeout=5)
+        c.request("HEAD", "/")
+        length = c.getresponse().getheader("Content-Length")
+        c.close()
+        check("and its Content-Length is the GET body's", length == str(len(page)), f"{length} vs {len(page)}")
         c = http.client.HTTPConnection("127.0.0.1", PORT, timeout=5)
         c.request("POST", "/health")
         check("POST is 405 — this server changes nothing", c.getresponse().status == 405)
