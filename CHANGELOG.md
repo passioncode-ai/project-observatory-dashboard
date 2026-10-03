@@ -3,6 +3,61 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+Three audit-and-fix runs over 0.12.0 (2026-10-03); the findings, the checks and what is still
+open are in `docs/reports/2026-10-03-observatory-audit-run-{1,2,3}/README.md`. The release that
+ships this section also bumps the `observatory-log` plugin, whose hook and skill text changed.
+
+### Changed
+
+- **Every engine git call goes through one hardened door** (`safe_git.py`): no credential helper,
+  askpass, pager, fsmonitor, hook, signer, external diff, textconv or filter driver runs, only the
+  https, http, ssh, git and file transports are allowed, and ssh runs in BatchMode. Plain values
+  of your git config (`url.*.insteadOf`, `safe.directory`, excludes, proxies) still apply. A
+  consequence: a collector sees an LFS file as its pointer. SECURITY.md lists what remains.
+- **The wheel carries the tested dependency lock**; README → Install is two steps (the wheel, then
+  its `[full]` extra under that lock), and `full update --apply` installs with it.
+- **A vault `PROJECT` is the project's folder name**; a registry id (`project:local-alpha-web`) or
+  name is accepted and normalised to that folder, and two projects claiming one string are refused.
+- **`full agent install` checks that Claude Code really installed the plugin** before saying so,
+  and `uninstall` leaves `settings.json` as it was before the install.
+- **No key is not "ready"**: `model_status` is `no-key`, `next` names `install_key.py`, and doctor
+  and `assistant status` show where the key comes from (an inherited `OPENROUTER_API_KEY` too).
+- **Bare `observatory` without a workspace exits 2** (it printed its guidance and exited 0).
+- **The registry guard** refuses a swing over ±25% only above a floor (more than 5 projects added
+  or more than 1 lost), so a small estate can grow; an empty registry is always refused.
+- **Every `full <command> --help` prints help and runs nothing**, `full google --force` and
+  `full plugins --only ID --force` are accepted, and doctor lists every known setting.
+- **PassionCode design system 1.1.0**: the dark control edge is `#6f5e77` (3:1 on every surface),
+  on the dashboard, the website and the Mac app.
+- **The Mac app**: one dashboard window; a window reopened after a workspace change shows that
+  workspace; Start Server is offered only where it can start; no model or budget is a named step;
+  the assistant and Settings in the dashboard's tones; ⌥⌘↑/↓ walk the conversations.
+- `configure model chain` and `configure budget` set what the assistant needs; `vault.py remove`
+  removes a slot or its retired archives on the record.
+
+### Fixed
+
+- **Keychain and prompts:** `git ls-remote`, scheduled commits, the remotes probe (a `gcrypt::`
+  remote started its helper), collectors and the Stop hook could run a credential helper, signer,
+  hook or filter of the user's git config; the dashboard window cancels every password or
+  certificate challenge.
+- **Lost work:** `full cleanup --apply --include manual` could remove a dirty worktree after saving
+  an empty or unappliable patch; it now proves the patch applies first.
+- **Keys:** a second sighting of one leaked slot stopped the whole board; a value typed as a name,
+  owner or note reached the registry and the pages; the keyserver's leak route could be turned into
+  vault options; refusals over MCP and the keyserver quoted the caller's value; a vault slot
+  reached the Keys page only after an OpenRouter scan; a key with no limit read as spent.
+- **New user:** `full local` with no projects source ended in a traceback; the first board said the
+  dashboard was unverified; a folder whose remote is on another host had no history and its
+  unpushed commits were reported nowhere; seven handed-over commands were refused by the step
+  runner; messages named source-tree paths; a missing `[full]` extra was blamed on the interpreter.
+- **Dashboard:** keyboard focus was lost after a sort or a reset; the project panel said "no
+  commits" for a project with commits; empty pages gave no command; demo pages carried the
+  builder's paths; the server answered HEAD with 501; the Russian copy had meaning errors.
+- **CLI:** a bare `full open --stop` looked on the default port, not this workspace's.
+
 ## 0.12.0 — 2026-10-02
 
 A minor release: the Mac app opens on the dashboard, has its icon, always comes back to a window,
