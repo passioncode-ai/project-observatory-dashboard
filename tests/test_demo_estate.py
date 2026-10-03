@@ -69,5 +69,20 @@ class DemoEstate(unittest.TestCase):
         self.assertIn("project-observatory full", mcp)
 
 
+    def test_every_demo_finding_type_is_one_the_engine_emits(self):
+        """Three demo findings carried types no rule emits (`credential.leaked`,
+        `repo.unpushed`, `project.drift`), so the findings page showed raw ids
+        where a real estate shows a label — a screenshot of something the
+        product never draws."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("demo_estate", ROOT / "tools/demo_estate.py")
+        demo = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(demo)
+        sys.path.insert(0, str(ROOT / "observatory/engine/dashboard"))
+        import finding_types
+        unknown = sorted({f[1] for f in demo.FINDINGS} - set(finding_types.LABELS))
+        self.assertEqual(unknown, [], "demo finding types the engine does not know")
+
+
 if __name__ == "__main__":
     unittest.main()
