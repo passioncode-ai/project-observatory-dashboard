@@ -98,6 +98,9 @@ configuration names. Every engine call goes through one module,
 - **Scheduled commits** (the registry and the wiki projection) use the author the
   operator's own git would use in that repository, resolved with `git var`, and
   never run hooks, filters or a signer.
+- **`full cleanup` removes a dirty worktree only after its archived patch has been
+  re-applied, in check mode, to a scratch index of its HEAD**; a patch that cannot
+  be produced or does not apply removes nothing.
 
 Left outside, by design: `ssh` still reads `~/.ssh/config` (a `ProxyCommand` there
 runs); a submodule's own configuration can name a filter driver the parent does not

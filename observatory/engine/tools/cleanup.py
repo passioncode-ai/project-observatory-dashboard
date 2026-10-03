@@ -39,6 +39,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 from datetime import datetime, timezone
 
@@ -66,11 +67,51 @@ def load_config() -> dict:
     return {}
 
 
-def git(repo: str, *args: str, timeout: int = 120) -> subprocess.CompletedProcess:
+def git(repo: str, *args: str, timeout: int = 120, text: bool = True, input: bytes | None = None,
+        extra_env: dict | None = None) -> subprocess.CompletedProcess:
     """Through `safe_git`, the engine's one git door. Bare git here ran the
     operator's reference-transaction hook on every `branch -D`, and — worse —
     `diff.external` decided what the archived patch of a dirty worktree held."""
-    return safe_git.run(args, repo=repo, write=True, timeout=timeout, extra_env={"LC_ALL": "C"})
+    return safe_git.run(args, repo=repo, write=True, timeout=timeout, text=text, input=input,
+                        extra_env={"LC_ALL": "C", **(extra_env or {})})
+
+
+def export_tracked(target: str, status: str) -> tuple[bytes | None, str]:
+    """`(patch, "")` — the worktree's tracked changes as a patch PROVEN to apply
+    to its HEAD — or `(None, why)`, and then nothing may be removed.
+
+    The patch is the only copy of an uncommitted edit once the worktree is
+    removed with `--force`, so writing it is not enough: it is re-applied, in
+    check mode, to a scratch index read from HEAD. That catches every way the
+    archive can be wrong without anyone noticing — git exiting non-zero (an
+    unreadable object; the return code was never looked at), an external diff
+    driver printing its own display text with exit 0 (`--no-ext-diff` now, but
+    the check does not depend on it), and an empty patch from a worktree whose
+    status says tracked files changed. Measured before this existed: one
+    `cleanup --apply --include manual` reported "1 removed, 0 failed" with a
+    0-byte tracked.patch, and the edit was gone.
+    """
+    diff = git(target, "diff", "HEAD", "--binary", text=False)
+    if diff.returncode:
+        err = diff.stderr.decode("utf-8", "replace").strip()
+        return None, f"git diff exited {diff.returncode}: {err[:160] or 'no message'}"
+    patch = diff.stdout
+    changed = [l for l in status.splitlines() if l.strip() and not l.startswith("??")]
+    if not patch.strip():
+        if changed:
+            return None, f"git status lists {len(changed)} tracked change(s) but the patch is empty"
+        return patch, ""
+    with tempfile.TemporaryDirectory(prefix="observatory-cleanup-") as scratch:
+        index = {"GIT_INDEX_FILE": os.path.join(scratch, "index")}
+        seeded = git(target, "read-tree", "HEAD", extra_env=index)
+        if seeded.returncode:
+            return None, f"HEAD could not be read into a scratch index: {seeded.stderr.strip()[:160]}"
+        check = git(target, "apply", "--check", "--cached", "--binary", "-",
+                    text=False, input=patch, extra_env=index)
+    if check.returncode:
+        err = check.stderr.decode("utf-8", "replace").strip()
+        return None, f"the patch does not apply to HEAD: {err[:160] or 'no message'}"
+    return patch, ""
 
 
 def protected(name: str, cfg: dict) -> bool:
@@ -240,11 +281,23 @@ def act(a: dict, archive: pathlib.Path) -> dict:
             return {**rec, "result": "skipped", "reason": "it has uncommitted changes now"}
         rec["head"] = git(target, "rev-parse", "HEAD").stdout.strip()
         if cls == "worktree-dirty":
+            # NOTHING IS REMOVED UNLESS THE ARCHIVE IS PROVEN: every refusal below
+            # returns before `worktree remove --force --force`, which is the step
+            # that destroys the only copy.
+            if not rec["head"]:
+                return {**rec, "result": "failed", "reason": "HEAD could not be resolved; nothing removed"}
+            patch, why = export_tracked(target, status.stdout)
+            if patch is None:
+                return {**rec, "result": "failed", "reason": f"{why}; nothing removed"[:200]}
+            listed = git(target, "ls-files", "--others", "--exclude-standard", "-z")
+            if listed.returncode:
+                return {**rec, "result": "failed",
+                        "reason": f"untracked files could not be listed: {listed.stderr.strip()[:120]}; nothing removed"}
             dest = archive / (pathlib.Path(target).name + "-" + rec["head"][:8])
             dest.mkdir(parents=True, exist_ok=True, mode=0o700)
-            (dest / "tracked.patch").write_text(git(target, "diff", "HEAD", "--binary").stdout)
+            (dest / "tracked.patch").write_bytes(patch)
             (dest / "status.txt").write_text(status.stdout)
-            untracked = git(target, "ls-files", "--others", "--exclude-standard", "-z").stdout
+            untracked = listed.stdout
             if untracked:
                 with tarfile.open(dest / "untracked.tgz", "w:gz") as tar:
                     for name in untracked.split("\0"):

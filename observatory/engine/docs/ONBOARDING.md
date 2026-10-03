@@ -396,7 +396,9 @@ project-observatory full cleanup --apply --include manual # also unique branches
 
 The manual tier writes a thin git bundle per branch and a patch plus a tarball
 of untracked files per worktree under `<home>/archive/cleanup/<date>/` before
-removing anything.
+removing anything. A worktree's patch is re-applied, in check mode, to a scratch
+index of its HEAD first; if git cannot produce it or it does not apply, the
+worktree stays and the run reports it as failed with the reason.
 
 ## Organizations and resources
 
