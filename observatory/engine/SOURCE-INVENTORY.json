@@ -694,8 +694,8 @@
     {
       "path": "docs/CLI-COMPATIBILITY.md",
       "source_sha256": "4ec1878cbc8ff9d68bd37a6e9902d3c50180b91093a4c20d59230b41de4a29c2",
-      "export_sha256": "19d2419e803d998f1e7e95de632943e419397d7fb86751d628034cb75e7b7b04",
-      "bytes": 12562,
+      "export_sha256": "6452b32e315ec8f609170584c017bf883fe19e07969721757da2c2b0dc4387d1",
+      "bytes": 12643,
       "upstream_modified": true
     },
     {
