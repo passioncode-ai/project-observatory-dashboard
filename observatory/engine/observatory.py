@@ -844,8 +844,8 @@ FOREIGN_WRITES_IGNORED = {
         "the recorder redirect OBSERVATORY_SCRATCH and are checked for it "
         "separately in tests/test_gate_purity.py",
     "store/raw/serverd.json":
-        "the always-on server's heartbeat receipt, rewritten every 20 seconds "
-        "for as long as launchd keeps the daemon alive — which is "
+        "the always-on server's heartbeat receipt, rewritten on change and at "
+        "least every five minutes for as long as launchd keeps the daemon alive — which is "
         "concurrently with any gate that outlives that interval, i.e. every "
         "gate. No step of any group starts or stops the daemon, so exempting "
         "its receipt removes no coverage; the suites that drive its refresh "

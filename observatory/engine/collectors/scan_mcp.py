@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Every MCP server an agent on this machine is told to reach, and whether it does.
 
-    scan_mcp.py store/raw/mcp.json
+    scan_mcp.py store/raw/mcp.json                       # on demand: configs + Claude's probe
+    scan_mcp.py store/raw/mcp.json --declarations-only   # the tick: configs only, no process started
 
 WHY. The gateway that used to hold every MCP declaration in one place was
 switched off on 2026-09-14; declarations now live in each agent's own config
@@ -32,6 +33,18 @@ servers this scan knows; Cursor and opencode have no equivalent probe, so their
 rows say `liveness: not-probed` rather than borrowing Claude's answer for a
 different process.
 
+THE PROBE NEVER RUNS ON A SCHEDULE (lifecycle LC-04, LC-08). `claude mcp list`
+starts every stdio server Claude Code knows (`npx …@latest` fetches included),
+reads the operator's Claude credential and, when its access token has expired,
+refreshes and rewrites it. Run from the 30-minute tick that was ~480 server
+launches a day and a background job racing interactive sessions over the
+operator's rotating login. So the tick passes `--declarations-only`: it reads the
+configs, starts nothing, and carries forward the verdict of the last probe a
+person or agent asked for (`full scan-mcp`, `machine.mcp.refresh`), stamped
+`liveness_at` so an old verdict reads as old. Only an explicit request probes,
+and the probe runs in a process group of its own that is killed as a whole on
+exit or timeout, so no server it started outlives it.
+
 THE PROBE IS SLOW BY DESIGN. `claude mcp list` health-checks every server it
 knows before it prints, so a machine with many servers (plugins and claude.ai
 connectors included) can take minutes. The limit defaults to
@@ -47,8 +60,10 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit
 
@@ -85,6 +100,13 @@ OWN_SERVER = "observatory"
 DEFAULT_PROBE_TIMEOUT = 180
 PROBE_TIMEOUT_ENV = "OBSERVATORY_MCP_PROBE_TIMEOUT"
 PROBE_TIMEOUT_MAX = 3600
+#: Seconds the probe's process group gets between SIGTERM and SIGKILL once the
+#: probe has answered or run out of time. MCP servers the CLI started belong to
+#: that group; one that ignores SIGTERM is killed after this.
+PROBE_GRACE = 2.0
+#: Days a carried-forward verdict stays attributed. Older than this the row says
+#: `not-probed` again: a week-old "connected" is a guess, not a measurement.
+CARRY_DAYS = 7
 
 
 def probe_timeout() -> tuple[float, str | None]:
@@ -332,23 +354,80 @@ def probe_wire(target: str) -> str:
     return "stdio"
 
 
+def _group_alive(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def reap_group(pgid: int, grace: float = PROBE_GRACE) -> None:
+    """SIGTERM the whole group, then SIGKILL what is still there after `grace`.
+
+    The group outlives its leader: servers `claude mcp list` started stay in it
+    after the CLI exits, reparented to launchd (measured: firebase-tools held
+    165 MB for two minutes after the probe answered). Killing the group, not the
+    leader, is what leaves nothing behind."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            return
+        deadline = time.monotonic() + (grace if sig == signal.SIGTERM else 1.0)
+        while time.monotonic() < deadline:
+            if not _group_alive(pgid):
+                return
+            time.sleep(0.05)
+
+
+def run_reaped(argv: list[str], timeout: float) -> tuple[int | None, str]:
+    """(exit code or None on timeout, everything printed) for a command run in a
+    process group of its own that is reaped on every path.
+
+    Output goes to a private temporary file, not a pipe: a server the command
+    started inherits its stdout, and a pipe would then stay open — and the read
+    would block — for as long as that server lives. Waiting on the leader's exit
+    and then killing the group ends the probe the moment the CLI has answered."""
+    import tempfile
+    with tempfile.TemporaryFile() as sink:
+        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink,
+                                stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            code = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            code = None
+        finally:
+            reap_group(proc.pid)
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        sink.seek(0)
+        return code, _text(sink.read())
+
+
 def claude_probe(timeout: float | None = None) -> tuple[dict[str, dict], str | None, bool]:
-    """(name -> {status, plugin, detail}, why degraded or None, whether the list is complete)."""
+    """(name -> {status, plugin, detail}, why degraded or None, whether the list is complete).
+
+    On request only — never from the tick (module docstring)."""
     if not shutil.which("claude"):
         return {}, "claude CLI not on PATH", False
     if timeout is None:
         timeout, _ = probe_timeout()
     try:
-        p = subprocess.run(["claude", "mcp", "list"], capture_output=True, text=True,
-                           timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
-        heard = parse_probe(_text(exc.stdout) + _text(exc.stderr))
+        code, text = run_reaped(["claude", "mcp", "list"], timeout)
+    except OSError as exc:
+        return {}, f"claude mcp list: {type(exc).__name__}", False
+    if code is None:
+        heard = parse_probe(text)
         return heard, (f"claude mcp list did not finish within {timeout:g} s (it health-checks every "
                        f"server before printing); {len(heard)} server(s) reported before the cut, the "
                        f"rest are not-probed — raise {PROBE_TIMEOUT_ENV} (seconds) on this machine"), False
-    except OSError as exc:
-        return {}, f"claude mcp list: {type(exc).__name__}", False
-    out = parse_probe(p.stdout + p.stderr)
+    out = parse_probe(text)
     if not out:
         return {}, "claude mcp list answered with nothing this scan could parse", False
     return out, None, True
@@ -372,20 +451,53 @@ def attribute_liveness(rows: list[dict], probe: dict[str, dict], complete: bool)
             r["liveness"] = "not-probed"
 
 
-def scan(home: pathlib.Path | None = None, probe=None) -> dict:
+def _age_days(stamp: str | None) -> float:
+    try:
+        at = datetime.strptime(stamp or "", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return float("inf")
+    return (datetime.now(timezone.utc) - at).total_seconds() / 86400
+
+
+def carried(previous: dict | None) -> tuple[dict[str, dict], bool, str | None]:
+    """(verdicts, complete, probed_at) of the last on-demand probe, while it is younger
+    than CARRY_DAYS; ({}, False, None) when there is none or it is too old."""
+    probe = (previous or {}).get("probe") if isinstance(previous, dict) else None
+    if not isinstance(probe, dict) or not isinstance(probe.get("servers"), dict):
+        return {}, False, None
+    at = probe.get("probed_at")
+    if _age_days(at) > CARRY_DAYS:
+        return {}, False, None
+    servers = {str(k): v for k, v in probe["servers"].items()
+               if isinstance(v, dict) and v.get("status") in ("connected", "failed", "needs-auth")}
+    return servers, bool(probe.get("complete")), at
+
+
+def scan(home: pathlib.Path | None = None, probe=None, *, declarations_only: bool = False,
+         previous: dict | None = None) -> dict:
     """The whole scan as one document: declarations, liveness, sources, degraded.
 
     `probe` is the liveness source, `claude_probe` unless a caller hands in its
-    own (the tests do, so no suite ever runs the real CLI)."""
+    own (the tests do, so no suite ever runs the real CLI). With
+    `declarations_only` nothing is started: the verdicts come from `previous`,
+    the last document this collector wrote, and keep that probe's time."""
     home = HOME if home is None else home
     rows, sources = read_sources(home)
     note = None
-    if probe is None:
-        timeout, note = probe_timeout()
-        probe = lambda: claude_probe(timeout)                      # noqa: E731
-    heard, why, complete = probe()
-    degraded = [{"source": PROBE_TIMEOUT_ENV, "reason": note}] if note else []
-    degraded += [{"source": "claude mcp list", "reason": why}] if why else []
+    degraded: list[dict] = []
+    if declarations_only:
+        heard, complete, probed_at = carried(previous)
+        probe_doc = {"state": "carried" if probed_at else "never", "probed_at": probed_at,
+                     "complete": complete, "servers": heard}
+    else:
+        if probe is None:
+            timeout, note = probe_timeout()
+            probe = lambda: claude_probe(timeout)                  # noqa: E731
+        heard, why, complete = probe()
+        probed_at = now()
+        probe_doc = {"state": "probed", "probed_at": probed_at, "complete": complete, "servers": heard}
+        degraded += [{"source": PROBE_TIMEOUT_ENV, "reason": note}] if note else []
+        degraded += [{"source": "claude mcp list", "reason": why}] if why else []
     # An unreadable config is a hole in the inventory, so it degrades the scan. An
     # ABSENT one does not: it is an agent that is not set up here, and a service
     # reporting itself degraded for every agent a machine lacks would never be
@@ -394,6 +506,10 @@ def scan(home: pathlib.Path | None = None, probe=None) -> dict:
     degraded += [{"source": f"{s['agent']}:{s['file']}", "reason": s["reason"]}
                  for s in sources if s["state"] == "unreadable"]
     attribute_liveness(rows, heard, complete)
+    if probed_at:
+        for r in rows:
+            if r.get("name") is not None and r.get("liveness") not in (None, "not-probed"):
+                r["liveness_at"] = probed_at
     # Servers Claude reaches that no config here declares: plugin-shipped and
     # claude.ai connectors. Recorded as their own rows so the inventory is the
     # whole picture, never a subset that looks whole.
@@ -406,11 +522,13 @@ def scan(home: pathlib.Path | None = None, probe=None) -> dict:
                          "transport": None, "wire": pr.get("wire"), "target": None, "command": None,
                          "args_count": 0, "key_in_url": False, "key_in_header": False,
                          "key_in_env": False, "command_present": None, "disabled": False,
-                         "liveness": pr["status"], "liveness_detail": pr["detail"]})
+                         "liveness": pr["status"], "liveness_detail": pr["detail"],
+                         **({"liveness_at": probed_at} if probed_at else {})})
     rows.sort(key=lambda r: (r.get("agent") or "", r.get("name") or ""))
     return {"scanned_at": now(), "servers": rows, "sources": sources,
             "own_server": OWN_SERVER,
             "own_declared": any(r.get("name") == OWN_SERVER for r in rows),
+            "probe": probe_doc,
             "degraded": degraded}
 
 
@@ -419,12 +537,22 @@ def main(argv: list[str]) -> int:
     if not configuration.enabled("mcp"):
         print("mcp: not configured (integration disabled)")
         return 0
-    if len(argv) < 2:
+    flags = [a for a in argv[1:] if a.startswith("--")]
+    positional = [a for a in argv[1:] if not a.startswith("--")]
+    if len(positional) != 1 or set(flags) - {"--declarations-only"}:
         print(__doc__, file=sys.stderr)
         return 2
-    doc = scan()
+    out = pathlib.Path(positional[0])
+    declarations_only = "--declarations-only" in flags
+    previous = None
+    if declarations_only:
+        try:
+            previous = json.loads(out.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            previous = None
+    doc = scan(declarations_only=declarations_only, previous=previous)
     rows, degraded = doc["servers"], doc["degraded"]
-    atomic.write_json(argv[1], doc)
+    atomic.write_json(out, doc)
     by = {}
     for r in rows:
         by[r.get("liveness", "?")] = by.get(r.get("liveness", "?"), 0) + 1
@@ -433,6 +561,10 @@ def main(argv: list[str]) -> int:
     print(f"mcp: {len(rows)} declaration(s) across "
           f"{len({r.get('agent') for r in rows})} agent(s)"
           + (" — " + ", ".join(f"{k} {v}" for k, v in sorted(by.items())) if by else ""))
+    probe = doc["probe"]
+    if probe["state"] != "probed":
+        print(f"  liveness: {'carried from the probe of ' + probe['probed_at'] if probe['probed_at'] else 'never probed'}"
+              " — the tick starts no server; `project-observatory full scan-mcp` probes on request")
     for d in degraded:
         print(f"  degraded {d['source']}: {d['reason']}")
     return 0

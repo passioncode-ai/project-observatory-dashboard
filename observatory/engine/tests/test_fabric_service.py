@@ -778,8 +778,10 @@ class RunningServer(unittest.TestCase):
     def test_health_is_unchanged(self):
         code, _h, body = get(self.port, "/health")
         self.assertEqual(code, 200)
+        # `silent_after_s` joined with the write-on-change heartbeat (lifecycle LC-08):
+        # the age past which a reader calls the receipt silent.
         self.assertEqual(set(json.loads(body)), {"at", "pid", "port", "version", "workspace", "uptime_s",
-                                                 "remote", "leaks", "skills", "tick"})
+                                                 "silent_after_s", "remote", "leaks", "skills", "tick"})
 
     def test_the_guard_covers_the_protocol_routes(self):
         for path in ("/.well-known/fabric-service", "/fabric/v1/events"):

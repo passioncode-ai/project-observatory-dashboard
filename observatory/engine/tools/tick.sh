@@ -44,19 +44,24 @@ log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
 
 FAILED_STEPS=""
+# Every step runs under the watchdog in tools/tick_lease.py (`step`): its own
+# process group, its own wall-clock limit, never past the tick's ceiling, the
+# whole group stopped on the limit (lifecycle LC-02, LC-03). The feature gate is
+# checked in the same process. A stopped step exits 124 and is a failed step.
 step() {
   local name="$1"; shift
-  if ! "$PY" tools/tick_lease.py allowed "$name"; then
-    log "$name: disabled in workspace settings"
-    return 0
-  fi
-  "$@" 2>&1 | while IFS= read -r l; do log "$name: $l"; done
+  "$PY" tools/tick_lease.py step "$name" -- "$@" 2>&1 | while IFS= read -r l; do log "$name: $l"; done
   local rc=$?
   if [ "$rc" -ne 0 ]; then
     log "$name: EXIT $rc — recorded as a failed step"
     FAILED_STEPS="$FAILED_STEPS $name=$rc"
   fi
   return 0
+}
+# The same watchdog for a command whose output and exit the tick reads itself.
+bounded() {
+  local name="$1"; shift
+  "$PY" tools/tick_lease.py step --ungated "$name" -- "$@"
 }
 
 
@@ -177,7 +182,7 @@ fi
 # The daily copy may live in the backups root (encrypted, outside this disk) or
 # beside the database (no passphrase yet); only Python knows where the root is,
 # so the due check is the script's, not a `find` over one of the two places.
-if "$PY" tools/backup_store.py --due >/dev/null 2>&1; then
+if bounded backup-due "$PY" tools/backup_store.py --due >/dev/null 2>&1; then
   log "backup: taking a daily copy of the store"
   step "backup" "$PY" tools/backup_store.py
 fi
@@ -205,7 +210,7 @@ fi
 
 
 step "scan-cloudflare" "$PY" collectors/scan_cloudflare.py "$SCRATCH/cloudflare_zones.json"
-step "scan-mcp" "$PY" collectors/scan_mcp.py "$SCRATCH/mcp.json"
+step "scan-mcp" "$PY" collectors/scan_mcp.py "$SCRATCH/mcp.json" --declarations-only
 step "remote-env" "$PY" collectors/scan_remote_env.py "$SCRATCH/remote-env.json"
 step "google" "$PY" collectors/scan_google.py "$SCRATCH/google.json"
 step "leaks" "$PY" tools/scan_leaks.py
@@ -219,15 +224,19 @@ step "scrub-companion" "$PY" tools/scrub_companion.py
 # loses nothing (tools/cleanup.py) and only with features.auto_cleanup on.
 step "machine" "$PY" collectors/scan_machine.py "$SCRATCH/machine.json"
 step "git-hygiene" "$PY" collectors/scan_git_hygiene.py "$SCRATCH/git-hygiene.json"
+# The lifecycle watch: orphaned product processes, per-session servers on
+# replaced code, jobs past their interval, logs past their cap (lifecycle.md,
+# "Watching it hold"). Reads the process table and plists; starts nothing.
+step "lifecycle" "$PY" collectors/scan_lifecycle.py "$SCRATCH/lifecycle.json"
 step "cleanup" "$PY" tools/cleanup.py --auto
-"$PY" collectors/merge.py          "$SCRATCH"             >/dev/null 2>&1 || bail merge 1 "merge failed — stopping, the registry is not rewritten"
-"$PY" collectors/emit_registry.py  "$SCRATCH"             >/dev/null 2>&1 || bail emit 1 "emit failed or REFUSED a wholesale change — the registry keeps the last good version"
+bounded merge "$PY" collectors/merge.py "$SCRATCH" >/dev/null 2>&1 || bail merge 1 "merge failed — stopping, the registry is not rewritten"
+bounded emit "$PY" collectors/emit_registry.py "$SCRATCH" >/dev/null 2>&1 || bail emit 1 "emit failed or REFUSED a wholesale change — the registry keeps the last good version"
 
-if ! "$PY" tools/validate_registry.py >/dev/null 2>&1; then
+if ! bounded validate "$PY" tools/validate_registry.py >/dev/null 2>&1; then
   bail validate 1 "VALIDATOR RED — the registry is not projected and the agent is not called"
 fi
 
-"$PY" collectors/scan_events.py   >/dev/null 2>&1 || log "events degraded"
+bounded events "$PY" collectors/scan_events.py >/dev/null 2>&1 || log "events degraded"
 
 
 
@@ -235,8 +244,8 @@ fi
 
 step "plugins" "$PY" collectors/run_plugins.py
 step "rollup" "$PY" store/rollup.py refresh
-"$PY" collectors/compute_deltas.py snapshot >/dev/null 2>&1 || log "snapshot degraded"
-DIFF="$("$PY" collectors/compute_deltas.py diff 2>&1)"
+bounded snapshot "$PY" collectors/compute_deltas.py snapshot >/dev/null 2>&1 || log "snapshot degraded"
+DIFF="$(bounded diff "$PY" collectors/compute_deltas.py diff 2>&1)"
 log "$(printf '%s' "$DIFF" | head -1)"
 
 
@@ -349,24 +358,9 @@ step "links" "$PY" tools/audit_vault_links.py --quiet
 
 
 
+# One rotation policy for every log this engine writes (log_policy.py, LC-12).
+step "logs" "$PY" tools/rotate_logs.py
+
 write_report
 
 log "tick done"
-
-
-
-
-
-
-
-rotate_log() {
-  local f="$STATE/logs/tick.log" limit=$((2 * 1024 * 1024))
-  [ -f "$f" ] || return 0
-  local size; size=$(stat -f %z "$f" 2>/dev/null || stat -c %s "$f" 2>/dev/null || echo 0)
-  [ "$size" -gt "$limit" ] || return 0
-  [ -f "$f.2" ] && mv -f "$f.2" "$f.3"
-  [ -f "$f.1" ] && mv -f "$f.1" "$f.2"
-  mv -f "$f" "$f.1"
-  log "log: rotated tick.log at ${size} bytes — three generations kept"
-}
-rotate_log

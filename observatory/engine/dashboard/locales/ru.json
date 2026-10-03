@@ -1800,5 +1800,35 @@
  "Link to: {title}": "Ссылка на: {title}",
  "Evidence and action: {title}": "Основание и действие: {title}",
  "No key is tracked yet. Put one in this workspace's vault (the value on stdin), then rebuild:": "Ключей пока нет. Положите ключ в хранилище этой папки данных (значение — через stdin), затем пересоберите:",
- "No domain is listed. Domains come from the zones a Cloudflare scan finds, and from {file}. Switch Cloudflare on and scan:": "Доменов нет. Домены берутся из зон, которые находит сканирование Cloudflare, и из {file}. Включите Cloudflare и запустите сканирование:"
+ "No domain is listed. Domains come from the zones a Cloudflare scan finds, and from {file}. Switch Cloudflare on and scan:": "Доменов нет. Домены берутся из зон, которые находит сканирование Cloudflare, и из {file}. Включите Cloudflare и запустите сканирование:",
+ "{n} processes of {product} outlived their parent": {
+  "one": "{n} процесс {product} пережил родителя",
+  "few": "{n} процесса {product} пережили родителя",
+  "many": "{n} процессов {product} пережили родителя",
+  "other": "{n} процесса {product} пережили родителя"
+ },
+ "{n} session servers of {product} run replaced code": {
+  "one": "{n} сессионный сервер {product} работает на заменённом коде",
+  "few": "{n} сессионных сервера {product} работают на заменённом коде",
+  "many": "{n} сессионных серверов {product} работают на заменённом коде",
+  "other": "{n} сессионного сервера {product} работают на заменённом коде"
+ },
+ "{n} logs of {product} are past their cap": {
+  "one": "{n} журнал {product} превысил лимит",
+  "few": "{n} журнала {product} превысили лимит",
+  "many": "{n} журналов {product} превысили лимит",
+  "other": "{n} журнала {product} превысили лимит"
+ },
+ "{n} logs of {product} are readable by other accounts": {
+  "one": "{n} журнал {product} доступен другим учётным записям",
+  "few": "{n} журнала {product} доступны другим учётным записям",
+  "many": "{n} журналов {product} доступны другим учётным записям",
+  "other": "{n} журнала {product} доступны другим учётным записям"
+ },
+ "a job of {product} runs longer than its interval": "задача {product} работает дольше своего интервала",
+ "Logs readable by other accounts": "Журналы, доступные другим учётным записям",
+ "Logs past their cap": "Журналы сверх лимита",
+ "Orphaned product processes": "Осиротевшие процессы продуктов",
+ "Job running past its interval": "Задача дольше своего интервала",
+ "Session servers on replaced code": "Сессионные серверы на заменённом коде"
 }

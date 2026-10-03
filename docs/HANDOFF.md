@@ -60,6 +60,14 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
+**2026-10-03, the product lifecycle contract (branch `claude/lifecycle-contract`, not
+released):** the tick no longer runs `claude mcp list`, sizes no privacy-guarded place, bounds
+every step and itself, the server idles, every log rotates, a session server on replaced code
+answers `stale-server`, plists carry a minimal PATH, builds prune, and a lifecycle watch reports
+each product's orphans, stale servers, overruns and oversized logs. Findings fixed and deferred,
+tests and the exact next task:
+[runs/2026-10-03-lifecycle-contract](runs/2026-10-03-lifecycle-contract/README.md).
+
 **Status 2026-10-03: 0.13.0 — three audit-and-fix runs over 0.12.0.** Run 1 (PR #119), run 2
 (PR #120) and run 3 (PR #121) each re-walked the build, onboarding, keys, the Keychain, the Mac
 app, the scenarios and the docs, and fixed what the one before missed: 73, 27 and 66. Reports:
