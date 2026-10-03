@@ -75,6 +75,23 @@ leaves cannot answer. Five MCP tools, migration `0008-agent-memory-workflows`. D
 [design/AGENT-MEMORY.md](design/AGENT-MEMORY.md). Record, checks and the exact next task
 (OBS-07, then OBS-03): [runs/2026-10-03-agent-memory-workflows](runs/2026-10-03-agent-memory-workflows/README.md).
 
+**2026-10-03, agent memory after the first release (branch `claude/agent-memory-eval`, one pull
+request; W1 merged as `b9e5473`, #130):** what each part delivered:
+- agents get every credential from Observatory by name, with `--vault-only` and findings for keys outside the vault (W3, OBS-10, OBS-13);
+- agents find and recover their work, and the operator gets `full workflow` (W2, OBS-09);
+- sessions are linked to workflows (W4, OBS-11);
+- the live Agents page (W5, OBS-12);
+- the evaluation set, gated (OBS-07);
+- search in both languages' word forms, by checkpoint body, with an honest "nothing found" (OBS-03).
+
+Measured: recall@5 0.975 → 1.0; abstention 5 → 20 of 20; checkpoint bodies 0 → 8 of 8. The
+redaction on `observatory_record` was quadratic and is now linear. Checks on `4a9600b`: 209 of
+209 suites. Records under `runs/2026-10-03-agent-*`; numbers in
+[reports/2026-10-03-memory-eval-baseline](reports/2026-10-03-memory-eval-baseline/README.md).
+
+**Next:** merge the pull request, then OBS-04: local embeddings chosen on this set, with a
+distance floor per model.
+
 **Status 2026-10-03: 0.13.0 — three audit-and-fix runs over 0.12.0.** Run 1 (PR #119), run 2
 (PR #120) and run 3 (PR #121) each re-walked the build, onboarding, keys, the Keychain, the Mac
 app, the scenarios and the docs, and fixed what the one before missed: 73, 27 and 66. Reports:
