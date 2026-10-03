@@ -220,7 +220,7 @@ class Surfaces(Base):
                                                      "organization_why": "a vs b"}))
         self.assertEqual(self.line({"id": "p"}), "")
         ru = self.line({"id": "p", "organization": "person", "organization_source": "default"}, "ru")
-        self.assertIn("владелец: Example Person", ru)
+        self.assertIn("организация: Example Person", ru)
         self.assertIn("учтено ресурсов: 0", ru)
 
     def test_project_view_carries_organization_and_resources(self):
