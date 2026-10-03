@@ -27,10 +27,8 @@ const harness = readFileSync(process.argv[2], "utf8");
 const spec = JSON.parse(readFileSync(process.argv[3], "utf8"));
 let prefix = harness.slice(harness.indexOf('const file ='), harness.indexOf('let threw = null;'));
 prefix = prefix.replace('const file = process.argv[2];', 'const file = ' + JSON.stringify(spec.page) + ';');
-// Finding controls ask descendants for stable nodes. The existing smoke DOM
-// deliberately omits this, but these tests need their filter inputs.
-prefix = prefix.replace('querySelector() { return null; },',
-  'querySelector(selector) { this._sub ||= new Map(); if (!this._sub.has(selector)) this._sub.set(selector, makeEl(selector)); return this._sub.get(selector); }, closest() { return null; }, remove() {}, insertAdjacentHTML(where, markup) { written[this.id + ":" + where] = String(markup); },');
+// Finding controls ask descendants for stable nodes; the shared harness's
+// elements answer with them (and record insertAdjacentHTML) on their own.
 const exercise = `
 const chips = [...html.matchAll(/<button\\b[^>]*data-f="([^"]+)"[^>]*>([\\s\\S]*?)<\\/button>/g)].map(match => {
   const chip = makeEl("chip-" + match[1]);

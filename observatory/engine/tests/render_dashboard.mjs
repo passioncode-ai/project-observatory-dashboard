@@ -74,9 +74,13 @@ function makeEl(id) {
     checked: false,
     children: [],
     querySelectorAll() { return []; },
-    // An element, as the document answers: the findings page reads its bar
-    // (`host.querySelector(".fbar")`) and a null here was a harness throw.
-    querySelector(sel) { return makeEl(`${id} ${sel}`); },
+    // A stable element per selector, as the document answers: the findings
+    // page reads its bar (`host.querySelector(".fbar")`) and a null here was a
+    // harness throw. The same shape tests/test_workspace_redesign.py patched in
+    // by hand, now the harness's own, with insertAdjacentHTML recorded.
+    querySelector(selector) { this._sub ||= new Map(); if (!this._sub.has(selector)) this._sub.set(selector, makeEl(selector)); return this._sub.get(selector); },
+    closest() { return null; },
+    insertAdjacentHTML(where, markup) { written[this.id + ":" + where] = String(markup); },
   };
   return el;
 }
