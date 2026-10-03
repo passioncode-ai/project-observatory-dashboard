@@ -17,9 +17,9 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **Releases are built, signed and published in CI.** `.github/workflows/release.yml` runs on a
   `vX.Y.Z` tag. It builds the wheel and the Mac app, signs the app with the organization's CI
   Developer ID, notarizes and staples it, attests every file (Sigstore), and publishes the
-  release with `SHA256SUMS` and a GPG signature, `SHA256SUMS.asc`. Nothing runs until someone
-  from `release-approvers` who is not the tag's author approves it. A published release is never
-  rewritten. To rehearse, push an `-rc` tag and dispatch the workflow with `publish=false`.
+  release with `SHA256SUMS` and a GPG signature, `SHA256SUMS.asc`. Nothing runs until a person
+  from `release-approvers` approves it; that may be whoever pushed the tag, and an agent never
+  approves. A published release is never rewritten. To rehearse, push an `-rc` tag and dispatch the workflow with `publish=false`.
 
 ## 0.13.0 — 2026-10-03
 
