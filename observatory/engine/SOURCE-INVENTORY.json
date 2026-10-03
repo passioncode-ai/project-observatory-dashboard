@@ -701,8 +701,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c8cdd329718ccafbea7891dd069e5e8fa7a5b8cf1063aef35c4e8b0f8becd6f3",
-      "bytes": 41706,
+      "export_sha256": "c5cf0f473b2883ff6ddedd7076bca8a303d92e6ed4bd765f8c84c7ce7174702d",
+      "bytes": 41909,
       "upstream_modified": true
     },
     {
@@ -1278,6 +1278,13 @@
       "upstream_modified": true,
       "export_sha256": "621bc6e77f2574557702e3b72adcc51818451be5195b2fa3d1073a96816ec167",
       "bytes": 4744
+    },
+    {
+      "path": "safe_git.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "18316d4a88685bdbdb3a2a031236606a421dc21fa4a377db5215b518764d4aaa",
+      "bytes": 19446
     },
     {
       "path": "service_events.py",
@@ -2111,6 +2118,13 @@
       "upstream_modified": true,
       "export_sha256": "dd74f94dd05d3fec41903fa2fa635fe8ed225265428e1962857dd3ca9e6fb752",
       "bytes": 20774
+    },
+    {
+      "path": "tests/test_git_hardening.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "dff8af545e5ebcf27e2c65498bf9542a15695b536fb77fc96bc4ab92cb7497cc",
+      "bytes": 27158
     },
     {
       "path": "tests/test_git_locale.py",
@@ -3243,8 +3257,8 @@
       "path": "tools/cleanup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c5a1f542c8c126469898d4468cfad31d9e04c40d83a719fb9d9de57a396035ff",
-      "bytes": 16451
+      "export_sha256": "066ec46e761cb93220200b6ba868d3b14e54a316f6750bbb8036602c1f2e9bc7",
+      "bytes": 19533
     },
     {
       "path": "tools/cloudflare.py",
@@ -3771,7 +3785,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 475,
+  "file_count": 477,
   "excluded": [
     "git-history",
     "operator-registries",

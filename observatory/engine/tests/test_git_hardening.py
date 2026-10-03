@@ -418,6 +418,91 @@ class HookAndTools(HostileBase):
         self.assertNothingRan("cleanup")
 
 
+class CleanupNeverLosesWork(unittest.TestCase):
+    """`cleanup --apply --include manual` removes a dirty worktree with
+    `--force --force`, so its archived patch is the only copy of the edit. It
+    must be proven to apply before anything is removed (KC-R3-4: a 0-byte
+    patch, "1 removed, 0 failed", and the edit gone)."""
+
+    def setUp(self) -> None:
+        import cleanup
+        self.cleanup = cleanup
+        cleanup.busy_now = lambda path: False
+        self.d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-cleanup-loss-")).resolve()
+        self.repo, self.wt = self.d / "alpha-web", self.d / "alpha-wt"
+        bare(self.d, "init", "-q", "-b", "main", str(self.repo))
+        (self.repo / "old.txt").write_text("".join(f"line {i}\n" for i in range(20)), encoding="utf-8")
+        bare(self.repo, "add", "-A")
+        bare(self.repo, "commit", "-qm", "init")
+        bare(self.repo, "branch", "topic")
+        bare(self.repo, "worktree", "add", "-q", str(self.wt), "topic")
+        with open(self.wt / "old.txt", "a", encoding="utf-8") as fh:
+            fh.write("the only copy of this edit\n")
+
+    def act(self) -> dict:
+        return self.cleanup.act({"class": "worktree-dirty", "tier": "manual", "repo": str(self.repo),
+                                 "target": str(self.wt), "branch": "topic",
+                                 "repository": "repository:example-org/alpha-web"}, self.d / "archive")
+
+    def assertKept(self, rec: dict) -> None:
+        self.assertEqual(rec["result"], "failed", rec)
+        self.assertIn("nothing removed", rec["reason"])
+        self.assertIn("the only copy of this edit", (self.wt / "old.txt").read_text(encoding="utf-8"))
+
+    def assertRestorable(self, rec: dict) -> None:
+        """The archived patch, applied to a fresh checkout of HEAD, gives back the edit."""
+        self.assertEqual(rec["result"], "removed", rec)
+        self.assertFalse(self.wt.exists())
+        patch = pathlib.Path(rec["archive"]) / "tracked.patch"
+        fresh = self.d / "restore"
+        bare(self.d, "clone", "-q", str(self.repo), str(fresh))
+        bare(fresh, "apply", str(patch))
+        self.assertIn("the only copy of this edit", (fresh / "old.txt").read_text(encoding="utf-8"))
+
+    def test_an_external_diff_driver_cannot_become_the_archive(self) -> None:
+        # A difftastic-like driver: prints its own display text and exits 0.
+        driver = self.d / "display-diff"
+        driver.write_text("#!/bin/sh\necho \"display: $1 changed\"\nexit 0\n", encoding="utf-8")
+        driver.chmod(0o755)
+        bare(self.repo, "config", "diff.external", str(driver))
+        self.assertRestorable(self.act())
+
+    def test_a_diff_that_fails_removes_nothing(self) -> None:
+        # The committed blob of the edited file is gone: status still answers
+        # (the worktree is hashed, not compared), `git diff` cannot.
+        blob = bare(self.repo, "rev-parse", "HEAD:old.txt").stdout.strip()
+        (self.repo / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+        self.assertKept(self.act())
+
+    def test_a_patch_that_does_not_apply_removes_nothing(self) -> None:
+        real = self.cleanup.git
+
+        def corrupting(repo, *args, **kw):
+            p = real(repo, *args, **kw)
+            if args[:2] == ("diff", "HEAD"):
+                p.stdout = b"diff --git a/old.txt b/old.txt\n--- a/old.txt\n+++ b/old.txt\n@@ -1 +1 @@\n-no such line\n+x\n"
+            return p
+        self.cleanup.git = corrupting
+        try:
+            self.assertKept(self.act())
+        finally:
+            self.cleanup.git = real
+
+    def test_an_empty_patch_for_a_dirty_tree_removes_nothing(self) -> None:
+        real = self.cleanup.git
+
+        def emptying(repo, *args, **kw):
+            p = real(repo, *args, **kw)
+            if args[:2] == ("diff", "HEAD"):
+                p.stdout = b""
+            return p
+        self.cleanup.git = emptying
+        try:
+            self.assertKept(self.act())
+        finally:
+            self.cleanup.git = real
+
+
 class NoBareGit(unittest.TestCase):
     """Structural: no engine module spawns git except through `safe_git`.
 
