@@ -105,6 +105,50 @@ def test_the_vocabulary_is_enforced() -> None:
           p.returncode != 0 and "UPPER_SNAKE_CASE" in p.stderr, p.stderr[:120])
 
 
+def _token_shaped() -> str:
+    """A synthetic, obviously fake run in the shape of a pasted token: 37
+    characters mixing classes. Composed, so no literal here looks like a key."""
+    return "Fake" + "Tokn" + "_" + "Ab3" * 9 + "x"
+
+
+def test_a_credential_shaped_name_or_note_never_reaches_the_register() -> None:
+    """A token pasted as the PROJECT was accepted (any 1–64 identifier passed)
+    and then printed in the registry, the findings, five dashboard pages and the
+    MCP answers. Every write door now refuses a credential-shaped name, and a
+    place or a settlement note never carries the value onward."""
+    s = fresh()
+    tok = _token_shaped()
+    for verb, extra, stdin in (("put", (), "synthetic-value-1"),
+                               ("leak", ("--where", "a CI log, job 4412"), ""),
+                               ("rotate", (), "synthetic-value-2"),
+                               ("moved", ("--how", "rotated in the provider dashboard today"), ""),
+                               ("remove", (), "")):
+        p = vault(s, verb, tok, "prod", "API_TOKEN", *extra, stdin=stdin)
+        check(f"`{verb}` refuses a credential-shaped project, naming the field and not the value",
+              p.returncode != 0 and "credential" in p.stderr and tok not in p.stdout + p.stderr,
+              (p.stdout + p.stderr)[-200:])
+    aws_like = "AKIA" + "FAKE" * 3 + "0000"
+    p = vault(s, "put", "demo", "prod", aws_like, stdin="synthetic-value-3")
+    check("a NAME in a key id's shape is refused even though it is UPPER_SNAKE",
+          p.returncode != 0 and aws_like not in p.stdout + p.stderr, (p.stdout + p.stderr)[-200:])
+    check("and nothing was written for any of them",
+          not any(s.rglob("API_TOKEN")) and not any(s.rglob(aws_like))
+          and not (s / "leaks.jsonl").exists())
+    p = vault(s, "leak", "demo", "prod", "API_TOKEN", "--where", f"pasted {tok} into a review thread")
+    reg = (s / "leaks.jsonl").read_text(encoding="utf-8") if (s / "leaks.jsonl").exists() else ""
+    moves = (s / "movements.jsonl").read_text(encoding="utf-8") if (s / "movements.jsonl").exists() else ""
+    check("a place that carries the value is recorded with the value redacted",
+          p.returncode == 0 and "[redacted]" in reg and "review thread" in reg
+          and tok not in reg + moves + p.stdout + p.stderr, (p.stdout + p.stderr)[-200:])
+    p = vault(s, "settle", "demo", "prod", "API_TOKEN", "--how", f"revoked {tok} at the provider",
+              *settlement_evidence())
+    check("a settlement note carrying a value is refused, without echoing it",
+          p.returncode != 0 and tok not in p.stdout + p.stderr
+          and tok not in (s / "leaks.jsonl").read_text(encoding="utf-8"), (p.stdout + p.stderr)[-200:])
+    p = vault(s, "put", "alpha-web", "prod", "OPENROUTER_API_KEY", stdin="synthetic-value-4")
+    check("an ordinary project and NAME still store", p.returncode == 0, p.stderr[-160:])
+
+
 def test_inject_refuses_a_committable_env_and_writes_an_ignored_one() -> None:
     s = fresh()
     vault(s, "put", "demo", "local", "API_TOKEN", stdin="sk-test-1234abcd")
@@ -503,6 +547,7 @@ if __name__ == "__main__":
                test_a_value_travels_only_on_stdin,
                test_put_list_rotate_and_the_archive,
                test_the_vocabulary_is_enforced,
+               test_a_credential_shaped_name_or_note_never_reaches_the_register,
                test_inject_refuses_a_committable_env_and_writes_an_ignored_one,
                test_a_leak_needs_a_place_and_stays_open_after_local_rotation,
                test_a_leak_of_a_key_the_store_never_held_is_still_recorded,

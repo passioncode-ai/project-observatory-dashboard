@@ -93,6 +93,35 @@ def test_the_writer_refuses_what_would_make_the_file_worse() -> None:
           json.loads(ann.read_text(encoding="utf-8"))["annotations"] == {})
 
 
+def test_every_free_text_field_and_the_id_refuse_a_value() -> None:
+    """Only purpose and evidence were checked, and only for `sk-…` or 40+ runs:
+    a token as `owner` landed in the annotation file and on two pages, a
+    38-character token passed as a purpose, and UUID or 32-hex keys passed
+    everything. One shared heuristic now checks every field the writer stores."""
+    env, ann = sandbox()
+    cid = "credential:openrouter/demo"
+    mixed = "Fake" + "_" + "Ab3" * 11                # 38 chars, three classes
+    uuid = "-".join(("0f" * 4, "1a2b", "3c4d", "5e6f", "7a" * 6))
+    hex32 = "0123456789abcdef" * 2
+    attempts = (("owner", mixed, ("--purpose", "p", "--evidence", "e", "--owner", mixed)),
+                ("tag", hex32, ("--purpose", "p", "--evidence", "e", "--tag", hex32)),
+                ("38-char purpose", mixed, ("--purpose", f"key {mixed}", "--evidence", "e")),
+                ("uuid evidence", uuid, ("--purpose", "p", "--evidence", f"see {uuid}")))
+    for label, bad, args in attempts:
+        p = sign(env, "set", cid, *args)
+        check(f"a value-shaped {label} is refused without being echoed",
+              p.returncode == 2 and bad not in p.stderr + p.stdout, (p.stdout + p.stderr)[-200:])
+    empty_env = dict(env, OBSERVATORY_REGISTRY=str(pathlib.Path(tmpdir.mkdtemp(prefix="observatory-sign-empty-"))))
+    p = sign(empty_env, "set", mixed, "--purpose", "p", "--evidence", "e")
+    check("a value-shaped id is refused even when no board can be read to compare it",
+          p.returncode == 2 and mixed not in p.stderr + p.stdout, (p.stdout + p.stderr)[-200:])
+    check("and none of that wrote a row",
+          json.loads(ann.read_text(encoding="utf-8"))["annotations"] == {})
+    p = sign(env, "set", cid, "--purpose", "DNS edits for alpha-web", "--evidence",
+             "issued 2026-10-03 to project:local-alpha-web", "--owner", "ops-team", "--tag", "dns")
+    check("ordinary words, dates and ids still sign", p.returncode == 0, p.stderr[-200:])
+
+
 def test_a_signature_lands_and_a_re_signing_keeps_the_doors_half() -> None:
     env, ann = sandbox()
     cid = "credential:openrouter/demo"
@@ -200,6 +229,7 @@ def test_one_writer_serves_the_page_and_the_terminal() -> None:
 if __name__ == "__main__":
     print("signing a credential — one writer, and a file that stays clean\n")
     for fn in (test_the_writer_refuses_what_would_make_the_file_worse,
+               test_every_free_text_field_and_the_id_refuse_a_value,
                test_a_signature_lands_and_a_re_signing_keeps_the_doors_half,
                test_the_board_reports_the_unsigned_and_only_a_chosen_policy,
                test_one_writer_serves_the_page_and_the_terminal):
