@@ -226,6 +226,34 @@ class ObservatoryTest(unittest.TestCase):
         self.assertTrue(report["readable"])
         self.assertFalse(marker.exists())
 
+    def test_git_signature_display_never_runs_gpg(self):
+        # The global file is dropped, the repository's own is not: a repository
+        # that turns signature display on and names a gpg program must not have
+        # that program run when the light profile reads its last commit.
+        def git(*args, **kw):
+            return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-C", str(self.project), *args], check=True, capture_output=True, **kw)
+        git("init", "-q")
+        (self.project / "tracked").write_text("one")
+        git("add", ".")
+        git("commit", "-qm", "fixture")
+        tree = git("write-tree", text=True).stdout.strip()
+        parent = git("rev-parse", "HEAD", text=True).stdout.strip()
+        signed = (f"tree {tree}\nparent {parent}\nauthor F <f@example.invalid> 1759400000 +0000\n"
+                  f"committer F <f@example.invalid> 1759400000 +0000\n"
+                  "gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEEFAKE=\n =FAKE\n"
+                  " -----END PGP SIGNATURE-----\n\nsigned fixture commit\n")
+        commit = git("hash-object", "-t", "commit", "-w", "--stdin", input=signed, text=True).stdout.strip()
+        git("update-ref", "HEAD", commit)
+        marker = self.base / "gpg-executed"
+        program = self.base / "gpg-probe"
+        program.write_text(f"#!/bin/sh\ntouch '{marker}'\nexit 1\n")
+        program.chmod(0o700)
+        git("config", "log.showSignature", "true")
+        git("config", "gpg.program", str(program))
+        report = core.git_metrics(self.project)
+        self.assertEqual(report["last_commit_at"], "2025-10-02T10:13:20Z")
+        self.assertFalse(marker.exists(), "git log ran the repository's gpg.program")
+
     def test_registered_root_replaced_by_symlink_is_refused(self):
         core.add_project(self.state, "example", str(self.project))
         self.project.rename(self.base / "old-project")
