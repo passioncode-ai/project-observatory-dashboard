@@ -424,8 +424,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "0f68adc9cf63bc54fa5c62755c9fed00f945cc058d4b99e5bfe58574e4dabf91",
-      "bytes": 234512,
+      "export_sha256": "af88ec940480faa0ea9cb0c9903e74a20c108b966f6910e938da886ce9049c37",
+      "bytes": 235463,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,

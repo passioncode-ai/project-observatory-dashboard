@@ -11,9 +11,11 @@ then `dashboard/build_dashboard.py`), so a screenshot of `OUT_DIR/pages/` shows
 what Observatory draws, not a mock-up of it.
 
 The output directory must not exist or must be empty; it is the demo's own home
-(`OUT_DIR/home` is its OBSERVATORY_HOME). Like every dashboard, the pages embed the
-interpreter and engine paths that built them, for their copy-a-command buttons, so
-publish screenshots of the pages, never the generated HTML.
+(`OUT_DIR/home` is its OBSERVATORY_HOME). Unlike a workspace's dashboard, the
+pages embed no path of the machine that built them (`OBSERVATORY_DEMO=1`): their
+copy-a-command buttons read `project-observatory full …` and `"$HOME"`, and
+`tests/test_demo_estate.py` builds under a distinctive HOME and searches every page
+for it.
 """
 from __future__ import annotations
 
@@ -107,7 +109,10 @@ def main(argv: list[str]) -> int:
     env.update(OBSERVATORY_DATA=str(root / "estate"), OBSERVATORY_VAULT=str(root / "wiki"),
                CLAUDE_MEM_DB=str(root / "absent-companion.db"), OBSERVATORY_DB=str(root / "state/data.db"),
                OBSERVATORY_DASHBOARD=str(root / "page.html"), OBSERVATORY_DASHBOARD_DIR=str(root / "pages"),
-               OBSERVATORY_LOCALE=a.locale, OBSERVATORY_OFFLINE="1")
+               OBSERVATORY_LOCALE=a.locale, OBSERVATORY_OFFLINE="1",
+               # The pages carry no path of this machine: commands render as
+               # `project-observatory full …` and `"$HOME"` (build_dashboard.runtime_paths).
+               OBSERVATORY_DEMO="1")
 
     model = json.loads((root / "raw/model.json").read_text())
     project = dict(anchor=OWNER, ownership="owned", owners=[OWNER], archived=False, kinds=[],
@@ -179,7 +184,9 @@ def main(argv: list[str]) -> int:
               "variables": [{"name": n, "class": c, **({"fingerprint": fp} if fp else {})} for n, c, fp in variables]}
              for project, kind, variables in ENV_FILES]
     (root / "registry/env-inventory.json").write_text(json.dumps(document(
-        {"files": files, "scanned_at": stamp, "root": str(root / "estate")}, stamp[:10])))
+        # A neutral root: the page carries this document whole, and the output
+        # directory is a path on the machine that built the demo.
+        {"files": files, "scanned_at": stamp, "root": "~/projects"}, stamp[:10])))
     built = subprocess.run([sys.executable, str(ENGINE / "dashboard/build_dashboard.py")], cwd=ENGINE, env=env,
                            capture_output=True, text=True)
     if built.returncode:
