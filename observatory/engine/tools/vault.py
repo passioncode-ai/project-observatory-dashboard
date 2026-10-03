@@ -66,6 +66,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import leak_register  # noqa: E402
 import paths                                            
+import safe_git  # noqa: E402  — the engine's one git door
 
 GATEWAY = paths.source_path("gateway_root", paths.HOME / "disabled/gateway")
 STORE = pathlib.Path(os.environ.get("OBSERVATORY_VAULT_DIR",
@@ -535,10 +536,9 @@ def cmd_inject(a) -> int:
     env_file = target_dir / ".env"
     # THE GITIGNORE CHECK IS NOT OPTIONAL. An .env that git would commit turns
     # an injection into a publication on the next `git add -A`.
-    probe = subprocess.run(["git", "check-ignore", "-q", str(env_file)],
-                           cwd=target_dir, capture_output=True, timeout=60)
-    in_repo = subprocess.run(["git", "rev-parse", "--git-dir"], cwd=target_dir,
-                             capture_output=True, timeout=60).returncode == 0
+    probe = safe_git.run(["check-ignore", "-q", str(env_file)], cwd=target_dir, timeout=60)
+    in_repo = safe_git.run(["rev-parse", "--git-dir"], cwd=target_dir,
+                           timeout=60).returncode == 0
     if in_repo and probe.returncode != 0:
         die(f"{env_file} is NOT gitignored in that repository — refusing to write "
             f"secrets where `git add -A` can publish them. Add `.env` to its "

@@ -45,6 +45,7 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import paths                                                                    
+import safe_git                                                                 
 
 #: The instant every row of one run shares — the calendar day in UTC, matching
 #: the manifest's 24-hour cadence. A daily plugin stamping `now()` would write a
@@ -60,8 +61,7 @@ def git(cwd: pathlib.Path, *args: str) -> tuple[str, str | None]:
     the second is how a broken clone becomes "never released".
     """
     try:
-        p = subprocess.run(["git", "-C", str(cwd), *args],
-                           capture_output=True, text=True, timeout=30)
+        p = safe_git.run(args, repo=cwd, timeout=30)
     except FileNotFoundError:
         return "", "git is not installed or not on PATH"
     except subprocess.TimeoutExpired:

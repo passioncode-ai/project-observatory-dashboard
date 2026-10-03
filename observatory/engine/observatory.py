@@ -775,11 +775,13 @@ def tree_state() -> tuple[str, set[str], dict[str, str]] | None:
     split out of the one `git diff HEAD` already taken, so naming the files costs
     no extra subprocess.
     """
-    st = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT,
-                        capture_output=True, text=True)
+    # Through `safe_git`, the engine's one git door: the gate must not run the
+    # operator's fsmonitor, filters or diff drivers while it measures the tree.
+    import safe_git
+    st = safe_git.run(["status", "--porcelain"], cwd=ROOT, timeout=None)
     if st.returncode != 0:
         return None
-    df = subprocess.run(["git", "diff", "HEAD"], cwd=ROOT, capture_output=True, text=True)
+    df = safe_git.run(["diff", "HEAD"], cwd=ROOT, timeout=None)
     digest = hashlib.sha256((st.stdout + "\0" + df.stdout).encode("utf-8")).hexdigest()
     per_file: dict[str, str] = {}
     path, chunk = None, []

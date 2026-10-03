@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT))
 from datetime import datetime, timezone
 import atomic
 import paths
+import safe_git
 
 # The projection is the configured wiki's `inventory` folder, addressed relative
 # to the Git repository that holds the wiki; the lease uses the same name.
@@ -32,10 +33,13 @@ LEASE_KEY = PROJECTION
 
 
 def git(*args: str, cwd: pathlib.Path) -> tuple[int, str]:
-    # No signing, as in commit_registry: an unattended commit must not run a
-    # signer that can raise a passphrase or Keychain dialog.
-    p = subprocess.run(["git", "-c", "commit.gpgsign=false", *args], cwd=cwd,
-                       capture_output=True, text=True, timeout=60)
+    # Through `safe_git`, as in commit_registry: an unattended commit must not
+    # run a signer that can raise a passphrase or Keychain dialog, nor the
+    # operator's hooks, fsmonitor or clean filters. Signing was the only thing
+    # turned off here, and one tick ran pre-commit, prepare-commit-msg,
+    # commit-msg, post-commit and reference-transaction hooks from the
+    # operator's global hooks directory.
+    p = safe_git.run(args, cwd=cwd, write=True, timeout=60)
     return p.returncode, (p.stdout + p.stderr).strip()
 
 

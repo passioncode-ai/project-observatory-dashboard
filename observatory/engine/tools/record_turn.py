@@ -24,6 +24,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import atomic                                                                    
 import paths                                                                     
+import safe_git                                                                  
 
 OWNER = "agent:claude-code"
 MAX_SUBJECTS = 8
@@ -138,9 +139,11 @@ def _fault(exc: BaseException) -> int:
 
 
 def git(cwd: pathlib.Path, *args: str) -> str:
+    """stdout, or "" — through `safe_git`. This runs from the Stop hook on every
+    agent turn, and bare git there ran the operator's gpg (signature display),
+    fsmonitor, clean filters and index hooks each time."""
     try:
-        p = subprocess.run(["git", "-C", str(cwd), *args],
-                           capture_output=True, text=True, timeout=20)
+        p = safe_git.run(args, repo=cwd, timeout=20)
     except Exception:
         return ""
     return p.stdout if p.returncode == 0 else ""

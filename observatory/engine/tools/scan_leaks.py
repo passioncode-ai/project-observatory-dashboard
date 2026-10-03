@@ -60,6 +60,7 @@ sys.path.insert(0, str(ROOT / "collectors"))
 sys.path.insert(0, str(ROOT / "tools"))
 import atomic              
 import paths              
+import safe_git  # noqa: E402  — the engine's one git door
 import sqlite_scan  # noqa: E402  — when a store may be read from its last mark (PB-131)
 
 # Direct scanner callers may use names; main uses a name and version pair.
@@ -217,8 +218,7 @@ def targets(days: int) -> tuple[list[pathlib.Path], list[dict]]:
     if paths.DASHBOARD_HTML.is_file():
         out.append(paths.DASHBOARD_HTML)
     try:
-        tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True,
-                                 text=True, timeout=60)
+        tracked = safe_git.run(["ls-files"], cwd=ROOT, timeout=60)
         if tracked.returncode != 0:
             # An installed engine is not a git checkout. Its files cannot hold
             # this machine's values, but "not scanned" is still said, not implied.

@@ -18,13 +18,13 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import paths                                                                      
+import safe_git                                                                   
 
 
 def branches(folder: pathlib.Path) -> int | None:
     """Local branches in one checkout, or None when git will not answer."""
     try:
-        p = subprocess.run(["git", "-C", str(folder), "branch", "--list"],
-                           capture_output=True, text=True, timeout=30)
+        p = safe_git.run(["branch", "--list"], repo=folder, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return None
     if p.returncode != 0:

@@ -20,6 +20,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import safe_git
+
 SCHEMA_VERSION = 1
 
 
@@ -36,8 +38,7 @@ def root_commit(path: str | None) -> str | None:
     if not path or not (Path(path) / ".git").exists():
         return None
     try:
-        p = subprocess.run(["git", "-C", path, "rev-list", "--max-parents=0", "HEAD"],
-                           capture_output=True, text=True, timeout=30)
+        p = safe_git.run(["rev-list", "--max-parents=0", "HEAD"], repo=path, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return None
     roots = sorted(p.stdout.split()) if p.returncode == 0 else []

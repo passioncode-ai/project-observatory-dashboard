@@ -42,6 +42,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import paths              
+import safe_git           
 
 SEEN = paths.SCRATCH / "sessions-seen.jsonl"
 HOOK_LOG = paths.STATE / "logs" / "hooks.jsonl"
@@ -64,8 +65,7 @@ def log(row: dict) -> None:
 
 def git_top(cwd: pathlib.Path) -> pathlib.Path | None:
     try:
-        p = subprocess.run([GIT, "-C", str(cwd), "rev-parse", "--show-toplevel"],
-                           capture_output=True, text=True, timeout=10)
+        p = safe_git.run(["rev-parse", "--show-toplevel"], repo=cwd, timeout=10, git=GIT)
     except (OSError, subprocess.SubprocessError):
         return None
     return pathlib.Path(p.stdout.strip()) if p.returncode == 0 and p.stdout.strip() else None
@@ -73,8 +73,7 @@ def git_top(cwd: pathlib.Path) -> pathlib.Path | None:
 
 def remote_of(top: pathlib.Path) -> str:
     try:
-        p = subprocess.run([GIT, "-C", str(top), "remote", "get-url", "origin"],
-                           capture_output=True, text=True, timeout=10)
+        p = safe_git.run(["remote", "get-url", "origin"], repo=top, timeout=10, git=GIT)
         return p.stdout.strip() if p.returncode == 0 else ""
     except (OSError, subprocess.SubprocessError):
         return ""

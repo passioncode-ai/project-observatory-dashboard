@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
@@ -23,10 +24,21 @@ ENGINE = ROOT / "observatory" / "engine"
 INVENTORY = ENGINE / "SOURCE-INVENTORY.json"
 
 
+def _safe_git():
+    """The engine's one git door, loaded by path from this checkout (not from
+    whatever copy the interpreter has installed), so listing the tree runs none
+    of the programs the maintainer's git configuration names."""
+    spec = importlib.util.spec_from_file_location("observatory_inventory_safe_git",
+                                                  ENGINE / "safe_git.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def tracked_engine_files(root: Path = ROOT) -> list[str]:
     """Engine files Git tracks, relative to the engine directory."""
-    out = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "observatory/engine"],
-                         check=True, capture_output=True).stdout.decode("utf-8")
+    out = _safe_git().run(["ls-files", "-z", "--", "observatory/engine"], repo=root, timeout=None,
+                          check=True, text=False).stdout.decode("utf-8")
     prefix = "observatory/engine/"
     return sorted(p[len(prefix):] for p in out.split("\0")
                   if p.startswith(prefix) and p != prefix + "SOURCE-INVENTORY.json")

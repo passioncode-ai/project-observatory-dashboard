@@ -45,10 +45,11 @@ every clone and the credential is compromised either way.
     check_secrets.py --history N  # also the last N commits' added lines
 """
 from __future__ import annotations
-import argparse, collections, json, math, pathlib, re, subprocess, sys
+import argparse, collections, json, math, pathlib, re, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import safe_git  # noqa: E402  — the engine's one git door
 
 #: Shannon entropy DIVIDED BY its own ceiling, `log2(len)`. The first version
 #: used raw bits per character with a floor of 4.3 — and a real AWS key sailed
@@ -177,8 +178,7 @@ def body_of(match: str) -> str:
 
 
 def tracked() -> list[str]:
-    out = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True,
-                         text=True, timeout=120)
+    out = safe_git.run(["ls-files"], cwd=ROOT, timeout=120)
     if out.returncode != 0:
         raise SystemExit(f"check_secrets: `git ls-files` failed: {out.stderr[:200]}")
     return [l for l in out.stdout.splitlines() if l]
@@ -251,9 +251,10 @@ def main() -> int:
                 fixtures.append(hit)
 
     if a.history:
-        out = subprocess.run(
-            ["git", "log", f"-{a.history}", "-p", "--no-color", "--unified=0"],
-            cwd=ROOT, capture_output=True, text=True, timeout=600)
+        # `safe_git` adds `--no-ext-diff --no-textconv`: the scan must read the
+        # bytes that were committed, not a driver's rendering of them.
+        out = safe_git.run(["log", f"-{a.history}", "-p", "--no-color", "--unified=0"],
+                           cwd=ROOT, timeout=600)
         # THE FILE EACH LINE CAME FROM, kept. The first version concatenated
         # every added line of N commits into one string and scanned it as
         # `history(last N)` — so the per-file allowlist above could not apply,

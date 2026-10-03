@@ -107,7 +107,7 @@ and token provisioning are different permissions.
 | Integration name | Purpose | User-owned setup |
 |---|---|---|
 | `github` | Repository inventory | Authenticate GitHub CLI locally; it enumerates resources visible to that account |
-| `git_remotes` | Whether each checkout is current with its remote: one `git ls-remote` per checkout | None added: it uses each checkout's own remote and SSH keys, asks no credential helper, and reports a remote that wants a password as unreachable |
+| `git_remotes` | Whether each checkout is current with its remote: one `git ls-remote` per checkout | None added: it uses each checkout's own remote and SSH keys (and your `url.<base>.insteadOf` rewrites), asks no credential helper, allows only the https, http, ssh, git and file transports, and reports a remote that wants a password, or names another transport, as unreachable with git's own reason |
 | `bitbucket` | Repository inventory | A local Bitbucket credential in the configured secret store |
 | `cloudflare` | Zones and DNS inventory | User-owned account credentials; token administration is separately scoped |
 | `heroku` | Hosting inventory | Local authentication for the intended Heroku account |

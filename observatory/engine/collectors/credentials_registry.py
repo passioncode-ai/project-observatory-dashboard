@@ -41,6 +41,7 @@ import leak_register  # noqa: E402
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import environments  # noqa: E402  — one spelling of an environment name (DEPLOYMENTS.md)
 import paths                                                                             
+import safe_git  # noqa: E402  — the engine's one git door
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OWNERS = paths.config_file('credential_owners.json')
@@ -346,12 +347,10 @@ def from_project_secrets(root: pathlib.Path | None = None) -> list[dict]:
                 git = "no-repo"
                 if is_repo:
                     try:
-                        tracked = subprocess.run(
-                            ["git", "-C", str(proj), "ls-files", "--error-unmatch", str(rel)],
-                            capture_output=True, timeout=30).returncode == 0
-                        ignored = subprocess.run(
-                            ["git", "-C", str(proj), "check-ignore", str(rel)],
-                            capture_output=True, timeout=30).returncode == 0
+                        tracked = safe_git.run(["ls-files", "--error-unmatch", str(rel)],
+                                               repo=proj, timeout=30).returncode == 0
+                        ignored = safe_git.run(["check-ignore", str(rel)],
+                                               repo=proj, timeout=30).returncode == 0
                         git = "tracked" if tracked else ("ignored" if ignored else "loose")
                     except (OSError, subprocess.SubprocessError):
                         git = "unknown"

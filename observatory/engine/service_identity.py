@@ -38,6 +38,7 @@ import sys
 import configuration
 import fabric_service as fs
 import paths
+import safe_git
 
 SERVICE_ID = "project-observatory"
 NAME = "Project Observatory"
@@ -98,8 +99,7 @@ def log_files() -> list[Path]:
 
 def _git(root: Path, *args: str) -> str | None:
     try:
-        out = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
-                             timeout=5, check=True)
+        out = safe_git.run(args, repo=root, timeout=5, check=True)
     except (OSError, subprocess.SubprocessError):
         return None
     return out.stdout.strip()

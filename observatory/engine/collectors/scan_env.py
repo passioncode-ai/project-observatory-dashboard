@@ -38,6 +38,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import atomic              
 import paths              
+import safe_git  # noqa: E402  — the engine's one git door
 from runtime_identity import IdentityError, load as load_identity
 
 #: NO DEPTH LIMIT. A fixed depth looks sufficient and silently misses files a
@@ -337,11 +338,11 @@ def git_states(files: list[pathlib.Path], root: pathlib.Path) -> tuple[dict, lis
         tracked: set[str] = set()
         ignored: set[str] = set()
         try:
-            p = subprocess.run(["git", "-C", str(repo), "ls-files", "--", *rel],
-                               capture_output=True, text=True, timeout=60)
+            # Through `safe_git`: `ls-files` here ran the fsmonitor named in the
+            # operator's configuration, once per repository per tick.
+            p = safe_git.run(["ls-files", "--", *rel], repo=repo, timeout=60)
             tracked = {ln for ln in p.stdout.splitlines() if ln}
-            q = subprocess.run(["git", "-C", str(repo), "check-ignore", "--", *rel],
-                               capture_output=True, text=True, timeout=60)
+            q = safe_git.run(["check-ignore", "--", *rel], repo=repo, timeout=60)
             ignored = {ln for ln in q.stdout.splitlines() if ln}
         except (OSError, subprocess.SubprocessError) as exc:
             degraded.append({"repo": str(repo), "reason": f"{type(exc).__name__}: {exc}",
