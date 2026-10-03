@@ -260,8 +260,12 @@ def git(root: Path, *args: str) -> str | None:
                               timeout=10, env=env)
         if keys.returncode not in (0, 1):
             return None
+        # `log.showSignature` is neutralized too: dropping the global file does
+        # not drop the repository's own, and a repository that sets it with a
+        # `gpg.program` ran that program from `git log` on a signed commit.
         options = ["-c", "core.fsmonitor=false", "-c", f"core.hooksPath={os.devnull}",
-                   "-c", f"core.worktree={root}", "-c", "core.pager=cat"]
+                   "-c", f"core.worktree={root}", "-c", "core.pager=cat",
+                   "-c", "log.showSignature=false"]
         for key in keys.stdout.decode("utf-8").split("\0"):
             if key:
                 options += ["-c", key + ("=false" if key.endswith(".required") else "=")]
