@@ -141,7 +141,7 @@ def ledger_candidates(conn: sqlite3.Connection) -> list[dict]:
             # revision date: an open workflow's checkpoint is the work in
             # progress however long the work takes. `workflow_candidates`
             # applies their horizons below.
-            "   AND l.kind NOT IN ('checkpoint', 'handoff')"
+            "   AND " + ledger.not_workflow() +
             # Structural, not a parameter: the exempt owners are inlined into
             # every query rather than passed in by a caller who might forget.
             f"   AND l.owner NOT IN ({','.join('?' * len(cfg['owner_exempt']))})",
@@ -196,9 +196,13 @@ def volatile_counts(conn: sqlite3.Connection) -> dict:
     }
 
 
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                        (name,)).fetchone() is not None
+
+
 def _idempotency_count(conn: sqlite3.Connection, cfg: dict) -> int:
-    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    if "idempotency" not in tables:
+    if not _has_table(conn, "idempotency"):
         return 0
     return conn.execute("SELECT count(*) FROM idempotency WHERE created_at < ?",
                         (cutoff(cfg.get("idempotency_days", 7)),)).fetchone()[0]
@@ -464,11 +468,17 @@ def cmd_apply(conn: sqlite3.Connection) -> int:
         ik = (conn.execute("DELETE FROM idempotency WHERE created_at < ?",
                            (cutoff(cfg.get("idempotency_days", 7)),)).rowcount
               if _idempotency_count(conn, cfg) else 0)
+        # Lease rows of a workflow closed past its checkpoint horizon: the
+        # checkpoint is erased by then, and the rows only said who held it.
+        # The `workflows` row stays — small, and the trace that it existed.
+        wl = (workflow.prune_leases(
+            conn, cutoff_iso=cutoff(int(cfg["ledger"].get("checkpoint_closed_days", 30))))
+              if _has_table(conn, "workflow_leases") else 0)
 
     # THE BYTES, after the rows. Only when something was actually removed: a
     # VACUUM on every tick would rewrite 23 MB forty-eight times a day to
     # compact nothing.
-    removed_any = tombstoned or ev or ob or dl or mt or ik or any(
+    removed_any = tombstoned or ev or ob or dl or mt or ik or wl or any(
         r.get("removed") for r in receipts.values())
     scrubbing = (scrub(conn) if removed_any else
                  {"scrubbed": None, "detail": "nothing was removed, so there is "
@@ -480,11 +490,13 @@ def cmd_apply(conn: sqlite3.Connection) -> int:
     # pipes into a log nothing reads on a schedule. Ledger rows had their
     # tombstone; the volatile deletes and the projection receipts had nothing.
     report(tombstoned=tombstoned, records=records, events=ev, observations=ob,
-           deltas=dl, metrics=mt, idempotency=ik, receipts=receipts, scrub=scrubbing)
+           deltas=dl, metrics=mt, idempotency=ik, workflow_leases=wl, receipts=receipts,
+           scrub=scrubbing)
 
     print(f"tombstoned {records} record(s), {tombstoned} revision(s) — every row retained")
     print(f"deleted: {ev} event(s), {ob} observation(s), {dl} consumed delta(s), "
-          f"{mt} metric row(s), {ik} idempotency answer(s)")
+          f"{mt} metric row(s), {ik} idempotency answer(s), {wl} lease row(s) of closed "
+          f"workflows")
     print(f"file scrub: {scrubbing['detail']}")
     bad: list[str] = []
     if any(r.get("status") != "absent" for r in receipts.values()):

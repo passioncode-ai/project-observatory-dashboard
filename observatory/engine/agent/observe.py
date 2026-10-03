@@ -157,7 +157,8 @@ def project_facts(pid: str) -> dict:
 
 def already_recorded(conn, pid: str) -> list[str]:
     return [r["statement"] for r in conn.execute(
-        "SELECT statement FROM ledger WHERE project_id = ? ORDER BY created_at DESC LIMIT 5",
+        "SELECT statement FROM ledger WHERE project_id = ? AND " + L.not_workflow("")
+        + " ORDER BY created_at DESC LIMIT 5",
         (pid,))]
 
 

@@ -462,6 +462,14 @@ def tombstone(conn: sqlite3.Connection, memory_id: str, *, reason: str,
         raise LedgerError(f"{memory_id} does not exist")
     if not approved_by or not approved_by.strip():
         raise OwnerRequired("an erasure must name who approved it")
+    if row["kind"] == "checkpoint" and _workflow_open(conn, row["workflow_id"]):
+        # AN OPEN WORKFLOW'S CHECKPOINT IS ITS STATE. A tombstoned record takes
+        # no further revisions, so erasing it left a workflow that could be
+        # neither continued (every write refused) nor handed over (no
+        # checkpoint to carry). Close the workflow first, then erase.
+        raise LedgerError(
+            f"{memory_id} is the checkpoint of open workflow {row['workflow_id']}; close the "
+            f"workflow first (`project-observatory full workflow close`), then erase it")
     revisions = [r["revision"] for r in history(conn, memory_id)]
     now = _now()
     with conn:
@@ -473,6 +481,17 @@ def tombstone(conn: sqlite3.Connection, memory_id: str, *, reason: str,
             "revisions": revisions, "reason": reason, "approvedBy": approved_by,
             "note": "every revision tombstoned; ledger rows retained; purge the "
                     "derived projections and collect receipts"}
+
+
+def _workflow_open(conn: sqlite3.Connection, workflow_id: str | None) -> bool:
+    if not workflow_id:
+        return False
+    try:
+        row = conn.execute("SELECT status FROM workflows WHERE workflow_id = ?",
+                           (workflow_id,)).fetchone()
+    except sqlite3.Error:
+        return False
+    return row is not None and row[0] == "open"
 
 
 def live_count(conn: sqlite3.Connection, project_id: str | None = None,
@@ -489,6 +508,7 @@ def live_count(conn: sqlite3.Connection, project_id: str | None = None,
            " FROM ledger GROUP BY memory_id) m ON l.memory_id = m.memory_id"
            " AND l.revision = m.r LEFT JOIN tombstones t"
            " ON t.memory_id = l.memory_id WHERE t.memory_id IS NULL")
+    sql += _NOT_WORKFLOW
     args: list = []
     if project_id:
         sql += " AND l.project_id = ?"
@@ -512,6 +532,7 @@ def live(conn: sqlite3.Connection, project_id: str | None = None,
            " GROUP BY memory_id) m ON l.memory_id = m.memory_id AND l.revision = m.r"
            " LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
            " WHERE t.memory_id IS NULL")
+    sql += _NOT_WORKFLOW
     args: list = []
     if project_id:
         sql += " AND l.project_id = ?"
@@ -530,7 +551,26 @@ def live(conn: sqlite3.Connection, project_id: str | None = None,
         args += [at, mid]
     sql += " ORDER BY l.created_at DESC, l.memory_id DESC LIMIT ?"
     args.append(limit)
-    return [dict(r) for r in conn.execute(sql, args)]
+    return [{k: r[k] for k in r.keys() if k not in _BODY_COLUMNS}
+            for r in conn.execute(sql, args)]
+
+
+#: A workflow's checkpoint and handoff pack are read through the workflow tools,
+#: never in a general listing: one pack is up to 128 KB, so a page of ten could
+#: be a megabyte where the reader was promised a few KB. Their structured
+#: columns leave every other row too — a step's result keeps its statement.
+def not_workflow(alias: str = "l") -> str:
+    """The SQL condition that leaves workflow records out of a general reader.
+
+    One spelling, built from `WORKFLOW_KINDS`, for every reader that lists
+    conclusions — recall, project notes, the observer's prompt, retention's
+    age rules — so a kind added to the set leaves all of them at once."""
+    prefix = f"{alias}." if alias else ""
+    return f"{prefix}kind NOT IN ({','.join(repr(k) for k in sorted(WORKFLOW_KINDS))})"
+
+
+_NOT_WORKFLOW = " AND " + not_workflow()
+_BODY_COLUMNS = frozenset({"body_json", "executor_json"})
 
 
 def live_cursor(row: dict) -> str:
