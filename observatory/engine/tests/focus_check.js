@@ -113,6 +113,13 @@ function click(selector, inside) {
   return { focused: doc.activeElement ? doc.activeElement.key : null, errors };
 }
 
+// `--eval EXPR`: the value of an expression evaluated in the loaded page,
+// for a helper whose output is text (what a toast will say).
+const evalAt = process.argv.indexOf("--eval");
+if (!result.threw && evalAt > 0) {
+  try { result.value = vm.runInContext(process.argv[evalAt + 1], context); }
+  catch (e) { result.evalError = `${e.name}: ${e.message}`; }
+}
 if (!result.threw) {
   result.sort = click("th[data-sort]", Object.assign(node("old th"), { dataset: { sort: "name" } }));
   result.clear = click("[data-clear]", node("old reset"));

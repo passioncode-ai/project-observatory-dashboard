@@ -2801,7 +2801,11 @@ async function copyText(text) {
 function copiedWhat(label, text) {
   const line = String(text || "").replace(/\s+/g, " ").trim();
   const tail = line.length > 56 ? "…" + line.slice(-56) : line;
-  const name = String(label || "").replace(/\s+/g, " ").trim();
+  let name = String(label || "").replace(/\s+/g, " ").trim();
+  // A GENERIC label says nothing about what was copied: the toast read
+  // "copied: copy the command — …", repeating the button. Only a label that
+  // names the thing ("Command: silence") is worth keeping beside the text.
+  if ([T("copy the command"), T("copy")].includes(name)) name = "";
   return name && name !== line && tail ? name + " — " + tail : (name || tail);
 }
 // Any element with `data-copy` copies its command on click. A button marked

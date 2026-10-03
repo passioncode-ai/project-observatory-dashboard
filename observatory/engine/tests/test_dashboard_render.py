@@ -658,6 +658,37 @@ def test_links_and_summaries_have_names_and_one_tab_stop_per_row() -> None:
           str(focusable))
 
 
+def test_the_copy_toast_and_the_swap_tile_read_in_the_readers_words() -> None:
+    """Two strings a Russian walk caught. The machine tile said "swap —" in
+    Russian; and a copy button whose label is generic produced the toast
+    "copied: copy the command — …", repeating the button instead of saying
+    what was copied. A generic label is dropped; a specific one is kept."""
+    sys.path.insert(0, str(ROOT / "dashboard"))
+    import i18n
+    ru = i18n.translate("swap {size}", "ru", size="1 GB")
+    check("the swap caption is Russian in Russian", "swap" not in ru.lower(), ru)
+    if node() is None:
+        check("node is available", True, " [uncoverable: executing the page needs node]")
+        return
+    root = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-toast-"))
+    build(root)
+    cmd = "python3 tools/vault.py put alpha-web prod API_TOKEN"
+
+    def said(label_expr: str) -> str:
+        p = subprocess.run([node(), str(FOCUS), str(root / "pages/env.html"), "--eval",
+                            f"copiedWhat({label_expr}, {json.dumps(cmd)})"],
+                           cwd=ROOT, capture_output=True, text=True, timeout=300)
+        try:
+            return json.loads(p.stdout).get("value") or ""
+        except ValueError:
+            return (p.stdout + p.stderr)[-200:]
+    generic = said('T("copy the command")')
+    check("a generic label is not echoed in the toast",
+          "copy the command" not in generic and cmd in generic, generic)
+    specific = said('"Command: silence"')
+    check("a specific label is kept", specific.startswith("Command: silence — "), specific)
+
+
 def test_the_harness_itself_can_fail() -> None:
     """A green from a harness that cannot go red is not evidence."""
     if node() is None:
@@ -706,6 +737,7 @@ if __name__ == "__main__":
                test_the_keys_page_says_what_it_measured,
                test_the_declared_and_measured_states_are_labelled,
                test_links_and_summaries_have_names_and_one_tab_stop_per_row,
+               test_the_copy_toast_and_the_swap_tile_read_in_the_readers_words,
                test_the_harness_itself_can_fail):
         fn()
     print()
