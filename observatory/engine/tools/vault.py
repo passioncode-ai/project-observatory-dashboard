@@ -64,6 +64,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import credential_shape  # noqa: E402
 import leak_register  # noqa: E402
 import paths                                            
 import safe_git  # noqa: E402  — the engine's one git door
@@ -188,12 +189,37 @@ def _serialized(function):
 
 
 def validate_names(project: str, env: str | None = None, name: str | None = None) -> None:
+    """The slot's three names, refused when malformed OR credential-shaped.
+
+    The second test is the one the first cannot make: a pasted token is a
+    perfectly good identifier, and one accepted as a PROJECT became the folder
+    `projects/<token>/…`, and from there `credential:vault/<token>/…` in the
+    registry, the findings, the dashboard pages and the MCP answers. The shape
+    test is `credential_shape`, the same one every other door uses. Messages
+    name the field, never the text."""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", project or ""):
         raise VaultBoundaryError("Project must be one plain identifier")
     if env is not None and env not in ENVS:
         raise VaultBoundaryError("env must be one of local, stage, prod")
     if name is not None and not re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", name or ""):
         raise VaultBoundaryError("Secret NAME must be UPPER_SNAKE_CASE")
+    for field, text in (("project", project), ("NAME", name)):
+        try:
+            credential_shape.refuse(field, text)
+        except ValueError as exc:
+            raise VaultBoundaryError(str(exc)) from None
+
+
+def _note(field: str, text: str) -> str:
+    """A free-text note (`--how`, an evidence reference), refused when it
+    carries a credential shape: these land in the leak register and the
+    movement journal, which the board and the keys page print."""
+    kind = credential_shape.find(text)
+    if kind:
+        die(f"{field} looks like it carries a credential ({credential_shape.describe(kind)}); "
+            f"describe the operation and cite references (a short commit id, a ticket, a "
+            f"release number), never the value")
+    return text
 
 
 def _slot(project: str, env: str, name: str) -> pathlib.Path:
@@ -344,7 +370,7 @@ def cmd_moved(a) -> int:
         die("--how must describe what moved, where, and its evidence (at least 12 characters)")
     # `--settle` also closes the open leak rows of this slot, and then needs
     # the same revocation and consumer evidence `settle` does.
-    detail = _settlement_detail(a) if a.settle else {"how": a.how.strip()}
+    detail = _settlement_detail(a) if a.settle else {"how": _note("--how", a.how.strip())}
     secret = f"{a.project}/{a.env}/{a.name}"
     rows = _unsettled_for(secret) if a.settle else []
     journal("moved", secret, at_provider=a.at or "unknown", **detail)
@@ -379,14 +405,14 @@ def _settlement_detail(a) -> dict:
     """The settlement record, refused unless it carries revocation and consumer evidence."""
     if not a.how or len(a.how.strip()) < 12:
         die("--how must describe the operation and its evidence (at least 12 characters)")
-    detail = {"verification": "manual_attestation", "how": a.how.strip()}
+    detail = {"verification": "manual_attestation", "how": _note("--how", a.how.strip())}
     for field in ("revocation_evidence", "consumer_evidence"):
         value = getattr(a, field, None)
+        flag = "--" + field.replace("_", "-")
         if not isinstance(value, str) or len(value.strip()) < 12:
-            flag = "--" + field.replace("_", "-")
             die(f"{flag} must reference the completed check (at least 12 characters); "
                 "settlement needs both issuer revocation and consumer evidence")
-        detail[field] = value.strip()
+        detail[field] = _note(flag, value.strip())
     return detail
 
 
@@ -434,14 +460,20 @@ def cmd_leak(a) -> int:
             "transcript of session X') — a leak record that names no place "
             "cannot be judged later")
     known = slot.is_file()
+    # THE PLACE IS KEPT, THE VALUE IS NOT. A person recording a sighting often
+    # pastes the line they saw, value included; refusing would lose the leak,
+    # so the credential-shaped part is replaced and the rest of the place stays.
+    where = credential_shape.redact(a.where.strip())
     row = {"event": "leaked", "id": f"leak:{now()}:{a.project}/{a.env}/{a.name}",
-           "secret": f"{a.project}/{a.env}/{a.name}", "where": a.where.strip(),
+           "secret": f"{a.project}/{a.env}/{a.name}", "where": where,
            "at": now(), "by": os.environ.get("USER", "unknown"),
            "slot_exists": known}
     _append_leak(row)
     journal("leak", row["secret"], where=row["where"][:120])
     print(f"recorded: {row['id']}")
     print(f"  where: {row['where']}")
+    if where != a.where.strip():
+        print("  the place carried a credential-shaped value; it was recorded as [redacted]")
     if known:
         print("  revoke the old version at its provider and verify consumers; "
               "replacing a local slot leaves this row open")

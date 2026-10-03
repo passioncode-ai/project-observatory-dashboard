@@ -264,6 +264,35 @@ class KeyserverBoundaryTests(unittest.TestCase):
         self.assertEqual(record["subject"], "[redacted]")
         self.assertNotIn(synthetic, keyserver.AUDIT.read_text())
 
+    def test_audit_scrub_uses_the_shared_shapes_and_keeps_a_session_caller(self):
+        """The scrub caught only `sk-…` and 40+ runs: a 37-character token sent
+        as an annotate id sat unredacted in the journal, and UUID or 32-hex keys
+        passed. An agent's session id IS a UUID, and naming the caller is the
+        journal's point, so the caller keeps its UUID."""
+        shapes = {"mixed37": "Fake" + "Tokn" + "_" + "Ab3" * 9 + "x",
+                  "uuid": "-".join(("0f" * 4, "1a2b", "3c4d", "5e6f", "7a" * 6)),
+                  "hex32": "0123456789abcdef" * 2}
+        session = "-".join(("1b" * 4, "2c3d", "4e5f", "6a7b", "8c" * 6))
+        token = keyserver._CALLER.set(session)
+        try:
+            for label, value in shapes.items():
+                keyserver.audit("fixture", f"credential:{value}", {"label": f"see {value} here"})
+        finally:
+            keyserver._CALLER.reset(token)
+        text = keyserver.AUDIT.read_text()
+        for label, value in shapes.items():
+            self.assertNotIn(value, text, label)
+        rows = [json.loads(line) for line in text.splitlines()]
+        self.assertTrue(all(r["caller"] == session for r in rows), rows[0]["caller"])
+        self.assertTrue(all("[redacted]" in r["subject"] and r["label"].startswith("see ") for r in rows))
+
+    def test_annotate_refuses_a_value_shaped_id_before_the_audit_row(self):
+        synthetic = "Fake" + "Tokn" + "_" + "Ab3" * 9 + "x"
+        with self.assertRaises(ValueError) as caught:
+            keyserver.act_annotate({"id": synthetic, "purpose": "p", "evidence": "e"})
+        self.assertNotIn(synthetic, str(caught.exception))
+        self.assertFalse(keyserver.AUDIT.exists(), "a refused id must not become a journal row")
+
     def test_explicit_reveal_is_inventory_scoped_and_audited_without_value(self):
         keyserver.paths.SCRATCH.mkdir()
         keyserver.paths.DATA.mkdir()

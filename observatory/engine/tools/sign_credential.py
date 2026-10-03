@@ -32,12 +32,12 @@ import datetime
 import json
 import os
 import pathlib
-import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import atomic                                                       # noqa: E402
+import credential_shape                                             # noqa: E402
 import paths                                                        # noqa: E402
 
 #: Redirectable for the same reason every other artefact here is: a test that
@@ -45,10 +45,10 @@ import paths                                                        # noqa: E402
 #: would be the thing that noticed.
 FILE = pathlib.Path(os.environ.get("OBSERVATORY_ANNOTATIONS",
                                    paths.config_file("credential_annotations.json")))
-#: A value looks like this: a long unbroken run with no spaces, or a known
-#: provider prefix. Deliberately generous — a false refusal costs a rewording,
-#: and a credential committed to git costs a rotation and stays in the history.
-VALUE_SHAPED = re.compile(r"(sk-[A-Za-z0-9_-]{12,}|[A-Za-z0-9_\-+/=]{40,})")
+#: What "looks like a value" means is `credential_shape`, shared with the vault,
+#: the keyserver's journal and every refusal that would echo input. This file
+#: once kept its own pattern (`sk-…` or a 40+ run), which let a 38-character
+#: token through as a purpose and any token through as an owner or a tag.
 
 
 def today() -> str:
@@ -99,15 +99,22 @@ def write(cred_id: str, fields: dict, *, by: str = "operator") -> dict:
     if not evidence:
         raise ValueError("--evidence is required: a purpose nobody can check is a "
                          "guess that will be read as a fact")
-    for field, text in (("purpose", purpose), ("evidence", evidence)):
-        if VALUE_SHAPED.search(text):
-            raise ValueError(f"refused: the {field} looks like it carries a value. "
-                             f"This file is in git, and no later edit removes a "
-                             f"credential from the history")
+    # EVERY FIELD THE ROW STORES, the id included: the id is the row's key, and
+    # with no board to compare it against (a fresh workspace) it was the one
+    # field nothing checked at all.
+    tags = [str(t) for t in (fields.get("tags") or [])]
+    for field, text in (("id", cred_id), ("purpose", purpose), ("evidence", evidence),
+                        ("owner", str(fields.get("owner") or "")),
+                        *(("tag", t) for t in tags)):
+        kind = credential_shape.find(text)
+        if kind:
+            raise ValueError(f"refused: the {field} looks like it carries a value "
+                             f"({credential_shape.describe(kind)}). This file is in git, "
+                             f"and no later edit removes a credential from the history")
     ids = board_ids()
     if ids and cred_id not in ids:
         near = [i for i in ids if cred_id.split("/", 1)[0] == i.split("/", 1)[0]][:4]
-        raise ValueError(f"the board carries no credential {cred_id!r}"
+        raise ValueError(f"the board carries no credential {credential_shape.echo(cred_id)}"
                          + (f" — same kind: {', '.join(near)}" if near else "")
                          + "\n  (ids are as registry/credentials.json prints them)")
     days = fields.get("rotation_days")
@@ -116,7 +123,7 @@ def write(cred_id: str, fields: dict, *, by: str = "operator") -> dict:
             days = int(days)
         except (TypeError, ValueError):
             raise ValueError(f"--rotation-days must be a whole number of days, "
-                             f"got {days!r}") from None
+                             f"got {credential_shape.echo(days) if isinstance(days, str) else type(days).__name__}") from None
         if days < 1:
             raise ValueError("--rotation-days must be at least 1; a policy of zero "
                              "is a finding every day and a decision never")

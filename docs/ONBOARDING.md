@@ -211,6 +211,11 @@ The command accepts the value only on stdin. The same tool manages the slot afte
 the provider), and `remove PROJECT ENV NAME` (the value, its metadata and its retired
 archives; refused while a leak on the slot is open unless `--force`; `--retired` removes
 only the archives). Every change is a line in the movements journal and none prints a value.
+A `PROJECT` or `NAME` shaped like a credential (a provider key prefix, a UUID, 32 or more
+hexadecimal characters, a long random-looking run) is refused by every command, and so is a
+`--how` or evidence note that carries one; a `--where` that carries one is recorded with that
+part replaced by `[redacted]`, so the sighting is kept and the value is not. Cite a commit by
+its short id.
 A command uses a slot by name, never by value:
 
 ```sh

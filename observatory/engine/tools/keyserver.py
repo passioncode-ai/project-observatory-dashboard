@@ -77,6 +77,7 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "collectors"))
+import credential_shape
 import paths              
 
 import stat
@@ -182,10 +183,23 @@ def audit(action: str, subject: str, detail: dict) -> None:
            # `detail` so no action can overwrite it, and a later reader never
            # mistakes the label for a verified identity.
            "caller_verified": False, "principal": "local-token-holder"}
-    # Free-text fields are not journalled. Scrub recognizable value shapes in
-    # labels too; a user can paste a credential into any textbox by mistake.
-    value_shape = re.compile(r"sk-[A-Za-z0-9_-]{12,}|[A-Za-z0-9_+/=-]{40,}")
-    encoded = value_shape.sub("[redacted]", json.dumps(row, ensure_ascii=False))
+    # Free-text fields are not journalled. Scrub credential shapes in labels
+    # and subjects too; a user can paste a credential into any textbox by
+    # mistake. The shapes are `credential_shape`'s, the ones every door uses —
+    # this scrub once caught only `sk-…` and 40+ runs, so a 37-character token
+    # sent as an annotate id sat in the journal whole. Each string is scrubbed
+    # on its own (never the encoded JSON, where a match could span a quote),
+    # and the caller keeps a UUID: an agent's session id is one, and naming the
+    # caller is what the journal is for.
+    def scrub(key, value):
+        if isinstance(value, str):
+            return credential_shape.redact(value, uuids=key != "caller")
+        if isinstance(value, list):
+            return [scrub(key, v) for v in value]
+        if isinstance(value, dict):
+            return {k: scrub(k, v) for k, v in value.items()}
+        return value
+    encoded = json.dumps({k: scrub(k, v) for k, v in row.items()}, ensure_ascii=False)
     fd = os.open(AUDIT, os.O_WRONLY | os.O_APPEND | os.O_CREAT |
                  getattr(os, "O_NOFOLLOW", 0) | os.O_NONBLOCK, 0o600)
     with os.fdopen(fd, "a", encoding="utf-8") as fh:
@@ -285,11 +299,19 @@ def act_annotate(body: dict) -> dict:
     the audit line carries only the names of changed fields. Free text is not
     copied into the journal, including text the writer subsequently refuses.
     """
-    cred = (body.get("id") or "").strip()
+    cred = str(body.get("id") or "").strip()
     if not cred:
         raise ValueError("id is required — the credential as the registry spells it")
+    # THE ID IS CHECKED BEFORE IT IS JOURNALLED. The audit row names its
+    # subject, so an id that is a pasted token, or one the board does not
+    # carry, would otherwise land in the journal before the writer refused it.
+    credential_shape.refuse("id", cred)
     sys.path.insert(0, str(ROOT / "tools"))
     import sign_credential
+    ids = sign_credential.board_ids()
+    if ids and cred not in ids:
+        raise ValueError(f"the board carries no credential {credential_shape.echo(cred)} "
+                         f"(ids are as registry/credentials.json prints them)")
     audit("annotate", cred, {"fields": sorted(k for k in
           ("purpose", "owner", "evidence", "rotation_days", "tags") if k in body)})
     try:
