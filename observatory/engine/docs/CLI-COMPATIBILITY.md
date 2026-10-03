@@ -156,10 +156,40 @@ the engine migration path accepts the original full-engine layout explicitly.
 
 Two local servers require different ports when used concurrently. Workspace
 labels prevent scheduler-job collisions; they do not allocate TCP ports.
-Individual engine step commands have fixed arguments; additional arbitrary
-arguments are rejected instead of silently ignored. Use the underlying tool's
-CLI for its detailed options. Workspace commands and the portable check runner
-forward their documented arguments.
+## Step arguments and help
+
+Individual engine step commands have fixed arguments; undeclared arguments are
+rejected (exit 2) instead of silently ignored, and a group takes none. A step's
+positional arguments are this workspace's own paths, so free pass-through would
+let a typo point a writer elsewhere. There is one step per invocation: a
+chained form such as `full merge emit` is refused, and `project-observatory full
+local` is the chain of `scan-fs`, `env`, `merge`, `emit`, `validate`,
+`scan-events`, `findings` and the dashboard.
+
+A few steps forward options their tool declares, through an allowlist
+([`STEP_OPTIONS`](../observatory.py)):
+
+| Step | Options |
+|---|---|
+| `google` | `--force` (re-fetch inside the twelve-hour cache window) |
+| `plugins` | `--only ID` (one plugin by manifest id; a name, never a path), `--force` (ignore each plugin's age gate) |
+
+`--expect-skipped=STEP[,STEP]` is accepted everywhere for CI. Workspace commands
+and the portable check runner forward their documented arguments.
+
+Every subcommand answers `--help` (`-h`) with exit 0 and a usage line that names
+it as typed (`usage: project-observatory full` and the command), and runs nothing: no collector, no survey,
+no workspace write. `project-observatory full --help` lists every workspace
+command, `migrate-local` included.
+
+Every `project-observatory full …` command the engine hands a person (finding
+remedies, hook lines, messages, dashboard copy buttons, shipped docs) is parsed
+in the gate by [`refusal`](../observatory.py), which uses the dispatcher's own
+parsers and runs nothing; a remedy the dispatcher would refuse fails the gate.
+Tests: [`tests/test_handed_commands.py`](../tests/test_handed_commands.py)
+(`test_every_handed_over_full_command_is_accepted`,
+`test_every_subcommand_help_exits_zero_names_itself_and_runs_nothing`,
+`test_full_help_lists_every_workspace_command`).
 
 ## Regression receipt for this change
 

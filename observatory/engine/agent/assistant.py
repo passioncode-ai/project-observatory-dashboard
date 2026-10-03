@@ -407,9 +407,16 @@ def run_question(job):
     return result
 
 
-def main(argv=None):
+def parser():
+    """Shared by `main` and the gate's parse-only check (`observatory.refusal`)."""
     import argparse
-    ap=argparse.ArgumentParser(description=__doc__);ap.add_argument('action',choices=['status','ask','list','get','job','cancel','delete','dashboard','serve','build']);args=ap.parse_args(argv)
+    ap=argparse.ArgumentParser(prog='project-observatory full assistant',description=__doc__)
+    ap.add_argument('action',choices=['status','ask','list','get','job','cancel','delete','dashboard','serve','build'])
+    return ap
+
+
+def main(argv=None):
+    args=parser().parse_args(argv)
     try:
         require_workspace()
         doc={}

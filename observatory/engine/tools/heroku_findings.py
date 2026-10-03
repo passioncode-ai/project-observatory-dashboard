@@ -200,7 +200,9 @@ def snapshot_stale(doc: dict, age: int) -> list[dict]:
                    f"{STALE_AFTER_DAYS} days. A crashed dyno reported from a stale "
                    f"scan may have been restarted, and one that crashed since is "
                    f"invisible — both are worse than an admitted gap."),
-        "action": "project-observatory full heroku, then project-observatory full emit findings",
+        # One step per invocation: `local` re-emits the registry and rebuilds the
+        # board, which `full emit findings` (refused: steps take no arguments) meant.
+        "action": "`project-observatory full heroku`, then `project-observatory full local`",
     }]
 
 

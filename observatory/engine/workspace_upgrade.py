@@ -462,18 +462,26 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
             shutil.rmtree(stage,ignore_errors=True)
 
 
-def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    commands = parser.add_subparsers(dest='command',required=True)
-    backup = commands.add_parser('backup')
+def parser() -> argparse.ArgumentParser:
+    """Shared by `main` and the gate's parse-only check (`workspace.parse`).
+
+    `backup` is reached as `full workspace-backup` (the engine's `backup` step is
+    the SQLite-only one), so its usage line says the name a person types."""
+    ap = argparse.ArgumentParser(prog='project-observatory full', description=__doc__)
+    commands = ap.add_subparsers(dest='command',required=True)
+    backup = commands.add_parser('backup', prog='project-observatory full workspace-backup')
     backup.add_argument('--output',type=Path)
     backup.add_argument('--writers-stopped',action='store_true')
-    up = commands.add_parser('upgrade')
+    up = commands.add_parser('upgrade', prog='project-observatory full upgrade')
     up.add_argument('--apply',action='store_true')
     up.add_argument('--writers-stopped',action='store_true')
-    res = commands.add_parser('restore')
+    res = commands.add_parser('restore', prog='project-observatory full restore')
     res.add_argument('snapshot',type=Path)
-    args = parser.parse_args(argv)
+    return ap
+
+
+def main(argv: list[str]) -> int:
+    args = parser().parse_args(argv)
     try:
         base = config.home()
         if args.command == 'backup':
