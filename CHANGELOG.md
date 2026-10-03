@@ -3,6 +3,26 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Added
+
+- **A vault bearer for an HTTP MCP server, through Claude Code's `headersHelper`.**
+  `tools/use_secret.py header [--env ENV] [--name Authorization] [--scheme Bearer] PROJECT NAME`
+  prints one JSON header object, `{"Authorization": "Bearer <value>"}`, which Claude Code puts
+  into the request on each new connection. It reads the vault only and refuses, printing nothing,
+  when stdout is a terminal, when `CLAUDE_CODE_MCP_SERVER_URL` is unset or names a scheme, host or
+  port other than the slot's binding, when the slot is not bound, when `--name` or `--scheme` is
+  not an RFC 7230 token, or when the value carries a control character. Every call, served or
+  refused, is a row in the `secret-use.jsonl` audit, without the value.
+- **`tools/vault.py bind PROJECT ENV NAME --header-for <https URL or host>`** records, in the
+  slot's metadata and never with its value, the one server the header door may serve it to;
+  `--clear` removes it. Only https is accepted (a bare host means https on the default port).
+  Both are journalled in the movements journal, and `vault.py list` shows the binding.
+
+The `handling-secrets` skill gained both commands, so the companion plugin `observatory-log`
+needs a version bump at the next release (its three manifests and every `SKILL.md`).
+
 ## 0.14.0 — 2026-10-03
 
 A minor release: the organisation's product lifecycle contract applied to the engine (#125,

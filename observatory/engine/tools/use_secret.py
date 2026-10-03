@@ -5,6 +5,8 @@
     python "$T/use_secret.py" names <project>                    what this project has
     python "$T/use_secret.py" run [--env ENV] <project> <NAME>[,<NAME>…] -- <command…>
     python "$T/use_secret.py" where [--env ENV] <project> <NAME>             which slot it would resolve
+    python "$T/use_secret.py" header [--env ENV] [--name Authorization] [--scheme Bearer] <project> <NAME>
+                                                    one MCP server's headersHelper, vault only, bound slot only
 
 WHY THIS EXISTS. The secrets rule already says an agent works with NAMES after
 an inject — and without this file there was no way to HONOUR that for a one-off
@@ -56,6 +58,7 @@ sys.path.insert(0, str(ROOT))
 import paths  # noqa: E402
 sys.path.insert(0, str(ROOT / "tools"))
 import vault as private_files
+import credential_shape  # noqa: E402  — the one credential-shape heuristic
 
 VAULT = pathlib.Path(os.environ.get(
     "OBSERVATORY_VAULT_DIR",
@@ -438,6 +441,162 @@ def cmd_pipe(args) -> int:
     return rc
 
 
+# ── the header door ───────────────────────────────────────────────────────
+#
+# THE CONTRACT IT RELIES ON, quoted from Claude Code's MCP documentation
+# (https://code.claude.com/docs/en/mcp, "Use dynamic headers for custom
+# authentication", read 2026-10-03):
+#
+#   "use `headersHelper` to generate request headers at connection time. Claude
+#    Code runs the command and merges its output into the connection headers."
+#   "The command must write a JSON object of string key-value pairs to stdout"
+#   "Claude Code runs the command in a shell and gives up on it after 10 seconds"
+#   "Claude Code runs the helper fresh on each connection, at session start and
+#    on reconnect [...] It doesn't cache the result"
+#   "Claude Code sets these environment variables when executing the helper:
+#    `CLAUDE_CODE_MCP_SERVER_NAME` the name of the MCP server;
+#    `CLAUDE_CODE_MCP_SERVER_URL` the URL of the MCP server"
+#
+# So the value goes into an HTTP request and not into the model's context —
+# but only when Claude Code is the reader. This is the one door here that PRINTS
+# a value, and `header … | cat` from an agent's shell would put it straight into
+# a transcript. What stands between the two cases is the binding: the slot names
+# the one server (scheme, host, port) it may be served to, set once by the
+# operator with `vault.py bind`, and the door serves it only when the URL Claude
+# Code says it is connecting to is that server. An agent that sets the variable
+# itself can still pass the check; the binding narrows the accident, the TTY
+# refusal and the audit row name the rest, and none of it is a sandbox.
+
+#: RFC 7230 §3.2.6 `token`: what a header field name, and an auth scheme, may be.
+#: Anything else (a space, a colon, CR or LF) could split or forge a header.
+TOKEN = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+#: The helper has ten seconds in all; the parent's name is worth two at most.
+PARENT_TIMEOUT = 2
+BIND = 'python "$(project-observatory full-path)/tools/vault.py" bind'
+
+
+class HeaderRefused(Exception):
+    """One sentence for stderr, and a short reason code for the audit row."""
+
+    def __init__(self, reason: str, sentence: str):
+        super().__init__(sentence)
+        self.reason = reason
+
+
+def _parent_name() -> str:
+    """The name of the process that ran this one — a shell under Claude Code,
+    a terminal's shell otherwise. Asked of `ps` by PID only: nothing of the
+    request, and never the value, is on that command line."""
+    try:
+        p = subprocess.run(["ps", "-o", "comm=", "-p", str(os.getppid())],
+                           capture_output=True, text=True, timeout=PARENT_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    name = pathlib.PurePath(p.stdout.strip() or "unknown").name[:64]
+    return name or "unknown"
+
+
+def _control(value: str) -> bool:
+    return any(ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f for c in value)
+
+
+def _header_value(args, url: str) -> tuple[str, str]:
+    """(the header's value, the server's host for the audit). Raises HeaderRefused."""
+    if not TOKEN.fullmatch(args.header_name or ""):
+        raise HeaderRefused("bad-name", "refused: --name must be an RFC 7230 token "
+                            "(letters, digits and !#$%&'*+-.^_`|~), so it cannot split a header")
+    if args.scheme and not TOKEN.fullmatch(args.scheme):
+        raise HeaderRefused("bad-scheme", "refused: --scheme must be an RFC 7230 token or "
+                            "empty (for the bare value), so it cannot split a header")
+    if sys.stdout.isatty():
+        raise HeaderRefused("tty", "refused: stdout is a terminal, and the reader must be a "
+                            "program — this door is Claude Code's headersHelper, not a way "
+                            "to look at a value")
+    if not url:
+        raise HeaderRefused("no-server-url", "refused: CLAUDE_CODE_MCP_SERVER_URL is unset or "
+                            "empty, so nothing says which MCP server would receive the header; "
+                            "Claude Code sets it when it runs a headersHelper")
+    try:
+        actual, actual_host, _ = private_files.origin(url, https_only=False)
+    except private_files.VaultBoundaryError as exc:
+        raise HeaderRefused("bad-server-url", f"refused: CLAUDE_CODE_MCP_SERVER_URL is not a "
+                            f"usable server address ({exc})") from None
+    slot, got_env = vault_slot(args.project, args.name, args.env)
+    if slot is None:
+        envs, held = _held_in(args.project, args.name)
+        where = (f" (the vault holds it under {', '.join(envs)}; pass that --env)" if envs else
+                 f" (an env file holds it — {held[0]} — and this door serves the vault only)"
+                 if held else "")
+        raise HeaderRefused("not-in-vault", f"refused: {args.name} is not in the vault under "
+                            f"{args.project}/{args.env or '{' + ','.join(ENVS) + '}'}{where}; "
+                            f"the header door reads the vault only, never an env file, the "
+                            f"environment or the inventory — store it with `{PUT} {args.project} "
+                            f"{args.env or 'prod'} {args.name}` (value on stdin), then bind it")
+    meta = private_files._read_meta(slot)
+    bound_text = meta.get("header_for")
+    command = (f"`{BIND} {args.project} {got_env} {args.name} --header-for "
+               f"<the server's https URL>`")
+    if not bound_text:
+        raise HeaderRefused("unbound", f"refused: {args.project}/{got_env}/{args.name} is bound "
+                            f"to no MCP server, and an unbound slot is never printed; the "
+                            f"operator binds it once with {command}")
+    try:
+        bound, bound_host, _ = private_files.origin(str(bound_text))
+    except private_files.VaultBoundaryError:
+        raise HeaderRefused("bad-binding", f"refused: the binding of {args.project}/{got_env}/"
+                            f"{args.name} does not read as an https origin; bind it again "
+                            f"with {command}") from None
+    if actual != bound:
+        raise HeaderRefused("server-mismatch", f"refused: CLAUDE_CODE_MCP_SERVER_URL names "
+                            f"{credential_shape.redact(actual)} (host {credential_shape.redact(actual_host)}), "
+                            f"but {args.project}/{got_env}/{args.name} is bound to {bound} "
+                            f"(host {bound_host}); a value is served only to the server it is "
+                            f"bound to")
+    value = private_files._read_private(slot).strip()
+    if not value or _control(value):
+        raise HeaderRefused("control-character", f"refused: the value in {args.project}/{got_env}/"
+                            f"{args.name} is empty or carries a control character (CR, LF, tab, "
+                            f"escape…), which would corrupt or split the header; rotate it")
+    return (f"{args.scheme} {value}" if args.scheme else value), actual_host
+
+
+def cmd_header(args) -> int:
+    """Print `{"<name>": "<scheme> <value>"}` for Claude Code's headersHelper.
+
+    Every call is audited — served or refused, with the server's name and host
+    and the parent process — before anything reaches stdout; an audit that
+    cannot be written refuses the call (the caller's OSError branch)."""
+    url = os.environ.get("CLAUDE_CODE_MCP_SERVER_URL", "").strip()
+    server = credential_shape.redact(os.environ.get("CLAUDE_CODE_MCP_SERVER_NAME", ""))[:120]
+    row = {"server": server or None, "parent": _parent_name()}
+    try:
+        header_value, host = _header_value(args, url)
+    except HeaderRefused as exc:
+        try:
+            _, host, _ = private_files.origin(url, https_only=False) if url else (None, None, None)
+        except private_files.VaultBoundaryError:
+            host = None
+        audit("header", f"{args.project}:{args.name}",
+              {**row, "host": credential_shape.redact(host) if host else None,
+               "verdict": "refused", "reason": exc.reason})
+        print(f"use_secret header: {exc}", file=sys.stderr)
+        return 2
+    audit("header", f"{args.project}:{args.name}",
+          {**row, "host": host, "verdict": "served", "header": args.header_name})
+    sys.stdout.write(json.dumps({args.header_name: header_value}) + "\n")
+    sys.stdout.flush()
+    return 0
+
+
+def _audit_quietly(action: str, detail: dict) -> None:
+    """An audit row for a refusal raised before the subject was validated: the
+    typed PROJECT and NAME are not recorded, since validation refused them."""
+    try:
+        audit(action, "(refused before validation)", detail)
+    except (OSError, ValueError):
+        pass
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -463,6 +622,17 @@ def main(argv: list[str]) -> int:
                    help="after `--`, the command to run")
     p.set_defaults(fn=cmd_run)
 
+    p = sub.add_parser("header", help="one JSON header object for Claude Code's MCP headersHelper; "
+                                      "vault only, and only to the server the slot is bound to")
+    p.add_argument("project")
+    p.add_argument("name")
+    p.add_argument("--env", choices=ENVS)
+    p.add_argument("--name", dest="header_name", default="Authorization",
+                   help="the header field (an RFC 7230 token); default Authorization")
+    p.add_argument("--scheme", default="Bearer",
+                   help="the auth scheme before the value; empty for the bare value")
+    p.set_defaults(fn=cmd_header)
+
     p = sub.add_parser("pipe", help="value on stdin -> env NAME -> run, output scrubbed")
     p.add_argument("name", help="the environment variable the command will read")
     p.add_argument("command", nargs=argparse.REMAINDER, help="after `--`, the command")
@@ -482,6 +652,8 @@ def main(argv: list[str]) -> int:
     except private_files.VaultBoundaryError as exc:
         # Its messages are written to be shown: they name the field and the
         # rule, never the input.
+        if a.cmd == "header":
+            _audit_quietly("header", {"verdict": "refused", "reason": "bad-project-or-name"})
         print(f"use_secret: {exc}", file=sys.stderr)
         return 2
     except (OSError, ValueError):

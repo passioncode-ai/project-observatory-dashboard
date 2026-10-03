@@ -52,6 +52,8 @@ for it. A name or note shaped like a credential is refused, never stored.
 | List slots | `vault.py list PROJECT ENV` |
 | Run a command using a slot | `use_secret.py run [--env ENV] PROJECT NAME -- COMMAND ARGUMENTS` (flags before PROJECT) |
 | Receive a value from another local command | `use_secret.py pipe NAME -- COMMAND ARGUMENTS` |
+| Bind a slot to the one MCP server allowed to receive it as a header (the operator, once) | `vault.py bind PROJECT ENV NAME --header-for https://HOST[:PORT]` (a bare host means https); `--clear` removes it; both are journalled |
+| Give an HTTP MCP server its bearer through Claude Code's `headersHelper` | `use_secret.py header [--env ENV] [--name Authorization] [--scheme Bearer] PROJECT NAME`, written into the server's `headersHelper` entry, never run by hand |
 | Populate a project's ignored environment file | `vault.py inject PROJECT ENV DIRECTORY` |
 | Record an exposure | `vault.py leak PROJECT ENV NAME --where "location and evidence, no value"` |
 | Replace a stored value | `vault.py rotate PROJECT ENV NAME`, replacement on stdin |
@@ -76,6 +78,16 @@ The command runner redacts exact known values from its captured output. It is
 not a sandbox: a child process can encode a value, transmit it, or write it to
 another file. Only run the command authorized by the task. Do not claim this
 filter prevents every leak.
+
+**The header door prints a value, so it serves only Claude Code.** `use_secret.py
+header` writes one JSON object (`{"Authorization": "Bearer …"}`) for a
+`headersHelper`, which Claude Code merges into the MCP request rather than the
+conversation. It reads the vault only (never an env file or the environment), and
+refuses unless stdout is a program, `CLAUDE_CODE_MCP_SERVER_URL` names the scheme,
+host and port the slot is bound to, and the value has no control character. Never
+run it yourself, pipe it, or set `CLAUDE_CODE_MCP_SERVER_URL` to make it answer:
+that prints the value into your transcript. Each call is audited. Binding is the
+operator's decision; ask for it, do not run `bind` to make a call succeed.
 
 **Stdin carries one thing.** Never pipe a secret into `python3 -`, `node -` or
 `sh -s`, or combine a secret pipe with a heredoc program. A program goes in a
