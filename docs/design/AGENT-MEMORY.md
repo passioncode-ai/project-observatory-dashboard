@@ -182,6 +182,27 @@ matters to the workflow, not whether a conclusion is true.
 
 ## What the operator sees
 
+**The Agents page** (Work group, `agents.html`) answers *which agents are working, on what, and
+where their work moved* (scenarios OSS-24 to OSS-28):
+
+- five counters: sessions with a turn in the last hour, open workflows, handoffs waiting,
+  stalled workflows, steps kept after a lost lease;
+- **Needs you**: stalled workflows, lapsed offers, kept steps, and keys a workflow needs that are
+  missing or only in a `.env`, each with its reason and the command to copy;
+- the workflows by project: goal, step and status, executor, last checkpoint age, handoffs. A
+  card opens to a lane per executor that held it, a dot per checkpoint it wrote (by the lease
+  recorded on the checkpoint, not by timestamp), the handoff and its reason between lanes, then
+  constraints, next actions, checkouts and keys by state. The same events are an ordered list
+  for a screen reader;
+- the agent sessions of the last day, with their project and workflow.
+
+It is built on every tick from `agents_view.summary()` (read-only). Opened through the local
+server it also asks `/agents` every 15 seconds: the server renders the same section again with
+the same Python renderer (`dashboard/agents_page.py`), and the page swaps it in, keeping open
+cards and focus. A failed refresh keeps what is shown and says live updates are paused; opened
+as a file, the page says it is the snapshot of its build. It shows and hands over commands and
+changes nothing.
+
 The dashboard's Health panel counts the open workflows and the handoffs waiting for a session
 (`workflows_open`, `handoffs_waiting` in `dashboard/build_dashboard.py`): an offer nobody
 accepts lapses, and a workflow stalls quietly unless someone can see it waiting. A step refused
