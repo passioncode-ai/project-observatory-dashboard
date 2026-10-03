@@ -60,7 +60,7 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
-**2026-10-03, agent memory for workflows (OBS-02, in review):** a checkpoint after every
+**2026-10-03, agent memory for workflows (OBS-02, merged `d6f2b33`, not released):** a checkpoint after every
 step, one executor per workflow by lease token, and an immutable handoff pack the engine
 assembles, so a workflow continues on another account, model or session when the one that
 leaves cannot answer. Five MCP tools, migration `0008-agent-memory-workflows`. Design:
