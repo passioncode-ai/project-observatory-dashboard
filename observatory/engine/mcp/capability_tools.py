@@ -36,6 +36,7 @@ from pydantic import ValidationError
 from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
 
 import configuration
+import credential_shape
 import interop
 import jobs
 
@@ -135,6 +136,46 @@ def _first_error(validator: jsonschema.protocols.Validator, value: Any) -> str |
     return f"{where}: fails `{e.validator}`"
 
 
+def _accepted_names(tool: Any) -> set[str]:
+    """Every argument name a tool takes: its fields and their declared aliases."""
+    names: set[str] = set()
+    for field_name, info in tool.fn_metadata.arg_model.model_fields.items():
+        names.add(field_name)
+        alias = info.validation_alias
+        for choice in getattr(alias, "choices", None) or ([alias] if isinstance(alias, str) else []):
+            if isinstance(choice, str):
+                names.add(choice)
+        if isinstance(info.alias, str):
+            names.add(info.alias)
+    return names
+
+
+def _name_unknown_arguments(result: Any, tool: Any, arguments: dict) -> Any:
+    """An argument the tool does not take is NAMED in `degraded`, never applied.
+
+    The SDK drops unknown arguments silently, so `{"projectid": …}` (a typo)
+    answered for the whole estate with an empty `degraded`, which asserts the
+    question was understood. Refusing would break callers that send an
+    optional field a later version added, which the compatibility policy keeps
+    working, so the answer is kept and qualified. The NAME is quoted only when
+    it is a plain identifier; the value never is."""
+    unknown = sorted(k for k in arguments if k not in _accepted_names(tool))
+    if not unknown or not isinstance(result, CallToolResult):
+        return result
+    structured = result.structured_content
+    if not isinstance(structured, dict):
+        return result
+    structured = dict(structured)
+    structured["degraded"] = list(structured.get("degraded") or []) + [{
+        "source": "arguments", "code": "unknown-argument",
+        "reason": f"ignored argument(s) this tool does not take: "
+                  f"{', '.join(credential_shape.echo(k) for k in unknown)} — "
+                  f"the answer is as if they were not sent"}]
+    result.structured_content = structured
+    result.content = [_text(structured), *[b for b in result.content[1:]]]
+    return result
+
+
 class InteropServer(MCPServer):
     """An MCPServer that also serves the manifest's capabilities as their own tools."""
 
@@ -231,10 +272,13 @@ class InteropServer(MCPServer):
         are `invalid-input` and `unknown-tool`. Anything else the SDK raises keeps its
         own path: a crash still reaches the client as the SDK's bare "Error
         executing tool <name>" and is logged there."""
-        if self._tool_manager.get_tool(name) is None:
-            return _error("unknown-tool", f"no tool named {name!r} is served here; list the tools to see them")
+        tool = self._tool_manager.get_tool(name)
+        if tool is None:
+            return _error("unknown-tool", f"no tool named {credential_shape.echo(name)} is served "
+                                          f"here; list the tools to see them")
         try:
-            return _compact(await super().call_tool(name, arguments, context))
+            result = await super().call_tool(name, arguments, context)
+            return _compact(_name_unknown_arguments(result, tool, arguments or {}))
         except ToolError as exc:
             if isinstance(exc, UnexpectedToolError) or not isinstance(exc.__cause__, ValidationError):
                 raise

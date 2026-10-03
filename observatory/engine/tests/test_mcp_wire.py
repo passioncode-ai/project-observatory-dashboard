@@ -377,9 +377,120 @@ async def run_credentials() -> None:
                   any(d.get("code") == "unknown-project" for d in data.get("degraded", [])), str(data.get("degraded")))
 
 
+async def run_refusals() -> None:
+    """A refusal never quotes a value it could not vouch for, and says it refused.
+
+    Meaning-level refusals echoed the caller's input: an unknown projectId in
+    observatory_project, _findings and _credentials (and into `use`), a bad
+    `since`, `cursor` or `asOfScanId`, a refused `owner`, a conversation id, an
+    unknown tool name. A key pasted into the wrong field then reached the
+    transcript through the refusal. Well-formed identifiers are still quoted —
+    that is how a caller finds its typo. Unknown arguments, a `since` that is no
+    date and a cursor that names no position are said in `degraded` rather than
+    silently ignored, and a refused WRITE answers isError."""
+    planted = "sk-or-v1-" + "FAKE" * 10
+    mixed = "Fake" + "Tokn" + "_" + "Ab3" * 9 + "x"
+    tmp = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-wire-refusals-")) / "test.db"
+    params = StdioServerParameters(command=sys.executable, args=[str(ROOT / "mcp/server.py")],
+                                   cwd=str(ROOT), env={**os.environ, "OBSERVATORY_DB": str(tmp)})
+
+    def text_of(res) -> str:
+        return " ".join(getattr(b, "text", "") for b in res.content) + json.dumps(
+            getattr(res, "structured_content", None) or {})
+
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.discover()
+            for value in (planted, mixed, "../../secrets"):
+                for tool, args in (
+                        ("observatory_project", {"projectId": value}),
+                        ("observatory_findings", {"projectId": value}),
+                        ("observatory_findings", {"cursor": value}),
+                        ("observatory_credentials", {"projectId": value}),
+                        ("observatory_timeline", {"projectId": SYNTHETIC_PROJECT, "since": value}),
+                        ("observatory_status", {"limit": 1, "cursor": value}),
+                        ("observatory_status", {"limit": 1, "asOfScanId": value}),
+                        ("observatory_recall", {"cursor": value}),
+                        ("observatory_record", {"owner": value, "statement": "x"}),
+                        ("observatory_assistant_conversation", {"id": value}),
+                        ("estate.survey", {"limit": 1, "cursor": value}),
+                        ("project.timeline", {"projectId": SYNTHETIC_PROJECT, "since": value})):
+                    res = await session.call_tool(tool, args)
+                    check(f"{tool} {sorted(args)}: the refusal does not quote a {len(value)}-character value",
+                          value not in text_of(res), text_of(res)[:240])
+            res = await session.call_tool(planted, {})
+            check("an unknown tool's name is not quoted when it is credential-shaped",
+                  bool(res.is_error) and planted not in text_of(res), text_of(res)[:200])
+            res = await session.call_tool("observatory_project", {"projectId": "project:absent-example"})
+            check("a well-formed unknown id is still quoted, to find the typo",
+                  "project:absent-example" in text_of(res), text_of(res)[:200])
+
+            res = await session.call_tool("observatory_timeline", {"projectId": SYNTHETIC_PROJECT,
+                                                                   "since": "garbage"})
+            data = payload(res)
+            check("a `since` that is no date is said in degraded, not answered as an empty filter",
+                  any(d.get("source") == "since" for d in data.get("degraded", []))
+                  and data.get("since") is None, str(data)[:240])
+            res = await session.call_tool("project.timeline", {"projectId": SYNTHETIC_PROJECT,
+                                                               "since": "garbage"})
+            check("and the capability answers it inside its published schema",
+                  not res.is_error and any(d.get("source") == "since" for d in payload(res)["degraded"]),
+                  text_of(res)[:240])
+            res = await session.call_tool("project.timeline", {"projectId": "project:absent-example"})
+            check("an unknown project on project.timeline stays inside the published schema",
+                  not res.is_error, text_of(res)[:240])
+            res = await session.call_tool("observatory_recall", {"cursor": "garbage"})
+            check("a recall cursor that names no position is said in degraded",
+                  any(d.get("source") == "cursor" for d in payload(res).get("degraded", [])),
+                  text_of(res)[:240])
+            res = await session.call_tool("observatory_status", {"limit": 1, "bogus": planted,
+                                                                 "include_external": False})
+            data = payload(res)
+            check("an argument the tool does not take is named in degraded, its value is not",
+                  not res.is_error and any("bogus" in d.get("reason", "") for d in data.get("degraded", []))
+                  and planted not in text_of(res)
+                  and not any("include_external" in d.get("reason", "") for d in data.get("degraded", [])),
+                  str(data.get("degraded"))[:300])
+
+            # A REFUSAL IS AN ANSWER, NOT A FAULT — the published record schema says
+            # so in its description, and `missing value` above pins the same for
+            # reads. So a refused write is a typed answer with `error` and
+            # `degraded`, isError false; isError is for malformed input, unknown
+            # tools and answers a published schema does not describe.
+            res = await session.call_tool("observatory_record", {"owner": "operator", "statement": "forged"})
+            check("a refused write is a typed answer that still quotes a plain identifier",
+                  not res.is_error and payload(res).get("error") == "owner refused"
+                  and "'operator'" in text_of(res) and payload(res).get("degraded") == [],
+                  text_of(res)[:200])
+            res = await session.call_tool("observatory_propose", {"owner": "agent:wire-test",
+                                                                  "targetId": "project:x",
+                                                                  "patch": {"description": "d"}})
+            check("an unappliable proposal is a typed answer carrying degraded",
+                  payload(res).get("error") == "unappliable-proposal" and payload(res).get("degraded") == [],
+                  text_of(res)[:200])
+            res = await session.call_tool("observatory_record", {"owner": "agent:wire-test",
+                                                                 "statement": "a note in its schema"})
+            check("an accepted write keeps the published record shape (no `degraded`, as the "
+                  "instructions say)", not res.is_error and "degraded" not in payload(res),
+                  text_of(res)[:200])
+            res = await session.call_tool("project.record", {"owner": "agent:wire-test",
+                                                             "statement": "the capability's note"})
+            check("project.record stays inside its published schema", not res.is_error, text_of(res)[:200])
+            res = await session.call_tool("project.record", {"owner": "agent:wire-test",
+                                                             "targetId": "project:x"})
+            check("project.record's own refusal stays the typed answer its schema describes",
+                  not res.is_error and payload(res).get("error") == "LedgerError", text_of(res)[:200])
+            disc = await session.discover()
+            check("the instructions say what isError means here, and where `degraded` is",
+                  "isError" in (disc.instructions or "") and len(disc.instructions or "") <= 1800,
+                  str(len(disc.instructions or "")))
+
+
 if __name__ == "__main__":
     print("MCP wire — mcp/server.py over stdio\n")
     asyncio.run(run())
+    # Before run_credentials, which rewrites the registry with a minimal row.
+    asyncio.run(run_refusals())
     asyncio.run(run_credentials())
     print()
     if FAILURES:

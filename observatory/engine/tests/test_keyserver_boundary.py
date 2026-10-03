@@ -331,6 +331,32 @@ class KeyserverBoundaryTests(unittest.TestCase):
                 keyserver.act_leak({"project": "alpha-web", "env": "prod", "name": "CF_API_TOKEN",
                                     "where": "a CI log, job 4412"})
 
+    def test_refusals_never_quote_a_credential_shaped_input(self):
+        """Unknown action path, reveal name, revoke label (the door's own
+        sentence) and mint destination all quoted the caller's value back."""
+        planted = "sk-or-v1-" + "FAKE" * 10
+        code, _, raw = self.request(path="/api/" + planted)
+        self.assertEqual(code, 404)
+        self.assertNotIn(planted.encode(), raw)
+        keyserver.paths.SCRATCH.mkdir()
+        (keyserver.paths.SCRATCH / "env.json").write_text(json.dumps({"files": [
+            {"path": "fixture.env", "variables": [{"name": "EXAMPLE_KEY", "class": "fixture"}]}]}))
+        for body in ({"path": "fixture.env", "name": planted}, {"path": planted, "name": "EXAMPLE_KEY"}):
+            code, _, raw = self.request(path="/api/reveal", body=json.dumps(body).encode())
+            self.assertEqual(code, 400)
+            self.assertNotIn(planted.encode(), raw)
+        with patch.object(keyserver, "_door") as door:
+            door.return_value.revoke_key.side_effect = LookupError(f"no issued key called {planted!r}")
+            code, _, raw = self.request(path="/api/revoke", body=json.dumps({"label": planted}).encode())
+        self.assertEqual(code, 404)
+        self.assertNotIn(planted.encode(), raw)
+        code, _, raw = self.request(path="/api/mint", body=json.dumps(
+            {"destination": planted, "limit": 1}).encode())
+        self.assertEqual(code, 400)
+        self.assertNotIn(planted.encode(), raw)
+        code, _, raw = self.request(path="/api/no-such-action")
+        self.assertIn(b"no-such-action", raw, "a plain identifier is still quoted")
+
     def test_explicit_reveal_is_inventory_scoped_and_audited_without_value(self):
         keyserver.paths.SCRATCH.mkdir()
         keyserver.paths.DATA.mkdir()

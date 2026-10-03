@@ -410,10 +410,11 @@ def act_reveal(body: dict) -> dict:
     doc = json.loads(scan.read_text(encoding="utf-8"))
     rec = next((f for f in doc.get("files", []) if f.get("path") == path), None)
     if rec is None:
-        raise ValueError(f"{path} is not in the env inventory, so it is not "
-                         f"readable from here")
+        raise ValueError(f"{credential_shape.echo(path)} is not in the env inventory, so it "
+                         f"is not readable from here")
     if name not in {v.get("name") for v in rec.get("variables", [])}:
-        raise ValueError(f"{path} holds no variable {name!r} in the current scan")
+        raise ValueError(f"{credential_shape.echo(path)} holds no variable "
+                         f"{credential_shape.echo(name)} in the current scan")
     root = paths.DATA.resolve()
     target = (root / path).resolve()
     if root not in target.parents:
@@ -490,6 +491,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass                                                                              
 
     def _send(self, code: int, payload: dict) -> None:
+        # EVERY REFUSAL IS SCRUBBED ON THE WAY OUT. The sentences come from this
+        # file, the vault, the signer and the provider door, and several quote
+        # what the caller sent; a key pasted into the wrong field must not come
+        # back in the answer. The shared shapes, the same ones the audit uses.
+        if code >= 400 and isinstance(payload.get("error"), str):
+            payload = {**payload, "error": credential_shape.redact(payload["error"])}
         body = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -629,7 +636,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         fn = ACTIONS.get(what)
         if not fn:
-            self._send(404, {"error": f"no action {what!r}"})
+            self._send(404, {"error": f"no action {credential_shape.echo(what)}"})
             return
         lengths = self.headers.get_all("Content-Length", [])
         if self.headers.get("Transfer-Encoding") or len(lengths) != 1:

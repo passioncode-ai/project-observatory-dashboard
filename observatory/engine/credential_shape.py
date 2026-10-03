@@ -161,18 +161,31 @@ def redact(text: str, *, uuids: bool = True, marker: str = "[redacted]") -> str:
 _ECHOABLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+=-]{0,119}")
 
 
-def echo(value: object, *, pattern: re.Pattern | None = None) -> str:
+def shown(value: object, *, pattern: re.Pattern | None = None, own_id: bool = False) -> str:
+    """`value` itself when a refusal may quote it (see `echo`), otherwise a
+    marker carrying only its length — for a JSON field rather than a sentence.
+
+    `own_id=True` says `pattern` is the exact shape of an id THIS program
+    mints (`chat-` and 32 hex characters): matching it is then enough, since
+    such an id is random by design and would otherwise read as a key."""
+    if not isinstance(value, str):
+        return f"<a {type(value).__name__}, not shown>"
+    if own_id and pattern is not None and pattern.fullmatch(value):
+        return value
+    ok = (_ECHOABLE.fullmatch(value) is not None and not shaped(value)
+          and (pattern is None or pattern.fullmatch(value) is not None))
+    return value if ok else f"<{len(value)} characters, not shown>"
+
+
+def echo(value: object, *, pattern: re.Pattern | None = None, own_id: bool = False) -> str:
     """How a refusal names the caller's input: quoted when it is a well-formed
     identifier (it helps the caller find its typo), otherwise only its length.
 
     `pattern`, when given, is the field's own shape; a value must pass it AND
     carry no credential shape to be quoted. A refusal is written to a transcript,
     and the input most worth refusing is a key pasted into the wrong field."""
-    if not isinstance(value, str):
-        return f"<a {type(value).__name__}, not shown>"
-    ok = (_ECHOABLE.fullmatch(value) is not None and not shaped(value)
-          and (pattern is None or pattern.fullmatch(value) is not None))
-    return repr(value) if ok else f"<{len(value)} characters, not shown>"
+    said = shown(value, pattern=pattern, own_id=own_id)
+    return repr(value) if said == value else said
 
 
 def refuse(field: str, text: object, *, uuids: bool = True) -> None:
