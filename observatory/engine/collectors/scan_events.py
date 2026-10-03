@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import estate
 import paths
+import safe_git
 from collectors import registry_read
 from store import db as store_db, migrate
 
@@ -61,10 +62,12 @@ def git(repo: pathlib.Path, *args: str) -> tuple[str, str | None]:
     fact about the SUBJECT; "git could not run" is a fact about the RUN. Both
     arrived as an empty string and were reported as "git log returned nothing",
     which reads as the first. A fault must not be silent, and here it no longer is.
+
+    Through `safe_git`: `git log` under the operator's configuration ran
+    gpg.program on a signed commit whenever `log.showSignature` was set.
     """
     try:
-        proc = subprocess.run(["git", "-C", str(repo), *args],
-                              capture_output=True, text=True, timeout=60)
+        proc = safe_git.run(args, repo=repo, timeout=60)
     except FileNotFoundError:
         return "", "git is not installed or not on PATH"
     except subprocess.TimeoutExpired:

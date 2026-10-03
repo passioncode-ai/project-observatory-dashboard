@@ -73,18 +73,53 @@ without the full keyserver's reveal or provisioning features. Its child-secret
 runner suppresses output rather than using the full engine's streaming filter.
 The two interfaces have distinct state formats and security tests.
 
+## Running git
+
+The engine runs `git` in every watched checkout, and git executes programs its
+configuration names. Every engine call goes through one module,
+`observatory/engine/safe_git.py`, so that asking git a question runs nothing else:
+
+- **The user's global and system git configuration is not loaded.** Only values
+  that change what git reports or where it connects are copied from them into a
+  private per-process file (mode 600, removed at exit): `safe.directory`,
+  `core.excludesFile`, `core.attributesFile`, line-ending settings,
+  `url.<base>.insteadOf` and HTTP proxy/CA settings. No key that names a program
+  is copied.
+- **What a repository's own configuration can still name is switched off** on
+  every call: fsmonitor, the hooks directory and config-declared hooks
+  (`hook.<name>.command`), clean/smudge/process filters, signature display and
+  signing (`log.showSignature`, `commit.gpgSign`, `tag.gpgSign`), credential
+  helpers (URL-scoped ones too), external diff and textconv drivers
+  (`--no-ext-diff --no-textconv`), the pager and automatic `gc`. Prompts are
+  disabled, askpass answers nothing, and ssh runs with `BatchMode=yes`.
+- **Only the https, http, ssh, git and file transports are allowed**, so a remote
+  such as `gcrypt::…` or `ext::…` is reported unreachable instead of starting a
+  remote helper.
+- **Scheduled commits** (the registry and the wiki projection) use the author the
+  operator's own git would use in that repository, resolved with `git var`, and
+  never run hooks, filters or a signer.
+
+Left outside, by design: `ssh` still reads `~/.ssh/config` (a `ProxyCommand` there
+runs); a submodule's own configuration can name a filter driver the parent does not
+and only the parent's are switched off; filters such as Git LFS are not run, so a
+modified LFS file is compared byte for byte with its pointer; and values the global
+file sets only under an `includeIf` condition are not copied. The regression suite
+`observatory/engine/tests/test_git_hardening.py` plants a hostile `~/.gitconfig` and
+repository configuration and asserts that no planted program runs. Git older than
+2.32 ignores `GIT_CONFIG_GLOBAL`: there the global file is still read, and only the
+per-call overrides above protect against it.
+
 ## macOS Keychain
 
 Observatory keeps no secret in the macOS Keychain and reads none from it. Vault
 slots, provider key files and the backup passphrase (`secrets/backup-passphrase`)
-are files with private modes. The credential-free remote probe (`git ls-remote`)
-empties git's credential-helper list for its own commands, so `osxkeychain` is never
-asked; a remote that wants a password is reported unreachable. The scheduled commits of the
-registry and the wiki projection pass `commit.gpgsign=false`, so a user's signing setup
-(gpg's pinentry, an SSH signer) is never run unattended. The Mac app's
-dashboard view cancels every password and client-certificate challenge rather than
-let WebKit consult the login keychain. A tracked script that launches a
-Chromium-family browser must pass `--use-mock-keychain` and `--password-store=basic`
+are files with private modes. Git runs with no credential helper (see
+[Running git](#running-git)), so `osxkeychain` is never asked; a remote that wants a
+password is reported unreachable, and no git signer (gpg's pinentry, an SSH signer)
+is run unattended. The Mac app's dashboard view cancels every password and
+client-certificate challenge rather than let WebKit consult the login keychain. Every
+launch of a Chromium-family browser in a tracked script must pass
+`--use-mock-keychain` and `--password-store=basic`
 (`tests/test_keychain_and_app_scripts.py`). Opt-in integrations that run a provider's
 own CLI (`gh`, `heroku`, `claude`) go through that CLI's login, wherever the CLI keeps
 it; the Heroku scan takes a session token from `heroku auth:token` for the run and

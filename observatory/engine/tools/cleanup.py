@@ -47,6 +47,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "collectors"))
 import configuration  # noqa: E402
 import paths  # noqa: E402
+import safe_git  # noqa: E402
 
 AUTO_CLASSES = ("branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts")
 MANUAL_CLASSES = ("branch-unique", "worktree-dirty")
@@ -66,8 +67,10 @@ def load_config() -> dict:
 
 
 def git(repo: str, *args: str, timeout: int = 120) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, timeout=timeout,
-                          env={**os.environ, "LC_ALL": "C"})
+    """Through `safe_git`, the engine's one git door. Bare git here ran the
+    operator's reference-transaction hook on every `branch -D`, and — worse —
+    `diff.external` decided what the archived patch of a dirty worktree held."""
+    return safe_git.run(args, repo=repo, write=True, timeout=timeout, extra_env={"LC_ALL": "C"})
 
 
 def protected(name: str, cfg: dict) -> bool:

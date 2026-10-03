@@ -36,36 +36,34 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import paths              
+import safe_git          
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import local_scan              
 
 WORKERS = 8
 NET_TIMEOUT = 25
-ENV = {
-    **os.environ,
-    "GIT_TERMINAL_PROMPT": "0",                                               
-    "GIT_ASKPASS": "/usr/bin/true",
-    "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=10 "
-                       "-o StrictHostKeyChecking=accept-new",
-}
 
 
-#: Credential-free means no credential STORE either. `GIT_ASKPASS` and
-#: `GIT_TERMINAL_PROMPT` stop prompts, but a remote that answers 401 still makes
-#: git ask every configured credential helper first — on macOS that is
-#: `osxkeychain`, and from an unattended tick it can raise a Keychain dialog in
-#: front of the operator. An empty `credential.helper` resets the helper list
-#: (system, global and repository alike) for this one command.
-NO_HELPERS = ["-c", "credential.helper="]
-
-
+#: CREDENTIAL-FREE AND PROGRAM-FREE, through the engine's one git door
+#: (`safe_git`). Credential-free means no credential STORE either: a remote that
+#: answers 401 makes git ask every configured credential helper first — on macOS
+#: that is `osxkeychain`, and from an unattended tick it can raise a Keychain
+#: dialog in front of the operator. `safe_git` empties the helper list (system,
+#: global, repository and URL-scoped alike), answers askpass with nothing, runs
+#: ssh in BatchMode, and allows only the https, http, ssh, git and file
+#: transports: a recorded origin such as `gcrypt::rsync://…` would otherwise
+#: start `git-remote-gcrypt`, and through it gpg's pinentry. Such a remote is
+#: reported unreachable with git's own "transport … not allowed".
+#: `url.<base>.insteadOf` from the operator's configuration is still honoured,
+#: so a remote rewritten to SSH is probed the way their own git reaches it.
 def git(args: list[str], cwd: pathlib.Path | None = None, timeout: int = 10):
     try:
-        r = subprocess.run(["git", *NO_HELPERS, *args], cwd=cwd, env=ENV, capture_output=True,
-                           text=True, timeout=timeout)
+        r = safe_git.run(args, cwd=cwd, timeout=timeout)
         return r.returncode, r.stdout.strip(), r.stderr.strip()
     except subprocess.TimeoutExpired:
         return 124, "", f"timed out after {timeout}s"
+    except OSError as exc:
+        return 127, "", f"git could not be run: {type(exc).__name__}: {exc}"
 
 
 #: Every state this collector can put in `sync`. PUBLISHED, because both

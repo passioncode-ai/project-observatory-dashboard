@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import paths                                                                      
+import safe_git                                                                   
 from store import db as store_db                                                  
 from store import ledger as L                                                     
 import atomic                                                                      
@@ -54,8 +55,7 @@ def clone_path(nwo: str) -> pathlib.Path | None:
 
 def git(path: pathlib.Path, *args: str) -> tuple[int, str]:
     try:
-        r = subprocess.run(["git", *args], cwd=path, capture_output=True, text=True,
-                           timeout=20)
+        r = safe_git.run(args, repo=path, timeout=20)
         return r.returncode, r.stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return 127, ""

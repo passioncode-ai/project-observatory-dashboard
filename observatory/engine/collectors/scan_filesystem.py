@@ -28,6 +28,7 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import atomic
 import paths
+import safe_git
 import slow_command
 import json, os, re, subprocess, sys
 from datetime import datetime, timezone
@@ -88,10 +89,18 @@ def sh(args, cwd=None):
     later, held the service degraded for a whole tick; `slow_command` retries it
     once with a longer limit, and a command that misses both is reported with
     both durations ("did not finish in 25s, nor in 60s …") and the load.
+
+    A `git` command is composed by `safe_git`, the engine's one git door: this is
+    the tick's first step and runs in every checkout, and bare git here ran the
+    operator's gpg (through `log.showSignature`), fsmonitor and index hooks.
+    `args` keep their spelling (`["git", …]`) so the reasons below name the
+    command the caller asked for.
     """
     try:
-        r, slow = slow_command.run(args, timeouts=SH_TIMEOUTS, backoff=SH_BACKOFF, cwd=cwd,
-                                   capture_output=True, text=True, env={**os.environ, **GIT_ENV})
+        argv, env = (safe_git.command(args[1:], cwd=cwd, extra_env=GIT_ENV)
+                     if args and args[0] == "git" else (args, {**os.environ, **GIT_ENV}))
+        r, slow = slow_command.run(argv, timeouts=SH_TIMEOUTS, backoff=SH_BACKOFF, cwd=cwd,
+                                   capture_output=True, text=True, env=env)
     except OSError as exc:
         return "", f"`{args[0]}` could not run: {type(exc).__name__}: {exc}"
     if r is None:

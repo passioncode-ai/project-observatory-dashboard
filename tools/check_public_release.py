@@ -12,12 +12,29 @@ from __future__ import annotations
 import argparse
 import functools
 import hashlib
+import importlib.util
 import json
 import re
-import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_safe_git():
+    """The engine's one git door, loaded by path from THIS checkout.
+
+    By path rather than `import observatory.engine.safe_git`, which would find
+    whatever copy is installed in the interpreter. Every history object is read
+    through it, so a maintainer's `log.showSignature` + `gpg.program`, hooks,
+    fsmonitor or filters do not run while the gate walks the history."""
+    spec = importlib.util.spec_from_file_location(
+        "observatory_release_safe_git", ROOT / "observatory" / "engine" / "safe_git.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+safe_git = _load_safe_git()
 PUBLIC_IDENTIFIERS = ROOT / "tools" / "public-identifiers.json"
 
 
@@ -204,7 +221,7 @@ def audit(root: Path, deny: list[str], history: bool, refs: tuple[str, ...] = ("
             findings.append({"file_index": index, "kind": kind, "count": n})
     blobs = 0
     if (root / ".git").exists():
-        tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, text=True)
+        tracked = safe_git.run(["ls-files", "-z"], repo=root, timeout=None)
         if tracked.returncode:
             findings.append({"kind": "tracked-inventory-unavailable", "count": 1})
         else:
@@ -212,7 +229,7 @@ def audit(root: Path, deny: list[str], history: bool, refs: tuple[str, ...] = ("
                 if rel and not allowed_path(Path(rel)):
                     findings.append({"kind": "tracked-outside-public-allowlist", "count": 1})
     if history:
-        paths = subprocess.run(["git", "-C", str(root), "log", *refs, "--name-only", "--format=", "-z"], capture_output=True, text=True)
+        paths = safe_git.run(["log", *refs, "--name-only", "--format=", "-z"], repo=root, timeout=None)
         if paths.returncode:
             findings.append({"kind": "historical-paths-unavailable", "count": 1})
         else:
@@ -221,7 +238,7 @@ def audit(root: Path, deny: list[str], history: bool, refs: tuple[str, ...] = ("
                     findings.append({"kind": "history:forbidden-path", "count": 1})
                 for category, n in scan_path(rel, deny).items():
                     findings.append({"kind": "history-path:" + category, "count": n})
-        run = subprocess.run(["git", "-C", str(root), "rev-list", "--objects", *refs], capture_output=True, text=True)
+        run = safe_git.run(["rev-list", "--objects", *refs], repo=root, timeout=None)
         if run.returncode:
             findings.append({"kind": "git-history-unavailable", "count": 1})
         else:
@@ -231,13 +248,13 @@ def audit(root: Path, deny: list[str], history: bool, refs: tuple[str, ...] = ("
                 if oid in seen:
                     continue
                 seen.add(oid)
-                kind = subprocess.run(["git", "-C", str(root), "cat-file", "-t", oid], capture_output=True, text=True)
+                kind = safe_git.run(["cat-file", "-t", oid], repo=root, timeout=None)
                 object_kind = kind.stdout.strip()
                 if kind.returncode:
                     findings.append({"kind": "history:unreadable-object", "count": 1})
                     continue
                 if object_kind in {"commit", "tag"}:
-                    metadata = subprocess.run(["git", "-C", str(root), "cat-file", object_kind, oid], capture_output=True, text=True)
+                    metadata = safe_git.run(["cat-file", object_kind, oid], repo=root, timeout=None)
                     if metadata.returncode:
                         findings.append({"kind": "history:unreadable-metadata", "count": 1})
                     for category, n in scan_text(metadata.stdout, deny).items():
@@ -246,12 +263,12 @@ def audit(root: Path, deny: list[str], history: bool, refs: tuple[str, ...] = ("
                     continue
                 if not rel or not allowed_path(Path(rel)):
                     findings.append({"kind": "history:outside-public-allowlist", "count": 1})
-                size = subprocess.run(["git", "-C", str(root), "cat-file", "-s", oid], capture_output=True, text=True)
+                size = safe_git.run(["cat-file", "-s", oid], repo=root, timeout=None)
                 size_limit = 4 if rel in PUBLIC_IMAGES else 2
                 if size.returncode or int(size.stdout.strip()) > size_limit * 1024 * 1024:
                     findings.append({"kind": "history:oversized-or-unreadable", "count": 1})
                     continue
-                blob = subprocess.run(["git", "-C", str(root), "cat-file", "blob", oid], capture_output=True)
+                blob = safe_git.run(["cat-file", "blob", oid], repo=root, timeout=None, text=False)
                 if blob.returncode:
                     findings.append({"kind": "history:unreadable-blob", "count": 1})
                     continue
@@ -267,7 +284,7 @@ def audit(root: Path, deny: list[str], history: bool, refs: tuple[str, ...] = ("
                     continue
                 for category, n in scan_text(text, deny).items():
                     findings.append({"kind": "history:" + category, "count": n})
-            messages = subprocess.run(["git", "-C", str(root), "log", *refs, "--format=%B"], capture_output=True, text=True)
+            messages = safe_git.run(["log", *refs, "--format=%B"], repo=root, timeout=None)
             if messages.returncode:
                 findings.append({"kind": "commit-messages-unavailable", "count": 1})
             for category, n in scan_text(messages.stdout, deny).items():

@@ -61,7 +61,9 @@ def scanner():
     src = (ROOT / "collectors/scan_filesystem.py").read_text(encoding="utf-8")
     sys.path.insert(0, str(ROOT))
     import slow_command  # `sh` asks a timed-out command again through it
-    ns: dict = {"subprocess": subprocess, "os": os, "slow_command": slow_command}
+    import safe_git      # and composes every git call through the engine's one door
+    ns: dict = {"subprocess": subprocess, "os": os, "slow_command": slow_command,
+                "safe_git": safe_git}
     start = src.index("GIT_ENV = ")
     end = src.index("MARKERS = [")
     exec(compile(src[start:end], "scan_filesystem:sh", "exec"), ns)   # noqa: S102
@@ -146,7 +148,8 @@ def test_the_pin_is_declared_where_a_reader_will_meet_it() -> None:
     check("and empties LANGUAGE, which gettext lets override LC_ALL",
           '"LANGUAGE": ""' in src, "")
     check("and `sh` passes it to every git it runs",
-          "env={**os.environ, **GIT_ENV}" in src,
+          # git's own environment is composed by `safe_git`; the pin rides on it.
+          "extra_env=GIT_ENV" in src and "{**os.environ, **GIT_ENV}" in src,
           "a pin the runner does not use is a pin that does nothing")
     i = src.find("GIT_ENV = ")
     check("with the measurement that made it necessary quoted above it",

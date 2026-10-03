@@ -53,6 +53,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 import paths                                                                    
+import safe_git                                                                 
 import tmp as tmpdir                                                            
 
 PY = str(ROOT / ".venv/bin/python") if (ROOT / ".venv/bin/python").exists() else sys.executable
@@ -444,8 +445,7 @@ class Stale(Exception):
 def restore(mut: dict) -> None:
     if mut["subject"] != "source":
         return
-    subprocess.run(["git", "checkout", "--", mut["file"]], cwd=ROOT,
-                   capture_output=True, text=True, timeout=120)
+    safe_git.run(["checkout", "--", mut["file"]], cwd=ROOT, write=True, timeout=120)
 
 
 def dirty(files: list[str]) -> list[str]:
@@ -460,8 +460,7 @@ def dirty(files: list[str]) -> list[str]:
     """
     if not files:
         return []
-    p = subprocess.run(["git", "status", "--porcelain", "--"] + files, cwd=ROOT,
-                       capture_output=True, text=True, timeout=120)
+    p = safe_git.run(["status", "--porcelain", "--", *files], cwd=ROOT, timeout=120)
     return [ln[3:] for ln in p.stdout.splitlines() if ln.strip()]
 
 

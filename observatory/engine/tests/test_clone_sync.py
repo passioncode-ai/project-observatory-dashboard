@@ -315,14 +315,19 @@ def test_a_remote_asking_for_a_password_never_reaches_a_credential_helper() -> N
     helper.chmod(0o700)
     config = d / "gitconfig"
     config.write_text(f"[credential]\n\thelper = {helper}\n", encoding="utf-8")
-    saved = S.ENV
-    S.ENV = {**saved, "GIT_CONFIG_GLOBAL": str(config)}
+    # The operator's global configuration names the helper; the probe must not
+    # reach it whatever that file says.
+    saved = os.environ.get("GIT_CONFIG_GLOBAL")
+    os.environ["GIT_CONFIG_GLOBAL"] = str(config)
     try:
         folder, got = S.probe({"folder": "alpha-web", "path": str(d),
                                "remote": f"http://127.0.0.1:{server.server_port}/alpha-web.git",
                                "branch": "main"})
     finally:
-        S.ENV = saved
+        if saved is None:
+            os.environ.pop("GIT_CONFIG_GLOBAL", None)
+        else:
+            os.environ["GIT_CONFIG_GLOBAL"] = saved
         server.shutdown()
     check("the remote was asked, and answered with a password demand", bool(seen), str(seen))
     check("a remote that wants a password is reported unreachable",

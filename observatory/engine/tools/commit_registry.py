@@ -37,6 +37,7 @@ import tick_lease
 sys.path.insert(0, str(TOOLS.parent))
 import paths
 import configuration
+import safe_git
 
 DEFAULT_ROOT = paths.HOME
 REGISTRY = "registry"
@@ -44,10 +45,13 @@ IN_PROGRESS = ("MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD")
 
 
 def git(*args: str, cwd: pathlib.Path) -> tuple[int, str]:
-    # No signing: an unattended commit that runs gpg's pinentry or an SSH signer
-    # can put a passphrase or Keychain dialog in front of the operator.
-    p = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
-                        "-c", "commit.gpgsign=false", *args], cwd=cwd, capture_output=True, text=True, timeout=60)
+    # Through `safe_git`, the engine's one git door. No signing: an unattended
+    # commit that runs gpg's pinentry or an SSH signer can put a passphrase or
+    # Keychain dialog in front of the operator. No hooks, no fsmonitor, and no
+    # clean filter either: `git add` ran the operator's filter on every staged
+    # file while the hook and signing overrides held. The author is the one the
+    # operator's own git would use in this repository (`safe_git.identity`).
+    p = safe_git.run(args, cwd=cwd, write=True, timeout=60)
     return p.returncode, (p.stdout + p.stderr).strip()
 
 

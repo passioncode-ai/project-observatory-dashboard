@@ -36,12 +36,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "collectors"))
 import paths  # noqa: E402
+import safe_git  # noqa: E402
 
 
 def git(repo: str, *args: str, timeout: int = 60) -> str | None:
+    """stdout, or None when git would not answer. A survey: through `safe_git`,
+    which reads without taking optional locks and runs none of the programs the
+    operator's or the repository's configuration names (signature display ran
+    gpg here, and `status` in every worktree ran the fsmonitor)."""
     try:
-        p = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, timeout=timeout,
-                           env={**os.environ, "LC_ALL": "C", "GIT_OPTIONAL_LOCKS": "0"})
+        p = safe_git.run(args, repo=repo, timeout=timeout, extra_env={"LC_ALL": "C"})
     except (OSError, subprocess.SubprocessError):
         return None
     return p.stdout if p.returncode == 0 else None
