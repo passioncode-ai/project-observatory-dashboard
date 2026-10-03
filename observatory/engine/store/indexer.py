@@ -148,6 +148,9 @@ def index_batch(conn: sqlite3.Connection, rows: list[sqlite3.Row], have_vec: boo
     # announces two functions below. `tick.sh` swallowed the traceback into a log
     # line. Nothing needed it: `load_vec` does the loading and
     # `serialize_float32` is imported at its own use site, under `vectors`.
+    # A store whose lexical index predates search keys (migration 0009) — a
+    # hand-made fixture — is written without them, as `ledger` writes it.
+    keyed = "stems" in [c[1] for c in conn.execute("PRAGMA table_info(search_notes)")]
     with conn:
         for i, r in enumerate(rows):
             # `<=`, not `=`: a new revision REPLACES the record in the index.
@@ -155,10 +158,16 @@ def index_batch(conn: sqlite3.Connection, rows: list[sqlite3.Row], have_vec: boo
             # a separate, live-looking result.
             conn.execute("DELETE FROM search_notes WHERE memory_id = ? AND revision <= ?",
                          (r["memory_id"], r["revision"]))
-            conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why, stems)"
-                         " VALUES (?,?,?,?,?)",
-                         (r["memory_id"], r["revision"], r["statement"], r["why"] or "",
-                          textkeys.stems_of(r["statement"], r["why"], r["body_json"])))
+            if keyed:
+                body = r["body_json"] if "body_json" in r.keys() else None
+                conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why, stems)"
+                             " VALUES (?,?,?,?,?)",
+                             (r["memory_id"], r["revision"], r["statement"], r["why"] or "",
+                              textkeys.stems_of(r["statement"], r["why"], body)))
+            else:
+                conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why)"
+                             " VALUES (?,?,?,?)",
+                             (r["memory_id"], r["revision"], r["statement"], r["why"] or ""))
             if have_vec:
                 # Older revisions leave the vector index too, whether or not
                 # this one is embedded: a workflow record never is, and a stale
