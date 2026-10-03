@@ -175,6 +175,46 @@ class AgentPluginTests(unittest.TestCase):
         self.assertIn("not on PATH", p.stderr)
 
 
+    def test_install_does_not_claim_a_plugin_claude_did_not_install(self):
+        # A `claude` that exits 0 and installs nothing used to produce "plugin updated"
+        # and status "installed", while `agent status` said "plugin not installed".
+        fake = Path(self.env["CLAUDE_BIN"])
+        fake.write_text("#!/bin/sh\nexit 0\n")
+        p = self.run_cli("agent", "install", code=2)
+        self.assertIn("installed_plugins.json", p.stderr)
+        self.assertIn("observatory-log@observatory-log", p.stderr)
+        self.assertNotIn('"status": "installed"', p.stdout)
+        self.assertFalse((self.claude_home / "settings.json").exists(), "nothing is written for a plugin that is not there")
+        status = self.run_cli("agent", "status", code=1)
+        self.assertIn("plugin not installed", " ".join(status["problems"]))
+
+    def test_install_reports_the_version_claude_actually_installed(self):
+        self.env["FAKE_VERSION"] = "0.0.9"
+        out = self.run_cli("agent", "install")
+        self.assertEqual(out["installed_version"], "0.0.9")
+        self.assertIn("0.0.9", " ".join(out["steps"]))
+        self.assertIn(self.shipped_version(), " ".join(out["steps"]))
+
+    def shipped_version(self) -> str:
+        return json.loads((ROOT / "skill/plugins/observatory-log/.claude-plugin/plugin.json").read_text())["version"]
+
+    def test_without_claude_the_manual_route_names_the_hook_environment(self):
+        self.env["CLAUDE_BIN"] = ""
+        self.env["PATH"] = "/nonexistent"
+        p = self.run_cli("agent", "install", code=2)
+        self.assertIn("/plugin install observatory-log@observatory-log", p.stderr)
+        for name in ("OBSERVATORY_ROOT", "OBSERVATORY_HOME", "OBSERVATORY_PYTHON"):
+            self.assertIn(name, p.stderr)
+        self.assertIn(str(self.home), p.stderr, "the value to set, not only the name")
+        self.assertIn(str(self.claude_home / "settings.json"), p.stderr)
+        self.assertIn("unset", p.stderr)
+
+    def test_uninstall_leaves_settings_exactly_as_before_install(self):
+        (self.claude_home / "settings.json").write_text(json.dumps({"theme": "dark"}))
+        self.run_cli("agent", "install")
+        self.run_cli("agent", "uninstall")
+        self.assertEqual(self.settings(), {"theme": "dark"}, "no empty objects left behind")
+
     # --- another channel manages the plugin -----------------------------------
     # A launcher (for instance the PassionCode one, marketplace `passioncode`) can
     # install this same plugin under its own id. A second copy under the engine's
