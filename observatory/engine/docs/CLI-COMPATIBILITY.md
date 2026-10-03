@@ -204,10 +204,12 @@ names a hand-edited settings file carries are kept.
 
 ## Regression receipt for this change
 
-Executed in the isolated full-engine source, using synthetic fixtures only:
+Executed in the isolated full-engine source, using synthetic fixtures only. The counts
+were 14 and 16 when the routing landed; re-measured 2026-10-03 with
+`project-observatory full check --suite cli_compatibility --suite workspace_scheduler`:
 
-- `.venv/bin/python -W error::ResourceWarning tests/test_cli_compatibility.py`: 14 tests passed.
-- `.venv/bin/python -W error::ResourceWarning tests/test_workspace_scheduler.py`: 16 tests passed.
+- `tests/test_cli_compatibility.py`: 17 tests passed.
+- `tests/test_workspace_scheduler.py`: 17 tests passed.
 - `/bin/bash -n tools/tick.sh` and `/bin/bash -n tools/gate.sh`: exit 0.
 
 These receipts cover the new routing and scheduler boundaries. They are not a
