@@ -1,8 +1,9 @@
 # The release: the wheel, and the Mac app signed with the organization's CI Developer ID,
 # notarized and stapled; then attested (Sigstore), summed and GPG-signed, and published.
-# Signing happens only here, in the protected `release` environment: approved by
-# release-approvers, never by whoever pushed the tag (passioncode-ai/.github
-# release-signing/README.md). A published release is never rewritten: a fix is a new tag.
+# Signing happens only here, in the protected `release` environment: approved by a
+# person from release-approvers, who may be whoever pushed the tag; an agent never
+# approves (passioncode-ai/.github release-signing/README.md). A published release is
+# never rewritten: a fix is a new tag.
 #
 # Release:    push an annotated vX.Y.Z tag on the reviewed release commit.
 # Rehearsal:  push vX.Y.Z-rc.N (the push trigger ignores it), then
