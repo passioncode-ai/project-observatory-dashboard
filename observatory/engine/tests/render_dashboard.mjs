@@ -99,16 +99,22 @@ const document = {
   }),
 };
 
+// `--hash project:<id>` loads the page at that address, so the script opens
+// the project panel the way a link does (`fromHash()` runs at load).
+const startHash = (() => {
+  const i = process.argv.indexOf("--hash");
+  return i > 0 ? "#" + process.argv[i + 1] : "";
+})();
 const errors = [];
 const globals = {
   document,
   window: {
     addEventListener(type, fn) { listeners.push(["window", type, fn]); },
-    location: { hash: "", href: `file://${file}`, search: "" },
+    location: { hash: startHash, href: `file://${file}${startHash}`, search: "" },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
     devicePixelRatio: 1,
   },
-  location: { hash: "", href: `file://${file}`, search: "" },
+  location: { hash: startHash, href: `file://${file}${startHash}`, search: "" },
   console: { log() {}, warn() {}, error(...a) { errors.push(a.join(" ")); } },
   // BARE globals the page uses without a receiver. In a browser
   // `addEventListener(...)` resolves to `window.addEventListener`; inside the
@@ -180,5 +186,7 @@ console.log(JSON.stringify({
   // a wrong conclusion waiting to be drawn from it.
   findings: clip(written.findings, 400),
   tiles: clip(written.tiles, 200),
+  // One project's panel, written only when `--hash` opened it.
+  panel: clip(written.panel, 12000),
   listeners: listeners.length,
 }, null, 1));

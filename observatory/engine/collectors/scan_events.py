@@ -143,14 +143,21 @@ def targets(projects: list[dict], repos: dict[str, dict],
                             "checkout": extra.get("folder")})
     for p in projects:
         lo = p.get("local_only") or {}
-        # `unpublished` is `is_git and no parseable remote` (collectors/merge.py),
-        # so this admits exactly the folders that HAVE history and no repository.
-        # The other ten `local-only` projects are not git repositories at all.
-        if not lo.get("unpublished") or not lo.get("path"):
+        # `unpublished` is `is_git and no remote` (collectors/merge.py). A git
+        # folder whose remote is on a host the merge cannot key (a self-hosted
+        # forge, a bare repository on another disk) is a `local-only` project
+        # too, with `unpublished: false` — and admitting only `unpublished`
+        # dropped its history silently: the panel said "no commits in the
+        # window" for a checkout committed to that day. `commits` is what the
+        # filesystem scan measured, so a folder with history is a target
+        # whatever its remote; one that is not a git repository measured none.
+        remote_elsewhere = not lo.get("unpublished") and int(lo.get("commits") or 0) > 0
+        if not (lo.get("unpublished") or remote_elsewhere) or not lo.get("path"):
             continue
         out.append({"label": p["id"], "project_id": p["id"], "repo_id": None,
                     "path": lo["path"], "created_on": "",
-                    "name": p.get("name") or lo.get("folder") or p["id"]})
+                    "name": p.get("name") or lo.get("folder") or p["id"],
+                    "remote_elsewhere": remote_elsewhere})
     return out
 
 
@@ -228,7 +235,7 @@ def main() -> int:
     # than an accident — and on the live pair it happens to agree with the
     # alphabet, so the change is visible only in the reporting, which is where a
     # silent ambiguity should have been all along.
-    unpublished = 0
+    unpublished = remote_elsewhere = 0
     # THE LOOP IS WRAPPED, because the scan row already exists. Anything raising
     # inside it — and it walks 172 checkouts on a volume that has been at 100% —
     # would otherwise leave `finished_at` NULL for ever: `scans` is the table
@@ -251,7 +258,11 @@ def main() -> int:
               degraded.append({"source": rid, "reason": f"no .git at {path}"})
               continue
           checkouts += 1
-          if t["repo_id"] is None:
+          if t.get("remote_elsewhere"):
+              # Its own count, for the same reason as `unpublished` below: these
+              # are published somewhere, just not anywhere this estate inventories.
+              remote_elsewhere += 1
+          elif t["repo_id"] is None:
               # COUNTED, not folded into `checkouts`. A new source absorbed into
               # an old total reads as "nothing changed", and the number an
               # operator checks after this change is exactly how many checkouts
@@ -321,6 +332,7 @@ def main() -> int:
                events_already_present=skipped, repos_excluded=excluded,
                repos_truncated=truncated, repos_unreadable=unreadable,
                repos_quiet=len(quiet), checkouts_unpublished=unpublished,
+               checkouts_remote_not_inventoried=remote_elsewhere,
                aborted=True,
                commits_shared=sum(n for _, _, n in shared),
                degraded=degraded + [{"source": "the scan itself",
@@ -336,6 +348,7 @@ def main() -> int:
            events_already_present=skipped, repos_excluded=excluded,
            repos_truncated=truncated, repos_unreadable=unreadable,
            repos_quiet=len(quiet), checkouts_unpublished=unpublished,
+           checkouts_remote_not_inventoried=remote_elsewhere,
            commits_shared=sum(n for _, _, n in shared), degraded=degraded)
     total = conn.execute("SELECT count(*) FROM events").fetchone()[0]
     conn.close()
@@ -345,6 +358,8 @@ def main() -> int:
     # whether the new source was reached at all.
     print(f"  of them {unpublished} unpublished checkout(s) with no repository id"
           if unpublished else "  no unpublished checkout had history to read")
+    if remote_elsewhere:
+        print(f"  and {remote_elsewhere} checkout(s) whose remote is on a host not inventoried here")
     print(f"  checkouts {checkouts} | inserted {inserted} | already present {skipped} "
           f"| total {total}" + (f" | window {horizon}d" if horizon else " | NO window"))
     # BY RULE, not one line per repository. 118 policy exclusions in `degraded`
