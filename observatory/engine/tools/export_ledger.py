@@ -47,7 +47,7 @@ So the gate asserts what has to be TRUE rather than what happens to be CURRENT:
   written for — and failing it would block a recovery.
 """
 from __future__ import annotations
-import json, pathlib, sqlite3, sys
+import hashlib, json, pathlib, sqlite3, sys
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -55,6 +55,7 @@ sys.path.insert(0, str(ROOT))
 import atomic
 import paths                                                                      
 from store import db as store_db                                                  
+from store.ledger import WORKFLOW_KINDS
 
 OUT = paths.REGISTRY / "ledger.jsonl"
 HEADER = {
@@ -80,7 +81,16 @@ HEADER = {
 def rows(conn: sqlite3.Connection) -> list[dict]:
     out = []
     for r in conn.execute("SELECT * FROM ledger ORDER BY memory_id, revision"):
-        out.append({"_kind": "revision", **{k: r[k] for k in r.keys()}})
+        row = {"_kind": "revision", **{k: r[k] for k in r.keys()}}
+        # A WORKFLOW'S BODY STAYS IN THE STORE. A checkpoint body is up to 64 KB
+        # per step and a handoff pack up to 128 KB, with local paths and file
+        # names; this file is committed. The row stays — who, when, which step —
+        # and the body is named by its SHA-256, so a restore can tell whether
+        # the store still holds the same one.
+        if r["kind"] in WORKFLOW_KINDS and row.get("body_json") is not None:
+            row["body_sha256"] = hashlib.sha256(row["body_json"].encode()).hexdigest()
+            row["body_json"] = None
+        out.append(row)
     try:
         for r in conn.execute("SELECT * FROM tombstones ORDER BY memory_id, revision"):
             out.append({"_kind": "tombstone", **{k: r[k] for k in r.keys()}})

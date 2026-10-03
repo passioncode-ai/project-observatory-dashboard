@@ -148,11 +148,20 @@ def index_batch(conn: sqlite3.Connection, rows: list[sqlite3.Row], have_vec: boo
     # `serialize_float32` is imported at its own use site, under `vectors`.
     with conn:
         for i, r in enumerate(rows):
-            conn.execute("DELETE FROM search_notes WHERE memory_id = ? AND revision = ?",
+            # `<=`, not `=`: a new revision REPLACES the record in the index.
+            # Keeping older revisions made every search answer with each one as
+            # a separate, live-looking result.
+            conn.execute("DELETE FROM search_notes WHERE memory_id = ? AND revision <= ?",
                          (r["memory_id"], r["revision"]))
             conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why)"
                          " VALUES (?,?,?,?)",
                          (r["memory_id"], r["revision"], r["statement"], r["why"] or ""))
+            if have_vec:
+                # Older revisions leave the vector index too, whether or not
+                # this one is embedded: a workflow record never is, and a stale
+                # vector must not outlive the statement it was made from.
+                conn.execute("DELETE FROM vec_notes WHERE memory_id = ? AND revision < ?",
+                             (r["memory_id"], r["revision"]))
             if vectors is not None and i in vectors:
                 from sqlite_vec import serialize_float32
                 conn.execute("DELETE FROM vec_notes WHERE memory_id = ? AND revision = ?",

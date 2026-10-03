@@ -17,6 +17,7 @@ import degradations
 import identity
 import paths
 from store import db as store_db
+from store import ledger as L_kinds
 
 SOURCE_OF_TRUTH = "registry"
 
@@ -492,7 +493,10 @@ LIVE_LEDGER_JOIN = (
     " JOIN (SELECT memory_id, MAX(revision) r FROM ledger GROUP BY memory_id) m"
     "   ON m.memory_id = l.memory_id AND m.r = l.revision"
     " LEFT JOIN tombstones t ON t.memory_id = l.memory_id")
-LIVE_LEDGER_WHERE = " t.memory_id IS NULL"
+#: A workflow's checkpoint and handoff pack are working state, read through the
+#: workflow tools and the Agents view: they are not a project's conclusions, and
+#: a page of notes must not fill with the latest step of every workflow.
+LIVE_LEDGER_WHERE = " t.memory_id IS NULL AND " + L_kinds.not_workflow()
 
 
 def project_detail(project_id: str, timeline_limit: int = 10,
@@ -1061,6 +1065,16 @@ def search(query: str, project_id: str | None = None, limit: int = 10) -> dict:
             if row is None or row["tomb"] is not None:
                 continue                                                   
             if project_id and row["project_id"] != project_id:
+                continue
+            # THE LATEST REVISION ONLY. An index can still hold a superseded
+            # revision — one written before the indexer removed older ones, or
+            # one whose newer revision is not indexed yet — and serving it
+            # would present a replaced statement as live. A workflow's
+            # checkpoint revises once per step, so this is the difference
+            # between one answer and thirty stale ones.
+            latest = conn.execute("SELECT MAX(revision) FROM ledger WHERE memory_id = ?",
+                                  (mid,)).fetchone()[0]
+            if rev != latest:
                 continue
             out.append({**h, "projectId": row["project_id"], "state": row["state"],
                         "owner": row["owner"], "confidence": row["confidence"],

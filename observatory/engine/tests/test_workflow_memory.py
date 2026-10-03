@@ -117,7 +117,25 @@ class WorkflowCase(unittest.TestCase):
         args.update(kw)
         return W.checkpoint_write(self.conn, **args)
 
-    def handoff(self, wf: dict, key: str = "key-handoff-0001", **kw) -> dict:
+    def silence(self, wf: dict, seconds: int = 600) -> None:
+        """Make the executor silent: its checkpoint and any earlier offer are
+        `seconds` old, as when a session ran out of quota a while ago."""
+        from datetime import datetime, timedelta, timezone
+        past = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+        self.conn.execute("UPDATE ledger SET created_at = ? WHERE memory_id = ?",
+                          (past, f"ckpt:{wf['workflowId']}"))
+        self.conn.execute("UPDATE workflow_leases SET granted_at = ? WHERE workflow_id = ?"
+                          " AND handoff_id IS NOT NULL AND state != 'offered'",
+                          (past, wf["workflowId"]))
+        self.conn.commit()
+
+    def handoff(self, wf: dict, key: str = "key-handoff-0001", silent: bool = True,
+                **kw) -> dict:
+        """A handoff WITHOUT the token (the S1 case), after the executor fell
+        silent — unless the caller passes `lease_token` or `silent=False`."""
+        if silent and "lease_token" not in kw:
+            self.silence(wf)
         args = dict(owner="service:switchboard", idempotency_key=key,
                     workflow_id=wf["workflowId"], reason="limit",
                     to={"provider": "anthropic", "model": "claude-opus-5-5", "accountRef": "acct-b"},
@@ -185,7 +203,8 @@ class TheS1Scenario(WorkflowCase):
 
     def test_planned_route_to_another_provider(self) -> None:
         wf = self.start()
-        h = self.handoff(wf, reason="plan_route", to={"provider": "openai", "model": "gpt-5.5"})
+        h = self.handoff(wf, reason="plan_route", lease_token=wf["leaseId"],
+                         to={"provider": "openai", "model": "gpt-5.5"})
         with self.assertRaises(W.InvalidInput):
             self.accept(h["handoffId"], executor={"provider": "anthropic"})
         got = self.accept(h["handoffId"], key="key-accept-0002", owner=CODEX,
@@ -276,7 +295,8 @@ class Handoff(WorkflowCase):
     def test_a_newer_handoff_supersedes_an_unaccepted_one(self) -> None:
         wf = self.start()
         old = self.handoff(wf)
-        new = self.handoff(wf, key="key-handoff-0002", reason="operator")
+        new = self.handoff(wf, key="key-handoff-0002", lease_token=wf["leaseId"],
+                           reason="operator")
         with self.assertRaises(W.HandoffSuperseded):
             self.accept(old["handoffId"])
         self.assertEqual(self.accept(new["handoffId"], key="key-accept-0002")["handoffId"],
@@ -527,6 +547,202 @@ class RetentionSeam(WorkflowCase):
             retention.config = real
 
 
+class ReviewFindings(WorkflowCase):
+    """The adversarial review of the first release (AGENT-MEMORY-PLAN.md, W1).
+    Each case drives the failure the review confirmed."""
+
+    def test_h01_listings_leave_workflow_bodies_out(self) -> None:
+        wf = self.start()
+        self.handoff(wf)
+        note = L.append(self.conn, owner=AGENT_A, statement="a plain note",
+                        project_id="project:alpha-web", confidence=0.5)
+        rows = L.live(self.conn)
+        kinds = {r["kind"] for r in rows}
+        self.assertNotIn("checkpoint", kinds)
+        self.assertNotIn("handoff", kinds)
+        self.assertIn(note["memoryId"], {r["memory_id"] for r in rows})
+        self.assertTrue(all("body_json" not in r for r in rows))
+        self.assertEqual(L.live_count(self.conn), 1)
+        # a kept step is an ordinary listed record, without its body column
+        with self.assertRaises(W.LeaseLost):
+            self.write(wf, None, "key-h01-lost")
+        kept = [r for r in L.live(self.conn) if r["kind"] == "step_result"]
+        self.assertEqual(len(kept), 1)
+        self.assertNotIn("body_json", kept[0])
+
+    def test_h02_a_new_revision_replaces_the_old_one_in_the_index(self) -> None:
+        from store import indexer
+        wf = self.start()
+        self.write(wf, wf["leaseId"], "key-h02-0002")
+        mid = f"ckpt:{wf['workflowId']}"
+        for rev in (1, 2):
+            indexer.index_batch(self.conn, [indexer.indexable(self.conn, mid, rev)], False, 3)
+        revs = [r[0] for r in self.conn.execute(
+            "SELECT revision FROM search_notes WHERE memory_id = ?", (mid,))]
+        self.assertEqual(revs, [2], "only the latest revision stays searchable")
+
+    def test_h03_a_workflow_belongs_to_a_project(self) -> None:
+        with self.assertRaises(W.InvalidInput):
+            self.start(project_id=None)
+        related, degraded = W.related_records(self.conn, body=body(), project_id=None,
+                                              workflow_id="wf_0000000000000000")
+        self.assertEqual(related, [])
+        self.assertIn("no project", degraded[0]["reason"])
+
+    def test_h03_related_records_never_cross_projects(self) -> None:
+        wf = self.start(body=body(goal="rotate the exporter schema"))
+        other = L.append(self.conn, owner=AGENT_A, project_id="project:beta-api",
+                         statement="the exporter schema of another project", confidence=0.5)
+        row = L.current(self.conn, other["memoryId"])
+        self.conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why)"
+                          " VALUES (?,?,?,?)", (other["memoryId"], 1, row["statement"], None))
+        self.conn.commit()
+        related, _ = W.related_records(self.conn, body=body(goal="rotate the exporter schema"),
+                                       project_id="project:alpha-web",
+                                       workflow_id=wf["workflowId"])
+        self.assertNotIn(other["memoryId"], [r["memoryId"] for r in related])
+
+    def test_h04_an_active_executor_keeps_its_workflow(self) -> None:
+        wf = self.start()
+        with self.assertRaises(W.HandoffRefused) as caught:
+            self.handoff(wf, silent=False)
+        self.assertIn("silent", str(caught.exception))
+        with self.assertRaises(W.HandoffRefused):
+            self.handoff(wf, key="key-h04-0002", reason="plan_route")
+        with self.assertRaises(W.HandoffRefused):
+            self.handoff(wf, key="key-h04-0003", lease_token="wl_not-the-token")
+        ok = self.handoff(wf, key="key-h04-0004", lease_token=wf["leaseId"], reason="plan_route",
+                          to={"provider": "openai"})
+        self.assertEqual(W.handoff_get(self.conn, ok["handoffId"])["pack"]["authority"], "lease")
+
+    def test_h04_offers_without_the_token_are_rate_limited(self) -> None:
+        wf = self.start()
+        first = self.handoff(wf)
+        self.assertEqual(W.handoff_get(self.conn, first["handoffId"])["pack"]["authority"],
+                         "silence")
+        with self.assertRaises(W.HandoffRefused) as caught:
+            W.handoff_create(self.conn, owner="service:switchboard",
+                             idempotency_key="key-h04-again", workflow_id=wf["workflowId"],
+                             reason="crash", to={"provider": "anthropic"}, git_reader=no_git,
+                             related_reader=no_related, redactor=redactor())
+        self.assertIn("less than", str(caught.exception))
+
+    def test_h05_a_replayed_acceptance_is_bound_to_its_session(self) -> None:
+        wf = self.start()
+        h = self.handoff(wf)
+        s1, s2 = "0f8fad5b-d9cb-469f-a165-70867728950e", "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+        first = self.accept(h["handoffId"], session_id=s1)
+        self.assertEqual(self.accept(h["handoffId"], session_id=s1)["leaseId"], first["leaseId"])
+        with self.assertRaises(W.IdempotencyConflict):
+            self.accept(h["handoffId"], session_id=s2)
+
+    def test_h06_identifiers_never_carry_a_value(self) -> None:
+        cases = [dict(project_id="project:" + SHAPED_KEY),
+                 dict(step_id=SHAPED_KEY[:60]),
+                 dict(executor={"provider": "anthropic", "model": SHAPED_KEY}),
+                 dict(idempotency_key=SHAPED_KEY)]
+        for i, case in enumerate(cases):
+            args = dict(idempotency_key=f"key-h06-{i:04d}")
+            args.update(case)
+            with self.assertRaises(W.InvalidInput, msg=str(list(case))):
+                self.start(**args)
+        dump = "\n".join(str(tuple(r)) for t in ("ledger", "workflows", "idempotency")
+                         for r in self.conn.execute(f"SELECT * FROM {t}"))
+        self.assertNotIn(SHAPED_KEY[:30], dump)
+        ok = self.start(idempotency_key="0f8fad5b-d9cb-469f-a165-70867728950e")
+        self.assertTrue(ok["workflowId"], "a UUID idempotency key is an ordinary key")
+
+    def test_h07_the_committed_export_carries_no_workflow_body(self) -> None:
+        sys.path.insert(0, str(ROOT / "tools"))
+        import export_ledger
+        wf = self.start()
+        h = self.handoff(wf)
+        rows = {r["memory_id"]: r for r in export_ledger.rows(self.conn)
+                if r["_kind"] == "revision"}
+        for mid in (h["handoffId"], f"ckpt:{wf['workflowId']}"):
+            self.assertIsNone(rows[mid]["body_json"])
+            self.assertEqual(len(rows[mid]["body_sha256"]), 64)
+
+    def test_h08_an_open_workflow_checkpoint_is_not_erased(self) -> None:
+        wf = self.start()
+        mid = f"ckpt:{wf['workflowId']}"
+        with self.assertRaises(L.LedgerError):
+            L.tombstone(self.conn, mid, reason="test", approved_by="operator")
+        self.write(wf, wf["leaseId"], "key-h08-close", close=True)
+        self.assertEqual(L.tombstone(self.conn, mid, reason="test",
+                                     approved_by="operator")["memoryId"], mid)
+
+    def test_h09_a_rotated_value_is_known_on_the_next_write(self) -> None:
+        values = {"first fixture value here": "alpha-web/OLD"}
+        stamp = [1]
+        r = memory_redact.Redactor(known_loader=lambda: dict(values),
+                                   fingerprint=lambda: (stamp[0],))
+        r.scrub("warm the cache")
+        values.clear()
+        values["second fixture value here"] = "alpha-web/NEW"
+        stamp[0] = 2                                  # the vault changed
+        out, rep = r.scrub("now second fixture value here")
+        self.assertIn("[redacted:alpha-web/NEW]", out)
+        self.assertEqual(rep.known, 1)
+
+    def test_h10_references_survive_and_the_report_names_fields(self) -> None:
+        full = "0123456789abcdef0123456789abcdef01234567"
+        session = "session:0f8fad5b-d9cb-469f-a165-70867728950e"
+        b = body(memory_refs=[session], notes=f"key {SHAPED_KEY}",
+                 artifacts=[{"kind": "git", "path": "/tmp/x", "head": full}])
+        b["done"][0]["evidence"] = [f"commit:{full}"]
+        wf = self.start(body=b)
+        stored = W.checkpoint_latest(self.conn, wf["workflowId"])["checkpoint"]["body"]
+        self.assertEqual(stored["memory_refs"], [session])
+        self.assertEqual(stored["artifacts"][0]["head"], full[:12])
+        self.assertEqual(stored["done"][0]["evidence"], [f"commit:{full[:12]}"])
+        self.assertEqual(wf["redacted"]["fields"], ["notes"])
+
+    def test_h11_statuses_and_remedies_say_what_happened(self) -> None:
+        wf = self.start()
+        h = self.handoff(wf)
+        self.conn.execute("UPDATE workflow_leases SET expires_at = '2000-01-01T00:00:00Z'"
+                          " WHERE handoff_id = ?", (h["handoffId"],))
+        self.conn.commit()
+        latest = W.checkpoint_latest(self.conn, wf["workflowId"])
+        self.assertIsNone(latest["pendingHandoff"])
+        self.assertEqual(latest["lapsedHandoff"]["status"], "expired")
+        with self.assertRaises(W.LeaseLost) as caught:
+            self.write(wf, None, "key-h11-lost")
+        self.assertIn("new idempotency key", str(caught.exception))
+        wf2 = self.start(idempotency_key="key-h11-start2")
+        h2 = self.handoff(wf2, key="key-h11-handoff2")
+        self.write(wf2, wf2["leaseId"], "key-h11-close", close=True)
+        self.assertEqual(W.handoff_get(self.conn, h2["handoffId"])["status"], "workflow-closed")
+
+    def test_h12_credential_stores_open_transactions_and_old_leases(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="observatory-wf-home-") as home:
+            keys = pathlib.Path(home) / ".ssh"
+            keys.mkdir()
+            link = pathlib.Path(home) / "innocent-looking"
+            link.symlink_to(keys)
+            real_home = pathlib.Path.home
+            pathlib.Path.home = classmethod(lambda cls: pathlib.Path(home))
+            try:
+                for target in (keys, link):
+                    self.assertEqual(W.git_snapshot(str(target)).get("error"),
+                                     "a credential store is never read into a handoff",
+                                     str(target))
+            finally:
+                pathlib.Path.home = real_home
+        self.conn.execute("INSERT INTO workflows (workflow_id, created_by, created_at, status)"
+                          " VALUES ('wf_00000000000000aa', 'x', '2000-01-01T00:00:00Z', 'open')")
+        with self.assertRaises(W.WorkflowError):
+            self.start(idempotency_key="key-h12-open-tx")
+        self.conn.rollback()
+        wf = self.start()
+        self.write(wf, wf["leaseId"], "key-h12-close", close=True)
+        self.conn.execute("UPDATE workflows SET closed_at = '2000-01-01T00:00:00Z'")
+        with self.conn:
+            gone = W.prune_leases(self.conn, cutoff_iso="2001-01-01T00:00:00Z")
+        self.assertEqual(gone, 1)
+
+
 class Migration(unittest.TestCase):
     def test_a_pre_workflow_store_gains_the_shape_and_keeps_its_rows(self) -> None:
         with tempfile.TemporaryDirectory(prefix="observatory-wf-mig-") as d:
@@ -553,8 +769,10 @@ class Migration(unittest.TestCase):
             row = L.current(conn, "mem:old")
             self.assertEqual(row["statement"], "kept")
             self.assertIsNone(row["workflow_id"])
+            conn.commit()
             wf = W.checkpoint_write(conn, owner=AGENT_A, idempotency_key="key-mig-0001",
                                     step_id="S1", status="done", body=body(),
+                                    project_id="project:alpha-web",
                                     redactor=redactor())
             self.assertEqual(wf["revision"], 1)
             conn.close()
