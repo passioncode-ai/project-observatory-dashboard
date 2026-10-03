@@ -60,7 +60,16 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
-**2026-10-01, client disconnect handling (proposed, unreleased):** expected socket
+**Status 2026-10-03: three audit-and-fix runs over 0.12.0, unreleased.** Run 1 (PR #119), run 2
+and run 3 each re-walked the build, onboarding, keys, the Keychain, the Mac app, the scenarios and
+the docs, and fixed what the one before missed: 73, 27 and the run-3 count in its report. Reports:
+[run 1](reports/2026-10-03-observatory-audit-run-1/README.md),
+[run 2](reports/2026-10-03-observatory-audit-run-2/README.md),
+[run 3](reports/2026-10-03-observatory-audit-run-3/README.md). The release that ships them, its
+`observatory-log` plugin bump and the items only the operator can do are listed at the end of
+the run-3 report; `CHANGELOG.md` → Unreleased says what changed for a user.
+
+**2026-10-01, client disconnect handling (released in 0.11.0):** expected socket
 closures no longer produce server tracebacks; unrelated I/O failures remain visible.
 Test-first receipt and exact next task:
 [runs/2026-10-01-client-disconnect](runs/2026-10-01-client-disconnect/README.md).
@@ -119,7 +128,7 @@ lock, well-known document, token-guarded events feed, descriptor from the instal
 `agent/fabric-service`, unreleased. Entry point and the next task:
 [runs/2026-09-28-fabric-service](runs/2026-09-28-fabric-service/README.md).
 
-**Current status, 2026-09-28: 0.6.3.** The package installs the short name `observatory`
+**Status 2026-09-28 (history): 0.6.3.** The package installs the short name `observatory`
 beside `project-observatory`, and either name with no arguments opens the dashboard of the
 workspace in `OBSERVATORY_HOME` ([CHANGELOG](../CHANGELOG.md#063--2026-09-28)). 0.6.3 has no
 run receipt of its own; the receipts of the releases before it are the entry points:
@@ -134,15 +143,13 @@ the privacy rules and the merge flow.
 
 **Next tasks for a contributor** (this repository and synthetic fixtures only):
 
-1. **The `analytics.stale` remedy names a command the step runner refuses**
-   (`./observatory.py google --force` answers "step arguments are not accepted here"). Fix the
-   remedy text or let the step take `--force`, with a test that runs the printed remedy.
-   Open since the 0.5.0 receipt.
+1. *Done in run 3 (2026-10-03):* the `analytics.stale` remedy and six other handed-over
+   commands were refused by the step runner; `full google --force` is accepted now, and
+   `tests/test_handed_commands.py` parses every `full …` command the engine hands over.
 2. `test_schema_compatibility.test_many_concurrent_first_opens` failed once under heavy memory
    pressure and passed on re-run: give it a load-independent assertion or a longer timeout.
-3. `project-observatory full update`, the command the release cycle in AGENTS.md ends with, is
-   being built in its own change; until it lands, a machine installs the new wheel into its
-   environment and runs `full upgrade` (a preview; `--apply --writers-stopped` applies it).
+3. *Done in 0.7.0:* `project-observatory full update` (a preview; `--apply` installs the
+   release, with the tested lock since run 3).
 
 **Next tasks for the operator only** (they need the operator's machine, accounts or decision;
 no contributor can do them):
