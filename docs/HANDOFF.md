@@ -90,8 +90,8 @@ request; W1 merged as `b9e5473`, #130):** what each part delivered:
 - search in both languages' word forms, by checkpoint body, with an honest "nothing found" (OBS-03).
 
 Measured: recall@5 0.975 → 1.0; abstention 5 → 20 of 20; checkpoint bodies 0 → 8 of 8. The
-redaction on `observatory_record` was quadratic and is now linear. Checks on `4a9600b`: 209 of
-209 suites. Records under `runs/2026-10-03-agent-*`; numbers in
+redaction on `observatory_record` was quadratic and is now linear. Checks on `687320f` (merged with
+0.14.0): 210 of 210 suites. Records under `runs/2026-10-03-agent-*`; numbers in
 [reports/2026-10-03-memory-eval-baseline](reports/2026-10-03-memory-eval-baseline/README.md).
 
 **Next:** merge the pull request, then OBS-04: local embeddings chosen on this set, with a

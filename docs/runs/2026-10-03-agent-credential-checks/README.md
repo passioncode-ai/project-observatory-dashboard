@@ -18,11 +18,12 @@ silent when nothing breaks the rule.
 
 ## Checks run
 
-Checked together on the stack's tip, `4a9600b` (branch `claude/agent-memory-eval`, which carries
-W2–W5, OBS-13, OBS-07 and OBS-03), 2026-10-03. They were not checked per branch.
+Checked together on the stack's tip merged with `main` (0.14.0 and the header door), `687320f`
+(branch `claude/agent-memory-eval`, which carries W2–W5, OBS-13, OBS-07 and OBS-03), 2026-10-03.
+They were not checked per branch.
 
 - `python -m unittest discover -s tests` (repository root): 124 tests, OK.
-- `python tests/run_portable.py --jobs 4 --timeout 1200` (engine): 209 of 209 suites PASS,
+- `python tests/run_portable.py --jobs 4 --timeout 1200` (engine): 210 of 210 suites PASS,
   6206 assertions.
 - Two earlier full runs on this stack found five defects, all fixed before this one:
   - the runtime check did not know the stemmer;
