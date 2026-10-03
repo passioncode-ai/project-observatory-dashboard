@@ -3,9 +3,55 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.14.0 — 2026-10-03
+
+A minor release: the organisation's product lifecycle contract applied to the engine (#125,
+#131), agent memory for workflows (#127), and releases built, signed and published in CI.
+Behaviour changes: the scheduled tick no longer probes MCP servers, and background disk sizing
+no longer opens privacy-guarded places. After updating, run
+`python "$(project-observatory full-path)/tools/install_launchd.py" install` and
+`python "$(project-observatory full-path)/tools/serverd.py" --install` once, so the background
+jobs pick up the new plists. The companion plugin `observatory-log` is unchanged (0.14.0).
+
+### Changed
+
+- **The scheduled tick starts no MCP server.** It reads the agents' MCP configs only.
+  `claude mcp list` runs on request (`full scan-mcp`, `machine.mcp.refresh`) in a process group
+  that is killed when it answers or times out, so no server it started outlives it and no
+  background job refreshes your Claude login. The last verdict is carried with its time
+  (`liveness_at`).
+- **Background disk sizing skips privacy-guarded places** — Documents, Downloads, Desktop, the
+  media folders, iCloud Drive and other apps' containers. `full machine --disk` sizes them.
+- **The server idles.** It re-reads its inputs only when they change, writes its heartbeat on
+  change or every five minutes, and slows its beat to two minutes when no client asks.
+  `/health` carries `silent_after_s`.
+- **Background jobs carry a minimal `PATH`** (the directories holding the tools the engine
+  calls, then the system ones) and name the interpreter by its virtual-environment or Homebrew
+  `opt` path; the installers refuse a plist naming a versioned Homebrew `Cellar` path.
 
 ### Added
+
+- **The tick is bounded.** Every step runs in its own process group under a wall-clock limit,
+  the whole tick stops at a 25-minute ceiling below its interval, and
+  `store/raw/tick-run.json` records each run's start, end, outcome and reason. The tick plist's
+  `ExitTimeOut` is 30 seconds.
+- **One log policy** for every log the engine writes: five generations of 5 MB, mode 0600.
+- **`stale-server`.** An MCP server whose code an update replaced answers every call with
+  `stale-server` instead of running the previous release; `full update` reports the session
+  servers it could not reach.
+- **The lifecycle watch** (`lifecycle.*` findings): orphaned product processes, session servers
+  on replaced code, jobs past their interval, and logs past their cap or readable by others,
+  each reported against the product that owns it.
+- **Retention owns the pre-upgrade database copies** in `store/migration-backups/`: the newest
+  two and any younger than 30 days stay.
+- **Agent memory for workflows.** A checkpoint after every step, one executor per workflow by
+  lease token, and an immutable handoff pack, so a workflow continues on another account, model
+  or session when the one that leaves cannot answer. Five MCP tools
+  (`observatory_checkpoint_write`, `_checkpoint_latest`, `observatory_handoff_create`,
+  `_accept`, `_get`); migration `0008-agent-memory-workflows`; design in
+  `docs/design/AGENT-MEMORY.md`.
+- **Builds clean up after themselves.** `tools/prune_builds.py` keeps the current and previous
+  release in `dist/`; `macos/scripts/build-app.sh` runs it.
 
 - **A notarized Mac app per release.** `macos/scripts/notarize.sh` notarizes the
   Developer ID-signed bundle with an App Store Connect API key or a `notarytool` Keychain
