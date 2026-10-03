@@ -585,6 +585,12 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(code, self.mod.EXIT_NEEDS_PERSON, doc)
         self.assertFalse(doc["rolled_back"])
         self.assertTrue(doc["human_steps"])
+        # The hand-over reinstalls the tested set: the wheel without its
+        # dependencies first, then the [full] extra under the lock the reinstalled
+        # engine ships. A bare `pip install '<wheel>[full]'` resolves today's index.
+        step = next(h for h in doc["human_steps"] if "Rollback install failed" in h)
+        self.assertIn("--no-deps", step)
+        self.assertIn('-c "$(project-observatory full-path)/requirements-full.lock"', step)
 
     def test_services_that_do_not_restart_are_reported(self):
         self.services.start_fails = {"server"}

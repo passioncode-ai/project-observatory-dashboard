@@ -846,8 +846,10 @@ class Transaction:
         report["error"] = error
         human = []
         if rollback is None:
-            human.append(f"Reinstall {self.current}: python -m pip install "
-                         f"'{WHEEL.format(version=self.current)}[full]' from its release page")
+            wheel = WHEEL.format(version=self.current)
+            human.append(f"Reinstall {self.current} from its release page: python -m pip install "
+                         f"--force-reinstall --no-deps '{wheel}', then python -m pip install "
+                         f"-c \"$(project-observatory full-path)/requirements-full.lock\" '{wheel}[full]'")
         else:
             try:
                 # The running release's own lock, so the rollback restores the tested set
@@ -859,8 +861,12 @@ class Transaction:
                 if not report["rolled_back"]:
                     human.append(f"The rollback install reports version {back}, not {self.current}")
             except (InstallFailed, UpdateError, OSError) as exc:
+                # Two steps, as README → Install: the wheel alone, then its [full]
+                # extra under the lock that wheel ships, so the hand-over restores
+                # the tested set rather than whatever the index resolves today.
                 human.append(f"Rollback install failed ({exc}); run: {sys.executable} -m pip install "
-                             f"--force-reinstall '{rollback}[full]'")
+                             f"--force-reinstall --no-deps '{rollback}' && {sys.executable} -m pip install "
+                             f"-c \"$(project-observatory full-path)/requirements-full.lock\" '{rollback}[full]'")
             self.step("rolled-back" if report["rolled_back"] else "rollback-failed")
         if self.has_ws and snapshot is not None and before is not None:
             try:

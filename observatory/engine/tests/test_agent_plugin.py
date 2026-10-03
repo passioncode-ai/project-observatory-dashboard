@@ -209,6 +209,19 @@ class AgentPluginTests(unittest.TestCase):
         self.assertIn(str(self.claude_home / "settings.json"), p.stderr)
         self.assertIn("unset", p.stderr)
 
+    def test_uninstall_without_claude_cleans_settings_and_says_what_is_left(self):
+        # Without `claude` the uninstall used to print the INSTALL advice ("Install
+        # Claude Code and run this again… add the plugin by hand") and change nothing.
+        (self.claude_home / "settings.json").write_text(json.dumps({"theme": "dark"}))
+        self.run_cli("agent", "install")
+        self.env["CLAUDE_BIN"] = ""
+        self.env["PATH"] = "/nonexistent"
+        out = self.run_cli("agent", "uninstall")
+        self.assertEqual(self.settings(), {"theme": "dark"}, "the keys install wrote are gone")
+        text = json.dumps(out)
+        self.assertNotIn("Install Claude Code and run this again", text)
+        self.assertIn("/plugin uninstall observatory-log@observatory-log", text)
+
     def test_uninstall_leaves_settings_exactly_as_before_install(self):
         (self.claude_home / "settings.json").write_text(json.dumps({"theme": "dark"}))
         self.run_cli("agent", "install")

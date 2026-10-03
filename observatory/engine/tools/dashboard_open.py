@@ -237,15 +237,30 @@ def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="project-observatory full open", description=__doc__.splitlines()[0])
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--serve", action="store_true", help="serve on 127.0.0.1 instead of opening files")
-    mode.add_argument("--stop", action="store_true", help="stop the server --serve started on --port")
-    ap.add_argument("--port", type=int, default=DEFAULT_PORT)
+    mode.add_argument("--stop", action="store_true",
+                      help="stop the server --serve started (on --port, else on the port this workspace's server last reported)")
+    ap.add_argument("--port", type=int, default=None, help=f"loopback port (default {DEFAULT_PORT})")
     ap.add_argument("--rebuild", action="store_true", help="rebuild the pages before opening")
     ap.add_argument("--no-browser", action="store_true", help="print the address only")
     return ap
 
 
+def served_port() -> int | None:
+    """The port this workspace's server last wrote in its receipt, if any.
+
+    `--serve --port N` then a bare `--stop` used to look on the default port and
+    report someone else's server, or none; the receipt names where this one is."""
+    try:
+        port = json.loads((_paths().SCRATCH / "serverd.json").read_text(encoding="utf-8")).get("port")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return port if type(port) is int and 0 < port < 65536 else None
+
+
 def main(argv: list[str] | None = None) -> int:
     a = parser().parse_args(argv)
+    if a.port is None:
+        a.port = (served_port() if a.stop else None) or DEFAULT_PORT
     if not 0 < a.port < 65536:
         print("Observatory: port must be between 1 and 65535", file=sys.stderr)
         return 2

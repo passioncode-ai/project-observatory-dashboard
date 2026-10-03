@@ -343,10 +343,10 @@ the command instead. A vault value is never put or rotated from a page; that is
 `tools/vault.py` on stdin.
 
 The server `--serve` starts runs detached, so closing the terminal does not end
-it. Stop it with the same port:
+it. Stop it with:
 
 ```sh
-project-observatory full open --stop              # or: --stop --port PORT, if you served on another port
+project-observatory full open --stop              # finds the port this workspace's server reported; --port PORT names one
 ```
 
 `--stop` ends only a server that serves this workspace and that `--serve`

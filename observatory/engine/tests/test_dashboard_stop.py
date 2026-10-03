@@ -97,6 +97,23 @@ class DashboardStop(unittest.TestCase):
         self.assertIs(doc.get("stopped"), False)
         self.assertIn("no Observatory server", doc.get("reason", ""))
 
+    def test_stop_without_a_port_finds_the_port_this_workspace_serves_on(self):
+        # `--serve --port N` then `--stop` used to look on the default port and
+        # report a server that "serves another workspace" (or none) instead.
+        env = self.workspace("home")
+        port = free_port()
+        proc = self.serve(env, port)
+        receipt = Path(env["OBSERVATORY_HOME"]) / "store/raw/serverd.json"
+        deadline = time.monotonic() + 20
+        while not receipt.is_file() and time.monotonic() < deadline:
+            time.sleep(0.2)
+        p = subprocess.run([sys.executable, "observatory.py", "open", "--stop"],
+                           cwd=ROOT, env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        doc = json.loads(p.stdout)
+        self.assertEqual((doc.get("stopped"), doc.get("port")), (True, port), doc)
+        proc.wait(timeout=10)
+
     def test_another_workspaces_server_is_left_running(self):
         mine, theirs = self.workspace("mine"), self.workspace("theirs")
         port = free_port()

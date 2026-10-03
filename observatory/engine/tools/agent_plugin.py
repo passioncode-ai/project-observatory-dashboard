@@ -368,9 +368,18 @@ def managed_elsewhere_status(settings: dict, others: list[dict]) -> dict:
 
 def uninstall() -> dict:
     steps = []
-    for args in (("uninstall", PLUGIN), ("marketplace", "remove", MARKETPLACE)):
-        p = run_claude(*args)
-        steps.append(f"{' '.join(args)}: {'ok' if p.returncode == 0 else 'not present'}")
+    try:
+        claude_bin()
+    except PluginError:
+        # Without the CLI the plugin itself cannot be removed from here, but the
+        # settings keys install wrote still can — and the install advice ("install
+        # Claude Code and run this again") would be the wrong sentence for this.
+        steps.append("claude not on PATH: remove the plugin inside Claude Code with "
+                     f"`/plugin uninstall {PLUGIN}` and `/plugin marketplace remove {MARKETPLACE}`")
+    else:
+        for args in (("uninstall", PLUGIN), ("marketplace", "remove", MARKETPLACE)):
+            p = run_claude(*args)
+            steps.append(f"{' '.join(args)}: {'ok' if p.returncode == 0 else 'not present'}")
     settings = read_json(settings_path())
     changed = _drop(settings, "extraKnownMarketplaces", MARKETPLACE)
     changed = _drop(settings, "enabledPlugins", PLUGIN) or changed
