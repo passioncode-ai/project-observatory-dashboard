@@ -1,0 +1,488 @@
+{
+ "records": [
+  {
+   "ref": "export-stream",
+   "project": "project:alpha-web",
+   "statement": "The CSV exporter streams rows in batches of 500 to keep memory under 200 MB."
+  },
+  {
+   "ref": "export-timeout",
+   "project": "project:alpha-web",
+   "statement": "Exports longer than 10 minutes time out at the load balancer; large reports run as background jobs."
+  },
+  {
+   "ref": "auth-refresh",
+   "project": "project:alpha-web",
+   "statement": "Refresh tokens rotate on every use; a reused refresh token revokes the whole session family."
+  },
+  {
+   "ref": "ci-nightly",
+   "project": "project:alpha-web",
+   "statement": "The full CI suite runs nightly at 23:00; pull requests run only the fast checks."
+  },
+  {
+   "ref": "db-migration",
+   "project": "project:beta-api",
+   "statement": "The accounts table migration adds a nullable column first, backfills it, then sets NOT NULL."
+  },
+  {
+   "ref": "rate-limit",
+   "project": "project:beta-api",
+   "statement": "The public API allows 600 requests per minute per key; bursts above that return 429 with Retry-After."
+  },
+  {
+   "ref": "cache-ttl",
+   "project": "project:beta-api",
+   "statement": "Search results are cached for 90 seconds; the cache key includes the tenant id."
+  },
+  {
+   "ref": "deploy-order",
+   "project": "project:beta-api",
+   "statement": "Deploy the worker before the web process, because the web process enqueues jobs the old worker cannot read."
+  },
+  {
+   "ref": "flaky-test",
+   "project": "project:alpha-web",
+   "statement": "The checkout test was flaky because it depended on the wall clock; it now uses a frozen time fixture."
+  },
+  {
+   "ref": "webhook-retry",
+   "project": "project:beta-api",
+   "statement": "Payment webhooks are retried for three days with exponential backoff; handlers must be idempotent on the event id."
+  },
+  {
+   "ref": "font-loading",
+   "project": "project:alpha-web",
+   "statement": "The landing page preloads only the display font; body text uses the system stack to avoid layout shift."
+  },
+  {
+   "ref": "log-retention",
+   "project": "project:beta-api",
+   "statement": "Application logs are kept for 14 days; audit logs for one year in a separate bucket."
+  },
+  {
+   "ref": "sso-domain",
+   "project": "project:alpha-web",
+   "statement": "Single sign-on is offered only to customers whose email domain is verified in the admin console."
+  },
+  {
+   "ref": "pdf-render",
+   "project": "project:beta-api",
+   "statement": "Invoices are rendered to PDF by a headless browser in a sandboxed container with no network."
+  },
+  {
+   "ref": "queue-dlq",
+   "project": "project:beta-api",
+   "statement": "Messages that fail five times move to the dead-letter queue and page the on-call engineer."
+  },
+  {
+   "ref": "i18n-plural",
+   "project": "project:alpha-web",
+   "statement": "Russian plurals need the one, few, many and other forms; English needs only one and other."
+  },
+  {
+   "ref": "backup-restore",
+   "project": "project:beta-api",
+   "statement": "The nightly database backup is restored weekly into a scratch instance to prove it works."
+  },
+  {
+   "ref": "image-cdn",
+   "project": "project:alpha-web",
+   "statement": "Product images are served from the CDN with a one-year cache and content-hashed file names."
+  },
+  {
+   "ref": "feature-flags",
+   "project": "project:alpha-web",
+   "statement": "Feature flags are evaluated on the server; the client receives only the resolved values."
+  },
+  {
+   "ref": "timezone",
+   "project": "project:beta-api",
+   "statement": "All timestamps are stored in UTC and converted to the user's zone only when displayed."
+  },
+  {
+   "ref": "switch-account",
+   "project": "project:alpha-web",
+   "statement": "Переключение аккаунта при исчерпании лимита выполняет менеджер учётных записей, а не сам агент."
+  },
+  {
+   "ref": "handoff-pack",
+   "project": "project:alpha-web",
+   "statement": "Пакет передачи собирает хранилище памяти: ограничения идут первыми, затем последний чекпоинт."
+  },
+  {
+   "ref": "vault-keys",
+   "project": "project:beta-api",
+   "statement": "Ключи провайдеров хранятся только в хранилище секретов; агент получает их по имени при запуске."
+  },
+  {
+   "ref": "search-morph",
+   "project": "project:alpha-web",
+   "statement": "Поиск по русскому тексту должен находить разные формы слова: переключение, переключить, переключили."
+  },
+  {
+   "ref": "dashboard-live",
+   "project": "project:alpha-web",
+   "statement": "Страница агентов обновляется каждые пятнадцать секунд, когда открыта через локальный сервер."
+  },
+  {
+   "ref": "retention-days",
+   "project": "project:beta-api",
+   "statement": "Чекпоинты закрытого процесса хранятся тридцать дней, пакеты передачи девяносто дней."
+  },
+  {
+   "ref": "stall-detect",
+   "project": "project:alpha-web",
+   "statement": "Процесс считается застрявшим, если полчаса нет ни чекпоинта, ни хода сессии."
+  },
+  {
+   "ref": "lease-token",
+   "project": "project:beta-api",
+   "statement": "Токен аренды отличает две сессии одного агента на разных аккаунтах."
+  },
+  {
+   "ref": "leak-scan",
+   "project": "project:beta-api",
+   "statement": "Сканер утечек ищет известные значения секретов в транскриптах и в хранилище памяти."
+  },
+  {
+   "ref": "dns-migration",
+   "project": "project:alpha-web",
+   "statement": "Перенос DNS на новый регистратор делали ночью, заранее понизив TTL записей до пяти минут."
+  },
+  {
+   "ref": "mobile-build",
+   "project": "project:alpha-web",
+   "statement": "Сборка мобильного приложения подписывается в CI; ключи подписи лежат только там."
+  },
+  {
+   "ref": "price-test",
+   "project": "project:beta-api",
+   "statement": "Эксперимент с ценами показал рост выручки на восемь процентов при годовой подписке."
+  },
+  {
+   "ref": "support-sla",
+   "project": "project:beta-api",
+   "statement": "Ответ поддержки на срочные обращения — в течение двух часов в рабочее время."
+  },
+  {
+   "ref": "onboarding",
+   "project": "project:alpha-web",
+   "statement": "Новых сотрудников подключают к репозиториям через группу в организации, а не по одному."
+  },
+  {
+   "ref": "analytics",
+   "project": "project:alpha-web",
+   "statement": "События аналитики отправляются с сервера, чтобы блокировщики рекламы не теряли конверсии."
+  },
+  {
+   "ref": "email-bounce",
+   "project": "project:beta-api",
+   "statement": "Письма с жёстким отказом помечают адрес недействительным и больше на него не отправляют."
+  },
+  {
+   "ref": "gpu-quota",
+   "project": "project:beta-api",
+   "statement": "Квота на видеокарты в облаке исчерпалась, обучение перенесли на ночные часы."
+  },
+  {
+   "ref": "api-versions",
+   "project": "project:beta-api",
+   "statement": "Старую версию API отключат через полгода после выхода новой, клиентов предупреждают письмом."
+  },
+  {
+   "ref": "css-tokens",
+   "project": "project:alpha-web",
+   "statement": "Цвета задаются токенами дизайн-системы; тёмная тема переопределяет только токены."
+  },
+  {
+   "ref": "cron-overlap",
+   "project": "project:beta-api",
+   "statement": "Ночная задача не запускается, пока не закончилась предыдущая: держит блокировку в базе."
+  }
+ ],
+ "questions": [
+  {
+   "question": "How large are the batches the CSV exporter streams?",
+   "expect": "export-stream",
+   "lang": "en"
+  },
+  {
+   "question": "What happens to exports that run longer than ten minutes?",
+   "expect": "export-timeout",
+   "lang": "en"
+  },
+  {
+   "question": "What does reusing a refresh token do?",
+   "expect": "auth-refresh",
+   "lang": "en"
+  },
+  {
+   "question": "When does the full CI suite run?",
+   "expect": "ci-nightly",
+   "lang": "en"
+  },
+  {
+   "question": "How is the NOT NULL column added to the accounts table?",
+   "expect": "db-migration",
+   "lang": "en"
+  },
+  {
+   "question": "What is the API rate limit per key?",
+   "expect": "rate-limit",
+   "lang": "en"
+  },
+  {
+   "question": "How long are search results cached?",
+   "expect": "cache-ttl",
+   "lang": "en"
+  },
+  {
+   "question": "Which process is deployed first, web or worker?",
+   "expect": "deploy-order",
+   "lang": "en"
+  },
+  {
+   "question": "Why was the checkout test flaky?",
+   "expect": "flaky-test",
+   "lang": "en"
+  },
+  {
+   "question": "For how long are payment webhooks retried?",
+   "expect": "webhook-retry",
+   "lang": "en"
+  },
+  {
+   "question": "Which fonts does the landing page preload?",
+   "expect": "font-loading",
+   "lang": "en"
+  },
+  {
+   "question": "How long are application logs retained?",
+   "expect": "log-retention",
+   "lang": "en"
+  },
+  {
+   "question": "Who can use single sign-on?",
+   "expect": "sso-domain",
+   "lang": "en"
+  },
+  {
+   "question": "How are invoice PDFs rendered?",
+   "expect": "pdf-render",
+   "lang": "en"
+  },
+  {
+   "question": "Where do messages go after failing five times?",
+   "expect": "queue-dlq",
+   "lang": "en"
+  },
+  {
+   "question": "Which plural forms does Russian need?",
+   "expect": "i18n-plural",
+   "lang": "en"
+  },
+  {
+   "question": "How do we prove the database backup works?",
+   "expect": "backup-restore",
+   "lang": "en"
+  },
+  {
+   "question": "How are product images cached?",
+   "expect": "image-cdn",
+   "lang": "en"
+  },
+  {
+   "question": "Where are feature flags evaluated?",
+   "expect": "feature-flags",
+   "lang": "en"
+  },
+  {
+   "question": "In which time zone are timestamps stored?",
+   "expect": "timezone",
+   "lang": "en"
+  },
+  {
+   "question": "Кто переключает аккаунт, когда закончился лимит?",
+   "expect": "switch-account",
+   "lang": "ru"
+  },
+  {
+   "question": "Что идёт первым в пакете передачи?",
+   "expect": "handoff-pack",
+   "lang": "ru"
+  },
+  {
+   "question": "Где хранятся ключи провайдеров?",
+   "expect": "vault-keys",
+   "lang": "ru"
+  },
+  {
+   "question": "Должен ли поиск находить формы слова переключить?",
+   "expect": "search-morph",
+   "lang": "ru"
+  },
+  {
+   "question": "Как часто обновляется страница агентов?",
+   "expect": "dashboard-live",
+   "lang": "ru"
+  },
+  {
+   "question": "Сколько хранятся чекпоинты закрытого процесса?",
+   "expect": "retention-days",
+   "lang": "ru"
+  },
+  {
+   "question": "Когда процесс считается застрявшим?",
+   "expect": "stall-detect",
+   "lang": "ru"
+  },
+  {
+   "question": "Что отличает две сессии одного агента?",
+   "expect": "lease-token",
+   "lang": "ru"
+  },
+  {
+   "question": "Где сканер ищет утечки известных значений?",
+   "expect": "leak-scan",
+   "lang": "ru"
+  },
+  {
+   "question": "Как переносили DNS к новому регистратору?",
+   "expect": "dns-migration",
+   "lang": "ru"
+  },
+  {
+   "question": "Где лежат ключи подписи мобильной сборки?",
+   "expect": "mobile-build",
+   "lang": "ru"
+  },
+  {
+   "question": "Что показал эксперимент с ценой?",
+   "expect": "price-test",
+   "lang": "ru"
+  },
+  {
+   "question": "За сколько поддержка отвечает на срочное обращение?",
+   "expect": "support-sla",
+   "lang": "ru"
+  },
+  {
+   "question": "Как подключают нового сотрудника к репозиториям?",
+   "expect": "onboarding",
+   "lang": "ru"
+  },
+  {
+   "question": "Почему события аналитики отправляют с сервера?",
+   "expect": "analytics",
+   "lang": "ru"
+  },
+  {
+   "question": "Что делают с адресом после жёсткого отказа письма?",
+   "expect": "email-bounce",
+   "lang": "ru"
+  },
+  {
+   "question": "Почему обучение перенесли на ночь?",
+   "expect": "gpu-quota",
+   "lang": "ru"
+  },
+  {
+   "question": "Когда отключат старую версию API?",
+   "expect": "api-versions",
+   "lang": "ru"
+  },
+  {
+   "question": "Как устроена тёмная тема?",
+   "expect": "css-tokens",
+   "lang": "ru"
+  },
+  {
+   "question": "Почему ночная задача не запускается дважды?",
+   "expect": "cron-overlap",
+   "lang": "ru"
+  }
+ ],
+ "unanswerable": [
+  {
+   "question": "Which database engine does the mobile app use offline?",
+   "lang": "en"
+  },
+  {
+   "question": "What is the office Wi-Fi password policy?",
+   "lang": "en"
+  },
+  {
+   "question": "How many employees work in the Berlin office?",
+   "lang": "en"
+  },
+  {
+   "question": "Which vendor supplies our laptops?",
+   "lang": "en"
+  },
+  {
+   "question": "What colour is the company logo?",
+   "lang": "en"
+  },
+  {
+   "question": "When is the next board meeting?",
+   "lang": "en"
+  },
+  {
+   "question": "Which GraphQL server library do we use?",
+   "lang": "en"
+  },
+  {
+   "question": "How is the Kubernetes cluster autoscaled?",
+   "lang": "en"
+  },
+  {
+   "question": "What is the parental leave policy?",
+   "lang": "en"
+  },
+  {
+   "question": "Which language is the billing service written in?",
+   "lang": "en"
+  },
+  {
+   "question": "Кто отвечает за закупку мебели?",
+   "lang": "ru"
+  },
+  {
+   "question": "Какая погода была на корпоративе?",
+   "lang": "ru"
+  },
+  {
+   "question": "Сколько стоит аренда офиса?",
+   "lang": "ru"
+  },
+  {
+   "question": "Какой антивирус стоит на ноутбуках?",
+   "lang": "ru"
+  },
+  {
+   "question": "Когда день рождения у директора?",
+   "lang": "ru"
+  },
+  {
+   "question": "Какой бренд кофемашины на кухне?",
+   "lang": "ru"
+  },
+  {
+   "question": "Сколько этажей в здании?",
+   "lang": "ru"
+  },
+  {
+   "question": "Кто выиграл турнир по настольному теннису?",
+   "lang": "ru"
+  },
+  {
+   "question": "Какой пароль от гостевой сети?",
+   "lang": "ru"
+  },
+  {
+   "question": "Где проходит летний выезд команды?",
+   "lang": "ru"
+  }
+ ]
+}

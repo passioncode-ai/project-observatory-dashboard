@@ -117,6 +117,8 @@ BOUNDARY += ('workflow_memory',)
 BOUNDARY += ('agents_page',)
 # Agents' credentials: the findings that report keys outside the vault.
 BOUNDARY += ('agent_secrets',)
+# The agent-memory evaluation set (tools/memory_eval.py).
+BOUNDARY += ('memory_eval',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -177,6 +179,8 @@ def copy_source(target: Path) -> None:
     selected.add(ROOT / 'fabric/FABRIC-CONFORMANCE.md')
     selected.add(ROOT / 'fabric/interop-schemas/README.md')
     selected.add(ROOT / 'store/schema.sql')
+    # The agent-memory evaluation corpus (tools/memory_eval.py reads it).
+    selected |= set((ROOT / 'tests' / 'memory_eval').glob('*.json'))
     # The documentation suite checks the engine's own shipped docs.
     selected |= set((ROOT / 'docs').glob('*.md'))
     for folder in RUNTIME_DIRS:

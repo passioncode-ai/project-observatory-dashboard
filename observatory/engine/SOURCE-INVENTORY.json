@@ -1623,6 +1623,13 @@
       "bytes": 8971
     },
     {
+      "path": "tests/memory_eval/corpus.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7c1ed0266ac81485a5b7ad09bc06b10ba38a8ce248a227b066ab47502547e4eb",
+      "bytes": 15628
+    },
+    {
       "path": "tests/merge_fixture.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -1663,8 +1670,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "b7a36f41c6145ba77090d42a67a52373abf9df8460fb280e7775ea4c346d4c39",
-      "bytes": 16091,
+      "export_sha256": "314d63497d562799cd7b70fcc878fee07fc904bd07916c756792c666a528a0e8",
+      "bytes": 16321,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2485,6 +2492,13 @@
       "upstream_modified": true,
       "export_sha256": "367e4134ed4922f6ea56cec2180634b3acb460a59812ff1f6014bcb599f755c0",
       "bytes": 10152
+    },
+    {
+      "path": "tests/test_memory_eval.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "fa38d3bfc6b32f71875fb3cc942d061c1ebb3b968502cf452c18879b3c3c3bd2",
+      "bytes": 2458
     },
     {
       "path": "tests/test_merge_membership.py",
@@ -3580,6 +3594,13 @@
       "bytes": 8491
     },
     {
+      "path": "tools/memory_eval.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "57fc947d1a0a1dc0bb08c7e70651227a41340846c828177416e66e10b61f4029",
+      "bytes": 11830
+    },
+    {
       "path": "tools/movements.py",
       "source_sha256": "069994b0b2f1ffbad6473b4f26d34229ad9ff5fc70e20f21096e007d69007a04",
       "export_sha256": "06ae04fcafff1ed058e78bec31a4326343d2b6119c2754fd42328536d0215183",
@@ -3954,7 +3975,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 501,
+  "file_count": 504,
   "excluded": [
     "git-history",
     "operator-registries",
