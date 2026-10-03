@@ -397,8 +397,8 @@
       "path": "dashboard/brand/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "18d287bad4f3b7c84008e0f06c16886862b99645358aa9f7f76c30b1eb157a76",
-      "bytes": 1270
+      "export_sha256": "cc8511c7069937cc1cb4b89e4732831c2f687f21ff429069e2b39bdedc5c6d14",
+      "bytes": 1299
     },
     {
       "path": "dashboard/brand/manifest.json",
