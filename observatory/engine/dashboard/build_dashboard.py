@@ -2365,6 +2365,9 @@ function bytes(n) {
 }
 
 function row(r) {
+  // THREE LINKS, ONE TAB STOP. The name, the counts and "Project details →"
+  // all open the same panel; three stops per row made a small projects page 66
+  // presses long. The name keeps the stop; the other two stay clickable.
   const link = `#${E(r.id)}`;
   const sites = r.sites.slice(0, 2).map(x =>
     `<a href="https://${E(x.host)}" target="_blank" rel="noopener">${E(x.host)}</a>` +
@@ -2380,12 +2383,12 @@ function row(r) {
       <div class="anchor mono">${E(r.last) || T("date not measured")}</div>${spark(r.weeks)}
       ${dirty ? chip(T("{n} repos need attention", {n: dirty}), "warn") : ""}</td>
     <td data-label="${T("Code and sites")}"><div class="resource-links">${repos}${sites}</div>
-      <a class="plink anchor" href="${link}">${T("{n} repos", {n: r.repos.length})} · ${T("{n} sites", {n: r.sites.length})} · ${T("{n} folders", {n: r.folders.length})}${r.local_git ? " (" + LOCAL_GIT_LABEL[r.local_git] + ")" : ""}</a></td>
+      <a class="plink anchor" href="${link}" tabindex="-1">${T("{n} repos", {n: r.repos.length})} · ${T("{n} sites", {n: r.sites.length})} · ${T("{n} folders", {n: r.folders.length})}${r.local_git ? " (" + LOCAL_GIT_LABEL[r.local_git] + ")" : ""}</a></td>
     <td data-label="${T("Hosting")}">${(r.heroku || []).length ? hostingGroups(r.heroku) : `<span class="none">${T("No linked apps")}</span>`}</td>
     <td data-label="${T("Audience / 30 days")}">${traffic && traffic.users_30d != null
       ? `<span class="mono">${NUM(traffic.users_30d)}</span><div class="anchor">${T("sum across properties")}${traffic.unknown_properties ? " · " + T("partial") : ""}</div>`
       : `<span class="none">${T("audience@@Not measured")}</span>`}
-      <div class="anchor"><a class="plink" href="${link}">${T("Project details →")}</a></div></td>
+      <div class="anchor"><a class="plink" href="${link}" tabindex="-1">${T("Project details →")}</a></div></td>
   </tr>`;
 }
 
@@ -3889,11 +3892,13 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
       return `<div class="f${f.severity === "critical" ? "" : " f" + f.severity}${foldCls}" id="${E(fid)}" data-type="${E(f.type)}" data-sev="${E(f.severity)}">${chip(word, kind)}` +
         `<span class="t"><span class="ftl" title="${E(f.type)}">${E(typeLabel(f.type))}</span>${E(findingTitle(f))}` +
         (subj ? ` <a class="plink fsubj" href="${E(subj[0])}" title="${T("open {name}", {name: E(subj[1])})}">→ ${E(subj[1])}</a>` : "") +
-        (PAGE === "findings" ? ` <a class="fperma" href="#${E(fid)}" title="${T("link to this row")}">#</a>` : "") +
+        // Named after its finding: its own text is "#", which is all a screen
+        // reader announced for every row.
+        (PAGE === "findings" ? ` <a class="fperma" href="#${E(fid)}" title="${T("link to this row")}" aria-label="${E(T("Link to: {title}", {title: findingTitle(f)}))}">#</a>` : "") +
         `</span>` +
         (f.deadline ? `<span class="due">${T("by {date}", {date: E(f.deadline)})}</span>` : "") +
         (PAGE === "index" ? `<a class="fdetail" href="findings.html#${E(fid)}">${T("Review →")}</a>` :
-          `<details class="finding-body"><summary>${T("Evidence and action")}</summary><p class="d">${E(f.detail)}</p>` +
+          `<details class="finding-body"><summary aria-label="${E(T("Evidence and action: {title}", {title: findingTitle(f)}))}">${T("Evidence and action")}</summary><p class="d">${E(f.detail)}</p>` +
           `<p class="act">${E(f.action)}</p>` +
           ` <button class="chip-btn ack" type="button" data-cmd="${E(cmd)}" title="${T("copy the silence command")}">${T("Command: {label}", {label: T("silence")})}</button></details>`) + '</div>';
     }).join("") +

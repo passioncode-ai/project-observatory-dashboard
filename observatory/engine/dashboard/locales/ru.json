@@ -1796,5 +1796,7 @@
  "declared {state}": "заявлено: {state}",
  "measured {state}": "измерено: {state}",
  "git, no remote": "git, без remote",
- "git, remote not inventoried": "git, remote не учтён"
+ "git, remote not inventoried": "git, remote не учтён",
+ "Link to: {title}": "Ссылка на: {title}",
+ "Evidence and action: {title}": "Основание и действие: {title}"
 }

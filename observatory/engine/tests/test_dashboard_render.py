@@ -626,6 +626,38 @@ def test_the_declared_and_measured_states_are_labelled() -> None:
     check("a git folder with no remote says so on its row", "git, no remote" in out, out[:300])
 
 
+def test_links_and_summaries_have_names_and_one_tab_stop_per_row() -> None:
+    """Three accessibility defects a screen-reader walk found. The findings
+    permalink's accessible name was "#"; every finding's disclosure was named
+    "Evidence and action", so five of them were indistinguishable in a list of
+    controls; and each project row had three tab stops to one panel (the name,
+    the "1 repo · 0 sites · 1 folder" counts, "Project details →"), 66 on a
+    small projects page. One stop per row remains: the project's name."""
+    if node() is None:
+        check("node is available", True, " [uncoverable: executing the page needs node]")
+        return
+    root = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-a11y-names-"))
+    build(root)
+    got = render(root / "pages/findings.html", show="findings") or {}
+    check("the findings page runs", got.get("threw") is None, str(got.get("threw")))
+    f = got.get("shown", "")
+    perma = re.findall(r'<a class="fperma"[^>]*>', f)
+    check("each permalink is named after its finding",
+          perma and all('aria-label="Link to: Synthetic unresolved work"' in a for a in perma), str(perma[:2]))
+    summaries = re.findall(r"<summary[^>]*>", f)
+    check("each disclosure is named after its finding",
+          summaries and all('aria-label="Evidence and action: Synthetic unresolved work"' in x
+                            for x in summaries), str(summaries[:2]))
+    got = render(root / "pages/projects.html", show="out") or {}
+    out = got.get("shown", "")
+    rows = re.findall(r'<tr data-project="[^"]+">(.*?)</tr>', out, re.S)
+    check("the projects table rendered rows", len(rows) >= 2, out[:200])
+    focusable = [len([a for a in re.findall(r'<a class="plink[^"]*"[^>]*>', r) if 'tabindex="-1"' not in a])
+                 for r in rows]
+    check("each row has one tab stop to its panel", focusable and all(n == 1 for n in focusable),
+          str(focusable))
+
+
 def test_the_harness_itself_can_fail() -> None:
     """A green from a harness that cannot go red is not evidence."""
     if node() is None:
@@ -673,6 +705,7 @@ if __name__ == "__main__":
                test_keyboard_focus_survives_sort_and_reset,
                test_the_keys_page_says_what_it_measured,
                test_the_declared_and_measured_states_are_labelled,
+               test_links_and_summaries_have_names_and_one_tab_stop_per_row,
                test_the_harness_itself_can_fail):
         fn()
     print()
