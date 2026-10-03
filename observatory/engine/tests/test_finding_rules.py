@@ -819,6 +819,28 @@ def test_no_message_names_a_command_a_user_cannot_run() -> None:
                     and bare.search(node.value) and not node.value.startswith(("installedBy", "tools/")):
                 loose.append(f"{rel}:{node.lineno}")
     check("no message hands over a tool by its source-tree path", not loose, ", ".join(loose[:10]))
+    # ANY TOOL, in a command a message hands over. The list above named four
+    # tools; finding actions still said `tools/sign_credential.py set …` (on every
+    # new vault slot's `credential.unsigned` row) and `tools/scan_leaks.py --full`.
+    # A backticked command naming `tools/<x>.py` must carry the installed path —
+    # except a maintainer's `.venv/bin/python tools/…`, shown only in a checkout.
+    handed = re.compile(r"`(?:python3? )?(?:\./)?tools/[a-z_]+\.py \S[^`]*`")
+    commands = []
+    for path in sorted(ROOT.rglob("*.py")):
+        rel = path.relative_to(ROOT)
+        if rel.parts[0] in ("tests", ".venv") or "__pycache__" in rel.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        docs = {id(n.body[0].value) for n in ast.walk(tree)
+                if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and n.body and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs:
+                for m in handed.finditer(node.value):
+                    if ".venv/bin/python tools/" not in m.group(0):
+                        commands.append(f"{rel}:{node.lineno} {m.group(0)[:50]}")
+    check("no handed-over command names any tool by its source-tree path", not commands,
+          "; ".join(commands[:10]))
 
 
 if __name__ == "__main__":

@@ -158,7 +158,7 @@ def main(argv: list[str]) -> int:
         print(f"provisioning key installed: {PROVISIONING} (600), "
               f"length {len(key)}; value hidden")
         print("  keys can now be minted, capped and revoked from this machine — "
-              "`tools/revoke_key.py --list` reads it")
+              "`python \"$(project-observatory full-path)/tools/revoke_key.py\" --list` reads it")
         return 0
 
     if not a.consumer:

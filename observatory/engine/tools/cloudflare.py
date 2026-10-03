@@ -1138,7 +1138,7 @@ def cmd_rotate(label: str | None, leaked: bool) -> int:
             print(f"no issued token called {label!r}", file=sys.stderr)
             return 1
     if not targets:
-        print("nothing issued yet — `./tools/cloudflare.py issue --preset analytics`")
+        print("nothing issued yet — `python \"$(project-observatory full-path)/tools/cloudflare.py\" issue --preset analytics`")
         return 0
     bad = 0
     for p in targets:

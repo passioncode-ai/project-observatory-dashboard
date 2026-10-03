@@ -148,7 +148,7 @@ def test_the_board_reports_the_unsigned_and_only_a_chosen_policy() -> None:
           "1 credential carries" in rows[0]["title"] and "openrouter/a" in rows[0]["detail"],
           rows[0]["title"])
     check("and the remedy is the verb, not a file to edit",
-          "sign_credential.py set" in rows[0]["action"], rows[0]["action"])
+          'full-path)/tools/sign_credential.py" set' in rows[0]["action"], rows[0]["action"])
     check("everything signed raises nothing", cf.unsigned([creds[1]]) == [])
 
     due = cf.rotation_due(creds, "2026-09-14")
