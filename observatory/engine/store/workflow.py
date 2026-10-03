@@ -81,6 +81,21 @@ REASONS = ("limit", "plan_route", "operator", "crash", "restart")
 OFFER_TTL_DEFAULT = 3600
 OFFER_TTL_MIN, OFFER_TTL_MAX = 60, 86400
 
+#: WHO MAY TAKE A WORKFLOW AWAY. The current executor may hand it over for any
+#: reason, by presenting its lease token. Without the token, only for the
+#: reasons that mean the executor cannot (`limit`, `crash`, `restart`), and only
+#: once it has been silent — no checkpoint — for this long. Without that, any
+#: process on the machine could take a working executor's workflow mid-step.
+#: Two minutes is longer than a checkpoint write and shorter than a person
+#: notices a stalled session; a step that runs longer simply delays a handoff
+#: nobody asked the executor about.
+SILENCE_SECONDS = 120
+#: REASONS that may be claimed without the token, under the silence rule.
+REASONS_WITHOUT_TOKEN = ("limit", "crash", "restart")
+#: One offer per workflow per this many seconds without the token, so a loop of
+#: superseding offers cannot fill the store with packs.
+OFFER_INTERVAL_SECONDS = 60
+
 #: Size bounds. A checkpoint body is the state of one workflow, not a log: the
 #: largest realistic one (twenty steps, their evidence, a dozen decisions) is
 #: well under 16 KiB, and 64 KiB is four times that. A handoff pack adds git
@@ -148,6 +163,10 @@ class HandoffSuperseded(WorkflowError):
     """A newer handoff replaced this one before it was accepted."""
 
 
+class HandoffRefused(WorkflowError):
+    """The caller may not move this workflow now. The message says what would."""
+
+
 class IdempotencyConflict(WorkflowError):
     """The key was used before for a different request."""
 
@@ -170,9 +189,26 @@ def _parse(value: str) -> datetime:
 
 # ─────────────────────────────── input shape ───────────────────────────────
 
-def _require(pattern: re.Pattern, value: Any, field: str) -> str:
+#: Shapes an idempotency key may legitimately take: clients mint them as UUIDs
+#: or random runs. Everything else credential-shaped is refused there too.
+_KEY_SHAPES_ALLOWED = frozenset({"uuid", "hex", "random"})
+#: A session id IS a UUID; that one shape is its declared content.
+_UUID_ONLY = frozenset({"uuid"})
+
+
+def _require(pattern: re.Pattern, value: Any, field: str,
+             allow: frozenset[str] = frozenset()) -> str:
+    """`value` when it matches `pattern` AND carries no credential shape.
+
+    An identifier is stored raw — in `workflows`, in the ledger's columns, in
+    the idempotency table — and never passes through redaction, so a key pasted
+    into one would be kept. The pattern alone admits `project:sk-…`."""
     if not isinstance(value, str) or not pattern.fullmatch(value):
         raise InvalidInput(f"{field} must match {pattern.pattern}")
+    kind = memory_redact.credential_kind(value)
+    if kind and kind not in allow:
+        raise InvalidInput(f"{field} looks like a credential ({kind}); an identifier never "
+                           f"carries a value — a key belongs in the vault, named by slot")
     return value
 
 
@@ -222,6 +258,18 @@ def _objects(value: Any, field: str, limit: int, shape: dict[str, tuple[int, boo
     return out
 
 
+_FULL_COMMIT = re.compile(r"\b([0-9a-f]{12})[0-9a-f]{28}\b")
+
+
+def _short_commits(text: str) -> str:
+    """A full 40-character commit id, cut to the 12 the git read uses.
+
+    Forty hexadecimal characters is also the shape of many keys, so the
+    redaction would replace it whole and the reference would be lost; twelve
+    identify a commit in any one repository."""
+    return _FULL_COMMIT.sub(lambda m: m.group(1), text)
+
+
 def checkpoint_body(raw: Any) -> dict[str, Any]:
     """The checkpoint body, validated and normalised. Unknown fields are refused:
     a field the next executor is not told to read is state that silently does
@@ -255,8 +303,16 @@ def checkpoint_body(raw: Any) -> dict[str, Any]:
             raise InvalidInput(f"body.artifacts[{i}].kind must be git, file, url or other")
         if a["kind"] == "git" and a.get("path") and not pathlib.PurePath(a["path"]).is_absolute():
             raise InvalidInput(f"body.artifacts[{i}].path must be absolute for a git artifact")
+    for a in body["artifacts"]:
+        for key in ("head", "ref"):
+            if key in a:
+                a[key] = _short_commits(a[key])
+    for d in body["done"]:
+        if "evidence" in d:
+            d["evidence"] = [_short_commits(e) for e in d["evidence"]]
     body["questions"] = _strings(raw.get("questions"), "body.questions", 50, 1000)
-    body["memory_refs"] = _strings(raw.get("memory_refs"), "body.memory_refs", 100, 300)
+    body["memory_refs"] = [_short_commits(r) for r in
+                           _strings(raw.get("memory_refs"), "body.memory_refs", 100, 300)]
     notes = _string(raw.get("notes"), "body.notes", 4000)
     if notes is not None:
         body["notes"] = notes
@@ -319,10 +375,13 @@ def _atomic(conn: sqlite3.Connection, principal: str, operation: str, key: str,
 
     The replay check is inside the same transaction as the write, so two
     retries racing each other cannot both miss the record and both write."""
-    _require(IDEMPOTENCY_KEY, key, "idempotencyKey")
+    _require(IDEMPOTENCY_KEY, key, "idempotencyKey", _KEY_SHAPES_ALLOWED)
     digest = _request_digest(request)
     if conn.in_transaction:
-        conn.commit()
+        # Committing it here would make a caller's half-done work durable as a
+        # side effect of a memory write. A connection is handed over clean.
+        raise WorkflowError("the connection has an open transaction; commit or roll it "
+                            "back before a workflow operation")
     conn.execute("BEGIN IMMEDIATE")
     try:
         replay = _replayed(conn, principal, operation, key, digest)
@@ -410,14 +469,25 @@ def checkpoint_latest(conn: sqlite3.Connection, workflow_id: str) -> dict:
     ckpt = _latest_checkpoint(conn, workflow_id)
     now = _now()
     offer = _offer(conn, workflow_id)
+    lapsed = None
     if offer is not None and offer["expires_at"] and _parse(offer["expires_at"]) <= now:
-        offer = None                    # lapsed; the next write records it
+        # Lapsed, and SAID: the next write records the lapse, but a reader in
+        # between must not see the offer vanish without a word.
+        lapsed, offer = dict(_lease_view(offer), status="expired"), None
+    if lapsed is None:
+        # Only the LATEST offer: an old lapse followed by an accepted handoff
+        # is history, not something waiting for anyone.
+        last = conn.execute("SELECT * FROM workflow_leases WHERE workflow_id = ?"
+                            " AND handoff_id IS NOT NULL ORDER BY granted_at DESC, rowid DESC"
+                            " LIMIT 1", (workflow_id,)).fetchone()
+        if last is not None and last["state"] == "ended" and last["ended_reason"] == "lapsed":
+            lapsed = dict(_lease_view(last), status="expired")
     return {"workflowId": workflow_id, "projectId": wf["project_id"], "status": wf["status"],
             "createdBy": wf["created_by"], "createdAt": wf["created_at"],
             "closedAt": wf["closed_at"],
             "checkpoint": None if ckpt is None else _checkpoint_view(ckpt),
             "lease": _lease_view(_active(conn, workflow_id)),
-            "pendingHandoff": _lease_view(offer)}
+            "pendingHandoff": _lease_view(offer), "lapsedHandoff": lapsed}
 
 
 def handoff_get(conn: sqlite3.Connection, handoff_id: str) -> dict:
@@ -446,8 +516,8 @@ def _handoff_status(lease: sqlite3.Row | None, now: datetime) -> str:
         return "accepted"
     if lease["accepted_at"]:
         return "accepted-then-ended"
-    return {"lapsed": "expired", "superseded": "superseded"}.get(lease["ended_reason"] or "",
-                                                                 "ended")
+    return {"lapsed": "expired", "superseded": "superseded",
+            "closed": "workflow-closed"}.get(lease["ended_reason"] or "", "ended")
 
 
 # ─────────────────────────────── writing ───────────────────────────────────
@@ -506,7 +576,7 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
     if status not in STATUSES:
         raise InvalidInput(f"status must be one of {', '.join(STATUSES)}")
     if session_id is not None:
-        _require(SESSION_UUID, session_id, "sessionId")
+        _require(SESSION_UUID, session_id, "sessionId", _UUID_ONLY)
     if project_id is not None:
         _require(PROJECT_ID, project_id, "projectId")
     redactor = redactor or memory_redact.Redactor()
@@ -526,6 +596,10 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
         now = _now()
         token = None
         if workflow_id is None:
+            if project_id is None:
+                raise InvalidInput("projectId is required to start a workflow: a workflow "
+                                   "belongs to a project, and its handoff reads related "
+                                   "records from that project alone")
             if lease_token is not None:
                 raise InvalidInput("leaseId without workflowId: a lease belongs to a workflow")
             if expected_revision is not None:
@@ -564,8 +638,9 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
                 # would roll the episode back with the transaction, so the
                 # refusal is carried out of `work` and raised after commit.
                 lost.append(LeaseLost(f"{wid}: {why}. Your step was kept as {kept}; read "
-                                      f"the workflow's latest checkpoint before continuing.",
-                                      kept))
+                                      f"the workflow's latest checkpoint before continuing. "
+                                      f"A retry needs a new idempotency key: this one now "
+                                      f"answers with this refusal.", kept))
                 return {"error": "LeaseLost", "keptAs": kept}
             prior = _latest_checkpoint(conn, wid)
             if expected_revision is not None and (prior is None or
@@ -621,17 +696,24 @@ def _ref() -> str:
 
 def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str,
                    workflow_id: str, to: Any, reason: str, transcript: Any = None,
-                   offer_ttl_seconds: int = OFFER_TTL_DEFAULT,
+                   offer_ttl_seconds: int = OFFER_TTL_DEFAULT, lease_token: str | None = None,
+                   force: bool = False,
                    git_reader: Callable[[str], dict] | None = None,
                    related_reader: Callable[..., tuple[list[dict], list[dict]]] | None = None,
                    redactor: memory_redact.Redactor | None = None) -> dict:
     """Assemble an immutable handoff pack and offer the workflow to `to`.
 
-    Anyone working on this machine may create it — in the case it exists for,
-    the executor that should hand over cannot. Creating it does not take the
-    workflow away: the current lease stays in force until the pack is accepted,
-    and an offer nobody accepts lapses after `offer_ttl_seconds`. A newer
-    handoff replaces an unaccepted older one.
+    WHO MAY. The current executor, for any reason, by presenting its lease
+    token. Without the token — the case this exists for, since the executor
+    that should hand over often cannot — only for `limit`, `crash` or
+    `restart`, only once the executor has been silent for `SILENCE_SECONDS`,
+    and no more than one offer per `OFFER_INTERVAL_SECONDS`. `force` is the
+    operator's override, for a terminal command and never passed by the MCP
+    tools, and it is recorded in the pack as `operator-force`.
+
+    Creating it does not take the workflow away: the current lease stays in
+    force until the pack is accepted, and an offer nobody accepts lapses after
+    `offer_ttl_seconds`. A newer handoff replaces an unaccepted older one.
     """
     if not owner or not owner.strip():
         raise L.OwnerRequired("a handoff must name who created it")
@@ -678,7 +760,9 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
     degraded += related_degraded
     redactor = redactor or memory_redact.Redactor()
     request = {"workflowId": workflow_id, "to": target, "reason": reason, "transcript": session,
-               "offerTtlSeconds": offer_ttl_seconds, "checkpoint": ckpt["revision"]}
+               "offerTtlSeconds": offer_ttl_seconds, "checkpoint": ckpt["revision"],
+               "force": force, "lease": None if lease_token is None else hashlib.sha256(
+                   lease_token.encode()).hexdigest()}
 
     def work() -> dict:
         now = _now()
@@ -690,14 +774,17 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
             raise L.RevisionConflict(_checkpoint_id(workflow_id), ckpt["revision"],
                                      0 if latest is None else latest["revision"])
         _lapse_expired(conn, workflow_id, now)
+        active = _active(conn, workflow_id)
+        authority = _handoff_authority(conn, workflow_id, active, latest, lease_token, reason,
+                                       force, now)
         conn.execute("UPDATE workflow_leases SET state = 'ended', ended_at = ?,"
                      " ended_reason = 'superseded' WHERE workflow_id = ? AND state = 'offered'",
                      (_iso(now), workflow_id))
-        active = _active(conn, workflow_id)
         hid = f"handoff:{secrets.token_hex(8)}"
         pack: dict[str, Any] = {
             "handoffId": hid, "workflowId": workflow_id, "projectId": fresh["project_id"],
             "createdAt": _iso(now), "createdBy": owner, "reason": reason, "to": target,
+            "authority": authority,
             "from": None if active is None else json.loads(active["executor_json"] or "{}"),
             # FIRST, and verbatim: the restrictive mode is what a summary drops.
             "constraints": body.get("constraints", []),
@@ -741,8 +828,41 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
     return _atomic(conn, owner, "handoff.create", idempotency_key, request, work)
 
 
+def _handoff_authority(conn: sqlite3.Connection, workflow_id: str, active: sqlite3.Row | None,
+                       latest: sqlite3.Row, lease_token: str | None, reason: str, force: bool,
+                       now: datetime) -> str:
+    """How this handoff is entitled to move the workflow, or a refusal.
+
+    Inside the write transaction, so the silence it measures and the offer it
+    replaces are the ones the handoff acts on."""
+    if lease_token is not None:
+        if active is None or active["token"] is None or \
+                not hmac.compare_digest(active["token"], lease_token):
+            raise HandoffRefused(f"{workflow_id}: the token does not hold the active lease; "
+                                 f"read the workflow with checkpoint_latest")
+        return "lease"
+    if force:
+        return "operator-force"
+    if reason not in REASONS_WITHOUT_TOKEN:
+        raise HandoffRefused(f"a `{reason}` handoff is the current executor's to make, with its "
+                             f"lease token; without it, only "
+                             f"{', '.join(REASONS_WITHOUT_TOKEN)}")
+    silent = (now - _parse(latest["created_at"])).total_seconds()
+    if active is not None and silent < SILENCE_SECONDS:
+        raise HandoffRefused(
+            f"{workflow_id}: the executor wrote a checkpoint {int(silent)} s ago; without its "
+            f"lease token a handoff waits until it has been silent for {SILENCE_SECONDS} s "
+            f"(retry after {SILENCE_SECONDS - int(silent)} s)")
+    last = conn.execute("SELECT max(granted_at) FROM workflow_leases WHERE workflow_id = ?"
+                        " AND handoff_id IS NOT NULL", (workflow_id,)).fetchone()[0]
+    if last and (now - _parse(last)).total_seconds() < OFFER_INTERVAL_SECONDS:
+        raise HandoffRefused(f"{workflow_id}: a handoff was offered less than "
+                             f"{OFFER_INTERVAL_SECONDS} s ago; read it with checkpoint_latest")
+    return "silence"
+
+
 def handoff_accept(conn: sqlite3.Connection, *, owner: str, idempotency_key: str,
-                   handoff_id: str, executor: Any = None) -> dict:
+                   handoff_id: str, executor: Any = None, session_id: str | None = None) -> dict:
     """Take the workflow: the offer becomes the active lease, the old one ends.
 
     The answer carries the new lease token and the pack, constraints first.
@@ -754,7 +874,12 @@ def handoff_accept(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
         raise L.OwnerRefused("an executor accepts as `agent:` or `service:`")
     _require(HANDOFF_ID, handoff_id, "handoffId")
     who = executor_shape(executor)
-    request = {"handoffId": handoff_id, "executor": who}
+    if session_id is not None:
+        _require(SESSION_UUID, session_id, "sessionId", _UUID_ONLY)
+    # THE SESSION IS PART OF THE REQUEST. A replay returns the lease token, and
+    # every Claude session shares one identity, so without it a second session
+    # repeating the key and the handoff id would receive the first one's token.
+    request = {"handoffId": handoff_id, "executor": who, "sessionId": session_id}
 
     def work() -> dict:
         now = _now()
@@ -829,10 +954,39 @@ def _transcript(raw: Any) -> dict | None:
     if not isinstance(raw, dict) or set(raw) - {"provider", "sessionId"}:
         raise InvalidInput("transcript must be {provider, sessionId}")
     return {"provider": _require(PROVIDER, raw.get("provider"), "transcript.provider"),
-            "sessionId": _require(SESSION_UUID, raw.get("sessionId"), "transcript.sessionId")}
+            "sessionId": _require(SESSION_UUID, raw.get("sessionId"), "transcript.sessionId", _UUID_ONLY)}
 
 
 # ──────────────────────────── pack sources ─────────────────────────────────
+
+def _sensitive(p: pathlib.Path) -> bool:
+    """True for a path inside a credential store: the workspace's vault and
+    secret store, and the user's key directories. Resolved first, so a symlink
+    into one is caught too."""
+    import paths
+    try:
+        real = p.resolve()
+    except OSError:
+        return True
+    home = pathlib.Path.home()
+    roots = [home / ".ssh", home / ".gnupg", home / ".password-store", home / ".aws",
+             home / ".config" / "gcloud"]
+    # `paths.VAULT` is the WIKI vault, not the secret one; the credential
+    # vault lives under the secret store (`scan_leaks.VAULT`).
+    roots.append(pathlib.Path(paths.SECRETS))
+    try:
+        roots.append(pathlib.Path(paths.source_path("secret_store", paths.SECRETS)))
+    except Exception:                                                          # noqa: BLE001
+        pass
+    for root in roots:
+        try:
+            r = root.resolve()
+        except OSError:
+            continue
+        if real == r or r in real.parents:
+            return True
+    return False
+
 
 def git_snapshot(path: str) -> dict:
     """Branch, head and the paths that differ, read now. Never file contents.
@@ -844,6 +998,11 @@ def git_snapshot(path: str) -> dict:
     p = pathlib.Path(path)
     if not p.is_absolute() or not p.is_dir():
         out["error"] = "not an existing absolute directory"
+        return out
+    if _sensitive(p):
+        # Names only would still be read from it — the file names of a secret
+        # store are themselves worth keeping out of a pack.
+        out["error"] = "a credential store is never read into a handoff"
         return out
     try:
         head = safe_git.run(["rev-parse", "--short=12", "HEAD"], repo=p, timeout=20)
@@ -892,6 +1051,12 @@ def related_records(conn: sqlite3.Connection, *, body: dict, project_id: str | N
     how many are waiting rather than letting an empty list read as "none".
     """
     degraded: list[dict] = []
+    if not project_id:
+        # NEVER ACROSS PROJECTS. A workflow from before projects were required
+        # has none, and an unscoped search put other projects' records into
+        # its pack.
+        return [], [{"source": "related", "reason": "the workflow names no project, so no "
+                                                    "related records are read"}]
     text = " ".join([body.get("goal", "")] + [o.get("next_action", "")
                                               for o in body.get("open", [])])
     words: list[str] = []
@@ -912,11 +1077,8 @@ def related_records(conn: sqlite3.Connection, *, body: dict, project_id: str | N
            " WHERE search_notes MATCH ? AND t.memory_id IS NULL"
            "   AND l.state NOT IN ('rejected','superseded','archived')"
            "   AND (l.workflow_id IS NULL OR l.workflow_id != ? OR l.kind = 'step_result')")
-    args: list[Any] = [query, workflow_id]
-    if project_id:
-        sql += " AND l.project_id = ?"
-        args.append(project_id)
-    sql += " ORDER BY rank LIMIT ?"
+    sql += " AND l.project_id = ? ORDER BY rank LIMIT ?"
+    args: list[Any] = [query, workflow_id, project_id]
     args.append(MAX_RELATED)
     try:
         rows = conn.execute(sql, args).fetchall()
@@ -969,6 +1131,14 @@ def retention_candidates(conn: sqlite3.Connection, *, closed_checkpoint_days: in
     out += [dict(r, horizon_days=handoff_days,
                  reason=f"handoff older than {handoff_days} days") for r in rows]
     return out
+
+
+def prune_leases(conn: sqlite3.Connection, *, cutoff_iso: str) -> int:
+    """Lease rows of workflows closed before the cutoff. Runs inside the
+    caller's transaction (retention's), so it neither opens nor commits one."""
+    return conn.execute(
+        "DELETE FROM workflow_leases WHERE workflow_id IN (SELECT workflow_id FROM"
+        " workflows WHERE status = 'closed' AND closed_at < ?)", (cutoff_iso,)).rowcount
 
 
 def prune_idempotency(conn: sqlite3.Connection, *, cutoff_iso: str) -> int:

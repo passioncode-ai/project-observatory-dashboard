@@ -508,7 +508,7 @@ async def run_workflow() -> None:
                 "observatory_handoff_get"} <= listed, str(sorted(listed)))
             a = payload(await session.call_tool("observatory_checkpoint_write", {
                 "owner": "agent:claude-code", "idempotencyKey": "wire-start-0001",
-                "stepId": "S1", "status": "done", "body": body,
+                "stepId": "S1", "status": "done", "body": body, "projectId": "project:alpha-web",
                 "executor": {"provider": "anthropic", "accountRef": "acct-a"}}))
             check("a first checkpoint starts a workflow and hands out its lease",
                   a.get("workflowId", "").startswith("wf_") and a.get("leaseId", "").startswith("wl_"),
@@ -519,6 +519,20 @@ async def run_workflow() -> None:
                 "status": "done", "body": body, "workflowId": wid}))
             check("the operator's authority is not claimable over stdio",
                   refused.get("error") == "owner refused", json.dumps(refused)[:200])
+            early = payload(await session.call_tool("observatory_handoff_create", {
+                "owner": "service:switchboard", "idempotencyKey": "wire-handoff-early",
+                "workflowId": wid, "reason": "limit",
+                "to": {"provider": "anthropic", "accountRef": "acct-b"}}))
+            check("while the executor is active, a handoff without its token is refused",
+                  early.get("error") == "HandoffRefused" and early.get("remedy"),
+                  json.dumps(early)[:200])
+            # Session A falls silent: its checkpoint is ten minutes old.
+            import sqlite3 as _sq
+            db = _sq.connect(tmp)
+            db.execute("UPDATE ledger SET created_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now',"
+                       " '-10 minutes') WHERE kind = 'checkpoint'")
+            db.commit()
+            db.close()
             h = payload(await session.call_tool("observatory_handoff_create", {
                 "owner": "service:switchboard", "idempotencyKey": "wire-handoff-0001",
                 "workflowId": wid, "reason": "limit",

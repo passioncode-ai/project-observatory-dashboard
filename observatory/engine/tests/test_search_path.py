@@ -209,6 +209,46 @@ def test_the_projection_lag_is_still_named() -> None:
     check("and reported as a degradation", '"source": "projection"' in src)
 
 
+def test_a_superseded_revision_is_never_served() -> None:
+    """An index can still hold an older revision — written before the indexer
+    removed older ones, or while the newer one waits in the outbox. Serving it
+    presents a replaced statement as live; a workflow checkpoint revises once a
+    step, so this was thirty stale answers for one record."""
+    import importlib
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-superseded-"))
+    before = os.environ.get("OBSERVATORY_DB")
+    os.environ["OBSERVATORY_DB"] = str(d / "observatory.db")
+    try:
+        import paths
+        importlib.reload(paths)
+        from store import db as sdb
+        importlib.reload(sdb)
+        from store import ledger as L
+        conn = sdb.connect()
+        first = L.append(conn, owner="agent:fixture", statement="the quokka exporter is slow",
+                         project_id="project:alpha", confidence=0.5)
+        conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why)"
+                     " VALUES (?,?,?,?)", (first["memoryId"], 1, "the quokka exporter is slow", ""))
+        conn.commit()
+        L.append(conn, owner="agent:fixture", statement="the quokka exporter is fast now",
+                 memory_id=first["memoryId"], expected_revision=1, project_id="project:alpha",
+                 confidence=0.5)
+        conn.close()
+        r = survey().search("quokka", limit=5)
+        served = [(h["memoryId"], h["revision"]) for h in r["results"]]
+        check("the replaced revision is not served", (first["memoryId"], 1) not in served,
+              str(served))
+        check("and the answer still says the newer one is not indexed yet",
+              any(x.get("source") == "projection" for x in r["degraded"]), str(r["degraded"]))
+    finally:
+        if before is None:
+            os.environ.pop("OBSERVATORY_DB", None)
+        else:
+            os.environ["OBSERVATORY_DB"] = before
+        import paths
+        importlib.reload(paths)
+
+
 if __name__ == "__main__":
     print("the search path — ordinary text, and two scales that are not one\n")
     for fn in (test_no_ordinary_question_degrades_the_lexical_half,
@@ -218,7 +258,8 @@ if __name__ == "__main__":
                test_fusion_orders_by_membership_in_both_lists,
                test_the_answer_reports_what_it_left_out,
                test_the_contract_notes_survive,
-               test_the_projection_lag_is_still_named):
+               test_the_projection_lag_is_still_named,
+               test_a_superseded_revision_is_never_served):
         fn()
     print()
     if FAILURES:

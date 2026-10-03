@@ -899,9 +899,11 @@ def observatory_propose(
 _WORKFLOW_REMEDY = {
     "UnknownWorkflow": "check the id, or omit `workflowId` to start a new workflow",
     "WorkflowClosed": "the workflow is finished; start a new one to continue the work",
-    "LeaseLost": "another executor holds this workflow now. Read it with "
-                 "`observatory_checkpoint_latest` before doing anything else; your step was "
-                 "kept as `keptAs` and is not lost",
+    "LeaseLost": "another executor holds this workflow now, or your token is gone. Read it "
+                 "with `observatory_checkpoint_latest` before doing anything else; your step "
+                 "was kept as `keptAs` and is not lost. If you lost your own token, hand the "
+                 "workflow to yourself with reason `restart`. A retry takes a new "
+                 "`idempotencyKey`",
     "NoCheckpoint": "write a checkpoint first; a handoff carries the latest one",
     "UnknownHandoff": "check the id; `observatory_checkpoint_latest` names a pending handoff",
     "HandoffExpired": "ask for a new handoff; the previous executor still holds the workflow",
@@ -911,6 +913,9 @@ _WORKFLOW_REMEDY = {
                          "names it",
     "IdempotencyConflict": "a retry repeats its request exactly; a new request takes a new "
                            "`idempotencyKey`",
+    "HandoffRefused": "the current executor hands over with its `leaseId`; without it, only "
+                      "`limit`, `crash` or `restart`, once the executor has been silent — the "
+                      "message says how long to wait",
     "InvalidInput": "the message names the field and the shape it must have",
 }
 
@@ -973,7 +978,8 @@ def observatory_checkpoint_write(
     leaseId: Annotated[str | None, Field(description="The token from the first write or from "
                                                      "`observatory_handoff_accept`. Required to "
                                                      "continue a workflow.")] = None,
-    projectId: Annotated[str | None, Field(description="A 'project:<slug>' id.")] = None,
+    projectId: Annotated[str | None, Field(description="A 'project:<slug>' id. Required to start "
+                                                       "a workflow.")] = None,
     sessionId: Annotated[str | None, Field(description="This session's UUID.")] = None,
     executor: Annotated[dict[str, Any] | None, Field(description=_EXECUTOR)] = None,
     expectedRevision: Annotated[int | None, Field(description="The checkpoint revision you "
@@ -1025,6 +1031,10 @@ def observatory_handoff_create(
                                             "not stored.")] = None,
     offerTtlSeconds: Annotated[int, Field(ge=60, le=86400, description="How long the offer "
                                                                        "waits to be accepted.")] = 3600,
+    leaseId: Annotated[str | None, Field(description="The current executor's token: with it any "
+                                                     "reason is allowed. Without it only "
+                                                     "limit, crash or restart, once the executor "
+                                                     "has been silent for two minutes.")] = None,
 ) -> dict[str, Any]:
     """Assemble an immutable handoff pack — latest checkpoint, a fresh git read of its
     checkouts, related records — and offer the workflow to `to`. The leaving executor need
@@ -1036,7 +1046,8 @@ def observatory_handoff_create(
     from store import workflow as W
     return _workflow_call(lambda c: W.handoff_create(
         c, owner=owner, idempotency_key=idempotencyKey, workflow_id=workflowId, to=to,
-        reason=reason, transcript=transcript, offer_ttl_seconds=offerTtlSeconds))
+        reason=reason, transcript=transcript, offer_ttl_seconds=offerTtlSeconds,
+        lease_token=leaseId))
 
 
 @server.tool()
@@ -1049,6 +1060,8 @@ def observatory_handoff_accept(
     executor: Annotated[dict[str, Any] | None,
                         Field(description="Narrows the offer to the account actually used: " +
                                           _EXECUTOR)] = None,
+    sessionId: Annotated[str | None, Field(description="This session's UUID. A retry of this "
+                                                       "acceptance must send the same one.")] = None,
 ) -> dict[str, Any]:
     """Take a workflow: returns your `leaseId`, the constraints in force (obey them first),
     the current checkpoint and the pack. The previous executor's writes are refused from
@@ -1060,7 +1073,7 @@ def observatory_handoff_accept(
     from store import workflow as W
     return _workflow_call(lambda c: W.handoff_accept(
         c, owner=owner, idempotency_key=idempotencyKey, handoff_id=handoffId,
-        executor=executor))
+        executor=executor, session_id=sessionId))
 
 
 @server.tool()

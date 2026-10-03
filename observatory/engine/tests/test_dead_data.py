@@ -165,9 +165,10 @@ def test_agent_workflows_reach_the_operator() -> None:
     quiet = memory_redact.Redactor(known_loader=lambda: {})
     wf = W.checkpoint_write(conn, owner="agent:fixture", idempotency_key="dead-data-0001",
                             step_id="S1", status="done", body={"goal": "a fixture goal"},
-                            redactor=quiet)
+                            project_id="project:alpha", redactor=quiet)
     W.handoff_create(conn, owner="service:fixture", idempotency_key="dead-data-0002",
                      workflow_id=wf["workflowId"], reason="limit", to={"provider": "fixture"},
+                     lease_token=wf["leaseId"],
                      git_reader=lambda path: {"path": path},
                      related_reader=lambda c, **kw: ([], []), redactor=quiet)
     conn.close()

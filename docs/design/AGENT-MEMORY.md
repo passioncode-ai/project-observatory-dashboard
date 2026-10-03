@@ -11,8 +11,7 @@ This page describes what the engine implements today. The code is
 [`store/workflow.py`](../../observatory/engine/store/workflow.py), the redaction on the write
 path is [`memory_redact.py`](../../observatory/engine/memory_redact.py), and the MCP tools are
 in [`mcp/server.py`](../../observatory/engine/mcp/server.py). The behaviour below is proved by
-[`tests/test_workflow_memory.py`](../../observatory/engine/tests/test_workflow_memory.py) (30
-cases) and by `run_workflow` in
+[`tests/test_workflow_memory.py`](../../observatory/engine/tests/test_workflow_memory.py) (44 cases) and by `run_workflow` in
 [`tests/test_mcp_wire.py`](../../observatory/engine/tests/test_mcp_wire.py), which drives the
 handoff between two sessions over real stdio.
 
@@ -64,13 +63,25 @@ rightful successor or admit the session the workflow was taken from.
 - A write without the current token is refused with `LeaseLost`, and its content is kept as a
   `step_result` episode named in `keptAs`. A session that never learnt of the handoff does not
   lose its work, and a person sees it in the review queue.
-- `observatory_handoff_create` offers the workflow to `to: {provider, model, accountRef}`. Anyone
-  working on the machine may create it, because the executor that should hand over often cannot.
-  It does **not** take the workflow away: the current lease stays in force until acceptance, an
-  unaccepted offer lapses after `offerTtlSeconds` (default 3600), and a newer handoff replaces
-  an older unaccepted one.
+- `observatory_handoff_create` offers the workflow to `to: {provider, model, accountRef}`.
+  **Who may:** the current executor, for any reason, by presenting its `leaseId`. Without the
+  token — the case the handoff exists for, since the executor that should hand over often
+  cannot — only for `limit`, `crash` or `restart`, only once the executor has written no
+  checkpoint for two minutes (`SILENCE_SECONDS`), and no more than one offer a minute. A
+  `plan_route` or `operator` handoff without the token is refused; the operator's override is
+  the terminal command, recorded in the pack as `authority: operator-force`. The pack records
+  how it was entitled: `lease`, `silence` or `operator-force`.
+- Creating a handoff does **not** take the workflow away: the current lease stays in force until
+  acceptance, an unaccepted offer lapses after `offerTtlSeconds` (default 3600), and a newer
+  handoff replaces an older unaccepted one. `observatory_checkpoint_latest` names a lapsed
+  offer (`lapsedHandoff`) instead of letting it vanish.
 - `observatory_handoff_accept` ends the old lease and activates the new one in the same
-  transaction, and returns the new `leaseId`. Acceptance is once per pack.
+  transaction, and returns the new `leaseId`. Acceptance is once per pack. The accepting
+  session sends its `sessionId`, and a retry must send the same one: a replay returns the lease
+  token, and every Claude session shares one identity.
+- **A session that lost its own token** (after compaction, say) hands the workflow to itself with
+  reason `restart` once its last checkpoint is two minutes old, and accepts it.
+- A workflow is started with a `projectId`; its related records are read from that project only.
 - An **active** lease has no expiry. Expiring it would leave the workflow with no writer, since
   the session it would expire away from is gone; the way to the next executor is a handoff.
 
@@ -109,12 +120,21 @@ happened, and `constraints` in the answer are the newest checkpoint's.
 | Nothing credential-shaped is stored | every string is redacted before the first write: credential shapes always, and the workspace's own secret values (env inventory and vault) when they can be read | `Redaction` cases; the store and the idempotency table are searched for the planted values |
 | An account handle is not an address or a token | `accountRef` matches a narrow pattern with no `@`, and a credential-shaped handle is refused | `test_account_handles_are_opaque` |
 | Workflow text stays on the machine | the indexer writes checkpoints and packs to the lexical index only and never sends them to the embedding provider | `Projection` case: only the ordinary note reaches the stub provider |
+| Identifiers never carry a value | the project, step, model, provider and account fields refuse every credential shape; an idempotency key may be a UUID or a random run, never a provider key | `test_h06_identifiers_never_carry_a_value` |
+| General listings stay small | recall, project notes and the observer's prompt leave checkpoints and packs out (`ledger.not_workflow`), and no listing carries a body column | `test_h01_listings_leave_workflow_bodies_out`: 176 KB for four rows before |
+| Search answers with the current statement | indexing a revision removes the record's older ones from both indexes, and search serves the latest revision only | `test_h02_…`, `test_a_superseded_revision_is_never_served` |
+| An open workflow cannot be erased into a dead end | a tombstone on an open workflow's checkpoint is refused; close it first | `test_h08_an_open_workflow_checkpoint_is_not_erased` |
+| The committed export holds no workflow body | `tools/export_ledger.py` writes the row with `body_sha256` and no body | `test_h07_the_committed_export_carries_no_workflow_body` |
+| A credential store is never read into a pack | a git artifact inside the secret store or a key directory (`~/.ssh`, `~/.gnupg`, `~/.aws`, …), symlinks resolved, is refused | `test_h12_…` |
 | Reads never hand out the right to write | `observatory_checkpoint_latest` and `observatory_handoff_get` show the lease by `leaseRef`, never by token | wire test: no `wl_` string in a read |
 
 When the known secret values cannot be read, shape redaction still runs and the answer says
-`knownValuesChecked: false`: an honest partial, not a silent skip. A full commit id is 40
-hexadecimal characters and is redacted as a shape; cite commits by their short form, as the git
-read does.
+`knownValuesChecked: false`: an honest partial, not a silent skip. The known values are re-read
+as soon as the vault or the env inventory changes, so a rotated key is caught on the next write.
+The report names the fields where text was replaced (`redacted.fields`), so the writer knows
+what it lost. A full commit id in `head`, `ref`, `evidence` or `memory_refs` is cut to 12
+characters before redaction (40 hexadecimal characters is also the shape of many keys), and a
+`session:<uuid>` reference is kept whole.
 
 ## What the operator sees
 
@@ -146,7 +166,7 @@ workflow's checkpoint is never erased because the work took long. A workspace wh
 | `observatory_checkpoint_latest` | no | carries `degraded` |
 | `observatory_handoff_create` | yes | reads git and the local index; spends nothing |
 | `observatory_handoff_accept` | yes | returns the new `leaseId`, the constraints, the current checkpoint and the pack |
-| `observatory_handoff_get` | no | status: `offered`, `accepted`, `expired`, `superseded` |
+| `observatory_handoff_get` | no | status: `offered`, `accepted`, `expired`, `superseded`, `workflow-closed` |
 
 Every refusal is a typed answer with `error`, `detail` and `remedy`; `LeaseLost` adds `keptAs`.
 The caller is `agent:<name>` or `service:<name>`: the operator's authority cannot be claimed
