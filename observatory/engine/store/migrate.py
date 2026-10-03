@@ -211,6 +211,57 @@ def _drop_retention_policy(conn: sqlite3.Connection) -> str:
             f"nothing read it and `append` wrote a constant")
 
 
+def _agent_memory_workflows(conn: sqlite3.Connection) -> str:
+    """Workflows, executor leases and idempotency keys; four ledger columns.
+
+    The design is docs/design/AGENT-MEMORY.md: a workflow's state is a chain of
+    checkpoint revisions in the ledger, a handoff pack is an immutable ledger
+    record, and the right to continue is a lease. Every statement is guarded so
+    the migration also runs against a store `schema.sql` already created in the
+    new shape — `db.connect()` applies the schema to a fresh store and then
+    every migration, so a fresh store meets each `ADD COLUMN` a second time.
+    """
+    # A STORE WITHOUT A LEDGER is a store built by hand to exercise another
+    # migration (`tests/test_time.py` creates `events` alone); `schema.sql`
+    # creates the ledger in its current shape wherever one is really needed.
+    have = {c[1] for c in conn.execute("PRAGMA table_info(ledger)")}
+    added = []
+    if have:
+        for col in ("workflow_id", "step_id", "executor_json", "body_json"):
+            if col not in have:
+                conn.execute(f"ALTER TABLE ledger ADD COLUMN {col} TEXT")
+                added.append(col)
+        conn.execute("CREATE INDEX IF NOT EXISTS ledger_workflow ON ledger(workflow_id, kind)"
+                     " WHERE workflow_id IS NOT NULL")
+    execute_statements(conn, """
+      CREATE TABLE IF NOT EXISTS workflows (
+        workflow_id TEXT PRIMARY KEY, project_id TEXT, created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('open','closed')),
+        closed_at TEXT, closed_by TEXT) STRICT;
+      CREATE TABLE IF NOT EXISTS workflow_leases (
+        lease_ref TEXT PRIMARY KEY,
+        workflow_id TEXT NOT NULL REFERENCES workflows(workflow_id),
+        state TEXT NOT NULL CHECK (state IN ('offered','active','ended')),
+        token TEXT UNIQUE, holder TEXT, executor_json TEXT NOT NULL DEFAULT '{}',
+        handoff_id TEXT, granted_at TEXT NOT NULL, expires_at TEXT, accepted_at TEXT,
+        ended_at TEXT, ended_reason TEXT) STRICT;
+      CREATE UNIQUE INDEX IF NOT EXISTS workflow_one_active
+        ON workflow_leases(workflow_id) WHERE state = 'active';
+      CREATE UNIQUE INDEX IF NOT EXISTS workflow_one_offer
+        ON workflow_leases(workflow_id) WHERE state = 'offered';
+      CREATE UNIQUE INDEX IF NOT EXISTS workflow_lease_handoff
+        ON workflow_leases(handoff_id) WHERE handoff_id IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS idempotency (
+        principal TEXT NOT NULL, operation TEXT NOT NULL, key TEXT NOT NULL,
+        request_sha256 TEXT NOT NULL, response_json TEXT NOT NULL, created_at TEXT NOT NULL,
+        PRIMARY KEY (principal, operation, key)) STRICT;
+    """)
+    return (f"ledger gained {', '.join(added)}; " if added else
+            "ledger already carries the workflow columns; " if have else
+            "no ledger here to extend; ") + \
+        "workflows, workflow_leases and idempotency are available"
+
+
 MIGRATIONS: list[tuple[str, object]] = [
     ("0001-events-occurred-at-utc", _events_utc),
     ("0002-drop-events-outside-the-estate", _drop_foreign_events),
@@ -219,6 +270,7 @@ MIGRATIONS: list[tuple[str, object]] = [
     ("0005-project-week-sessions", _project_week_sessions),
     ("0006-collector-cursors", _collector_cursors),
     ("0007-drop-inert-retention-policy", _drop_retention_policy),
+    ("0008-agent-memory-workflows", _agent_memory_workflows),
 ]
 
 

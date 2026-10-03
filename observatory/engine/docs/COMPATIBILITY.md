@@ -43,7 +43,7 @@ Semantic versioning applies to the declared public API even before 1.0 as a proj
 
 ## Tested migration boundary
 
-`tests/test_schema_compatibility.py` covers every prefix of the seven original migration IDs, repeat opens, legacy checksum adoption, unknown IDs, changed migration checksum, future user_version, rollback after injected failure, WAL-only data and concurrent openers. Adopting a checksum for a legacy history records the current implementation; it cannot prove which old implementation originally ran.
+`tests/test_schema_compatibility.py` covers every prefix of the eight migration IDs (0008 adds the agent-memory workflow tables), repeat opens, legacy checksum adoption, unknown IDs, changed migration checksum, future user_version, rollback after injected failure, WAL-only data and concurrent openers. Adopting a checksum for a legacy history records the current implementation; it cannot prove which old implementation originally ran.
 
 `tests/test_workspace_boundaries.py` covers concurrent initialization, symbolic-link escape attempts, source changes during migration, future writer refusal and preservation of an existing destination. `tests/test_workspace.py` covers separate homes, optional settings preservation, configuration/registry version refusal and the complete local pipeline through eleven generated pages (`test_complete_local_workflow_and_eleven_pages`). Test execution receipts are recorded separately; listing a test here is not a claim that every release ran it.
 

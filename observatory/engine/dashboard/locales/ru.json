@@ -1800,5 +1800,7 @@
  "Link to: {title}": "Ссылка на: {title}",
  "Evidence and action: {title}": "Основание и действие: {title}",
  "No key is tracked yet. Put one in this workspace's vault (the value on stdin), then rebuild:": "Ключей пока нет. Положите ключ в хранилище этой папки данных (значение — через stdin), затем пересоберите:",
- "No domain is listed. Domains come from the zones a Cloudflare scan finds, and from {file}. Switch Cloudflare on and scan:": "Доменов нет. Домены берутся из зон, которые находит сканирование Cloudflare, и из {file}. Включите Cloudflare и запустите сканирование:"
+ "No domain is listed. Domains come from the zones a Cloudflare scan finds, and from {file}. Switch Cloudflare on and scan:": "Доменов нет. Домены берутся из зон, которые находит сканирование Cloudflare, и из {file}. Включите Cloudflare и запустите сканирование:",
+ "agent workflows open": "открытых workflow агентов",
+ "handoffs waiting for a session": "передач ждут новой сессии"
 }
