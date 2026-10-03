@@ -62,8 +62,18 @@ A workflow declares the credentials it needs, by name:
 | a handoff reports `vault`, `env-only`, `missing`; acceptance re-reads the vault; an unreadable vault is `unknown` | `Credentials` cases in `tests/test_workflow_memory.py` |
 | a redaction marker names the slot | `test_redaction_names_the_slot_a_value_lives_in` |
 | `serve` starts the service from the vault as the same process, refuses a `.env`, and the rotation names it | `test_serve_starts_a_service_from_the_vault_and_rotation_names_it` |
-| a finding when an agent project keeps a secret outside the vault | planned (S-08) |
-| a finding when a known value reaches agent memory, and the store itself in the leak scan | planned (S-04, S-05) |
+| a finding when an agent's project keeps a secret in its `.env` that the vault does not hold (`agent.secret_outside_vault`) | `test_secrets_outside_the_vault_are_named_with_the_command` |
+| a finding when a run for an agent's project took a key from a `.env` (`agent.secret_fallback_used`) | `test_a_run_that_fell_back_to_a_dotenv_is_reported` |
+| a finding when a known value was written into agent memory (`secret.seen_in_agent_memory`, critical); the write is stored redacted and journalled by slot name | `test_a_known_value_in_memory_is_journalled_and_reported` |
+| the Observatory's own store is in the leak scan: a sighting there means the redactor missed one | `test_the_observatory_store_is_in_the_leak_scan` |
+| an agent's note (`observatory_record`) is redacted like a checkpoint | `memory_redact` on the record tool |
+
+## Which projects are agents'
+
+The two findings about a project's keys judge only projects measured as an agent's: a project
+a workflow declared a credential for, or one whose local folder carries a Fabric agent manifest
+(`fabric-agent.json`). A project an agent merely touched is not judged; guessing would make
+every repository an agent's (`tools/agent_secret_findings.py`, `agent_projects`).
 
 ## Edge cases
 

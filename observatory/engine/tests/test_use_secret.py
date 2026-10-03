@@ -15,7 +15,7 @@ asserts about the bytes that came back.
 and the assertion is that the scanner finds it, names it, and does NOT quote it.
 """
 from __future__ import annotations
-import json, os, pathlib, subprocess, sys
+import json, os, pathlib, sqlite3, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -331,6 +331,32 @@ def test_the_leak_scan_finds_a_planted_value() -> None:
     check("nor does what it printed", PLANTED not in p.stdout + p.stderr, "IT LEAKED")
 
 
+def test_the_observatory_store_is_in_the_leak_scan() -> None:
+    """Agent memory lives in the Observatory's own store. Writes into it are
+    redacted, so a value found there means the redactor missed one — the alarm
+    for the safety net itself."""
+    d, env = estate()
+    db = d / "observatory.db"
+    conn = sqlite3.connect(db)
+    conn.executescript((ROOT / "store/schema.sql").read_text(encoding="utf-8"))
+    conn.execute("INSERT INTO ledger (memory_id, revision, kind, function, scope, statement,"
+                 " state, owner, created_at) VALUES ('mem:x', 1, 'note', 'episodic', 'project',"
+                 " ?, 'proposed', 'agent:x', '2026-01-01T00:00:00Z')",
+                 (f"the provider returned {PLANTED}",))
+    conn.commit()
+    conn.close()
+    env2 = {**env, "OBSERVATORY_DB": str(db)}
+    subprocess.run([sys.executable, str(ROOT / "tools/scan_leaks.py"), "--full"], env=env2,
+                   capture_output=True, text=True, timeout=300, cwd=str(ROOT))
+    out = json.loads(((d / "scratch") / "leak-scan.json").read_text(encoding="utf-8"))
+    hits = [h for h in out["hits"] if str(db) in h["where"]]
+    check("a value in the store is found", len(hits) == 1 and "ledger" in hits[0]["where"],
+          str(out["hits"])[:300])
+    check("and the store is reported as read", (out.get("observatory_store") or {}).get("read"),
+          str(out.get("observatory_store")))
+    check("without quoting the value", PLANTED not in json.dumps(out), "IT LEAKED")
+
+
 def test_the_companion_store_is_read_as_a_database_not_named_as_unread() -> None:
     """The companion's SQLite store holds session summaries — the shape that
     has leaked before — and the scanner once only NAMED it as unread. Driven on a planted store: a value in a text column is a sighting
@@ -477,6 +503,7 @@ if __name__ == "__main__":
                test_nothing_measured_is_not_nothing_wrong,
                test_what_the_scan_could_not_open_is_named,
                test_the_companion_store_is_read_as_a_database_not_named_as_unread,
+               test_the_observatory_store_is_in_the_leak_scan,
                test_pipe_hands_a_stdin_value_to_a_command_and_scrubs_its_output,
                test_pipe_refuses_a_program_that_reads_its_code_from_stdin):
         fn()

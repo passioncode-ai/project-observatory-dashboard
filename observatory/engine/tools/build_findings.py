@@ -1642,6 +1642,16 @@ def collect() -> list[dict]:
     _ld = paths.SCRATCH / "leak-scan.json"
     out.extend(leak_findings.findings(
         json.loads(_ld.read_text(encoding="utf-8")) if _ld.is_file() else None))
+    # EVERY CREDENTIAL AN AGENT USES COMES FROM THE VAULT. These read what agent
+    # memory, the env inventory, the vault listing and use_secret's journal say
+    # about the projects agents work for (tools/agent_secret_findings.py).
+    import agent_secret_findings
+    _vault_dir = pathlib.Path(os.environ.get(
+        "OBSERVATORY_VAULT_DIR", paths.source_path("secret_store", paths.SECRETS) / "projects"))
+    out.extend(agent_secret_findings.findings(
+        db=paths.DB, state=paths.STATE,
+        env_doc=json.loads(_ed.read_text(encoding="utf-8")) if _ed.is_file() else None,
+        vault_dir=_vault_dir, projects=reg("projects.json").get("projects", [])))
     live = reg("domain-liveness.json")
     owned = {d["name"]: d for d in reg("domains.json").get("domains", [])}
     hosts = {h["host"]: h for h in live.get("hosts", [])}

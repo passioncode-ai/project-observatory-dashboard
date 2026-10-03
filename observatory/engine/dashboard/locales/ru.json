@@ -1925,5 +1925,16 @@
  "ago": "назад",
  "took the workflow": "взял workflow",
  "handoff to": "передача",
- "working": "в работе"
+ "working": "в работе",
+ "{n} known secret values were written into agent memory": {
+  "one": "{n} известное значение секрета записано в память агента",
+  "few": "{n} известных значения секретов записаны в память агентов",
+  "many": "{n} известных значений секретов записаны в память агентов",
+  "other": "{n} известных значения секретов записаны в память агентов"
+ },
+ "{project}: an agent's secrets are outside the vault": "{project}: секреты агента лежат вне хранилища",
+ "{project}: an agent's run read a key from a .env": "{project}: запуск агента взял ключ из .env",
+ "An agent's run read a key from a .env": "Запуск агента взял ключ из .env",
+ "An agent's secrets outside the vault": "Секреты агента вне хранилища",
+ "Secret written into agent memory": "Секрет записан в память агента"
 }

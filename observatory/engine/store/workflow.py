@@ -51,6 +51,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import pathlib
 import re
 import secrets
@@ -882,6 +883,9 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
         return answer
 
     answer = _atomic(conn, owner, "checkpoint.write", idempotency_key, request, work)
+    if not answer.get("replayed"):
+        _journal_known("checkpoint", answer.get("workflowId") or workflow_id, step_id,
+                       report.as_dict())
     if lost:
         raise lost[0]
     if answer.get("error") == "LeaseLost":
@@ -889,6 +893,33 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
         raise LeaseLost(f"{workflow_id}: this write was refused before and kept as "
                         f"{answer['keptAs']}", answer["keptAs"])
     return answer
+
+
+#: Where a write that replaced one of the workspace's KNOWN secret values is
+#: recorded — names of slots, never values. `tools/agent_secret_findings.py`
+#: turns it into a finding with the command that puts the exposure on the
+#: register: the write succeeded redacted, but the value was in an agent's hands.
+REDACTIONS = "memory-redactions.jsonl"
+
+
+def _journal_known(kind: str, workflow_id: str | None, step_id: str | None,
+                   report: dict) -> None:
+    if not report or not report.get("knownValues"):
+        return
+    import paths
+    row = {"at": _iso(_now()), "kind": kind, "workflowId": workflow_id, "stepId": step_id,
+           "names": report.get("knownNames", []), "count": report.get("knownValues")}
+    target = pathlib.Path(paths.STATE) / "logs" / REDACTIONS
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        # The write itself succeeded redacted; losing the note about it is a
+        # smaller failure than refusing the memory, and the leak scan over the
+        # store (scan_leaks) is the second net.
+        pass
 
 
 def _new_token() -> str:
@@ -1039,7 +1070,10 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
                 "checkpointRevision": latest["revision"], "degraded": degraded,
                 "credentialsMissing": _blocking(creds), "redacted": pack_report.as_dict()}
 
-    return _atomic(conn, owner, "handoff.create", idempotency_key, request, work)
+    answer = _atomic(conn, owner, "handoff.create", idempotency_key, request, work)
+    if not answer.get("replayed"):
+        _journal_known("handoff", workflow_id, None, answer.get("redacted") or {})
+    return answer
 
 
 def _handoff_authority(conn: sqlite3.Connection, workflow_id: str, active: sqlite3.Row | None,

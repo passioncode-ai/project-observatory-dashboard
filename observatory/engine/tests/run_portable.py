@@ -115,6 +115,8 @@ BOUNDARY += ('lifecycle', 'lifecycle_watch')
 BOUNDARY += ('workflow_memory',)
 # The Agents page: workflows, handoffs and sessions, rendered.
 BOUNDARY += ('agents_page',)
+# Agents' credentials: the findings that report keys outside the vault.
+BOUNDARY += ('agent_secrets',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',

@@ -605,5 +605,9 @@
  "lease-end@@handed-off": "handed off",
  "handoff@@plan_route": "plan route",
  "key-state@@env-only": ".env only",
- "workflow@@handoff waiting": "handoff waiting"
+ "workflow@@handoff waiting": "handoff waiting",
+ "{n} known secret values were written into agent memory": {
+  "one": "{n} known secret value was written into agent memory",
+  "other": "{n} known secret values were written into agent memory"
+ }
 }

@@ -789,9 +789,18 @@ def observatory_record(
     bad = _owner_error(owner)
     if bad:
         return bad
+    # AN AGENT'S NOTE IS AGENT MEMORY, and gets the same redaction as a
+    # checkpoint: credential shapes and the workspace's known values are
+    # replaced before the first write, and a known value is journalled for the
+    # finding that puts it on the register. The answer's schema is closed (the
+    # published record schema), so the count travels in the journal, not here.
+    import memory_redact
+    from store import workflow as W
+    cleaned, report = memory_redact.Redactor().scrub({"statement": statement, "why": why})
+    statement, why = cleaned["statement"], cleaned["why"]
     conn = store_db.connect()
     try:
-        return L.append(conn, owner=owner, statement=statement, why=why,
+        result = L.append(conn, owner=owner, statement=statement, why=why,
                         project_id=projectId, session_id=sessionId,
                         memory_id=memoryId, expected_revision=expectedRevision,
                         evidence=evidence or [], function="episodic", scope="project",
@@ -802,6 +811,8 @@ def observatory_record(
                         # and a condition whose true side is unreachable is dead
                         # data that misleads the next reader.
                         confidence=0.5)
+        W._journal_known("note", None, None, report.as_dict())
+        return result
     except Exception as exc:
         return _write_error(exc)
     finally:
