@@ -253,6 +253,50 @@ def test_the_board_carries_an_open_leak_and_drops_a_settled_one() -> None:
         os.environ.pop("OBSERVATORY_VAULT_DIR", None)
 
 
+def test_two_sightings_of_one_slot_are_one_finding_naming_both() -> None:
+    """Two open leak rows of ONE slot raised two findings with one id, and the
+    duplicate-id guard then stopped the whole board build (`full local` failed
+    at `findings`; the dashboard, smoke and settle steps never ran). A slot is
+    one thing to settle, so it is one finding that lists every sighting."""
+    import importlib.util
+    s = fresh()
+    vault(s, "put", "demo", "local", "API_TOKEN", stdin=BOARD_V1)
+    vault(s, "leak", "demo", "local", "API_TOKEN", "--where", "first sighting: a CI log, job 101")
+    vault(s, "leak", "demo", "local", "API_TOKEN", "--where", "second sighting: a pasted terminal")
+    vault(s, "leak", "demo", "prod", "OTHER_TOKEN", "--where", "a different slot entirely")
+    prior = os.environ.get("OBSERVATORY_VAULT_DIR")
+    os.environ["OBSERVATORY_VAULT_DIR"] = str(s)
+    try:
+        spec = importlib.util.spec_from_file_location("bf_two", ROOT / "tools/build_findings.py")
+        bf = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bf)
+        got = [f for f in bf.collect() if f["type"] == "secret.leaked_unrotated"]
+        subjects = sorted(f["subject"] for f in got)
+        check("two sightings of one slot raise one finding, another slot its own",
+              subjects == ["secret:demo/local/API_TOKEN", "secret:demo/prod/OTHER_TOKEN"],
+              str(subjects))
+        one = next((f for f in got if f["subject"] == "secret:demo/local/API_TOKEN"), {})
+        check("the one finding names both places and how many sightings",
+              "first sighting: a CI log" in one.get("detail", "")
+              and "second sighting: a pasted terminal" in one.get("detail", "")
+              and "2 sightings" in one.get("detail", ""), one.get("detail", "")[:300])
+        check("and it is still critical and carries no value",
+              one.get("severity") == "critical" and BOARD_V1 not in json.dumps(got))
+        settled = vault(s, "settle", "demo", "local", "API_TOKEN", "--how",
+                        "synthetic provider and consumer checks", *settlement_evidence())
+        check("one settlement closes every sighting of the slot",
+              settled.returncode == 0 and "settled 2 open leak" in settled.stdout, settled.stdout)
+        got = [f for f in bf.collect() if f["type"] == "secret.leaked_unrotated"]
+        check("and the board then keeps only the other slot",
+              [f["subject"] for f in got] == ["secret:demo/prod/OTHER_TOKEN"],
+              str([f["subject"] for f in got]))
+    finally:
+        if prior is None:
+            os.environ.pop("OBSERVATORY_VAULT_DIR", None)
+        else:
+            os.environ["OBSERVATORY_VAULT_DIR"] = prior
+
+
 def test_an_unreadable_register_is_reported_not_read_as_empty() -> None:
     """`secret.register_unreadable` — empty and unreadable are different facts.
 
@@ -463,6 +507,7 @@ if __name__ == "__main__":
                test_a_leak_needs_a_place_and_stays_open_after_local_rotation,
                test_a_leak_of_a_key_the_store_never_held_is_still_recorded,
                test_the_board_carries_an_open_leak_and_drops_a_settled_one,
+               test_two_sightings_of_one_slot_are_one_finding_naming_both,
                test_an_unreadable_register_is_reported_not_read_as_empty,
                test_an_old_retired_archive_is_reported,
                test_the_mandatory_rules_ship_as_a_skill,

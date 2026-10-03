@@ -3013,8 +3013,8 @@
     {
       "path": "tests/test_vault.py",
       "source_sha256": "7fdbb28115a9f017c42a7c292f00850b4b04ae14d4cb0b68bfbce9e801cf3be6",
-      "export_sha256": "67cb6a49a99a62bf900e0868642c6adb15ee555fdb06f772e1d5f0e113651c4c",
-      "bytes": 28315,
+      "export_sha256": "08d78c51a2def18d9ee5f5e16518107c15f3f143fd87bf1d992a28ea406bc116",
+      "bytes": 31125,
       "python_comments_removed": 5,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -3227,8 +3227,8 @@
     {
       "path": "tools/build_findings.py",
       "source_sha256": "03136ce1f366d180307f7f0c17ab41a3de82631103750f081a6d79758569e0b3",
-      "export_sha256": "5a1b3ee1b8e92a51b08085a1d0f82f5dd434b2a3c1860c8cd83055893be75f4f",
-      "bytes": 254155,
+      "export_sha256": "7cfa2a57056a1a86465ce002c821d94e3c6356530f5494cf2f50f4b99a8f6836",
+      "bytes": 255443,
       "python_comments_removed": 996,
       "python_docstrings_removed": 28,
       "tool_descriptions_retained": 0,
