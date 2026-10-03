@@ -49,17 +49,19 @@ SHAPES = {
     "cooling": lambda w: max(0, 9 - w),
     "dormant": lambda w: 0,
 }
+# Each type is one a rule emits (`dashboard/finding_types.LABELS`), so the page labels it
+# as it would on a real estate; tests/test_demo_estate.py holds the list to that.
 FINDINGS = (
-    ("critical", "credential.leaked", "project:atlas-billing", "A payment webhook secret appeared in an agent transcript",
+    ("critical", "secret.leaked_unrotated", "project:atlas-billing", "A payment webhook secret appeared in an agent transcript",
      "The value of PAYMENTS_SIGNING_SECRET was seen in a session log on 2026-09-24.",
      "Rotate the secret at the provider, then record the rotation with vault.py rotate."),
-    ("warning", "repo.unpushed", "project:orbit-agents", "Eleven commits exist only on this machine",
+    ("warning", "clone.ahead", "project:orbit-agents", "Eleven commits exist only on this machine",
      "orbit-agents is 11 commits ahead of its remote on branch triage-v2.",
      "Push the branch or record why it stays local."),
     ("warning", "env.shared_secret", "env:harbor-web/.env", "One database password is shared by two projects",
      "DATABASE_URL in harbor-web and lumen-mobile has the same salted fingerprint.",
      "Split the credential so each project holds its own."),
-    ("info", "project.drift", "project:tern-cli", "Declared active, measured cooling",
+    ("info", "project.declared_alive_measured_dead", "project:tern-cli", "Declared active, no commit in 41 days",
      "No commit in 41 days while the project is marked active.",
      "Mark it paused, or pick the work back up."),
     ("info", "domain.expiring", "domain:signal-docs.example", "A documentation domain expires in 38 days",
