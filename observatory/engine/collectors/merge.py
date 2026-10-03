@@ -422,6 +422,50 @@ for owner,ks in sorted(left.items()):
             projects[k]={"key":slug(k.replace("/","-")),"name":repos[k]["name"],"anchor":"repository",
                 "vault":None,"repos":[k],"rules":[f"{k}: standalone repository"],"sites":[]}
 apply_verified_links()                                                      
+def _elsewhere_sync(folder, l):
+    """`sync` and what is at stake for a git folder whose remote is on a host
+    this merge cannot key into a repository row.
+
+    Such a folder has no repository row, and every clone rule reads repository
+    rows, so a commit ahead of its upstream there raised nothing while the same
+    commit in a GitHub checkout raised `clone.ahead`. The probe's answer is used
+    when it reached the remote. When it did not, or never ran, the clone's own
+    tracking ref is asked — the ref the last fetch left, read without a network
+    call and without writing to the repository — and the result says so with
+    `remote_unreachable` / `compared_with`, because "as of the last fetch" is a
+    weaker claim than "the remote lacks this".
+    """
+    rm = REMOTES.get(folder) or {}
+    path, branch = pathlib.Path(l["path"]), l.get("branch", "") or ""
+    out = {}
+    if rm.get("reachable"):
+        out["sync"] = rm.get("sync") or ""
+        remote_sha = rm.get("branch_remote_sha") or ""
+    else:
+        if rm:
+            out["remote_unreachable"] = True
+        ref = f"refs/remotes/origin/{branch}" if branch and branch != "HEAD" else ""
+        code, remote_sha, _ = scan_remotes.git(["rev-parse", "--verify", "--quiet", ref], cwd=path) if ref else (1, "", "")
+        head = scan_remotes.git(["rev-parse", "HEAD"], cwd=path)[1] if code == 0 else ""
+        if code != 0 or not head:
+            # No tracking ref: nothing on this disk can say what the remote has.
+            out["sync"] = "unreachable" if rm else ""
+            return out
+        out["compared_with"] = "last-fetch"
+        if head == remote_sha:
+            out["sync"] = "current"
+        elif scan_remotes.git(["merge-base", "--is-ancestor", remote_sha, head], cwd=path)[0] == 0:
+            out["sync"] = "ahead"
+        elif scan_remotes.git(["merge-base", "--is-ancestor", head, remote_sha], cwd=path)[0] == 0:
+            out["sync"] = "behind"
+        else:
+            out["sync"] = "diverged"
+    fresh = scan_remotes.at_stake(path, out["sync"], "", remote_sha, branch)
+    for key, out_key in (("unpushed", "unpushed"), ("newest_on", "unpushed_newest_on"),
+                         ("nothing_exclusive", "nothing_exclusive")):
+        if fresh.get(key) is not None:
+            out[out_key] = fresh[key]
+    return out
 # ---------- folders that produced no repository ----------
 # NOT "folders with no git". A folder holding a .git with no remote satisfies
 # neither branch: the repository pass above needs a remote to derive an nwo,
@@ -458,6 +502,8 @@ for folder,l in local.items():
                       "commits":int(l.get("commits") or 0),"branch":l.get("branch","") or "",
                       "last_commit":l.get("last_commit","") or "","dirty":int(l.get("dirty") or 0),
                       "readme":l["readme"],"files":l.get("file_count",0),"mtime":l.get("mtime","")}}
+    if _remote:
+        projects["local:"+folder]["local_only"].update(_elsewhere_sync(folder, l))
 # ---------- sites, by evidence rank ----------
 def host_of(u):
     u=(u or "").strip().lower(); u=re.sub(r"^https?://","",u); u=re.sub(r"^www\.","",u)

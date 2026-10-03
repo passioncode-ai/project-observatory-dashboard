@@ -416,6 +416,33 @@ def test_a_repository_with_no_remote_at_all_is_reported() -> None:
           "pushing would not have saved them, so the remedy must not say push")
 
 
+def test_unpushed_work_on_an_uninventoried_host_is_reported() -> None:
+    """A git folder whose remote is on a host nothing inventories is a
+    `local-only` project with no repository row, and the clone rules iterate
+    repositories only — so one commit ahead of its upstream raised nothing,
+    while the same commit in a GitHub checkout raised `clone.ahead`. The merge
+    now records the folder's `sync` on `local_only`, and the same rule reads it."""
+    def plant(doc):
+        doc["projects"][0]["local_only"] = {"unpublished": False, "commits": 2, "dirty": 0,
+                                            "branch": "main", "last_commit": "2026-09-01",
+                                            "path": "/tmp/planted-elsewhere", "sync": "ahead",
+                                            "unpushed": 1, "unpushed_newest_on": "2026-09-01",
+                                            "remote_unreachable": True,
+                                            "compared_with": "last-fetch"}
+    board = sandbox(registry={"projects.json": plant})
+    pid = json.loads((paths.REGISTRY / "projects.json").read_text(
+        encoding="utf-8"))["projects"][0]["id"]
+    r = [f for f in rows(board, "clone.ahead") if f["subject"] == pid]
+    check("an ahead local-only folder raises clone.ahead against its project", len(r) == 1,
+          str([(f["type"], f["subject"]) for f in board if f["type"].startswith("clone")]))
+    check("counting what is at stake", bool(r) and "1 commit(s) are on no remote" in r[0]["detail"],
+          r[0]["detail"] if r else "")
+    check("and saying the remote could not be reached, so the count is against the last fetch",
+          bool(r) and "last fetch" in r[0]["detail"], r[0]["detail"] if r else "")
+    check("and it is not also called a repository with no remote",
+          not [f for f in rows(board, "repo.no_remote") if f["subject"] == pid], "")
+
+
 #: The boundary the operator would curate, planted into the synthetic
 #: workspace's own config: one host outside by decision, one pending with
 #: candidate projects. The rule's three classes are driven, not a snapshot of
@@ -861,6 +888,7 @@ if __name__ == "__main__":
                test_a_pattern_of_store_faults_is_reported,
                test_an_extra_checkout_holding_work_is_reported,
                test_a_repository_with_no_remote_at_all_is_reported,
+               test_unpushed_work_on_an_uninventoried_host_is_reported,
                test_unmapped_analytics_traffic_is_one_registry_row,
                test_a_key_moved_at_heroku_with_no_journal_entry_is_a_row,
                test_the_mcp_inventory_raises_four_kinds_of_row,

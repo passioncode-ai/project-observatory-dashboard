@@ -493,6 +493,48 @@ def test_the_merged_model_is_unchanged_by_all_of_this() -> None:
           not any(p.get('name') == EXCLUDED for p in models[1]['projects'].values()))
 
 
+def test_a_folder_on_an_uninventoried_host_records_its_unpushed_work() -> None:
+    """One commit ahead of an upstream on a host the merge cannot key, with the
+    remote unreachable now: the merge asks the tracking ref the clone already
+    holds (no network, no fetch) and records `sync` and the count on
+    `local_only`, so the clone rules can see it."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-fs-elsewhere-"))
+    (d / "raw").mkdir()
+    data = d / "data"
+    data.mkdir()
+    genv = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+    bare, work = d / "upstream.git", data / "fixture-elsewhere"
+    def g(*args, cwd=None):
+        subprocess.run(["git", *(["-C", str(cwd)] if cwd else []), "-c", "user.name=Fixture",
+                        "-c", "user.email=fixture@example.invalid",
+                        "-c", "core.hooksPath=" + os.devnull, *args],
+                       env=genv, check=True, capture_output=True)
+    g("init", "--bare", "--template=", "-b", "main", str(bare))
+    g("init", "--template=", "-b", "main", str(work))
+    g("commit", "--allow-empty", "-m", "published", cwd=work)
+    g("remote", "add", "origin", str(bare), cwd=work)
+    g("push", "-u", "origin", "main", cwd=work)
+    g("commit", "--allow-empty", "-m", "only here", cwd=work)
+    # The remote moves to a host nothing inventories and nothing can reach.
+    g("remote", "set-url", "origin", "ssh://git@git.example.invalid/fixture-elsewhere.git", cwd=work)
+    p = scan(d / "raw/local.json", data=data)
+    check("the scan runs", p.returncode == 0, p.stderr[-300:])
+    env = dict(os.environ, OBSERVATORY_SCRATCH=str(d / "raw"),
+               PATH=f"{offline_bin(d)}:{os.environ.get('PATH', '')}")
+    p = subprocess.run([PY, "collectors/merge.py", str(d / "raw")], cwd=ROOT,
+                       env=env, capture_output=True, text=True, timeout=120)
+    check("the merge runs", p.returncode == 0, p.stderr[-300:])
+    if p.returncode:
+        return
+    model = json.loads((d / "raw/model.json").read_text())
+    lo = (model["projects"].get("local-fixture-elsewhere") or {}).get("local_only") or {}
+    check("it is a local-only project with a remote", lo and lo.get("unpublished") is False, str(lo)[:200])
+    check("its state is recorded against the last fetch", lo.get("sync") == "ahead", str(lo)[:300])
+    check("with the commit at stake counted", lo.get("unpushed") == 1, str(lo)[:300])
+    check("and that it was compared with the last fetch, not the remote",
+          lo.get("compared_with") == "last-fetch", str(lo)[:300])
+
+
 def test_both_other_readers_use_the_shared_loader() -> None:
     for f in ("collectors/scan_remotes.py", "collectors/scan_bitbucket.py",
               "collectors/merge.py"):
@@ -531,6 +573,7 @@ if __name__ == "__main__":
                test_the_step_failure_becomes_a_finding,
                test_the_scan_skips_what_the_merge_would_discard,
                test_the_merged_model_is_unchanged_by_all_of_this,
+               test_a_folder_on_an_uninventoried_host_records_its_unpushed_work,
                test_both_other_readers_use_the_shared_loader):
         fn()
     print()
