@@ -77,7 +77,8 @@ def verify_database(conn: sqlite3.Connection) -> None:
 
 
 def backup(conn: sqlite3.Connection, target: Path) -> Path:
-    """Snapshot committed WAL content, verify it, retain it until explicit cleanup."""
+    """Snapshot committed WAL content and verify it. `store/retention.py` keeps the newest
+    two copies and any younger than 30 days (`migration_backups_*` in retention.json)."""
     directory = target.parent / "migration-backups"
     if directory.is_symlink():
         raise RuntimeError("Migration backup directory must not be a symbolic link")
