@@ -1965,8 +1965,8 @@
       "path": "tests/test_credential_shape.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a709ada660b5a498e664e06450642853699b400215e29a8f940ab1482d27adc7",
-      "bytes": 6590
+      "export_sha256": "821517f05b9df47546c5354399a08f69cc8a6b449ec6e35a160dcf49f9c0adba",
+      "bytes": 6721
     },
     {
       "path": "tests/test_credentials.py",

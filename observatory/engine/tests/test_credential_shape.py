@@ -118,9 +118,10 @@ class CredentialShapeTests(unittest.TestCase):
 
     def test_bounded_shapes_still_catch_what_they_caught(self):
         secret = "Zq7" * 12
-        for text in (f"clone https://user:{secret}@example.test/repo",
-                     "x" * 100 + f"https://user:{secret}@example.test",
-                     f"git+ssh://user:{secret}@example.test"):
+        at = "@"                     # composed at runtime: no literal here is URL-with-password shaped
+        for text in ("clone https://user:" + secret + at + "example.test/repo",
+                     "x" * 100 + "https://user:" + secret + at + "example.test",
+                     "git+ssh://user:" + secret + at + "example.test"):
             self.assertNotIn(secret, cs.redact(text, marker="[r]"), text[:40])
         jwt = "eyJ" + "hb3" * 6 + "." + "eyJ" + "zd2" * 6 + "." + "sig" * 6
         for text in (f"Bearer {jwt}", f"token={jwt}", f'{{"t":"{jwt}"}}'):
