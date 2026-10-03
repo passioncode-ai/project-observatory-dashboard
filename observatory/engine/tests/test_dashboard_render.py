@@ -589,6 +589,43 @@ def test_the_keys_page_says_what_it_measured() -> None:
           and "Heroku was not scanned" in out, out[-600:])
 
 
+def test_the_declared_and_measured_states_are_labelled() -> None:
+    """"local folder · active · active · last activity …" — and in Russian
+    "активен · активен". The panel printed the declared lifecycle and the
+    measured activity tier side by side with no label, so two different facts
+    read as a stutter, and one that disagreed read as noise. And a row counted
+    "0 repos · 1 folder" for a git checkout the findings call "Repository with no
+    remote", so the row never said it was a repository at all."""
+    if node() is None:
+        check("node is available", True, " [uncoverable: executing the page needs node]")
+        return
+    root = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-states-"))
+    env = dashboard_fixture.seed(root)
+    reg = root / "registry/projects.json"
+    doc = json.loads(reg.read_text(encoding="utf-8"))
+    p = next(x for x in doc["projects"] if x["name"] == "Fixture B")
+    p.update(lifecycle="active", activity_tier="active", anchor="local-folder")
+    p["local_only"] = {"folder": "fixture-b", "path": str(root / "estate/fixture-b"),
+                       "unpublished": True, "commits": 1, "last_commit": ""}
+    reg.write_text(json.dumps(doc), encoding="utf-8")
+    page = _rebuild(root, env)
+    panel = (render(page, hash=p["id"]) or {}).get("panel", "")
+    meta = (re.search(r'<p class="dmeta">(.*?)</p>', panel, re.S) or [None, ""])[1]
+    meta = " ".join(meta.split())
+    check("the panel's state line is not a bare repetition",
+          "active · active" not in meta, meta)
+    check("and it says the two agree", "active (declared and measured)" in meta, meta)
+    p.update(activity_tier="dormant")
+    reg.write_text(json.dumps(doc), encoding="utf-8")
+    page = _rebuild(root, env)
+    panel = (render(page, hash=p["id"]) or {}).get("panel", "")
+    meta = " ".join((re.search(r'<p class="dmeta">(.*?)</p>', panel, re.S) or [None, ""])[1].split())
+    check("when they disagree, each is labelled",
+          "declared active" in meta and "measured dormant" in meta, meta)
+    out = (render(page, show="out") or {}).get("shown", "")
+    check("a git folder with no remote says so on its row", "git, no remote" in out, out[:300])
+
+
 def test_the_harness_itself_can_fail() -> None:
     """A green from a harness that cannot go red is not evidence."""
     if node() is None:
@@ -635,6 +672,7 @@ if __name__ == "__main__":
                test_the_panel_says_why_history_was_not_recorded,
                test_keyboard_focus_survives_sort_and_reset,
                test_the_keys_page_says_what_it_measured,
+               test_the_declared_and_measured_states_are_labelled,
                test_the_harness_itself_can_fail):
         fn()
     print()
