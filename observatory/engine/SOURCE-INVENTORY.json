@@ -2787,8 +2787,8 @@
       "path": "tests/test_serverd.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4c00b256b000b0b22f9116b9ca01b86abd45855d923fbdb865743bf8241d2468",
-      "bytes": 15401
+      "export_sha256": "89b0fa244b39e0a36c5807382a8e838c858fe560f6fe99b6359cb32b7c319f0f",
+      "bytes": 15802
     },
     {
       "path": "tests/test_session_start.py",
@@ -3619,8 +3619,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "d24a59d74084bef3e9e7a9100931cd75768e374a594a3e02857f78b73d9399c7",
-      "bytes": 33670,
+      "export_sha256": "0955478606bc9ac5f70b3be2b17d2d26db67af8b75b4085835e0d3b5d246dbe4",
+      "bytes": 33775,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
