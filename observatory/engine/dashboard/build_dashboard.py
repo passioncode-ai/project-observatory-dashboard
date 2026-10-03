@@ -1051,12 +1051,20 @@ def build():
         PAYLOAD["machine"] = machine_view.summary()
     except Exception as exc:  # noqa: BLE001 — a page, not a crash
         PAYLOAD["machine"] = {"degraded": [{"source": "machine", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
+    # THE AGENTS: workflows, handoffs and sessions, read-only from the store;
+    # only the Agents page carries it (shell.slice_for), and the overview card
+    # reads its counters.
+    try:
+        import agents_view
+        PAYLOAD["agents"] = agents_view.summary()
+    except Exception as exc:  # noqa: BLE001 — a page, not a crash
+        PAYLOAD["agents"] = {"degraded": [{"source": "agents", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
     build.last_payload = PAYLOAD                                                  
     payload = json.dumps(PAYLOAD, ensure_ascii=False)
     locale = build_locale()
     t = i18n.Translator(locale)
     title = "Projects — the operator's registry"
-    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "").replace("__MACHINE__", "")
+    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "").replace("__MACHINE__", "").replace("__AGENTS__", "")
             .replace("__TITLE__", html.escape(t(title)))
             .replace("__PAGE_TITLE__", "")
             .replace("__H1__", t.mark(title, tag="h1"))
@@ -1543,8 +1551,44 @@ body[data-page]:not([data-page="projects"]) #reading,
 body[data-page]:not([data-page="projects"]) #dups-s { display: none; }
 body[data-page="index"] #out, body[data-page="findings"] #out, body[data-page="health"] #out,
 body[data-page="machine"] #out, body[data-page="machine"] #list-tools,
+body[data-page="agents"] #out, body[data-page="agents"] #list-tools,
 body[data-page="index"] #panel, body[data-page="findings"] #panel, body[data-page="health"] #panel,
-body[data-page="machine"] #panel { display: none; }
+body[data-page="machine"] #panel, body[data-page="agents"] #panel { display: none; }
+/* The Agents page: server-rendered cards (dashboard/agents_page.py). */
+.agents-wf { margin-top: var(--space-2); }
+.agents-wf > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center;
+  gap: var(--space-2); list-style: none; }
+.agents-wf > summary::-webkit-details-marker { display: none; }
+.agents-wf > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.agents-meta { flex-basis: 100%; color: var(--muted); font-size: var(--t-label); }
+.agents-wf h3 { font: 600 var(--t-label) var(--font-ui); text-transform: uppercase;
+  letter-spacing: .06em; color: var(--muted); margin: var(--space-3) 0 var(--space-1); }
+.agents-project { margin: var(--space-4) 0 0; font-size: var(--t-label); color: var(--muted); }
+.agents-lane { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+  margin-top: var(--space-3); }
+.agents-seg { display: inline-flex; flex-direction: column; gap: var(--space-1);
+  border: 1px solid var(--border-strong); border-radius: var(--r-card);
+  padding: var(--space-2) var(--space-3); background: var(--panel-2);
+  font: 400 var(--t-chip) var(--font-data); }
+.agents-seg.offered { border-style: dashed; border-color: var(--warn); }
+.agents-seg.lapsed { text-decoration: line-through; color: var(--muted); }
+.agents-dots { display: flex; flex-wrap: wrap; gap: 4px; }
+.agents-dot { border-radius: var(--r-pill); padding: 0 6px; border: 1px solid var(--border-strong);
+  background: var(--panel); }
+.agents-dot.st-done { border-color: var(--ok); }
+.agents-dot.st-blocked { border-color: var(--danger); }
+.agents-dot.st-in_progress { border-color: var(--accent); }
+.agents-arrow { color: var(--muted); font: 400 var(--t-chip) var(--font-data); }
+.agents-ended { color: var(--muted); }
+.agents-needs { list-style: none; padding: 0; margin: 0; }
+.agents-need { padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
+.agents-need:last-child { border-bottom: 0; }
+.agents-cmd { display: block; margin-top: var(--space-1); white-space: pre-wrap;
+  word-break: break-all; }
+.agents-constraints li { color: var(--warn); }
+.visually-hidden-list { position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 640px) { .agents-lane { flex-direction: column; align-items: stretch; } }
 /* The Machine page: server-rendered cards (dashboard/machine_page.py). */
 .machine-h { font: 600 var(--t-section) var(--font-ui); margin: 0 0 var(--space-3); }
 #machine thead th.num { text-align: right; }
@@ -1696,6 +1740,7 @@ __NAV__
 <section id="panel" class="card panel" role="dialog" aria-labelledby="panel-title" hidden></section>
 __CARDS__
 __MACHINE__
+__AGENTS__
 <div id="list-tools" class="list-tools"></div>
 <main id="out" aria-live="polite"></main>
 
@@ -1817,7 +1862,7 @@ function localizeStatic(root) {
     try { args = el.dataset.tArgs ? JSON.parse(el.dataset.tArgs) : undefined; } catch (e) {}
     el.textContent = T(el.dataset.t, args);
   });
-  for (const name of ["aria-label", "placeholder", "title"])
+  for (const name of ["aria-label", "placeholder", "title", "data-label"])
     root.querySelectorAll(`[data-t-${name}]`).forEach(el =>
       el.setAttribute(name, T(el.getAttribute(`data-t-${name}`))));
 }
@@ -4061,6 +4106,50 @@ stick();
 render();
 // Finally, open whatever the URL hash names.
 fromHash();
+// THE AGENTS PAGE STAYS CURRENT between ticks when the local server serves it:
+// the server renders the same section again from the store (`/agents`, the same
+// Python renderer as the built page) and the page swaps it in. Which workflows
+// are expanded, and where focus is, survive the swap; a failed refresh keeps
+// what is shown and says that live updates are paused. Opened as a file there
+// is no server to ask, and the page says it is the snapshot of its build.
+(function agentsLive() {
+  if (PAGE !== "agents" || typeof fetch !== "function") return;
+  const say = text => { const el = document.getElementById("agents-live"); if (el) el.textContent = text; };
+  if (!String(location.protocol || "").startsWith("http")) {
+    say(T("A snapshot of the last build. Open it through the local server for live updates."));
+    return;
+  }
+  const keep = box => new Set([...box.querySelectorAll("details[open]")]
+    .map(d => (d.querySelector("summary .mono") || {}).textContent));
+  const refresh = () => fetch("/agents?locale=" + encodeURIComponent(LOCALE), {cache: "no-store"})
+    .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
+    .then(markup => {
+      const box = document.getElementById("agents");
+      if (!box) return;
+      const open = keep(box);
+      const within = document.activeElement && box.contains(document.activeElement)
+        ? document.activeElement.closest("details") : null;
+      const focused = within ? (within.querySelector("summary .mono") || {}).textContent : null;
+      const holder = document.createElement("div");
+      holder.innerHTML = markup;
+      const fresh = holder.querySelector("#agents");
+      if (!fresh) throw new Error("no section");
+      fresh.querySelectorAll("details").forEach(d => {
+        const id = (d.querySelector("summary .mono") || {}).textContent;
+        if (open.has(id)) d.open = true;
+      });
+      box.replaceWith(fresh);
+      if (focused) {
+        const again = [...fresh.querySelectorAll("details summary")].find(
+          s => (s.querySelector(".mono") || {}).textContent === focused);
+        if (again) again.focus();
+      }
+      say(T("Live — refreshed {at}", {at: new Date().toLocaleTimeString(LOCALE)}));
+    })
+    .catch(() => say(T("Live updates are paused — this is the last data the page read.")));
+  say(T("Live — refreshed {at}", {at: new Date().toLocaleTimeString(LOCALE)}));
+  setInterval(refresh, 15000);
+})();
 </script>
 </body>
 </html>

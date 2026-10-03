@@ -584,5 +584,26 @@
  "{subject} was revealed {n} times in {hours} hours": {
   "one": "{subject} was revealed {n} time in {hours} hours",
   "other": "{subject} was revealed {n} times in {hours} hours"
- }
+ },
+ "{n} step(s) kept after a lost lease wait for review": {
+  "one": "{n} step kept after a lost lease waits for review",
+  "other": "{n} steps kept after a lost lease wait for review"
+ },
+ "{n} handoff(s)": {
+  "one": "{n} handoff",
+  "other": "{n} handoffs"
+ },
+ "{n} workflows open": {
+  "one": "{n} workflow open",
+  "other": "{n} workflows open"
+ },
+ "{n} need you": {
+  "one": "{n} needs you",
+  "other": "{n} need you"
+ },
+ "step@@in_progress": "in progress",
+ "lease-end@@handed-off": "handed off",
+ "handoff@@plan_route": "plan route",
+ "key-state@@env-only": ".env only",
+ "workflow@@handoff waiting": "handoff waiting"
 }

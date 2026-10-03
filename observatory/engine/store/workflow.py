@@ -808,10 +808,11 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
             conn.execute("INSERT INTO workflows (workflow_id, project_id, created_by, created_at,"
                          " status) VALUES (?,?,?,?, 'open')", (wid, project_id, owner, _iso(now)))
             token = _new_token()
+            held_ref = _ref()
             conn.execute("INSERT INTO workflow_leases (lease_ref, workflow_id, state, token,"
                          " holder, executor_json, granted_at, accepted_at)"
                          " VALUES (?,?, 'active', ?,?,?,?,?)",
-                         (_ref(), wid, token, owner, json.dumps(who), _iso(now), _iso(now)))
+                         (held_ref, wid, token, owner, json.dumps(who), _iso(now), _iso(now)))
             prior = None
             pid = project_id
         else:
@@ -841,6 +842,7 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
                                       f"A retry needs a new idempotency key: this one now "
                                       f"answers with this refusal.", kept))
                 return {"error": "LeaseLost", "keptAs": kept}
+            held_ref = active["lease_ref"]
             prior = _latest_checkpoint(conn, wid)
             if expected_revision is not None and (prior is None or
                                                   prior["revision"] != expected_revision):
@@ -858,7 +860,11 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
             state="observed", confidence=None, owner=owner, classification="project-internal",
             valid_from=None, valid_to=None,
             supersedes=[] if prior is None else [f"{mid}@{prior['revision']}"],
+            # WHICH LEASE WROTE IT: the Agents view draws one lane per executor,
+            # and a timestamp of second resolution cannot tell a step written in
+            # the second a handoff was accepted from one written just before.
             conflicts_with=[], provenance=[{"source": "checkpoint", "status": status,
+                                            "lease": held_ref,
                                             "redacted": report.as_dict()}],
             evidence=[], created_at=_iso(now), workflow_id=wid, step_id=step_id,
             executor=who or None, body=clean))

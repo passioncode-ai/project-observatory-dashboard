@@ -69,6 +69,7 @@ SAMPLES = {
     "{name}": "github", "{k}": "daily_ceiling",
     "WORKFLOW_ID": "wf_0123456789abcdef", "{kept}": "wf_0123456789abcdef",
     "PROVIDER": "anthropic", "REASON": "limit", "WHY": "abandoned",
+    "{wid}": "wf_0123456789abcdef",
     'shellArg(RUNTIME.user_home || "$HOME")': "/srv/example-ws/home",
 }
 PLACEHOLDER = re.compile(r"[A-Z][A-Z0-9_./,]*[A-Z]|[A-Z]{2,}")
