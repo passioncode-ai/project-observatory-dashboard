@@ -47,13 +47,15 @@ a failed step in `tick.json` and on the board.
 
 - **F1 / H6 — consents keyed to an ad hoc interpreter (LC-05).** A `brew upgrade python@3.14`
   still voids the tick's privacy consents: TCC keys them to the code identity of the binary that
-  runs, and the `opt` link resolves to the same ad hoc Cellar binary. The fix is a Developer ID
-  signed launcher in the app bundle that hosts the virtual environment and is the plists'
-  `ProgramArguments[0]`; it needs the release operator's certificate. Recorded in
+  runs, and the `opt` link resolves to the same ad hoc Cellar binary. The fix is a launcher in
+  the app bundle, signed with the app by `.github/workflows/release.yml`, that spawns the
+  virtual environment's python as its child and is the plists' `ProgramArguments[0]`. It changes
+  the bundle the release workflow builds and signs, so it is its own change. Recorded in
   `AGENTS.md` → Lifecycle. The backup root's default under `~/Documents` (part of F1) is a
   data-location change with a migration of existing backups; left for that work.
-- **F12 / H5 — ad hoc signed app (LC-05).** Developer ID signing and notarisation are carried by
-  the parallel notarisation work; this run does not sign.
+- **F12 / H5 — ad hoc signed app (LC-05).** Closed on `main` by the notarisation work
+  (`macos/scripts/notarize.sh`, `.github/workflows/release.yml`), merged into this branch; this
+  run signs nothing.
 - **F9 — 200 MB of pre-migration data.** One machine's leftovers outside this repository; a
   retention item, not a lifecycle defect of the code.
 - **F10 — six interpreter starts per agent turn in the plugin hook.** A plugin change with its
@@ -68,8 +70,8 @@ On this branch, Python 3.14.7, before the pull request (exit codes read directly
 
 | Check | Result |
 |---|---|
-| `observatory/engine/tests/run_portable.py` (what `project-observatory full check` runs) | 204 of 204 suites PASS, exit 0 |
-| `python -m unittest discover -s tests` | 114 tests, OK |
+| `observatory/engine/tests/run_portable.py` (what `project-observatory full check` runs) | 204 of 204 suites PASS before merging `main`; 205 of 205 after, exit 0 |
+| `python -m unittest discover -s tests` | 114 tests OK before merging `main`; 124 after |
 | `python tools/update_inventory.py --check` | passed |
 | `python tools/check_public_release.py` (working tree) | passed, 0 findings |
 | every source compiled with Python 3.11 | 0 syntax errors |
@@ -81,9 +83,10 @@ signed by this run), `claude plugin validate --strict` (no plugin file changed).
 
 ## Landing note
 
-The parallel branch `feat/macos-notarize` also changes `AGENTS.md` and engine files. Whoever
-lands second rebases onto `main` and regenerates `observatory/engine/SOURCE-INVENTORY.json`
-with `python tools/update_inventory.py`.
+`feat/macos-notarize` (release signing) and #127 (agent memory) landed on `main` first. This
+branch merged `main` (`baa4664`) — no force-push — keeping both sides of `run_portable.py`,
+`locales/ru.json` and `docs/HANDOFF.md`, and regenerated
+`observatory/engine/SOURCE-INVENTORY.json`. The pull request squash-merges into a linear `main`.
 
 ## Next task
 

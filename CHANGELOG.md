@@ -3,6 +3,24 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Added
+
+- **A notarized Mac app per release.** `macos/scripts/notarize.sh` notarizes the
+  Developer ID-signed bundle with an App Store Connect API key or a `notarytool` Keychain
+  profile, staples the ticket, assesses it with `spctl` and packages
+  `ProjectObservatory-<version>-macos.zip`, which the release attaches and lists in
+  `SHA256SUMS`. It refuses before uploading when credentials are missing or the bundle is ad hoc
+  or lacks the hardened runtime. Apple's log is printed on a rejection. The key never reaches
+  the output. 0.13.0 carries the first such download.
+- **Releases are built, signed and published in CI.** `.github/workflows/release.yml` runs on a
+  `vX.Y.Z` tag. It builds the wheel and the Mac app, signs the app with the organization's CI
+  Developer ID, notarizes and staples it, attests every file (Sigstore), and publishes the
+  release with `SHA256SUMS` and a GPG signature, `SHA256SUMS.asc`. Nothing runs until someone
+  from `release-approvers` who is not the tag's author approves it. A published release is never
+  rewritten. To rehearse, push an `-rc` tag and dispatch the workflow with `publish=false`.
+
 ## 0.13.0 — 2026-10-03
 
 A minor release: three audit-and-fix runs over 0.12.0 (2026-10-03) — 173 defects found, 167 fixed (two

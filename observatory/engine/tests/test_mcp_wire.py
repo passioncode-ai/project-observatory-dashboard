@@ -486,12 +486,81 @@ async def run_refusals() -> None:
                   str(len(disc.instructions or "")))
 
 
+async def run_workflow() -> None:
+    """A workflow handed between two sessions, over the wire, as hosts would do it.
+
+    Session A starts a workflow and checkpoints; a third party creates the
+    handoff while A is silent; session B accepts it and continues; A's late
+    write is refused as a typed answer that names where its work was kept. The
+    lease token appears only in the answers that hand it out."""
+    tmp = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-wire-workflow-")) / "test.db"
+    params = StdioServerParameters(command=sys.executable, args=[str(ROOT / "mcp/server.py")],
+                                   cwd=str(ROOT), env={**os.environ, "OBSERVATORY_DB": str(tmp)})
+    body = {"goal": "ship the exporter", "open": [{"step_id": "S2", "next_action": "write it"}],
+            "constraints": ["read-only: do not push"]}
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.discover()
+            listed = {t.name for t in (await session.list_tools()).tools}
+            check("the five workflow tools are listed", {
+                "observatory_checkpoint_write", "observatory_checkpoint_latest",
+                "observatory_handoff_create", "observatory_handoff_accept",
+                "observatory_handoff_get"} <= listed, str(sorted(listed)))
+            a = payload(await session.call_tool("observatory_checkpoint_write", {
+                "owner": "agent:claude-code", "idempotencyKey": "wire-start-0001",
+                "stepId": "S1", "status": "done", "body": body,
+                "executor": {"provider": "anthropic", "accountRef": "acct-a"}}))
+            check("a first checkpoint starts a workflow and hands out its lease",
+                  a.get("workflowId", "").startswith("wf_") and a.get("leaseId", "").startswith("wl_"),
+                  json.dumps(a)[:200])
+            wid, token_a = a.get("workflowId"), a.get("leaseId")
+            refused = payload(await session.call_tool("observatory_checkpoint_write", {
+                "owner": "operator", "idempotencyKey": "wire-operator-01", "stepId": "S2",
+                "status": "done", "body": body, "workflowId": wid}))
+            check("the operator's authority is not claimable over stdio",
+                  refused.get("error") == "owner refused", json.dumps(refused)[:200])
+            h = payload(await session.call_tool("observatory_handoff_create", {
+                "owner": "service:switchboard", "idempotencyKey": "wire-handoff-0001",
+                "workflowId": wid, "reason": "limit",
+                "to": {"provider": "anthropic", "accountRef": "acct-b"}}))
+            check("a handoff is created without the leaving session",
+                  h.get("handoffId", "").startswith("handoff:"), json.dumps(h)[:200])
+            b = payload(await session.call_tool("observatory_handoff_accept", {
+                "owner": "agent:claude-code", "idempotencyKey": "wire-accept-0001",
+                "handoffId": h.get("handoffId")}))
+            check("acceptance carries the constraints first and a new lease",
+                  b.get("constraints") == ["read-only: do not push"]
+                  and b.get("leaseId") not in (None, token_a), json.dumps(b)[:200])
+            late = payload(await session.call_tool("observatory_checkpoint_write", {
+                "owner": "agent:claude-code", "idempotencyKey": "wire-late-0001", "stepId": "S2",
+                "status": "done", "body": body, "workflowId": wid, "leaseId": token_a}))
+            check("the old session's write is a typed LeaseLost naming where it was kept",
+                  late.get("error") == "LeaseLost" and str(late.get("keptAs", "")).startswith("mem:"),
+                  json.dumps(late)[:200])
+            latest = await session.call_tool("observatory_checkpoint_latest", {"workflowId": wid})
+            doc = payload(latest)
+            check("reading the workflow names the new executor and never a token",
+                  doc.get("lease", {}).get("executor", {}).get("accountRef") == "acct-b"
+                  and "wl_" not in json.dumps(doc) and doc.get("degraded") == [],
+                  json.dumps(doc)[:200])
+            got = payload(await session.call_tool("observatory_handoff_get",
+                                                  {"handoffId": h.get("handoffId")}))
+            check("the pack reads back as accepted", got.get("status") == "accepted",
+                  json.dumps(got)[:200])
+            bad = payload(await session.call_tool("observatory_checkpoint_latest",
+                                                  {"workflowId": "wf_0000000000000000"}))
+            check("an unknown workflow is a typed refusal with a remedy and `degraded`",
+                  bad.get("error") == "UnknownWorkflow" and bad.get("remedy")
+                  and bad.get("degraded") == [], json.dumps(bad)[:200])
+
+
 if __name__ == "__main__":
     print("MCP wire — mcp/server.py over stdio\n")
     asyncio.run(run())
     # Before run_credentials, which rewrites the registry with a minimal row.
     asyncio.run(run_refusals())
     asyncio.run(run_credentials())
+    asyncio.run(run_workflow())
     print()
     if FAILURES:
         print(f"\033[31m{len(FAILURES)} failed\033[0m")

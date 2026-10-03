@@ -68,6 +68,13 @@ each product's orphans, stale servers, overruns and oversized logs. Findings fix
 tests and the exact next task:
 [runs/2026-10-03-lifecycle-contract](runs/2026-10-03-lifecycle-contract/README.md).
 
+**2026-10-03, agent memory for workflows (OBS-02, merged `d6f2b33`, not released):** a checkpoint after every
+step, one executor per workflow by lease token, and an immutable handoff pack the engine
+assembles, so a workflow continues on another account, model or session when the one that
+leaves cannot answer. Five MCP tools, migration `0008-agent-memory-workflows`. Design:
+[design/AGENT-MEMORY.md](design/AGENT-MEMORY.md). Record, checks and the exact next task
+(OBS-07, then OBS-03): [runs/2026-10-03-agent-memory-workflows](runs/2026-10-03-agent-memory-workflows/README.md).
+
 **Status 2026-10-03: 0.13.0 — three audit-and-fix runs over 0.12.0.** Run 1 (PR #119), run 2
 (PR #120) and run 3 (PR #121) each re-walked the build, onboarding, keys, the Keychain, the Mac
 app, the scenarios and the docs, and fixed what the one before missed: 73, 27 and 66. Reports:

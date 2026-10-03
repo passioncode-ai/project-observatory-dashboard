@@ -13,7 +13,9 @@
     "owner_exempt": [
       "operator",
       "agent:estate-history"
-    ]
+    ],
+    "checkpoint_closed_days": 30,
+    "handoff_days": 90
   },
   "events_days": 365,
   "observations_days": 90,
@@ -25,5 +27,6 @@
   "tombstones": "never — they ARE the audit trail an erasure leaves",
   "wallet_events": 500,
   "wallet_days": 60,
-  "wallet_months": 12
+  "wallet_months": 12,
+  "idempotency_days": 7
 }

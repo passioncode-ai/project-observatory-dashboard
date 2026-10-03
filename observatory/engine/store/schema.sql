@@ -49,10 +49,73 @@ CREATE TABLE IF NOT EXISTS ledger (
   provenance_json   TEXT    NOT NULL DEFAULT '[]',
   evidence_json     TEXT    NOT NULL DEFAULT '[]',
   created_at        TEXT    NOT NULL,
+  -- AGENT MEMORY (migration 0008). Which workflow step a record came out of,
+  -- who executed it ({provider, model, accountRef} — an opaque account handle,
+  -- never an address or a token), and the structured body a checkpoint or a
+  -- handoff pack carries. NULL on every record that is not part of a workflow.
+  workflow_id       TEXT,
+  step_id           TEXT,
+  executor_json     TEXT,
+  body_json         TEXT,
   PRIMARY KEY (memory_id, revision)
 ) STRICT;
 CREATE INDEX IF NOT EXISTS ledger_project ON ledger(project_id, state);
 CREATE INDEX IF NOT EXISTS ledger_state   ON ledger(state, created_at);
+CREATE INDEX IF NOT EXISTS ledger_workflow ON ledger(workflow_id, kind)
+  WHERE workflow_id IS NOT NULL;
+
+-- A WORKFLOW outlives the sessions, accounts, models and providers that work on
+-- it. Its state is the checkpoint chain in `ledger` (kind 'checkpoint'); this
+-- row is only what has no revision history: whether it is still open.
+CREATE TABLE IF NOT EXISTS workflows (
+  workflow_id TEXT PRIMARY KEY,
+  project_id  TEXT,
+  created_by  TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  status      TEXT NOT NULL CHECK (status IN ('open','closed')),
+  closed_at   TEXT,
+  closed_by   TEXT
+) STRICT;
+
+-- ONE EXECUTOR AT A TIME. A lease is the right to write the workflow's next
+-- checkpoint, proven by its token. `offered` is a handoff waiting to be
+-- accepted, and lapses at `expires_at`; `active` is the current executor and
+-- has no expiry, because the session it would expire away from is gone and the
+-- only way to the next one is a handoff. The partial unique indexes make "one
+-- active, one offered" a property of the table rather than of the code.
+CREATE TABLE IF NOT EXISTS workflow_leases (
+  lease_ref     TEXT PRIMARY KEY,
+  workflow_id   TEXT NOT NULL REFERENCES workflows(workflow_id),
+  state         TEXT NOT NULL CHECK (state IN ('offered','active','ended')),
+  token         TEXT UNIQUE,
+  holder        TEXT,
+  executor_json TEXT NOT NULL DEFAULT '{}',
+  handoff_id    TEXT,
+  granted_at    TEXT NOT NULL,
+  expires_at    TEXT,
+  accepted_at   TEXT,
+  ended_at      TEXT,
+  ended_reason  TEXT
+) STRICT;
+CREATE UNIQUE INDEX IF NOT EXISTS workflow_one_active
+  ON workflow_leases(workflow_id) WHERE state = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS workflow_one_offer
+  ON workflow_leases(workflow_id) WHERE state = 'offered';
+CREATE UNIQUE INDEX IF NOT EXISTS workflow_lease_handoff
+  ON workflow_leases(handoff_id) WHERE handoff_id IS NOT NULL;
+
+-- A RETRY IS NOT A SECOND WRITE. A write carries a key; the same key with the
+-- same request returns the answer recorded the first time, in the transaction
+-- that made it, and the same key with a different request is refused.
+CREATE TABLE IF NOT EXISTS idempotency (
+  principal      TEXT NOT NULL,
+  operation      TEXT NOT NULL,
+  key            TEXT NOT NULL,
+  request_sha256 TEXT NOT NULL,
+  response_json  TEXT NOT NULL,
+  created_at     TEXT NOT NULL,
+  PRIMARY KEY (principal, operation, key)
+) STRICT;
 
 -- Erasure leaves a trace. Retention writes here; it never DELETEs from ledger.
 CREATE TABLE IF NOT EXISTS tombstones (

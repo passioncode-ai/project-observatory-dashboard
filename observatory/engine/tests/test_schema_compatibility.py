@@ -29,6 +29,12 @@ def open_worker(target: str, home: str, queue) -> None:
         queue.put(type(exc).__name__)
 
 
+
+#: Written out rather than read from `migrate.MIGRATIONS`, so that adding a
+#: migration fails here until someone has looked at what the upgrade matrix now
+#: covers. 0008 added the agent-memory workflow tables.
+CURRENT_MIGRATIONS = 8
+
 class SchemaCompatibility(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -67,8 +73,8 @@ class SchemaCompatibility(unittest.TestCase):
 
     def test_fresh_store_and_repeat(self):
         conn = self.db.connect(self.target)
-        self.assertEqual(conn.execute('SELECT COUNT(*) FROM migrations').fetchone()[0], 7)
-        self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0], 7)
+        self.assertEqual(conn.execute('SELECT COUNT(*) FROM migrations').fetchone()[0], CURRENT_MIGRATIONS)
+        self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0], CURRENT_MIGRATIONS)
         for suffix in ('', '-wal', '-shm'):
             file = Path(str(self.target) + suffix)
             if file.exists():
@@ -189,8 +195,8 @@ class SchemaCompatibility(unittest.TestCase):
         conn.commit()
         conn.close()
         conn = self.db.connect(self.target)
-        self.assertEqual(conn.execute('SELECT COUNT(*) FROM migration_checksums').fetchone()[0], 7)
-        self.assertEqual(conn.execute('SELECT COUNT(*) FROM migrations').fetchone()[0], 7)
+        self.assertEqual(conn.execute('SELECT COUNT(*) FROM migration_checksums').fetchone()[0], CURRENT_MIGRATIONS)
+        self.assertEqual(conn.execute('SELECT COUNT(*) FROM migrations').fetchone()[0], CURRENT_MIGRATIONS)
         conn.close()
         self.assertEqual(len(list((self.home / 'migration-backups').glob('*.db'))), 1)
 
@@ -208,7 +214,7 @@ class SchemaCompatibility(unittest.TestCase):
                 conn.commit()
                 conn.close()
                 conn = self.db.connect(target)
-                self.assertEqual(conn.execute('SELECT COUNT(*) FROM migrations').fetchone()[0], 7)
+                self.assertEqual(conn.execute('SELECT COUNT(*) FROM migrations').fetchone()[0], CURRENT_MIGRATIONS)
                 self.assertEqual(conn.execute('PRAGMA quick_check').fetchone()[0], 'ok')
                 conn.close()
 
@@ -240,7 +246,7 @@ class SchemaCompatibility(unittest.TestCase):
         with patch.object(compatibility, "preflight", racing):
             conn = db.connect(self.target)
             try:
-                self.assertEqual(conn.execute('SELECT COUNT(*) FROM migrations').fetchone()[0], 7)
+                self.assertEqual(conn.execute('SELECT COUNT(*) FROM migrations').fetchone()[0], CURRENT_MIGRATIONS)
             finally:
                 conn.close()
         self.assertEqual(len(calls), 2, "the check under the lock still runs")
@@ -256,7 +262,7 @@ class SchemaCompatibility(unittest.TestCase):
             for p in workers:
                 p.join(60)
                 self.assertEqual(p.exitcode, 0)
-            self.assertEqual(sorted(q.get(timeout=5) for _ in workers), [7, 7, 7, 7])
+            self.assertEqual(sorted(q.get(timeout=5) for _ in workers), [CURRENT_MIGRATIONS] * 4)
             q.close()
 
     def test_concurrent_first_open(self):
@@ -272,7 +278,7 @@ class SchemaCompatibility(unittest.TestCase):
                 p.join()
                 self.fail('concurrent opener timed out')
             self.assertEqual(p.exitcode, 0)
-        self.assertEqual([q.get(timeout=2) for _ in workers], [7, 7])
+        self.assertEqual([q.get(timeout=2) for _ in workers], [CURRENT_MIGRATIONS] * 2)
         q.close()
 
     def test_corrupt_database_not_replaced(self):

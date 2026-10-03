@@ -406,6 +406,17 @@ def from_store() -> dict:
             "registry_proposals": conn.execute(
                 "SELECT COUNT(*) FROM proposals WHERE status='proposed'").fetchone()[0],
         }
+        # AGENT WORKFLOWS, so the operator sees what agents are carrying between
+        # sessions: how many are open, and how many handoffs wait for a session
+        # to accept them (an offer nobody takes lapses, and the work stalls
+        # quietly). A store from before migration 0008 has neither table.
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if {"workflows", "workflow_leases"} <= tables:
+            out["health"]["workflows_open"] = conn.execute(
+                "SELECT COUNT(*) FROM workflows WHERE status = 'open'").fetchone()[0]
+            out["health"]["handoffs_waiting"] = conn.execute(
+                "SELECT COUNT(*) FROM workflow_leases WHERE state = 'offered'"
+                " AND expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')").fetchone()[0]
         # The projection's lag. Both search indexes are fed by the outbox, so a
         # pending queue means the answer any search gives is missing these
         # revisions — and this page is where "the observer is still watching" is
@@ -1985,6 +1996,8 @@ const SERVERD_FIX = {
 if (H.leaks_open > 0) hb.push([T("secret leaks"), T("{n} not rotated — vault.py leaks", {n: H.leaks_open})]);
 if (H.proposed != null) hb.push([T("awaiting the operator's decision"), H.proposed]);
 if (H.registry_proposals) hb.push([T("registry edits proposed"), H.registry_proposals]);
+if (H.workflows_open) hb.push([T("agent workflows open"), H.workflows_open]);
+if (H.handoffs_waiting) hb.push([T("handoffs waiting for a session"), H.handoffs_waiting]);
 if (H.projection_lag) hb.push([T("conclusions not indexed"),
   T("{n}, oldest from {date}", {n: H.projection_lag, date: (H.projection_oldest || "").slice(0, 10)})]);
 if (H.degraded_sources) hb.push([T("sources degraded"), H.degraded_sources]);

@@ -38,6 +38,16 @@ TRANSITIONS: dict[str, frozenset[str]] = {
 }
 OPERATOR = "operator"
 
+#: Kinds whose revisions belong to a WORKFLOW rather than to their author, and
+#: so are written only by `store/workflow.py`, under its executor lease. A
+#: checkpoint is continued by whichever session holds the workflow now — often
+#: the same `agent:claude-code` identity on another account — so the author
+#: guard below would either refuse the rightful successor or, keyed on the
+#: identity alone, admit a session the workflow was taken from. A handoff pack
+#: is immutable once written. Refusing both here is structural: every door that
+#: reaches `append` (`transition`, the MCP record tool, the review queue) meets it.
+WORKFLOW_KINDS = frozenset({"checkpoint", "handoff"})
+
 #: The longest text a single record may carry. See `append` for the
 #: measurement behind the number.
 MAX_TEXT = 4000
@@ -138,6 +148,20 @@ def _commit_revision(conn: sqlite3.Connection, row: dict) -> int:
     than accepting silently; a new conclusion about the same subject is a new
     record.
     """
+    with conn:
+        return insert_revision(conn, row)
+
+
+def insert_revision(conn: sqlite3.Connection, row: dict) -> int:
+    """`_commit_revision` without the transaction, for a caller that holds one.
+
+    `store/workflow.py` checks a lease, writes a checkpoint and records the
+    answer to an idempotency key as ONE transaction: a lease checked in one
+    transaction and a revision written in another lets the lease change hands
+    in between. `with conn:` commits whatever transaction is open on exit, so
+    it cannot nest inside that one; the guard below is a read and travels with
+    the insert, so every path still meets it.
+    """
     tomb = conn.execute("SELECT revision FROM tombstones WHERE memory_id = ?"
                         " ORDER BY revision LIMIT 1", (row["memory_id"],)).fetchone()
     if tomb is not None:
@@ -145,29 +169,51 @@ def _commit_revision(conn: sqlite3.Connection, row: dict) -> int:
             f"{row['memory_id']} is tombstoned (from revision {tomb[0]}) and takes no "
             f"further revisions — every read joins tombstones on memory_id, so this "
             f"row would be written and never served. Append a new record instead.")
-    with conn:
-        conn.execute(
-            "INSERT INTO ledger (memory_id, revision, kind, project_id, agent_id, run_id,"
-            " session_id, function, scope, statement, why, state, confidence, owner,"
-            " classification, valid_from, valid_to, supersedes_json,"
-            " conflicts_with_json, provenance_json, evidence_json, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (row["memory_id"], row["revision"], row["kind"], row["project_id"],
-             row["agent_id"], row["run_id"], row["session_id"], row["function"],
-             row["scope"], row["statement"], row["why"], row["state"], row["confidence"],
-             row["owner"], row["classification"], row["valid_from"],
-             row["valid_to"], json.dumps(row["supersedes"]),
-             json.dumps(row["conflicts_with"]),
-             json.dumps(row["provenance"], ensure_ascii=False),
-             json.dumps(row["evidence"], ensure_ascii=False), row["created_at"]))
-        # The version comes from the store's own vocabulary, not from a literal
-        # here. This line held `1` while `store/indexer.py` filtered on its own
-        # constant — two numbers that had to agree, in two files, with nothing
-        # checking. See `store/db.py:PROJECTION_VERSION`.
-        cur = conn.execute(
-            "INSERT INTO outbox (memory_id, revision, projection_version) VALUES (?,?,?)",
-            (row["memory_id"], row["revision"], store_db.PROJECTION_VERSION))
-        return cur.lastrowid
+    conn.execute(
+        "INSERT INTO ledger (memory_id, revision, kind, project_id, agent_id, run_id,"
+        " session_id, function, scope, statement, why, state, confidence, owner,"
+        " classification, valid_from, valid_to, supersedes_json,"
+        " conflicts_with_json, provenance_json, evidence_json, created_at,"
+        " workflow_id, step_id, executor_json, body_json)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (row["memory_id"], row["revision"], row["kind"], row["project_id"],
+         row["agent_id"], row["run_id"], row["session_id"], row["function"],
+         row["scope"], row["statement"], row["why"], row["state"], row["confidence"],
+         row["owner"], row["classification"], row["valid_from"],
+         row["valid_to"], json.dumps(row["supersedes"]),
+         json.dumps(row["conflicts_with"]),
+         json.dumps(row["provenance"], ensure_ascii=False),
+         json.dumps(row["evidence"], ensure_ascii=False), row["created_at"],
+         row.get("workflow_id"), row.get("step_id"),
+         None if row.get("executor") is None else json.dumps(row["executor"], ensure_ascii=False),
+         None if row.get("body") is None else json.dumps(row["body"], ensure_ascii=False)))
+    # The version comes from the store's own vocabulary, not from a literal
+    # here. This line held `1` while `store/indexer.py` filtered on its own
+    # constant — two numbers that had to agree, in two files, with nothing
+    # checking. See `store/db.py:PROJECTION_VERSION`.
+    cur = conn.execute(
+        "INSERT INTO outbox (memory_id, revision, projection_version) VALUES (?,?,?)",
+        (row["memory_id"], row["revision"], store_db.PROJECTION_VERSION))
+    return cur.lastrowid
+
+
+def _carried(prior: sqlite3.Row | None) -> dict:
+    """The workflow fields a later revision inherits unchanged.
+
+    They say WHICH workflow step a record came out of, which is identity rather
+    than content: a correction or a promotion of a step's result is still that
+    step's result. `append` takes no argument for them, so carrying them is the
+    only way a revision can have them, and it cannot be skipped by a caller.
+    """
+    if prior is None:
+        return {}
+    keys = prior.keys()
+    def loaded(name: str):
+        raw = prior[name] if name in keys else None
+        return None if raw is None else json.loads(raw)
+    return {"workflow_id": prior["workflow_id"] if "workflow_id" in keys else None,
+            "step_id": prior["step_id"] if "step_id" in keys else None,
+            "executor": loaded("executor_json"), "body": loaded("body_json")}
 
 
 def append(
@@ -258,6 +304,12 @@ def append(
     prior = None if new else current(conn, mid)
     if not new and prior is None:
         raise LedgerError(f"{mid} does not exist; omit memory_id to create it")
+    guarded = prior["kind"] if prior is not None and prior["kind"] in WORKFLOW_KINDS else kind
+    if guarded in WORKFLOW_KINDS:
+        raise LedgerError(
+            f"a {guarded} belongs to its workflow, not to a writer: checkpoints are written under the "
+            f"workflow's executor lease and a handoff pack never changes. Use the "
+            f"checkpoint and handoff operations (store/workflow.py) instead.")
     _check_owner(prior, owner)
 
     if prior is not None:
@@ -281,7 +333,8 @@ def append(
         scope=scope, statement=statement, why=why, state=state, confidence=confidence,
         owner=owner, classification=classification, valid_from=valid_from,
         valid_to=valid_to, supersedes=supersedes, conflicts_with=conflicts_with or [],
-        provenance=provenance or [], evidence=evidence or [], created_at=created))
+        provenance=provenance or [], evidence=evidence or [], created_at=created,
+        **_carried(prior)))
     return {"memoryId": mid, "revision": revision, "state": state, "owner": owner,
             "supersedes": supersedes, "consistencyCursor": cursor, "createdAt": created}
 
@@ -372,7 +425,7 @@ def corroborate(conn: sqlite3.Connection, memory_id: str, *, by: str, check: dic
         provenance=json.loads(prior["provenance_json"]) +
                    [{"source": "corroboration", "by": by, "at": created}],
         evidence=json.loads(prior["evidence_json"]) + [dict(check, kind="corroboration")],
-        created_at=created))
+        created_at=created, **_carried(prior)))
     return {"memoryId": memory_id, "revision": revision, "state": "observed",
             "owner": prior["owner"], "corroboratedBy": by,
             "consistencyCursor": cursor, "createdAt": created}

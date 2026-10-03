@@ -172,12 +172,14 @@ The organisation's [lifecycle contract](https://github.com/passioncode-ai/fabric
   - *Stable signed identity for the jobs (LC-05).* macOS privacy consents follow the code
     identity of the interpreter that runs, and Homebrew's python is ad hoc signed: a
     `brew upgrade` still voids every consent the tick was given, even through the `opt` link.
-    The fix is a Developer ID signed launcher inside the app bundle that hosts the virtual
-    environment and is the plists' `ProgramArguments[0]`. It needs the Developer ID
-    certificate, which only the release operator holds.
-  - *Developer ID signing and notarisation of the app (F12, LC-05).* Carried by the release
-    work on notarisation; this repository's `build-app.sh` signs ad hoc unless
-    `OBSERVATORY_SIGN_IDENTITY` is set.
+    The fix is a launcher executable inside the app bundle, signed by the release workflow
+    with the app, that spawns (not execs) the virtual environment's python as its child and is
+    the plists' `ProgramArguments[0]`, so the launcher stays the responsible process. Open: it
+    changes the app bundle the release workflow builds and signs, and the installers'
+    dependency on an installed app.
+  - The app itself is Developer ID signed, notarised and stapled by
+    `.github/workflows/release.yml` (F12 closed there); a local `build-app.sh` build stays ad
+    hoc unless `OBSERVATORY_SIGN_IDENTITY` is set, and is never attached to a release.
 
 **Build output (LC-15).** Release artefacts are `dist/project_observatory-<version>-*.whl`,
 `dist/project_observatory-<version>.tar.gz` and `dist/macos/Project Observatory.app`. At most
@@ -203,9 +205,23 @@ tasks are the operator's and which a contributor can take.
    (`tests/test_version_consistency.py` fails until they agree), and add the `## X.Y.Z — date`
    section to `CHANGELOG.md`. A plugin change bumps `observatory-log` separately, in its three
    manifests and every `SKILL.md` (`tests/test_plugin_manifests.py`).
-2. Merge that pull request through the required checks, then tag the merge commit `vX.Y.Z`.
-3. Publish a GitHub release for the tag with the built wheel and `SHA256SUMS`; re-download the
-   asset and compare its digest with the one inspected by `tools/check_package.py`.
+2. Merge that pull request through the required checks, then push the annotated tag `vX.Y.Z` on
+   the merge commit.
+3. The tag starts `.github/workflows/release.yml`:
+   - It builds the wheel and the Mac app.
+   - It signs the app with the organization's CI Developer ID, notarizes and staples it.
+   - It attests every file (Sigstore), writes `SHA256SUMS` and `SHA256SUMS.asc` (the
+     organization's GPG key), and publishes the release.
+
+   The signing jobs and the publish job wait for an approval in the `release` environment,
+   from `release-approvers` but never from the tag's author
+   ([organization release signing](https://github.com/passioncode-ai/.github/blob/main/release-signing/README.md)).
+   Then:
+   - Re-download the assets and run `shasum -a 256 -c SHA256SUMS` and
+     `gh attestation verify <file> -R passioncode-ai/project-observatory-dashboard`.
+   - To rehearse first, push `vX.Y.Z-rc.N` and run
+     `gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false`.
+   - A locally signed build (`build-app.sh` + `notarize.sh`) is for debugging and is never attached.
 4. Every machine then runs `project-observatory full update --apply` (without `--apply` it only previews).
 5. Record the release in `docs/runs/<date>-<slug>/`.
 

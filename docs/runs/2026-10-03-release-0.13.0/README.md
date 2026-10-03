@@ -69,6 +69,32 @@ The wheel was built with `python -m build --wheel` from a fresh clone of the tag
     release workflow published it to npm).
   - `npx @passioncode-ai/passioncode@0.1.22 update` installed `observatory-log` 0.14.0.
 
+## Notarized app (added the same day)
+
+The maintainer asked for the app signed and notarized with the maintainer's own Apple
+developer account.
+
+- **Build.** From a full clone of `v0.13.0` (`c7a8912`, bundle 244), `build-app.sh` ran with
+  `OBSERVATORY_SIGN_IDENTITY` set to the account's Developer ID Application certificate.
+  `codesign -dv` shows the Developer ID authority chain, `flags=0x10000(runtime)` and a secure
+  timestamp. No Keychain dialog appeared.
+- **Notarization.** `macos/scripts/notarize.sh` (this change) ran with the account's App Store
+  Connect API key, decoded into a temporary 0600 file for the run.
+  - Apple answered `Accepted`.
+  - The ticket was stapled, and `stapler validate` passed.
+  - `spctl --assess --type execute` printed `accepted`, `source=Notarized Developer ID`.
+- **Release asset.**
+  - `ProjectObservatory-0.13.0-macos.zip` (SHA-256 `d7eff63e…3f916a44`) is attached to the
+    release, and its line is added to `SHA256SUMS`.
+  - A re-download of every asset passed `shasum -a 256 -c SHA256SUMS`, and GitHub's digests are
+    the same.
+  - `full update --check --version 0.13.0` still answers `up-to-date` with `degraded: []`: the
+    updater reads only the wheel's line.
+- **Gatekeeper on a download.** The downloaded zip, given a browser's `com.apple.quarantine`
+  flag and unzipped, passed `spctl` as `Notarized Developer ID`.
+- **Installed copy.** The notarized build replaced the ad hoc one in `/Applications` and opened
+  on the live dashboard.
+
 ## Website
 
 - passioncode.ai names 0.13.0 (passioncode-ai/passioncode-ai.github.io #31, merged as `d59d521`):
@@ -85,8 +111,6 @@ The wheel was built with `python -m build --wheel` from a fresh clone of the tag
 ## Not run
 
 - Live provider calls and real credential rotation (the gate's own `NOT_RUN` scopes).
-- Developer ID signing and notarization of the app (SIGN-1). This needs the operator's
-  credentials.
 - Regenerating the README screenshots from the demo estate (run 3's O-5).
 
 ## Next task

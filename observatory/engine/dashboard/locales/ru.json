@@ -1830,5 +1830,7 @@
  "Logs past their cap": "Журналы сверх лимита",
  "Orphaned product processes": "Осиротевшие процессы продуктов",
  "Job running past its interval": "Задача дольше своего интервала",
- "Session servers on replaced code": "Сессионные серверы на заменённом коде"
+ "Session servers on replaced code": "Сессионные серверы на заменённом коде",
+ "agent workflows open": "открытых workflow агентов",
+ "handoffs waiting for a session": "передач ждут новой сессии"
 }
