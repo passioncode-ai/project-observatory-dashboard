@@ -42,13 +42,17 @@ import AppKit
     @StateObject private var web = WebController()
 
     var body: some Scene {
-        // The DASHBOARD is the app: it opens first, at launch and on reopen.
-        WindowGroup("Project Observatory", id: WindowID.dashboard) {
+        // The DASHBOARD is the app: it opens first, at launch and on reopen. ONE
+        // window — a `Window`, not a WindowGroup, whose openWindow(id:) added a
+        // window per ⌘1 / Overview / Dashboard click, all but one blank (they
+        // share one web view). SwiftUI lists it in the Window menu as Dashboard, ⌘1.
+        Window(model.t("Dashboard", "Дашборд"), id: WindowID.dashboard) {
             // The pages are dark by design (PassionCode tokens, `color-scheme: dark`):
             // the window's chrome matches them instead of framing them in light grey.
             DashboardView().environmentObject(model).environmentObject(web)
         }
         .defaultSize(width: 1320, height: 860)
+        .keyboardShortcut("1")
         .commands { AppCommands(model: model, web: web) }
 
         // The assistant is one window away, never in front of the dashboard.
@@ -98,10 +102,6 @@ struct AppCommands: Commands {
                 .disabled(model.dashboardWorking)
             Button(model.t("Open in Browser", "Открыть в браузере")) { if let u = web.currentURL { NSWorkspace.shared.open(u) } }
                 .disabled(web.currentURL == nil)
-        }
-        CommandGroup(before: .windowList) {
-            Button(model.t("Dashboard", "Дашборд")) { openWindow(id: WindowID.dashboard) }.keyboardShortcut("1")
-            Divider()
         }
     }
 }

@@ -425,11 +425,24 @@ enum DashboardMode: Equatable {
         await refreshDashboard()
         if connected { savedAt = Date() }
     }
-    /// The engine refuses a workspace path through a symbolic link (`/tmp` is one);
-    /// a typed path is resolved the way the folder picker resolves a chosen one.
-    static func resolved(_ path: String) -> String {
+    /// The engine refuses a workspace path through a symbolic link (`/tmp` is one),
+    /// so a typed or picked path is saved as its real path. `realpath(3)`, not
+    /// `URL.resolvingSymlinksInPath`: that one strips a leading `/private` again,
+    /// turning `/private/tmp/ws` back into the `/tmp/ws` the engine refuses. A
+    /// folder that does not exist yet resolves through its parent.
+    nonisolated static func resolved(_ path: String) -> String {
         let p = path.trimmingCharacters(in: .whitespaces)
         guard p.hasPrefix("/") else { return p }
-        return URL(fileURLWithPath: p).resolvingSymlinksInPath().path
+        func real(_ s: String) -> String? {
+            guard let r = realpath(s, nil) else { return nil }
+            defer { free(r) }
+            return String(cString: r)
+        }
+        if let r = real(p) { return r }
+        let url = URL(fileURLWithPath: p)
+        if let parent = real(url.deletingLastPathComponent().path) {
+            return (parent as NSString).appendingPathComponent(url.lastPathComponent)
+        }
+        return p
     }
 }

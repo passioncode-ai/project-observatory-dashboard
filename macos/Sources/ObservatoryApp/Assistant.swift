@@ -257,8 +257,11 @@ struct SettingsView: View {
             row(m.t("Workspace", "Папка данных"), m.t("the folder `full init` created", "папка, созданная `full init`"), text: $m.workspace, id: "workspace", directory: true)
             VStack(alignment: .leading, spacing: 6) {
                 label(m.t("Language", "Язык"))
+                // The group is named "Language"; each segment keeps its own word —
+                // a label on the Segmented itself renamed both buttons "Language".
                 Segmented(options: [("en", "English"), ("ru", "Русский")],
                           selection: Binding(get: { m.russian ? "ru" : "en" }, set: { m.russian = $0 == "ru" }))
+                    .accessibilityElement(children: .contain)
                     .accessibilityLabel(m.t("Language", "Язык"))
             }
             HStack(spacing: 10) {
@@ -305,7 +308,7 @@ struct SettingsView: View {
         let panel = NSOpenPanel(); panel.canChooseDirectories = directory; panel.canChooseFiles = !directory
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            if directory { m.workspace = url.resolvingSymlinksInPath().path } else { m.executable = url.path }
+            if directory { m.workspace = Model.resolved(url.path) } else { m.executable = url.path }
         }
     }
 }
