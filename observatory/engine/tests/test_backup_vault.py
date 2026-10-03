@@ -365,6 +365,28 @@ class Doctor(Base):
         self.assertTrue(report['encrypted'])
         self.assertNotIn(PASS, repr(report))
 
+    def test_a_root_inside_the_workspace_is_named_as_sharing_the_disk_with_its_key(self):
+        # With no ~/Documents (or off macOS) the root falls back to <home>/backups, and the
+        # encrypted copies then sit in the same tree as secrets/backup-passphrase.
+        vault.set_passphrase(self.home, PASS)
+        with patch.dict(os.environ, {'OBSERVATORY_BACKUPS': str(self.home / 'nested')}):
+            report = workspace.doctor(self.home)['backups']
+        self.assertTrue(report['inside_workspace'])
+        joined = ' '.join(report['warnings'])
+        self.assertIn('inside the workspace', joined)
+        self.assertIn('backup-passphrase', joined)
+        self.assertIn('configure storage backups', joined)
+        del os.environ['OBSERVATORY_BACKUPS']
+        with patch.object(vault, 'documents_dir', return_value=self.base / 'no-documents'):
+            report = vault.status(self.home)
+        self.assertEqual(report['root'], str(self.home / 'backups'))
+        self.assertIn('inside the workspace', ' '.join(report['warnings']))
+        # A root elsewhere carries no such warning.
+        with patch.dict(os.environ, {'OBSERVATORY_BACKUPS': str(self.root)}):
+            report = vault.status(self.home)
+        self.assertFalse(report['inside_workspace'])
+        self.assertEqual(report['warnings'], [])
+
 
 if __name__ == '__main__':
     unittest.main()

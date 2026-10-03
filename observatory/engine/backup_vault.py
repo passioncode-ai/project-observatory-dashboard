@@ -528,6 +528,17 @@ def status(base: Path) -> dict:
     if not configured:
         warnings.append("no backup passphrase: copies stay inside the workspace, unencrypted, on this "
                         "disk only; run `project-observatory full backup-passphrase set`")
+    if configured and info["inside_workspace"]:
+        # Encryption protects a copy that leaves this disk; a root inside the
+        # workspace never leaves it. The fallback root (<home>/backups, chosen when
+        # there is no ~/Documents or off macOS) is the usual way to get here, and
+        # it puts the copies in the same tree as the key that opens them.
+        beside = (f"beside the passphrase in {passphrase_file(base)}" if os.environ.get(PASS_ENV) is None
+                  else f"on the same disk as the workspace ({PASS_ENV} supplies the passphrase)")
+        warnings.append(f"the backups root {root} is inside the workspace, {beside}: a lost or stolen disk "
+                        "takes the copies and their key together. Point it at another disk or a synced "
+                        "folder: `project-observatory full configure storage backups /absolute/path` "
+                        f"(or {ROOT_ENV}); new copies go there, and the ones already here stay until moved by hand")
     legacy = local_snapshots(base, "snapshot") + local_snapshots(base, "before-upgrade")
     if configured and legacy:
         warnings.append(f"{len(legacy)} unencrypted snapshot(s) remain in {base / 'backups'}; "
@@ -536,6 +547,7 @@ def status(base: Path) -> dict:
     for kind, suffix in ((DB_KIND, DB_SUFFIX), ("snapshot", SNAPSHOT_SUFFIX), ("before-upgrade", SNAPSHOT_SUFFIX)):
         found = artifacts(root, kind, suffix)
         latest[kind] = {"count": len(found), "newest": found[-1].name if found else None}
-    return {"root": str(root), "root_source": info["source"], "encrypted": configured,
+    return {"root": str(root), "root_source": info["source"], "inside_workspace": info["inside_workspace"],
+            "encrypted": configured,
             "passphrase": "configured" if configured else "missing", "keep_per_kind": KEEP,
             "artifacts": latest, "local_unencrypted_snapshots": len(legacy), "warnings": warnings}

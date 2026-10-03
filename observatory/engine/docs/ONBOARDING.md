@@ -497,7 +497,11 @@ The root is chosen in this order: `OBSERVATORY_BACKUPS`, then
 `project-observatory full configure storage backups /absolute/path`, then the
 platform default — on macOS `~/Documents/Project Observatory/Backups` when
 `~/Documents` exists, which iCloud Desktop & Documents can sync off the machine;
-elsewhere, or with no `~/Documents`, `<home>/backups`.
+elsewhere, or with no `~/Documents`, `<home>/backups`. A root inside the
+workspace keeps the encrypted copies in the same tree as
+`secrets/backup-passphrase`, so one lost disk takes both: `backups status` and
+`doctor` warn about it (`inside_workspace: true`) until the root is pointed
+elsewhere.
 Each workspace writes into its own subfolder (`<home-name>-<instance>`), so two
 workspaces sharing one root never rotate each other's files. Three artifacts
 per kind are kept (`observatory-db-*.obsdb`, `snapshot-*.obsnap`,

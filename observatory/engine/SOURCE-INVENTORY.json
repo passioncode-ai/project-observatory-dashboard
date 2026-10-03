@@ -52,8 +52,8 @@
       "path": "backup_vault.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1a0afcf4a9bbba93b3842cbd58c3f56decba72a91848255545a7bf73acff9798",
-      "bytes": 22285
+      "export_sha256": "d53508b8ffe8cd86f613360577e046b9972ef5cfa3297a9d8aba1ee857a15221",
+      "bytes": 23347
     },
     {
       "path": "collectors/accounts.py",
@@ -701,8 +701,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "d2932a58fb5cf5b07f28ac9d034b4952a1460ab8231d4423cd3f007fc65e3639",
-      "bytes": 42867,
+      "export_sha256": "3e40159fc665ef59ba0c36a5031dbfdf6878faaab095469284c532ea2ed6fb1c",
+      "bytes": 43108,
       "upstream_modified": true
     },
     {
@@ -1741,8 +1741,8 @@
       "path": "tests/test_backup_vault.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4fa923bdddaf8b9dde3a4822595ebecf4fa027c5133ad8a208f1e6b622702c3c",
-      "bytes": 18019
+      "export_sha256": "b30434d0070cc65e0dd0659526204ce14f3cf991c2c646812f59969cde818893",
+      "bytes": 19347
     },
     {
       "path": "tests/test_blank_page.py",
