@@ -3,11 +3,12 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.13.0 — 2026-10-03
 
-Three audit-and-fix runs over 0.12.0 (2026-10-03); the findings, the checks and what is still
-open are in `docs/reports/2026-10-03-observatory-audit-run-{1,2,3}/README.md`. The release that
-ships this section also bumps the `observatory-log` plugin, whose hook and skill text changed.
+A minor release: three audit-and-fix runs over 0.12.0 (2026-10-03) — 173 defects found, 167 fixed (two
+of them in part), the rest open and named. The findings, the checks and what is still open are in
+`docs/reports/2026-10-03-observatory-audit-run-{1,2,3}/README.md`. The companion plugin
+`observatory-log` is 0.14.0: its hook and its `handling-secrets` skill text changed.
 
 ### Changed
 
