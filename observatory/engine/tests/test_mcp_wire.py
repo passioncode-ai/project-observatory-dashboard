@@ -502,8 +502,9 @@ async def run_workflow() -> None:
         async with ClientSession(read, write) as session:
             await session.discover()
             listed = {t.name for t in (await session.list_tools()).tools}
-            check("the five workflow tools are listed", {
+            check("the six workflow tools are listed", {
                 "observatory_checkpoint_write", "observatory_checkpoint_latest",
+                "observatory_workflow_list",
                 "observatory_handoff_create", "observatory_handoff_accept",
                 "observatory_handoff_get"} <= listed, str(sorted(listed)))
             a = payload(await session.call_tool("observatory_checkpoint_write", {
@@ -557,6 +558,12 @@ async def run_workflow() -> None:
                   doc.get("lease", {}).get("executor", {}).get("accountRef") == "acct-b"
                   and "wl_" not in json.dumps(doc) and doc.get("degraded") == [],
                   json.dumps(doc)[:200])
+            found = payload(await session.call_tool("observatory_workflow_list",
+                                                     {"projectId": "project:alpha-web"}))
+            check("the workflow is found again without its id, and no token is listed",
+                  [w["workflowId"] for w in found.get("workflows", [])] == [wid]
+                  and found["workflows"][0]["keptSteps"] == 1 and "wl_" not in json.dumps(found)
+                  and found.get("degraded") == [], json.dumps(found)[:200])
             got = payload(await session.call_tool("observatory_handoff_get",
                                                   {"handoffId": h.get("handoffId")}))
             check("the pack reads back as accepted", got.get("status") == "accepted",

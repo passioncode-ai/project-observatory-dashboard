@@ -810,6 +810,167 @@ class Credentials(WorkflowCase):
         self.assertIn("[redacted:vault:alpha-web/prod/STRIPE_KEY]", stored["notes"])
 
 
+class Recovery(WorkflowCase):
+    """W2: agents find their work again; the operator can see, move and close it."""
+
+    def test_list_finds_a_workflow_without_its_id(self) -> None:
+        a = self.start(idempotency_key="key-list-a")
+        b = self.start(idempotency_key="key-list-b", project_id="project:beta-api")
+        self.handoff(b, key="key-list-handoff")
+        with self.assertRaises(W.LeaseLost):
+            self.write(a, None, "key-list-lost")
+        out = W.workflow_list(self.conn)
+        self.assertEqual(out["total"], 2)
+        rows = {w["workflowId"]: w for w in out["workflows"]}
+        self.assertEqual(rows[a["workflowId"]]["keptSteps"], 1)
+        self.assertIsNotNone(rows[b["workflowId"]]["pendingHandoff"])
+        self.assertEqual(rows[a["workflowId"]]["step"]["stepId"], "S1")
+        self.assertNotIn("wl_", json.dumps(out), "a listing never carries a lease token")
+        only_b = W.workflow_list(self.conn, project_id="project:beta-api")
+        self.assertEqual([w["workflowId"] for w in only_b["workflows"]], [b["workflowId"]])
+        page = W.workflow_list(self.conn, limit=1)
+        self.assertEqual(page["count"], 1)
+        rest = W.workflow_list(self.conn, limit=1, cursor=page["nextCursor"])
+        self.assertEqual(len({page["workflows"][0]["workflowId"],
+                              rest["workflows"][0]["workflowId"]}), 2)
+        self.assertNotIn("nextCursor", rest)
+        with self.assertRaises(W.InvalidInput):
+            W.workflow_list(self.conn, cursor="' OR 1=1 --")
+
+    def test_a_session_that_lost_its_token_takes_its_workflow_back(self) -> None:
+        wf = self.start()
+        # The token is gone (a compaction); the session waits out the silence,
+        # hands the workflow to itself and continues.
+        h = self.handoff(wf, owner=AGENT_A, reason="restart")
+        got = self.accept(h["handoffId"], owner=AGENT_A)
+        nxt = self.write(wf, got["leaseId"], "key-restart-next")
+        self.assertEqual(nxt["revision"], 2)
+
+    def test_the_operator_closes_an_abandoned_workflow(self) -> None:
+        wf = self.start()
+        self.handoff(wf)
+        with self.assertRaises(L.OwnerRefused):
+            W.close_workflow(self.conn, workflow_id=wf["workflowId"], by=AGENT_A, why="x",
+                             idempotency_key="key-close-agent")
+        with self.assertRaises(W.InvalidInput):
+            W.close_workflow(self.conn, workflow_id=wf["workflowId"], by="operator", why=" ",
+                             idempotency_key="key-close-blank")
+        out = W.close_workflow(self.conn, workflow_id=wf["workflowId"], by="operator",
+                               why="abandoned: the branch was merged by hand",
+                               idempotency_key="key-close-op")
+        self.assertEqual(out["leasesEnded"], 2, "the active lease and the pending offer")
+        last = L.current(self.conn, f"ckpt:{wf['workflowId']}")
+        self.assertEqual((last["owner"], last["revision"]), ("operator", 2))
+        self.assertIn("abandoned", last["why"])
+        with self.assertRaises(W.WorkflowClosed):
+            self.write(wf, wf["leaseId"], "key-close-after")
+        # the operator's last word is never erased by age
+        self.conn.execute("UPDATE workflows SET closed_at = '2000-01-01T00:00:00Z'")
+        self.conn.commit()
+        got = W.retention_candidates(self.conn, closed_checkpoint_days=30, handoff_days=90,
+                                     cutoff=lambda d: "2001-01-01T00:00:00Z")
+        self.assertNotIn(f"ckpt:{wf['workflowId']}", [c["memory_id"] for c in got])
+
+    def test_only_a_forced_handoff_may_be_the_operators(self) -> None:
+        wf = self.start()
+        with self.assertRaises(L.OwnerRefused):
+            self.handoff(wf, owner="operator", silent=False)
+        h = self.handoff(wf, owner="operator", silent=False, force=True, reason="operator")
+        self.assertEqual(W.handoff_get(self.conn, h["handoffId"])["pack"]["authority"],
+                         "operator-force")
+
+    def test_the_review_queue_names_a_kept_step_and_its_workflow(self) -> None:
+        sys.path.insert(0, str(ROOT / "tools"))
+        import review
+        wf = self.start()
+        with self.assertRaises(W.LeaseLost) as caught:
+            self.write(wf, None, "key-review-lost")
+        row = L.current(self.conn, caught.exception.kept_as)
+        self.assertEqual(review._kept_after_lost_lease(row), wf["workflowId"])
+        note = L.append(self.conn, owner=AGENT_A, statement="a note", confidence=0.5)
+        self.assertIsNone(review._kept_after_lost_lease(L.current(self.conn, note["memoryId"])))
+
+
+class OperatorCommand(unittest.TestCase):
+    """`project-observatory full workflow`, driven through its own entry point."""
+
+    def setUp(self) -> None:
+        self.dir = tempfile.TemporaryDirectory(prefix="observatory-wf-cli-")
+        self.before = os.environ.get("OBSERVATORY_DB")
+        os.environ["OBSERVATORY_DB"] = str(pathlib.Path(self.dir.name) / "store.db")
+        import importlib
+        import paths
+        importlib.reload(paths)
+        from store import db as sdb
+        importlib.reload(sdb)
+        sys.path.insert(0, str(ROOT / "tools"))
+        import workflow_cli
+        self.cli = importlib.reload(workflow_cli)
+        conn = sdb.connect()
+        self.wf = W.checkpoint_write(conn, owner=AGENT_A, idempotency_key="key-cli-start",
+                                     step_id="S1", status="done", body=body(),
+                                     project_id="project:alpha-web", redactor=redactor())
+        conn.close()
+
+    def tearDown(self) -> None:
+        if self.before is None:
+            os.environ.pop("OBSERVATORY_DB", None)
+        else:
+            os.environ["OBSERVATORY_DB"] = self.before
+        import importlib
+        import paths
+        importlib.reload(paths)
+        self.dir.cleanup()
+
+    def run_cli(self, *argv: str, terminal: bool = False) -> tuple[int, str, str]:
+        import contextlib
+        import io
+        out, err = io.StringIO(), io.StringIO()
+        self.cli._is_terminal = lambda: terminal
+        code = 0
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = self.cli.main(list(argv))
+            except SystemExit as exc:
+                code = exc.code if isinstance(exc.code, int) else 1
+                err.write(str(exc.code))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_list_and_show_read_without_the_token(self) -> None:
+        code, out, _ = self.run_cli("list")
+        self.assertEqual(code, 0)
+        self.assertIn(self.wf["workflowId"], out)
+        self.assertIn("ship the export", out)
+        code, out, _ = self.run_cli("show", self.wf["workflowId"])
+        self.assertIn("constraint: read-only: do not push", out)
+        self.assertNotIn("wl_", out)
+        code, out, _ = self.run_cli("list", "--json")
+        self.assertEqual(json.loads(out)["total"], 1)
+
+    def test_close_and_force_need_a_terminal(self) -> None:
+        code, _, err = self.run_cli("close", self.wf["workflowId"], "--why", "abandoned")
+        self.assertNotEqual(code, 0)
+        self.assertIn("without a terminal", err)
+        code, _, err = self.run_cli("handoff", self.wf["workflowId"], "--to-provider",
+                                    "anthropic", "--reason", "operator", "--force")
+        self.assertIn("without a terminal", err)
+        code, out, _ = self.run_cli("handoff", self.wf["workflowId"], "--to-provider",
+                                    "anthropic", "--reason", "operator", "--force",
+                                    terminal=True)
+        self.assertEqual(code, 0, out)
+        self.assertIn("handoff handoff:", out)
+        code, out, _ = self.run_cli("close", self.wf["workflowId"], "--why", "abandoned",
+                                    terminal=True)
+        self.assertEqual(code, 0)
+        self.assertIn("lease(s) ended", out)
+
+    def test_a_handoff_without_force_follows_the_agents_rule(self) -> None:
+        code, _, err = self.run_cli("handoff", self.wf["workflowId"], "--to-provider",
+                                    "anthropic", "--reason", "limit")
+        self.assertEqual(code, 1)
+        self.assertIn("HandoffRefused", err)
+
+
 class Migration(unittest.TestCase):
     def test_a_pre_workflow_store_gains_the_shape_and_keeps_its_rows(self) -> None:
         with tempfile.TemporaryDirectory(prefix="observatory-wf-mig-") as d:

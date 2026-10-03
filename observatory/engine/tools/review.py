@@ -99,7 +99,30 @@ def cmd_list(conn, args) -> int:
         print(f"{r['memory_id']}  r{r['revision']:<3} {r['state']:<9} {conf}  "
               f"{r['owner']:<20} {r['kind']:<11} {(r['project_id'] or '')[:28]:<28} "
               f"{(r['statement'] or '')[:60]}")
+        kept = _kept_after_lost_lease(r)
+        if kept:
+            # A STEP KEPT AFTER A LOST LEASE is not a conclusion to promote: it
+            # is a session's work on a workflow another executor had taken. It
+            # says which workflow, so the decision is whether that work still
+            # matters there — `workflow show` answers that.
+            print(f"    kept after a lost lease — workflow {kept}: "
+                  f"`project-observatory full workflow show {kept}`")
     return 0
+
+
+def _kept_after_lost_lease(row) -> str | None:
+    """The workflow a step was written for, when it was kept because the session
+    no longer held the workflow's lease; otherwise None."""
+    keys = row.keys()
+    if row["kind"] != "step_result" or "workflow_id" not in keys or not row["workflow_id"]:
+        return None
+    try:
+        prov = json.loads(row["provenance_json"] or "[]")
+    except ValueError:
+        return None
+    if any(isinstance(x, dict) and x.get("source") == "lease-lost" for x in prov):
+        return row["workflow_id"]
+    return None
 
 
 def report_proposals(conn) -> int:

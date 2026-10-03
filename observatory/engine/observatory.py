@@ -25,6 +25,7 @@
     export-ledger  write registry/ledger.jsonl — the only copy outside the store
     ledger-current  non-zero if that export is behind the store
     review     the operator's queue; writes need a terminal (tools/review.py --help)
+    workflow   agent workflows: list, show, handoff, close (tools/workflow_cli.py --help)
     scan-events  read commits out of every local checkout into the store
     probes     run the declared Fabric probes against the live MCP server
     test       planted trap fixtures
@@ -479,6 +480,7 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   cleanup [--apply [--include manual]]  plan, or remove what loses nothing; manual tier archives first
   tick                         configured cycle; scheduler must be explicitly enabled
   assistant ACTION             the app's JSON protocol (observatory-assistant/1) on stdin/stdout
+  workflow list|show|handoff|close   agent workflows; handoff --force and close need a terminal
   scan-mcp                     the MCP servers your agent configs declare (integration mcp)
 
 `project-observatory full-path` (outside `full`) prints the engine directory, where the
@@ -686,6 +688,10 @@ def refusal(argv: list[str]) -> str:
     if name == "assistant":
         from agent import assistant
         return argparse_refusal(lambda: assistant.parser().parse_args(rest))
+    if name == "workflow":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import workflow_cli
+        return argparse_refusal(lambda: workflow_cli.parser().parse_args(rest))
     if name in WORKSPACE_COMMANDS:
         import workspace
         return argparse_refusal(lambda: workspace.parse(argv))
@@ -1038,6 +1044,10 @@ def main(argv: list[str]) -> int:
     if len(argv) > 1 and argv[1] == "assistant":
         from agent import assistant
         return assistant.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "workflow":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import workflow_cli
+        return workflow_cli.main(argv[2:])
     if len(argv) > 1 and argv[1] in WORKSPACE_COMMANDS:
         import workspace
         return workspace.main(argv[1:])

@@ -598,6 +598,81 @@ def _credential_view(ckpt: sqlite3.Row | None, reader) -> dict:
             "degraded": degraded}
 
 
+LIST_CURSOR = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\|wf_[0-9a-f]{16}")
+
+
+def workflow_list(conn: sqlite3.Connection, *, project_id: str | None = None,
+                  status: str = "open", limit: int = 20, cursor: str | None = None) -> dict:
+    """Workflows, newest first, each with where it stands — the way an agent
+    finds its workflow again after a compaction lost the id, and the rows the
+    Agents view and the operator's `full workflow list` show.
+
+    Per row: the latest step and its status, the goal, the executor holding it
+    (never the token), a pending handoff, how long since the last checkpoint,
+    and how many steps were kept after a lost lease. `total` counts the whole
+    scope; `nextCursor` continues it."""
+    if status not in ("open", "closed", "all"):
+        raise InvalidInput("status must be open, closed or all")
+    if project_id is not None:
+        _require(PROJECT_ID, project_id, "projectId")
+    if not isinstance(limit, int) or not 1 <= limit <= 200:
+        raise InvalidInput("limit must be 1..200")
+    if cursor is not None and not LIST_CURSOR.fullmatch(cursor):
+        raise InvalidInput("cursor is not one a previous answer handed out")
+    where, args = [], []
+    if status != "all":
+        where.append("w.status = ?")
+        args.append(status)
+    if project_id is not None:
+        where.append("w.project_id = ?")
+        args.append(project_id)
+    scope = (" WHERE " + " AND ".join(where)) if where else ""
+    total = conn.execute(f"SELECT count(*) FROM workflows w{scope}", args).fetchone()[0]
+    page_where = list(where)
+    page_args = list(args)
+    if cursor:
+        at, wid = cursor.split("|", 1)
+        page_where.append("(w.created_at, w.workflow_id) < (?, ?)")
+        page_args += [at, wid]
+    page_scope = (" WHERE " + " AND ".join(page_where)) if page_where else ""
+    rows = conn.execute(f"SELECT w.* FROM workflows w{page_scope}"
+                        " ORDER BY w.created_at DESC, w.workflow_id DESC LIMIT ?",
+                        (*page_args, limit + 1)).fetchall()
+    more, rows = len(rows) > limit, rows[:limit]
+    now = _now()
+    out = []
+    for w in rows:
+        wid = w["workflow_id"]
+        ckpt = _latest_checkpoint(conn, wid)
+        body = json.loads(ckpt["body_json"] or "{}") if ckpt else {}
+        offer = _offer(conn, wid)
+        live_offer = offer is not None and _parse(offer["expires_at"]) > now
+        kept = conn.execute("SELECT count(*) FROM ledger l LEFT JOIN tombstones t"
+                            " ON t.memory_id = l.memory_id WHERE l.workflow_id = ?"
+                            " AND l.kind = 'step_result' AND l.state = 'proposed'"
+                            " AND t.memory_id IS NULL", (wid,)).fetchone()[0]
+        handoffs = conn.execute("SELECT count(*) FROM workflow_leases WHERE workflow_id = ?"
+                                " AND handoff_id IS NOT NULL AND accepted_at IS NOT NULL",
+                                (wid,)).fetchone()[0]
+        out.append({
+            "workflowId": wid, "projectId": w["project_id"], "status": w["status"],
+            "createdAt": w["created_at"], "closedAt": w["closed_at"],
+            "goal": (body.get("goal") or "")[:200],
+            "step": None if ckpt is None else {
+                "stepId": ckpt["step_id"], "status": _status_of(ckpt),
+                "revision": ckpt["revision"], "at": ckpt["created_at"]},
+            "silentSeconds": None if ckpt is None else
+            int((now - _parse(ckpt["created_at"])).total_seconds()),
+            "lease": _lease_view(_active(conn, wid)),
+            "pendingHandoff": _lease_view(offer) if live_offer else None,
+            "handoffs": handoffs, "keptSteps": kept})
+    answer = {"status": status, "projectId": project_id, "count": len(out), "total": total,
+              "workflows": out}
+    if more and out:
+        answer["nextCursor"] = f"{rows[-1]['created_at']}|{rows[-1]['workflow_id']}"
+    return answer
+
+
 def handoff_get(conn: sqlite3.Connection, handoff_id: str) -> dict:
     """A handoff pack and whether it was accepted. Reads only."""
     _require(HANDOFF_ID, handoff_id, "handoffId")
@@ -826,8 +901,10 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
     """
     if not owner or not owner.strip():
         raise L.OwnerRequired("a handoff must name who created it")
-    if owner == L.OPERATOR:
-        raise L.OwnerRefused("a handoff is created as `agent:` or `service:` over this path")
+    if owner == L.OPERATOR and not force:
+        raise L.OwnerRefused("the operator moves a workflow with the forced handoff from a "
+                             "terminal; over this path a handoff is created as `agent:` or "
+                             "`service:`")
     _require(WORKFLOW_ID, workflow_id, "workflowId")
     if reason not in REASONS:
         raise InvalidInput(f"reason must be one of {', '.join(REASONS)}")
@@ -1228,7 +1305,8 @@ def related_records(conn: sqlite3.Connection, *, body: dict, project_id: str | N
 # ──────────────────────────────── retention ────────────────────────────────
 
 def retention_candidates(conn: sqlite3.Connection, *, closed_checkpoint_days: int,
-                         handoff_days: int, cutoff: Callable[[int], str]) -> list[dict]:
+                         handoff_days: int, cutoff: Callable[[int], str],
+                         exempt_owners: tuple[str, ...] = ("operator",)) -> list[dict]:
     """Workflow records past their horizon.
 
     A checkpoint is kept while its workflow is open, whatever its age — the
@@ -1244,8 +1322,11 @@ def retention_candidates(conn: sqlite3.Connection, *, closed_checkpoint_days: in
         " JOIN workflows w ON w.workflow_id = l.workflow_id"
         " LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
         " WHERE t.memory_id IS NULL AND l.kind = 'checkpoint'"
-        "   AND w.status = 'closed' AND w.closed_at < ?",
-        (cutoff(closed_checkpoint_days),)).fetchall()
+        "   AND w.status = 'closed' AND w.closed_at < ?"
+        # The operator's rows are never erased by age, here as in every other
+        # retention query: a workflow the operator closed keeps its last word.
+        f"   AND l.owner NOT IN ({','.join('?' * len(exempt_owners))})",
+        (cutoff(closed_checkpoint_days), *exempt_owners)).fetchall()
     out = [dict(r, horizon_days=closed_checkpoint_days,
                 reason=f"checkpoint of a workflow closed more than {closed_checkpoint_days} days ago")
            for r in rows]
@@ -1253,11 +1334,66 @@ def retention_candidates(conn: sqlite3.Connection, *, closed_checkpoint_days: in
         "SELECT l.memory_id, l.revision, l.state, l.owner, l.created_at, l.kind,"
         "       substr(l.statement, 1, 70) AS gist"
         " FROM ledger l LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
-        " WHERE t.memory_id IS NULL AND l.kind = 'handoff' AND l.created_at < ?",
-        (cutoff(handoff_days),)).fetchall()
+        " WHERE t.memory_id IS NULL AND l.kind = 'handoff' AND l.created_at < ?"
+        f"   AND l.owner NOT IN ({','.join('?' * len(exempt_owners))})",
+        (cutoff(handoff_days), *exempt_owners)).fetchall()
     out += [dict(r, horizon_days=handoff_days,
                  reason=f"handoff older than {handoff_days} days") for r in rows]
     return out
+
+
+def close_workflow(conn: sqlite3.Connection, *, workflow_id: str, by: str, why: str,
+                   idempotency_key: str) -> dict:
+    """The operator closes a workflow nobody will continue, without its lease.
+
+    Otherwise an abandoned workflow stays open for ever, and an open workflow's
+    checkpoint is kept whatever its age. This is the operator's act — the CLI
+    asks for a terminal before calling it — and it leaves a trace in the
+    ledger: a final revision of the checkpoint, written by the operator, saying
+    why. Every lease and pending offer ends with it."""
+    if by != L.OPERATOR:
+        raise L.OwnerRefused("closing a workflow without its lease is the operator's act; an "
+                             "executor closes its own with a final checkpoint (`close`)")
+    _require(WORKFLOW_ID, workflow_id, "workflowId")
+    reason = _string(why, "why", 500, required=True)
+    if memory_redact.credential_kind(reason):
+        raise InvalidInput("why looks like it carries a credential; say what happened, "
+                           "not a value")
+
+    def work() -> dict:
+        now = _now()
+        wf = _workflow(conn, workflow_id)
+        if wf["status"] != "open":
+            raise WorkflowClosed(f"{workflow_id} was already closed at {wf['closed_at']}")
+        prior = _latest_checkpoint(conn, workflow_id)
+        revision = None
+        if prior is not None:
+            mid = _checkpoint_id(workflow_id)
+            revision = prior["revision"] + 1
+            L.insert_revision(conn, dict(
+                memory_id=mid, revision=revision, kind="checkpoint",
+                project_id=prior["project_id"], agent_id=prior["agent_id"], run_id=None,
+                session_id=None, function="working", scope="run",
+                statement=f"{prior['statement']} — closed by the operator: {reason}"[:L.MAX_TEXT],
+                why=reason, state="observed", confidence=None, owner=L.OPERATOR,
+                classification=prior["classification"], valid_from=None, valid_to=None,
+                supersedes=[f"{mid}@{prior['revision']}"], conflicts_with=[],
+                provenance=[{"source": "checkpoint", "status": _status_of(prior),
+                             "closedBy": L.OPERATOR}],
+                evidence=[], created_at=_iso(now), workflow_id=workflow_id,
+                step_id=prior["step_id"],
+                executor=json.loads(prior["executor_json"]) if prior["executor_json"] else None,
+                body=json.loads(prior["body_json"] or "{}")))
+        conn.execute("UPDATE workflows SET status = 'closed', closed_at = ?, closed_by = ?"
+                     " WHERE workflow_id = ?", (_iso(now), L.OPERATOR, workflow_id))
+        ended = conn.execute("UPDATE workflow_leases SET state = 'ended', ended_at = ?,"
+                             " ended_reason = 'closed' WHERE workflow_id = ? AND state IN"
+                             " ('active','offered')", (_iso(now), workflow_id)).rowcount
+        return {"workflowId": workflow_id, "closed": True, "closedAt": _iso(now),
+                "checkpointRevision": revision, "leasesEnded": ended}
+
+    return _atomic(conn, by, "workflow.close", idempotency_key,
+                   {"workflowId": workflow_id, "why": reason}, work)
 
 
 def prune_leases(conn: sqlite3.Connection, *, cutoff_iso: str) -> int:

@@ -143,6 +143,26 @@ what it lost. A full commit id in `head`, `ref`, `evidence` or `memory_refs` is 
 characters before redaction (40 hexadecimal characters is also the shape of many keys), and a
 `session:<uuid>` reference is kept whole.
 
+## What the operator does
+
+`project-observatory full workflow` (`tools/workflow_cli.py`):
+
+| Command | What it does |
+|---|---|
+| `list [--project ID] [--status open\|closed\|all] [--json]` | the workflows, as `observatory_workflow_list` |
+| `show WORKFLOW_ID [--json]` | one workflow: goal, step, constraints, open steps, executor, handoffs, keys |
+| `handoff WORKFLOW_ID --to-provider P --reason R` | a handoff under the agents' rule (silence) |
+| `handoff … --force` | the operator takes the workflow, for any reason; recorded as `operator-force`. Needs a terminal |
+| `close WORKFLOW_ID --why WHY` | closes a workflow nobody will continue: a final checkpoint revision by the operator says why, every lease and offer ends. Needs a terminal |
+
+The two acts that need a terminal carry the operator's authority, which a script must not be
+able to mint — the same rule `tools/review.py` keeps. A workflow the operator closed keeps its
+last checkpoint past the 30-day horizon, as every operator-owned record does.
+
+The review queue (`project-observatory full review`) names a step kept after a lost lease as
+such, with its workflow and the `workflow show` command: the decision is whether that work still
+matters to the workflow, not whether a conclusion is true.
+
 ## What the operator sees
 
 The dashboard's Health panel counts the open workflows and the handoffs waiting for a session
@@ -171,6 +191,7 @@ workflow's checkpoint is never erased because the work took long. A workspace wh
 |---|---|---|
 | `observatory_checkpoint_write` | yes | starts a workflow without `workflowId`; `close: true` ends it |
 | `observatory_checkpoint_latest` | no | carries `degraded` |
+| `observatory_workflow_list` | no | workflows newest first, with step, goal, executor, pending handoff, seconds since the last checkpoint and kept steps; how an agent finds its workflow again after a compaction lost the id |
 | `observatory_handoff_create` | yes | reads git and the local index; spends nothing |
 | `observatory_handoff_accept` | yes | returns the new `leaseId`, the constraints, the current checkpoint and the pack |
 | `observatory_handoff_get` | no | status: `offered`, `accepted`, `expired`, `superseded`, `workflow-closed` |

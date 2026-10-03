@@ -67,6 +67,8 @@ SAMPLES = {
     "{p['id']}": "alpha-plugin", "{release.version}": "0.12.0",
     "{doc['engine_version']}": "0.12.0", "{source}": "projects", "{section}": "integrations",
     "{name}": "github", "{k}": "daily_ceiling",
+    "WORKFLOW_ID": "wf_0123456789abcdef", "{kept}": "wf_0123456789abcdef",
+    "PROVIDER": "anthropic", "REASON": "limit", "WHY": "abandoned",
     'shellArg(RUNTIME.user_home || "$HOME")': "/srv/example-ws/home",
 }
 PLACEHOLDER = re.compile(r"[A-Z][A-Z0-9_./,]*[A-Z]|[A-Z]{2,}")

@@ -97,8 +97,8 @@ server = InteropServer(
         "refusal is a typed answer with `error`; isError means malformed input, an unknown "
         "tool or an answer outside its published schema.\n"
         "WORKFLOW: `observatory_checkpoint_write` after each step (keep `leaseId`); "
-        "`observatory_handoff_create`/`_accept` move it to a new session or model; "
-        "`observatory_checkpoint_latest` reads.\n"
+        "`observatory_handoff_create`/`_accept` move it to a new session/model; "
+        "`observatory_workflow_list` finds it again.\n"
         "START with `observatory_overview`: counts, tiers, recent projects, the worst "
         "findings, disk — a few KB.\n"
         "READ, paged with `limit` and `cursor` → `nextCursor`, totals covering the whole "
@@ -1075,6 +1075,23 @@ def observatory_handoff_accept(
     return _workflow_call(lambda c: W.handoff_accept(
         c, owner=owner, idempotency_key=idempotencyKey, handoff_id=handoffId,
         executor=executor, session_id=sessionId))
+
+
+@server.tool()
+def observatory_workflow_list(
+    projectId: Annotated[str | None, Field(description="Only this 'project:<slug>'.")] = None,
+    status: Annotated[Literal["open", "closed", "all"], Field()] = "open",
+    limit: Annotated[int, Field(ge=1, le=200)] = 20,
+    cursor: Annotated[str | None, Field(description="A previous answer's `nextCursor`.")] = None,
+) -> dict[str, Any]:
+    """Workflows, newest first: latest step, goal, executor, pending handoff, seconds since
+    the last checkpoint, kept steps. Find your workflow again after a compaction lost its
+    id; then read it with `observatory_checkpoint_latest`. Never returns a lease token."""
+    from store import workflow as W
+    out = _workflow_call(lambda c: W.workflow_list(c, project_id=projectId, status=status,
+                                                   limit=limit, cursor=cursor))
+    out.setdefault("degraded", [])
+    return out
 
 
 @server.tool()

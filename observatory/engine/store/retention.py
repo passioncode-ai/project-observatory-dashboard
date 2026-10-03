@@ -162,7 +162,8 @@ def workflow_candidates(conn: sqlite3.Connection) -> list[dict]:
     cfg = config()["ledger"]
     return workflow.retention_candidates(
         conn, closed_checkpoint_days=int(cfg.get("checkpoint_closed_days", 30)),
-        handoff_days=int(cfg.get("handoff_days", 90)), cutoff=cutoff)
+        handoff_days=int(cfg.get("handoff_days", 90)), cutoff=cutoff,
+        exempt_owners=exempt_owners() or ("operator",))
 
 
 def volatile_counts(conn: sqlite3.Connection) -> dict:
