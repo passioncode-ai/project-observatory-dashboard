@@ -1911,9 +1911,13 @@ const tileHTML = ts => ts.map(([k, v]) =>
   const top = S.busiest_28d;
   // The busiest project is a NAME, so it is a link to that project rather
   // than a number in a tile.
+  // The store keys work by project id; the tile prints the project's NAME,
+  // as every other surface does (`local-alpha-web` read as a different thing
+  // from the row called alpha-web).
+  const topRow = top && (D.rows || []).find(r => r.id === "project:" + top);
   if (host) host.innerHTML = TILES_WORK.length
     ? tileHTML(TILES_WORK) + (top
-        ? `<a class="tile name" href="projects.html#project:${E(top)}"><b>${E(top)}</b>` +
+        ? `<a class="tile name" href="projects.html#project:${E(top)}"><b>${E(topRow && topRow.name || top)}</b>` +
           `<span>${T("most work, 28 d")}</span></a>` : "")
     : `<div class="tile"><b>—</b><span>${T("no store: activity not measured")}</span></div>`;
 }
