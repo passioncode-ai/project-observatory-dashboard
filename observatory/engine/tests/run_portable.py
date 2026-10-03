@@ -109,7 +109,7 @@ SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
            'dashboard_fixture.py', 'emitter_fixture.py', 'session_fixture.py', 'surface_fixture.py',
-           'env_tab_check.js', 'action_outcome_check.mjs',
+           'env_tab_check.js', 'action_outcome_check.mjs', 'focus_check.js',
            'own_project.py', 'tick_reader.py', 'validator_fixture.py', 'check_service.py', 'fabric_interop.py', 'mcp_config_fixture.py',
     # Merged from the parallel port streams.
     'concurrency.py', 'merge_fixture.py', 'probe_fixture.py',
