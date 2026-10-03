@@ -194,7 +194,29 @@ def insert_revision(conn: sqlite3.Connection, row: dict) -> int:
     cur = conn.execute(
         "INSERT INTO outbox (memory_id, revision, projection_version) VALUES (?,?,?)",
         (row["memory_id"], row["revision"], store_db.PROJECTION_VERSION))
+    _index_lexically(conn, row)
     return cur.lastrowid
+
+
+def _index_lexically(conn: sqlite3.Connection, row: dict) -> None:
+    """The record enters the lexical index IN THIS TRANSACTION.
+
+    It waited for the indexer's pass, up to a tick, so a checkpoint written a
+    second ago was not found by a search and a handoff read memory that lagged
+    the work. FTS5 lives in this same SQLite file, so the revision and its
+    lexical entry commit together; the indexer still consumes the outbox for the
+    vector index and rewrites the lexical row idempotently. A store built without
+    the lexical index (a hand-made fixture) is left as it is."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(search_notes)")]
+    if "stems" not in cols:
+        return
+    import textkeys
+    conn.execute("DELETE FROM search_notes WHERE memory_id = ? AND revision <= ?",
+                 (row["memory_id"], row["revision"]))
+    conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why, stems)"
+                 " VALUES (?,?,?,?,?)",
+                 (row["memory_id"], row["revision"], row["statement"], row["why"] or "",
+                  textkeys.stems_of(row["statement"], row["why"])))
 
 
 def _carried(prior: sqlite3.Row | None) -> dict:
@@ -482,6 +504,13 @@ def tombstone(conn: sqlite3.Connection, memory_id: str, *, reason: str,
             "INSERT OR REPLACE INTO tombstones (memory_id, revision, reason, approved_by,"
             " created_at) VALUES (?,?,?,?,?)",
             [(memory_id, rev, reason, approved_by, now) for rev in revisions])
+        # THE LEXICAL ROWS GO WITH THE TOMBSTONE. A record enters the lexical
+        # index in the transaction that writes it (`_index_lexically`), so it
+        # leaves in the one that erases it: waiting for retention's purge would
+        # keep an erased statement searchable in the file. The vector index needs
+        # its extension loaded and is still purged by retention, with receipts.
+        if "stems" in [r[1] for r in conn.execute("PRAGMA table_info(search_notes)")]:
+            conn.execute("DELETE FROM search_notes WHERE memory_id = ?", (memory_id,))
     return {"memoryId": memory_id, "revision": row["revision"],
             "revisions": revisions, "reason": reason, "approvedBy": approved_by,
             "note": "every revision tombstoned; ledger rows retained; purge the "

@@ -92,11 +92,14 @@ def _score(ranks: list[int | None]) -> dict:
             "mrr": round(sum(1 / r for r in ranks if r) / n, 3) if n else None}
 
 
-def run(corpus_path: pathlib.Path = CORPUS) -> dict:
+def run(corpus_path: pathlib.Path = CORPUS, coverage: float | None = None) -> dict:
+    """`coverage` overrides the search's coverage floor for a calibration sweep."""
     corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
     with tempfile.TemporaryDirectory(prefix="observatory-memory-eval-") as d:
         db = pathlib.Path(d) / "store.db"
         sdb, survey, indexer, L, W, retention, memory_redact = _modules(db)
+        if coverage is not None:
+            survey.COVERAGE = coverage
         quiet = memory_redact.Redactor(known_loader=lambda: {})
         conn = sdb.connect(db)
         refs = {}
@@ -108,8 +111,17 @@ def run(corpus_path: pathlib.Path = CORPUS) -> dict:
         ranks = _ranks(survey, corpus["questions"], refs)
         by_lang = {lang: _score([r for r, q in zip(ranks, corpus["questions"]) if q["lang"] == lang])
                    for lang in ("en", "ru")}
-        empty = [len(survey.search(q["question"], limit=5)["results"]) == 0
-                 for q in corpus["unanswerable"]]
+        def abstained(q: str) -> bool:
+            r = survey.search(q, limit=5)
+            return bool(r.get("abstain")) or not r["results"]
+        empty = [abstained(q["question"]) for q in corpus["unanswerable"]]
+        wrongly_abstained = [q["expect"] for q in corpus["questions"]
+                             if abstained(q["question"])]
+
+        # --- the held-out hard split: paraphrases and near-miss questions ------
+        hard = corpus.get("hard") or {}
+        hard_ranks = _ranks(survey, hard.get("paraphrases", []), refs)
+        hard_abstained = [abstained(q["question"]) for q in hard.get("adversarial_unanswerable", [])]
 
         # --- handoff: ten workflows, interrupted mid-step --------------------
         def past(s):
@@ -194,7 +206,13 @@ def run(corpus_path: pathlib.Path = CORPUS) -> dict:
         "retrieval": {**_score(ranks), "byLanguage": by_lang,
                       "missed": [q["expect"] for r, q in zip(ranks, corpus["questions"]) if r is None]},
         "abstention": {"n": len(empty), "emptyAnswers": sum(empty),
-                       "rate": round(sum(empty) / len(empty), 3)},
+                       "rate": round(sum(empty) / len(empty), 3),
+                       "answerableRefused": wrongly_abstained},
+        "hard": {"paraphrases": {**_score(hard_ranks),
+                                 "missed": [q["expect"] for r, q in zip(hard_ranks, hard.get("paraphrases", []))
+                                            if r is None]},
+                 "adversarialAbstention": {"n": len(hard_abstained),
+                                           "emptyAnswers": sum(hard_abstained)}},
         "handoff": {"n": len(handoffs), "passed": handoff_pass,
                     "failedChecks": sorted({k for c in handoffs for k, v in c.items() if not v})},
         "injection": injection,
@@ -216,6 +234,10 @@ def main(argv: list[str]) -> int:
           f"(en {r['byLanguage']['en']['recall@5']}, ru {r['byLanguage']['ru']['recall@5']})")
     print(f"abstention  {out['abstention']['emptyAnswers']} of {out['abstention']['n']} "
           f"unanswerable questions came back empty")
+    h = out["hard"]
+    print(f"hard        paraphrase recall@5 {h['paraphrases']['recall@5']}; "
+          f"{h['adversarialAbstention']['emptyAnswers']} of {h['adversarialAbstention']['n']} "
+          f"near-miss questions came back empty")
     print(f"handoff     {out['handoff']['passed']} of {out['handoff']['n']} packs complete")
     print(f"injection   {out['injection']}")
     print(f"forgetting  {out['forgetting']}")

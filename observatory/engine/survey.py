@@ -947,6 +947,27 @@ def fts_query(query: str) -> str:
     return " OR ".join('"' + t.replace('"', '""') + '"' for t in terms)
 
 
+def coverage_floor(n_keys: int) -> float:
+    """The share of a question's subject words a lexical hit must carry.
+
+    Calibrated on the evaluation set (tools/memory_eval.py): high enough that a
+    question nothing answers comes back empty instead of matched on one shared
+    word, low enough that a short question still finds its record. A question of
+    one or two subject words needs one of them; a longer one needs half."""
+    if n_keys <= 2:
+        return 1 / max(n_keys, 1)
+    return COVERAGE
+
+
+#: The share of subject words a hit must carry once a question has three or more.
+#: Measured, not chosen (`tools/memory_eval.py`, 2026-10-03): from 0.34 to 0.5 every
+#: answerable question was found and every unanswerable one abstained; at 0.6 two
+#: answerable ones were refused, at 0.25 two unanswerable ones were answered. 0.4
+#: sits in the middle of that plateau. Paraphrases with no shared word are not a
+#: lexical floor's to catch — similarity is (OBS-04).
+COVERAGE = 0.4
+
+
 #: How many candidates each retrieval arm fetches, INDEPENDENT of the caller's
 #: page size. Scaling the fetch with `limit` would make `total` — which exists
 #: to say how much was left — change with the page, a silent cap in disguise.
@@ -1017,20 +1038,49 @@ def search(query: str, project_id: str | None = None, limit: int = 10) -> dict:
 
         # --- lexical, always. It is the path that still answers when the other
         # --- one cannot, which is exactly when a caller most needs an answer.
+        # BY SEARCH KEY, NOT BY SPELLING: each word's Snowball stem, Russian cut to
+        # six characters (textkeys.py), so a question finds a record in another
+        # word form. Only the question's subject words are asked for — "what",
+        # "как", "the" match everything and say nothing.
+        import textkeys
+        qkeys = textkeys.query_keys(query)
+        lexical_floor = coverage_floor(len(qkeys))
+        if not textkeys.STEMMER:
+            degraded.append({"source": "lexical",
+                             "reason": "no stemmer installed (snowballstemmer): word forms "
+                                       "are matched exactly"})
         try:
-            fts = ("SELECT memory_id, revision, rank FROM search_notes"
-                   " WHERE search_notes MATCH ? ORDER BY rank LIMIT ?")
-            for r in conn.execute(fts, (fts_query(query), RETRIEVAL_WIDTH)):
-                k = (r["memory_id"], r["revision"])
-                lexical_order.append(k)
-                if k in hits:
-                    hits[k]["matched"].append("lexical")
-                    hits[k]["rank"] = round(r["rank"], 6)
-                else:
-                    hits[k] = {"memoryId": r["memory_id"], "revision": r["revision"],
-                               "rank": round(r["rank"], 6), "matched": ["lexical"]}
+            if qkeys:
+                fts = ("SELECT memory_id, revision, rank, stems FROM search_notes"
+                       " WHERE search_notes MATCH ? ORDER BY rank LIMIT ?")
+                expr = "stems : (" + " OR ".join('"' + k.replace('"', '""') + '"'
+                                                 for k in qkeys) + ")"
+                below = 0
+                for r in conn.execute(fts, (expr, RETRIEVAL_WIDTH)):
+                    # THE FLOOR. An OR over the question's keys matches any record
+                    # sharing one of them, and a best-of-the-bad answer is how a
+                    # search invents memory. A hit must carry enough of what was
+                    # asked; one that does not is dropped, and counted.
+                    have = set((r["stems"] or "").split())
+                    covered = sum(1 for k in qkeys if k in have) / len(qkeys)
+                    if covered < lexical_floor:
+                        below += 1
+                        continue
+                    k = (r["memory_id"], r["revision"])
+                    lexical_order.append(k)
+                    if k in hits:
+                        hits[k]["matched"].append("lexical")
+                        hits[k]["rank"] = round(r["rank"], 6)
+                        hits[k]["coverage"] = round(covered, 3)
+                    else:
+                        hits[k] = {"memoryId": r["memory_id"], "revision": r["revision"],
+                                   "rank": round(r["rank"], 6), "coverage": round(covered, 3),
+                                   "matched": ["lexical"]}
+            else:
+                below = 0
         except sqlite3.Error as exc:
             degraded.append({"source": "lexical", "reason": str(exc)})
+            below = 0
 
         # --- the LAG, which both halves search over and neither reported ------
         # Both indexes are fed by the outbox, so a pending queue means this
@@ -1102,7 +1152,17 @@ def search(query: str, project_id: str | None = None, limit: int = 10) -> dict:
         for h in out:
             h["score"] = round(fused.get((h["memoryId"], h["revision"]), 0.0), 8)
         out.sort(key=lambda h: -h["score"])
+        # AN HONEST "NOTHING". When no record clears the floor the answer says
+        # so as a decision, not as an empty list a caller might read as a bug:
+        # "this is not in memory" is an answer, and the one a caller must give.
+        abstain = not out
+        reason = ("no subject words in the question" if not qkeys else
+                  f"{below} lexical match(es) below the coverage floor" if below else
+                  "nothing matched")
         return {"query": query, "projectId": project_id, "count": len(out[:limit]),
+                "abstain": abstain, **({"abstainReason": reason} if abstain else {}),
+                "floor": {"coverage": lexical_floor, "keys": len(qkeys),
+                          "belowFloor": below},
                 # THE SCOPE WITHIN THE RETRIEVAL WINDOW, not the page — and not a
                 # function of it. `count` is the page size; `total` says how much
                 # the window held, so a caller can tell what was left out.

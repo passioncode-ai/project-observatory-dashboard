@@ -23,6 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "agent"))
 import paths
+import textkeys
 from store import db as store_db
 from store import ledger
 import store_faults
@@ -153,9 +154,10 @@ def index_batch(conn: sqlite3.Connection, rows: list[sqlite3.Row], have_vec: boo
             # a separate, live-looking result.
             conn.execute("DELETE FROM search_notes WHERE memory_id = ? AND revision <= ?",
                          (r["memory_id"], r["revision"]))
-            conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why)"
-                         " VALUES (?,?,?,?)",
-                         (r["memory_id"], r["revision"], r["statement"], r["why"] or ""))
+            conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why, stems)"
+                         " VALUES (?,?,?,?,?)",
+                         (r["memory_id"], r["revision"], r["statement"], r["why"] or "",
+                          textkeys.stems_of(r["statement"], r["why"])))
             if have_vec:
                 # Older revisions leave the vector index too, whether or not
                 # this one is embedded: a workflow record never is, and a stale

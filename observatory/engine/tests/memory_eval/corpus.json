@@ -484,5 +484,127 @@
    "question": "Где проходит летний выезд команды?",
    "lang": "ru"
   }
- ]
+ ],
+ "hard": {
+  "_note": "held out: written after the search was tuned, to measure what lexical search cannot do",
+  "paraphrases": [
+   {
+    "question": "How big is each chunk when we write the spreadsheet out?",
+    "expect": "export-stream",
+    "lang": "en"
+   },
+   {
+    "question": "What stops a very long download of a report?",
+    "expect": "export-timeout",
+    "lang": "en"
+   },
+   {
+    "question": "What if someone presents an old renewal credential twice?",
+    "expect": "auth-refresh",
+    "lang": "en"
+   },
+   {
+    "question": "How many calls can one client make each minute?",
+    "expect": "rate-limit",
+    "lang": "en"
+   },
+   {
+    "question": "Which service has to ship before the other one?",
+    "expect": "deploy-order",
+    "lang": "en"
+   },
+   {
+    "question": "Where do undeliverable jobs end up?",
+    "expect": "queue-dlq",
+    "lang": "en"
+   },
+   {
+    "question": "How do we make sure the snapshots can actually be brought back?",
+    "expect": "backup-restore",
+    "lang": "en"
+   },
+   {
+    "question": "Кто меняет учётку, когда кончились запросы?",
+    "expect": "switch-account",
+    "lang": "ru"
+   },
+   {
+    "question": "Откуда агент берёт пароли к сервисам?",
+    "expect": "vault-keys",
+    "lang": "ru"
+   },
+   {
+    "question": "Как понять, что работа зависла?",
+    "expect": "stall-detect",
+    "lang": "ru"
+   },
+   {
+    "question": "Как часто перерисовывается экран со списком агентов?",
+    "expect": "dashboard-live",
+    "lang": "ru"
+   },
+   {
+    "question": "Что сделали с временем жизни записей перед переездом доменов?",
+    "expect": "dns-migration",
+    "lang": "ru"
+   },
+   {
+    "question": "Насколько выросли деньги после смены тарифа?",
+    "expect": "price-test",
+    "lang": "ru"
+   },
+   {
+    "question": "Почему не теряются конверсии из-за блокировщиков?",
+    "expect": "analytics",
+    "lang": "ru"
+   },
+   {
+    "question": "Можно ли запустить ночной процесс второй раз параллельно?",
+    "expect": "cron-overlap",
+    "lang": "ru"
+   }
+  ],
+  "adversarial_unanswerable": [
+   {
+    "question": "How big is the office kitchen?",
+    "lang": "en"
+   },
+   {
+    "question": "Which payment provider charges the lowest fee?",
+    "lang": "en"
+   },
+   {
+    "question": "When does the web team have its weekly meeting?",
+    "lang": "en"
+   },
+   {
+    "question": "What font does the company letterhead use?",
+    "lang": "en"
+   },
+   {
+    "question": "How long are interns' contracts?",
+    "lang": "en"
+   },
+   {
+    "question": "Какой лимит на такси для сотрудников?",
+    "lang": "ru"
+   },
+   {
+    "question": "Где хранятся бумажные договоры?",
+    "lang": "ru"
+   },
+   {
+    "question": "Сколько дней длится отпуск у поддержки?",
+    "lang": "ru"
+   },
+   {
+    "question": "Какой процент скидки у партнёров?",
+    "lang": "ru"
+   },
+   {
+    "question": "Кто переносит мебель при переезде офиса?",
+    "lang": "ru"
+   }
+  ]
+ }
 }
