@@ -152,7 +152,8 @@ def resolve(project: str, name: str, env: str | None = None) -> tuple[str, str]:
     raise LookupError(
         f"{name} is not in the vault under projects/{project}/"
         f"{{{','.join(ENVS)}}} and not in any env file the inventory lists for "
-        f"{project}. `use_secret.py names {project}` shows what is there; "
+        f"{project}. `python \"$(project-observatory full-path)/tools/use_secret.py\" names {project}` "
+        f"shows what is there; "
         f"the vault put command for {project}, local, {name} accepts a protected file on stdin.")
 
 

@@ -2773,8 +2773,8 @@
       "path": "tests/test_session_start.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fee97d101b5d9124b79902411fe0e2a43476b842df509192c84b0595acc25053",
-      "bytes": 11467
+      "export_sha256": "86a24aff9ae8fc5d36d8c30b8050712fc3713f329bf59ec08a4b62d92af29672",
+      "bytes": 11801
     },
     {
       "path": "tests/test_sessions.py",
@@ -3618,8 +3618,8 @@
     {
       "path": "tools/session_start.py",
       "source_sha256": "1cd87b90886c6d87b170e7887d66fc1f05ae95e15a1631f5313eb29852a81989",
-      "export_sha256": "1d712b857d0887ece31f8f6857c7e2ea295c275a7702e44e9daed57363d75ee6",
-      "bytes": 11302,
+      "export_sha256": "86e4991b6795811eafab4f24446514996988f3b416cbe885cf1e1534931f2bfb",
+      "bytes": 11574,
       "python_comments_removed": 7,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,
@@ -3730,8 +3730,8 @@
     {
       "path": "tools/use_secret.py",
       "source_sha256": "8836e5826c78ca12bd852fd8f7b036c49db3b41383209d829f321318afc76bc1",
-      "export_sha256": "4cf377eec8996249665e066c06871d14faee7cdb275b80c53999756b65903e39",
-      "bytes": 17719,
+      "export_sha256": "14ad7f6c0d91623491bcff990cf90e316ffc0d2e6c9bf0b57fc701cc2e958482",
+      "bytes": 17781,
       "python_comments_removed": 14,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,

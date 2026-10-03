@@ -78,7 +78,11 @@ def test_a_known_project_gets_one_line_with_its_counts() -> None:
           "1 critical / 1 warning" in line, line)
     check("counts keys by name from the registry AND the project's .env, secrets only",
           "keys by name: 2 (registry 1, .env 1)" in line, line)
-    check("and hands over the verb and the address", "use_secret.py names known" in line and "#project:known" in line, line)
+    check("and hands over the verb and the address", 'use_secret.py" names known' in line and "#project:known" in line, line)
+    # RUNNABLE AS PRINTED. A bare `use_secret.py names X` resolves nowhere for an
+    # installed user; every other surface hands over the installed path.
+    check("the verb is runnable as printed: the tool by its installed path",
+          'python "$(project-observatory full-path)/tools/use_secret.py" names known' in line, line)
 
 
 def test_an_unknown_folder_inside_the_estate_is_said_and_remembered() -> None:

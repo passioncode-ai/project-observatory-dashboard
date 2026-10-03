@@ -21,8 +21,9 @@ reason, which is how a silent hook is told apart from a broken one.
 What it prints:
 
   known project     "observatory: <name> · N critical / M warning · keys by
-                    name: K (registry, .env) · last activity · use_secret.py
-                    names <name> · a link to the project's board entry"
+                    name: K (registry, .env) · last activity · the
+                    `use_secret.py names <name>` command by its installed path ·
+                    a link to the project's board entry"
   unknown folder    a line saying the folder is not in the registry, and a row
                     in `sessions-seen.jsonl` (cwd, remote, when), so a folder
                     an agent works in and the registry never joined becomes a
@@ -160,7 +161,10 @@ def state_line(p: dict) -> str:
     bits.append(t("{crit} critical / {warn} warning", crit=crit, warn=warn) if (crit or warn) else t("no findings"))
     bits.append(t("keys by name: {total} (registry {vault}, .env {env})", total=vault + env_keys, vault=vault, env=env_keys))
     bits.append(t("activity {date}", date=last))
-    tail = f" · use_secret.py names {name} · projects.html#project:{pid.split(':', 1)[-1]}"
+    # The tool by its installed path, the way every other surface hands it over:
+    # a bare `use_secret.py` resolves nowhere for an installed user.
+    tail = (f' · python "$(project-observatory full-path)/tools/use_secret.py" names {name}'
+            f" · projects.html#project:{pid.split(':', 1)[-1]}")
     return " · ".join(bits) + tail + organization_line(p, t)
 
 
