@@ -4,8 +4,9 @@ import AppKit
 @MainActor final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     /// SwiftUI's own "open this window", remembered from the app's commands — which
     /// exist with no window open — because AppKit's reopen and a launch restored with
-    /// no window do NOT recreate a WindowGroup window by themselves (measured: zero
-    /// windows after closing the dashboard and clicking the Dock icon).
+    /// no window do NOT recreate a SwiftUI scene window by themselves (measured with
+    /// the WindowGroup this was: zero windows after closing the dashboard and clicking
+    /// the Dock icon; the single `Window` scene relies on the same call).
     static var openWindow: OpenWindowAction?
 
     func applicationDidFinishLaunching(_ notification: Notification) {

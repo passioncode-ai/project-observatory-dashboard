@@ -9,7 +9,7 @@ extensions**, plus the locked sqlite-vec dependency. Some macOS Python builds
 omit `enable_load_extension`; installing sqlite-vec alone cannot add it.
 Initialization, doctor, migration and upgrade check this before workspace writes.
 The isolated regression is
-`tests/test_workspace_upgrade.py::WorkspaceUpgrade::test_missing_sqlite_extension_support_refuses_before_writes`.
+`observatory/engine/tests/test_workspace_upgrade.py::WorkspaceUpgrade::test_missing_sqlite_extension_support_refuses_before_writes`.
 
 On macOS, [Homebrew Python](https://formulae.brew.sh/formula/python@3.14)
 provides a supported installation path:

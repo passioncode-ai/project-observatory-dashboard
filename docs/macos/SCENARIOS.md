@@ -21,7 +21,7 @@ ST-03: another agent invokes the same capability. Product outcome: unobserved.
 | SCN-009 | Window closed, Dock click brings it back | draft |
 
 These scenarios are specified from the autonomous implementation brief, not human usability validation;
-coverage below names the regression tests and the native walkthroughs run on 2026-10-02 and in the two 2026-10-03 audits. See [receipts](../runs/2026-10-01-macos-app/README.md).
+coverage below names the regression tests and the native walkthroughs run on 2026-10-02 and in the three 2026-10-03 audits. See [receipts](../runs/2026-10-01-macos-app/README.md).
 
 ## SCN-001 — First launch and connection recovery
 Status: draft
@@ -93,8 +93,11 @@ Errors & recovery: failed B connection offers settings; no fallback into A disgu
 Coverage: core/bridge/model regression tests (`testLateWorkspaceResponseCannotReplaceNewState`,
 `testChangingWorkspaceDuringABuildLeavesTheNewWorkspaceUsable`); native walkthrough 2026-10-03 with a
 stub provider ([run 2](../reports/2026-10-03-observatory-audit-run-2/README.md)): a question outstanding in A, Settings switched to B → B's
-state and none of A's turns, A's job completed in A's own store. Whether the dashboard window then
-paints B's pages was not confirmed natively (the QA windows were occluded); it is run 3's.
+state and none of A's turns, A's job completed in A's own store. The dashboard half is settled by
+`DashboardWindowTests`, which hosts the window over a real web view with two built workspaces: a
+window open during the switch shows B's pages; a window closed during the switch and reopened kept
+showing A's until [run 3](../reports/2026-10-03-observatory-audit-run-3/README.md) (R2-APP-5, fixed:
+the window shows the current mode when it opens).
 
 ## SCN-006 — CLI/MCP caller obtains the same answer
 Status: draft
@@ -135,11 +138,15 @@ Trigger: the app opens or comes back to the front.
 Steps: saved pages shown under a banner naming their build time → Start server → the
 window switches to the live dashboard; an installed always-on server is restarted instead.
 Expected result: reading never waits for a server; a server starts only on request.
-Errors & recovery: a port held by another workspace is named and Start is disabled; a failed
-start names its log; no pages at all → Build the dashboard.
-Coverage: engine `serve`/`build` tests, Model tests; native walkthroughs 2026-10-02 and 2026-10-03:
-port held by another workspace → Start disabled with the reason; unbuilt → Build → saved pages;
-spare port → Start server → «Live» ([report](../reports/2026-10-03-observatory-audit-run-1/README.md)).
+Errors & recovery: a port held by another workspace is named and Start (the banner's button and
+Dashboard → Start Server alike) is disabled; a failed start names its log; no pages at all → Build
+the dashboard.
+Coverage: engine `serve`/`build` tests, Model tests (`testStartServerIsOfferedOnlyWhereItCanStart`);
+native walkthroughs 2026-10-02 and 2026-10-03: port held by another workspace → Start disabled with
+the reason; unbuilt → Build → saved pages; spare port → Start server → «Live»
+([run 1](../reports/2026-10-03-observatory-audit-run-1/README.md)); opened through Launch Services,
+Dashboard → Start Server started the workspace's server and the window's next load answered HTTP 200
+from it ([run 3](../reports/2026-10-03-observatory-audit-run-3/README.md)).
 
 ## SCN-009 — Window closed, Dock click brings it back
 Status: draft

@@ -1,8 +1,9 @@
 # Product scenarios by runtime
 
-The [full dashboard redesign](DASHBOARD-REDESIGN.md) specifies all ten operator
-screens and acceptance UI-01–09. Its behavior is recorded as OSS-13–20 in the
-full-engine scenario base linked below, alongside existing safety contracts.
+The [full dashboard redesign](DASHBOARD-REDESIGN.md) specified the ten original operator
+screens and acceptance UI-01–09; the Machine page, the eleventh, came later. Their behavior is
+recorded as OSS-13–22 in the full-engine scenario base linked below, alongside existing safety
+contracts.
 
 This file indexes the two distinct runtime paths. The table below describes the retained portable compatibility CLI only. Full-engine scenarios are in [portable-scenarios.md](../../observatory/engine/docs/ux/portable-scenarios.md); despite that historical filename, its OSS scenarios cover the full engine. The public site's scenarios live separately in [docs/site/](../site/). The implementation and tests are linked from [MIGRATION.md](../MIGRATION.md).
 
