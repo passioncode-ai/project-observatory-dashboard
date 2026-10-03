@@ -11,6 +11,8 @@
     python "$T/vault.py" moved <project> <env> <NAME> --how "…"    # record a movement done elsewhere
     python "$T/vault.py" movements [project]                 # the movement journal
     python "$T/vault.py" remove <project> <env> <NAME> [--retired] [--force]  # delete a slot, or only its archives
+    python "$T/vault.py" bind <project> <env> <NAME> --header-for <https URL|host>   # the one MCP server
+    python "$T/vault.py" bind <project> <env> <NAME> --clear                          #   `use_secret.py header` may serve it to
     python "$T/vault.py" leaks                               # the register, oldest unrotated first
     python "$T/vault.py" backup                              # run the store's encrypted backup now
 
@@ -39,9 +41,10 @@ THE CONTRACT WITH AGENTS — the four rules the observatory skill makes mandator
      issuer and that its consumers were checked. A local `rotate` alone does not
      settle it: the retired value keeps working until revoked at the provider.
 
-METADATA IS NOT SECRET. `meta.json` beside each value (created, rotated, envs)
-and `leaks.jsonl` hold names, dates and places — never values — so the register
-can be read, listed and rendered without touching a single secret byte.
+METADATA IS NOT SECRET. `meta.json` beside each value (created, rotated, envs,
+and `header_for`, the server a slot is bound to) and `leaks.jsonl` hold names,
+dates and places — never values — so the register can be read, listed and
+rendered without touching a single secret byte.
 
 Every value file is chmod 600 and every write goes through a sibling-and-rename,
 so a crash mid-write cannot leave a half-written credential.
@@ -343,6 +346,109 @@ def cmd_put(a) -> int:
     return 0
 
 
+#: An HTTP host as a binding may name it: DNS labels, or an IP literal.
+_HOST = re.compile(r"(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+                   r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*")
+
+
+def origin(text: str, *, https_only: bool = True) -> tuple[str, str, str]:
+    """(origin `scheme://host[:port]`, the host as shown, the path that was dropped).
+
+    THE BINDING IS AN ORIGIN, NOT A URL. `use_secret.py header` compares it with
+    the `CLAUDE_CODE_MCP_SERVER_URL` Claude Code hands its `headersHelper`, and
+    the question that comparison answers is "is this request going to the server
+    the operator meant", which scheme, host and port decide. A path is accepted
+    (an operator pastes the server's whole URL) and reported as not part of it.
+
+    `https_only` is the binding's rule: a bearer bound to plain http would travel
+    readable on the wire. The header door parses the server's URL with it off,
+    so a plain-http server is named in the refusal rather than failing to parse.
+    A bare host means https on the default port. Userinfo, a query and a
+    fragment are refused: each is a place a credential rides in a URL.
+    Messages name the rule, never the text, except the host — hosts are not
+    secrets, and a refusal that names the wrong one is the useful kind.
+    """
+    raw = (text or "").strip()
+    if credential_shape.find(raw):
+        raise VaultBoundaryError("the address looks like it carries a credential; give the "
+                                 "server's https URL or its host, never a value")
+    import ipaddress
+    import urllib.parse
+    if "://" not in raw:
+        raw = "https://" + raw
+    try:
+        parts = urllib.parse.urlsplit(raw)
+        port = parts.port
+    except ValueError:
+        raise VaultBoundaryError("the address is not a URL or a host[:port]") from None
+    scheme = parts.scheme.lower()
+    if https_only and scheme != "https":
+        raise VaultBoundaryError("only https is accepted: a bearer bound to plain http "
+                                 "would cross the network readable")
+    if scheme not in ("https", "http"):
+        raise VaultBoundaryError("the address must be an http(s) URL")
+    if "@" in parts.netloc:
+        raise VaultBoundaryError("the address carries userinfo (user:password@); "
+                                 "give the server's URL without it")
+    if parts.query or parts.fragment or raw.endswith(("?", "#")):
+        raise VaultBoundaryError("the address carries a query or a fragment; "
+                                 "the binding is the server's scheme, host and port")
+    host = (parts.hostname or "").lower()
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if not host or (literal is None and not _HOST.fullmatch(host)):
+        raise VaultBoundaryError("the address names no valid host")
+    shown = f"[{host}]" if literal is not None and literal.version == 6 else host
+    default = 443 if scheme == "https" else 80
+    if port is not None and port != default:
+        shown = f"{shown}:{port}"
+    path = parts.path if parts.path not in ("", "/") else ""
+    return f"{scheme}://{shown}", shown, path
+
+
+@_serialized
+def cmd_bind(a) -> int:
+    """Bind a slot to the one MCP server `use_secret.py header` may serve it to.
+
+    Metadata only, in the slot's `meta.json`, and journalled like every other
+    write here. The value is never read. A slot that holds no value is refused:
+    a binding that describes nothing hides a typo in PROJECT, ENV or NAME.
+    """
+    slot = _slot(a.project, a.env, a.name)
+    secret = f"{a.project}/{a.env}/{a.name}"
+    if not slot.is_file():
+        die(f"nothing at {secret} to bind — `vault.py put {a.project} {a.env} {a.name}` "
+            f"with the value on stdin first; a binding describes a slot that exists")
+    meta = _read_meta(slot)
+    if a.clear:
+        previous = meta.pop("header_for", None)
+        meta.pop("header_bound", None)
+        if previous is None:
+            print(f"{secret} has no header binding; nothing to clear")
+            return 0
+        _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
+        journal("unbind", secret, header_for=previous)
+        print(f"cleared: {secret} is no longer served by `use_secret.py header` "
+              f"(it was bound to {previous})")
+        return 0
+    bound, _, dropped = origin(a.header_for)
+    previous = meta.get("header_for")
+    meta["header_for"] = bound
+    meta["header_bound"] = now()
+    _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
+    journal("bind", secret, header_for=bound,
+            **({"replaced": previous} if previous and previous != bound else {}))
+    print(f"bound {secret} to {bound}: `use_secret.py header` serves it only to an MCP "
+          f"server at that scheme, host and port; value hidden")
+    if dropped:
+        print(f"  the path {dropped} is not part of the binding")
+    if previous and previous != bound:
+        print(f"  it was bound to {previous}")
+    return 0
+
+
 @_serialized
 def cmd_rotate(a) -> int:
     slot = _slot(a.project, a.env, a.name)
@@ -621,6 +727,8 @@ def cmd_list(a) -> int:
         extras = []
         if meta.get("rotated"):
             extras.append(f"rotated {meta['rotated'][:10]}×{meta.get('rotations', 1)}")
+        if isinstance(meta.get("header_for"), str):
+            extras.append(f"header for {meta['header_for']}")
         if mode & 0o077:
             extras.append(f"MODE {mode:o} — READABLE BEYOND OWNER")
         print(f"  {project}/{env}/{name}  ({slot.stat().st_size}B"
@@ -773,6 +881,12 @@ def main(argv: list[str]) -> int:
     p = sub.add_parser("remove"); _slot_args(p)
     p.add_argument("--retired", action="store_true", help="remove only the archives rotation left; keep the slot")
     p.add_argument("--force", action="store_true", help="remove even while a leak of it is open")
+    p = sub.add_parser("bind", help="bind a slot to the one MCP server `use_secret.py header` may serve it to")
+    _slot_args(p)
+    target = p.add_mutually_exclusive_group(required=True)
+    target.add_argument("--header-for", metavar="URL_OR_HOST",
+                        help="the MCP server's https URL or host[:port]; a bare host means https")
+    target.add_argument("--clear", action="store_true", help="remove the binding")
     sub.add_parser("backup")
     a = ap.parse_args(argv[1:])
     try:
@@ -789,7 +903,8 @@ def main(argv: list[str]) -> int:
             validate_names(a.project, getattr(a, "env", None), getattr(a, "name", None))
         return {"put": cmd_put, "settle": cmd_settle, "moved": cmd_moved, "movements": cmd_movements,
                 "rotate": cmd_rotate, "leak": cmd_leak, "leaks": cmd_leaks,
-                "list": cmd_list, "inject": cmd_inject, "backup": cmd_backup, "remove": cmd_remove}[a.cmd](a)
+                "list": cmd_list, "inject": cmd_inject, "backup": cmd_backup, "remove": cmd_remove,
+                "bind": cmd_bind}[a.cmd](a)
     except VaultBoundaryError as exc:
         print(f"vault: {exc}", file=sys.stderr)
         return 2

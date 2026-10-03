@@ -60,6 +60,11 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
+**2026-10-03, release 0.14.0 (published, installed on the maintainer's machine):** the lifecycle
+contract, agent memory and its hardening, the first release built, signed, notarized, attested
+and published in CI. Receipt — tag, run, digests, verification, installation, launchd state, next
+task: [runs/2026-10-03-release-0.14.0](runs/2026-10-03-release-0.14.0/README.md).
+
 **2026-10-03, the product lifecycle contract (branch `claude/lifecycle-contract`, not
 released):** the tick no longer runs `claude mcp list`, sizes no privacy-guarded place, bounds
 every step and itself, the server idles, every log rotates, a session server on replaced code

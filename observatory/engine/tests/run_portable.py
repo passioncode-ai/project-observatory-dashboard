@@ -120,6 +120,8 @@ BOUNDARY += ('agent_secrets',)
 # The agent-memory evaluation set (tools/memory_eval.py).
 BOUNDARY += ('memory_eval',)
 BOUNDARY += ('textkeys',)
+# The header door: a vault value for one MCP server's headersHelper, and its binding.
+BOUNDARY += ('secret_header',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
