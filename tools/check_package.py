@@ -13,6 +13,11 @@ import json
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
+#: The dependency set CI installs and tests (`pip install -c requirements-full.lock`). A
+#: release publishes only the wheel and SHA256SUMS, so the wheel carries the lock for
+#: `full update` and for a wheel user's own install; it must be the tested one, byte for byte.
+LOCK = "requirements-full.lock"
+LOCK_MEMBER = "observatory/engine/" + LOCK
 
 
 def check(wheel: Path) -> dict:
@@ -51,6 +56,10 @@ def check(wheel: Path) -> dict:
             name = prefix + row['path']
             if name in names and hashlib.sha256(z.read(name)).hexdigest() != row['export_sha256']:
                 failures.append('export inventory digest mismatch: ' + row['path'])
+        if LOCK_MEMBER not in names:
+            failures.append('the tested dependency lock is missing: ' + LOCK_MEMBER)
+        elif z.read(LOCK_MEMBER) != (ROOT / LOCK).read_bytes():
+            failures.append('the tested dependency lock differs from ' + LOCK + '; run tools/sync_engine_docs.py')
         for name in names:
             if name not in expected and name not in metadata_names:
                 failures.append('unexpected package resource: ' + name)

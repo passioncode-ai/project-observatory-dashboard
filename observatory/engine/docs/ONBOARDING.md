@@ -5,7 +5,13 @@ configuration. Its database, registries, keys and generated pages live in a
 private workspace outside the installed source. macOS and Linux are supported;
 Python 3.11+, SQLite 3.37+, Git and Node.js are required for the complete local
 checks. The Python package's `full` extra installs the MCP, schema, vector-store
-and Google authentication libraries at the versions tested by this release.
+and Google authentication libraries; installed with `-c requirements-full.lock`,
+every dependency, direct and transitive, lands at the version tested by this
+release. A checkout has the lock at its root; a wheel carries it at
+`"$(project-observatory full-path)/requirements-full.lock"` (the
+[README](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/../README.md#install) installs the wheel `--no-deps` first, then the
+extra against that file). Without `-c`, pip resolves newer transitive releases
+this release was not tested with.
 
 ## SQLite runtime prerequisite
 
@@ -606,7 +612,10 @@ It keeps a verified wheel of the running release for rollback (under
 refuses without one unless `--no-rollback` is given. It stops this workspace's launchd
 tick and server if they are loaded (unless `--writers-stopped` says you stopped your own
 scheduler; a foreground `open --serve` is yours to stop), snapshots the workspace, installs
-the wheel with its `full` extra using the running interpreter's pip (or `uv pip`), runs the
+the wheel with its `full` extra using the running interpreter's pip (or `uv pip`),
+constrained by the `requirements-full.lock` inside the verified wheel (a rollback uses the
+running release's own lock; a wheel without one installs unconstrained and the report's
+`degraded` says so, `constraints` names the lock used), runs the
 new release's `upgrade --apply --writers-stopped` in a new process, verifies the installed
 version, its pinned dependencies and `doctor`, and starts again exactly the jobs it
 stopped. Any failure after the install reinstalls the rollback wheel; if the workspace had

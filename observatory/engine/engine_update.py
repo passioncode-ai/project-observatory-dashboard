@@ -22,7 +22,9 @@ the Python environment, the background jobs and the workspace:
    engine's own launchd helpers (never with --writers-stopped: the caller did);
 3. snapshot the workspace with THIS code, which is the code able to restore it;
 4. install the wheel with the running interpreter (pip, else `uv pip`), the
-   `full` extra included so a dependency added by the release is installed;
+   `full` extra included so a dependency added by the release is installed,
+   constrained by the lock the wheel carries (LOCK_MEMBER) so the transitive
+   dependencies land at the versions that release was tested with;
 5. run the new release's `upgrade --apply --writers-stopped` in a new process;
 6. verify the installed version, the pinned dependencies and `doctor`;
 7. restart exactly the jobs step 2 stopped.
@@ -73,6 +75,11 @@ SUMS = "SHA256SUMS"
 CACHE = Path("backups") / "engine-releases"   # under `backups/`: never inside a snapshot
 LOG = Path("store") / "logs" / "update.jsonl"
 KEEP_CACHED = 3
+#: Where a release wheel carries its tested dependency set. A release publishes
+#: only the wheel and SHA256SUMS, so the lock travels inside the verified wheel;
+#: a lock file at any other path in the archive is not the release's and is ignored.
+LOCK_MEMBER = "observatory/engine/requirements-full.lock"
+MAX_LOCK = 1024 * 1024
 MAX_JSON, MAX_SUMS, MAX_WHEEL = 2 * 1024 * 1024, 64 * 1024, 64 * 1024 * 1024
 LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
@@ -345,15 +352,33 @@ def wheel_metadata(wheel: Path, work: Path) -> dict:
             if len(meta) != 1:
                 raise UpdateError("Wheel metadata is missing or ambiguous")
             headers = email.parser.Parser().parsestr(zf.read(meta[0]).decode("utf-8"))
-            constraints = None
-            lock = [n for n in names if n.endswith("/requirements-full.lock") or n == "requirements-full.lock"]
-            if len(lock) == 1 and zf.getinfo(lock[0]).file_size <= 1024 * 1024:
-                constraints = work / "constraints.txt"
-                constraints.write_bytes(zf.read(lock[0]))
     except (zipfile.BadZipFile, KeyError, UnicodeError, OSError):
         raise UpdateError("Wheel is not a readable archive") from None
     return {"name": (headers.get("Name") or "").lower().replace("_", "-"), "version": headers.get("Version"),
-            "requires": headers.get_all("Requires-Dist") or [], "constraints": constraints}
+            "requires": headers.get_all("Requires-Dist") or [], "constraints": wheel_lock(wheel, work)}
+
+
+def wheel_lock(wheel: Path, folder: Path) -> Path | None:
+    """The wheel's own LOCK_MEMBER written to a constraints file in `folder`, or None.
+
+    None means the wheel carries no lock (a release older than the lock's
+    shipping, or a hand-built wheel): the install still works, unconstrained,
+    and the caller says so rather than pretending the tested set was installed."""
+    try:
+        with zipfile.ZipFile(wheel) as zf:
+            try:
+                info = zf.getinfo(LOCK_MEMBER)
+            except KeyError:
+                return None
+            if info.file_size > MAX_LOCK:
+                raise UpdateError(f"{wheel.name} carries a {info.file_size}-byte {LOCK_MEMBER}; refusing to read it")
+            data = zf.read(info)
+    except (zipfile.BadZipFile, OSError):
+        raise UpdateError(f"{wheel.name} is not a readable archive") from None
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    target = folder / f"constraints-{wheel.stem}.txt"
+    target.write_bytes(data)
+    return target
 
 
 def fetch_verified(fetcher: Fetcher, release: Release, work: Path) -> tuple[Path, dict]:
@@ -705,7 +730,8 @@ def preview(base: Path, current: str, release: Release, deps: Dependencies, args
         would += ["stop this workspace's launchd tick and server if loaded" if not args.writers_stopped
                   else "leave writers alone (--writers-stopped: you stopped them)",
                   _snapshot_destination(base)]
-    would += [f"install the wheel with its [full] extra into {sys.executable}"]
+    would += [f"install the wheel with its [full] extra into {sys.executable}, constrained by the "
+              f"{Path(LOCK_MEMBER).name} the wheel carries (unconstrained, and said so, if it carries none)"]
     if has_ws:
         would += ["run the new release's `upgrade --apply --writers-stopped` in a new process"]
     would += ["verify the installed version, its pinned dependencies" + (" and `doctor`" if has_ws else ""),
@@ -724,6 +750,7 @@ class Transaction:
         self.has_ws = (base / "workspace.json").is_file()
         self.steps: list[dict] = []
         self.stopped: list[dict] = []
+        self.work: Path | None = None   # the run's temporary folder, while run() holds it
         self.report: dict = {"status": "failed", "current": current, "target": release.version,
                              "steps": self.steps, "services_stopped": [], "rolled_back": False,
                              "workspace_restored": False, "rollback_available": False, "degraded": []}
@@ -823,12 +850,15 @@ class Transaction:
                          f"'{WHEEL.format(version=self.current)}[full]' from its release page")
         else:
             try:
-                self.deps.installer.install(rollback, force=True)
+                # The running release's own lock, so the rollback restores the tested set
+                # and not whatever the index offers today.
+                constraints = wheel_lock(rollback, self.work / "rollback-lock") if self.work else None
+                self.deps.installer.install(rollback, force=True, constraints=constraints)
                 back = self.deps.engine(self.base).distribution_version()
                 report["rolled_back"] = back == self.current
                 if not report["rolled_back"]:
                     human.append(f"The rollback install reports version {back}, not {self.current}")
-            except InstallFailed as exc:
+            except (InstallFailed, UpdateError, OSError) as exc:
                 human.append(f"Rollback install failed ({exc}); run: {sys.executable} -m pip install "
                              f"--force-reinstall '{rollback}[full]'")
             self.step("rolled-back" if report["rolled_back"] else "rollback-failed")
@@ -880,8 +910,14 @@ class Transaction:
         self.refuse_early()
         work = Path(tempfile.mkdtemp(prefix="observatory-update-"))
         try:
+            self.work = work
             wheel, meta = fetch_verified(self.deps.fetcher, self.release, work)
             self.step("verified", wheel=wheel.name, sha256=meta["sha256"], checks=["github-digest", SUMS])
+            self.report["constraints"] = LOCK_MEMBER if meta["constraints"] else None
+            if not meta["constraints"]:
+                self.report["degraded"].append(
+                    f"{wheel.name} carries no {LOCK_MEMBER}: its [full] dependencies are installed "
+                    "unconstrained, at the newest releases the index offers rather than the tested set")
             rollback = self.rollback_wheel(work)
             self.report["rollback_available"] = rollback is not None
             self.stop_writers()
@@ -901,7 +937,7 @@ class Transaction:
             try:
                 self.deps.installer.install(wheel, force=relation(self.current, self.release.version) == 0,
                                             constraints=meta["constraints"])
-                self.step("installed", wheel=wheel.name)
+                self.step("installed", wheel=wheel.name, constraints=self.report["constraints"])
             except InstallFailed as exc:
                 return self.undo(f"install failed: {exc}", rollback, snapshot, before)
             if self.has_ws:

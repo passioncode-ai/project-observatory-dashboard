@@ -27,9 +27,15 @@ brew install python@3.14                                     # macOS; on Linux u
 PYTHON="$(brew --prefix python@3.14)/bin/python3.14"         # on Linux, e.g. PYTHON=python3.12
 "$PYTHON" -c 'import sqlite3; c = sqlite3.connect(":memory:"); c.enable_load_extension(True)'   # AttributeError: this build cannot load sqlite-vec
 "$PYTHON" -m venv ~/.local/share/project-observatory-venv
-~/.local/share/project-observatory-venv/bin/python -m pip install "project_observatory-$V-py3-none-any.whl[full]"
 export PATH="$HOME/.local/share/project-observatory-venv/bin:$PATH"
+python -m pip install --no-deps "project_observatory-$V-py3-none-any.whl"       # the engine, and the lock it carries
+python -m pip install -c "$(project-observatory full-path)/requirements-full.lock" \
+    "project_observatory-$V-py3-none-any.whl[full]"                             # its [full] extra at the tested versions
 ```
+
+The wheel carries `requirements-full.lock`, the dependency set this release was tested with; the second
+`pip` line installs the `full` extra against it. Without `-c`, pip resolves the newest releases of the
+transitive dependencies instead, which this release was not tested with.
 
 Later releases arrive with `project-observatory full update --apply`, verified and reversible.
 
@@ -148,7 +154,7 @@ Known-value scanning cannot find unknown or transformed values. A copied value i
 
 ## Updates preserve supported contracts
 
-An installed release is updated with `project-observatory full update --apply`: the wheel is verified against GitHub's digest and `SHA256SUMS`, the workspace is upgraded, and a failure rolls back ([staying in step](docs/ONBOARDING.md#staying-in-step)). A source checkout is updated with Git and reinstalled (`python -m pip install -U -c requirements-full.lock '.[full]'`), followed by `project-observatory full upgrade`. `full profile export` / `import` carries the functional configuration to a [second machine](docs/ONBOARDING.md#second-machine). The Claude Code plugin updates itself when auto-update is on; see `full agent status`.
+An installed release is updated with `project-observatory full update --apply`: the wheel is verified against GitHub's digest and `SHA256SUMS`, the workspace is upgraded, and a failure rolls back ([staying in step](docs/ONBOARDING.md#staying-in-step)). A source checkout is updated with Git and reinstalled (`python -m pip install -U -c requirements-full.lock '.[full]'`), followed by `project-observatory full upgrade`. Both install the dependencies from the release's `requirements-full.lock`, which the wheel carries. `full profile export` / `import` carries the functional configuration to a [second machine](docs/ONBOARDING.md#second-machine). The Claude Code plugin updates itself when auto-update is on; see `full agent status`.
 
 Application versions, workspace/config formats, database migrations, plugin API and tool schemas have separate compatibility rules. Newer unsupported state is refused. Updates preserve optional settings, back up SQLite including committed WAL data, and support restore into a separate home.
 

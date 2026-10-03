@@ -180,8 +180,12 @@ class ReleaseBoundaryTests(unittest.TestCase):
             self.assertNotIn('confidential-fixture',json.dumps(result))
     def package_files(self):
         self.put('pyproject.toml','[project]\nname="project-observatory"\nversion="0.2.0"\n')
-        runtime={'observatory/__init__.py':b'', 'observatory/engine/example.py':b'VALUE = 1\n'}
-        manifest={'files':[{'path':'example.py','export_sha256':hashlib.sha256(runtime['observatory/engine/example.py']).hexdigest()}]}
+        lock=b'# synthetic tested set\nexample-dependency==1.0\n'
+        self.put('requirements-full.lock',lock)
+        runtime={'observatory/__init__.py':b'', 'observatory/engine/example.py':b'VALUE = 1\n',
+                 'observatory/engine/requirements-full.lock':lock}
+        manifest={'files':[{'path':p[len('observatory/engine/'):],'export_sha256':hashlib.sha256(runtime[p]).hexdigest()}
+                           for p in ('observatory/engine/example.py','observatory/engine/requirements-full.lock')]}
         runtime['observatory/engine/SOURCE-INVENTORY.json']=json.dumps(manifest).encode()
         for name,data in runtime.items():self.put(name,data)
         runtime.update({'project_observatory-0.2.0.dist-info/METADATA':b'Metadata-Version: 2.4\nName: project-observatory\nVersion: 0.2.0\n',
@@ -218,6 +222,17 @@ class ReleaseBoundaryTests(unittest.TestCase):
                   {**original,'observatory/engine/extra.json':b'{}'}]
         for files in variants:self.assertFalse(self.checked(self.wheel(files))['passed'])
         self.assertFalse(self.checked(self.wheel(original,duplicate='observatory/engine/example.py'))['passed'])
+    def test_wheel_must_ship_the_tested_lock_unchanged(self):
+        # `full update` installs with the lock the wheel carries; a wheel without it, or with a
+        # lock other than the one CI tested, would install an untested dependency set.
+        original=self.package_files()
+        result=self.checked(self.wheel({k:v for k,v in original.items() if k!='observatory/engine/requirements-full.lock'}))
+        self.assertFalse(result['passed'])
+        self.assertIn('tested dependency lock',' '.join(result['failures']))
+        self.put('requirements-full.lock',b'# a newer root lock nobody copied into the engine\n')
+        result=self.checked(self.wheel(original))
+        self.assertFalse(result['passed'])
+        self.assertIn('tested dependency lock',' '.join(result['failures']))
     def test_wheel_rejects_symlink_even_when_content_matches_source(self):
         self.assertFalse(self.checked(self.wheel(self.package_files(),symlink='observatory/engine/example.py'))['passed'])
     def test_wheel_rejects_unreviewed_dist_info_payload(self):

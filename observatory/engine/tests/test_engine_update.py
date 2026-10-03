@@ -41,14 +41,25 @@ def bump(version: str, step: int) -> str:
 NEWER, OLDER = bump(CURRENT, 1), bump(CURRENT, -1)
 
 
-def wheel_bytes(version: str, requires: tuple[str, ...] = ('mcp==2.2.0; extra == "full"',)) -> bytes:
+def wheel_bytes(version: str, requires: tuple[str, ...] = ('mcp==2.2.0; extra == "full"',),
+                extra_files: dict[str, str] | None = None) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         meta = [f"Metadata-Version: 2.4", "Name: project-observatory", f"Version: {version}",
                 "Provides-Extra: full", *[f"Requires-Dist: {r}" for r in requires]]
         zf.writestr(f"project_observatory-{version}.dist-info/METADATA", "\n".join(meta) + "\n")
         zf.writestr("observatory/__init__.py", f'__version__ = "{version}"\n')
+        for name, text in (extra_files or {}).items():
+            zf.writestr(name, text)
     return buf.getvalue()
+
+
+LOCK_MEMBER = "observatory/engine/requirements-full.lock"
+
+
+def locked_wheel(version: str) -> bytes:
+    """A wheel carrying its tested dependency set where a real release carries it."""
+    return wheel_bytes(version, extra_files={LOCK_MEMBER: f"# synthetic lock of {version}\nmcp==2.2.0\n"})
 
 
 def sha(data: bytes) -> str:
@@ -139,6 +150,7 @@ class FakeGitHub:
 class FakeInstaller:
     def __init__(self, fail_on: set[str] = frozenset(), name="pip"):
         self.calls: list[tuple[str, bool]] = []
+        self.constraints: list[str | None] = []   # the text of each install's -c file
         self.fail_on, self.name = set(fail_on), name
         self.installed = CURRENT
 
@@ -148,6 +160,7 @@ class FakeInstaller:
     def install(self, wheel: Path, *, force: bool, constraints=None):
         version = wheel.name.split("-")[1]
         self.calls.append((version, force))
+        self.constraints.append(constraints.read_text() if constraints else None)
         if version in self.fail_on:
             import engine_update
             raise engine_update.InstallFailed(f"synthetic installer failure for {version}")
@@ -434,6 +447,35 @@ class UpdateTest(unittest.TestCase):
         rows = [json.loads(line) for line in (self.home / "store/logs/update.jsonl").read_text().splitlines()]
         self.assertEqual(rows[-1]["event"], "updated")
         self.assertTrue(all("at" in r and "event" in r for r in rows))
+
+    def test_the_release_lock_constrains_the_install(self):
+        # A wheel's `[full]` extra pins only the direct dependencies; the release's
+        # lock is what keeps the transitive ones at the versions CI tested.
+        self.gh.publish(NEWER, wheel=locked_wheel(NEWER))
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self.installer.constraints, [f"# synthetic lock of {NEWER}\nmcp==2.2.0\n"])
+        self.assertEqual(doc["constraints"], LOCK_MEMBER)
+        self.assertEqual(doc["degraded"], [])
+
+    def test_the_rollback_installs_with_the_running_release_lock(self):
+        self.gh.publish(CURRENT, latest=False, wheel=locked_wheel(CURRENT))
+        self.gh.publish(NEWER, wheel=locked_wheel(NEWER))
+        self.installer.fail_on = {NEWER}
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, self.mod.EXIT_FAILED, doc)
+        self.assertTrue(doc["rolled_back"])
+        self.assertEqual(self.installer.constraints, [f"# synthetic lock of {NEWER}\nmcp==2.2.0\n",
+                                                      f"# synthetic lock of {CURRENT}\nmcp==2.2.0\n"])
+
+    def test_a_wheel_without_the_lock_is_installed_unconstrained_and_says_so(self):
+        # Only the engine's own path counts: a lock file elsewhere in the archive is not the release's.
+        self.gh.publish(NEWER, wheel=wheel_bytes(NEWER, extra_files={"observatory/tools/requirements-full.lock": "x==1\n"}))
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self.installer.constraints, [None])
+        self.assertIsNone(doc["constraints"])
+        self.assertTrue(any(LOCK_MEMBER in d and "unconstrained" in d for d in doc["degraded"]), doc["degraded"])
 
     def plant_plugin(self, plugin_id: str):
         claude = self.base / "user" / ".claude"
