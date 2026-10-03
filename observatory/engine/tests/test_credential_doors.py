@@ -1052,6 +1052,23 @@ def test_or_stash_demands_a_label_because_the_provider_names_nothing() -> None:
     check("an inference key is refused — it cannot provision", rc == 1, str(rc))
     check("and points at install_key for what it IS good for", True, "")
 
+    # OFFLINE IS NOT "CANNOT MANAGE KEYS". An unreachable provider was reported
+    # as a key that cannot provision, with advice to install it as an inference
+    # key — the wrong door for a perfectly good provisioning key.
+    import contextlib
+    import io
+
+    def offline(*a, **k):
+        raise m.Unreachable("openrouter unreachable: URLError")
+    m._request = offline
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        rc = m.stash_value("sk-or-v1-" + "c" * 40, "offline", origin="test")
+    said = err.getvalue()
+    check("an unreachable provider is its own refusal, and nothing is stashed",
+          rc == 1 and "could not be reached" in said and "cannot manage keys" not in said
+          and "install_key" not in said and not (m.ADMIN_STORE / "offline").exists(), said)
+
 
 def test_or_rotation_creates_and_delivers_before_deleting() -> None:
     """The order is the contract: a delete-first rotation that fails halfway
