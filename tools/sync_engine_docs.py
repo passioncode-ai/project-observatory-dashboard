@@ -7,7 +7,11 @@
 The rule lives in tests/test_engine_doc_copies.py (`derived`), so the tool and
 the check cannot disagree: test paths lose `observatory/engine/`, and a relative
 link to a file the engine does not ship points at the repository.
+
+Arguments are parsed, not searched for: `--help` once fell through to write mode,
+and any unknown argument is refused rather than read as "write".
 """
+import argparse
 import sys
 from pathlib import Path
 
@@ -15,12 +19,21 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
 from test_engine_doc_copies import COPIES, ENGINE_DOCS, derived  # noqa: E402
 
-stale = []
-for name in COPIES:
-    want, path = derived(name), ENGINE_DOCS / name
-    if path.read_text(encoding="utf-8") != want:
-        stale.append(name)
-        if "--check" not in sys.argv:
-            path.write_text(want, encoding="utf-8")
-print(("stale: " if "--check" in sys.argv else "written: ") + (", ".join(stale) or "none"))
-sys.exit(1 if stale and "--check" in sys.argv else 0)
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="sync_engine_docs.py", description=__doc__.splitlines()[0])
+    ap.add_argument("--check", action="store_true", help="write nothing; exit 1 when a copy differs")
+    check = ap.parse_args(argv).check
+    stale = []
+    for name in COPIES:
+        want, path = derived(name), ENGINE_DOCS / name
+        if path.read_text(encoding="utf-8") != want:
+            stale.append(name)
+            if not check:
+                path.write_text(want, encoding="utf-8")
+    print(("stale: " if check else "written: ") + (", ".join(stale) or "none"))
+    return 1 if stale and check else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
