@@ -428,9 +428,11 @@ def main(argv: list[str]) -> int:
     by = {}
     for r in rows:
         by[r.get("liveness", "?")] = by.get(r.get("liveness", "?"), 0) + 1
+    # The liveness tally follows a dash only when there is one: with no
+    # declaration the line used to end in a dangling "— ".
     print(f"mcp: {len(rows)} declaration(s) across "
-          f"{len({r.get('agent') for r in rows})} agent(s) — "
-          + ", ".join(f"{k} {v}" for k, v in sorted(by.items())))
+          f"{len({r.get('agent') for r in rows})} agent(s)"
+          + (" — " + ", ".join(f"{k} {v}" for k, v in sorted(by.items())) if by else ""))
     for d in degraded:
         print(f"  degraded {d['source']}: {d['reason']}")
     return 0

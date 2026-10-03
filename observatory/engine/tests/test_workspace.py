@@ -259,6 +259,43 @@ class WorkspaceTests(unittest.TestCase):
         self.run_cli('local')
         types={f.get('type') for f in json.loads((self.home/'registry/findings.json').read_text())['findings']}
         self.assertNotIn('dashboard.unverified',types)
+    def test_the_first_local_reads_as_a_person_reads_it(self):
+        # A new user's first `local` printed Python dicts from the merge
+        # (`anchor: {'local-folder': 2}`), listed integrations they never
+        # switched on under "degraded", printed the registrar counters of an
+        # estate with no domains, and showed the findings counts from BEFORE
+        # `settle` rebuilt the board, so the last numbers on screen were not
+        # the board's.
+        import shutil
+        self.run_cli('init')
+        projects=self.base/'projects';(projects/'alpha-web').mkdir(parents=True)
+        (projects/'alpha-web'/'package.json').write_text('{"name":"alpha-web"}')
+        self.run_cli('configure','sources','projects',str(projects))
+        out=self.run_cli('local').stdout
+        self.assertNotRegex(out, r"\{'[a-z-]+': \d+")
+        self.assertNotIn('duplicate repo names: []', out)
+        self.assertNotIn('namecheap_', out)
+        self.assertNotIn('cloudflare_invalid_nameservers', out)
+        merge = out.split('── merge', 1)[1].split('── emit', 1)[0]
+        self.assertNotIn('degraded:', merge, merge)
+        self.assertIn('switched off', merge)
+        self.assertIn('github', merge)
+        board = json.loads((self.home/'registry/findings.json').read_text())['findings']
+        counts = {sev: sum(1 for f in board if f.get('severity') == sev) for sev in ('critical', 'warning', 'info')}
+        last = [l for l in out.splitlines() if 'critical ' in l and 'warning ' in l][-1]
+        self.assertIn(f"critical {counts['critical']}", last)
+        self.assertIn(f"info {counts['info']}", last)
+        if shutil.which('node'):
+            # settle rebuilt the board, so it is the one that reprints the counts
+            self.assertTrue(last.startswith('settle:'), last)
+    def test_scan_mcp_summary_has_no_dangling_dash(self):
+        self.run_cli('init')
+        (self.user/'.claude.json').write_text('{}')
+        self.run_cli('configure','sources','mcp_config_root',str(self.user))
+        self.run_cli('configure','integrations','mcp','true')
+        out=self.run_cli('scan-mcp').stdout
+        line=next(l for l in out.splitlines() if l.startswith('mcp:'))
+        self.assertFalse(line.rstrip().endswith('—'), line)
     def test_configure_sets_the_model_chain_and_the_budget(self):
         # A fresh models.json has chain [] and every ceiling 0.0, and nothing
         # offered a way to set them but editing the file by hand.

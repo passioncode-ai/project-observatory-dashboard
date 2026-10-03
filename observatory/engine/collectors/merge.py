@@ -638,20 +638,37 @@ out["stale_remotes"] = [
     for was, real in sorted(moved.items())]
 out["transfers_unchecked"] = unchecked
 atomic.write_json(SP / "model.json", out)
-if degraded:
-    print(f"degraded: {len(degraded)} source(s)")
-    for d in degraded:
+# THE CONSOLE SUMMARY, written for the person running `local`. It printed
+# Python dicts and an empty "duplicate repo names: []", and listed integrations
+# the user never switched on as "degraded". The model above still records every
+# source in `degraded`; only what is SAID here separates "switched off" (a
+# choice) from "degraded" (a switch that is on and could not be measured).
+import degradations
+_switch = {id(d): degradations.merge_source_off(str(d.get("source") or "")) for d in degraded}
+off = sorted({name for name in _switch.values() if name})
+real = [d for d in degraded if not _switch[id(d)]]
+if real:
+    print(f"degraded: {len(real)} source(s)")
+    for d in real:
         print(f"  {d['source']}: {d['reason'][:120]}")
+if off:
+    print("not measured, switched off: " + ", ".join(off)
+          + " (`project-observatory full configure integrations NAME true`)")
 P=out["projects"]
-print(f"projects={len(P)}  repositories={len(repos)}")
 from collections import Counter
-print("anchor:",dict(Counter(p["anchor"] for p in P.values())))
-print("ownership:",dict(Counter(p["ownership"] for p in P.values())))
-print("with site:",sum(1 for p in P.values() if p["sites"]),
-      "| registry-confirmed:",sum(1 for p in P.values() if any(s["confidence"]=="registry-confirmed" for s in p["sites"])))
-print("with vault note:",sum(1 for p in P.values() if p["has_note"]),
-      "| with local folder:",sum(1 for p in P.values() if p["folders"]))
-print("duplicate repo names:",duplicates)
-print("\nmulti-repo projects:")
-for p in sorted(P.values(),key=lambda x:-len(x["repos"])):
-    if len(p["repos"])>1: print(f'  {p["name"]:<34} {len(p["repos"]):>2} repos  {", ".join(p["repos"][:6])}{" …" if len(p["repos"])>6 else ""}')
+def _tally(counter):
+    return ", ".join(f"{k} {v}" for k, v in sorted(counter.items())) or "none"
+print(f"projects {len(P)}, repositories {len(repos)}")
+print("  anchored by:", _tally(Counter(p["anchor"] for p in P.values())))
+print("  ownership:", _tally(Counter(p["ownership"] for p in P.values())))
+print(f"  with a site {sum(1 for p in P.values() if p['sites'])} "
+      f"(registry-confirmed {sum(1 for p in P.values() if any(s['confidence']=='registry-confirmed' for s in p['sites']))}), "
+      f"with a wiki note {sum(1 for p in P.values() if p['has_note'])}, "
+      f"with a local folder {sum(1 for p in P.values() if p['folders'])}")
+if duplicates:
+    print("  duplicate repository names:", ", ".join(map(str, duplicates)))
+multi = [p for p in sorted(P.values(), key=lambda x: -len(x["repos"])) if len(p["repos"]) > 1]
+if multi:
+    print("  multi-repository projects:")
+    for p in multi:
+        print(f'    {p["name"]:<34} {len(p["repos"]):>2} repos  {", ".join(p["repos"][:6])}{" …" if len(p["repos"])>6 else ""}')

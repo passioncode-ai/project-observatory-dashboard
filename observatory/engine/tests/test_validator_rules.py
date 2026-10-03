@@ -67,7 +67,7 @@ def test_the_untouched_copy_passes() -> None:
     code, out = run(reg)
     check("the complete synthetic registry validates", code == 0, out[-400:])
     check('validation summary counts its snapshot, not the wider zone inventory',
-          'cloudflare_active=1\n' in out and 'cloudflare_invalid_nameservers=1\n' in out,
+          'Cloudflare zones active 1, invalid nameservers 1;' in out,
           out[-500:])
     reg = sandbox()
     edit(reg, "domain-liveness.json", lambda d: d.update(source_refs=[]))

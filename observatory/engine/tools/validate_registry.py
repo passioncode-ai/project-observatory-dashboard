@@ -356,19 +356,17 @@ def main():
     print("Inventory validation OK" + (" (degraded evidence)" if degraded else ""))
     print(f"degraded_sources={len(degraded)}")
     for reason in degraded: print(f"DEGRADED: {reason}")
-    print(f"owned_domains={len(dn)}")
-    print(f"namecheap_registered={sum(d['registrar']=='namecheap' for d in domains)}")
-    print(f"cloudflare_registered={sum(d['registrar']=='cloudflare' for d in domains)}")
-    print(f"cloudflare_active={status['active']}")
-    print(f"cloudflare_invalid_nameservers={status['invalid_nameservers']}")
-    print(f"excluded_not_owned={len(xi)}")
-    print(f"namecheap_export_rows={len(raw_rows)}")
-    print(f"namecheap_export_unique={len(raw_unique)}")
-    print(f"namecheap_export_duplicate_rows={duplicates}")
+    # The domain counters belong to an estate that has domains: printed as nine
+    # `key=0` lines to a new user with none, they read as maintainer debugging.
+    if dn or raw_rows or snapshot_zones:
+        print(f"domains: {len(dn)} owned (Namecheap {sum(d['registrar']=='namecheap' for d in domains)}, "
+              f"Cloudflare {sum(d['registrar']=='cloudflare' for d in domains)}), {len(xi)} excluded as not owned; "
+              f"Cloudflare zones active {status['active']}, invalid nameservers {status['invalid_nameservers']}; "
+              f"registrar export {len(raw_rows)} row(s), {len(raw_unique)} unique, {duplicates} duplicate")
     print(f"projects={len(projects)} repositories={len(repos)} relations={len(relations)}")
-    print(f"projects_with_canonical_page={sum(1 for p in projects if p.get('canonical_page'))}")
-    print(f"projects_without_vault_note={sum(1 for p in projects if not p.get('has_vault_note'))}")
-    print(f"repositories_with_local_checkout={sum(1 for r in repos if r.get('local'))}")
+    print(f"  {sum(1 for p in projects if p.get('canonical_page'))} with a canonical page, "
+          f"{sum(1 for p in projects if not p.get('has_vault_note'))} without a wiki note; "
+          f"{sum(1 for r in repos if r.get('local'))} repositories with a local checkout")
     return 0
 if __name__=="__main__":
     try:

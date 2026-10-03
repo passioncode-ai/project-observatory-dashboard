@@ -1044,10 +1044,7 @@ def maintaining_the_engine(root: pathlib.Path | None = None) -> bool:
 #: integration is switched off was not MISSED — it was never asked for — so it is
 #: no warning on the board (model.json still records it, and doctor says what
 #: is enabled without its source). Sources not listed here are always read.
-MERGE_SOURCE_INTEGRATION = {
-    "wiki": "wiki", "github": "github", "sessions.json": "sessions",
-    "remotes.json": "git_remotes", "bitbucket.json": "bitbucket",
-}
+MERGE_SOURCE_INTEGRATION = degradations.MERGE_SOURCE_INTEGRATION
 
 
 def merge_findings(deg: list[dict], integrations: dict | None = None) -> list[dict]:
