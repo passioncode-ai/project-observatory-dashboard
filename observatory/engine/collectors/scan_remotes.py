@@ -66,6 +66,22 @@ def git(args: list[str], cwd: pathlib.Path | None = None, timeout: int = 10):
         return 127, "", f"git could not be run: {type(exc).__name__}: {exc}"
 
 
+def failure_reason(stderr: str) -> str:
+    """The line of git's stderr that names the CAUSE, at most 200 characters.
+
+    git prints the cause first and its generic advice last: for an SSH failure
+    the last line is "and the repository exists.", which is what this collector
+    used to report — advice in place of the reason. So: ssh's own line when ssh
+    failed, else git's first `fatal:` / `error:` line, else the first line.
+    """
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    for prefixes in (("ssh:",), ("fatal:", "error:")):
+        for line in lines:
+            if line.startswith(prefixes):
+                return line[:200]
+    return (lines[0] if lines else "unknown")[:200]
+
+
 #: Every state this collector can put in `sync`. PUBLISHED, because both
 #: consumers — the findings table and the dashboard's chip map — look the state
 #: up and skip a miss in silence, so an unlisted state reaches neither surface
@@ -203,7 +219,7 @@ def probe(rec: dict) -> tuple[str, dict]:
     if code != 0:
         # A permission failure and a deleted repository are different facts and
         # the operator needs to tell them apart; git says which, so pass it on.
-        out.update(reachable=False, reason=(stderr.splitlines() or ["unknown"])[-1][:200])
+        out.update(reachable=False, reason=failure_reason(stderr))
         return folder, out
 
     default_branch, remote_head, branch_sha = "", "", ""
