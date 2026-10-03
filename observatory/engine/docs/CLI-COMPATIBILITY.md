@@ -48,8 +48,13 @@ configured scheduled workflow. This is not a silent filtering of `all`.
 
 `local` runs these steps in order:
 
-1. `scan-fs`, `merge`, `emit`, `validate`.
-2. `scan-events`, `findings`, `dashboard`, `smoke-pages`.
+1. `scan-fs`, `env`, `merge`, `emit`, `validate`.
+2. `scan-events`, `findings`, `dashboard`, `smoke`, `smoke-pages`, `settle`.
+
+`env` reads the projects' env files for variable names and keyed fingerprints,
+never values. `smoke` records whether the page's script runs; `settle` rebuilds
+the board once when the only row it lacks is that verdict, so a workspace's first
+`local` does not report its own page as unverified.
 
 Its children receive `OBSERVATORY_OFFLINE=1`, which disables configured
 integrations for that invocation; settings are not rewritten. In particular,
