@@ -379,9 +379,12 @@ app's assistant window, `full assistant`, or the MCP `observatory_assistant_ask`
 3. `project-observatory full configure model chain VENDOR/MODEL`
 4. the three `full configure budget …` ceilings above
 
-With the agent on, `full doctor` shows an `agent` section with `model_status` and the
-`next` commands still missing; `project-observatory full assistant status` says the same
-without spending. On macOS the
+With the agent on, `full doctor` shows an `agent` section with `model_status` (`no-model`,
+`no-budget`, `no-key` or `ready`), `key_status`, `key_source` and the `next` commands still
+missing, the key step included; `project-observatory full assistant status` says the same
+without spending. An `OPENROUTER_API_KEY` in the environment of the process counts as the
+assistant's key and is used ahead of the key file (`key_source` then says `environment`):
+a personal key exported in your shell profile is spent by the assistant and the agent. On macOS the
 two launchd installers write workspace-specific jobs only after the scheduler
 is explicitly enabled; Linux can run `project-observatory full tick` under a
 supervisor chosen by the user. Do not create duplicate writers for one home.

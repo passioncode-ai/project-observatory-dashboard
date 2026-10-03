@@ -487,7 +487,16 @@ def doctor(base: Path) -> dict:
             "credentials": "values are never returned", "network_calls": 0,
             # With the agent on, whether it has a model and a budget: a fresh
             # models.json has neither, and the refusal a call meets says less.
-            **({"agent": config.model_readiness(base)} if (doc.get("features") or {}).get("agent") is True else {})}
+            **({"agent": config.model_readiness(base, _key_report())}
+               if (doc.get("features") or {}).get("agent") is True else {})}
+
+
+def _key_report() -> dict:
+    """The assistant key's state and source, from the provider module itself so
+    doctor and `assistant status` cannot disagree about where a key is found."""
+    sys.path.insert(0, str(config.SOURCE))
+    from agent import providers
+    return providers.key_report()
 
 
 #: Every usage line names the entry point a person types, never this file.

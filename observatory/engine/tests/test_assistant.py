@@ -336,7 +336,15 @@ class AssistantTests(unittest.TestCase):
         doc=self.a.status()
         self.assertEqual((doc['model_configured'],doc['model_status']),(True,'no-budget'))
         self.configure_model()
-        self.assertEqual(self.a.status()['model_status'],'ready')
+        # No key: not ready, and `next` names the step (it was `ready`, no `next`).
+        doc=self.a.status()
+        self.assertEqual((doc['model_status'],doc['key_status'],doc['key_source']),('no-key','absent',None))
+        self.assertIn('install_key.py" --for observatory',' '.join(doc['next']))
+        with patch.dict(os.environ,{'OPENROUTER_API_KEY':'sk-or-v1-'+'FAKE'*16}):
+            doc=self.a.status()
+        self.assertEqual((doc['model_status'],doc['key_status'],doc['next']),('ready','present',[]))
+        self.assertIn('OPENROUTER_API_KEY',doc['key_source'])
+        self.assertNotIn('FAKE',json.dumps(doc))
 
     def test_ask_refuses_an_unconfigured_model_before_any_spend(self):
         for setup,code in ((lambda:None,'model-unconfigured'),

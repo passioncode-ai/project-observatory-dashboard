@@ -825,6 +825,33 @@ def have_key() -> bool:
     return bool(key)
 
 
+def key_report() -> dict:
+    """Whether the chat key is usable and WHERE it comes from — never a character
+    of it, and no absolute path (this lands in app windows and doctor output).
+
+    `key_source` exists because the environment wins: an `OPENROUTER_API_KEY`
+    exported in the shell that starts the engine is the assistant's key, ahead
+    of every file, so a person's own key could be spent with nothing on screen
+    saying so. Now doctor and `assistant status` name the source."""
+    try:
+        key, where = read_key()
+    except Fatal as exc:
+        return {"key_status": "refused", "key_source": None,
+                "key_note": str(exc).split("\n")[0][:200]}
+    if not key:
+        return {"key_status": "absent", "key_source": None}
+    if where.startswith("$"):
+        source = (f"environment: ${KEY_ENV}, inherited from the process that started the engine; "
+                  f"it is used ahead of every key file")
+    elif os.environ.get("OBSERVATORY_KEY_FILE"):
+        source = "file: OBSERVATORY_KEY_FILE"
+    elif pathlib.Path(where).name == ".openrouter-key":
+        source = "file: the workspace's .openrouter-key (install_key.py --for observatory)"
+    else:
+        source = "file: the secret store's openrouter key"
+    return {"key_status": "present", "key_source": source}
+
+
 def key_status() -> str:
     """One line, for a human. Never prints the key, only its shape."""
     try:
