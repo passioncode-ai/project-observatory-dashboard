@@ -69,8 +69,8 @@ class EngineDocCopies(unittest.TestCase):
             "optional-dependencies"]["full"]
         names = {re.split(r"[=<>!~ ;\[]", requirement, maxsplit=1)[0].lower() for requirement in extra}
         source = (ROOT / "observatory/engine/workspace.py").read_text(encoding="utf-8")
-        declared = re.search(r"FULL_MODULES = \{(.*?)\}", source, re.S).group(1)
-        self.assertEqual(set(re.findall(r'"([a-z0-9-]+)":', declared)), names)
+        declared = re.search(r"FULL_DISTRIBUTIONS = \[(.*?)\]", source, re.S).group(1)
+        self.assertEqual(set(re.findall(r'"([a-z0-9-]+)"', declared)), names)
         lock = (ROOT / "requirements-full.lock").read_text(encoding="utf-8").lower()
         for requirement in extra:
             with self.subTest(requirement):

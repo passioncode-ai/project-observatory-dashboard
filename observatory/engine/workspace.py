@@ -5,7 +5,7 @@ import contextlib
 import datetime
 import fcntl
 import hashlib
-import importlib.util
+import importlib.metadata
 import json
 import os
 from pathlib import Path
@@ -60,19 +60,21 @@ def lock(base: Path):
         os.close(fd)
 
 
-#: The `[full]` extra's distributions and the module each one is imported as.
-#: tests/test_engine_doc_copies.py keeps the keys equal to pyproject.toml's extra.
-FULL_MODULES = {"mcp": "mcp", "jsonschema": "jsonschema", "sqlite-vec": "sqlite_vec",
-                "google-auth": "google.auth", "cryptography": "cryptography"}
+#: The `[full]` extra's distributions, by the name pip installs them under.
+#: tests/test_engine_doc_copies.py keeps this equal to pyproject.toml's extra.
+#: Checked as installed DISTRIBUTIONS, not importable modules: the engine's own
+#: `mcp/` package sits on sys.path and would answer for the absent MCP SDK.
+FULL_DISTRIBUTIONS = ["mcp", "jsonschema", "sqlite-vec", "google-auth", "cryptography"]
 #: The tested dependency set, shipped inside the engine (see requirements-full.lock).
 LOCK_FILE = config.SOURCE / "requirements-full.lock"
 
 
-def _absent(module: str) -> bool:
+def _absent(distribution: str) -> bool:
     try:
-        return importlib.util.find_spec(module) is None
-    except (ImportError, ValueError):   # a dotted name whose parent package is absent
+        importlib.metadata.distribution(distribution)
+    except importlib.metadata.PackageNotFoundError:
         return True
+    return False
 
 
 def full_extra_command() -> str:
@@ -94,7 +96,7 @@ def require_runtime() -> dict:
     interpreter = ("Full engine requires Python with SQLite 3.37+ and loadable extensions; this interpreter "
                    f"({sys.executable}, SQLite {sqlite3.sqlite_version}) {{why}}. On macOS use Homebrew "
                    "Python 3.14 in a virtual environment; reinstall the full package there.")
-    missing = sorted(module for module in FULL_MODULES.values() if _absent(module))
+    missing = [name for name in FULL_DISTRIBUTIONS if _absent(name)]
     extra = ("The full engine's dependencies are not installed in this interpreter (missing: "
              + ", ".join(missing) + "): the package was installed without its `[full]` extra. Install it at "
              "the tested versions: " + full_extra_command()) if missing else ""
