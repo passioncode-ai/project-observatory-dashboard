@@ -3,10 +3,13 @@
 
 install  adds the GitHub marketplace, installs the plugin, turns plugin
          auto-update ON (pass --no-auto-update to keep it off) and sets
-         OBSERVATORY_ROOT / OBSERVATORY_HOME for the plugin's hooks.
+         OBSERVATORY_ROOT / OBSERVATORY_HOME / OBSERVATORY_PYTHON for the
+         plugin's hooks. It reports "installed" only when Claude Code's own
+         installed_plugins.json lists the plugin afterwards.
 status   reports the marketplace source, auto-update, installed version and
          whether the hooks can find this engine and workspace.
-uninstall removes the plugin, its marketplace and the keys install added.
+uninstall removes the plugin, its marketplace and the keys install added,
+         with any settings object those keys leave empty.
 
 The same plugin can also reach Claude Code through another channel: a launcher
 (the PassionCode one installs it from its local `passioncode` marketplace as
@@ -63,10 +66,27 @@ def claude_home() -> Path:
 def claude_bin() -> str:
     found = os.environ.get("CLAUDE_BIN") or shutil.which("claude")
     if not found:
-        raise PluginError("Claude Code (`claude`) is not on PATH. Install Claude Code, or add the "
-                          f"marketplace by hand: `/plugin marketplace add {REPOSITORY}` then "
-                          f"`/plugin install {PLUGIN}`")
+        raise PluginError("Claude Code (`claude`) is not on PATH. Install Claude Code and run this again, or add "
+                          f"the plugin by hand inside Claude Code: `/plugin marketplace add {REPOSITORY}` then "
+                          f"`/plugin install {PLUGIN}`. " + manual_env_advice())
     return found
+
+
+def manual_env_advice() -> str:
+    """What the by-hand route leaves out: the hook environment only `agent install` writes.
+
+    Without it the hooks run but cannot find this engine, workspace or interpreter,
+    which is silent until someone wonders why nothing was recorded."""
+    names = ", ".join(ENV_KEYS)
+    try:
+        values = json.dumps(workspace_env(), ensure_ascii=False)
+        where = settings_path()
+    except (configuration.ConfigurationError, OSError) as exc:
+        return (f"That route leaves the hook environment ({names}) unset, and this workspace could not be "
+                f"resolved to say its values ({exc}).")
+    return (f"That route leaves the hook environment ({names}) unset, so the hooks cannot find this engine and "
+            f"workspace: add {values} under \"env\" in {where}, or run `project-observatory full agent install` "
+            "again once `claude` is on PATH, which writes them.")
 
 
 def run_claude(*args: str) -> subprocess.CompletedProcess:
@@ -116,8 +136,12 @@ def known_path() -> Path:
     return claude_home() / "plugins" / "known_marketplaces.json"
 
 
+def installed_path() -> Path:
+    return claude_home() / "plugins" / "installed_plugins.json"
+
+
 def installed_plugins() -> dict:
-    doc = read_json(claude_home() / "plugins" / "installed_plugins.json")
+    doc = read_json(installed_path())
     plugins = doc.get("plugins") or {}
     return plugins if isinstance(plugins, dict) else {}
 
@@ -251,6 +275,17 @@ def install(auto_update: bool = True) -> dict:
         steps.append("plugin updated")
     else:
         steps.append("plugin installed")
+    # Claude Code's exit code is not the evidence: its own record of installed
+    # plugins is. A CLI that exits 0 without installing (an older or wrapped
+    # `claude`) would otherwise make install say "installed" while status says not.
+    have, ship = installed_version(), shipped_version()
+    if not have:
+        raise PluginError(f"`claude plugin` exited 0, but {installed_path()} lists no {PLUGIN}: Claude Code did "
+                          f"not install it. Run `claude plugin install {PLUGIN}` to see its own error; "
+                          f"nothing was written to {settings_path()}")
+    if have != ship:
+        steps.append(f"Claude Code installed {have}, this engine ships {ship}: the marketplace serves another "
+                     "version; `agent status` reports it until they match")
     settings = read_json(settings_path())
     settings.setdefault("extraKnownMarketplaces", {})[MARKETPLACE] = {
         "source": dict(SOURCE), "autoUpdate": auto_update}
@@ -263,8 +298,8 @@ def install(auto_update: bool = True) -> dict:
         known[MARKETPLACE]["autoUpdate"] = auto_update
         write_json(known_path(), known)
     steps.append(f"auto-update {'on' if auto_update else 'off'}")
-    return {"status": "installed", "plugin": PLUGIN, "source": SOURCE, "auto_update": auto_update,
-            "env": workspace_env(), "replaced_env": {k: v for k, v in previous_env.items()
+    return {"status": "installed", "plugin": PLUGIN, "installed_version": have, "shipped_version": ship,
+            "source": SOURCE, "auto_update": auto_update, "env": workspace_env(), "replaced_env": {k: v for k, v in previous_env.items()
                                                       if v and v != workspace_env()[k]},
             "steps": steps, "next": "Restart Claude Code sessions: plugins load at session start."}
 
@@ -337,25 +372,36 @@ def uninstall() -> dict:
         p = run_claude(*args)
         steps.append(f"{' '.join(args)}: {'ok' if p.returncode == 0 else 'not present'}")
     settings = read_json(settings_path())
-    changed = False
-    if MARKETPLACE in (settings.get("extraKnownMarketplaces") or {}):
-        del settings["extraKnownMarketplaces"][MARKETPLACE]; changed = True
-    if PLUGIN in (settings.get("enabledPlugins") or {}):
-        del settings["enabledPlugins"][PLUGIN]; changed = True
-    env = settings.get("env") or {}
+    changed = _drop(settings, "extraKnownMarketplaces", MARKETPLACE)
+    changed = _drop(settings, "enabledPlugins", PLUGIN) or changed
     others = other_channels(settings)
     if others:
         steps.append(f"hook environment kept: {others[0]['plugin']} is managed by {others[0]['managed_by']} "
                      "and its hooks still read it")
     else:
         for k, v in workspace_env().items():
-            if env.get(k) == v:
-                del env[k]; changed = True
+            if (settings.get("env") or {}).get(k) == v:
+                changed = _drop(settings, "env", k) or changed
     if changed:
         write_json(settings_path(), settings)
         steps.append("settings keys removed")
     return {"status": "uninstalled", "steps": steps,
             "next": "Restart Claude Code sessions. Your workspace was not touched."}
+
+
+def _drop(settings: dict, section: str, key: str) -> bool:
+    """Remove one key install wrote; a section that only held install's keys goes with it.
+
+    install creates `extraKnownMarketplaces`, `enabledPlugins` and `env` when they
+    are absent, so an uninstall that left them as `{}` would leave settings.json
+    different from before the install."""
+    block = settings.get(section)
+    if not isinstance(block, dict) or key not in block:
+        return False
+    del block[key]
+    if not block:
+        del settings[section]
+    return True
 
 
 def parser() -> argparse.ArgumentParser:

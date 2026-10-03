@@ -286,7 +286,16 @@ Claude Code's user settings for the hooks. `full agent status` shows the
 installed and shipped versions and anything the hooks would miss; `full agent
 uninstall` reverses it. The hook environment it writes is `OBSERVATORY_ROOT`
 (the engine), `OBSERVATORY_HOME` (the workspace) and `OBSERVATORY_PYTHON` (the
-interpreter that runs the hooks). A directory-sourced marketplace from an earlier setup is
+interpreter that runs the hooks). `install` says "installed" only after Claude Code's
+own `installed_plugins.json` lists the plugin, and reports the version it lists
+(`installed_version`) beside the one this engine ships; a `claude` that exits 0 without
+installing is refused and nothing is written to settings. `uninstall` removes the keys
+it added and the `env`, `enabledPlugins` or `extraKnownMarketplaces` objects they leave
+empty. Installing by hand inside Claude Code (`/plugin marketplace add
+passioncode-ai/project-observatory-dashboard`, then `/plugin install
+observatory-log@observatory-log`) leaves those three variables unset; without `claude`
+on PATH, `install` prints their values and the settings file to put them in. A
+directory-sourced marketplace from an earlier setup is
 replaced. When another channel already installs and enables the plugin under
 its own id (the PassionCode launcher installs `observatory-log@passioncode`),
 `install` leaves that copy alone, adds no second id (two copies would fire every

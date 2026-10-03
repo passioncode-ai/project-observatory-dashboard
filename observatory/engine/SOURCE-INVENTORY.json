@@ -701,8 +701,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "7f20bf2a46ab73c76a6faeb28bf64f6ed74a0e9af1581e0df0b546b8105c0b24",
-      "bytes": 44159,
+      "export_sha256": "e61ca5c94ca403738af0a5a67eca52046edf66893721b99b4495e04eaf66f89d",
+      "bytes": 44858,
       "upstream_modified": true
     },
     {
@@ -1679,8 +1679,8 @@
       "path": "tests/test_agent_plugin.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f6db162304481099c00b7a0251ce7a489deb3b9050e3f6334b45adb433a3f83f",
-      "bytes": 18429
+      "export_sha256": "c2792f93f71c2056f1ce04e26c774baf62e30ece462ef1d5187ab1c40a44517b",
+      "bytes": 20729
     },
     {
       "path": "tests/test_agent_queue.py",
@@ -3194,8 +3194,22 @@
       "path": "tools/agent_plugin.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "be2b310ea04b1b710841f32e176a9e8959822ef2d7cc8ed0f25b8c4b40ca724d",
-      "bytes": 18095
+      "export_sha256": "54592f1602b796771936695c17a137eb25064f089bc3865f1753955bf25523ad",
+      "bytes": 20627
+    },
+    {
+      "path": "tools/agent_plugin.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "54592f1602b796771936695c17a137eb25064f089bc3865f1753955bf25523ad",
+      "bytes": 20627
+    },
+    {
+      "path": "tools/agent_plugin.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "54592f1602b796771936695c17a137eb25064f089bc3865f1753955bf25523ad",
+      "bytes": 20627
     },
     {
       "path": "tools/audit_vault_links.py",
@@ -3799,7 +3813,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 479,
+  "file_count": 481,
   "excluded": [
     "git-history",
     "operator-registries",
