@@ -273,21 +273,51 @@ def act_revoke(body: dict) -> dict:
     return {"ok": True, **r}
 
 
+#: The vault's door. A module constant so a test can stand a silent program in
+#: its place and prove an exit code alone is not taken as a receipt.
+VAULT = ROOT / "tools" / "vault.py"
+#: What `vault.py leak` prints when, and only when, it appended the row.
+_RECEIPT = re.compile(r"^recorded: (leak:\S+)$", re.M)
+
+
 def act_leak(body: dict) -> dict:
-    """Mark a credential leaked. No value crosses — only where it was seen."""
+    """Mark a credential leaked. No value crosses — only where it was seen.
+
+    THE BODY IS DATA, NEVER OPTIONS. Its fields were handed to `vault.py` as
+    positional argv, so `{"project": "--help"}` printed the help, exited 0 and
+    this route answered 200 `marked` with nothing recorded, and `"where":
+    "--force"` came back as usage text. Now the names are validated here, in
+    process, by the vault's own `validate_names` (the shape test every door
+    shares); `--where=<text>` binds the place to its flag whatever it starts
+    with; `--` ends the options before the three names; and success is the
+    vault's own receipt line, not its exit code.
+    """
+    fields = {}
     for field in ("project", "env", "name", "where"):
-        if not (body.get(field) or "").strip():
-            raise ValueError(f"{field} is required; a leak with no `where` is a note "
+        value = body.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{field} is required as text; a leak with no `where` is a note "
                              f"nobody can act on")
+        fields[field] = value.strip()
+    sys.path.insert(0, str(ROOT / "tools"))
+    import vault
+    vault.validate_names(fields["project"], fields["env"], fields["name"])
     import subprocess
-    args = [sys.executable, str(ROOT / "tools/vault.py"), "leak",
-            body["project"], body["env"], body["name"], "--where", body["where"]]
-    audit("leak", f"{body['project']}/{body['env']}/{body['name']}",
+    args = [sys.executable, str(VAULT), "leak", f"--where={fields['where']}", "--",
+            fields["project"], fields["env"], fields["name"]]
+    audit("leak", f"{fields['project']}/{fields['env']}/{fields['name']}",
           {"location_supplied": True})
     p = subprocess.run(args, capture_output=True, text=True, timeout=60)
     if p.returncode != 0:
-        raise LookupError(p.stderr.strip()[-200:] or "vault refused the mark")
-    return {"ok": True, "marked": f"{body['project']}/{body['env']}/{body['name']}"}
+        raise LookupError(credential_shape.redact(p.stderr.strip()[-200:]) or "vault refused the mark")
+    receipt = _RECEIPT.search(p.stdout or "")
+    if not receipt:
+        raise RuntimeError("the vault exited without its receipt line, so nothing is known to "
+                           "be recorded; run `vault.py leaks` to see the register")
+    # The slot as the VAULT recorded it, read from its receipt
+    # (`leak:<time>:<project>/<env>/<NAME>`), not as the request spelled it.
+    marked = receipt.group(1).rsplit(":", 1)[-1]
+    return {"ok": True, "marked": marked, "receipt": receipt.group(1)}
 
 
 def act_annotate(body: dict) -> dict:
@@ -615,6 +645,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(404, {"error": str(exc)})
         except urllib.error.HTTPError as exc:
             self._send(502, {"error": f"the provider refused: HTTP {exc.code}"})
+        except RuntimeError as exc:
+            # An action that ran and could not confirm its effect (the vault
+            # without its receipt). Its sentence is written here, not by the
+            # caller, and is scrubbed like everything else this server says.
+            self._send(500, {"error": credential_shape.redact(str(exc))})
         except Exception as exc:                                           
             self._send(500, {"error": "action failed; inspect the local service configuration"})
 
