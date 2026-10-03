@@ -2588,9 +2588,11 @@ def collect() -> list[dict]:
             out.append({
                 "type": "mcp.own_unregistered", "subject": "estate:mcp", "severity": "warning",
                 **titled("the observatory's own MCP server is declared in no agent"),
-                "detail": ("`mcp/server.py` serves eighteen tools — recall, credentials by "
-                           "name, proposals — and none of them is reachable until an "
-                           "agent's config names the server (credentials audit G14)."),
+                # No count: the server's tool list grows, and a number written
+                # here went stale while the sentence still read as measured.
+                "detail": ("`mcp/server.py` serves the observatory's tools — recall, "
+                           "credentials by name, proposals — and none of them is "
+                           "reachable until an agent's config names the server."),
                 "action": mcp_registration_command(),
                 "evidence": ["registry/mcp-servers.json#own_declared"]})
 
@@ -3325,9 +3327,8 @@ def collect() -> list[dict]:
             "severity": "info",
             **titled("{receipt} reports {n} sources it could not measure", receipt=receipt, n=len(rows)),
             "detail": ("A collector that cannot read a source says so in its own "
-                       "`degraded` list rather than returning an empty result — "
-                       "AGENTS.md rule 7 — and this row is what carries that to a "
-                       "person. "
+                       "`degraded` list rather than returning an empty result, and "
+                       "this row is what carries that to a person. "
                        + clipped("; ".join(shown), 900)
                        + (f" … and {rest} more source(s) not listed" if rest > 0 else "")
                        + ". Each reason is the collector's own; nothing here "
