@@ -789,6 +789,20 @@ def test_a_board_with_the_agent_off_does_not_ask_for_model_health() -> None:
                     "provider.health_unreadable")))
 
 
+def test_finding_text_cites_nothing_a_reader_cannot_open() -> None:
+    """A finding is read on a user's machine, where only the engine is
+    installed. Three sentences cited what is not there or is no longer true:
+    "serves eighteen tools" (the server lists more, and the count is not kept
+    in step), "(credentials audit G14)" and "AGENTS.md rule 7" — references
+    into a maintainers' record no install ships. The rule modules' literal
+    text is searched for each pattern."""
+    import re
+    bad = re.compile(r"AGENTS\.md rule|audit G\d+|\b(?:eighteen|nineteen|twenty|twenty-\w+) tools\b")
+    for f in sorted((ROOT / "tools").glob("*findings*.py")):
+        hits = [m.group(0) for m in bad.finditer(f.read_text(encoding="utf-8"))]
+        check(f"{f.name} cites no internal record and no stale tool count", not hits, str(hits))
+
+
 def test_a_disabled_integration_is_not_an_unmeasured_source() -> None:
     """model.degraded warned that wiki, github, sessions, remotes and bitbucket were
     unmeasured on a board where none of them is switched on."""
@@ -889,6 +903,7 @@ if __name__ == "__main__":
                test_an_extra_checkout_holding_work_is_reported,
                test_a_repository_with_no_remote_at_all_is_reported,
                test_unpushed_work_on_an_uninventoried_host_is_reported,
+               test_finding_text_cites_nothing_a_reader_cannot_open,
                test_unmapped_analytics_traffic_is_one_registry_row,
                test_a_key_moved_at_heroku_with_no_journal_entry_is_a_row,
                test_the_mcp_inventory_raises_four_kinds_of_row,
