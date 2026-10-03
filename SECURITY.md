@@ -123,10 +123,24 @@ is run unattended. The Mac app's dashboard view cancels every password and
 client-certificate challenge rather than let WebKit consult the login keychain. Every
 launch of a Chromium-family browser in a tracked script must pass
 `--use-mock-keychain` and `--password-store=basic`
-(`tests/test_keychain_and_app_scripts.py`). Opt-in integrations that run a provider's
-own CLI (`gh`, `heroku`, `claude`) go through that CLI's login, wherever the CLI keeps
-it; the Heroku scan takes a session token from `heroku auth:token` for the run and
-stores none of it.
+(`tests/test_keychain_and_app_scripts.py`).
+
+Two things can still reach the login Keychain, each only when you turn it on:
+
+- **Opt-in integrations that run a provider's own CLI** inherit your environment and
+  that CLI's login. `gh` (the `github` integration: `collectors/scan_github.py`, and
+  `collectors/merge.py` when it resolves transferred repositories) and `claude`
+  (the `mcp` integration: `claude mcp list` in `collectors/scan_mcp.py`) keep
+  their tokens in the login Keychain on macOS by default, so a locked keychain can show an unlock dialog when
+  a scheduled scan runs them. `heroku` keeps its token in `~/.netrc`; the Heroku scan
+  takes a session token from `heroku auth:token` for the run and stores none of it.
+  Leave the integration off, or keep the CLI logged in with a file-based token, if no
+  dialog may ever appear.
+- **Signing the Mac app with a Developer ID** (`OBSERVATORY_SIGN_IDENTITY` for
+  `macos/scripts/build-app.sh`) makes `codesign` read that identity's private key
+  from the Keychain, which can prompt for the keychain password or for access to the
+  key. That is the release operator's explicit act; the default ad-hoc signature
+  touches no keychain ([docs/macos](docs/macos/README.md#signing)).
 
 ## Upgrades and backups
 
