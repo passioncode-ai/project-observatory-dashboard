@@ -1000,6 +1000,19 @@ MERGE_REMEDY = {
     "wiki": "point `sources.wiki` in the workspace settings at the notes folder, "
             "run `project-observatory full scan-vault`, then `project-observatory "
             "full local` — or leave it unset and project notes stay unmeasured",
+    # The optional collector outputs, by file name (`merge._optional`). Each
+    # fell to the unknown-class text, which said nothing could tell the reader
+    # what to run, when one command produces the file.
+    "remotes.json": "run the remote probe, `project-observatory full remotes` (one "
+                    "`git ls-remote` per checkout, no credential), then "
+                    "`project-observatory full local`",
+    "sessions.json": "point `sources.sessions` at the agent transcripts, run "
+                     "`project-observatory full scan-sessions`, then "
+                     "`project-observatory full local` — or switch the `sessions` "
+                     "integration off",
+    "bitbucket.json": "store a Bitbucket credential in the secret store, run "
+                      "`project-observatory full scan-bb`, then `project-observatory "
+                      "full local` — or switch the `bitbucket` integration off",
     "identity": "pin a stable name for each colliding project in the workspace's "
                 "`config/identity_overrides.json`, then re-run "
                 "`project-observatory full local`; the suffixed keys are only a "
@@ -1080,9 +1093,11 @@ def merge_findings(deg: list[dict], integrations: dict | None = None) -> list[di
         "type": "model.degraded", "subject": "collector:merge",
         "severity": "warning",
         **titled("the model was built with {n} sources unmeasured", n=len(deg)),
-        "detail": why + ". The registry was still written: 170-odd "
-                  "repositories are unaffected and refusing the whole model "
-                  "would age every fact in the estate to save these.",
+        # No count here: "170-odd repositories" was one estate's number,
+        # printed on every workspace, a two-project one included.
+        "detail": why + ". The registry was still written: everything measured "
+                  "from the other sources is unaffected, and refusing the whole "
+                  "model would age every fact in the estate to save these.",
         "action": "; ".join(seen),
         "evidence": ["store/raw/model.json#degraded"]}]
 
