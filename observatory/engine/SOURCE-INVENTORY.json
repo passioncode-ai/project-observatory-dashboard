@@ -162,8 +162,8 @@
     {
       "path": "collectors/merge.py",
       "source_sha256": "832e43056d8f239ebe5184d9c2a20c12ef771d641064c2bee03365b1c75b5e69",
-      "export_sha256": "78d3e34b3ae4909dca481ff247c381e802c5ed02777ca383f2d64f2dc828f278",
-      "bytes": 38693,
+      "export_sha256": "2c9c0e35855cd9865204450b5a9729b00e1a00d57ba6edeab9e0429a5dc93c9e",
+      "bytes": 41129,
       "python_comments_removed": 202,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,
@@ -2071,15 +2071,15 @@
       "path": "tests/test_filesystem_scan.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1d14f8e60bb2725e637beee2e01f681e46b2e9e884e450e5e36cd18fde170d33",
-      "bytes": 27450
+      "export_sha256": "1bfa579930911bcacc9a04ef9db0c766dda637d860021a433528b013cd21d5a7",
+      "bytes": 30107
     },
     {
       "path": "tests/test_finding_rules.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2f51cf8ca8f79a8cf96a6ff435ed1240b8ba68fdfea41c0049a0a183681574cc",
-      "bytes": 49085
+      "export_sha256": "24860669a26985ffbdbe68e5074328bfa9ecf8870ce8035ad81f645b66f269eb",
+      "bytes": 51055
     },
     {
       "path": "tests/test_fingerprints.py",
@@ -3227,8 +3227,8 @@
     {
       "path": "tools/build_findings.py",
       "source_sha256": "03136ce1f366d180307f7f0c17ab41a3de82631103750f081a6d79758569e0b3",
-      "export_sha256": "6f424d10199aef5e0355aa318053a47cd3148cffb2f283bac666f6ad4af32234",
-      "bytes": 251624,
+      "export_sha256": "3e354f69595c709560413d5fd76f371bc2265ee695986bb96858a824c8643b09",
+      "bytes": 252952,
       "python_comments_removed": 996,
       "python_docstrings_removed": 28,
       "tool_descriptions_retained": 0,

@@ -3447,13 +3447,25 @@ def collect() -> list[dict]:
          if str(rel.get("to", "")).startswith("repository:")})
 
     _stale_names: list[tuple[str, str | None]] = []
-    for r in reg("repositories.json").get("repositories", []):
-        loc = r.get("local") or {}
+    # TWO KINDS OF CLONE, ONE RULE. A git folder whose remote is on a host the
+    # merge cannot key has no repository row; it is a `local-only` project whose
+    # `local_only` carries the same `sync` facts (`collectors/merge.py`,
+    # `_elsewhere_sync`). Iterating repositories alone meant a commit ahead of
+    # its upstream there raised nothing. Each clone is (subject, name, facts,
+    # ownership, evidence); `r` keeps the shape the loop below reads.
+    _clones = [(r, r["id"].split(":", 1)[1], r.get("local") or {},
+                ownership_of_project.get(owner_of_repo.get(r["id"])),
+                f"registry:repositories.json#{r['id']}")
+               for r in reg("repositories.json").get("repositories", [])]
+    _clones += [({"id": p["id"]}, p.get("name") or p["id"],
+                 {**p["local_only"], "checked_out_branch": p["local_only"].get("branch")},
+                 p.get("ownership"), f"registry:projects.json#{p['id']}")
+                for p in reg("projects.json").get("projects", [])
+                if (p.get("local_only") or {}).get("sync")]
+    for r, nwo, loc, own, _evidence in _clones:
         state = loc.get("sync") or ""
         if not state or state in SYNC_SILENT:
             continue
-        own = ownership_of_project.get(owner_of_repo.get(r["id"]))
-        nwo = r["id"].split(":", 1)[1]
         # TWO CLOCKS, AND THE ROW HELD ONE. What the remote has is asked at most
         # every six hours (about ninety network round trips); how far ahead this
         # checkout is now is a local `rev-list` and is recounted every tick. The
@@ -3464,6 +3476,13 @@ def collect() -> list[dict]:
         # 174 rows is what made `git diff` never empty.
         where = (f"(the remote was last asked {REMOTE_ASKED}, "
                  f"branch {loc.get('checked_out_branch') or '?'})")
+        if loc.get("compared_with") == "last-fetch":
+            # Not the remote's answer: the clone's own tracking ref, as the
+            # last fetch left it, because the remote was not reached.
+            where = (f"(compared with the last fetch of branch "
+                     f"{loc.get('checked_out_branch') or '?'}: the remote "
+                     + ("did not answer" if loc.get("remote_unreachable") else "was not probed")
+                     + ")")
         rule = SYNC_FINDINGS.get(state)
         if rule is None:
             # NOT A `continue`. An unlisted state reaching this loop is how
@@ -3480,7 +3499,7 @@ def collect() -> list[dict]:
                           f"surface {where}.",
                 "action": "declare the state in tools/build_findings.py and the "
                           "dashboard's chip map, or stop emitting it",
-                "evidence": [f"registry:repositories.json#{r['id']}",
+                "evidence": [_evidence,
                              "collectors/scan_remotes.py#STATES"]})
             continue
         sev, what, why, act = rule
@@ -3532,7 +3551,7 @@ def collect() -> list[dict]:
             **titled(what, repo=nwo),
             "detail": f"{why} {where}.{stake}",
             "action": act,
-            "evidence": [f"registry:repositories.json#{r['id']}"]})
+            "evidence": [_evidence]})
     out += stale_clones(_stale_names)
 
     # EFFORT IN, NOTHING OUT, AND STOPPED. A portfolio question this system
