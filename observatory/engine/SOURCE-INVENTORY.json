@@ -687,8 +687,8 @@
     {
       "path": "docs/CLI-COMPATIBILITY.md",
       "source_sha256": "4ec1878cbc8ff9d68bd37a6e9902d3c50180b91093a4c20d59230b41de4a29c2",
-      "export_sha256": "d5b408ee30ba1a3b1b824b9e9ec471f53c861e0c40780c0be5955c0f6cc9a10b",
-      "bytes": 9873,
+      "export_sha256": "ef3390202bd5b3f25a24a70aca6e24bff2d679d760aeb37f5905f5b964eb8ba4",
+      "bytes": 10297,
       "upstream_modified": true
     },
     {
@@ -701,8 +701,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "1458a88846ad81f4edae20fa463c91f9992032d1ccd2e7492feb4766e1eb7b2d",
-      "bytes": 41528,
+      "export_sha256": "17a376fd0635913afea148beb05be3c7843f2aac872485c903cc6455b605e5f9",
+      "bytes": 41553,
       "upstream_modified": true
     },
     {
@@ -1356,8 +1356,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "111c831bdc469720e71dfa36875e316680e95b47688767cfbf85022d2ba9326c",
-      "bytes": 9630,
+      "export_sha256": "a57cf9fc68023349e50b79cccab77d3be5b9303692cf6bec5b898d1858191c29",
+      "bytes": 9715,
       "upstream_modified": true
     },
     {
