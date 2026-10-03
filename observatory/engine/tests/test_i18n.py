@@ -241,6 +241,19 @@ class CatalogIsComplete(unittest.TestCase):
                     self.assertEqual(set(PLACEHOLDER.findall(form)), want, f"{locale}: {msgid!r} → {form!r}")
                     self.assertTrue(form.strip(), f"{locale}: empty translation for {msgid!r}")
 
+    def test_russian_keeps_one_vocabulary(self):
+        # English words and slang left in the Russian ("по имени property",
+        # "в workspace", "эстейт", "claim'ит", "кред", "дэшборд") read as an
+        # unfinished translation; each has a Russian term the rest of the
+        # catalog already uses (ресурс, папка данных, наши проекты, заявлять,
+        # ключ, дашборд). Placeholders are not text and are skipped.
+        banned = ("property", "workspace", "эстейт", "claim", " кред", "дэшборд", "стэш")
+        for msgid, entry in i18n.catalog("ru").items():
+            for form in (entry.values() if isinstance(entry, dict) else [entry]):
+                text = PLACEHOLDER.sub("", form).lower()
+                hits = [w for w in banned if w in text]
+                self.assertEqual(hits, [], f"{msgid!r} → {form!r}")
+
     def test_plural_forms_are_complete(self):
         for locale, forms in PLURAL_FORMS.items():
             for msgid, entry in i18n.catalog(locale).items():

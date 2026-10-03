@@ -456,8 +456,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b34d251639a9cb118ff27fc815d1c457e12d67c8caf1f6f5c153fd1e8d0b2c76",
-      "bytes": 128851
+      "export_sha256": "0c52efa136b40de01dee57fe5ee24072ff7ea93423ca1c617f7c278ecdef185d",
+      "bytes": 129114
     },
     {
       "path": "dashboard/machine_page.py",
@@ -2172,8 +2172,8 @@
       "path": "tests/test_i18n.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e07be3aed3b0d49485047153d0ead37250d6ebed1cd15fec3160150bd7af54c0",
-      "bytes": 26613
+      "export_sha256": "b4ce4dc7308545ecd284d58af6ddfeb70d9365da74bbba2994082e4d4963ddbd",
+      "bytes": 27543
     },
     {
       "path": "tests/test_identity_map.py",
@@ -3612,6 +3612,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/settle_board.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "4b91a0a8456e84a01d5111b538a9f3823db9deaa78aa0053778dc391cbf5feb3",
+      "bytes": 3514
+    },
+    {
       "path": "tools/sign_credential.py",
       "source_sha256": "02fb7640fd7b03d01d167f410b0b7b3972ab6bb671c05b1cfc3b8058e21a5ffc",
       "export_sha256": "1bbdd18f83657b41ba710a140d0e5cfe6bba52aa9136679c7aad3cbe0f6e9ed7",
@@ -3764,7 +3771,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 474,
+  "file_count": 475,
   "excluded": [
     "git-history",
     "operator-registries",
