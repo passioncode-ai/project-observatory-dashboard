@@ -16,7 +16,7 @@ measurement this feature grew out of, so none of them is hypothetical:
    deploy history look like it had never been deployed.
 4. A name is not evidence. An application can deploy from a folder with a
    different name; an application whose name equals a project's must still be
-   unlinked unless something was measured. AGENTS.md rule 2.
+   unlinked unless something was measured: never infer from a name.
 5. A hand link with no evidence is the same guess wearing a curator's clothes,
    so `heroku_links.json` rows without `evidence` are refused rather than
    trusted.
@@ -125,7 +125,7 @@ def _link(a: dict):
 
 
 def test_a_name_is_never_evidence():
-    """AGENTS.md rule 2, as an assertion rather than a sentence in a doc."""
+    """Never infer from a name, as an assertion rather than a sentence in a doc."""
     project, rule, why = _link(app(name="alpha"))
     check("an application named exactly like a project is still unlinked",
           project is None and rule is None, f"linked by {rule}")

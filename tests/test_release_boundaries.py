@@ -40,6 +40,23 @@ class ReleaseBoundaryTests(unittest.TestCase):
         env={**os.environ,'GIT_AUTHOR_NAME':'Fixture Maintainer','GIT_COMMITTER_NAME':'Fixture Maintainer',
              'GIT_AUTHOR_EMAIL':'fixture@example.invalid','GIT_COMMITTER_EMAIL':'fixture@example.invalid'}
         return subprocess.run(['git','-C',str(self.root),*args],env=env,check=True,capture_output=True)
+    def test_no_engine_comment_cites_the_private_predecessors_records(self):
+        # CONTRIBUTING: comments must not cite decision records kept outside this
+        # repository. The predecessor's numbered rules, audit items and decisions
+        # survived in eleven comments until run 3 named each rule in words instead.
+        cited = re.compile(r"AGENTS\.md rule \d|credentials audit G\d+|\bDEC-02\d\d\b")
+        hits = []
+        for path in sorted((ROOT / "observatory/engine").rglob("*")):
+            if path.suffix not in {".py", ".js", ".md", ".sh", ".html", ".css"} or not path.is_file():
+                continue
+            rel = path.relative_to(ROOT).as_posix()
+            if "/docs/runs/" in rel or rel.endswith("tests/test_finding_rules.py"):
+                continue          # the finding-text test names these phrases to refuse them
+            for n, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                if cited.search(line):
+                    hits.append(f"{rel}:{n}")
+        self.assertEqual(hits, [])
+
     def test_engine_code_allowlist_excludes_mutable_data_and_hidden_credentials(self):
         for allowed in ('observatory/engine/store/schema.sql','observatory/engine/store/db.py',
                         'observatory/engine/defaults/settings.json','observatory/engine/tools/tick.sh',

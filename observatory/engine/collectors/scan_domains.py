@@ -65,7 +65,7 @@ def dig(host: str, rtype: str) -> tuple[list[str], str | None]:
 
     It used to return `[]` for both "this host has no such record" and "dig
     could not run" — the same value for a measurement and for the absence of
-    one. That is the exact shape AGENTS.md rule 7 forbids, in the one collector
+    one. That is the exact shape honest degradation forbids, in the one collector
     that reaches outside this machine, and it is not a small conflation: an
     empty A record makes a domain `dark`, `domain.dark` says it "is being paid
     for and serves nothing", and `site.dead` is CRITICAL — "a published claim

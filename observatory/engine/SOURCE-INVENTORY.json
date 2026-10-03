@@ -75,8 +75,8 @@
     {
       "path": "collectors/credentials_registry.py",
       "source_sha256": "5876b75923c191737b6162537db6ef2e004b45a944ff1a387d2055cfd0de98e2",
-      "export_sha256": "7ee602183e4b242773d387b0a848cca0c4d5d159cafb77b5dae74030cbbf458a",
-      "bytes": 33702,
+      "export_sha256": "ceb63feb5c05147d203fdde82051b89d8f0c08cd7ae228990af3e5d90bca9806",
+      "bytes": 33718,
       "python_comments_removed": 104,
       "python_docstrings_removed": 12,
       "tool_descriptions_retained": 0,
@@ -132,8 +132,8 @@
     {
       "path": "collectors/heroku_registry.py",
       "source_sha256": "f8dbaf33bb895549049ca8542109913b6860b5823c90531ffd6a3420949ea3e1",
-      "export_sha256": "98889f79bf887f40e5beb4bead68dafc5f0bac12b5d0389dff501e438ea825c3",
-      "bytes": 13420,
+      "export_sha256": "550bd5f05e91e26c90f92ec37698c87e5ad07fe8c2dbaa19c2d06b78e2d95669",
+      "bytes": 13412,
       "python_comments_removed": 18,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -222,8 +222,8 @@
     {
       "path": "collectors/scan_domains.py",
       "source_sha256": "9c22724248adee443cf2b9b83cbacf5d3a0d68cfd98c4adbb732fda5e5127753",
-      "export_sha256": "76113b0008149de8e280050d576b5e4c54577f9ff4b7a329f6a7c5bf29093eec",
-      "bytes": 19670,
+      "export_sha256": "a82c77c91deb4524deef574a53647cdc03ac2d4b2d7d8dc52194a8b98d592fb1",
+      "bytes": 19672,
       "python_comments_removed": 41,
       "python_docstrings_removed": 6,
       "tool_descriptions_retained": 0,
@@ -289,8 +289,8 @@
     {
       "path": "collectors/scan_heroku.py",
       "source_sha256": "277e3f5d4a219ef91a2167662633eed79ac37c72a46eaca130e26572ad5ee63c",
-      "export_sha256": "617dab655e5477e4817a60f38d515f5dc664da47d67145a7fb9080251ba7f5e9",
-      "bytes": 22439,
+      "export_sha256": "03420a56d24350b58d4c0cacbe70e08f7e9fda09fae31f4788279d0f9c88c459",
+      "bytes": 22441,
       "python_comments_removed": 47,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -306,8 +306,8 @@
     {
       "path": "collectors/scan_mcp.py",
       "source_sha256": "58a2a009691699174de96ef0a878d1679a0d7a0da53d220f5a1fccae52d4678f",
-      "export_sha256": "2170f5da95b7d1c73e58590a8ed707db191932607dd233eb373c7c35f7a01dc5",
-      "bytes": 20690,
+      "export_sha256": "99362396333b7cec2fbd2feadf3cc57e73a0c4a876b469f1d48c2087c960e907",
+      "bytes": 20696,
       "python_comments_removed": 14,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
@@ -431,8 +431,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "e06338dab9e585d82cac8a07fcfd88ad04d5d61b307be43a6a9aca440c3484df",
-      "bytes": 239971,
+      "export_sha256": "2e393021d136ba9038629c798dd2b1dfd07692f035ae23da3543391c45fb56cf",
+      "bytes": 239979,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -677,8 +677,8 @@
     {
       "path": "degradations.py",
       "source_sha256": "bc7475fc3b8bb7683dc4deb4e45d92b64347d787d8ccb2b98e29469f03232db7",
-      "export_sha256": "737f10cd3666c726fd40195892e7c1a90ec2f405a7c70297877bbe3c57ae8ca8",
-      "bytes": 9476,
+      "export_sha256": "3bffe9a34058c8f340ef86838c7dbb6c6aa1cbc261a0a6b750ebcb909744726f",
+      "bytes": 9478,
       "python_comments_removed": 12,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,
@@ -753,8 +753,8 @@
     {
       "path": "fabric/FABRIC-CONFORMANCE.md",
       "source_sha256": "8353184efa4e9f48a2b464028d7366b975bf217c42b7736ab404f06e188a4fc8",
-      "export_sha256": "487f088386f3476771fb3dd291e8ef443606812fed6bed86dbbf5c017f70c00f",
-      "bytes": 11737,
+      "export_sha256": "8a5bc9f7a8be716dcde92e9193e8fd55c9f7ebf0557f02850fe7948ab555de22",
+      "bytes": 11856,
       "upstream_modified": true
     },
     {
@@ -1531,8 +1531,8 @@
       "path": "tests/env_tab_check.js",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e7558e1ba89efbc79d611c45f653020d906a72a446b46f200fa447fc060b3003",
-      "bytes": 11425
+      "export_sha256": "d6bd9079199a1396e09baf37be4f720d6b30ae2d0b678adc2ae8d06982d49053",
+      "bytes": 11392
     },
     {
       "path": "tests/fabric_interop.py",
@@ -2193,8 +2193,8 @@
       "path": "tests/test_heroku.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fda42d895b24a7a4ef7f205df62f0e02951393453d013e72e0cb32820e8f6435",
-      "bytes": 22244
+      "export_sha256": "7b007d4f4611c1dd5926f1f0efdfebdc44524efbebc876c42aab7dde62ee5fcf",
+      "bytes": 22258
     },
     {
       "path": "tests/test_honest_absence.py",
@@ -3782,8 +3782,8 @@
     {
       "path": "tools/validate_registry.py",
       "source_sha256": "5210502420dcda1ff5ca5a3c090d3d9fb8f330cf38be8e1ace9710e1af2e5e74",
-      "export_sha256": "be399a557115b8f6171d967bb27656cf970f44cf9c8406116099e316e590846f",
-      "bytes": 25190,
+      "export_sha256": "655b871a1fa500f29840e91f89012cf1b57a51cf737e93015c181198ad05a74d",
+      "bytes": 25206,
       "python_comments_removed": 60,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,

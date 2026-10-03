@@ -34,10 +34,12 @@ The capability definitions and effects come from `../fabric-agent.json`:
 | `machine.mcp.inventory` | `none` | `machine.mcp.inventory` | — |
 | `machine.mcp.refresh` | `none`, job | `machine.mcp.refresh`, then `fabric.job.get` / `fabric.job.cancel` | — |
 
-The ten `observatory_*` tools stay, unchanged, for hosts that call them; the full
-server also exposes `observatory_credentials`, `observatory_search`,
-`observatory_findings` and `observatory_machine`. With the six capability tools and
-the two job tools that is eighteen tools, all defined through `../mcp/server.py`.
+The older `observatory_*` tools stay, unchanged, for hosts that call them. The full
+server lists fourteen of them — the seven above plus `observatory_overview`,
+`observatory_credentials`, `observatory_findings`, `observatory_machine` and the three
+`observatory_assistant_*` tools — and with the six capability tools and the two job
+tools that is 22 tools, all defined through `../mcp/server.py` (`tools/list`, measured
+2026-10-03).
 
 ## fabric-interop/0.1
 

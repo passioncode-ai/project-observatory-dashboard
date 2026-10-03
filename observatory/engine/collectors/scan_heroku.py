@@ -377,7 +377,7 @@ def main(argv: list[str]) -> int:
     tok, why = token()
     if not tok:
         # AN EMPTY SURVEY IS NEVER RETURNED IN PLACE OF A PARTIAL ONE
-        # (AGENTS.md rule 7). The file is written so downstream steps find a
+        # (honest degradation). The file is written so downstream steps find a
         # shape rather than a missing path, and it says why it is empty.
         atomic.write_json(out_path, {
             "schema_version": 1, "scanned_at": started.isoformat(),

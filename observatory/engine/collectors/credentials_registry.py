@@ -30,7 +30,7 @@ WHERE THE EDGE COMES FROM, in order:
              is the same rule `collectors/heroku_links.json` follows
 
 An account nothing claims stays unclaimed and says so. Guessing which projects
-use a shared login from its name is exactly the inference AGENTS.md rule 2
+use a shared login from its name is exactly the inference the never-infer-from-a-name rule
 forbids, and here it would be worse than usual: the wrong answer sends somebody
 to rotate a credential several projects are quietly using.
 """
