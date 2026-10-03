@@ -67,7 +67,9 @@ app, the scenarios and the docs, and fixed what the one before missed: 73, 27 an
 [run 2](reports/2026-10-03-observatory-audit-run-2/README.md),
 [run 3](reports/2026-10-03-observatory-audit-run-3/README.md). They ship in 0.13.0 with
 `observatory-log` 0.14.0; the items only the operator can do are listed at the end of the run-3
-report, and `CHANGELOG.md` → 0.13.0 says what changed for a user.
+report, and `CHANGELOG.md` → 0.13.0 says what changed for a user. The release receipt (tag,
+wheel digest, installation, launcher pin, website) is
+[runs/2026-10-03-release-0.13.0](runs/2026-10-03-release-0.13.0/README.md).
 
 **2026-10-01, client disconnect handling (released in 0.11.0):** expected socket
 closures no longer produce server tracebacks; unrelated I/O failures remain visible.
