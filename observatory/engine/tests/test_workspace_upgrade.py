@@ -65,6 +65,39 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertEqual(before, upgrade.inventory(self.home))
         self.assertFalse((self.base / ('.' + self.home.name + '.observatory-operation.lock')).exists())
 
+    def test_a_missing_full_extra_is_named_instead_of_the_interpreter(self):
+        # A wheel installed without `[full]` on a perfectly good interpreter used to
+        # hear "use Homebrew Python 3.14", which sends the user after the wrong fix.
+        untouched = self.base / 'refused-new-home'
+        absent = {'example-absent': 'observatory_example_absent_module', 'mcp': 'mcp'}
+        with patch.dict(workspace.FULL_MODULES, absent, clear=True):
+            with self.assertRaises(config.ConfigurationError) as caught:
+                workspace.initialize(untouched)
+        message = str(caught.exception)
+        self.assertIn('[full]', message)
+        self.assertIn('observatory_example_absent_module', message)
+        self.assertNotIn('mcp,', message, 'an importable module is not reported missing')
+        self.assertIn('-m pip install', message)
+        self.assertIn('requirements-full.lock', message)
+        self.assertIn(sys.executable, message)
+        self.assertNotIn('Homebrew', message)
+        self.assertFalse(untouched.exists())
+
+    def test_an_interpreter_without_extensions_keeps_the_interpreter_advice(self):
+        class NoExtensions:
+            def close(self):
+                pass
+        absent = {'example-absent': 'observatory_example_absent_module'}
+        with patch.object(workspace.sqlite3, 'connect', return_value=NoExtensions()), \
+                patch.dict(workspace.FULL_MODULES, absent, clear=True):
+            with self.assertRaises(config.ConfigurationError) as caught:
+                workspace.doctor(self.home)
+        message = str(caught.exception)
+        self.assertIn('loadable extensions', message)
+        self.assertIn('Homebrew', message)
+        # Both faults are real; the second is named too, so one fix is not followed by another refusal.
+        self.assertIn('observatory_example_absent_module', message)
+
     def test_preview_does_not_write(self):
         before=upgrade.inventory(self.home)
         result=upgrade.upgrade(self.home)

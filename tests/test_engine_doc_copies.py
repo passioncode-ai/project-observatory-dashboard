@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 ENGINE_DOCS = ROOT / "observatory/engine/docs"
 REPO_DOCS = "https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/"
 COPIES = ("ONBOARDING.md", "COMPATIBILITY.md", "AGENT-ONBOARDING.md")
+#: Byte-for-byte copies the engine ships of root files a wheel user has no other way to get.
+#: The lock is the dependency set CI tests; `full update` and the `[full]` advice install from it.
+FILE_COPIES = {"requirements-full.lock": ROOT / "observatory/engine/requirements-full.lock"}
 LINK = re.compile(r"\]\(([^)#\s]+)(#[^)\s]*)?\)")
 
 
@@ -54,6 +57,24 @@ class EngineDocCopies(unittest.TestCase):
         self.assertEqual(refused.returncode, 2)
         self.assertIn("unrecognized arguments", refused.stderr)
         self.assertEqual({name: (ENGINE_DOCS / name).stat().st_mtime_ns for name in COPIES}, before)
+    def test_the_engine_ships_the_tested_lock_unchanged(self):
+        for name, copy in FILE_COPIES.items():
+            with self.subTest(name):
+                self.assertEqual(copy.read_bytes(), (ROOT / name).read_bytes(),
+                                 f"{copy.relative_to(ROOT)} drifted from {name}; run tools/sync_engine_docs.py")
+
+    def test_the_runtime_check_knows_every_full_dependency(self):
+        import tomllib
+        extra = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+            "optional-dependencies"]["full"]
+        names = {re.split(r"[=<>!~ ;\[]", requirement, maxsplit=1)[0].lower() for requirement in extra}
+        source = (ROOT / "observatory/engine/workspace.py").read_text(encoding="utf-8")
+        declared = re.search(r"FULL_MODULES = \{(.*?)\}", source, re.S).group(1)
+        self.assertEqual(set(re.findall(r'"([a-z0-9-]+)":', declared)), names)
+        lock = (ROOT / "requirements-full.lock").read_text(encoding="utf-8").lower()
+        for requirement in extra:
+            with self.subTest(requirement):
+                self.assertIn(requirement.lower() + "\n", lock, "every [full] pin is in the lock at the same version")
 
     def test_the_deps_step_installs_the_sdk_the_package_pins(self):
         pinned = re.search(r'"mcp==([\d.]+)"', (ROOT / "pyproject.toml").read_text(encoding="utf-8")).group(1)

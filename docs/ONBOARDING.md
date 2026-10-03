@@ -13,6 +13,11 @@ The full engine requires Python 3.11+ with SQLite 3.37+ **and loadable SQLite
 extensions**, plus the locked sqlite-vec dependency. Some macOS Python builds
 omit `enable_load_extension`; installing sqlite-vec alone cannot add it.
 Initialization, doctor, migration and upgrade check this before workspace writes.
+They name the two faults apart: an interpreter that cannot load extensions
+(choose another Python, below), and a package installed without its `[full]`
+extra, where the refusal lists the missing modules and prints the one `pip`
+command, with the engine's own `requirements-full.lock`, that installs them into
+the same interpreter.
 The isolated regression is
 `observatory/engine/tests/test_workspace_upgrade.py::WorkspaceUpgrade::test_missing_sqlite_extension_support_refuses_before_writes`.
 

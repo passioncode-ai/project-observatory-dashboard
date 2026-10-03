@@ -50,6 +50,12 @@ class ReleaseBoundaryTests(unittest.TestCase):
                         'observatory/engine/.env','observatory/engine/tools/unreviewed.sh',
                         'observatory/engine/.keyserver-token'):
             self.assertFalse(privacy.allowed_path(Path(refused)),refused)
+    def test_the_engine_lock_is_admitted_by_exact_path_only(self):
+        # The wheel ships the tested dependency set beside the engine; any other .lock stays out.
+        self.assertTrue(privacy.allowed_path(Path('observatory/engine/requirements-full.lock')))
+        for refused in ('observatory/engine/tools/requirements-full.lock','observatory/engine/other.lock',
+                        'observatory/engine/store/requirements-full.lock'):
+            self.assertFalse(privacy.allowed_path(Path(refused)),refused)
     def test_native_source_allowlist_does_not_admit_builds_or_private_state(self):
         for path in privacy.NATIVE_SOURCES:
             self.assertTrue(privacy.allowed_path(Path(path)))
