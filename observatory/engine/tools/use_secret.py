@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Run a command with a project's secret in its environment, by NAME.
 
-    use_secret.py names <project>                    what this project has
-    use_secret.py run <project> <NAME>[,<NAME>…] -- <command…>
-    use_secret.py where <project> <NAME>             which slot it would resolve
+    T="$(project-observatory full-path)/tools"          # the installed engine's tools
+    python "$T/use_secret.py" names <project>                    what this project has
+    python "$T/use_secret.py" run [--env ENV] <project> <NAME>[,<NAME>…] -- <command…>
+    python "$T/use_secret.py" where [--env ENV] <project> <NAME>             which slot it would resolve
 
 WHY THIS EXISTS. The secrets rule already says an agent works with NAMES after
 an inject — and without this file there was no way to HONOUR that for a one-off
@@ -16,7 +17,7 @@ So: the value is resolved here, placed in the child's environment, and **removed
 from everything the child prints**. The agent says the name, sees the name, and
 the transcript carries the name.
 
-    tools/use_secret.py run <project> DATABASE_URL -- psql -c 'select 1'
+    python "$T/use_secret.py" run <project> DATABASE_URL -- psql -c 'select 1'
 
 WHAT THIS DEFENDS AGAINST, stated honestly because the boundary matters: an
 ACCIDENT. A traceback quoting the connection string, a debug line echoing the
@@ -26,6 +27,9 @@ here. It does NOT defend against a hostile command: anything with the value in
 its environment can encode it, post it, or write it to a file this never sees.
 An agent that would do that could also read the `.env` directly. The point is to
 make the CAREFUL path as short as the careless one.
+
+<project> is the project's folder name; its registry id is accepted and
+normalised to that folder.
 
 RESOLUTION ORDER, and it is reported rather than guessed:
 

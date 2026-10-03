@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 """The one door to Cloudflare credentials: stash, issue, rotate, revoke, ping.
 
-    ./tools/cloudflare.py stash            # admin token on stdin, once per account
-    ./tools/cloudflare.py issue --preset analytics [--project project:x]
-    ./tools/cloudflare.py issue --preset dns-edit --zone example.com --vault PROJECT/ENV/NAME
-    ./tools/cloudflare.py issue --preset d1-edit --account <slug> --vault PROJECT/ENV/NAME
-    ./tools/cloudflare.py issue --preset r2-bucket --account <slug> --bucket NAME \
+    T="$(project-observatory full-path)/tools"          # the installed engine's tools
+    python "$T/cloudflare.py" stash < token-file   # admin token on stdin from a protected file, once per account
+    python "$T/cloudflare.py" issue --preset analytics [--project project:x]
+    python "$T/cloudflare.py" issue --preset dns-edit --zone example.com --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset d1-edit --account <slug> --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset r2-bucket --account <slug> --bucket NAME \
         [--jurisdiction eu] [--expire-days 30] --vault PROJECT/ENV/PREFIX
-    ./tools/cloudflare.py issue --preset email-send --account <slug> --vault PROJECT/ENV/NAME
-    ./tools/cloudflare.py issue --preset email-routing --zone example.com --vault PROJECT/ENV/NAME
-    ./tools/cloudflare.py issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
-    ./tools/cloudflare.py issue --preset fabric-inbox-server --account <slug> --vault PROJECT/ENV/NAME
-    ./tools/cloudflare.py issue --preset fabric-inbox-account --account <slug> --vault PROJECT/ENV/NAME
-    ./tools/cloudflare.py issue --preset workers-observability-read --account <slug> --vault PROJECT/ENV/NAME
-    ./tools/cloudflare.py list
-    ./tools/cloudflare.py groups --account <slug> --match "email sending"
-    ./tools/cloudflare.py ping
-    ./tools/cloudflare.py rotate <label>   # or --leaked, for every open leak
-    ./tools/cloudflare.py revoke <label>
+    python "$T/cloudflare.py" issue --preset email-send --account <slug> --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset email-routing --zone example.com --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset fabric-inbox-server --account <slug> --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset fabric-inbox-account --account <slug> --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset workers-observability-read --account <slug> --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" list
+    python "$T/cloudflare.py" groups --account <slug> --match "email sending"
+    python "$T/cloudflare.py" ping
+    python "$T/cloudflare.py" rotate <label>   # or --leaked, for every open leak
+    python "$T/cloudflare.py" revoke <label>
 
 THE ADMIN TOKEN IS STASHED AND NEVER HANDED OUT. It carries write access to
 everything the account has — billing, DNS, Workers, and the power to mint more
@@ -428,7 +429,7 @@ def cmd_stash(value: str) -> int:
         print(f"  sees but cannot issue in: "
               + ", ".join(a["name"] for a in cannot) + " — no API Tokens: Edit there")
     print("nothing reads it but this program. Issue a working token with:\n"
-          + "\n".join(f"  ./tools/cloudflare.py issue --preset analytics "
+          + "\n".join(f"  python \"$(project-observatory full-path)/tools/cloudflare.py\" issue --preset analytics "
                        f"--account {slug(a['name'])}" for a in can[:3]))
     return 0
 

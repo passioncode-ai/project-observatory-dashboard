@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """The one door to OpenRouter keys: stash, issue, rotate, revoke, limits, ping.
 
-    pbpaste | ./tools/openrouter.py stash --as main      # provisioning key, labeled
-    ./tools/openrouter.py adopt --as main                # take the legacy file in
-    ./tools/openrouter.py issue --name my-agent --limit 10 --to vault:myproject/prod/OPENROUTER_API_KEY
-    ./tools/openrouter.py list | ping
-    ./tools/openrouter.py limit my-agent --set 25
-    ./tools/openrouter.py disable my-agent               # or enable
-    ./tools/openrouter.py rotate my-agent                # or --leaked
-    ./tools/openrouter.py revoke my-agent
+    T="$(project-observatory full-path)/tools"            # the installed engine's tools
+    python "$T/openrouter.py" stash --as main < key-file   # provisioning key, labeled; a protected file
+    python "$T/openrouter.py" adopt --as main               # take the legacy file in
+    python "$T/openrouter.py" issue --name my-agent --limit 10 --to vault:PROJECT/prod/OPENROUTER_API_KEY
+    python "$T/openrouter.py" list | ping
+    python "$T/openrouter.py" limit my-agent --set 25
+    python "$T/openrouter.py" disable my-agent              # or enable
+    python "$T/openrouter.py" rotate my-agent               # or --leaked
+    python "$T/openrouter.py" revoke my-agent
+
+PROJECT in a `vault:` destination is the project's folder name; its registry id
+is accepted and normalised to that folder before anything is minted.
 
 The same shape as `tools/cloudflare.py`, deliberately: one admin credential per
 account, stashed and never handed out; every working key ISSUED from it, narrow,
@@ -200,7 +204,7 @@ def stash_value(value: str, label: str, origin: str) -> int:
         ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"{'replaced' if existed else 'stashed'}: provisioning key as {label!r}")
     print(f"issue a working key with:\n"
-          f"  ./tools/openrouter.py issue --name <consumer> --limit 10 "
+          f"  python \"$(project-observatory full-path)/tools/openrouter.py\" issue --name <consumer> --limit 10 "
           f"--account {label} --to <destination>")
     return 0
 

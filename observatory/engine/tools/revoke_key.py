@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Revoke an OpenRouter API key by its visible tail, using a provisioning key.
 
-    openrouter.ai/settings/provisioning-keys  ->  create one  ->  copy
-    pbpaste | tools/revoke_key.py --tail f8d
+    openrouter.ai/settings/provisioning-keys  ->  create one  ->  save it to a protected file
+    python "$(project-observatory full-path)/tools/revoke_key.py" --tail f8d < key-file
 
 WHY THIS EXISTS. A key cannot revoke itself: `DELETE /api/v1/key` answers 404 and
 `/api/v1/keys` answers 401 to anything that is not a provisioning key. So a leaked
@@ -55,8 +55,10 @@ def load_or_store() -> str:
         print(f"stored {SECRET} (600): length {len(key)}, value hidden")
         return key
     if not SECRET.is_file():
-        die(f"no provisioning key. Create one at openrouter.ai/settings/"
-            f"provisioning-keys, then run revoke_key --tail <tail> with a protected file redirected to stdin")
+        die("no provisioning key is stored. Create one at openrouter.ai/settings/"
+            "provisioning-keys, save it to a protected file, and give it on stdin once — "
+            "it is stored at mode 600 and used from then on: "
+            "python \"$(project-observatory full-path)/tools/revoke_key.py\" --list < key-file")
     target = private_io.legacy_path(SECRET)
     mode = stat.S_IMODE(target.stat().st_mode)
     if mode & 0o077:
@@ -66,7 +68,8 @@ def load_or_store() -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--tail", help="last characters of the key's label, e.g. f8d")
     ap.add_argument("--list", action="store_true", help="list keys and stop")
     a = ap.parse_args()
