@@ -1,0 +1,91 @@
+# The release: the wheel, and the Mac app signed with the organization's CI Developer ID,
+# notarized and stapled; then attested (Sigstore), summed and GPG-signed, and published.
+# Signing happens only here, in the protected `release` environment: approved by
+# release-approvers, never by whoever pushed the tag (passioncode-ai/.github
+# release-signing/README.md). A published release is never rewritten: a fix is a new tag.
+#
+# Release:    push an annotated vX.Y.Z tag on the reviewed release commit.
+# Rehearsal:  push vX.Y.Z-rc.N (the push trigger ignores it), then
+#             gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false
+#             The signed set is kept as a workflow artifact; no release is created.
+name: release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "false = rehearsal: sign, notarize and attest, create no release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Build and check the wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build --wheel --outdir dist .
+          python tools/check_package.py dist/*.whl
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # CFBundleVersion counts commits; a shallow clone would number the bundle 1
+      - id: sign
+        uses: passioncode-ai/.github/actions/apple-signing@v1
+        with:
+          developer-id-p12-b64: ${{ secrets.APPLE_DEVELOPER_ID_P12_B64 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          team-id: ${{ vars.APPLE_TEAM_ID }}
+      - name: Build the app, signed with the Developer ID
+        env:
+          OBSERVATORY_SIGN_IDENTITY: ${{ steps.sign.outputs.identity }}
+        run: macos/scripts/build-app.sh dist/macos
+      - uses: passioncode-ai/.github/actions/notarize@v1
+        with:
+          path: dist/macos/Project Observatory.app
+          asc-key-id: ${{ secrets.ASC_KEY_ID }}
+          asc-issuer-id: ${{ secrets.ASC_ISSUER_ID }}
+          asc-key-p8-b64: ${{ secrets.ASC_API_KEY_P8_B64 }}
+      - name: Package the stapled app
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n 1)
+          mkdir -p dist/release
+          ditto -c -k --keepParent "dist/macos/Project Observatory.app" "dist/release/ProjectObservatory-$version-macos.zip"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-macos
+          path: dist/release/*.zip
+          if-no-files-found: error
+      - if: always()
+        uses: passioncode-ai/.github/actions/apple-signing/cleanup@v1
+
+  publish:
+    needs: [wheel, macos]
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: passioncode-ai/.github/.github/workflows/release-publish.yml@v1
+    with:
+      publish: ${{ github.event_name == 'push' || inputs.publish }}
+    secrets: inherit

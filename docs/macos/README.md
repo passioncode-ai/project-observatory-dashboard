@@ -134,6 +134,16 @@ checks, the normal pull request (opening it is the CLA agreement — nothing to 
 tagged compatible engine and app artifact.
 ### Signing
 
+**Releases are signed in CI, not on a laptop.** `.github/workflows/release.yml` runs on a
+`vX.Y.Z` tag in the protected `release` environment:
+- the organization's CI Developer ID, through `passioncode-ai/.github/actions/apple-signing@v1`;
+- notarization and staple, through `actions/notarize@v1`;
+- Sigstore attestation, plus `SHA256SUMS` and its GPG signature, through `release-publish.yml@v1`.
+
+An approver from `release-approvers` other than the tag's author releases it. The local path
+below is for debugging and for checking the scripts; its output is never attached to a release.
+
+
 Without `OBSERVATORY_SIGN_IDENTITY` the build script signs ad hoc
 (`codesign --sign -`), which touches no keychain. For Developer ID signing supply
 `OBSERVATORY_SIGN_IDENTITY` to the build script: `codesign` then signs with the hardened
