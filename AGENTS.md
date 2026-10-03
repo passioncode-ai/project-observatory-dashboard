@@ -220,7 +220,10 @@ tasks are the operator's and which a contributor can take.
    ([organization release signing](https://github.com/passioncode-ai/.github/blob/main/release-signing/README.md)).
    Then:
    - Re-download the assets and run `shasum -a 256 -c SHA256SUMS` and
-     `gh attestation verify <file> -R passioncode-ai/project-observatory-dashboard`.
+     `gh attestation verify <file> -R passioncode-ai/project-observatory-dashboard --signer-repo passioncode-ai/.github`
+     (the shared `release-publish` workflow signs the attestation; without `--signer-repo` the
+     check fails with "verifying with issuer sigstore.dev"), and `gpg --verify SHA256SUMS.asc
+     SHA256SUMS` after importing the organization's release key.
    - To rehearse first, push `vX.Y.Z-rc.N` and run
      `gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false`.
    - A locally signed build (`build-app.sh` + `notarize.sh`) is for debugging and is never attached.
