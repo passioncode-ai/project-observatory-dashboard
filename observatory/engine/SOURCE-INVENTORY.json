@@ -397,15 +397,15 @@
       "path": "dashboard/brand/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "acc1ca0b6dc51c3a78944f5994dceba3bc30e7e04e1fb8d81b89b001c4ac471a",
-      "bytes": 865
+      "export_sha256": "18d287bad4f3b7c84008e0f06c16886862b99645358aa9f7f76c30b1eb157a76",
+      "bytes": 1270
     },
     {
       "path": "dashboard/brand/manifest.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cb3faa8027d68e889a15fd7839081c4c4335d3309b5b006066cd1939066aa0a3",
-      "bytes": 755
+      "export_sha256": "29048ecfa8602bb96b99d63f5f6f30513b7494e5d8c0cf7fc6110069db2ccbc0",
+      "bytes": 766
     },
     {
       "path": "dashboard/brand/observatory-mark.svg",
@@ -418,8 +418,8 @@
       "path": "dashboard/brand/passioncode-tokens.css",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a2ff52c6323de40aecd055a89c6629c25c94a6ce96eed7cd31ee333f210284ce",
-      "bytes": 1538
+      "export_sha256": "e006575d6505ea08c5dac7dcbd8945a695e72522a482d1a8d4f0d53f9e0cc819",
+      "bytes": 2410
     },
     {
       "path": "dashboard/build_dashboard.py",
@@ -2172,8 +2172,8 @@
       "path": "tests/test_i18n.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b4ce4dc7308545ecd284d58af6ddfeb70d9365da74bbba2994082e4d4963ddbd",
-      "bytes": 27543
+      "export_sha256": "b567d1458cba6bd44ed222e86c66f707c9357c9e860ddae8b2186ad592937d57",
+      "bytes": 29190
     },
     {
       "path": "tests/test_identity_map.py",

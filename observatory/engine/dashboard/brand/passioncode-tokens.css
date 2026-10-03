@@ -1,4 +1,4 @@
-/* PassionCode design system v1.0.0. Canonical: passioncode.ai/design-system/.
+/* PassionCode design system v1.1.0. Canonical: passioncode.ai/design-system/.
    Marketing and desktop share roles; each surface chooses its own density. */
 :root {
   color-scheme: dark;
@@ -8,11 +8,13 @@
   --pc-text: #fff9f0;
   --pc-text-muted: #b6aabc;
   --pc-border: #342b3a;
-  --pc-border-strong: #5c4e63;
+  --pc-border-strong: #6f5e77;
   --pc-accent: #ffd21a;
   --pc-accent-hover: #ffdf5e;
   --pc-on-accent: #211900;
   --pc-accent-soft: #30270e;
+  --pc-focus: var(--pc-accent);
+  --pc-link: var(--pc-accent);
   --pc-brand-plum: #41054b;
   --pc-brand-magenta: #f20673;
   --pc-positive: #79d49a;
@@ -45,6 +47,35 @@
   --pc-duration-hover: 120ms;
   --pc-duration-state: 180ms;
 }
+
+/* v1.1.0: opt-in light palette. Dark values above remain the v1.0.0 contract.
+   Gold stays the action fill; readable gold-brown is the focus/link role. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --pc-bg: #ffffff;
+  --pc-panel: #f7f5f8;
+  --pc-panel-raised: #ffffff;
+  --pc-text: #211725;
+  --pc-text-muted: #655769;
+  --pc-border: #ddd4df;
+  --pc-border-strong: #8f8095;
+  --pc-accent: #ffd21a;
+  --pc-accent-hover: #edbd00;
+  --pc-on-accent: #211900;
+  --pc-accent-soft: #fff2b8;
+  --pc-focus: #806200;
+  --pc-link: #806200;
+  --pc-positive: #246b3b;
+  --pc-positive-soft: #e4f3e8;
+  --pc-warning: #8a4b0b;
+  --pc-warning-soft: #fff0dc;
+  --pc-negative: #a82f44;
+  --pc-negative-soft: #fde8ec;
+  --pc-info: #345da7;
+  --pc-info-soft: #e8efff;
+  --pc-shadow-overlay: 0 20px 60px #21172526;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root { --pc-duration-hover: 0ms; --pc-duration-state: 0ms; }
 }

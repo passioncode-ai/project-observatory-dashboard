@@ -187,7 +187,7 @@ available for use that does not meet the AGPL's terms — contact@passioncode.ai
 Versions up to and including v0.9.1 were released under PolyForm Noncommercial or Internal Use (v0.8.2–v0.9.1) and the MIT License (v0.8.1 and earlier); those releases keep their licence.
 Contributions are accepted under the [CLA](CLA.md).
 
-Part of [PassionCode.ai](https://passioncode.ai/) — the design system is [PassionCode 1.0.0](https://passioncode.ai/design-system/). Observatory is also the observation component of the [ssheleg harness](https://skills.sshlg.me/harness/): skills guide the work; Observatory records and checks the state around it.
+Part of [PassionCode.ai](https://passioncode.ai/) — the design system is [PassionCode 1.1.0](https://passioncode.ai/design-system/), dark theme. Observatory is also the observation component of the [ssheleg harness](https://skills.sshlg.me/harness/): skills guide the work; Observatory records and checks the state around it.
 
 ## Mac app
 
