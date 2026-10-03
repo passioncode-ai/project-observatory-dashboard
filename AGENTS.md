@@ -156,7 +156,11 @@ tasks are the operator's and which a contributor can take.
    manifests and every `SKILL.md` (`tests/test_plugin_manifests.py`).
 2. Merge that pull request through the required checks, then tag the merge commit `vX.Y.Z`.
 3. Publish a GitHub release for the tag with the built wheel and `SHA256SUMS`; re-download the
-   asset and compare its digest with the one inspected by `tools/check_package.py`.
+   asset and compare its digest with the one inspected by `tools/check_package.py`. On a Mac with
+   the maintainer's Developer ID, build the app from a full clone of the tag with
+   `OBSERVATORY_SIGN_IDENTITY` set (a shallow clone numbers the bundle 1), run
+   `macos/scripts/notarize.sh`, attach `ProjectObservatory-<version>-macos.zip` and add its line to
+   `SHA256SUMS` ([docs/macos/README.md](docs/macos/README.md#signing)).
 4. Every machine then runs `project-observatory full update --apply` (without `--apply` it only previews).
 5. Record the release in `docs/runs/<date>-<slug>/`.
 
