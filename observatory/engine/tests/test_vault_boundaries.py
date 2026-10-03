@@ -47,6 +47,19 @@ class VaultBoundaryTests(unittest.TestCase):
         return subprocess.run([sys.executable, str(ROOT / "tools" / tool), *args],
                               input=value, text=True, capture_output=True, env=self.env, timeout=20)
 
+    def test_backup_script_is_found_at_the_root_or_in_bin(self):
+        """ONBOARDING said `gateway_root`'s bin/ holds the script while the vault
+        looked only at its root, and no document named the file."""
+        gateway = self.root / "gateway"
+        (gateway / "bin").mkdir(parents=True)
+        self.assertIsNone(vault.backup_script(gateway))
+        script = gateway / "bin" / "backup-secrets.sh"
+        script.write_text("#!/bin/bash\necho synthetic backup\n")
+        self.assertEqual(vault.backup_script(gateway), script)
+        top = gateway / "backup-secrets.sh"
+        top.write_text("#!/bin/bash\necho synthetic backup\n")
+        self.assertEqual(vault.backup_script(gateway), top, "the root copy is the documented first place")
+
     def test_names_excludes_metadata_and_retired_archives(self):
         slot = self.store / "example/local/EXAMPLE_KEY"
         vault._atomic_write(slot, "synthetic-value")

@@ -140,7 +140,8 @@ By default, slots live under the private workspace's `secrets/projects/`.
 An explicitly configured `sources.secret_store` or `OBSERVATORY_VAULT_DIR`
 can select a separate private store. Such external stores are excluded from
 workspace backups and need their own backup procedure. `vault.py backup`
-requires a configured gateway backup script; do not promise encryption,
+requires a configured gateway backup script (`backup-secrets.sh` at
+`sources.gateway_root` or in its `bin/`); do not promise encryption,
 keychain storage or scheduled backups when that integration is absent.
 
 ## When something is unavailable

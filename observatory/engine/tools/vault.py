@@ -83,7 +83,19 @@ LEAKS = STORE / "leaks.jsonl"
 #: recorded looks exactly like one that never happened.
 MOVES = STORE / "movements.jsonl"
 ENVS = ("local", "stage", "prod")
-BACKUP = GATEWAY / "backup-secrets.sh"
+#: The backup script's name, and the two places it is looked for under
+#: `sources.gateway_root`: the root, then `bin/`. The documentation named only
+#: `bin/` while this looked only at the root, so a script placed as documented
+#: was "not on this machine". Its contract: a bash script, run with no
+#: arguments; its output and its exit code are `vault.py backup`'s.
+BACKUP_NAME = "backup-secrets.sh"
+
+
+def backup_script(root: pathlib.Path) -> pathlib.Path | None:
+    for candidate in (root / BACKUP_NAME, root / "bin" / BACKUP_NAME):
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 class VaultBoundaryError(ValueError):
@@ -698,9 +710,10 @@ def cmd_backup(a) -> int:
         # names a folder nobody made; say which setting is missing instead.
         die("no backup script is configured: set sources.gateway_root to the folder that "
             "holds backup-secrets.sh (project-observatory full configure sources gateway_root PATH)")
-    if not BACKUP.is_file():
-        die(f"{BACKUP} is not on this machine")
-    p = subprocess.run(["bash", str(BACKUP)], capture_output=True, text=True, timeout=600)
+    script = backup_script(GATEWAY)
+    if script is None:
+        die(f"no {BACKUP_NAME} at {GATEWAY / BACKUP_NAME} or {GATEWAY / 'bin' / BACKUP_NAME}")
+    p = subprocess.run(["bash", str(script)], capture_output=True, text=True, timeout=600)
     sys.stdout.write(p.stdout)
     sys.stderr.write(p.stderr)
     return p.returncode

@@ -708,8 +708,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "bcd0cd9d710e73db18dc68c17c09b193bf5517ab849f6d4d1cbbe5da3514670f",
-      "bytes": 46923,
+      "export_sha256": "962d7a5390acb94e6c40ee93320d2ea7944822606dad2124266bfbf64e2f6d46",
+      "bytes": 47050,
       "upstream_modified": true
     },
     {
@@ -1377,8 +1377,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "859da7e755d73a4a0b84494899eb0a230edc55a5115ac0775500a2e6ce9259e0",
-      "bytes": 9958,
+      "export_sha256": "ebd7aedf530de54107228a0763b660d035a4536ebe3d496b981e31908edf7b6d",
+      "bytes": 10023,
       "upstream_modified": true
     },
     {
@@ -3037,8 +3037,8 @@
     {
       "path": "tests/test_vault_boundaries.py",
       "source_sha256": "a78d44c308ae72011afcf399af4d89d934a0dd52187dd59476dfc786b0c6d01f",
-      "export_sha256": "a78d44c308ae72011afcf399af4d89d934a0dd52187dd59476dfc786b0c6d01f",
-      "bytes": 12922,
+      "export_sha256": "8beb40f1863558908986e2b45bcb5d2711bf2c169231ef8db4cd6707cc9dbcdc",
+      "bytes": 13678,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -3780,26 +3780,6 @@
       "upstream_modified": true
     },
     {
-      "path": "tools/use_secret.py",
-      "source_sha256": "8836e5826c78ca12bd852fd8f7b036c49db3b41383209d829f321318afc76bc1",
-      "export_sha256": "bf8ec1fff96b2021f951120fa517a129df5c7ed1fb004ceb89484e3611b54b81",
-      "bytes": 21592,
-      "python_comments_removed": 14,
-      "python_docstrings_removed": 5,
-      "tool_descriptions_retained": 0,
-      "upstream_modified": true
-    },
-    {
-      "path": "tools/use_secret.py",
-      "source_sha256": "8836e5826c78ca12bd852fd8f7b036c49db3b41383209d829f321318afc76bc1",
-      "export_sha256": "bf8ec1fff96b2021f951120fa517a129df5c7ed1fb004ceb89484e3611b54b81",
-      "bytes": 21592,
-      "python_comments_removed": 14,
-      "python_docstrings_removed": 5,
-      "tool_descriptions_retained": 0,
-      "upstream_modified": true
-    },
-    {
       "path": "tools/validate_registry.py",
       "source_sha256": "5210502420dcda1ff5ca5a3c090d3d9fb8f330cf38be8e1ace9710e1af2e5e74",
       "export_sha256": "be399a557115b8f6171d967bb27656cf970f44cf9c8406116099e316e590846f",
@@ -3812,28 +3792,8 @@
     {
       "path": "tools/vault.py",
       "source_sha256": "1df9030175654ff330cee02d22de11b3b515188918216509cadbbc4f8a510f49",
-      "export_sha256": "de112e9b5a53758a83fa45ef1438101dbd91cfab719cebc2b69bb1b47b533c27",
-      "bytes": 34772,
-      "python_comments_removed": 19,
-      "python_docstrings_removed": 7,
-      "tool_descriptions_retained": 0,
-      "upstream_modified": true
-    },
-    {
-      "path": "tools/vault.py",
-      "source_sha256": "1df9030175654ff330cee02d22de11b3b515188918216509cadbbc4f8a510f49",
-      "export_sha256": "de112e9b5a53758a83fa45ef1438101dbd91cfab719cebc2b69bb1b47b533c27",
-      "bytes": 34772,
-      "python_comments_removed": 19,
-      "python_docstrings_removed": 7,
-      "tool_descriptions_retained": 0,
-      "upstream_modified": true
-    },
-    {
-      "path": "tools/vault.py",
-      "source_sha256": "1df9030175654ff330cee02d22de11b3b515188918216509cadbbc4f8a510f49",
-      "export_sha256": "de112e9b5a53758a83fa45ef1438101dbd91cfab719cebc2b69bb1b47b533c27",
-      "bytes": 34772,
+      "export_sha256": "825107c9d58460d822c2d29f0140475dd5095edf631cc7d2a494a3c602c145a6",
+      "bytes": 35424,
       "python_comments_removed": 19,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -3874,7 +3834,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 488,
+  "file_count": 484,
   "excluded": [
     "git-history",
     "operator-registries",
