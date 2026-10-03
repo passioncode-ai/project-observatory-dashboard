@@ -57,7 +57,7 @@ claude -p "Call observatory_status once and reply OK with the number of projects
 # → OK 1 degraded=[]   (one project under the configured source; an empty degraded list is full coverage)
 ```
 
-Restart open Claude Code sessions; they read their MCP servers at start. Every answer carries a `degraded` list naming what could not be read. To let `machine.mcp.inventory` list the MCP servers your agents declare (Claude Code, Cursor, OpenCode, Codex, Gemini CLI, Kiro — names and transports only, never a URL, header or key), point the scan at your home and take one:
+Restart open Claude Code sessions; they read their MCP servers at start. Every answer carries a `degraded` list naming what could not be read. A malformed argument or an unknown tool answers `isError` with `{"error": "invalid-input"}` or `{"error": "unknown-tool"}` and a `detail` naming the field and the rule it broke, never the value sent. To let `machine.mcp.inventory` list the MCP servers your agents declare (Claude Code, Cursor, OpenCode, Codex, Gemini CLI, Kiro — names and transports only, never a URL, header or key), point the scan at your home and take one:
 
 ```sh
 project-observatory full configure sources mcp_config_root "$HOME"

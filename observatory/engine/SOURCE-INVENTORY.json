@@ -1037,8 +1037,8 @@
       "path": "mcp/capability_tools.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b97991926814a3e24567c0d72974f6c07b2da36c66f5b65a122638953dbd38e0",
-      "bytes": 13945
+      "export_sha256": "7107a47567b6c832b383e17a8348e3303b0bcfbb4083be4e3342369a5678829e",
+      "bytes": 16251
     },
     {
       "path": "mcp/server.py",
@@ -2338,8 +2338,8 @@
     {
       "path": "tests/test_mcp_wire.py",
       "source_sha256": "6ef615d88123f97f325c42bf8e4a9a41c0d3e501756f82c8833f761143cdf006",
-      "export_sha256": "5721ea9042d855d8a3dffcb566c0bcea0857e2b70664ac91ffca93a61c070054",
-      "bytes": 23307,
+      "export_sha256": "2ff9fe17c707236ca5b82b56abcd8da798f25e051ef30b49012d74853807f1ea",
+      "bytes": 25579,
       "python_comments_removed": 13,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,

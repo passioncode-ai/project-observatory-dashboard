@@ -31,6 +31,8 @@ from typing import Any, Callable
 import anyio
 import jsonschema
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+from pydantic import ValidationError
 from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
 
 import configuration
@@ -99,6 +101,28 @@ def _compact(result: Any) -> Any:
 def _error(code: str, detail: str, span: interop.Span | None = None) -> CallToolResult:
     return CallToolResult(content=[_text({"error": code, "detail": detail})], is_error=True,
                           _meta=span.meta() if span else None)
+
+
+#: Pydantic error types whose message is built from the caller's own input (a
+#: custom validator's sentence) rather than from the rule; only the rule is named then.
+_VALUE_BEARING = ("value_error", "assertion_error")
+
+
+def _invalid_arguments(exc: ValidationError) -> str:
+    """A rejected argument as `field: fails `rule` — expectation`, never the value.
+
+    The SDK's own text is pydantic's: a docs URL and `input_value=…`, which echoes
+    whatever the caller put in the field — a pasted key included — into the
+    caller's transcript. Pydantic's `msg` for a type or range rule states only the
+    expectation ("Input should be a valid integer"), so it is kept; a message a
+    custom validator wrote may quote the input, so for those only the rule is named."""
+    parts = []
+    for err in exc.errors(include_url=False, include_input=False, include_context=False)[:3]:
+        where = ".".join(str(p) for p in err.get("loc") or ()) or "(root)"
+        rule = str(err.get("type") or "invalid")
+        msg = "" if rule.startswith(_VALUE_BEARING) else str(err.get("msg") or "")
+        parts.append(f"{where}: fails `{rule}`" + (f" — {msg}" if msg else ""))
+    return "; ".join(parts) or "(root): fails validation"
 
 
 def _first_error(validator: jsonschema.protocols.Validator, value: Any) -> str | None:
@@ -174,7 +198,7 @@ class InteropServer(MCPServer):
         is_job_tool = self._job_tools and name in (interop.JOB_GET, interop.JOB_CANCEL)
         is_assistant = name == "observatory_assistant_ask"
         if name not in self._definitions and not is_job_tool and not is_assistant:
-            return _compact(await super().call_tool(name, arguments, context))
+            return await self._sdk_call(name, arguments, context)
         meta = None
         try:
             request = context.request_context if context is not None else None
@@ -199,6 +223,22 @@ class InteropServer(MCPServer):
         if is_job_tool:
             return await anyio.to_thread.run_sync(self._job_call, name, arguments or {}, span)
         return await self._capability_call(name, arguments or {}, span)
+
+    async def _sdk_call(self, name: str, arguments: dict[str, Any], context: Any) -> Any:
+        """An SDK-described tool, with its refusals typed like the capability tools'.
+
+        A malformed argument and an unknown tool were the SDK's raw text; now they
+        are `invalid-input` and `unknown-tool`. Anything else the SDK raises keeps its
+        own path: a crash still reaches the client as the SDK's bare "Error
+        executing tool <name>" and is logged there."""
+        if self._tool_manager.get_tool(name) is None:
+            return _error("unknown-tool", f"no tool named {name!r} is served here; list the tools to see them")
+        try:
+            return _compact(await super().call_tool(name, arguments, context))
+        except ToolError as exc:
+            if isinstance(exc, UnexpectedToolError) or not isinstance(exc.__cause__, ValidationError):
+                raise
+            return _error("invalid-input", _invalid_arguments(exc.__cause__))
 
     async def _capability_call(self, name: str, arguments: dict, span: interop.Span) -> CallToolResult:
         in_v, out_v = self._validators[name]
