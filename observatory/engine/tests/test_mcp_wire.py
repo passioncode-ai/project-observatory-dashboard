@@ -52,6 +52,15 @@ def payload(result) -> dict:
     raise AssertionError("no JSON payload in tool result")
 
 
+def typed_error(result) -> dict:
+    """The JSON refusal in a tool result's first text block, or {} when it is not JSON."""
+    try:
+        doc = json.loads(result.content[0].text)
+    except (ValueError, IndexError, AttributeError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
 async def run() -> None:
     # A throwaway store: the write tools are exercised for real, and the live
     # ledger never sees a test row.
@@ -139,6 +148,34 @@ async def run() -> None:
             data = payload(res)
             check("a scope missing its value is a typed answer, not a crash",
                   data.get("error") == "missing value" and not res.is_error, str(data)[:120])
+
+            # A malformed argument to an SDK-described tool came back as the SDK's
+            # raw validation text — "Error executing tool …", a pydantic URL and
+            # `input_value=…`, which echoes whatever the caller put in the field
+            # (a pasted key included) into the agent's transcript. It is the same
+            # typed `invalid-input` the capability tools answer, naming the field
+            # and the rule, never the value.
+            planted = "sk-or-v1-" + "0" * 40
+            for args, field in (({"limit": planted}, "limit"), ({"limit": -5}, "limit"),
+                                ({"kind": "nonsense"}, "kind")):
+                res = await session.call_tool("observatory_status", args)
+                text = " ".join(getattr(b, "text", "") for b in res.content)
+                typed = typed_error(res)
+                check(f"a malformed `{field}` is a typed invalid-input naming the field",
+                      bool(res.is_error) and typed.get("error") == "invalid-input"
+                      and field in str(typed.get("detail")), text[:200])
+                check(f"and the refusal carries no SDK text and no value ({field})",
+                      "Error executing tool" not in text and "pydantic" not in text
+                      and "input_value" not in text and planted not in text, text[:200])
+            res = await session.call_tool("observatory_project", {})
+            typed = typed_error(res)
+            check("a missing required argument is a typed invalid-input",
+                  bool(res.is_error) and typed.get("error") == "invalid-input"
+                  and "missing" in str(typed.get("detail")), str(typed)[:200])
+            res = await session.call_tool("observatory_no_such_tool", {})
+            typed = typed_error(res)
+            check("an unknown tool is a typed unknown-tool",
+                  bool(res.is_error) and typed.get("error") == "unknown-tool", str(res.content)[:200])
 
             # ---- the write path, over the wire, including its refusals ----
             res = await session.call_tool("observatory_record", {
