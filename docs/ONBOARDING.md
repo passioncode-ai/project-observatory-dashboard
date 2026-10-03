@@ -123,6 +123,11 @@ and token provisioning are different permissions.
 Metric plugins have their own manifest requirements and opt-ins. Run
 `project-observatory full plugins-check` to validate them and read
 [plugins/README.md](../observatory/engine/plugins/README.md) before adding trusted executable plugins.
+`project-observatory full plugins --only ID --force` runs one plugin now, past its age
+gate, and `project-observatory full google --force` refreshes the analytics inside their
+twelve-hour cache. Step options are declared per step; every step and command explains
+itself with `--help` and runs nothing when asked
+([CLI compatibility](../observatory/engine/docs/CLI-COMPATIBILITY.md#step-arguments-and-help)).
 An unavailable input must remain visible as unavailable; it does not prove that
 there are no findings.
 

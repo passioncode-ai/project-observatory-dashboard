@@ -758,7 +758,8 @@ def reclaimable_pressure(free_bytes: float | None, reclaimable_bytes: float | No
                       "carries what that endangers — this row is only the lever.")),
         "action": "delete the package directories of a project you are not working "
                   "on; every byte comes back with a reinstall. "
-                  "`project-observatory full project <name>` shows one project's footprint",
+                  "A project's panel on the Projects page lists its measurements, "
+                  "footprint included",
         "evidence": ["store:metrics#" + RECLAIMABLE_ROLE,
                      "shutil.disk_usage(.).free"]}]
 
@@ -987,7 +988,7 @@ MERGE_REMEDY = {
     "ownership": "decide whether the organisation is yours — add it to "
                  "`organizations` in the workspace's `config/ownership.json` "
                  "(read as `OWNED_ORGS` by `collectors/merge.py`) and re-run "
-                 "`project-observatory full merge emit`, or leave it and its projects "
+                 "`project-observatory full local`, or leave it and its projects "
                  "stay `external`",
     # The merge's own coverage sources. Each is emitted when an input the
     # merge reads was never produced, so the cure is to produce that input —
@@ -3155,8 +3156,8 @@ def collect() -> list[dict]:
                               + (f" Last measurement: {p['last_at']}."
                                  if p.get("last_at") else
                                  " It has never written a measurement."),
-                    "action": f"project-observatory full plugins --only {p['id']} --force, "
-                              f"and `--check` for the manifest",
+                    "action": f"`project-observatory full plugins --only {p['id']} --force`; "
+                              f"`project-observatory full plugins-check` validates every manifest",
                     "evidence": ["store/raw/plugins.json#plugins"]})
             elif refused:
                 # REFUSED IS NOT SKIPPED. The plugin ran and wrote rows the

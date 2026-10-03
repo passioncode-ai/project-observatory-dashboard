@@ -432,10 +432,87 @@ def doctor(base: Path) -> dict:
             **({"agent": config.model_readiness(base)} if (doc.get("features") or {}).get("agent") is True else {})}
 
 
+#: Every usage line names the entry point a person types, never this file.
+PROG = "project-observatory full"
+
+
+def _parser() -> argparse.ArgumentParser:
+    """The parser for the workspace commands `main` handles itself."""
+    ap = argparse.ArgumentParser(prog=PROG, description=__doc__)
+    sub = ap.add_subparsers(dest="command", required=True)
+    sub.add_parser("init", help="create the private workspace, or complete one")
+    sub.add_parser("doctor", help="workspace health, sources and backups")
+    sub.add_parser("version", help="the engine, workspace and configuration versions")
+    sub.add_parser("onboard", help="print the agent onboarding guide")
+    migration = sub.add_parser("migrate-local", help="copy an original full-engine installation into a new workspace; previews without --apply")
+    migration.add_argument("source", type=Path)
+    migration.add_argument("--apply", action="store_true")
+    migration.add_argument("--writers-stopped", action="store_true")
+    conf = sub.add_parser("configure", help="set one setting in config/settings.json")
+    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage", "model", "budget"])
+    conf.add_argument("name")
+    conf.add_argument("value")
+    phrase = sub.add_parser("backup-passphrase", help="the passphrase that encrypts backups (stdin)")
+    phrase.add_argument("action", choices=["set", "status", "show"])
+    backups = sub.add_parser("backups", help="where backups go; move legacy copies; decrypt one")
+    backups.add_argument("action", choices=["status", "migrate", "decrypt"])
+    backups.add_argument("file", nargs="?", type=Path)
+    backups.add_argument("output", nargs="?", type=Path)
+    return ap
+
+
+def machine_parser(name: str) -> argparse.ArgumentParser:
+    """`machine` and `cleanup`. They read their flags by hand until 0.12, so
+    `machine --help` ran the survey and `cleanup --help` wrote a plan."""
+    if name == "machine":
+        ap = argparse.ArgumentParser(prog=f"{PROG} machine",
+                                     description="processes by origin, memory and disk; why one process runs")
+        ap.add_argument("--disk", action="store_true", help="also size the disk's largest places (slower)")
+        ap.add_argument("--explain", type=int, metavar="PID", help="why one process runs, and print nothing else")
+        return ap
+    ap = argparse.ArgumentParser(prog=f"{PROG} cleanup",
+                                 description="plan cleanup, or remove what loses nothing; without --apply only the plan is written")
+    ap.add_argument("--apply", action="store_true", help="remove the auto tier")
+    ap.add_argument("--include", choices=["manual"],
+                    help="with --apply, also archive and remove the manual tier")
+    return ap
+
+
+def _tool_module(name: str):
+    sys.path.insert(0, str(config.SOURCE / "tools"))
+    return __import__(name)
+
+
+def parse(argv: list[str]) -> argparse.Namespace:
+    """Parse a workspace command line exactly as `main` will, and run nothing.
+
+    Each command's own parser factory is the one its `main` uses, so the gate
+    (`observatory.refusal`) and the dispatcher cannot disagree about what is
+    accepted. argparse's `SystemExit` propagates: 0 after `--help`, 2 on a refusal.
+    """
+    name, rest = argv[0], argv[1:]
+    if name == "open":
+        return _tool_module("dashboard_open").parser().parse_args(rest)
+    if name == "agent":
+        return _tool_module("agent_plugin").parser().parse_args(rest)
+    if name == "update":
+        import engine_update
+        return engine_update.parser().parse_args(rest)
+    if name == "profile":
+        import workspace_profile
+        return workspace_profile.parser().parse_args(rest)
+    if name in {"machine", "cleanup"}:
+        return machine_parser(name).parse_args(rest)
+    if name in {"workspace-backup", "upgrade", "restore"}:
+        import workspace_upgrade
+        return workspace_upgrade.parser().parse_args(
+            ["backup" if name == "workspace-backup" else name, *rest])
+    return _parser().parse_args(argv)
+
+
 def main(argv: list[str]) -> int:
     if argv and argv[0] in {"open", "agent"}:
-        sys.path.insert(0, str(config.SOURCE / "tools"))
-        module = __import__("dashboard_open" if argv[0] == "open" else "agent_plugin")
+        module = _tool_module("dashboard_open" if argv[0] == "open" else "agent_plugin")
         return module.main(argv[1:])
     if argv and argv[0] == "update":
         import engine_update
@@ -448,27 +525,7 @@ def main(argv: list[str]) -> int:
     if argv and argv[0] in {"workspace-backup", "upgrade", "restore"}:
         import workspace_upgrade
         return workspace_upgrade.main(["backup" if argv[0] == "workspace-backup" else argv[0], *argv[1:]])
-    ap = argparse.ArgumentParser(description=__doc__)
-    sub = ap.add_subparsers(dest="command", required=True)
-    sub.add_parser("init")
-    sub.add_parser("doctor")
-    sub.add_parser("version")
-    sub.add_parser("onboard")
-    migration = sub.add_parser("migrate-local")
-    migration.add_argument("source", type=Path)
-    migration.add_argument("--apply", action="store_true")
-    migration.add_argument("--writers-stopped", action="store_true")
-    conf = sub.add_parser("configure")
-    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage", "model", "budget"])
-    conf.add_argument("name")
-    conf.add_argument("value")
-    phrase = sub.add_parser("backup-passphrase")
-    phrase.add_argument("action", choices=["set", "status", "show"])
-    backups = sub.add_parser("backups")
-    backups.add_argument("action", choices=["status", "migrate", "decrypt"])
-    backups.add_argument("file", nargs="?", type=Path)
-    backups.add_argument("output", nargs="?", type=Path)
-    a = ap.parse_args(argv)
+    a = _parser().parse_args(argv)
     try:
         base = config.home()
         if a.command == "backup-passphrase":
@@ -575,23 +632,22 @@ def _configure_models(base: Path, a) -> int:
 
 def machine_command(name: str, argv: list[str]) -> int:
     """`machine [--disk] [--explain PID]` surveys and prints; `cleanup [--apply]
-    [--include manual]` refreshes the git survey, then plans or acts."""
+    [--include manual]` refreshes the git survey, then plans or acts.
+
+    Parsed BEFORE the workspace is touched, so `--help` and a refused flag cost
+    nothing; anything undeclared is refused rather than ignored."""
+    a = machine_parser(name).parse_args(argv)
     config.validate_workspace(config.home(), required=True)
     for sub in ("collectors", "tools"):
         sys.path.insert(0, str(config.SOURCE / sub))
     import paths
     import scan_machine
     if name == "machine":
-        if "--explain" in argv:
-            try:
-                pid = int(argv[argv.index("--explain") + 1])
-            except (IndexError, ValueError):
-                print("Observatory: --explain takes a process id", file=sys.stderr)
-                return 2
-            print(json.dumps(scan_machine.explain(pid), indent=1, ensure_ascii=False))
+        if a.explain is not None:
+            print(json.dumps(scan_machine.explain(a.explain), indent=1, ensure_ascii=False))
             return 0
         out = paths.SCRATCH / "machine.json"
-        scan_machine.main(["scan_machine.py", str(out), *(["--disk"] if "--disk" in argv else [])])
+        scan_machine.main(["scan_machine.py", str(out), *(["--disk"] if a.disk else [])])
         doc = json.loads(out.read_text(encoding="utf-8"))
         print(json.dumps({"memory": doc["memory"], "volume": doc["disk"]["volume"],
                           "largest_origins": doc["processes"].get("groups", [])[:12],
@@ -601,7 +657,7 @@ def machine_command(name: str, argv: list[str]) -> int:
     import scan_git_hygiene
     import cleanup
     scan_git_hygiene.main(["scan_git_hygiene.py", str(paths.SCRATCH / "git-hygiene.json")])
-    args = ["cleanup.py"] + (["--apply"] if "--apply" in argv else []) + (["manual"] if "manual" in argv else [])
+    args = ["cleanup.py"] + (["--apply"] if a.apply else []) + (["manual"] if a.include == "manual" else [])
     return cleanup.main(args)
 
 

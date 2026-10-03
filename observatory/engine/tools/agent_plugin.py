@@ -358,7 +358,8 @@ def uninstall() -> dict:
             "next": "Restart Claude Code sessions. Your workspace was not touched."}
 
 
-def main(argv: list[str] | None = None) -> int:
+def parser() -> argparse.ArgumentParser:
+    """Shared by `main` and the gate's parse-only check (`workspace.parse`)."""
     ap = argparse.ArgumentParser(prog="project-observatory full agent",
                                  description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="action", required=True)
@@ -367,7 +368,11 @@ def main(argv: list[str] | None = None) -> int:
                       help="install without turning plugin auto-update on")
     sub.add_parser("status")
     sub.add_parser("uninstall")
-    a = ap.parse_args(argv)
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    a = parser().parse_args(argv)
     try:
         if a.action == "install":
             result = install(auto_update=not a.no_auto_update)

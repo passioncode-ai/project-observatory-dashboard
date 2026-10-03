@@ -232,7 +232,8 @@ def open_dashboard(*, serve: bool, port: int, rebuild: bool, browser: bool) -> d
     return result
 
 
-def main(argv: list[str] | None = None) -> int:
+def parser() -> argparse.ArgumentParser:
+    """Shared by `main` and the gate's parse-only check (`workspace.parse`)."""
     ap = argparse.ArgumentParser(prog="project-observatory full open", description=__doc__.splitlines()[0])
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--serve", action="store_true", help="serve on 127.0.0.1 instead of opening files")
@@ -240,7 +241,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--rebuild", action="store_true", help="rebuild the pages before opening")
     ap.add_argument("--no-browser", action="store_true", help="print the address only")
-    a = ap.parse_args(argv)
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    a = parser().parse_args(argv)
     if not 0 < a.port < 65536:
         print("Observatory: port must be between 1 and 65535", file=sys.stderr)
         return 2

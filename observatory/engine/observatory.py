@@ -57,7 +57,9 @@ said the opposite — "no model participates" and "the LLM layer is not built ye
 the table that lists it. `tools/check_docs.py` now fails on both sentences.
 """
 from __future__ import annotations
+import contextlib
 import hashlib
+import io
 import json, os, re, sqlite3, subprocess, sys
 from pathlib import Path
 
@@ -449,6 +451,8 @@ WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migr
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
+  migrate-local SOURCE [--apply --writers-stopped]  copy an original full-engine
+                               installation into a new workspace; previews without --apply
   version / doctor             the engine version; workspace health, sources and backups
   configure model chain ID[,ID]        the assistant's model chain (vendor/model ids)
   configure budget CEILING AMOUNT      daily_ceiling | monthly_ceiling | velocity_ceiling
@@ -513,6 +517,199 @@ def unavailable_step(name: str, public: bool) -> str:
     return ""
 
 
+#: The program name every usage line carries: the documented entry point, not
+#: this file. Parsers built with argparse's default announced `observatory.py`,
+#: a name an installed user has nowhere on disk.
+PROG = "project-observatory full"
+
+
+class CommandRefused(ValueError):
+    """A command line the dispatcher will not run, with the reason a person reads."""
+
+
+#: A value an option forwards: a name, never a path. `--only` selects a plugin by
+#: its manifest id, and a value shaped like `../x` or `/x` has no business there.
+OPTION_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+#: OPTIONS A SINGLE STEP FORWARDS TO ITS TOOL: an allowlist, not a pass-through.
+#: A step's command is fixed and its positional arguments are already this
+#: workspace's own paths (`workspace_argument`), so forwarding whatever follows
+#: the step name would let `full emit /elsewhere` point a writer outside the
+#: workspace and turn a typo into a silently different run; that is why extra
+#: arguments are refused. But the engine's own remedies need two declared flags:
+#: `analytics.stale` hands over `full google --force` and the plugin rows
+#: `full plugins --only ID --force`, and the blanket refusal sent the reader to
+#: the source tree instead. Each option below is one the tool's own parser
+#: declares, as {flag: (metavar or None for a switch, value pattern, help)}.
+#: `tests/test_handed_commands.py` drives every handed-over command through
+#: `refusal`, so a remedy that needs another option fails the gate, not the reader.
+STEP_OPTIONS: dict[str, dict[str, tuple[str | None, re.Pattern | None, str]]] = {
+    "google": {"--force": (None, None, "re-fetch inside the twelve-hour cache window")},
+    "plugins": {"--only": ("ID", OPTION_NAME, "run one plugin, by its manifest id"),
+                "--force": (None, None, "ignore each plugin's age gate")},
+}
+
+
+def step_arguments(name: str, args: list[str]) -> tuple[list[str], list[str] | None]:
+    """(options forwarded to the step's tool, `--expect-skipped` steps or None).
+
+    Raises `CommandRefused` for anything the step does not declare. `--opt=VALUE`
+    and `--opt VALUE` are both read and forwarded in the second form, which every
+    argparse tool accepts.
+    """
+    declared = {} if name in GROUPS else STEP_OPTIONS.get(name, {})
+    forwarded: list[str] = []
+    expect: list[str] | None = None
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("--expect-skipped="):
+            expect = arg.split("=", 1)[1].split(",")
+            i += 1
+            continue
+        flag, has_value, inline = arg.partition("=")
+        spec = declared.get(flag) if flag.startswith("--") else None
+        if spec is None:
+            if declared:
+                raise CommandRefused(
+                    f"`{name}` does not accept {arg!r}; it accepts {', '.join(declared)} "
+                    f"(`{PROG} {name} --help`)")
+            if name in GROUPS:
+                raise CommandRefused(f"step arguments are not accepted here: `{name}` is a group "
+                                     f"and takes none (got {arg!r})")
+            # The commonest cause is a remedy that chained steps (`full merge
+            # emit`): there is one step per invocation, and `local` is the chain.
+            raise CommandRefused(
+                f"step arguments are not accepted here: `{name}` takes none (got {arg!r}). "
+                f"One step per invocation; `{PROG} local` runs {', '.join(GROUPS['local'])} in order")
+        if flag in forwarded:
+            raise CommandRefused(f"`{name}`: {flag} is given twice")
+        metavar, pattern, _ = spec
+        if metavar is None:
+            if has_value:
+                raise CommandRefused(f"`{name}`: {flag} takes no value")
+            forwarded.append(flag)
+            i += 1
+            continue
+        if has_value:
+            value, i = inline, i + 1
+        elif i + 1 < len(args):
+            value, i = args[i + 1], i + 2
+        else:
+            raise CommandRefused(f"`{name}`: {flag} needs {metavar}")
+        if pattern is not None and not pattern.fullmatch(value):
+            raise CommandRefused(f"`{name}`: {value!r} is not a valid {metavar} for {flag}")
+        forwarded += [flag, value]
+    return forwarded, expect
+
+
+def wants_help(args: list[str]) -> bool:
+    return any(arg in ("-h", "--help") for arg in args)
+
+
+def _describe(name: str, public: bool) -> str:
+    """The one-line description the top-level help gives this name, if any."""
+    for text in ((PUBLIC_HELP, __doc__) if public else (__doc__, PUBLIC_HELP)):
+        m = re.search(rf"^\s{{2,4}}{re.escape(name)}(?=[\s\[]).*?\s{{2,}}(\S.*)$", text or "", re.M)
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+def step_help(name: str, public: bool) -> str:
+    """`full STEP --help`: what it runs and what it accepts. Printed, never run."""
+    declared = {} if name in GROUPS else STEP_OPTIONS.get(name, {})
+    shape = "".join(f" [{flag}{' ' + spec[0] if spec[0] else ''}]" for flag, spec in declared.items())
+    if name in GROUPS:
+        shape += " [--expect-skipped=STEP[,STEP]]"
+    lines = [f"usage: {PROG} {name}{shape}", ""]
+    described = _describe(name, public)
+    if described:
+        lines += [described, ""]
+    if name in GROUPS:
+        lines.append("runs, in order, stopping at the first failure: " + ", ".join(GROUPS[name]))
+    else:
+        cmd = STEPS[name]
+        lines.append("runs: " + " ".join(cmd[1:2] if cmd[0] == PY else cmd))
+    reason = unavailable_step(name, public)
+    if reason:
+        lines.append(f"unavailable in this distribution: {reason}")
+    options = [(f"{flag}{' ' + spec[0] if spec[0] else ''}", spec[2]) for flag, spec in declared.items()]
+    if name in GROUPS:
+        options.append(("--expect-skipped=STEP[,STEP]", "the steps this environment may skip (CI pins it)"))
+    options.append(("-h, --help", "show this help and run nothing"))
+    lines += ["", "options:"] + [f"  {left:<30} {right}" for left, right in options]
+    if not declared and name not in GROUPS:
+        lines += ["", f"This step takes no arguments; one step per invocation. `{PROG} local` "
+                      f"runs the local cycle."]
+    return "\n".join(lines)
+
+
+def _portable_runner():
+    """tests/run_portable.py as a module, for its parser only."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("observatory_run_portable", ROOT / "tests/run_portable.py")
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def refusal(argv: list[str]) -> str:
+    """Why the `full` command line `argv` would be refused, or "" if accepted.
+
+    PARSE ONLY: nothing is run, no workspace is opened. Each family is parsed by
+    the parser its dispatcher uses — the step rules above, `workspace.parse` for
+    the workspace commands, the assistant's and the portable runner's own — so
+    this cannot accept a line the dispatcher refuses, or the reverse. It exists
+    so every command the engine hands a person can be checked in the gate.
+    """
+    if not argv or argv[0] in ("-h", "--help"):
+        return ""
+    name, rest = argv[0], argv[1:]
+    try:
+        public = public_profile()
+    except configuration.ConfigurationError as exc:
+        return str(exc)
+
+    def argparse_refusal(parse) -> str:
+        captured = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(captured), contextlib.redirect_stdout(io.StringIO()):
+                parse()
+        except SystemExit as exc:
+            if exc.code not in (0, None):
+                return (captured.getvalue().strip().splitlines() or [f"exit {exc.code}"])[-1]
+        return ""
+
+    if name == "assistant":
+        from agent import assistant
+        return argparse_refusal(lambda: assistant.parser().parse_args(rest))
+    if name in WORKSPACE_COMMANDS:
+        import workspace
+        return argparse_refusal(lambda: workspace.parse(argv))
+    if name == "check-portable" or (public and name == "check"):
+        reason = unavailable_step("check-portable", public)
+        if reason:
+            return f"check-portable unavailable: {reason}"
+        runner = _portable_runner()
+        return argparse_refusal(lambda: runner.parser(f"{PROG} {name}").parse_args(rest))
+    steps = GROUPS.get(name, [name] if name in STEPS else None)
+    if steps is None:
+        return f"unknown step: {name}"
+    if wants_help(rest):
+        return ""
+    for step in [name, *steps]:
+        reason = unavailable_step(step, public)
+        if reason:
+            return f"{step} unavailable: {reason}"
+    try:
+        step_arguments(name, rest)
+    except CommandRefused as exc:
+        return str(exc)
+    return ""
+
+
 
 
 def capabilities() -> dict[str, str]:
@@ -539,8 +736,11 @@ def capabilities() -> dict[str, str]:
 SKIP_MARKER = re.compile(r"^\s+(SKIP|NOTE)\s")
 
 
-def run(step: str, *, offline: bool = False) -> tuple[int, list[str]]:
+def run(step: str, *, offline: bool = False, extra=()) -> tuple[int, list[str]]:
     """Run one step, streaming its output, and report the blocks it skipped.
+
+    `extra` holds the options `step_arguments` accepted for this step; they are
+    appended to its fixed command and nothing else is.
 
     STREAMED rather than captured. A 99-step gate whose output only appears at
     the end is a gate nobody watches, so the lines are printed as they arrive and
@@ -558,7 +758,7 @@ def run(step: str, *, offline: bool = False) -> tuple[int, list[str]]:
     child_environment = dict(os.environ)
     if offline:
         child_environment["OBSERVATORY_OFFLINE"] = "1"
-    proc = subprocess.Popen(STEPS[step], cwd=ROOT, stdout=subprocess.PIPE,
+    proc = subprocess.Popen([*STEPS[step], *extra], cwd=ROOT, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, bufsize=1,
                             env=child_environment)
     assert proc.stdout is not None
@@ -853,20 +1053,28 @@ def main(argv: list[str]) -> int:
             return 2
         # Before workspace validation/tightening: a public gate needs no live
         # state and its runner creates fresh private synthetic workspaces.
-        return subprocess.call([*STEPS["check-portable"], *argv[2:]], cwd=ROOT)
+        # OBSERVATORY_PROG gives the runner's usage line the name the person typed.
+        return subprocess.call([*STEPS["check-portable"], *argv[2:]], cwd=ROOT,
+                               env=dict(os.environ, OBSERVATORY_PROG=f"{PROG} {name}"))
     steps = GROUPS.get(name, [name] if name in STEPS else None)
     if steps is None:
         print(f"unknown step: {name}", file=sys.stderr)
         return 2
+    # HELP BEFORE ANYTHING ELSE, and it runs nothing: `--help` used to be refused
+    # as an argument, so a person asking what a step does got exit 2.
+    if wants_help(argv[2:]):
+        print(step_help(name, public))
+        return 0
     missing = [(step, unavailable_step(step, public)) for step in [name, *steps]]
     missing = [(step, reason) for step, reason in missing if reason]
     if missing:
         for step, reason in dict(missing).items():
             print(f"Observatory: {step} unavailable: {reason}", file=sys.stderr)
         return 2
-    invalid_args = [arg for arg in argv[2:] if not arg.startswith("--expect-skipped=")]
-    if invalid_args:
-        print("Observatory: step arguments are not accepted here; invoke the underlying tool directly", file=sys.stderr)
+    try:
+        forwarded, expect_skipped = step_arguments(name, argv[2:])
+    except CommandRefused as exc:
+        print(f"Observatory: {exc}", file=sys.stderr)
         return 2
     if name not in {"setup", "deps"} and not name.startswith("test"):
         try:
@@ -878,10 +1086,7 @@ def main(argv: list[str]) -> int:
         paths.tighten()
     # `--expect-skipped a,b` pins which steps this environment may skip. CI passes
     # it; a person leaves it off and gets the summary without the assertion.
-    expect_skipped = None
-    for a in argv[2:]:
-        if a.startswith("--expect-skipped="):
-            expect_skipped = a.split("=", 1)[1].split(",")
+    # `step_arguments` read it above, with the step's declared options.
     for g, body in GROUPS.items():                                               
         unknown = [x for x in body if x not in STEPS]                              
         if unknown:                                                                   
@@ -924,7 +1129,8 @@ def main(argv: list[str]) -> int:
               f"silently mixed into one verdict.\033[0m", flush=True)
     try:
         return _run_group(name, steps, expect_skipped,
-                          attributable=held is not None or name not in NON_MUTATING)
+                          attributable=held is not None or name not in NON_MUTATING,
+                          forwarded=forwarded)
     finally:
         if held is not None:
             import tick_lease
@@ -943,7 +1149,7 @@ def _tick_stamp() -> str:
 
 
 def _run_group(name: str, steps: list[str], expect_skipped: list[str] | None,
-               attributable: bool = True) -> int:
+               attributable: bool = True, forwarded: list[str] | None = None) -> int:
     before = tree_state() if name in NON_MUTATING else None
     before_ignored = ignored_state() if name in NON_MUTATING else None
     # THE TICK RUNS EVERY THIRTY MINUTES, and a long `check` overlaps it. On
@@ -964,7 +1170,10 @@ def _run_group(name: str, steps: list[str], expect_skipped: list[str] | None,
             skipped[step] = absent[0]
             print(f"\n\033[1m── {step}\033[0m\n\033[33mSKIP — {absent[0]}\033[0m")
             continue
-        code, blocks = run(step, offline=name == "local")
+        # Forwarded options belong to a single step invoked by name; a group
+        # accepts none (`step_arguments`), so they never reach another step.
+        code, blocks = run(step, offline=name == "local",
+                           extra=forwarded if step == name else ())
         if blocks:
             block_skips[step] = blocks
         if code != 0:

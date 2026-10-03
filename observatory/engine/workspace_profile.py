@@ -541,7 +541,8 @@ def import_profile(base: Path, path: Path, apply: bool) -> dict:
     return result
 
 
-def main(argv: list[str]) -> int:
+def parser() -> argparse.ArgumentParser:
+    """Shared by `main` and the gate's parse-only check (`workspace.parse`)."""
     ap = argparse.ArgumentParser(prog="project-observatory full profile", description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="action", required=True)
     exp = sub.add_parser("export", help="print the profile, or write it to a new private FILE")
@@ -550,7 +551,11 @@ def main(argv: list[str]) -> int:
     imp = sub.add_parser("import", help="preview a profile's changes; --apply writes them")
     imp.add_argument("file", type=Path)
     imp.add_argument("--apply", action="store_true")
-    a = ap.parse_args(argv)
+    return ap
+
+
+def main(argv: list[str]) -> int:
+    a = parser().parse_args(argv)
     try:
         base = config.home()
         result = export(base, a.file, a.force) if a.action == "export" else import_profile(base, a.file, a.apply)

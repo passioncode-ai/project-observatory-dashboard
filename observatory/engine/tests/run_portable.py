@@ -45,7 +45,7 @@ LEGACY = (
 BOUNDARY = (
     'workspace', 'workspace_upgrade', 'workspace_boundaries', 'dashboard_shell',
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
-    'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'dashboard_portability',
+    'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'handed_commands', 'dashboard_portability',
     'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'machine', 'local_folders', 'config_locations', 'dashboard_stop',
     'engine_update', 'workspace_profile',
     # Ported suites, first batch: each builds its own temporary workspace.
@@ -251,16 +251,24 @@ def run_suite(name: str, base: Path, template: Path, timeout: int) -> dict:
     return result
 
 
+def parser(prog: str | None = None) -> argparse.ArgumentParser:
+    """`prog` is the command a person typed (`project-observatory full check`);
+    the dispatcher passes it in OBSERVATORY_PROG, and the gate's parse-only check
+    (`observatory.refusal`) passes it directly."""
+    ap=argparse.ArgumentParser(prog=prog, description=__doc__)
+    ap.add_argument('--suite',action='append',choices=SUITES,metavar='NAME',
+                    help='Run a named subset (repeatable); omitted runs the entire explicit set.')
+    ap.add_argument('--jobs',type=int,default=4)
+    ap.add_argument('--timeout',type=int,default=120,help='Seconds per suite.')
+    ap.add_argument('--report-dir', type=Path, help='Write only synthetic suite logs and the summary to a new directory.')
+    ap.add_argument('--keep',action='store_true',help='Keep private synthetic logs and source sandboxes.')
+    return ap
+
+
 def main() -> int:
-    parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--suite',action='append',choices=SUITES,
-                        help='Run a named subset; omitted runs the entire explicit set.')
-    parser.add_argument('--jobs',type=int,default=4)
-    parser.add_argument('--timeout',type=int,default=120,help='Seconds per suite.')
-    parser.add_argument('--report-dir', type=Path, help='Write only synthetic suite logs and the summary to a new directory.')
-    parser.add_argument('--keep',action='store_true',help='Keep private synthetic logs and source sandboxes.')
-    args=parser.parse_args()
-    if args.jobs < 1 or args.timeout < 1: parser.error('jobs and timeout must be positive')
+    ap=parser(os.environ.get('OBSERVATORY_PROG') or None)
+    args=ap.parse_args()
+    if args.jobs < 1 or args.timeout < 1: ap.error('jobs and timeout must be positive')
     names=tuple(dict.fromkeys(args.suite or SUITES))
     base=Path(tempfile.mkdtemp(prefix='observatory-portable-')).resolve();base.chmod(0o700)
     try:

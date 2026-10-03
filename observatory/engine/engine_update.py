@@ -943,7 +943,8 @@ class Transaction:
         return (EXIT_SERVICES if failed else EXIT_OK), report
 
 
-def main(argv: list[str], deps: Dependencies | None = None) -> int:
+def parser() -> argparse.ArgumentParser:
+    """Shared by `main` and the gate's parse-only check (`workspace.parse`)."""
     ap = argparse.ArgumentParser(prog="project-observatory full update", description=__doc__.splitlines()[0])
     ap.add_argument("--version", metavar="X.Y.Z", help="target release instead of the latest")
     mode = ap.add_mutually_exclusive_group()
@@ -954,7 +955,11 @@ def main(argv: list[str], deps: Dependencies | None = None) -> int:
     ap.add_argument("--no-rollback", action="store_true", help="apply even without a verified rollback wheel")
     ap.add_argument("--repository", help=f"OWNER/NAME of the release source (default: the plugin's repository, or ${REPOSITORY_ENV})")
     ap.add_argument("--api-url", help=f"GitHub API base (default {DEFAULT_API}, or ${API_ENV})")
-    args = ap.parse_args(argv)
+    return ap
+
+
+def main(argv: list[str], deps: Dependencies | None = None) -> int:
+    args = parser().parse_args(argv)
     if deps is None:
         deps = Dependencies()
     current = config.VERSION

@@ -38,7 +38,11 @@ class CLICompatibilityTests(unittest.TestCase):
              patch.object(cli.configuration, "validate_workspace", side_effect=AssertionError("live workspace")), \
              patch.object(cli.paths, "tighten", side_effect=AssertionError("workspace write")):
             self.assertEqual(self.invoke("check", "--suite", "ledger")[0], 7)
-        run.assert_called_once_with([*cli.STEPS["check-portable"], "--suite", "ledger"], cwd=self.root)
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0], [*cli.STEPS["check-portable"], "--suite", "ledger"])
+        self.assertEqual(run.call_args.kwargs["cwd"], self.root)
+        # The runner's usage line names the command typed, not `run_portable.py`.
+        self.assertEqual(run.call_args.kwargs["env"]["OBSERVATORY_PROG"], "project-observatory full check")
 
     def test_missing_runner_is_an_error_not_a_skip(self):
         (self.root / "tests/run_portable.py").unlink()
