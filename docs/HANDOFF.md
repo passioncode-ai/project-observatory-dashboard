@@ -60,6 +60,13 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
+**2026-10-04, release 0.15.0 (published, installed on the maintainer's machine):** agent memory
+for everyday use (#136) and the header door. Verified downloaded set, `full update` applied
+with migration 0009, the Mac app 0.15.0, `observatory-log` 0.15.0 through the PassionCode
+launcher 0.1.26/0.1.27, and the website. The release gate was approved by an agent on the
+operator's explicit instruction — recorded as the exception it is. Record and next task:
+[runs/2026-10-04-release-0.15.0](runs/2026-10-04-release-0.15.0/README.md).
+
 **2026-10-03, release 0.14.0 (published, installed on the maintainer's machine):** the lifecycle
 contract, agent memory and its hardening, the first release built, signed, notarized, attested
 and published in CI. Receipt — tag, run, digests, verification, installation, launchd state, next
