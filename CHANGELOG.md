@@ -3,7 +3,14 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.15.0 — 2026-10-04
+
+A minor release: a vault bearer for HTTP MCP servers through Claude Code's `headersHelper`, and
+agent memory carried further — credentials through Observatory, recovery after a lost session,
+sessions, the Agents page, an evaluation set and better search (#133, #136). The companion plugin
+`observatory-log` is 0.15.0: its `handling-secrets` skill names the new commands. A new dependency,
+`snowballstemmer` 3.1.1 (BSD-3-Clause), is in `[full]` and both locks; migration `0009-search-stems`
+rebuilds the lexical index from canon on upgrade.
 
 ### Added
 
@@ -20,8 +27,22 @@ while the major version is 0, a minor release may change behaviour and says so h
   `--clear` removes it. Only https is accepted (a bare host means https on the default port).
   Both are journalled in the movements journal, and `vault.py list` shows the binding.
 
-The `handling-secrets` skill gained both commands, so the companion plugin `observatory-log`
-needs a version bump at the next release (its three manifests and every `SKILL.md`).
+- **Agents get every credential from Observatory, by name** (OBS-10): declared credentials,
+  slot-naming redaction, `--vault-only`, `use_secret.py serve`, consumers named on rotate.
+- **Agents find and recover their work** (OBS-09): `full workflow list/show/handoff/close`, and a
+  self-handoff after a lost token.
+- **Sessions are linked to workflows**, with derived stalls (OBS-11), and **the live Agents page**
+  shows lanes of executors and handoffs, what needs you, and sessions, in EN and RU (OBS-12).
+- **Credential checks that report** (OBS-13): known values in agent memory, keys outside the vault,
+  `.env` fallbacks.
+- **Search** (OBS-03): RU/EN word forms, checkpoint bodies, a measured coverage floor that abstains,
+  indexing on write. On the gated evaluation set (OBS-07), recall@5 rose from 0.975 to 1.0 and MRR
+  from 0.931 to 1.0; unanswerable questions abstain 20/20.
+
+### Fixed
+
+- `observatory_record` redaction was quadratic on long statements (about an hour on 2 MB, now
+  0.26 s); the length bound is checked before redaction.
 
 ## 0.14.0 — 2026-10-03
 
