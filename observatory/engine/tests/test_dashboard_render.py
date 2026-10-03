@@ -719,6 +719,20 @@ def test_an_empty_registry_page_gives_its_command_and_no_filter_bar() -> None:
           p.stdout[-200:])
 
 
+def test_the_busiest_project_tile_shows_its_name() -> None:
+    """The overview's "most work, 28 d" tile printed the project's id
+    (`local-alpha-web`) where every other surface prints its name
+    (`alpha-web`); the link still targets the id."""
+    if node() is None:
+        check("node is available", True, " [uncoverable: executing the page needs node]")
+        return
+    root = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-busiest-"))
+    build(root)
+    work = (render(root / "pages/index.html", show="work") or {}).get("shown", "")
+    check("the tile shows the project's name", "<b>Fixture A</b>" in work, work[-300:])
+    check("and links to its id", 'href="projects.html#project:fixture-a"' in work, work[-300:])
+
+
 def test_the_harness_itself_can_fail() -> None:
     """A green from a harness that cannot go red is not evidence."""
     if node() is None:
@@ -769,6 +783,7 @@ if __name__ == "__main__":
                test_links_and_summaries_have_names_and_one_tab_stop_per_row,
                test_the_copy_toast_and_the_swap_tile_read_in_the_readers_words,
                test_an_empty_registry_page_gives_its_command_and_no_filter_bar,
+               test_the_busiest_project_tile_shows_its_name,
                test_the_harness_itself_can_fail):
         fn()
     print()
