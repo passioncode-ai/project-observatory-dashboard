@@ -314,13 +314,7 @@ def append(
             "a record must carry a statement. An empty conclusion cannot be "
             "reviewed, indexed or corrected — if there is nothing to say, do not "
             "append.")
-    for field, value in (("statement", statement), ("why", why)):
-        if value is not None and len(value) > MAX_TEXT:
-            raise LedgerError(
-                f"{field} is {len(value):,} characters; the limit is {MAX_TEXT:,}. "
-                f"A record is the minimal claim, not a transcript — link the "
-                f"transcript as evidence instead. The live ledger's longest "
-                f"statement is 406 characters.")
+    check_text_bounds(statement, why)
     if owner != OPERATOR and state != "proposed" and memory_id is None:
         raise LedgerError(
             f"{owner} may not create a record already in state {state!r}; "
@@ -593,6 +587,20 @@ def live(conn: sqlite3.Connection, project_id: str | None = None,
 #: never in a general listing: one pack is up to 128 KB, so a page of ten could
 #: be a megabyte where the reader was promised a few KB. Their structured
 #: columns leave every other row too — a step's result keeps its statement.
+def check_text_bounds(statement: str | None, why: str | None) -> None:
+    """Refuse a statement or why longer than MAX_TEXT.
+
+    Callers that transform text before appending — the wire's redaction — call
+    this FIRST, so an oversized input is refused before any work is spent on it."""
+    for field, value in (("statement", statement), ("why", why)):
+        if value is not None and len(value) > MAX_TEXT:
+            raise LedgerError(
+                f"{field} is {len(value):,} characters; the limit is {MAX_TEXT:,}. "
+                f"A record is the minimal claim, not a transcript — link the "
+                f"transcript as evidence instead. The live ledger's longest "
+                f"statement is 406 characters.")
+
+
 def not_workflow(alias: str = "l") -> str:
     """The SQL condition that leaves workflow records out of a general reader.
 

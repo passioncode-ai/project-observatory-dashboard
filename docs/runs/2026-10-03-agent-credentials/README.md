@@ -17,7 +17,7 @@ and a workflow can check (OBS-10). The rule, the runtime contract and the checks
 | S-09 | the rule in the `handling-secrets` skill (a new section, new triggers) and the design page | skill, `docs/design/AGENT-SECRETS.md`, `AGENT-MEMORY.md` | — |
 
 The rule is also written outside this repository, each in its own change:
-- the organisation's rules (`fabric-workspace` `knowledge/rules.md` §6);
+- the organisation's shared rules (§6, on credentials);
 - the skill for building agent services (`fabric-agent-adapter` `building-fabric-services` principle 5);
 - the operator's own agent instructions.
 

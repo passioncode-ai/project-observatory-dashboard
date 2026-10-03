@@ -796,6 +796,12 @@ def observatory_record(
     # published record schema), so the count travels in the journal, not here.
     import memory_redact
     from store import workflow as W
+    # The bound is checked before the redaction, so an oversized input costs
+    # nothing; the ledger checks it again for every other caller.
+    try:
+        L.check_text_bounds(statement, why)
+    except Exception as exc:
+        return _write_error(exc)
     cleaned, report = memory_redact.Redactor().scrub({"statement": statement, "why": why})
     statement, why = cleaned["statement"], cleaned["why"]
     conn = store_db.connect()

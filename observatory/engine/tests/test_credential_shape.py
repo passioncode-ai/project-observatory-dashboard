@@ -103,6 +103,29 @@ class CredentialShapeTests(unittest.TestCase):
         import re
         self.assertIn("not shown", cs.echo("project:x", pattern=re.compile(r"chat-[0-9a-f]{32}")))
 
+    def test_redaction_is_linear_in_its_input(self):
+        """A 2 MB statement to `observatory_record` took about an hour: from every
+        position, an unbounded URL scheme ran to the end of the input looking for
+        `://`, and a run of `eyJ` did the same looking for a JWT's dot. Quadratic in
+        the input is a denial of service on the one tool every agent may call."""
+        import time
+        for text in ("x" * 1_000_000, "eyJ" * 330_000, "see a://u:" + "y" * 1_000_000,
+                     "Ab3-" * 250_000):
+            started = time.monotonic()
+            cs.redact(text, marker="[r]")
+            took = time.monotonic() - started
+            self.assertLess(took, 10, f"{len(text)} characters of {text[:6]!r}… took {took:.1f} s")
+
+    def test_bounded_shapes_still_catch_what_they_caught(self):
+        secret = "Zq7" * 12
+        for text in (f"clone https://user:{secret}@example.test/repo",
+                     "x" * 100 + f"https://user:{secret}@example.test",
+                     f"git+ssh://user:{secret}@example.test"):
+            self.assertNotIn(secret, cs.redact(text, marker="[r]"), text[:40])
+        jwt = "eyJ" + "hb3" * 6 + "." + "eyJ" + "zd2" * 6 + "." + "sig" * 6
+        for text in (f"Bearer {jwt}", f"token={jwt}", f'{{"t":"{jwt}"}}'):
+            self.assertNotIn(jwt, cs.redact(text, marker="[r]"), text[:20])
+
     def test_refuse_names_the_field_and_the_shape_never_the_value(self):
         value = fakes()["token-as-project"]
         with self.assertRaises(ValueError) as caught:

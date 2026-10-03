@@ -54,9 +54,14 @@ PREFIXES = ("sk-", "sk_", "rk_", "pk_live_", "pk_test_", "ghp_", "gho_", "ghu_",
 _PREFIXED = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(re.escape(p) for p in PREFIXES)
                        + r")([A-Za-z0-9_\-]{16,})")
 _AWS = re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Za-z0-9])")
-_JWT = re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")
+# A JWT starts a token. Without the boundary, a run of `eyJ` was scanned to its end
+# from every occurrence looking for the dot — quadratic in the input.
+_JWT = re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")
 _PEM = re.compile(r"-----BEGIN[A-Z ]*-----|-----BEGIN [A-Z ]*KEY")
-_URL_PASSWORD = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@")
+# The scheme is bounded: unbounded, it ran from every position to the end of the
+# input looking for `://` (a 2 MB statement took about an hour). Schemes are short;
+# the match may start inside a longer run, which redacts more, never less.
+_URL_PASSWORD = re.compile(r"[A-Za-z][A-Za-z0-9+.-]{0,31}://[^/\s:@]+:[^/\s@]+@")
 _UUID = re.compile(r"(?<![0-9A-Za-z])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
                    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9A-Za-z])")
 _HEX = re.compile(r"(?<![0-9A-Za-z])[0-9a-fA-F]{32,}(?![0-9A-Za-z])")

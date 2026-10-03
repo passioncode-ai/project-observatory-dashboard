@@ -761,7 +761,7 @@ class Credentials(WorkflowCase):
 
     NEEDS = [{"project": "alpha-web", "env": "prod", "name": "STRIPE_KEY", "purpose": "charge"},
              {"project": "alpha-web", "env": "local", "name": "DB_URL"},
-             {"project": "alpha-web", "env": "prod", "name": "SENTRY_DSN"}]
+             {"project": "alpha-web", "env": "prod", "name": "ERRORS_DSN"}]
 
     def test_a_handoff_says_where_each_key_is(self) -> None:
         wf = self.start(body=body(credentials=self.NEEDS))
@@ -771,7 +771,7 @@ class Credentials(WorkflowCase):
         pack = W.handoff_get(self.conn, h["handoffId"])["pack"]
         states = {c["name"]: c["state"] for c in pack["credentials"]}
         self.assertEqual(states, {"STRIPE_KEY": "vault", "DB_URL": "env-only",
-                                  "SENTRY_DSN": "missing"})
+                                  "ERRORS_DSN": "missing"})
         by = {c["name"]: c for c in pack["credentials"]}
         self.assertIn("--vault-only alpha-web STRIPE_KEY", by["STRIPE_KEY"]["use"])
         self.assertIn("vault.py\" put alpha-web local DB_URL", by["DB_URL"]["put"])
