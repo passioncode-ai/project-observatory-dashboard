@@ -1516,6 +1516,7 @@ body[data-page="creds"] .controls, body[data-page="creds"] #seg-creds,
 body[data-page="env"] .controls, body[data-page="env"] #seg-env,
 body[data-page="mcp"] .controls, body[data-page="mcp"] #seg-mcp,
 body[data-page="traffic"] .controls, body[data-page="traffic"] #seg-traffic { display: flex; }
+body[data-page] .controls.no-rows { display: none; }
 /* SPLIT PAGES. Each page shows only its own controls and sections; the
  * rules below hide what belongs to another page. */
 body[data-page]:not([data-page="index"]):not([data-page="findings"]) #findings { display: none; }
@@ -2667,10 +2668,14 @@ document.addEventListener("click", ev => {
 const lower = s => String(s || "").toLowerCase() || null;
 const dateOr = s => (s ? String(s) : null);
 const numOr = n => (typeof n === "number" ? n : (n == null || n === "" ? null : Number(n)));
-function nothingFound(total, note) {
+// `empty` is [sentence, commands]: how this page's rows arrive. A page with no
+// row at all says that and gives the command, like a page never scanned —
+// "the registry holds no row of this kind" alone left the reader nowhere.
+function nothingFound(total, note, empty) {
+  if (!total && empty) return notScanned(empty[0], empty[1]);
   const what = narrowingText(narrowing());
   // An empty result says whether a filter caused it or the registry is empty.
-  if (!what) return `<p class="empty">${total ? T("Nothing found") : T("Empty here — the registry holds no row of this kind")}${note ? ". " + note : ""}</p>`;
+  if (!what) return `<p class="empty"${total ? "" : " data-no-rows"}>${total ? T("Nothing found") : T("Empty here — the registry holds no row of this kind")}${note ? ". " + note : ""}</p>`;
   return `<p class="empty">${T("Nothing found with this narrowing — {what}.", {what})} ` +
     `<button class="chip-btn" type="button" data-clear>${T("reset")}</button>${note ? "<br>" + note : ""}</p>`;
 }
@@ -2697,6 +2702,12 @@ function render() {
     creds: "Search: key, provider or project", env: "Search: variable, file or project",
     mcp: "Search: server, agent or address", traffic: "Search: property, site or project"})[tab] || "Search");
   const out = drawTab();
+  // A FILTER BAR OVER NOTHING narrows nothing: while the page has no row at
+  // all (never scanned, or a registry with none of this kind) it is hidden.
+  const shown = document.getElementById("out");
+  const controls = document.querySelector(".controls");
+  if (controls && shown) controls.classList.toggle("no-rows",
+    /class="empty not-scanned"|data-no-rows/.test(String(shown.innerHTML || "")));
   const tools = document.getElementById("list-tools");
   const table = document.getElementById("out");
   if (tools && table) {
@@ -3051,7 +3062,11 @@ function renderCreds() {
   }
   const q = document.getElementById("q").value.trim().toLowerCase();
   const rows = CREDS.filter(c => keepCred(c, q, sel.value));
-  if (!rows.length) { out.innerHTML = nothingFound(CREDS.length); return; }
+  if (!rows.length) {
+    out.innerHTML = nothingFound(CREDS.length, "", [T("No key is tracked yet. Put one in this workspace's vault (the value on stdin), then rebuild:"),
+      [privateInput(toolCommand("vault.py", ["put", "PROJECT", "ENV", "NAME"])), fullCommand("local")]]);
+    return;
+  }
   const cell = (label, html, cls) =>
     `<td data-label="${label}"${cls || html === NONE ? ` class="${
       [cls, html === NONE ? "e" : ""].filter(Boolean).join(" ")}"` : ""}>${html}</td>`;
@@ -3568,7 +3583,11 @@ function renderDomains() {
   const q = document.getElementById("q").value.trim().toLowerCase();
   const rows0 = domainRows();
   const doms = rows0.filter(d => keepDom(d, q, sel.value));
-  if (!doms.length) { out.innerHTML = nothingFound(rows0.length); return; }
+  if (!doms.length) {
+    out.innerHTML = nothingFound(rows0.length, "", [T("No domain is listed. Domains come from the zones a Cloudflare scan finds, and from {file}. Switch Cloudflare on and scan:", {file: "registry/domains.json"}),
+      [fullCommand("configure integrations cloudflare true"), fullCommand("scan-cloudflare")]]);
+    return;
+  }
   const PROD_BY_PROJECT = new Map(D.rows.map(r => [r.id, r.products || []]));
   const standing = d => {
     if (!d.zone) return d.projects && d.projects.length ? chip(T("linked@@domain"), "ok") : chip(T("no project"));

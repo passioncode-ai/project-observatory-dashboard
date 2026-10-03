@@ -41,7 +41,13 @@ function node(key) {
     key, innerHTML: "", textContent: "", value: "", hidden: false, open: false,
     dataset: {}, children: [], isConnected: true, offsetHeight: 0, offsetParent: {},
     style: { setProperty() {}, removeProperty() {}, getPropertyValue() { return ""; } },
-    classList: { add() {}, remove() {}, toggle: () => false, contains: () => false },
+    // A class list that remembers, so a page's toggles can be read back.
+    classList: (() => {
+      const set = new Set();
+      return { add: (...c) => c.forEach(x => set.add(x)), remove: (...c) => c.forEach(x => set.delete(x)),
+               toggle: (c, on) => { const v = on === undefined ? !set.has(c) : !!on; v ? set.add(c) : set.delete(c); return v; },
+               contains: c => set.has(c) };
+    })(),
     attrs: {},
     setAttribute(k, v) { this.attrs[k] = String(v); },
     getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
