@@ -116,7 +116,12 @@ BUDGET_SETTINGS = ("daily_ceiling", "monthly_ceiling", "velocity_ceiling")
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._:-]+")
 
 
-def model_readiness(base: Path | None = None) -> dict:
+#: The step that installs the assistant's key: the value on stdin, from a file.
+KEY_STEP = ('python "$(project-observatory full-path)/tools/install_key.py" --for observatory '
+            '< key-file')
+
+
+def model_readiness(base: Path | None = None, key: dict | None = None) -> dict:
     """Whether the agent has a model to ask and a budget to spend, from the
     workspace's own `config/models.json` — no catalogue, no network, no spend.
 
@@ -131,13 +136,27 @@ def model_readiness(base: Path | None = None) -> dict:
     wallet = doc.get("wallet") if isinstance(doc.get("wallet"), dict) else {}
     unset = [k for k in BUDGET_SETTINGS
              if not isinstance(wallet.get(k), (int, float)) or isinstance(wallet.get(k), bool) or wallet.get(k) <= 0]
-    status = "no-model" if not chain else "no-budget" if unset else "ready"
+    # THE KEY IS A STEP TOO. Without `key` (the caller did not ask the
+    # provider module) the answer is about the model and the budget alone, as
+    # before; with it, a missing or refused key keeps the status off `ready`
+    # and puts the install step in `next` — a chain and three ceilings with no
+    # key used to read `ready` with nothing left to do.
+    keyless = key is not None and key.get("key_status") != "present"
+    status = ("no-model" if not chain else "no-budget" if unset
+              else "no-key" if keyless else "ready")
     steps = []
+    if keyless:
+        steps.append(KEY_STEP if key.get("key_status") == "absent"
+                     else f"fix the key file it refused ({key.get('key_note', 'mode 600')}), "
+                          f"or replace it: {KEY_STEP}")
     if not chain:
         steps.append("project-observatory full configure model chain VENDOR/MODEL[,VENDOR/MODEL...]")
     steps += [f"project-observatory full configure budget {k} AMOUNT" for k in unset]
-    return {"model_configured": bool(chain), "model_status": status, "chain": chain,
-            "budget_unset": unset, "next": steps}
+    out = {"model_configured": bool(chain), "model_status": status, "chain": chain,
+           "budget_unset": unset, "next": steps}
+    if key is not None:
+        out.update({k: key.get(k) for k in ("key_status", "key_source")})
+    return out
 
 
 def known_names(section: str) -> frozenset:

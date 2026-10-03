@@ -29,7 +29,9 @@ for actions with input and emits one JSON response on stdout. No user question o
 credential goes in argv. Errors are typed codes, never raw provider responses.
 `status` reports protocol `observatory-assistant/1`, `workspace_available`,
 agent feature/provider configuration (`provider_status` names why no provider is
-usable, never with a character of a key), `project_count`, `degraded` and
+usable, never with a character of a key; `key_status` and `key_source` say whether the
+key is usable and where it comes from, the environment included; `model_status` and
+`next` name the steps still missing), `project_count`, `degraded` and
 conversation summaries without spending; a path that is not a workspace answers
 `unknown-workspace`. `ask` starts `agent.ask`; `get` reads a conversation and stores
 any reconciled turn state; `job` polls and `cancel` stops **assistant jobs only**;

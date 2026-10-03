@@ -318,7 +318,17 @@ class WorkspaceTests(unittest.TestCase):
         # doctor names the agent's readiness once the agent is switched on.
         self.assertNotIn('agent',json.loads(self.run_cli('doctor').stdout))
         self.run_cli('configure','features','agent','true')
-        self.assertEqual(json.loads(self.run_cli('doctor').stdout)['agent']['model_status'],'ready')
+        # NO KEY IS NOT READY. A chain and three ceilings without a key read
+        # `ready` with `next: []`, while the first ask failed on the key.
+        agent=json.loads(self.run_cli('doctor').stdout)['agent']
+        self.assertEqual((agent['model_status'],agent['key_status'],agent['key_source']),('no-key','absent',None))
+        self.assertIn('install_key.py" --for observatory',' '.join(agent['next']))
+        # A key inherited from the shell counts, and doctor says that is where it came from.
+        self.env['OPENROUTER_API_KEY']='sk-or-v1-'+'FAKE'*16
+        agent=json.loads(self.run_cli('doctor').stdout)['agent']
+        self.assertEqual((agent['model_status'],agent['key_status']),('ready','present'))
+        self.assertIn('OPENROUTER_API_KEY',agent['key_source'])
+        self.assertNotIn('FAKE',json.dumps(agent))
         self.run_cli('configure','budget','daily_ceiling','0')
         agent=json.loads(self.run_cli('doctor').stdout)['agent']
         self.assertEqual(agent['model_status'],'no-budget')

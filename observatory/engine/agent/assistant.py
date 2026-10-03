@@ -306,8 +306,11 @@ def status(include_projects=True):
          'workspace_available':True,
          'agent_enabled':configuration.enabled('agent','features'),'provider_configured':providers.have_key(),
          'conversations':list_conversations(),'project_count':len(choices),'degraded':[]}
-    ready=configuration.model_readiness()
+    # `next` and the key's source, like `full doctor`: the two named different
+    # states for one workspace (doctor said ready; this said nothing).
+    ready=configuration.model_readiness(key=providers.key_report())
     out['model_configured']=ready['model_configured'];out['model_status']=ready['model_status']
+    out['key_status']=ready['key_status'];out['key_source']=ready['key_source'];out['next']=ready['next']
     if not out['provider_configured']:out['provider_status']=provider_status()
     if include_projects:out['projects']=choices
     return out

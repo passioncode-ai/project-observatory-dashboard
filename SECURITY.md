@@ -48,6 +48,12 @@ must not be presented as proof that the old credential was revoked.
 plugin. Other explicitly selected commands can call configured providers.
 Integrations, paid interpretation, embeddings, scheduling, notifications,
 retention, memory remediation and projections require their documented opt-ins.
+The assistant and the agent spend through an OpenRouter key, and an
+`OPENROUTER_API_KEY` in the environment of the process that runs them is that key,
+ahead of every key file: a key exported in your shell profile is spent by them.
+`full doctor` (with the agent on) and `full assistant status` name the key's source
+in `key_source` (never a character of it); unset the variable, or run the engine
+from an environment without it, to keep a personal key out.
 User-added metric plugins are trusted executable code, not sandboxed extensions.
 Their manifest API/version and path checks do not make hostile code safe.
 
