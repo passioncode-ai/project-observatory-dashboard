@@ -1306,7 +1306,7 @@ def companion_findings(rows: list[dict], slot: dict,
                        f"indistinguishable from a quiet turn. Everything those "
                        f"sessions did after each of these turns is absent from "
                        f"the ledger." + tail + lost),
-            "action": "run `tools/record_turn.py --cwd <project> --session-id <id>` "
+            "action": "run `python \"$(project-observatory full-path)/tools/record_turn.py\" --cwd <project> --session-id <id>` "
                       "by hand to see the error, `companion_faults.py` for the "
                       "history, and check that the INSTALLED copy of the plugin "
                       "matches this repository",

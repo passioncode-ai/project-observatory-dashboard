@@ -168,7 +168,7 @@ def unsigned(creds: list[dict]) -> list[dict]:
                    f"with no purpose cannot be retired, delegated or judged when "
                    f"it leaks — «is this still needed» has no answer, so it is "
                    f"kept forever and rotated never."),
-        "action": ("`tools/sign_credential.py set <id> --purpose \"…\" --evidence "
+        "action": ("`python \"$(project-observatory full-path)/tools/sign_credential.py\" set <id> --purpose \"…\" --evidence "
                    "\"…\"`, or the “sign…” button on the Keys page"),
     }]
 

@@ -98,7 +98,7 @@ def main(argv: list[str]) -> int:
             degraded.append({"source": f"cloudflare:{label}", "reason": str(exc)[:200]})
     if not accounts:
         degraded.append({"source": "cloudflare", "reason":
-                         "no issued token — `./tools/cloudflare.py issue --preset analytics`"})
+                         "no issued token — `python \"$(project-observatory full-path)/tools/cloudflare.py\" issue --preset analytics`"})
     zones.sort(key=lambda z: z["name"])
     atomic.write_json(argv[1], {"scanned_at": now(), "accounts": [l for l, _ in accounts],
                                 "zones": zones, "degraded": degraded})

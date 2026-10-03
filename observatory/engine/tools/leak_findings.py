@@ -140,7 +140,7 @@ def unscanned(doc: dict | None) -> list[dict]:
         "detail": ("A clean scan is only as wide as what it opened: "
                    + "; ".join(f"{n['what']} — {n['why']}" for n in notes[:LISTED])
                    + "."),
-        "action": ("`tools/scan_leaks.py --full --days 60` widens the window; a "
+        "action": ("`python \"$(project-observatory full-path)/tools/scan_leaks.py\" --full --days 60` widens the window; a "
                    "source named here as unreadable needs its own reader"),
     }]
 
