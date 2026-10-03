@@ -130,6 +130,11 @@ def test_every_route_answers_and_none_serves_a_value() -> None:
         code, skills = get("/skills")
         check("/skills reports the shipped versions", code == 200
               and "handling-secrets" in (skills.get("shipped") or {}), str(skills)[:150])
+        # The frontmatter quotes the scalar (`version: "0.13.1"`); served as
+        # read, every version arrived as "\"0.13.1\"" in /health and /skills.
+        versions = list((skills.get("shipped") or {}).values())
+        check("and each version is the bare number, without the YAML quotes",
+              versions and all(v == "unversioned" or v[:1].isdigit() for v in versions), str(versions))
         code, page = get("/")
         check("/ falls back to the single page when the split is not built",
               code == 200 and b"fixture page" in page,

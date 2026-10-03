@@ -193,15 +193,14 @@ def refresh_leaks() -> dict:
 
 def refresh_skills() -> dict:
     """Shipped skill versions beside what sessions have reported using."""
+    # ONE READER of the frontmatter version: `skill_check.shipped_version`,
+    # which strips the YAML quotes. A second copy here kept them, so /health
+    # and /skills served "\"0.13.1\"" beside the handshake's 0.13.1.
+    sys.path.insert(0, str(ROOT / "tools"))
+    import skill_check
     shipped: dict[str, str] = {}
     for sk in (ROOT / "skill/plugins/observatory-log/skills").glob("*/SKILL.md"):
-        body = sk.read_text(encoding="utf-8")
-        v = None
-        for line in body.splitlines():
-            if line.strip().startswith("version:"):
-                v = line.split(":", 1)[1].strip()
-                break
-        shipped[sk.parent.name] = v or "unversioned"
+        shipped[sk.parent.name] = skill_check.shipped_version(sk.parent.name) or "unversioned"
     sessions = _read_json(paths.SCRATCH / "skill-sessions.json") or {}
     return {"shipped": shipped, "sessions": sessions.get("sessions", {})}
 
