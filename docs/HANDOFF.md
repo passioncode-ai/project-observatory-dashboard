@@ -60,14 +60,14 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
-**Status 2026-10-03: three audit-and-fix runs over 0.12.0, unreleased.** Run 1 (PR #119), run 2
-and run 3 each re-walked the build, onboarding, keys, the Keychain, the Mac app, the scenarios and
-the docs, and fixed what the one before missed: 73, 27 and the run-3 count in its report. Reports:
+**Status 2026-10-03: 0.13.0 — three audit-and-fix runs over 0.12.0.** Run 1 (PR #119), run 2
+(PR #120) and run 3 (PR #121) each re-walked the build, onboarding, keys, the Keychain, the Mac
+app, the scenarios and the docs, and fixed what the one before missed: 73, 27 and 66. Reports:
 [run 1](reports/2026-10-03-observatory-audit-run-1/README.md),
 [run 2](reports/2026-10-03-observatory-audit-run-2/README.md),
-[run 3](reports/2026-10-03-observatory-audit-run-3/README.md). The release that ships them, its
-`observatory-log` plugin bump and the items only the operator can do are listed at the end of
-the run-3 report; `CHANGELOG.md` → Unreleased says what changed for a user.
+[run 3](reports/2026-10-03-observatory-audit-run-3/README.md). They ship in 0.13.0 with
+`observatory-log` 0.14.0; the items only the operator can do are listed at the end of the run-3
+report, and `CHANGELOG.md` → 0.13.0 says what changed for a user.
 
 **2026-10-01, client disconnect handling (released in 0.11.0):** expected socket
 closures no longer produce server tracebacks; unrelated I/O failures remain visible.
