@@ -89,6 +89,12 @@ def slug(text: str) -> str:
 
 # ─────────────────────────── the wire ───────────────────────────────────────
 
+class Unreachable(RuntimeError):
+    """OpenRouter could not be reached at all: no answer, so nothing is known
+    about the key. A RuntimeError, so every caller that treats "the provider
+    failed" alike keeps doing so; `stash` tells it apart from a refusal."""
+
+
 def _request(path: str, key: str, payload: dict | None = None,
              method: str | None = None) -> dict:
     """Endpoint and status in errors — never headers, never the body we sent."""
@@ -104,7 +110,7 @@ def _request(path: str, key: str, payload: dict | None = None,
         e.close()
         raise RuntimeError(f"openrouter answered HTTP {e.code}; provider response withheld") from None
     except OSError as e:
-        raise RuntimeError(f"openrouter unreachable: {type(e).__name__}") from None
+        raise Unreachable(f"openrouter unreachable: {type(e).__name__}") from None
 
 
 # ─────────────────────────── the admin stash ────────────────────────────────
@@ -173,6 +179,11 @@ def stash_value(value: str, label: str, origin: str) -> int:
     # it is needed.
     try:
         _request("/keys?include_disabled=false", value)
+    except Unreachable as exc:
+        print(f"refused: OpenRouter could not be reached ({exc}), so whether this key can "
+              f"manage keys is unknown; nothing was stashed. Run the same command again "
+              f"when the network is back", file=sys.stderr)
+        return 1
     except RuntimeError as exc:
         print(f"refused: this key cannot manage keys — {exc}\n  a PROVISIONING "
               f"key is minted at openrouter.ai/settings/provisioning-keys; an "
