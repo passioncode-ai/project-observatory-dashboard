@@ -35,7 +35,7 @@ The bundle is `dist/macos/Project Observatory.app`, with its icon rasterized fro
 product mark at every size. `macos/scripts/install-app.sh --open` installs it into
 `/Applications` (or `~/Applications`), quits a running copy, forgets Launch Services
 registrations of the same bundle left by QA builds elsewhere — Spotlight could open one
-of those instead — and opens it. `build-app.sh` signs the bundle ad hoc for local QA (with a Developer ID when `OBSERVATORY_SIGN_IDENTITY` is set) and `install-app.sh` verifies that signature. Neither claims a Developer ID, notarization or an App Store release.
+of those instead — and opens it. `build-app.sh` signs the bundle ad hoc for local QA (with a Developer ID, the hardened runtime and a secure timestamp when `OBSERVATORY_SIGN_IDENTITY` is set) and `install-app.sh` verifies that signature. A release's notarized download is made by `macos/scripts/notarize.sh` ([Signing](#signing)); it is not an App Store release.
 Set `OBSERVATORY_SWIFT_BUILD` to reuse a build directory outside the checkout;
 `OBSERVATORY_SWIFT_CONFIGURATION=debug` selects the debug build.
 
@@ -136,20 +136,33 @@ tagged compatible engine and app artifact.
 
 Without `OBSERVATORY_SIGN_IDENTITY` the build script signs ad hoc
 (`codesign --sign -`), which touches no keychain. For Developer ID signing supply
-`OBSERVATORY_SIGN_IDENTITY` to the build script: `codesign` then reads that
-identity's private key from the login Keychain (`macos/scripts/build-app.sh`), and
-macOS can ask for the keychain password or for permission to use the key. That
-dialog is expected: signing is the release operator's explicit act, run by hand, and
-nothing in Observatory signs on a schedule. Notarization is a separate release step
-using the maintainer's Keychain profile, which reads the Keychain too:
+`OBSERVATORY_SIGN_IDENTITY` to the build script: `codesign` then signs with the hardened
+runtime and a secure timestamp, reading that identity's private key from the login
+Keychain (`macos/scripts/build-app.sh`). macOS can ask for the keychain password or for
+permission to use the key, unless the key already allows `codesign`. Signing is the
+release operator's explicit act, run by hand; nothing in Observatory signs on a schedule.
+
+`macos/scripts/notarize.sh` turns that bundle into the release download:
 
 ```sh
-ditto -c -k --keepParent 'dist/macos/Project Observatory.app' dist/Project-Observatory.zip
-xcrun notarytool submit dist/Project-Observatory.zip --keychain-profile '<profile>' --wait
-xcrun stapler staple 'dist/macos/Project Observatory.app'
-codesign --verify --strict 'dist/macos/Project Observatory.app'
-spctl --assess --type execute 'dist/macos/Project Observatory.app'
+OBSERVATORY_SIGN_IDENTITY='Developer ID Application: <name> (<team>)' macos/scripts/build-app.sh
+# an App Store Connect API key (no Keychain involved) …
+OBSERVATORY_NOTARY_KEY=<path to AuthKey_….p8> OBSERVATORY_NOTARY_KEY_ID=<key id> \
+  OBSERVATORY_NOTARY_ISSUER=<issuer id> macos/scripts/notarize.sh 'dist/macos/Project Observatory.app'
+# … or a `xcrun notarytool store-credentials` profile (reads the Keychain)
+OBSERVATORY_NOTARY_PROFILE=<profile> macos/scripts/notarize.sh 'dist/macos/Project Observatory.app'
 ```
 
-These are release instructions, not evidence those operations have run. No signing
+It refuses (exit 2) before anything is uploaded when the credentials are missing or
+partial, or when the bundle lacks a Developer ID signature or the hardened runtime.
+Otherwise it submits the bundle and waits. When Apple rejects it, it prints Apple's log and
+exits 1. When Apple accepts, it staples the ticket, validates it, assesses the app with
+`spctl` as Gatekeeper will, and writes `dist/ProjectObservatory-<version>-macos.zip` from the
+stapled bundle. The key's path, id and issuer reach `notarytool`'s arguments and nothing
+else (`tests/test_notarize_script.py`). The release attaches that zip and lists it in
+`SHA256SUMS`. `full update` reads only the wheel's line, so the second line does not affect
+it (`parse_sums` in `observatory/engine/engine_update.py`).
+
+A downloaded app keeps the browser's quarantine flag; Gatekeeper opens a notarized,
+stapled copy without the "cannot be checked for malicious software" refusal. No signing
 credentials or Apple agreements are supplied or accepted by automation.
