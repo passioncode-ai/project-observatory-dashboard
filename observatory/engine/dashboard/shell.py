@@ -30,6 +30,7 @@ PAGES: tuple[tuple[str, str, str], ...] = (
     ("index",    "Overview",  "index"),
     ("findings", "Findings",  "findings"),
     ("projects", "Projects",  "table"),
+    ("agents",   "Agents",    "agents"),
     ("domains",  "Domains",   "table"),
     ("heroku",   "Heroku",    "table"),
     ("creds",    "Keys",      "table"),
@@ -48,6 +49,7 @@ QUESTIONS: dict[str, str] = {
     "index":    "What needs attention and what changed across your projects.",
     "findings": "Problems, next actions and the history of silenced findings.",
     "projects": "Projects, their state, resources and latest changes.",
+    "agents":   "Which agents are working, on what, and where their work moved.",
     "domains":  "Domains, reachability, expiry and linked projects.",
     "heroku":   "Apps, state, deployments and cost.",
     "creds":    "Keys, their purpose, state and the actions available.",
@@ -68,7 +70,7 @@ ICON = "data:image/svg+xml;base64," + base64.b64encode(
 NAMES = tuple(p[0] for p in PAGES)
 TABLE_PAGES = tuple(p[0] for p in PAGES if p[2] == "table")
 NAV_GROUPS = (
-    ("work", "Work", ("index", "projects", "findings")),
+    ("work", "Work", ("index", "projects", "agents", "findings")),
     ("infrastructure", "Infrastructure", ("heroku", "domains", "traffic")),
     ("access", "Access", ("creds", "env", "mcp")),
     ("system", "System", ("health", "machine")),
@@ -87,6 +89,22 @@ def brand_html(t: Translator) -> str:
     return ('<a class="brand" href="index.html">'
             f'<img class="brand-mark" src="{ICON}" width="32" height="32" alt="">'
             f'<span class="brand-name"><strong>{TITLE_SUFFIX}</strong>{family}</span></a>')
+
+
+def _agents(payload: dict, t: Translator) -> str:
+    """The Agents page's body, rendered at build time (dashboard/agents_page.py)."""
+    import agents_page
+    return agents_page.agents_html(payload, t)
+
+
+def _agents_line(payload: dict, t: Translator) -> str:
+    """The overview's Agents card: what is open and what needs a person."""
+    c = (payload.get("agents") or {}).get("counters") or {}
+    if not c:
+        return t.mark("no workflow yet")
+    needs = len((payload.get("agents") or {}).get("needsYou") or [])
+    return (t.mark("{n} workflows open", n=c.get("workflowsOpen", 0)) + " · "
+            + t.mark("{n} need you", n=needs))
 
 
 def _machine(payload: dict, t: Translator) -> str:
@@ -248,6 +266,7 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
                + t.mark("{n} servers", n=((payload.get("mcp") or {}).get("totals") or {}).get("distinct_servers", 0)),
         "traffic": _traffic_line(payload, t),
         "machine": _machine_line(payload, t),
+        "agents": _agents_line(payload, t),
         # TWO NUMBERS, because one of them is the reason to open the page: the
         # observer's state, and how many rows are waiting for a person (S4/F9).
         "health": (_observer(health, t) + " · "
@@ -281,7 +300,7 @@ def slice_for(page: str, payload: dict) -> dict:
     # small enough to ride everywhere, which is what the projects column and the
     # project panel read.
     heavy = {"env": "env", "heroku": "heroku", "creds": "creds", "mcp": "mcp",
-             "google": "traffic", "machine": "machine"}
+             "google": "traffic", "machine": "machine", "agents": "agents"}
     out = dict(payload)
     # WHAT PRODUCTION HOLDS is read by exactly the two pages that can say
     # something about it: the Heroku row and the ENV row.
@@ -397,4 +416,5 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
             .replace("__NAV__", nav_html(page, counts, t))
             .replace("__CARDS__", cards_html(payload, counts, t) if page == "index" else "")
             .replace("__MACHINE__", _machine(payload, t) if page == "machine" else "")
+            .replace("__AGENTS__", _agents(payload, t) if page == "agents" else "")
             .replace("__DATA__", data.replace("</", "<\\/")))

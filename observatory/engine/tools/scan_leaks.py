@@ -34,7 +34,8 @@ WHAT IT READS. Agent session transcripts — gigabytes over a few weeks on a bus
 machine, which is why this is incremental: a JSONL transcript is append-only, so
 a remembered offset makes the steady-state cost the size of what was said since
 the last tick. Plus this project's own logs, its built page, its tracked tree,
-and the session companion's SQLite store.
+the session companion's SQLite store, and this engine's own store, where agent
+memory lives.
 
 WHAT IT DOES NOT DO. It does not write `leaks.jsonl`. That register is the
 operator's debt ledger and a false entry there is expensive to withdraw — so a
@@ -153,7 +154,9 @@ def known_values() -> tuple[dict[str, str], list[dict], list[dict]]:
                                             "its shape is not distinctive enough for "
                                             "a text match to be evidence")})
                     continue
-                values.setdefault(value, f"{f['project']}/{name}")
+                # A LABEL THAT SAYS WHERE IT LIVES: `env:` and the project, so a
+                # redaction marker or a finding names the home of the value.
+                values.setdefault(value, f"env:{f['project']}/{name}")
 
     # 2. the vault's slots
     if VAULT.is_dir():
@@ -172,7 +175,9 @@ def known_values() -> tuple[dict[str, str], list[dict], list[dict]]:
                                         "its shape is not distinctive enough for a "
                                         "text match to be evidence")})
                 continue
-            values.setdefault(value, f"vault:{slot.parent.parent.name}/{slot.name}")
+            # `vault:<project>/<env>/<NAME>`, the address the rest of the
+            # engine uses for a slot (`openrouter.py --to`, the keyserver).
+            values.setdefault(value, f"vault:{slot.parent.parent.name}/{slot.parent.name}/{slot.name}")
 
     # 3. the OpenRouter destinations
     for label, path in DESTINATIONS.items():
@@ -501,16 +506,31 @@ def main(argv: list[str]) -> int:
     full, why = sqlite_scan.plan(sqlite_mark, digest, a.full, today)
     if decisions_changed and not a.full:
         full, why = True, "the effective suppression rules changed"
-    since = {} if full else (sqlite_mark.get("stores") or {}).get(str(mem))
-    mem_hits, mem_problem, mem_high, mem_rows = scan_sqlite(mem, pattern, by_value, since)
-    new_mark = sqlite_scan.next_mark(sqlite_mark, digest, full, today,
-                                     {} if mem_problem else {str(mem): mem_high}, not mem_problem)
-    for (name, where_in), n in mem_hits.items():
-        hits[(name, f"{mem}#{where_in}")] = hits.get((name, f"{mem}#{where_in}"), 0) + n
-    if mem_problem:
-        notes.append({"what": str(mem), "why": f"a SQLite store that would not open: {mem_problem}"})
+    # AND THE OBSERVATORY'S OWN STORE, which holds agent memory. Every value an
+    # agent writes there is redacted on the way in (`memory_redact`), so a
+    # sighting here means the redactor missed one, or a door that does not
+    # redact wrote it — the alarm for the safety net itself.
+    own = paths.DB
+    marks = sqlite_mark.get("stores") or {}
+    results = {}
+    for store in (mem, own):
+        since = {} if full else marks.get(str(store))
+        results[store] = scan_sqlite(store, pattern, by_value, since)
+    new_mark = sqlite_scan.next_mark(
+        sqlite_mark, digest, full, today,
+        {str(store): r[2] for store, r in results.items() if not r[1]},
+        not any(r[1] for r in results.values()))
+    for store, (store_hits, problem, _high, _rows) in results.items():
+        for (name, where_in), n in store_hits.items():
+            hits[(name, f"{store}#{where_in}")] = hits.get((name, f"{store}#{where_in}"), 0) + n
+        if problem:
+            notes.append({"what": str(store), "why": f"a SQLite store that would not open: {problem}"})
+    _hits, mem_problem, _high, mem_rows = results[mem]
     companion = {"path": str(mem), "read": mem.is_file() and not mem_problem,
                  "mode": "full" if full else "incremental", "why": why, "rows_read": mem_rows}
+    own_problem, own_rows = results[own][1], results[own][3]
+    own_store = {"path": str(own), "read": own.is_file() and not own_problem,
+                 "mode": "full" if full else "incremental", "rows_read": own_rows}
 
     atomic.write_json(STATE, {"updated_at": now, "offsets": state,
                               "values_digest": digest, "suppressions_digest": suppression_mark,
@@ -531,15 +551,18 @@ def main(argv: list[str]) -> int:
         "suppression_problems": rule_problems,
         "coverage": {"known_values": len(values), "targets": len(files),
                      "targets_unreadable": len(unreadable), "read_bytes": read_bytes,
-                     "window_days": a.days, "companion_store": companion["mode"] if companion["read"] else "unread"},
+                     "window_days": a.days, "companion_store": companion["mode"] if companion["read"] else "unread",
+                     "observatory_store": own_store["mode"] if own_store["read"] else "unread"},
         "skipped": skipped,
         "not_scanned": notes,
         "companion_store": companion,
+        "observatory_store": own_store,
         "degraded": [],
     })
     print(f"leaks: {len(values)} known value(s) against {len(files)} target(s), "
           f"{read_bytes/1e6:.1f} MB read, {len(rows)} sighting(s); companion store "
-          f"{companion['mode']} ({why}), {mem_rows} row(s) read")
+          f"{companion['mode']} ({why}), {mem_rows} row(s) read; observatory store "
+          f"{own_rows} row(s) read")
     for r in rows[:8]:
         # THE NAME AND THE FILE, never the line. A report that quotes the leak is
         # a second copy of it, in a file that is easier to read than the first.

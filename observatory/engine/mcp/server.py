@@ -97,8 +97,8 @@ server = InteropServer(
         "refusal is a typed answer with `error`; isError means malformed input, an unknown "
         "tool or an answer outside its published schema.\n"
         "WORKFLOW: `observatory_checkpoint_write` after each step (keep `leaseId`); "
-        "`observatory_handoff_create`/`_accept` move it to a new session or model; "
-        "`observatory_checkpoint_latest` reads.\n"
+        "`observatory_handoff_create`/`_accept` move it to a new session/model; "
+        "`observatory_workflow_list` finds it again.\n"
         "START with `observatory_overview`: counts, tiers, recent projects, the worst "
         "findings, disk — a few KB.\n"
         "READ, paged with `limit` and `cursor` → `nextCursor`, totals covering the whole "
@@ -789,9 +789,24 @@ def observatory_record(
     bad = _owner_error(owner)
     if bad:
         return bad
+    # AN AGENT'S NOTE IS AGENT MEMORY, and gets the same redaction as a
+    # checkpoint: credential shapes and the workspace's known values are
+    # replaced before the first write, and a known value is journalled for the
+    # finding that puts it on the register. The answer's schema is closed (the
+    # published record schema), so the count travels in the journal, not here.
+    import memory_redact
+    from store import workflow as W
+    # The bound is checked before the redaction, so an oversized input costs
+    # nothing; the ledger checks it again for every other caller.
+    try:
+        L.check_text_bounds(statement, why)
+    except Exception as exc:
+        return _write_error(exc)
+    cleaned, report = memory_redact.Redactor().scrub({"statement": statement, "why": why})
+    statement, why = cleaned["statement"], cleaned["why"]
     conn = store_db.connect()
     try:
-        return L.append(conn, owner=owner, statement=statement, why=why,
+        result = L.append(conn, owner=owner, statement=statement, why=why,
                         project_id=projectId, session_id=sessionId,
                         memory_id=memoryId, expected_revision=expectedRevision,
                         evidence=evidence or [], function="episodic", scope="project",
@@ -802,6 +817,8 @@ def observatory_record(
                         # and a condition whose true side is unreachable is dead
                         # data that misleads the next reader.
                         confidence=0.5)
+        W._journal_known("note", None, None, report.as_dict())
+        return result
     except Exception as exc:
         return _write_error(exc)
     finally:
@@ -971,8 +988,9 @@ def observatory_checkpoint_write(
         "Typed state, not prose: goal (required), plan [{step_id,title,needs}], done "
         "[{step_id,result,evidence}], open [{step_id,next_action}], decisions "
         "[{id,choice,why}], constraints [str] (shown to the next executor first), artifacts "
-        "[{kind: git|file|url|other, path, branch, head, ref, note}], questions, memory_refs, "
-        "notes. Secrets are redacted on the way in."))],
+        "[{kind: git|file|url|other, path, branch, head, ref, note}], credentials "
+        "[{project, env, name, purpose}] (keys by NAME, from the vault — never a value), "
+        "questions, memory_refs, notes. Secrets are redacted on the way in."))],
     workflowId: Annotated[str | None, Field(description="Omit to start a workflow; the answer "
                                                         "carries its id and your `leaseId`.")] = None,
     leaseId: Annotated[str | None, Field(description="The token from the first write or from "
@@ -1074,6 +1092,23 @@ def observatory_handoff_accept(
     return _workflow_call(lambda c: W.handoff_accept(
         c, owner=owner, idempotency_key=idempotencyKey, handoff_id=handoffId,
         executor=executor, session_id=sessionId))
+
+
+@server.tool()
+def observatory_workflow_list(
+    projectId: Annotated[str | None, Field(description="Only this 'project:<slug>'.")] = None,
+    status: Annotated[Literal["open", "closed", "all"], Field()] = "open",
+    limit: Annotated[int, Field(ge=1, le=200)] = 20,
+    cursor: Annotated[str | None, Field(description="A previous answer's `nextCursor`.")] = None,
+) -> dict[str, Any]:
+    """Workflows, newest first: latest step, goal, executor, pending handoff, seconds since
+    the last checkpoint, kept steps. Find your workflow again after a compaction lost its
+    id; then read it with `observatory_checkpoint_latest`. Never returns a lease token."""
+    from store import workflow as W
+    out = _workflow_call(lambda c: W.workflow_list(c, project_id=projectId, status=status,
+                                                   limit=limit, cursor=cursor))
+    out.setdefault("degraded", [])
+    return out
 
 
 @server.tool()

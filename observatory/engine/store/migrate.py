@@ -262,6 +262,43 @@ def _agent_memory_workflows(conn: sqlite3.Connection) -> str:
         "workflows, workflow_leases and idempotency are available"
 
 
+def _search_stems(conn: sqlite3.Connection) -> str:
+    """The lexical index gains a `stems` column, rebuilt from canon.
+
+    FTS5 has no ALTER, and the index is a projection — losing it is a rebuild,
+    never a data loss — so it is dropped, recreated with the column and refilled
+    from the latest revision of every record no tombstone hides. Done here rather
+    than left to the indexer, because the indexer only projects the outbox, and
+    every revision already consumed would otherwise stay unsearchable by stem."""
+    import pathlib as _pathlib
+    import sys as _sys
+    _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))
+    import textkeys
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "ledger" not in tables:
+        return "no ledger here to index"
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(search_notes)")] \
+        if "search_notes" in tables else []
+    if "stems" in cols:
+        return "search_notes already carries stems"
+    conn.execute("DROP TABLE IF EXISTS search_notes")
+    conn.execute("CREATE VIRTUAL TABLE search_notes USING fts5("
+                 "memory_id UNINDEXED, revision UNINDEXED, statement, why, stems)")
+    rows = conn.execute(
+        "SELECT l.memory_id, l.revision, l.statement, l.why, l.body_json FROM ledger l"
+        " JOIN (SELECT memory_id, MAX(revision) r FROM ledger GROUP BY memory_id) m"
+        "   ON m.memory_id = l.memory_id AND m.r = l.revision"
+        " WHERE l.memory_id NOT IN (SELECT memory_id FROM tombstones)"
+        "   AND trim(coalesce(l.statement, '')) != ''").fetchall() \
+        if "tombstones" in tables else []
+    for mid, rev, statement, why, body in rows:
+        conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why, stems)"
+                     " VALUES (?,?,?,?,?)",
+                     (mid, rev, statement, why or "", textkeys.stems_of(statement, why, body)))
+    return (f"search_notes rebuilt with stems from {len(rows)} current record(s)"
+            + ("" if textkeys.STEMMER else "; no stemmer installed, keys are lower-cased words"))
+
+
 MIGRATIONS: list[tuple[str, object]] = [
     ("0001-events-occurred-at-utc", _events_utc),
     ("0002-drop-events-outside-the-estate", _drop_foreign_events),
@@ -271,6 +308,7 @@ MIGRATIONS: list[tuple[str, object]] = [
     ("0006-collector-cursors", _collector_cursors),
     ("0007-drop-inert-retention-policy", _drop_retention_policy),
     ("0008-agent-memory-workflows", _agent_memory_workflows),
+    ("0009-search-stems", _search_stems),
 ]
 
 

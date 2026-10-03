@@ -239,14 +239,14 @@ def test_the_ceiling_message_does_not_blame_the_wrong_spender() -> None:
 def test_the_served_instructions_describe_the_served_surface() -> None:
     src = (ROOT / "mcp/server.py").read_text(encoding="utf-8")
     tools = src.count("@server.tool(")
-    # NINETEEN: fourteen with the three shared assistant tools and the
-    # overview, plus the five workflow-memory tools (checkpoint write and
-    # latest, handoff create, accept and get); the capability tools are
-    # counted apart, below. The count is asserted
+    # TWENTY: fourteen with the three shared assistant tools and the
+    # overview, plus the six workflow-memory tools (checkpoint write and
+    # latest, workflow list, handoff create, accept and get); the capability
+    # tools are counted apart, below. The count is asserted
     # rather than the names because the instructions below are what an LLM client
     # reads to decide what to call, and a tool that exists while the string says
     # otherwise is the drift this test was written for.
-    check("the server serves nineteen observatory tools", tools == 19, str(tools))
+    check("the server serves twenty observatory tools", tools == 20, str(tools))
     manifest = json.loads((ROOT / "fabric-agent.json").read_text(encoding="utf-8"))
     served = set(re.findall(r'@server\.capability\("([^"]+)"\)', src))
     import interop
@@ -257,7 +257,7 @@ def test_the_served_instructions_describe_the_served_surface() -> None:
     check("assistant readiness, conversation and paid ask are named", all(name in block for name in
           ("observatory_assistant_status", "observatory_assistant_conversation", "observatory_assistant_ask")))
     check("the workflow tools an executor must call are named", all(name in block for name in
-          ("observatory_checkpoint_write", "observatory_handoff_create", "observatory_checkpoint_latest")))
+          ("observatory_checkpoint_write", "observatory_handoff_create", "observatory_workflow_list")))
     check("the instructions no longer claim read-only", "Read-only" not in block)
     check("they state that two tools write", "WRITE:" in block)
     check("and that the credential reader cannot return a value",

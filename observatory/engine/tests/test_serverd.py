@@ -135,6 +135,16 @@ def test_every_route_answers_and_none_serves_a_value() -> None:
         versions = list((skills.get("shipped") or {}).values())
         check("and each version is the bare number, without the YAML quotes",
               versions and all(v == "unversioned" or v[:1].isdigit() for v in versions), str(versions))
+        code, agents = get("/agents")
+        check("/agents renders the Agents section now, from the store",
+              code == 200 and isinstance(agents, bytes) and b'id="agents"' in agents
+              and b"data-live" in agents, str(agents)[:160])
+        code, agents_ru = get("/agents?locale=ru")
+        check("and in the reader's language",
+              code == 200 and "Нужно вам".encode() in agents_ru, str(agents_ru)[:160])
+        code, agents_bad = get("/agents?locale=xx")
+        check("an unknown language falls back to English, not an error",
+              code == 200 and b"Needs you" in agents_bad, str(agents_bad)[:120])
         code, page = get("/")
         check("/ falls back to the single page when the split is not built",
               code == 200 and b"fixture page" in page,

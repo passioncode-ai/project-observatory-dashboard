@@ -66,6 +66,10 @@ def fixture(revisions: int = 1) -> tuple[sqlite3.Connection, str, list[str]]:
     The FTS rows are inserted directly. The indexer embeds and writes in one
     step, and embedding costs money against a live key; what it writes into
     `search_notes` is `statement` + `why`, which is what these rows hold.
+
+    An append now indexes its revision in its own transaction (OBS-03) and
+    replaces the record's older rows, so the latest revision is already there;
+    the older ones are put back as an engine before that change left them.
     """
     d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-scope-"))
     os.environ["OBSERVATORY_DB"] = str(d / "observatory.db")
@@ -89,8 +93,10 @@ def fixture(revisions: int = 1) -> tuple[sqlite3.Connection, str, list[str]]:
                      kind="observation")
         rev = r["revision"]
     for i, text in enumerate(texts, start=1):
-        conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why)"
-                     " VALUES (?,?,?,?)", (mid, i, text, "the why"))
+        if conn.execute("SELECT 1 FROM search_notes WHERE memory_id = ? AND revision = ?",
+                        (mid, i)).fetchone() is None:
+            conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why)"
+                         " VALUES (?,?,?,?)", (mid, i, text, "the why"))
     conn.commit()
     return conn, mid, texts
 
@@ -192,6 +198,16 @@ def test_every_revision_is_tombstoned_and_purged() -> None:
                         (mid,)).fetchone()[0]
     check("one tombstone row per revision", rows == 3, str(rows))
 
+    left = conn.execute("SELECT count(*) FROM search_notes WHERE memory_id = ?",
+                        (mid,)).fetchone()[0]
+    check("the erasure took every lexical row with it, in its own transaction", left == 0,
+          f"{left} row(s)")
+    # The purge stays the backstop for rows written around the tombstone — an
+    # engine before OBS-03, or a rebuild from a stale checkpoint. Put them back.
+    for i, text in enumerate(texts, start=1):
+        conn.execute("INSERT INTO search_notes (memory_id, revision, statement, why)"
+                     " VALUES (?,?,?,?)", (mid, i, text, "written around the tombstone"))
+    conn.commit()
     rec = retention.purge_projections(conn)["search_notes"]
     check("the purge removed all three index rows", rec["removed"] == 3, json.dumps(rec))
     check("nothing tombstoned is left, per revision",

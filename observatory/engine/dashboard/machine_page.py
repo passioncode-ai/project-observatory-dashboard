@@ -50,7 +50,8 @@ def _table(t: Translator, caption: str, heads: list[tuple[str, bool]], rows: lis
     th = "".join(f'<th scope="col"{NUM if num else ""}>{t.mark(h)}</th>' for h, num in heads)
     body = []
     for r in rows:
-        cells = "".join(f'<td{NUM if num else ""} data-label="{_e(t(h))}">{c}</td>'
+        # `t.attr`, so the page's language switch relabels a stacked cell too.
+        cells = "".join(f'<td{NUM if num else ""}{t.attr("data-label", h)}>{c}</td>'
                         for (h, num), c in zip(heads, r))
         body.append(f"<tr>{cells}</tr>")
     return (f'<section class="card panel">{head}<table><thead><tr>{th}</tr></thead>'

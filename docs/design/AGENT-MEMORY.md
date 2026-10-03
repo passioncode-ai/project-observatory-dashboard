@@ -45,9 +45,14 @@ including the flag that said "do not push":
   "decisions": [{"id": "D-1", "choice": "stream rows", "why": "the table is large"}],
   "constraints": ["read-only: do not push"],
   "artifacts": [{"kind": "git", "path": "/absolute/checkout", "branch": "feature"}],
+  "credentials": [{"project": "alpha-web", "env": "prod", "name": "STRIPE_KEY", "purpose": "charge"}],
   "questions": [], "memory_refs": [], "notes": "…"
 }
 ```
+
+`credentials` lists the keys the workflow needs, by name only — `{project, env, name,
+purpose}` — and every read and handoff reports where each one is now
+([AGENT-SECRETS.md](AGENT-SECRETS.md)).
 
 `goal` is required. An unknown field is refused, because a field the next executor is not told
 to read is state that silently does not travel. The body is at most 64 KiB; a log is linked as
@@ -92,7 +97,9 @@ Two partial unique indexes make "one active, one offered" a property of the tabl
 
 Assembled by the engine, immutable once written:
 
-1. `constraints`: the latest checkpoint's constraints, first and verbatim.
+1. `constraints`: the latest checkpoint's constraints, first and verbatim. Then
+   `credentials`: each declared key's state (`vault`, `env-only`, `missing`, `unknown`) with
+   the command to use or store it, and `credentialsMissing`.
 2. `checkpoint`: the latest checkpoint, with its body.
 3. `git`: a fresh read of each git artifact's checkout — branch, a 12-character head and the
    paths that differ, never file contents. It is read through `safe_git`, so the checkout's
@@ -127,6 +134,10 @@ happened, and `constraints` in the answer are the newest checkpoint's.
 | The committed export holds no workflow body | `tools/export_ledger.py` writes the row with `body_sha256` and no body | `test_h07_the_committed_export_carries_no_workflow_body` |
 | A credential store is never read into a pack | a git artifact inside the secret store or a key directory (`~/.ssh`, `~/.gnupg`, `~/.aws`, …), symlinks resolved, is refused | `test_h12_…` |
 | Reads never hand out the right to write | `observatory_checkpoint_latest` and `observatory_handoff_get` show the lease by `leaseRef`, never by token | wire test: no `wl_` string in a read |
+| A question in another word form finds its record | the lexical index keys every word by its Snowball stem, a Russian stem cut to six characters (`textkeys.py`); migration 0009 rebuilt the index with the keys | `test_textkeys`: word forms share a key; evaluation recall@5 1.0 in both languages |
+| A record is searchable the moment it is written | it enters the lexical index in the transaction that writes it, and leaves it in the one that erases it | `test_textkeys`, evaluation `freshness` |
+| A checkpoint is found by what its step decided | the index keys the body's prose — plan titles, results, next actions, decisions and their reasons, constraints, questions, notes, artifact notes — and not its identifiers | `test_the_body_prose_is_keyed_and_identifiers_are_not`; evaluation: 8 of 8, 0 of 8 before |
+| Nothing found is said, not filled | a lexical hit must carry a share of the question's subject words (`survey.coverage_floor`, 0.4 measured); when none does the answer says `abstain` with `abstainReason` and the `floor` | evaluation: 20 of 20 unanswerable questions empty, no answerable one refused; gated in `test_memory_eval` |
 
 When the known secret values cannot be read, shape redaction still runs and the answer says
 `knownValuesChecked: false`: an honest partial, not a silent skip. The known values are re-read
@@ -136,7 +147,65 @@ what it lost. A full commit id in `head`, `ref`, `evidence` or `memory_refs` is 
 characters before redaction (40 hexadecimal characters is also the shape of many keys), and a
 `session:<uuid>` reference is kept whole.
 
+## What the operator does
+
+`project-observatory full workflow` (`tools/workflow_cli.py`):
+
+| Command | What it does |
+|---|---|
+| `list [--project ID] [--status open\|closed\|all] [--json]` | the workflows, as `observatory_workflow_list` |
+| `show WORKFLOW_ID [--json]` | one workflow: goal, step, constraints, open steps, executor, handoffs, keys |
+| `handoff WORKFLOW_ID --to-provider P --reason R` | a handoff under the agents' rule (silence) |
+| `handoff … --force` | the operator takes the workflow, for any reason; recorded as `operator-force`. Needs a terminal |
+| `close WORKFLOW_ID --why WHY` | closes a workflow nobody will continue: a final checkpoint revision by the operator says why, every lease and offer ends. Needs a terminal |
+
+The two acts that need a terminal carry the operator's authority, which a script must not be
+able to mint — the same rule `tools/review.py` keeps. A workflow the operator closed keeps its
+last checkpoint past the 30-day horizon, as every operator-owned record does.
+
+The review queue (`project-observatory full review`) names a step kept after a lost lease as
+such, with its workflow and the `workflow show` command: the decision is whether that work still
+matters to the workflow, not whether a conclusion is true.
+
+## Sessions and stalls
+
+- **A session names the workflow it executes.** Whoever starts a session for a workflow (the
+  account manager, Fabric) sets `OBSERVATORY_WORKFLOW_ID`. The Stop hook
+  (`tools/record_turn.py`) writes it on the session's record, and later revisions carry it. A
+  value not shaped like a workflow id is ignored. A checkpoint's `sessionId` links the other
+  way.
+- **The session history reads the hook's own records.** `collectors/scan_sessions.py` reads the
+  ledger's `session` records first, and the companion's store only where it is still installed.
+  With the hook's records present, the companion's absence is reported as not applicable, not
+  as lost history.
+- **A stall is derived, not declared.** `observatory_workflow_list` marks a workflow `stalled`
+  when it is open, held, and neither a checkpoint nor a turn of a session executing it has been
+  seen for 30 minutes (`STALL_SECONDS`). The Stop hook records a turn only when files moved, so
+  a long think without edits can read as a stall. The view says which signal it saw last
+  (`silentSeconds`, `lastSessionAt`), not that the agent died.
+
 ## What the operator sees
+
+**The Agents page** (Work group, `agents.html`) answers *which agents are working, on what, and
+where their work moved* (scenarios OSS-24 to OSS-28):
+
+- five counters: sessions with a turn in the last hour, open workflows, handoffs waiting,
+  stalled workflows, steps kept after a lost lease;
+- **Needs you**: stalled workflows, lapsed offers, kept steps, and keys a workflow needs that are
+  missing or only in a `.env`, each with its reason and the command to copy;
+- the workflows by project: goal, step and status, executor, last checkpoint age, handoffs. A
+  card opens to a lane per executor that held it, a dot per checkpoint it wrote (by the lease
+  recorded on the checkpoint, not by timestamp), the handoff and its reason between lanes, then
+  constraints, next actions, checkouts and keys by state. The same events are an ordered list
+  for a screen reader;
+- the agent sessions of the last day, with their project and workflow.
+
+It is built on every tick from `agents_view.summary()` (read-only). Opened through the local
+server it also asks `/agents` every 15 seconds: the server renders the same section again with
+the same Python renderer (`dashboard/agents_page.py`), and the page swaps it in, keeping open
+cards and focus. A failed refresh keeps what is shown and says live updates are paused; opened
+as a file, the page says it is the snapshot of its build. It shows and hands over commands and
+changes nothing.
 
 The dashboard's Health panel counts the open workflows and the handoffs waiting for a session
 (`workflows_open`, `handoffs_waiting` in `dashboard/build_dashboard.py`): an offer nobody
@@ -144,6 +213,38 @@ accepts lapses, and a workflow stalls quietly unless someone can see it waiting.
 for a lost lease is a `proposed` record, so it is counted with everything else awaiting the
 operator's decision. Scenario OSS-23 in
 [portable-scenarios.md](../../observatory/engine/docs/ux/portable-scenarios.md).
+
+## Search
+
+`observatory_search` answers from two arms fused by rank: similarity where the vector index
+and an embedding key are both available, and the lexical index always. The lexical arm is the
+one a handoff relies on, because it answers when a limit has run out.
+
+- **Keys, not words.** A question and a record are compared by search keys
+  ([`textkeys.py`](../../observatory/engine/textkeys.py)): the Snowball stem of each word, and
+  for Russian the stem cut to six characters, because Snowball's Russian stemmer leaves
+  *переключение*, *переключает* and *переключить* as three stems. A question is matched on its
+  subject words only: stopwords in either language leave it.
+- **A floor, and an honest empty answer.** A lexical hit must carry a share of the question's
+  keys: all of one, one of two, and 0.4 of three or more — the middle of the plateau (0.34–0.5)
+  where the evaluation found every answerable question and refused every unanswerable one.
+  When nothing clears it the answer carries `abstain: true`, `abstainReason` and `floor`.
+- **The checkpoint body is searchable.** A checkpoint's statement names its goal and next
+  actions; its body's prose is keyed beside it, so *why are cents stored as integers?* finds
+  the step that decided it. Paths, commits, artifact refs and credential names are
+  identifiers and are not keyed.
+- **Written and erased in one transaction.** The lexical row commits with the revision and
+  leaves with the tombstone, so a checkpoint written a second ago is found by the next search.
+
+**What the floor does not cover yet.** The vector arm is top-k: every embedded record is a
+neighbour at some distance, so with similarity on, a question nothing answers still returns
+its nearest records and `abstain` stays false. A distance floor depends on the model and is
+calibrated with it (OBS-04). Workflow records are never embedded, so a checkpoint is matched
+only lexically, and a paraphrase that shares no word with its record is not found
+(held-out recall 0.067): that is similarity's to close.
+
+The numbers and how they were measured:
+[memory evaluation baseline](../reports/2026-10-03-memory-eval-baseline/README.md).
 
 ## Retention
 
@@ -164,6 +265,7 @@ workflow's checkpoint is never erased because the work took long. A workspace wh
 |---|---|---|
 | `observatory_checkpoint_write` | yes | starts a workflow without `workflowId`; `close: true` ends it |
 | `observatory_checkpoint_latest` | no | carries `degraded` |
+| `observatory_workflow_list` | no | workflows newest first, with step, goal, executor, pending handoff, seconds since the last checkpoint and kept steps; how an agent finds its workflow again after a compaction lost the id |
 | `observatory_handoff_create` | yes | reads git and the local index; spends nothing |
 | `observatory_handoff_accept` | yes | returns the new `leaseId`, the constraints, the current checkpoint and the pack |
 | `observatory_handoff_get` | no | status: `offered`, `accepted`, `expired`, `superseded`, `workflow-closed` |
@@ -178,14 +280,11 @@ gains it, these tools are what its schemas are written from.
 
 ## Not built yet
 
-- Search over agent memory: indexing only the latest revision of each record, a similarity
-  floor with an explicit "nothing found", a field-level index of checkpoint bodies, and word
-  forms in Russian and English.
-- Local multilingual embeddings, chosen by measurement, with a separate index per model.
+- Local multilingual embeddings, chosen by measurement, with a separate index per model and a
+  distance floor calibrated for each, so the vector arm can also say "nothing found".
 - Per-caller access bindings, read scopes by classification and redaction on output, needed
   before any caller other than the local operator's agents.
 - An MCP transport other than stdio (Streamable HTTP on loopback, as a `fabric-service`).
-- An evaluation set: recall, abstention, handoff continuation, injected instructions,
-  forgetting and freshness.
 
-They are rows OBS-03 to OBS-07 in the [backlog](../backlog.md).
+They are rows OBS-04 to OBS-06 in the [backlog](../backlog.md). Search (OBS-03) and the
+evaluation set (OBS-07) are described above.
