@@ -354,6 +354,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.close_connection = True
     # endregion client-disconnect
 
+    #: True while answering HEAD: every route runs as for GET, so the status
+    #: and headers (Content-Length included) are the GET answer's, and only the
+    #: body is withheld (RFC 9110 §9.3.2). HEAD was 501, so `curl -I`, a link
+    #: checker or an uptime probe read a working page as a broken server.
+    _head = False
+
+    def _body(self, body: bytes) -> None:
+        if not self._head:
+            self.wfile.write(body)
+
+    def do_HEAD(self):                                    # noqa: N802
+        self._head = True
+        try:
+            self.do_GET()
+        finally:
+            self._head = False
+
     def log_message(self, fmt, *args):                    # quiet by design;
         pass                                              # launchd keeps stderr
 
@@ -363,7 +380,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        self._body(body)
 
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
@@ -390,7 +407,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            self._body(body)
             return
         query = parse_qs(urlsplit(self.path).query)
         try:
@@ -427,7 +444,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self.send_header("Content-Type", f"{kind or 'text/html'}; charset=utf-8")
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
-                    self.wfile.write(body)
+                    self._body(body)
                     return
                 self._json({"error": "the pages are not built yet",
                             "build_with": "project-observatory full dashboard"}, 404)
@@ -454,7 +471,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            self._body(body)
         elif route == "/.well-known/fabric-service":
             if RUNTIME is None:
                 self._json({"error": "the service is starting"}, 503)
