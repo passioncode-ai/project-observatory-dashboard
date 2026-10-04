@@ -218,8 +218,9 @@ def test_the_door_reads_every_page_of_keys():
         asked.append(path)
         off = int(path.split("offset=")[1].split("&")[0]) if "offset=" in path else 0
         return {"data": pages.get(off, [])}
-    real = door._request
+    real, real_ledger = door._request, door.ledger
     door._request = fake
+    door.ledger = lambda: {"issued": {}}  # no recorded hash: the page-by-page fallback
     try:
         row = door.find_key("admin-value", "example-agent")
         check("a key on the third page is found", bool(row) and row.get("hash") == "hx", f"got {row!r}")
@@ -236,8 +237,21 @@ def test_the_door_reads_every_page_of_keys():
             check("a listing that never ends is refused", False, "no error raised")
         except RuntimeError as exc:
             check("a listing that never ends is refused", "pages" in str(exc), str(exc))
+        # With the hash the ledger recorded at issue, the key is read directly — one request.
+        door.ledger = lambda: {"issued": {"example-agent": {"hash": "hx", "account": "a"}}}
+        asked.clear()
+        door._request = lambda path, key, payload=None, method=None: (asked.append(path) or
+            ({"data": {"name": "example-agent", "hash": "hx"}} if path == "/keys/hx" else {"data": []}))
+        row = door.find_key("admin-value", "example-agent")
+        check("a key with a recorded hash is read by hash, in one request",
+              bool(row) and asked == ["/keys/hx"], f"asked {asked}")
+        def gone(path, key, payload=None, method=None):
+            raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+        door._request = gone
+        check("a recorded key the provider no longer has is reported absent",
+              door.find_key("admin-value", "example-agent") is None)
     finally:
-        door._request = real
+        door._request, door.ledger = real, real_ledger
 
 
 if __name__ == "__main__":

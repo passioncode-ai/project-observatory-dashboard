@@ -332,6 +332,21 @@ def _all_keys(admin: str, include_disabled: bool = True) -> list[dict]:
 
 
 def find_key(admin: str, name: str) -> dict | None:
+    """The provider's row for a key this door issued.
+
+    By the hash the ledger recorded at issue (`GET /keys/{hash}`): one request however many
+    keys the account holds (more than 20 000 on 2026-10-04, past any sane listing). Only a
+    key the ledger has no hash for is searched page by page.
+    """
+    rec = ledger().get("issued", {}).get(name) or {}
+    if rec.get("hash"):
+        try:
+            row = _request(f"/keys/{rec['hash']}", admin).get("data") or None
+        except RuntimeError as exc:
+            if "HTTP 404" in str(exc):
+                return None
+            raise
+        return row if row and row.get("name") == name else None
     for row in _all_keys(admin):
         if row.get("name") == name:
             return row
@@ -666,16 +681,18 @@ def cmd_ping() -> int:
     for label, p in admins():
         key = private_io.read(p).strip()
         try:
-            rows = _all_keys(key)
-            known = {r.get("name") for r in rows}
-            print(f"  admin/{label}: alive, {len(rows)} key(s) at the provider")
-            # Keys at the provider the ledger does not know are spend capacity
-            # nobody here manages — said, not hidden.
+            # One page proves the provisioning key is alive; the account can hold far more keys
+            # than any listing should walk (more than 20 000 on 2026-10-04).
+            first = _request(f"/keys?include_disabled=true&offset=0", key).get("data", [])
+            more = len(first) >= PAGE
+            print(f"  admin/{label}: alive, {len(first)}{'+' if more else ''} key(s) at the provider")
             mine = {n for n, r in doc["issued"].items() if r["account"] == label}
-            stray = sorted(known - mine - {None})
+            stray = sorted({r.get("name") for r in first} - mine - {None})
             if stray:
-                print(f"    unmanaged at the provider: {', '.join(stray[:6])}"
-                      f"{' …' if len(stray) > 6 else ''}")
+                # Keys the ledger does not know are spend capacity nobody here manages — said, not
+                # hidden; with more than one page the list is a sample, and says so.
+                print(f"    unmanaged at the provider{' (first page only)' if more else ''}: "
+                      f"{', '.join(stray[:6])}{' …' if len(stray) > 6 else ''}")
         except RuntimeError as exc:
             print(f"  admin/{label}: DEAD — {exc}", file=sys.stderr)
             bad += 1
@@ -683,7 +700,12 @@ def cmd_ping() -> int:
         for n, rec in sorted(doc["issued"].items()):
             if rec["account"] != label:
                 continue
-            row = next((r for r in rows if r.get("name") == n), None)
+            try:
+                row = find_key(key, n)
+            except RuntimeError as exc:
+                print(f"  {n}: could not be read — {exc}", file=sys.stderr)
+                bad += 1
+                continue
             if not row:
                 print(f"  {n}: in the ledger but NOT at the provider — revoke it "
                       f"or re-issue", file=sys.stderr)
