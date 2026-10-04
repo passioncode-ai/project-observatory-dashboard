@@ -580,6 +580,9 @@ def observatory_search(
     remote model (embedding-policy/1, PB-137 N-003): no budget is spent, no key is
     read, and `degraded` carries `source: vector` with the policy's reason code. The
     vector half returns with the local model (N-004..N-006); a binding's query is classified at its class ceiling (access-bindings/1, N-008).
+    Only CURRENT records in the caller's scope compete for the 300-match window: the latest
+    revision, not erased, inside its `valid_from`/`valid_to`, in the project and classes the
+    caller may read (N-009). A full window is named in `degraded` (`source: window`).
     """
     try:
         grant = MA.authorize("observatory_search", project_id=project_id)

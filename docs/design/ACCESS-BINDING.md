@@ -29,7 +29,7 @@ is N-015/N-016.
 | 6 | **Scopes are explicit:** `memory.read`, `memory.search`, `memory.record`, `memory.checkpoint`, `memory.handoff`. An unknown scope, `memory.forget` among them, is denied until it is defined. | A scope added by accident is a privilege added by accident. |
 | 7 | **Effect has a ceiling: `read` < `propose`.** The operator's authority is never a binding effect, and a request for it is denied (`effect-above-ceiling`). | Writes through the wire are proposals. Only a person at a terminal promotes them. |
 | 8 | **A session binding names its workflows.** A binding with `workflows` (a one-shot binding for a Fabric or Switchboard session) must name the workflow on every request and can touch no other. | A handed-over session continues one piece of work. It does not gain the project. |
-| 9 | **Visibility follows the class ceiling.** A record is visible when its classification (plan aliases mapped) is at or below the ceiling. An unknown class is never visible. | Filtering by ceiling before ranking is N-009. This rule is the predicate it uses. |
+| 9 | **Visibility follows the class ceiling.** A record is visible when its classification (plan aliases mapped) is at or below the ceiling. An unknown class is never visible. | Search applies it inside its candidate query, before ranking and limits (N-009). |
 | 10 | **A binding vouches for its queries at its ceiling.** `query_context` hands embedding-policy/1 an `authority: binding` context classified at the binding's ceiling. A binding that may see `confidential` text therefore never exports its queries, and that includes `local:stdio`. | The query text is the principal's. The most it may read is the most its words may carry. |
 | 11 | **A broken registry is refused whole.** A caller then serves stdio alone and denies every HTTP request. | As embedding-policy/1: half-reading an authority file is the one way this could grant more than it says. |
 
@@ -60,7 +60,7 @@ against the real MCP server module and a real store.
 |---|---|
 | `InteropServer.call_tool` (`mcp/capability_tools.py`) | Every tool outside the memory family, Fabric capabilities included, serves the local stdio agent only. A binding gets `local-only` before any handler runs. |
 | `InteropServer.read_resource` | Resources are local-only too. |
-| `observatory_search`, `observatory_recall` | Scope `memory.search` / `memory.read`, effect `read`, the named project. A binding reads only the classes at or below its ceiling: `recall` filters in SQL, so `total` agrees with the page. `search` filters after the retrieval window and says so in `degraded` (`class-filter`); filtering before the window is N-009. |
+| `observatory_search`, `observatory_recall` | Scope `memory.search` / `memory.read`, effect `read`, the named project. A binding reads only the classes at or below its ceiling: `recall` filters in SQL, so `total` agrees with the page. `search` filters project, class and validity inside its candidate query, before the window (N-009). |
 | `observatory_record` | Scope `memory.record`, effect `propose`, `owner` = the binding's principal. A correction (`memoryId`) must be a record of the authorized project. |
 | `observatory_workflow_list` | Scope `memory.read`. A session binding lists only its own workflows, and `total` counts only those. |
 | `observatory_checkpoint_write`, `_latest` | Scope `memory.checkpoint`. A new workflow is authorized on the project it names. A continued one is authorized on the project it already belongs to, read from the store. |
@@ -134,6 +134,8 @@ project-observatory full access-binding revoke BINDING_ID
 
 - It serves no HTTP. The loopback service and its bearer header are N-016. They plug into
   `serve_http()` and `channel()` above.
-- `search` still ranks over every class before it filters. N-009 applies `may_see` before
-  ranking and limits.
+- The vector arm's nearest-neighbour search is not filtered before the KNN: the legacy index
+  has no metadata to filter on. It runs only under a consent, and its hits pass the same
+  canonical recheck and say so in `degraded` (`vector-window`). Filtering before the KNN
+  comes with an admitted local model's namespace (N-006, deferred under OBS-35).
 - Session handoff across clients (N-018, N-022) builds on rule 8. It does not change it.

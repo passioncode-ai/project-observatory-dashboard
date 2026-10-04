@@ -375,7 +375,7 @@ class Classes(Base):
         self.assertEqual(out["total"], 1, "total counts only what the caller may see")
         self.assertTrue(refused(wf, "class-ceiling-below-workflow"), wf)
 
-    def test_search_filters_and_says_so(self) -> None:
+    def test_search_filters_before_the_window(self) -> None:
         self.ws.note(ALPHA, statement="exporter design public", classification="public")
         self.ws.note(ALPHA, statement="exporter design secret", classification="confidential")
         self.ws.bind("agent:public", [ALPHA], bearer="tok-pub", class_ceiling="public")
@@ -390,7 +390,10 @@ class Classes(Base):
         with self.ws.http("tok-pub"):
             out = self.ws.srv.observatory_search(query="exporter design", project_id=ALPHA)
         self.assertTrue(all("secret" not in r["statement"] for r in out["results"]), out)
-        self.assertIn("class-filter", [d["source"] for d in out["degraded"]])
+        self.assertEqual(out["total"], 1, "the unseen class takes no place and no count")
+        # Since N-009 the class is filtered inside the candidate query, so there is no
+        # post-window filter left to report (tests/test_search_scope.py).
+        self.assertNotIn("class-filter", [d["source"] for d in out["degraded"]])
 
 
 class SessionBinding(Base):

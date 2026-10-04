@@ -979,6 +979,33 @@ COVERAGE = 0.4
 RETRIEVAL_WIDTH = 300
 
 
+#: A ledger row is a CURRENT, visible candidate: its latest revision, not erased, inside
+#: its validity, in the caller's project and classes. Applied INSIDE the candidate query,
+#: before the window (PB-137 N-009), so rows the caller may not see neither take a place
+#: in the window nor move a count. `{l}` is the ledger alias.
+_CURRENT = ("NOT EXISTS (SELECT 1 FROM tombstones t WHERE t.memory_id = {l}.memory_id)"
+            " AND {l}.revision = (SELECT MAX(x.revision) FROM ledger x"
+            " WHERE x.memory_id = {l}.memory_id)"
+            " AND ({l}.valid_to IS NULL OR datetime({l}.valid_to) IS NULL"
+            " OR datetime({l}.valid_to) > datetime('now'))"
+            " AND ({l}.valid_from IS NULL OR datetime({l}.valid_from) IS NULL"
+            " OR datetime({l}.valid_from) <= datetime('now'))")
+
+
+def _scope_sql(alias: str, project_id: str | None,
+               classes: tuple[str, ...] | None) -> tuple[str, list]:
+    """The `_CURRENT` predicate plus the caller's project and classes, with its args."""
+    sql, args = _CURRENT.format(l=alias), []
+    if project_id:
+        sql += f" AND {alias}.project_id = ?"
+        args.append(project_id)
+    if classes is not None:
+        sql += (f" AND {alias}.classification IN ({','.join('?' * len(classes))})"
+                if classes else " AND 0")
+        args += list(classes)
+    return sql, args
+
+
 def search(query: str, project_id: str | None = None, limit: int = 10, *,
            authority: str = "caller-argument", classification: str | None = None,
            classes: tuple[str, ...] | None = None) -> dict:
@@ -1065,6 +1092,13 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
                     hits[key] = {
                         "memoryId": r["memory_id"], "revision": r["revision"],
                         "distance": round(r["distance"], 6), "matched": ["vector"]}
+                # Said: this legacy index has no metadata to filter on, so its nearest
+                # neighbours are chosen over every project and filtered after. Filtering
+                # before the KNN comes with an admitted local model's namespace (N-006).
+                degraded.append({"source": "vector-window",
+                                 "reason": "vector candidates were filtered after the nearest-"
+                                           "neighbour search, so fewer in-scope matches may "
+                                           "be returned than exist"})
             except Exception as exc:
                 degraded.append({"source": "vector",
                                  "reason": f"{type(exc).__name__}: {exc}"})
@@ -1087,12 +1121,24 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
                                        "are matched exactly"})
         try:
             if qkeys:
-                fts = ("SELECT memory_id, revision, rank, stems FROM search_notes"
-                       " WHERE search_notes MATCH ? ORDER BY rank LIMIT ?")
+                # SCOPE BEFORE THE WINDOW (PB-137 N-009): the ledger row behind each
+                # match must be current and the caller's before it may take one of
+                # the `RETRIEVAL_WIDTH` places; filtering after the LIMIT let three
+                # hundred stronger foreign matches push the caller's own record out.
+                scope_sql, scope_args = _scope_sql("l", project_id, classes)
+                fts = ("SELECT search_notes.memory_id AS memory_id,"
+                       " search_notes.revision AS revision, search_notes.rank AS rank,"
+                       " search_notes.stems AS stems FROM search_notes"
+                       " JOIN ledger l ON l.memory_id = search_notes.memory_id"
+                       " AND l.revision = search_notes.revision"
+                       f" WHERE search_notes MATCH ? AND {scope_sql}"
+                       " ORDER BY search_notes.rank LIMIT ?")
                 expr = "stems : (" + " OR ".join('"' + k.replace('"', '""') + '"'
                                                  for k in qkeys) + ")"
                 below = 0
-                for r in conn.execute(fts, (expr, RETRIEVAL_WIDTH)):
+                window = 0
+                for r in conn.execute(fts, (expr, *scope_args, RETRIEVAL_WIDTH)):
+                    window += 1
                     # THE FLOOR. An OR over the question's keys matches any record
                     # sharing one of them, and a best-of-the-bad answer is how a
                     # search invents memory. A hit must carry enough of what was
@@ -1112,6 +1158,13 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
                         hits[k] = {"memoryId": r["memory_id"], "revision": r["revision"],
                                    "rank": round(r["rank"], 6), "coverage": round(covered, 3),
                                    "matched": ["lexical"]}
+                if window >= RETRIEVAL_WIDTH:
+                    # Said, not hidden: the window is full, so a weaker match the
+                    # caller may see can lie beyond it.
+                    degraded.append({"source": "window",
+                                     "reason": f"the lexical window is full ({RETRIEVAL_WIDTH} "
+                                               f"current matches in scope); weaker matches "
+                                               f"beyond it were not ranked"})
             else:
                 below = 0
         except sqlite3.Error as exc:
@@ -1128,10 +1181,13 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
         # are one transaction, so `ledger.created_at` IS the enqueue time and no
         # column had to be added to learn it.
         try:
+            # IN THE CALLER'S SCOPE: another project's queue is not this answer's lag,
+            # and counting it would tell a binding that rows it may not see exist.
+            lag_sql, lag_args = _scope_sql("l", project_id, classes)
             lag = conn.execute(
                 "SELECT count(*) AS n, min(l.created_at) AS oldest FROM outbox o"
                 " JOIN ledger l ON l.memory_id = o.memory_id AND l.revision = o.revision"
-                " WHERE o.consumed_at IS NULL").fetchone()
+                f" WHERE o.consumed_at IS NULL AND {lag_sql}", lag_args).fetchone()
             if lag and lag["n"]:
                 since = f", the oldest committed {lag['oldest']}" if lag["oldest"] else ""
                 degraded.append({
@@ -1141,14 +1197,6 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
         except sqlite3.Error as exc:
             degraded.append({"source": "projection", "reason": f"lag unknown: {exc}"})
 
-        if classes is not None:
-            # Said, not hidden: the window was ranked over every class, so a record
-            # this caller may see can sit behind ones it may not. Filtering before
-            # the window is PB-137 N-009.
-            degraded.append({"source": "class-filter",
-                             "reason": "records above this binding's class ceiling are "
-                                       "removed after the retrieval window, so fewer "
-                                       "visible records may be returned than exist"})
         # --- hydrate from CANON, never from the projection --------------------
         out, contested = [], []
         for (mid, rev), h in hits.items():
@@ -1159,6 +1207,13 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
             if row is None or row["tomb"] is not None:
                 continue                                                   
             if project_id and row["project_id"] != project_id:
+                continue
+            # THE CANONICAL RECHECK, the same predicate the lexical window used:
+            # a vector hit was never filtered before its KNN, so its validity and
+            # visibility are decided here.
+            hscope, hargs = _scope_sql("l", project_id, classes)
+            if conn.execute(f"SELECT 1 FROM ledger l WHERE l.memory_id = ? AND l.revision = ?"
+                            f" AND {hscope}", (mid, rev, *hargs)).fetchone() is None:
                 continue
             # A BINDING'S CLASS CEILING (PB-137 N-008): a record above it is not
             # served. `classes` is None for the local agent, which reads every class.
