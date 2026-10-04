@@ -218,9 +218,13 @@ operator's decision. Scenario OSS-23 in
 
 ## Search
 
-`observatory_search` answers from two arms fused by rank: similarity where the vector index
-and an embedding key are both available, and the lexical index always. The lexical arm is the
-one a handoff relies on, because it answers when a limit has run out.
+`observatory_search` answers from two arms fused by rank: similarity, and the lexical index
+always. The lexical arm is the one a handoff relies on, because it answers when a limit has
+run out. **Since PB-137 N-003 an MCP caller gets the lexical arm only:** its query would have to
+be embedded by the remote model to use the vector one, and a caller's own arguments authorize no
+export (embedding-policy/1, rule 9). The answer's `degraded` then carries `source: vector` and
+the reason code (`untrusted-authority`). Similarity comes back with the local model (N-004 to
+N-006) or with caller bindings (N-007, N-008).
 
 - **Keys, not words.** A question and a record are compared by search keys
   ([`textkeys.py`](../../observatory/engine/textkeys.py)): the Snowball stem of each word, and

@@ -110,6 +110,26 @@ This repository is public, and so is its Git history, commit messages included.
 - Comments and docstrings are the design record: they explain why, under the same rules
   ([CONTRIBUTING.md](CONTRIBUTING.md#comments-and-design-notes)).
 
+## Every behaviour is visible to both readers
+
+Operator rule, 2026-10-04. Every command and behaviour must be fully transparent to both
+readers: the agent that drives the engine (Claude Code over MCP and the CLI) and the person.
+A change that alters what the engine does, refuses or sends updates every surface those
+readers use, in the same pull request:
+
+- **Agents:** the MCP server `instructions` (at most 1,800 characters, pinned by
+  `tests/test_mcp_wire.py`), each tool's description, the reason codes in `degraded`, and
+  `docs/AGENT-ONBOARDING.md`, which `full onboard` prints.
+- **People:** `full --help`, `full doctor`, `docs/ONBOARDING.md`, the dashboard where it shows
+  the state, and the scenario in `observatory/engine/docs/ux/portable-scenarios.md`.
+- **Both:** a refusal names its reason and the command that changes it. "Nothing happened"
+  is never silent.
+
+A test pins each claim that can drift, the way
+`tests/test_embedding_enforcement.py::WhatAgentsAndPeopleAreTold` does. A decision that only
+the operator can make does not block the work: ship the safe default, say it in those
+surfaces, and record the open decision in `docs/backlog.md`.
+
 ## How a change reaches `main`
 
 1. Branch from `main`; commit in small logical commits.
