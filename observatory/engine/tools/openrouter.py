@@ -306,8 +306,33 @@ def vault_destination(to: str) -> str:
     return f"vault:{folder}/{parts[1]}/{parts[2]}"
 
 
+#: The provider pages `/keys` by this many rows (measured 2026-10-04: 100, 100, 100, … and a
+#: short last page). A listing longer than PAGES_MAX pages is refused, never truncated.
+PAGE = 100
+PAGES_MAX = 200
+
+
+def _all_keys(admin: str, include_disabled: bool = True) -> list[dict]:
+    """Every key the provisioning key governs, every page of them.
+
+    Reading one page called keys past the first 100 "NOT at the provider" and refused
+    `limit` on a live key (2026-10-04); the collector (`scan_openrouter.listing`) already
+    paged, the door did not.
+    """
+    flag = "true" if include_disabled else "false"
+    rows: list[dict] = []
+    offset = 0
+    for _ in range(PAGES_MAX):
+        page = _request(f"/keys?include_disabled={flag}&offset={offset}", admin).get("data", [])
+        rows.extend(page)
+        if len(page) < PAGE:
+            return rows
+        offset += len(page)
+    raise RuntimeError(f"the provider listed more than {PAGES_MAX} pages of keys; refusing a partial answer")
+
+
 def find_key(admin: str, name: str) -> dict | None:
-    for row in _request("/keys?include_disabled=true", admin).get("data", []):
+    for row in _all_keys(admin):
         if row.get("name") == name:
             return row
     return None
@@ -641,7 +666,7 @@ def cmd_ping() -> int:
     for label, p in admins():
         key = private_io.read(p).strip()
         try:
-            rows = _request("/keys?include_disabled=true", key).get("data", [])
+            rows = _all_keys(key)
             known = {r.get("name") for r in rows}
             print(f"  admin/{label}: alive, {len(rows)} key(s) at the provider")
             # Keys at the provider the ledger does not know are spend capacity

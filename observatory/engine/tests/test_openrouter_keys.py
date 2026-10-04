@@ -198,6 +198,48 @@ def test_the_step_is_reachable():
           "a step no group runs is a step that never runs")
 
 
+def test_the_door_reads_every_page_of_keys():
+    """The fourth defect: `find_key` and `ping` read only the provider's first page.
+
+    The provisioning account holds more than 500 keys, the provider pages them by 100, and a
+    key issued later sits past the first page. The door then called three live keys "NOT at
+    the provider" and refused `limit` (2026-10-04) — the same confident wrong answer, one page
+    deep. Pages are read until one comes back short; a runaway listing is an error, not a
+    silent truncation.
+    """
+    sys.path.insert(0, str(ROOT / "tools"))
+    import importlib
+    door = importlib.import_module("openrouter")
+    pages = {0: [{"name": f"user_{i}", "hash": f"h{i}"} for i in range(100)],
+             100: [{"name": f"user_{i}", "hash": f"h{i}"} for i in range(100, 200)],
+             200: [{"name": "example-agent", "hash": "hx"}]}
+    asked = []
+    def fake(path, key, payload=None, method=None):
+        asked.append(path)
+        off = int(path.split("offset=")[1].split("&")[0]) if "offset=" in path else 0
+        return {"data": pages.get(off, [])}
+    real = door._request
+    door._request = fake
+    try:
+        row = door.find_key("admin-value", "example-agent")
+        check("a key on the third page is found", bool(row) and row.get("hash") == "hx", f"got {row!r}")
+        check("every page was asked, offset by what came back",
+              [p for p in asked if "offset=" in p] == ["/keys?include_disabled=true&offset=0",
+                                                       "/keys?include_disabled=true&offset=100",
+                                                       "/keys?include_disabled=true&offset=200"], f"asked {asked}")
+        rows = door._all_keys("admin-value")
+        check("all 201 keys are listed", len(rows) == 201, f"{len(rows)}")
+        endless = lambda path, key, payload=None, method=None: {"data": [{"name": "x", "hash": "y"}] * 100}
+        door._request = endless
+        try:
+            door._all_keys("admin-value")
+            check("a listing that never ends is refused", False, "no error raised")
+        except RuntimeError as exc:
+            check("a listing that never ends is refused", "pages" in str(exc), str(exc))
+    finally:
+        door._request = real
+
+
 if __name__ == "__main__":
     print("openrouter keys — three characters were not an identifier\n")
     for fn in (test_the_label_is_derivable_without_asking,
@@ -207,7 +249,8 @@ if __name__ == "__main__":
                test_no_value_and_no_hash_reach_the_registry_half,
                test_a_collision_is_reported_on_a_real_run,
                test_absent_provisioning_is_a_degradation_not_an_empty_estate,
-               test_the_step_is_reachable):
+               test_the_step_is_reachable,
+               test_the_door_reads_every_page_of_keys):
         fn()
     print()
     if FAILURES:
