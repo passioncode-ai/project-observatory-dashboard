@@ -93,7 +93,7 @@ server = InteropServer(
         "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run the "
         "`use` command it hands back never open a file.\n"
         "DEGRADED: every read answer carries `degraded`: empty asserts full coverage, "
-        "else it names what was not read; a read without one is a bug (writes and job "
+        "else it names what was not read; treat a read without one as a bug (writes and job "
         "handles have none). A "
         "refusal is a typed answer with `error`; isError means malformed input, an unknown "
         "tool or an answer outside its published schema.\n"

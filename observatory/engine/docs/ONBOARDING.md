@@ -478,11 +478,13 @@ sees the text it embeds. So since PB-137 N-003 nothing is sent until you consent
 project at a time, at your own terminal:
 
 ```sh
-project-observatory full embedding-policy show                      # what is in force; nothing by default
-project-observatory full embedding-policy grant project:<slug> \
-    --statement "texts of <slug> are sent to OpenAI for embeddings"  # public + project-internal by default
-project-observatory full embedding-policy revoke project:<slug>     # stops new export at once
+project-observatory full embedding-policy show                                # what is in force; nothing by default
+project-observatory full embedding-policy grant PROJECT --statement "TEXT"    # public + project-internal by default
+project-observatory full embedding-policy revoke PROJECT                      # stops new export at once
 ```
+
+`PROJECT` is a project id such as `project:alpha`. `TEXT` is your consent in your own words,
+naming the provider, for example `texts of alpha are sent to OpenAI`.
 
 The `embeddings` feature and an embedding key are needed too. A consent never covers
 `confidential` text, workflow checkpoints and handoff packs, records without a project, or an

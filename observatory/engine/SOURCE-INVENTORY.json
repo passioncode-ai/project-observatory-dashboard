@@ -751,8 +751,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "bc70d6557abd4ae5a10745e238b476f7c371fa484650e3cecae1545fe87fe684",
-      "bytes": 52606,
+      "export_sha256": "d62999d387aba3480ae15706dfbd3a7b4d903f4782a5fbb52e3ee7e394f272ef",
+      "bytes": 52734,
       "upstream_modified": true
     },
     {
@@ -1107,8 +1107,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "1c7f4fa9fa69a711cc0f9cf9df9dba87de0f27068f646954289e04b46916231b",
-      "bytes": 74963,
+      "export_sha256": "5712fa47aaa172d8ef39b3e16dbf826c6e0162169e6228c65d2f5afab4716a7c",
+      "bytes": 74969,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
