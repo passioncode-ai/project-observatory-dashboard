@@ -56,20 +56,27 @@ counts them in `degraded`:
 | `workflow-kind` | `checkpoint`, `handoff` or `step_result` |
 | `untrusted-authority` | the query context did not come from the server |
 
-## What changes when N-003 enforces this
+## Enforcement (N-003)
 
-- **The indexer.** Today it embeds every non-workflow record through the configured OpenAI
-  model whenever embeddings are enabled. After N-003 it asks `for_record` first, so in a
-  workspace without consents nothing new is sent.
-- **The query path.** Today `observatory_search` embeds the query remotely. After N-003 an
-  MCP call carries `caller-argument` until bindings exist (N-007, N-008), so its query stays
-  local and lexical. Semantic search comes back with the local model (N-004 to N-006) or with
-  a binding. That is the intended price of rule 9, not a regression to work around.
-- **Legacy vectors.** Vectors already made through OpenAI stay in their model's index. They
-  are served only for a project whose consent covers that model, and they are never sent
-  again.
-- **The policy file** lives in the workspace (machine-local, not in git). It is written only
-  by an operator command at a terminal, which N-003 adds. No MCP tool writes it.
+The rules are enforced at the three places that could send text, and at the one place
+that writes the policy. The proof is
+[`tests/test_embedding_enforcement.py`](../../observatory/engine/tests/test_embedding_enforcement.py).
+Each guard was also checked by planting the defect it prevents and watching the suite fail.
+
+| Where | What it does |
+|---|---|
+| `providers.embed` | Refuses (`PolicyRefused`) without a remote verdict for the model configured now. It refuses **before** the budget is asked, the key is read or a request is built. `PolicyRefused` is not a `ProviderError`, so a caller that skipped the door fails loudly; nothing quietly retries. |
+| The indexer (`store/indexer.py`) | Judges every row on its current canonical revision. A superseded or older revision, or a `stale`, `superseded`, `rejected` or `archived` record, is `not-current` and stays local. Rows the policy keeps local are batched apart and consumed: their lexical entry is written, and a later local model reaches them from the ledger, not from this queue. Authorized rows are sent one project per request. Only an authorized request that fails keeps its rows queued. |
+| The query path (`survey.search`) | An MCP caller is `caller-argument`, so its query is never embedded: no budget check, no key, no request. The answer is lexical, and `degraded` names the policy reason. Under a trusted context in a consented project, only vectors the policy still allows are served. A legacy vector of a record now kept local, or of a revoked consent, does not answer. |
+| `full embedding-policy show\|grant\|revoke` | The only writer. `grant` and `revoke` need a terminal and raise `policyRevision`. The file is `config/embedding-policy.json` in the workspace. The highest applied revision is recorded in `store/embedding-policy.seen.json`, and an older file is refused. |
+
+A policy that cannot be read, or whose applied revision cannot be recorded, keeps
+everything local and says so once per run (`embedding policy refused …`).
+
+**What the operator sees after upgrading:** nothing is sent until a consent is given. A
+workspace that relied on OpenAI embeddings keeps its existing vectors, but they answer only
+for projects with a consent covering that model. Until bindings (N-007/N-008) or the local
+model (N-004–N-006) arrive, an agent's search is lexical.
 
 ## What this decision does not do
 

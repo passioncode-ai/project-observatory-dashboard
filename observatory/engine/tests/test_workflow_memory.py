@@ -501,10 +501,15 @@ class Projection(WorkflowCase):
         indexer.ensure_vec_table(self.conn, 3)
         wf = self.start()
         h = self.handoff(wf)
-        note = L.append(self.conn, owner=AGENT_A, statement="an ordinary note", confidence=0.5)
+        note = L.append(self.conn, owner=AGENT_A, statement="an ordinary note", confidence=0.5,
+                        project_id="project:alpha")
+        # Under a consent, so the only thing holding the workflow's records back is
+        # that they are workflow records (PB-137 N-003 keeps them local by kind).
+        import embedding_consent
+        embedding_consent.grant("project:alpha")
         sent: list[str] = []
 
-        def embed(texts, log=print):
+        def embed(texts, log=print, **_kw):
             sent.extend(texts)
             return {"vectors": [[0.1, 0.2, 0.3] for _ in texts], "cost": 0.0, "tokens": 0}
 

@@ -63,6 +63,8 @@ def fixture(rows: int):
                  why="because the estate was scanned", state="proposed",
                  confidence=0.5, project_id="project:alpha")
     conn.commit()
+    import embedding_consent
+    embedding_consent.grant("project:alpha")
     return d, conn
 
 
@@ -75,7 +77,7 @@ def load_indexer(embed):
     return mod
 
 
-def stub(texts, log=print):
+def stub(texts, log=print, **_kw):
     return {"vectors": [[0.01] * 1536 for _ in texts], "cost": 0.0,
             "tokens": len(texts), "model": "stub", "cost_is_estimate": True}
 
@@ -148,7 +150,7 @@ def test_a_failed_vector_half_keeps_its_rows_queued() -> None:
     calls = {"n": 0}
     import providers
 
-    def flaky(texts, log=print):
+    def flaky(texts, log=print, **_kw):
         calls["n"] += 1
         if calls["n"] >= 2:
             raise providers.Retryable("the provider dropped the connection")
@@ -184,7 +186,7 @@ def test_the_summary_counts_both_halves() -> None:
     calls = {"n": 0}
     import providers
 
-    def flaky(texts, log=print):
+    def flaky(texts, log=print, **_kw):
         calls["n"] += 1
         if calls["n"] >= 2:
             raise providers.Retryable("down")

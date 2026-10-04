@@ -83,7 +83,7 @@ def stub_embed(dims: int):
     not the provider's semantics."""
     import hashlib
 
-    def _embed(texts, log=None):
+    def _embed(texts, log=None, **_kw):
         vecs = []
         for t in texts:
             h = hashlib.sha256(t.encode()).digest()
@@ -101,6 +101,9 @@ def seed(conn, L, n=3):
                      why=f"because reason {i}", project_id=f"project:p{i}",
                      state="proposed", confidence=0.5)
         ids.append(r["memoryId"])
+    # The vector half runs only under a recorded consent (PB-137 N-003).
+    import embedding_consent
+    embedding_consent.grant(*[f"project:p{i}" for i in range(n)])
     return ids
 
 

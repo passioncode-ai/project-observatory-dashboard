@@ -92,6 +92,14 @@ class CredentialError(Fatal):
     identical error per model and poisons the health of all of them."""
 
 
+class PolicyRefused(Exception):
+    """embedding-policy/1 did not authorize this text to leave the machine.
+
+    Deliberately NOT a ProviderError: the indexer catches those to keep rows queued
+    for a retry, and a policy refusal is not transient. A caller that reaches this
+    has skipped the door — it must be loud, never a quiet lexical fallback."""
+
+
 class BudgetExceeded(ProviderError):
     """A guardrail said stop. Not a failure — a decision."""
 
@@ -718,7 +726,7 @@ def read_embed_key() -> tuple[str | None, str]:
     return _read_from(EMBED_KEY_ENV, files)
 
 
-def embed(texts: list[str], log=print) -> dict:
+def embed(texts: list[str], log=print, *, authorization=None) -> dict:
     """Vectors for the pinned contract, or a refusal. Never a silent mismatch.
 
     The dimension the provider returns is checked against the declared contract
@@ -743,6 +751,11 @@ def embed(texts: list[str], log=print) -> dict:
     if not configuration.enabled("embeddings", "features"):
         raise Fatal("Feature embeddings is not enabled for this workspace")
     cfg = config()["embedding"]
+    # THE DOOR (PB-137 N-003). Before the budget, the key and the request: text
+    # leaves only under a remote verdict from embedding_policy, made for THIS
+    # configured provider and model. A verdict for another model is a configuration
+    # that changed between the decision and the call, and is refused the same way.
+    _require_authorization(authorization, cfg)
     if not texts:
         return {"vectors": [], "tokens": 0, "cost": 0.0, "model": cfg["model"]}
     # For THIS provider's meter. `cfg["provider"]` is openai; the OpenRouter
@@ -793,6 +806,16 @@ def embed(texts: list[str], log=print) -> dict:
            estimated=True)
     return {"vectors": vectors, "tokens": tokens, "cost": cost, "model": cfg["model"],
             "key_source": source, "cost_is_estimate": True}
+
+
+def _require_authorization(authorization, cfg: dict) -> None:
+    if authorization is None or not getattr(authorization, "remote", False):
+        reason = getattr(authorization, "reason", "no authorization")
+        raise PolicyRefused(f"embedding-policy/1 did not authorize export ({reason})")
+    if (getattr(authorization, "provider", None), getattr(authorization, "model", None)) != \
+            (cfg.get("provider"), cfg.get("model")):
+        raise PolicyRefused("embedding-policy/1 authorized another provider or model than "
+                            "the one configured now; decide again")
 
 
 def read_key() -> tuple[str | None, str]:

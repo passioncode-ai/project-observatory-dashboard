@@ -260,3 +260,68 @@ def for_query(policy: Policy, context: Any, *, configured: Any) -> Verdict:
     if context.get("authority") not in TRUSTED_AUTHORITIES:
         return _local(policy, "untrusted-authority")
     return _decide(policy, context.get("project_id"), context.get("classification"), configured)
+
+
+# ---------------------------------------------------------------------------
+# The workspace's policy, as the indexer and the query path read it (N-003).
+
+POLICY_FILE = "embedding-policy.json"
+SEEN_FILE = "embedding-policy.seen.json"
+
+
+def policy_path() -> pathlib.Path:
+    import paths
+    return paths.config_file(POLICY_FILE)
+
+
+def _seen_path() -> pathlib.Path:
+    import paths
+    return paths.STATE / SEEN_FILE
+
+
+def current(path: pathlib.Path | None = None, seen: pathlib.Path | None = None) -> Policy:
+    """The policy in force, or PolicyError.
+
+    A revision LOWER than the highest this workspace has applied is refused: a
+    restored old file must not re-open a revoked consent. The highest revision
+    seen is recorded after a successful read."""
+    path = path or policy_path()
+    seen = seen or _seen_path()
+    policy = load(path)
+    try:
+        last = int(json.loads(seen.read_text(encoding="utf-8")).get("policyRevision", 0))
+    except FileNotFoundError:
+        last = 0
+    except (OSError, ValueError, AttributeError, TypeError):
+        raise PolicyError("the record of the last applied policy revision is unreadable") from None
+    if policy.revision < last:
+        raise PolicyError(f"policy revision {policy.revision} is older than revision {last}, "
+                          f"which this workspace already applied; refusing a rollback")
+    if policy.revision > last:
+        import atomic
+        try:
+            seen.parent.mkdir(parents=True, exist_ok=True)
+            atomic.write_json(seen, {"policyRevision": policy.revision})
+        except (OSError, ValueError) as exc:
+            # Without the record, a later rollback could not be recognised; the
+            # policy is not applied rather than applied unguarded.
+            raise PolicyError(f"the applied revision cannot be recorded "
+                              f"({type(exc).__name__}); nothing is exported") from None
+    return policy
+
+
+def configured_model() -> dict:
+    """The embedding model the engine is configured to call now."""
+    import sys as _sys
+    agent = pathlib.Path(__file__).resolve().parent / "agent"
+    if str(agent) not in _sys.path:
+        _sys.path.insert(0, str(agent))
+    import providers
+    try:
+        cfg = providers.config()["embedding"]
+    except (OSError, ValueError, KeyError, TypeError):
+        # No readable model configuration: nothing can be authorized against it,
+        # so every verdict is `no-configured-model` — local, and said.
+        return {}
+    return {"provider": cfg.get("provider"), "model": cfg.get("model")}
+
