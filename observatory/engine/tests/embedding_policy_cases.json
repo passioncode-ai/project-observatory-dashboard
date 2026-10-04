@@ -1,0 +1,625 @@
+{
+  "contract": "embedding-policy/1",
+  "about": "Accepted decision fixtures for PB-137 N-002. Each case is one decision the enforcement (N-003) must reproduce. Synthetic project ids; no credential, no real text.",
+  "configured": {
+    "provider": "openai",
+    "model": "text-embedding-3-small"
+  },
+  "policies": {
+    "consented": {
+      "schema": "embedding-policy/1",
+      "policyRevision": 3,
+      "projects": {
+        "project:alpha": {
+          "remote": {
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "classes": [
+              "public",
+              "project-internal"
+            ],
+            "consent": {
+              "statement": "Texts of project alpha are sent to OpenAI to compute embeddings.",
+              "by": "operator",
+              "at": "2026-10-04T10:00:00Z",
+              "via": "terminal"
+            },
+            "revokedAt": null
+          }
+        },
+        "project:beta": {
+          "remote": {
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "classes": [
+              "public"
+            ],
+            "consent": {
+              "statement": "Public texts of project beta are sent to OpenAI for embeddings.",
+              "by": "operator",
+              "at": "2026-10-04T10:00:00Z",
+              "via": "terminal"
+            },
+            "revokedAt": null
+          }
+        },
+        "project:gamma": {
+          "remote": {
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "classes": [
+              "public",
+              "project-internal"
+            ],
+            "consent": {
+              "statement": "Texts of project gamma are sent to OpenAI for embeddings.",
+              "by": "operator",
+              "at": "2026-09-30T10:00:00Z",
+              "via": "terminal"
+            },
+            "revokedAt": "2026-10-03T09:00:00Z"
+          }
+        }
+      }
+    }
+  },
+  "records": [
+    {
+      "name": "consented project-internal record goes remote",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "project-internal",
+        "scope": "project",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "remote",
+        "reason": "remote-consented"
+      }
+    },
+    {
+      "name": "consented public record goes remote",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "public",
+        "scope": "run",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "remote",
+        "reason": "remote-consented"
+      }
+    },
+    {
+      "name": "no policy file at all: legacy workspace stays local",
+      "policy": null,
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "public",
+        "scope": "project",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "no-consent"
+      }
+    },
+    {
+      "name": "confidential never leaves, even in a consented project",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "confidential",
+        "scope": "project",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "confidential"
+      }
+    },
+    {
+      "name": "plan alias private is confidential",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "private",
+        "scope": "project",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "confidential"
+      }
+    },
+    {
+      "name": "plan alias secret-adjacent is confidential",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "secret-adjacent",
+        "scope": "project",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "confidential"
+      }
+    },
+    {
+      "name": "a class outside the consented list stays local",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:beta",
+        "classification": "project-internal",
+        "scope": "project",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "class-not-consented"
+      }
+    },
+    {
+      "name": "unknown classification denies",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "restricted",
+        "scope": "project",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "unknown-classification"
+      }
+    },
+    {
+      "name": "missing classification denies",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:alpha",
+        "scope": "project",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "unknown-classification"
+      }
+    },
+    {
+      "name": "a record with no project denies",
+      "policy": "consented",
+      "record": {
+        "project_id": null,
+        "classification": "public",
+        "scope": "project",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "no-project"
+      }
+    },
+    {
+      "name": "global scope denies even with a project",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "public",
+        "scope": "global",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "global-context"
+      }
+    },
+    {
+      "name": "agent-private scope stays local",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "public",
+        "scope": "agent-private",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "agent-private-scope"
+      }
+    },
+    {
+      "name": "a checkpoint is work in progress and stays local",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "public",
+        "scope": "project",
+        "kind": "checkpoint"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "workflow-kind"
+      }
+    },
+    {
+      "name": "a handoff pack stays local",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "public",
+        "scope": "project",
+        "kind": "handoff"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "workflow-kind"
+      }
+    },
+    {
+      "name": "a refused step's kept content stays local",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "public",
+        "scope": "project",
+        "kind": "step_result"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "workflow-kind"
+      }
+    },
+    {
+      "name": "a project without a consent entry stays local",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:delta",
+        "classification": "public",
+        "scope": "project",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "no-consent"
+      }
+    },
+    {
+      "name": "a revoked consent stays local",
+      "policy": "consented",
+      "record": {
+        "project_id": "project:gamma",
+        "classification": "public",
+        "scope": "project",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "consent-revoked"
+      }
+    },
+    {
+      "name": "a consent for another model does not cover the configured one",
+      "policy": "consented",
+      "configured": {
+        "provider": "openai",
+        "model": "text-embedding-3-large"
+      },
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "public",
+        "scope": "project",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "provider-mismatch"
+      }
+    },
+    {
+      "name": "a configured local model never needs consent",
+      "policy": "consented",
+      "configured": {
+        "provider": "local",
+        "model": "multilingual-e5-small"
+      },
+      "record": {
+        "project_id": "project:alpha",
+        "classification": "confidential",
+        "scope": "project",
+        "kind": "note"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "local-model"
+      }
+    }
+  ],
+  "queries": [
+    {
+      "name": "a trusted binding in a consented project may embed the query remotely",
+      "policy": "consented",
+      "context": {
+        "project_id": "project:alpha",
+        "classification": "project-internal",
+        "authority": "binding"
+      },
+      "expect": {
+        "route": "remote",
+        "reason": "remote-consented"
+      }
+    },
+    {
+      "name": "the operator's terminal is a trusted authority",
+      "policy": "consented",
+      "context": {
+        "project_id": "project:alpha",
+        "classification": "public",
+        "authority": "operator-cli"
+      },
+      "expect": {
+        "route": "remote",
+        "reason": "remote-consented"
+      }
+    },
+    {
+      "name": "classification claimed in a tool argument authorizes nothing",
+      "policy": "consented",
+      "context": {
+        "project_id": "project:alpha",
+        "classification": "public",
+        "authority": "caller-argument"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "untrusted-authority"
+      }
+    },
+    {
+      "name": "a context with no authority is untrusted",
+      "policy": "consented",
+      "context": {
+        "project_id": "project:alpha",
+        "classification": "public"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "untrusted-authority"
+      }
+    },
+    {
+      "name": "a query over every project is global and stays local",
+      "policy": "consented",
+      "context": {
+        "project_id": null,
+        "classification": "public",
+        "authority": "binding"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "no-project"
+      }
+    },
+    {
+      "name": "a query with no classification stays local",
+      "policy": "consented",
+      "context": {
+        "project_id": "project:alpha",
+        "authority": "binding"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "unknown-classification"
+      }
+    },
+    {
+      "name": "a confidential query context stays local",
+      "policy": "consented",
+      "context": {
+        "project_id": "project:alpha",
+        "classification": "confidential",
+        "authority": "binding"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "confidential"
+      }
+    },
+    {
+      "name": "a query in a revoked project stays local",
+      "policy": "consented",
+      "context": {
+        "project_id": "project:gamma",
+        "classification": "public",
+        "authority": "binding"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "consent-revoked"
+      }
+    },
+    {
+      "name": "no policy: queries stay local",
+      "policy": null,
+      "context": {
+        "project_id": "project:alpha",
+        "classification": "public",
+        "authority": "binding"
+      },
+      "expect": {
+        "route": "local",
+        "reason": "no-consent"
+      }
+    }
+  ],
+  "malformed": [
+    {
+      "name": "wrong schema id",
+      "doc": {
+        "schema": "embedding-policy/2",
+        "policyRevision": 1,
+        "projects": {}
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "revision below one",
+      "doc": {
+        "schema": "embedding-policy/1",
+        "policyRevision": 0,
+        "projects": {}
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "unknown top-level field",
+      "doc": {
+        "schema": "embedding-policy/1",
+        "policyRevision": 1,
+        "projects": {},
+        "allowAll": true
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "a global consent key",
+      "doc": {
+        "schema": "embedding-policy/1",
+        "policyRevision": 1,
+        "projects": {
+          "*": {
+            "remote": {}
+          }
+        }
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "confidential in the consented classes",
+      "doc": {
+        "schema": "embedding-policy/1",
+        "policyRevision": 1,
+        "projects": {
+          "project:alpha": {
+            "remote": {
+              "provider": "openai",
+              "model": "text-embedding-3-small",
+              "classes": [
+                "confidential"
+              ],
+              "consent": {
+                "statement": "Texts go to OpenAI.",
+                "by": "operator",
+                "at": "2026-10-04T10:00:00Z",
+                "via": "terminal"
+              },
+              "revokedAt": null
+            }
+          }
+        }
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "a consent statement that does not name the provider",
+      "doc": {
+        "schema": "embedding-policy/1",
+        "policyRevision": 1,
+        "projects": {
+          "project:alpha": {
+            "remote": {
+              "provider": "openai",
+              "model": "text-embedding-3-small",
+              "classes": [
+                "public"
+              ],
+              "consent": {
+                "statement": "ok",
+                "by": "operator",
+                "at": "2026-10-04T10:00:00Z",
+                "via": "terminal"
+              },
+              "revokedAt": null
+            }
+          }
+        }
+      },
+      "schemaRejects": false
+    },
+    {
+      "name": "a consent given through a tool call",
+      "doc": {
+        "schema": "embedding-policy/1",
+        "policyRevision": 1,
+        "projects": {
+          "project:alpha": {
+            "remote": {
+              "provider": "openai",
+              "model": "text-embedding-3-small",
+              "classes": [
+                "public"
+              ],
+              "consent": {
+                "statement": "Texts go to OpenAI.",
+                "by": "agent:x",
+                "at": "2026-10-04T10:00:00Z",
+                "via": "mcp"
+              },
+              "revokedAt": null
+            }
+          }
+        }
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "a consent time that is not a timestamp",
+      "doc": {
+        "schema": "embedding-policy/1",
+        "policyRevision": 1,
+        "projects": {
+          "project:alpha": {
+            "remote": {
+              "provider": "openai",
+              "model": "text-embedding-3-small",
+              "classes": [
+                "public"
+              ],
+              "consent": {
+                "statement": "Texts go to OpenAI.",
+                "by": "operator",
+                "at": "yesterday",
+                "via": "terminal"
+              },
+              "revokedAt": null
+            }
+          }
+        }
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "a project id that is not project:<slug>",
+      "doc": {
+        "schema": "embedding-policy/1",
+        "policyRevision": 1,
+        "projects": {
+          "alpha": {
+            "remote": {}
+          }
+        }
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "not an object",
+      "doc": [
+        "embedding-policy/1"
+      ],
+      "schemaRejects": true
+    }
+  ]
+}

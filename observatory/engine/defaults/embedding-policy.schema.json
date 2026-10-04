@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/observatory/engine/defaults/embedding-policy.schema.json",
+  "title": "embedding-policy/1",
+  "description": "Which memory text may be embedded by a remote model, per project, by explicit consent (PB-137 N-002, operator decision D-3). Structure only: the evaluator (embedding_policy.py) also requires the consent statement to name the provider. A workspace without this file consents to nothing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "policyRevision",
+    "projects"
+  ],
+  "properties": {
+    "schema": {
+      "const": "embedding-policy/1"
+    },
+    "policyRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Raised on every change; a reader that has seen revision N refuses a policy below N (N-003)."
+    },
+    "projects": {
+      "type": "object",
+      "description": "Keyed by one project id. There is no global or wildcard consent.",
+      "propertyNames": {
+        "pattern": "^project:[a-z0-9][a-z0-9._-]{0,127}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "remote"
+        ],
+        "properties": {
+          "remote": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "provider",
+              "model",
+              "classes",
+              "consent",
+              "revokedAt"
+            ],
+            "properties": {
+              "provider": {
+                "enum": [
+                  "openai"
+                ]
+              },
+              "model": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "classes": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "public",
+                    "project-internal"
+                  ]
+                },
+                "description": "Classes that may leave. `confidential` cannot be listed: it never leaves."
+              },
+              "consent": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "statement",
+                  "by",
+                  "at",
+                  "via"
+                ],
+                "properties": {
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "What the person agreed to, naming the provider: \"texts of project X are sent to OpenAI\"."
+                  },
+                  "by": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+                  },
+                  "via": {
+                    "enum": [
+                      "terminal"
+                    ],
+                    "description": "A consent is given by a person at a terminal, never through a tool call."
+                  }
+                }
+              },
+              "revokedAt": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+                  }
+                ],
+                "description": "Set when the consent is withdrawn; from then on nothing new leaves. Texts already sent cannot be recalled."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
