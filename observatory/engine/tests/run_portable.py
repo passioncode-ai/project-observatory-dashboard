@@ -134,6 +134,8 @@ BOUNDARY += ('embedding_policy',)
 BOUNDARY += ('embedding_enforcement',)
 # access-bindings/1 enforced at every business entry point (PB-137 N-008).
 BOUNDARY += ('memory_access',)
+# Scope and validity filtered before the candidate window (PB-137 N-009).
+BOUNDARY += ('search_scope',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',

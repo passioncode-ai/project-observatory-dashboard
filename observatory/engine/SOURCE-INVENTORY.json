@@ -772,8 +772,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "fccab9e09bdbf7fa15cc1858dafd095a2c50c581109a45b995f7a8ac5af8a43a",
-      "bytes": 13719,
+      "export_sha256": "881c9b0f18d6bae8f5b6d13732d43175a31d438155be28836af4b4cabce0bbb8",
+      "bytes": 14261,
       "upstream_modified": true
     },
     {
@@ -1121,8 +1121,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "d2d65b5df7ae6d9344d2818fc3f830c27ea2f1568a8d93851112b49bcbedecb5",
-      "bytes": 79326,
+      "export_sha256": "c80a5de1465f2d11f23df36e6d99fcf4356c6f4d8c223bd245790f10c6768dfd",
+      "bytes": 79597,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -1584,8 +1584,8 @@
     {
       "path": "survey.py",
       "source_sha256": "2c692bcd4b6deac11f6608cce06abe134b748382d7037e43a6d2034d193aac0f",
-      "export_sha256": "68b1eb409bee5ff8fa65dcda458d9a0d1237949b81e40eab5f9f6e75a0f11b3b",
-      "bytes": 65707,
+      "export_sha256": "23e3159fd1721f48ab99bc61b99e0f0304ec13398c27d4cbdfd4880f62cc4203",
+      "bytes": 69194,
       "python_comments_removed": 210,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
@@ -1733,8 +1733,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "7ea5b7bff7a4d7c2d12998101df08160e9668fdf8b4ee7543b1abcad4af0bb97",
-      "bytes": 17594,
+      "export_sha256": "bae0325cd2a41f04bc18dc89355f32b89ab89e3e95c7b1e03546b81b1db360e8",
+      "bytes": 17698,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2588,8 +2588,8 @@
       "path": "tests/test_memory_access.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "20328283ccce0885d5b1fdc68dce880ad27ebc84c31c66cf7c9de62599065eb0",
-      "bytes": 26784
+      "export_sha256": "68a61a6e0c79a008d6cb4139881f3137ccc4a57b84ccb24b613ebf15b6469722",
+      "bytes": 27044
     },
     {
       "path": "tests/test_memory_eval.py",
@@ -2986,6 +2986,13 @@
       "upstream_modified": true,
       "export_sha256": "8d803b3fad5605f44558f57018cf3756e9c5271d8e3ccdd5c18e8f538b0caaf1",
       "bytes": 13433
+    },
+    {
+      "path": "tests/test_search_scope.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "26c6ddce8e751604b959a4517002d8c07a018681a174ac8fce9f28aa7217cc7f",
+      "bytes": 8110
     },
     {
       "path": "tests/test_secret_header.py",
@@ -4115,7 +4122,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 524,
+  "file_count": 525,
   "excluded": [
     "git-history",
     "operator-registries",
