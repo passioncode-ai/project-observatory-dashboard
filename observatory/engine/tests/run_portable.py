@@ -126,6 +126,8 @@ BOUNDARY += ('secret_header',)
 BOUNDARY += ('access_binding',)
 # Vector namespaces: one index per pinned model identity, legacy quarantined (PB-137 N-005).
 BOUNDARY += ('vector_namespaces',)
+# The SDK properties the HTTP memory service relies on (PB-137 N-015).
+BOUNDARY += ('http_transport_pin',)
 # embedding-policy/1: which memory text may leave for a remote embedding model (PB-137 N-002).
 BOUNDARY += ('embedding_policy',)
 # embedding-policy/1 enforced at the provider, the indexer, the query path and the CLI (N-003).
