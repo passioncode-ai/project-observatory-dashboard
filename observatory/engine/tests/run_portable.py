@@ -124,6 +124,8 @@ BOUNDARY += ('textkeys',)
 BOUNDARY += ('secret_header',)
 # access-bindings/1: who may do what with agent memory, from the transport (PB-137 N-007).
 BOUNDARY += ('access_binding',)
+# Vector namespaces: one index per pinned model identity, legacy quarantined (PB-137 N-005).
+BOUNDARY += ('vector_namespaces',)
 # embedding-policy/1: which memory text may leave for a remote embedding model (PB-137 N-002).
 BOUNDARY += ('embedding_policy',)
 # embedding-policy/1 enforced at the provider, the indexer, the query path and the CLI (N-003).

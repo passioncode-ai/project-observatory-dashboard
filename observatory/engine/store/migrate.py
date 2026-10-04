@@ -299,6 +299,50 @@ def _search_stems(conn: sqlite3.Connection) -> str:
             + ("" if textkeys.STEMMER else "; no stemmer installed, keys are lower-cased words"))
 
 
+def _vector_namespaces(conn: sqlite3.Connection) -> str:
+    """One vector index per pinned model identity (PB-137 N-005, store/namespaces.py).
+
+    Additive: a registry table, nothing dropped. The pre-namespace `vec_notes` (the
+    OpenAI index) is registered as the quarantined `legacy` namespace; it keeps
+    answering only where the embedding policy allows and is never activated again.
+    Self-contained on purpose: the checksum pins THIS function's code, so the SQL and
+    the legacy identity are written here, not imported (test_vector_namespaces checks
+    they equal store/namespaces.py)."""
+    import hashlib as _hashlib
+    import json as _json
+    from datetime import datetime as _dt, timezone as _tz
+    execute_statements(conn, """
+      CREATE TABLE IF NOT EXISTS vector_namespaces (
+        namespace_id INTEGER PRIMARY KEY,
+        model_key TEXT NOT NULL UNIQUE,
+        identity_json TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('legacy','inactive','backfilling','ready','active','retired')),
+        table_name TEXT NOT NULL,
+        backfill_cursor INTEGER NOT NULL DEFAULT 0,
+        backfill_done INTEGER NOT NULL DEFAULT 0,
+        backfill_total INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        activated_at TEXT,
+        activation_receipt_json TEXT) STRICT;
+      CREATE UNIQUE INDEX IF NOT EXISTS vector_namespaces_one_active
+        ON vector_namespaces(state) WHERE state = 'active';
+    """)
+    legacy = {"provider": "openai", "model": "text-embedding-3-small", "revision": "legacy",
+              "weights_sha256": None, "tokenizer_sha256": None, "dims": 1536, "metric": "cosine",
+              "normalization": "none", "query_prefix": "", "passage_prefix": "",
+              "chunker": "statement+why/1"}
+    key = _hashlib.sha256(_json.dumps(legacy, sort_keys=True, separators=(",", ":"),
+                                      ensure_ascii=False).encode("utf-8")).hexdigest()
+    if conn.execute("SELECT 1 FROM vector_namespaces WHERE model_key = ?", (key,)).fetchone():
+        return "vector_namespaces present; the legacy namespace was already registered"
+    at = _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn.execute("INSERT INTO vector_namespaces (model_key, identity_json, state, table_name,"
+                 " created_at, updated_at) VALUES (?, ?, 'legacy', 'vec_notes', ?, ?)",
+                 (key, _json.dumps(legacy, sort_keys=True), at, at))
+    return "vector_namespaces created; the legacy OpenAI index is quarantined as a legacy namespace"
+
+
 MIGRATIONS: list[tuple[str, object]] = [
     ("0001-events-occurred-at-utc", _events_utc),
     ("0002-drop-events-outside-the-estate", _drop_foreign_events),
@@ -309,6 +353,7 @@ MIGRATIONS: list[tuple[str, object]] = [
     ("0007-drop-inert-retention-policy", _drop_retention_policy),
     ("0008-agent-memory-workflows", _agent_memory_workflows),
     ("0009-search-stems", _search_stems),
+    ("0010-vector-namespaces", _vector_namespaces),
 ]
 
 

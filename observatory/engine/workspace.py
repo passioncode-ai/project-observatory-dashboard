@@ -489,6 +489,9 @@ def doctor(base: Path) -> dict:
             # PB-137 N-003: whether any memory text may leave for a remote embedding
             # model, and for which projects — read-only, names and dates only.
             "embedding_policy": _embedding_policy(base),
+            # PB-137 N-005: each vector index with the model it belongs to, its state
+            # (legacy, inactive, backfilling, ready, active, retired) and its coverage.
+            "vector_namespaces": _vector_namespaces(base),
             # With the agent on, whether it has a model and a budget: a fresh
             # models.json has neither, and the refusal a call meets says less.
             **({"agent": config.model_readiness(base, _key_report())}
@@ -504,6 +507,17 @@ def _embedding_policy(base: Path) -> dict:
     except (OSError, ValueError, KeyError, TypeError):
         configured = {}
     return embedding_policy.status(base / "config", base / "store", configured)
+
+
+def _vector_namespaces(base: Path) -> list[dict]:
+    """The vector namespaces, read-only: names, states and counts, never vectors."""
+    from store import compatibility, namespaces
+    database = base / "store/observatory.db"
+    if not database.exists():
+        return []
+    with contextlib.closing(sqlite3.connect(compatibility.readonly_uri(database), uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        return namespaces.summary(conn)
 
 
 def _key_report() -> dict:

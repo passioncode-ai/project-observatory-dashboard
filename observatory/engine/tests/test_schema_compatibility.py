@@ -32,8 +32,8 @@ def open_worker(target: str, home: str, queue) -> None:
 
 #: Written out rather than read from `migrate.MIGRATIONS`, so that adding a
 #: migration fails here until someone has looked at what the upgrade matrix now
-#: covers. 0008 added the agent-memory workflow tables.
-CURRENT_MIGRATIONS = 9
+#: covers. 0008 added the agent-memory workflow tables; 0010 the vector-namespace registry.
+CURRENT_MIGRATIONS = 10
 
 class SchemaCompatibility(unittest.TestCase):
     def setUp(self):

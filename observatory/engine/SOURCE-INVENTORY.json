@@ -758,15 +758,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "d102bcf5be23c5020169fd0cee1438be3c7b19f1c0ac99a2e15fc4e2451565d4",
-      "bytes": 12232,
+      "export_sha256": "569707ae615f3a172bc23a184652b152881775b23bc984c8d5672ef2e3971270",
+      "bytes": 12313,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "d62999d387aba3480ae15706dfbd3a7b4d903f4782a5fbb52e3ee7e394f272ef",
-      "bytes": 52734,
+      "export_sha256": "26277bf1c154515e91c78f67f15711c412f66c1b0999d55a1a45780f99087ee4",
+      "bytes": 52941,
       "upstream_modified": true
     },
     {
@@ -1516,12 +1516,19 @@
     {
       "path": "store/migrate.py",
       "source_sha256": "7f7ab93c500f075433b15d2d10e370b9de915271e0bc0ca6f8945beba4835443",
-      "export_sha256": "c513b3658b27331f1c47438f4bd0f934762d478d605f84b573dabb124baec95c",
-      "bytes": 21570,
+      "export_sha256": "2668ecef0ca8febb7ab93a2dd6e22499f20de2308956476687553ed516da6e5a",
+      "bytes": 24184,
       "python_comments_removed": 18,
       "python_docstrings_removed": 12,
       "tool_descriptions_retained": 0,
       "upstream_modified": true
+    },
+    {
+      "path": "store/namespaces.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "eaf379765e571f477647cc73904e7201c7294e1e581e7da8680995d6358d13c0",
+      "bytes": 13544
     },
     {
       "path": "store/retention.py",
@@ -1719,8 +1726,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "aedd462e3ce6c5af40fc453fe0c300b9dc64683e1e311c46d1314781ca41a47b",
-      "bytes": 17229,
+      "export_sha256": "93bf6d71d2c95120a7b4383f3f5e1603103216ae859d467b00efa4dbd1bbf06b",
+      "bytes": 17357,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2931,8 +2938,8 @@
     {
       "path": "tests/test_schema_compatibility.py",
       "source_sha256": "3eb243e9cce5d649fe169aafc0d1537d04fb639c6ed33fcc618e251250ca30ec",
-      "export_sha256": "057c82e2b75dff336c06063f4d77668a83ea98393cedce9c4ef96dd7e4ed7a5a",
-      "bytes": 13937,
+      "export_sha256": "6982cfa1dbc3b23d9be31c0a4a681b3690be88934c1cae9be50829034390b472",
+      "bytes": 13974,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -3233,6 +3240,13 @@
       "upstream_modified": true,
       "export_sha256": "585b35bcb75149738b098b379ed80d055a26c6f90ee586d3390cebb1ae879402",
       "bytes": 10668
+    },
+    {
+      "path": "tests/test_vector_namespaces.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5052bb4b87b7c4dec73fb92b1cbf257fa7703a3646347de6a3d372113b1bfccd",
+      "bytes": 10772
     },
     {
       "path": "tests/test_wire_contract.py",
@@ -4048,8 +4062,8 @@
     {
       "path": "workspace.py",
       "source_sha256": "40d5ac9aafad0ab2485f03b86d84a0f192103a284f27309dfc2bf798f18071ef",
-      "export_sha256": "b1299f6ecd2cc289fb9f0e4c76ffb9b1139969c64da3db51a36d157815d502a4",
-      "bytes": 41507,
+      "export_sha256": "4f07e6ca03bfc048ad6ed48ac85f1641ef29dbe80679096df9d404c7787562a7",
+      "bytes": 42199,
       "python_comments_removed": 3,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
@@ -4073,7 +4087,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 518,
+  "file_count": 520,
   "excluded": [
     "git-history",
     "operator-registries",

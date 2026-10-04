@@ -489,7 +489,9 @@ naming the provider, for example `texts of alpha are sent to OpenAI`.
 The `embeddings` feature and an embedding key are needed too. A consent never covers
 `confidential` text, workflow checkpoints and handoff packs, records without a project, or an
 agent's search query: those stay on the machine whatever the policy says. `full doctor` shows
-the policy under `embedding_policy` (`state`, the projects `inForce`, `summary`). A policy file
+the policy under `embedding_policy` (`state`, the projects `inForce`, `summary`) and every vector
+index under `vector_namespaces`: the model it belongs to and its state, where the pre-namespace
+OpenAI index is `legacy` and a new local one stays `inactive` or `ready` until it is accepted. A policy file
 that is broken, or older than the last one applied, is refused, and then nothing leaves. The
 rules and their reasons: [design/EMBEDDING-POLICY.md](design/EMBEDDING-POLICY.md).
 
