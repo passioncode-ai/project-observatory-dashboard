@@ -362,5 +362,49 @@ class TheOperatorsCommand(unittest.TestCase):
                            "--class", "confidential"])
 
 
+class WhatAgentsAndPeopleAreTold(unittest.TestCase):
+    """Transparency is part of the contract: the texts an agent and a person read say
+    what the code does, and a test fails when they drift apart."""
+
+    def test_doctor_reports_the_policy_state(self):
+        home, conn, *_r, EP, _p = fresh_workspace()
+        conn.close()
+        cfg, state = home / "config", home / "store"
+        configured = EP.configured_model()
+        st = EP.status(cfg, state, configured)
+        self.assertEqual((st["state"], st["inForce"]), ("local-only", []))
+        self.assertIn("nothing leaves", st["summary"])
+        self.assertEqual(st["command"], "project-observatory full embedding-policy show")
+        write_policy(EP, {"project:alpha": {}, "project:gone": {"revokedAt": "2026-10-04T11:00:00Z"},
+                          "project:other": {"model": "text-embedding-3-large"}}, 2)
+        st = EP.status(cfg, state, configured)
+        self.assertEqual(st["state"], "remote-for-consented")
+        self.assertEqual((st["inForce"], st["revoked"], st["otherModel"]),
+                         (["project:alpha"], ["project:gone"], ["project:other"]))
+        self.assertIn("agents' queries never leave", st["summary"])
+        (state / EP.SEEN_FILE).write_text(json.dumps({"policyRevision": 5}), encoding="utf-8")
+        st = EP.status(cfg, state, configured)
+        self.assertEqual(st["state"], "refused")
+        self.assertIn("rollback", st["reason"])
+        EP.policy_path().write_text("{broken", encoding="utf-8")
+        self.assertEqual(EP.status(cfg, state, configured)["state"], "refused")
+        before = (state / EP.SEEN_FILE).read_text(encoding="utf-8")
+        EP.status(cfg, state, configured)
+        self.assertEqual((state / EP.SEEN_FILE).read_text(encoding="utf-8"), before,
+                         "a look never records a revision")
+
+    def test_the_mcp_instructions_say_the_query_stays_local(self):
+        import ast
+        tree = ast.parse((ROOT / "mcp/server.py").read_text(encoding="utf-8"))
+        text = next(ast.literal_eval(n.value) for n in ast.walk(tree)
+                    if isinstance(n, ast.keyword) and n.arg == "instructions")
+        self.assertNotIn("embeds the query", text)
+        self.assertIn("embedding-policy/1", text)
+        self.assertLessEqual(len(text), 1800, "a host keeps about 2,048 characters")
+        tool = (ROOT / "mcp/server.py").read_text(encoding="utf-8")
+        start = tool.index("def observatory_search(")
+        self.assertIn("never leaves this machine", tool[start:start + 2500])
+
+
 if __name__ == "__main__":
     unittest.main()

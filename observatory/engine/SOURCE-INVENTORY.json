@@ -744,8 +744,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "3516db57b60235fc8a7ff27522da10194efbce745a0e204b092c1187ab02afb3",
-      "bytes": 1761,
+      "export_sha256": "9db19d2d5bec185c9cce81a2012107c5bd848641ffc9e9707a49c0b2c59870c4",
+      "bytes": 1965,
       "upstream_modified": true
     },
     {
@@ -765,8 +765,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "efa9ada05217bbffb13eb1c4fbef931b607565254dfd76e2e63ff31bed064e2e",
-      "bytes": 51226,
+      "export_sha256": "d62999d387aba3480ae15706dfbd3a7b4d903f4782a5fbb52e3ee7e394f272ef",
+      "bytes": 52734,
       "upstream_modified": true
     },
     {
@@ -780,8 +780,8 @@
       "path": "embedding_policy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8e92b23aa0570a920e9db5bb4975cdd19e1e924e0c2c0e1f3a5ad44cc78055f2",
-      "bytes": 14385
+      "export_sha256": "db6c90dc08aa6acab4951efe40f9e5f02ee050fc32dd023eef7b658f6ec19b82",
+      "bytes": 16736
     },
     {
       "path": "engine_update.py",
@@ -1121,8 +1121,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "8fb0e7f685cea6bcf1a7ec5bf8d7fb47f5af829b3e1a93e397e0be808880d4b3",
-      "bytes": 74370,
+      "export_sha256": "5712fa47aaa172d8ef39b3e16dbf826c6e0162169e6228c65d2f5afab4716a7c",
+      "bytes": 74969,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -2139,8 +2139,8 @@
       "path": "tests/test_embedding_enforcement.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "513f865742a79e49560f1e043c8013796d557b7d31548e648139f0ca25be797e",
-      "bytes": 17457
+      "export_sha256": "2dd29c4ea4c886bab0364484233ee20a9a4e039a2bfd218aca569ae90d689458",
+      "bytes": 20014
     },
     {
       "path": "tests/test_embedding_policy.py",
@@ -4048,8 +4048,8 @@
     {
       "path": "workspace.py",
       "source_sha256": "40d5ac9aafad0ab2485f03b86d84a0f192103a284f27309dfc2bf798f18071ef",
-      "export_sha256": "068af3be197c508551530f371bb9937cb7b0e43f079a65ee341b46b055b31e16",
-      "bytes": 40817,
+      "export_sha256": "b1299f6ecd2cc289fb9f0e4c76ffb9b1139969c64da3db51a36d157815d502a4",
+      "bytes": 41507,
       "python_comments_removed": 3,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,

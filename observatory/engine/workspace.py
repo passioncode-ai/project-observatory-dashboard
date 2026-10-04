@@ -486,10 +486,24 @@ def doctor(base: Path) -> dict:
             # PB-132: a dead or interrupted tick cannot report itself.
             "tick": _tick_health(base, doc),
             "credentials": "values are never returned", "network_calls": 0,
+            # PB-137 N-003: whether any memory text may leave for a remote embedding
+            # model, and for which projects — read-only, names and dates only.
+            "embedding_policy": _embedding_policy(base),
             # With the agent on, whether it has a model and a budget: a fresh
             # models.json has neither, and the refusal a call meets says less.
             **({"agent": config.model_readiness(base, _key_report())}
                if (doc.get("features") or {}).get("agent") is True else {})}
+
+
+def _embedding_policy(base: Path) -> dict:
+    sys.path.insert(0, str(config.SOURCE))
+    import embedding_policy
+    try:
+        cfg = json.loads((base / "config" / "models.json").read_text(encoding="utf-8"))["embedding"]
+        configured = {"provider": cfg.get("provider"), "model": cfg.get("model")}
+    except (OSError, ValueError, KeyError, TypeError):
+        configured = {}
+    return embedding_policy.status(base / "config", base / "store", configured)
 
 
 def _key_report() -> dict:

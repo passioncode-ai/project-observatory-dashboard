@@ -325,3 +325,48 @@ def configured_model() -> dict:
         return {}
     return {"provider": cfg.get("provider"), "model": cfg.get("model")}
 
+
+def status(config_dir: pathlib.Path, state_dir: pathlib.Path, configured: Mapping | None) -> dict:
+    """What `full doctor` and the dashboard say about this workspace, read-only.
+
+    It never records a revision (that is `current`'s job when the indexer runs), so a
+    look cannot change what the next run does. Names and dates only."""
+    out: dict = {"contract": SCHEMA, "file": str(config_dir / POLICY_FILE),
+                 "configured": dict(configured or {}),
+                 "command": "project-observatory full embedding-policy show"}
+    try:
+        policy = load(config_dir / POLICY_FILE)
+    except PolicyError as exc:
+        out.update(state="refused", reason=str(exc), revision=None, inForce=[], revoked=[],
+                   otherModel=[], summary="the policy file is refused; nothing leaves this machine")
+        return out
+    try:
+        last = int(json.loads((state_dir / SEEN_FILE).read_text(encoding="utf-8"))
+                   .get("policyRevision", 0))
+    except FileNotFoundError:
+        last = 0
+    except (OSError, ValueError, AttributeError, TypeError):
+        last = None
+    model = (configured or {}).get("provider"), (configured or {}).get("model")
+    in_force, revoked, other = [], [], []
+    for project, c in sorted(policy.projects.items()):
+        if c.revoked_at is not None:
+            revoked.append(project)
+        elif (c.provider, c.model) != model:
+            other.append(project)
+        else:
+            in_force.append(project)
+    if last is None:
+        state, reason = "refused", "the record of the last applied revision is unreadable"
+    elif policy.revision < last:
+        state, reason = "refused", (f"revision {policy.revision} is older than the applied "
+                                    f"revision {last}; a rollback is refused")
+    else:
+        state, reason = ("remote-for-consented" if in_force else "local-only"), None
+    summary = ("nothing leaves this machine" if state != "remote-for-consented" else
+               f"texts of {len(in_force)} project(s) may go to {model[0]}/{model[1]}; "
+               f"confidential, workflow text and agents' queries never leave")
+    out.update(state=state, reason=reason, revision=policy.revision, appliedRevision=last,
+               inForce=in_force, revoked=revoked, otherModel=other, summary=summary)
+    return out
+

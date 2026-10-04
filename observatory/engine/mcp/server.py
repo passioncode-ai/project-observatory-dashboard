@@ -14,8 +14,9 @@ the tools.
 The `observatory_*` tools read, bounded and paged, except two that write only
 PROPOSALS — `observatory_record` appends to the append-only ledger in state
 `proposed`, and `observatory_propose` queues a registry change without touching
-`registry/*.json` — and two that spend (`observatory_search`,
-`observatory_assistant_ask`).
+`registry/*.json` — and one that spends (`observatory_assistant_ask`).
+`observatory_search` spent the configured embedding model until PB-137 N-003; an
+MCP caller's query now never leaves the machine (embedding-policy/1).
 
 Beside them, every capability of fabric-agent.json is served under its own name
 with its published schemas (fabric-interop/0.1): `capability_tools.py` lists and
@@ -83,17 +84,17 @@ server = InteropServer(
     # a host keeps about 2,048 and drops the rest, and the earlier text was cut
     # exactly at the WRITE rule (tests/test_mcp_wire.py checks the length).
     instructions=(
-        "SPENDS: `observatory_search` (embeds the query) and `observatory_assistant_ask` "
-        "(the configured model; a private dialogue and a job — `fabric.job.get` follows it, "
-        "`fabric.job.cancel` stops it).\n"
+        "SPENDS: `observatory_assistant_ask` (the configured model; a private dialogue and a "
+        "job — `fabric.job.get` follows it, `fabric.job.cancel` stops it). "
+        "`observatory_search` does not: the query stays on this machine "
+        "(embedding-policy/1, lexical); `degraded` says so.\n"
         "WRITE: `observatory_record` and `observatory_propose` append PROPOSALS with "
-        "confidence below 1; nothing here promotes one — that is the operator's act or an "
-        "independent corroboration.\n"
+        "confidence below 1; only the operator or an independent corroboration promotes one.\n"
         "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run the "
         "`use` command it hands back never open a file.\n"
         "DEGRADED: every read answer carries `degraded`: empty asserts full coverage, "
-        "else it names what was not read. Treat a missing one on a read "
-        "as a bug; writes and job handles follow their published schemas, which have none. A "
+        "else it names what was not read; treat a read without one as a bug (writes and job "
+        "handles have none). A "
         "refusal is a typed answer with `error`; isError means malformed input, an unknown "
         "tool or an answer outside its published schema.\n"
         "WORKFLOW: `observatory_checkpoint_write` after each step (keep `leaseId`); "
@@ -102,12 +103,12 @@ server = InteropServer(
         "START with `observatory_overview`: counts, tiers, recent projects, the worst "
         "findings, disk — a few KB.\n"
         "READ, paged with `limit` and `cursor` → `nextCursor`, totals covering the whole "
-        "scope: `observatory_status` (unpaged: EVERY project, hundreds of KB — pass "
-        "`limit` and `detail: summary`); `observatory_project`; `observatory_timeline`; `observatory_findings` "
+        "scope: `observatory_status` (pass `limit` and `detail: summary`; unpaged is "
+        "every project, hundreds of KB); `observatory_project`; `observatory_timeline`; `observatory_findings` "
         "filters by `projectId`; `observatory_recall`; `observatory_machine` "
         "(`section` or `explainPid` for detail); `observatory_assistant_status`; `observatory_assistant_conversation`.\n"
-        "Fabric capabilities (fabric-interop/0.1) take and return their published "
-        "schemas exactly: `estate.survey`, `project.detail`, "
+        "Fabric capabilities (fabric-interop/0.1) use their published schemas exactly: "
+        "`estate.survey`, `project.detail`, "
         "`project.timeline`, `project.record`, `machine.mcp.inventory`, `machine.mcp.refresh`."
     ),
 )
@@ -557,16 +558,21 @@ def observatory_timeline(
 @server.tool()
 def observatory_search(
     query: Annotated[str, Field(min_length=1,
-                     description="What to look for. Similarity where the vector index is "
-                                 "available, and a lexical match always.")],
+                     description="What to look for. It never leaves this machine: a caller's "
+                                 "query is matched lexically (Russian and English word forms), "
+                                 "and the vector half is skipped under embedding-policy/1, "
+                                 "which `degraded` names.")],
     project_id: Annotated[str | None, Field(description="Limit to one 'project:<slug>'")] = None,
     limit: Annotated[int, Field(ge=1, le=50)] = 10,
 ) -> dict[str, Any]:
-    """Recall over recorded narrative — the one read where similarity is the right question.
+    """Recall over recorded narrative, by word forms; similarity only under a trusted context.
 
     Conflicting records are returned **together** and unranked. `degraded` names
     every retrieval path that could not run, because absence from a result is not
-    proof that a record does not exist.
+    proof that a record does not exist. An MCP caller's query is never embedded by a
+    remote model (embedding-policy/1, PB-137 N-003): no budget is spent, no key is
+    read, and `degraded` carries `source: vector` with the policy's reason code. The
+    vector half returns with the local model (N-004..N-006) or caller bindings (N-007).
     """
     return survey_mod.search(query, project_id=project_id, limit=limit)
 
