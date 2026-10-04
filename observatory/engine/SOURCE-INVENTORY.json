@@ -580,6 +580,13 @@
       "bytes": 19
     },
     {
+      "path": "defaults/embedding-policy.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "2ce884128b75c9aa1259a13f7c02186dd0464dfa4736456080ee3b143e9a3d9d",
+      "bytes": 4181
+    },
+    {
       "path": "defaults/empty-registry.json",
       "source_sha256": "dd6a3aa971b609b6b96ad6bcc43ff400dfb0ca133d848adf52bea65818438c6a",
       "export_sha256": "b5f7cae950d4a850b7976dbc02e2dbbe6b4fedaebbd8a1f214ee1c13bf17a2b7",
@@ -754,6 +761,13 @@
       "export_sha256": "92e4b9f5660c018c65a4f257803f004497048379da9515eb83f162d7fd27be86",
       "bytes": 12111,
       "upstream_modified": true
+    },
+    {
+      "path": "embedding_policy.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "547f8eea6586cc3af405598ab3f363dbca45884a9d354411c10f417d2fcae60a",
+      "bytes": 11800
     },
     {
       "path": "engine_update.py",
@@ -1578,6 +1592,13 @@
       "bytes": 4184
     },
     {
+      "path": "tests/embedding_policy_cases.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "9f1f2968650d6c95cf459ad3eaaba21d8fe86a4e9209d37e3a1c1dad77a327a4",
+      "bytes": 15674
+    },
+    {
       "path": "tests/emitter_fixture.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -2078,6 +2099,13 @@
       "upstream_modified": true,
       "export_sha256": "0245c344b5a54b501a4c4ddd2d86c4ebc1c518efde50d2cc2ff554277c613a5f",
       "bytes": 16983
+    },
+    {
+      "path": "tests/test_embedding_policy.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f81705ce9b56d334a5c9309fc385323ba6c8ed628f133917de9f7b6125311e6a",
+      "bytes": 5818
     },
     {
       "path": "tests/test_emit_purity.py",
@@ -3996,7 +4024,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 507,
+  "file_count": 511,
   "excluded": [
     "git-history",
     "operator-registries",
