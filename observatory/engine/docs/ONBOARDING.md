@@ -495,6 +495,33 @@ OpenAI index is `legacy` and a new local one stays `inactive` or `ready` until i
 that is broken, or older than the last one applied, is refused, and then nothing leaves. The
 rules and their reasons: [design/EMBEDDING-POLICY.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/EMBEDDING-POLICY.md).
 
+### Who may reach memory: the local agent, and the bindings you issue
+
+The agent your own configuration starts over stdio is the **local agent**. It reads every
+project and writes only proposals, as before. Any other caller reaches memory only through a
+**binding** you issue at your terminal (PB-137 N-008). A binding names one principal, its
+projects, its scopes, the highest class it may read and whether it may write proposals, and
+it always expires. It reaches only the memory tools. Everything else (the estate, credentials,
+the machine) stays with the local agent.
+
+```sh
+project-observatory full access-binding show                        # who may reach memory; nobody by default
+project-observatory full access-binding issue PRINCIPAL --project PROJECT --token-file PATH
+project-observatory full access-binding revoke BINDING_ID           # refused from the next call
+```
+
+- `PRINCIPAL` is `agent:<name>` or `service:<name>`, and `PROJECT` is a project id. `PATH` is a
+  new file the bearer is written to, owner-only.
+- The bearer is never printed and the registry keeps only its SHA-256. Give the client the
+  file, never its contents in a chat.
+- `issue` defaults to reading (`memory.read`, `memory.search`), class `project-internal` and 30
+  days. `--scope`, `--class`, `--effect propose`, `--workflow` and `--days` change that.
+- `full doctor` shows the state under `access_bindings`, and the Health page shows the same.
+- Every decision about a binding is logged in `store/logs/access.jsonl`, without the bearer.
+- There is no HTTP endpoint yet (PB-137 N-016). Until then a binding is issued ahead of use.
+
+Rules and reasons: [design/ACCESS-BINDING.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/ACCESS-BINDING.md).
+
 ## The machine: what runs, where the disk goes, cleanup
 
 With `features.machine_watch` on, each tick surveys the machine the estate runs

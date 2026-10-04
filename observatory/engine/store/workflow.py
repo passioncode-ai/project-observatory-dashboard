@@ -184,6 +184,11 @@ class IdempotencyConflict(WorkflowError):
     """The key was used before for a different request."""
 
 
+class DeclarationMoved(WorkflowError):
+    """The checkpoint's credential declaration changed while an acceptance read the
+    vault, more times than it re-read; nothing was accepted."""
+
+
 class InvalidInput(WorkflowError):
     """An argument is outside its declared shape. The message names which."""
 
@@ -613,7 +618,8 @@ LIST_CURSOR = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\|wf_[0-9a-f]{16}
 
 
 def workflow_list(conn: sqlite3.Connection, *, project_id: str | None = None,
-                  status: str = "open", limit: int = 20, cursor: str | None = None) -> dict:
+                  status: str = "open", limit: int = 20, cursor: str | None = None,
+                  workflow_ids: tuple[str, ...] | None = None) -> dict:
     """Workflows, newest first, each with where it stands — the way an agent
     finds its workflow again after a compaction lost the id, and the rows the
     Agents view and the operator's `full workflow list` show.
@@ -637,6 +643,12 @@ def workflow_list(conn: sqlite3.Connection, *, project_id: str | None = None,
     if project_id is not None:
         where.append("w.project_id = ?")
         args.append(project_id)
+    if workflow_ids is not None:
+        # A session binding's workflows (PB-137 N-008): the rest are not listed, and
+        # `total` counts only these.
+        where.append(f"w.workflow_id IN ({','.join('?' * len(workflow_ids))})"
+                     if workflow_ids else "0")
+        args += list(workflow_ids)
     scope = (" WHERE " + " AND ".join(where)) if where else ""
     total = conn.execute(f"SELECT count(*) FROM workflows w{scope}", args).fetchone()[0]
     page_where = list(where)
@@ -762,7 +774,8 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
                      lease_token: str | None = None, project_id: str | None = None,
                      session_id: str | None = None, executor: Any = None,
                      expected_revision: int | None = None, close: bool = False,
-                     redactor: memory_redact.Redactor | None = None) -> dict:
+                     redactor: memory_redact.Redactor | None = None,
+                     caller: str | None = None) -> dict:
     """Write the workflow's next checkpoint, or start a workflow with its first.
 
     Without `workflow_id` a workflow is created and the caller becomes its
@@ -885,7 +898,7 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
             answer["leaseId"] = token
         return answer
 
-    answer = _atomic(conn, owner, "checkpoint.write", idempotency_key, request, work)
+    answer = _atomic(conn, caller or owner, "checkpoint.write", idempotency_key, request, work)
     if not answer.get("replayed"):
         _journal_known("checkpoint", answer.get("workflowId") or workflow_id, step_id,
                        report.as_dict())
@@ -940,7 +953,8 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
                    credential_reader: Callable[[str], dict] | None = None,
                    git_reader: Callable[[str], dict] | None = None,
                    related_reader: Callable[..., tuple[list[dict], list[dict]]] | None = None,
-                   redactor: memory_redact.Redactor | None = None) -> dict:
+                   redactor: memory_redact.Redactor | None = None,
+                   caller: str | None = None) -> dict:
     """Assemble an immutable handoff pack and offer the workflow to `to`.
 
     WHO MAY. The current executor, for any reason, by presenting its lease
@@ -1073,7 +1087,7 @@ def handoff_create(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
                 "checkpointRevision": latest["revision"], "degraded": degraded,
                 "credentialsMissing": _blocking(creds), "redacted": pack_report.as_dict()}
 
-    answer = _atomic(conn, owner, "handoff.create", idempotency_key, request, work)
+    answer = _atomic(conn, caller or owner, "handoff.create", idempotency_key, request, work)
     if not answer.get("replayed"):
         _journal_known("handoff", workflow_id, None, answer.get("redacted") or {})
     return answer
@@ -1112,9 +1126,19 @@ def _handoff_authority(conn: sqlite3.Connection, workflow_id: str, active: sqlit
     return "silence"
 
 
+#: How many times an acceptance re-reads the vault when the credential declaration
+#: changes under it before it gives up (`DeclarationMoved`).
+DECLARATION_ATTEMPTS = 3
+
+
+class _Moved(Exception):
+    """Internal: the declaration evaluated is not the one in force; roll back, re-read."""
+
+
 def handoff_accept(conn: sqlite3.Connection, *, owner: str, idempotency_key: str,
                    handoff_id: str, executor: Any = None, session_id: str | None = None,
-                   credential_reader: Callable[[str], dict] | None = None) -> dict:
+                   credential_reader: Callable[[str], dict] | None = None,
+                   caller: str | None = None) -> dict:
     """Take the workflow: the offer becomes the active lease, the old one ends.
 
     The answer carries the new lease token and the pack, constraints first.
@@ -1132,16 +1156,37 @@ def handoff_accept(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
     # every Claude session shares one identity, so without it a second session
     # repeating the key and the handoff id would receive the first one's token.
     request = {"handoffId": handoff_id, "executor": who, "sessionId": session_id}
-    # The credentials are read FRESH, before the transaction (the vault is
-    # files, not this store): a key put into the vault after the pack was made
-    # counts, and one removed since does too. From the checkpoint in force.
-    current = conn.execute(
-        "SELECT l.body_json FROM workflow_leases w JOIN ledger l"
-        " ON l.memory_id = 'ckpt:' || w.workflow_id WHERE w.handoff_id = ?"
-        " ORDER BY l.revision DESC LIMIT 1", (handoff_id,)).fetchone()
-    declared = json.loads(current[0] or "{}").get("credentials", []) if current else []
-    creds, creds_degraded = credential_states(declared, credential_reader)
+    for _ in range(DECLARATION_ATTEMPTS):
+        # The credentials are read FRESH, before the transaction (the vault is
+        # files, not this store): a key put into the vault after the pack was made
+        # counts, and one removed since does too. From the checkpoint in force.
+        current = conn.execute(
+            "SELECT l.body_json FROM workflow_leases w JOIN ledger l"
+            " ON l.memory_id = 'ckpt:' || w.workflow_id WHERE w.handoff_id = ?"
+            " ORDER BY l.revision DESC LIMIT 1", (handoff_id,)).fetchone()
+        declared = json.loads(current[0] or "{}").get("credentials", []) if current else []
+        creds, creds_degraded = credential_states(declared, credential_reader)
+        try:
+            answer = _atomic(conn, caller or owner, "handoff.accept", idempotency_key, request,
+                             _accept_work(conn, owner, handoff_id, who, declared, creds,
+                                          creds_degraded))
+        except _Moved:
+            # THE RACE, observed (PB-137 N-008): the previous executor holds its
+            # lease until this transaction and wrote a checkpoint declaring other
+            # keys while the vault was read. The answer must carry the declaration
+            # it evaluated, so the transaction rolled back and the vault is read again.
+            continue
+        if answer.get("error") == "HandoffExpired":
+            raise HandoffExpired(f"{handoff_id} lapsed at {answer['expiresAt']}; ask for a new "
+                                 f"handoff")
+        return answer
+    raise DeclarationMoved(f"{handoff_id}: the workflow's credential declaration changed "
+                           f"{DECLARATION_ATTEMPTS} times while the vault was read; nothing was "
+                           f"accepted")
 
+
+def _accept_work(conn: sqlite3.Connection, owner: str, handoff_id: str, who: dict,
+                 declared: list, creds: list, creds_degraded: list) -> Callable[[], dict]:
     def work() -> dict:
         now = _now()
         offer = conn.execute("SELECT * FROM workflow_leases WHERE handoff_id = ?",
@@ -1165,6 +1210,12 @@ def handoff_accept(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
             _lapse_expired(conn, wid, now)
             # The lapse is recorded; the refusal travels after the commit.
             return {"error": "HandoffExpired", "expiresAt": offer["expires_at"]}
+        # Before any write: the declaration in force must be the one evaluated.
+        latest = _latest_checkpoint(conn, wid)
+        in_force = (json.loads(latest["body_json"] or "{}").get("credentials", [])
+                    if latest is not None else [])
+        if in_force != declared:
+            raise _Moved()
         named = json.loads(offer["executor_json"] or "{}")
         if who.get("provider") and who["provider"] != named.get("provider"):
             raise InvalidInput(f"the handoff goes to {named.get('provider')}, not "
@@ -1183,8 +1234,8 @@ def handoff_accept(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
         # THE CHECKPOINT AS IT IS NOW, beside the pack. The previous executor
         # keeps its lease until this moment and may have written another step
         # after the pack was made; continuing from the pack's copy would redo
-        # that step. `checkpointAdvanced` says so explicitly.
-        latest = _latest_checkpoint(conn, wid)
+        # that step. `checkpointAdvanced` says so explicitly. `latest` was read
+        # above, inside this transaction, so nothing can have moved since.
         packed = (pack.get("checkpoint") or {}).get("revision")
         return {"workflowId": wid, "handoffId": handoff_id, "leaseId": token,
                 "leaseRef": offer["lease_ref"], "executor": merged, "acceptedAt": _iso(now),
@@ -1199,12 +1250,7 @@ def handoff_accept(conn: sqlite3.Connection, *, owner: str, idempotency_key: str
                 "credentials": creds, "credentialsMissing": _blocking(creds),
                 "degraded": creds_degraded,
                 "pack": pack}
-
-    answer = _atomic(conn, owner, "handoff.accept", idempotency_key, request, work)
-    if answer.get("error") == "HandoffExpired":
-        raise HandoffExpired(f"{handoff_id} lapsed at {answer['expiresAt']}; ask for a new "
-                             f"handoff")
-    return answer
+    return work
 
 
 def _transcript(raw: Any) -> dict | None:

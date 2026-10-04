@@ -980,7 +980,8 @@ RETRIEVAL_WIDTH = 300
 
 
 def search(query: str, project_id: str | None = None, limit: int = 10, *,
-           authority: str = "caller-argument", classification: str | None = None) -> dict:
+           authority: str = "caller-argument", classification: str | None = None,
+           classes: tuple[str, ...] | None = None) -> dict:
     """Recall over the narrative: by similarity where possible, lexically always.
 
     Two rules the contract makes non-negotiable, and both are visible in the
@@ -1140,6 +1141,14 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
         except sqlite3.Error as exc:
             degraded.append({"source": "projection", "reason": f"lag unknown: {exc}"})
 
+        if classes is not None:
+            # Said, not hidden: the window was ranked over every class, so a record
+            # this caller may see can sit behind ones it may not. Filtering before
+            # the window is PB-137 N-009.
+            degraded.append({"source": "class-filter",
+                             "reason": "records above this binding's class ceiling are "
+                                       "removed after the retrieval window, so fewer "
+                                       "visible records may be returned than exist"})
         # --- hydrate from CANON, never from the projection --------------------
         out, contested = [], []
         for (mid, rev), h in hits.items():
@@ -1150,6 +1159,10 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
             if row is None or row["tomb"] is not None:
                 continue                                                   
             if project_id and row["project_id"] != project_id:
+                continue
+            # A BINDING'S CLASS CEILING (PB-137 N-008): a record above it is not
+            # served. `classes` is None for the local agent, which reads every class.
+            if classes is not None and row["classification"] not in classes:
                 continue
             # THE LATEST REVISION ONLY. An index can still hold a superseded
             # revision — one written before the indexer removed older ones, or

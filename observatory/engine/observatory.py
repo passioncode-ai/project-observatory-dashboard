@@ -482,6 +482,8 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   workflow list|show|handoff|close   agent workflows; handoff --force and close need a terminal
   embedding-policy show|grant|revoke  which project's texts may go to a remote embedding model;
                                grant and revoke need a terminal
+  access-binding show|issue|revoke  which agent may reach memory over HTTP; issue writes the
+                               bearer to a new owner-only file; issue and revoke need a terminal
   scan-mcp                     the MCP servers your agent configs declare (integration mcp)
 
 `project-observatory full-path` (outside `full`) prints the engine directory, where the
@@ -697,6 +699,10 @@ def refusal(argv: list[str]) -> str:
         sys.path.insert(0, str(ROOT / "tools"))
         import embedding_policy_cli
         return argparse_refusal(lambda: embedding_policy_cli.parser().parse_args(rest))
+    if name == "access-binding":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import access_binding_cli
+        return argparse_refusal(lambda: access_binding_cli.parser().parse_args(rest))
     if name in WORKSPACE_COMMANDS:
         import workspace
         return argparse_refusal(lambda: workspace.parse(argv))
@@ -1057,6 +1063,10 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT / "tools"))
         import embedding_policy_cli
         return embedding_policy_cli.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "access-binding":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import access_binding_cli
+        return access_binding_cli.main(argv[2:])
     if len(argv) > 1 and argv[1] in WORKSPACE_COMMANDS:
         import workspace
         return workspace.main(argv[1:])
