@@ -119,7 +119,9 @@ readers use, in the same pull request:
 
 - **Agents:** the MCP server `instructions` (at most 1,800 characters, pinned by
   `tests/test_mcp_wire.py`), each tool's description, the reason codes in `degraded`, and
-  `docs/AGENT-ONBOARDING.md`, which `full onboard` prints.
+  `docs/AGENT-ONBOARDING.md`, which `full onboard` prints. Edit `docs/ONBOARDING.md` and
+  `docs/AGENT-ONBOARDING.md` only: the copies under `observatory/engine/docs/` are generated
+  by `python tools/sync_engine_docs.py`.
 - **People:** `full --help`, `full doctor`, `docs/ONBOARDING.md`, the dashboard where it shows
   the state, and the scenario in `observatory/engine/docs/ux/portable-scenarios.md`.
 - **Both:** a refusal names its reason and the command that changes it. "Nothing happened"

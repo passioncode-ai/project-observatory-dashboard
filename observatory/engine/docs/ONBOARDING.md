@@ -470,6 +470,27 @@ ceiling below its 30-minute interval, and `store/raw/tick-run.json` records each
 run's start, end, outcome and reason. A stopped step is a failed step in the log
 and on the board, never a hung tick.
 
+### Memory embeddings leave the machine only by your consent
+
+Agent memory is searched on this machine by word forms (Russian and English). A remote
+embedding model (OpenAI, configured in `config/models.json`) adds similarity search, and it
+sees the text it embeds. So since PB-137 N-003 nothing is sent until you consent, one
+project at a time, at your own terminal:
+
+```sh
+project-observatory full embedding-policy show                      # what is in force; nothing by default
+project-observatory full embedding-policy grant project:<slug> \
+    --statement "texts of <slug> are sent to OpenAI for embeddings"  # public + project-internal by default
+project-observatory full embedding-policy revoke project:<slug>     # stops new export at once
+```
+
+The `embeddings` feature and an embedding key are needed too. A consent never covers
+`confidential` text, workflow checkpoints and handoff packs, records without a project, or an
+agent's search query: those stay on the machine whatever the policy says. `full doctor` shows
+the policy under `embedding_policy` (`state`, the projects `inForce`, `summary`). A policy file
+that is broken, or older than the last one applied, is refused, and then nothing leaves. The
+rules and their reasons: [design/EMBEDDING-POLICY.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/EMBEDDING-POLICY.md).
+
 ## The machine: what runs, where the disk goes, cleanup
 
 With `features.machine_watch` on, each tick surveys the machine the estate runs
