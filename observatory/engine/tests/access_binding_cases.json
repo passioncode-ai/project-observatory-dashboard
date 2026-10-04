@@ -1,0 +1,771 @@
+{
+  "contract": "access-binding/1",
+  "about": "Accepted decision fixtures for PB-137 N-007: who may do what with agent memory, decided from the transport, never from the caller's arguments. N-008 must reproduce every case at the real entry points. Synthetic principals, projects and digests; no credential value.",
+  "now": "2026-10-04T12:00:00Z",
+  "registry": {
+    "schema": "access-bindings/1",
+    "revision": 4,
+    "bindings": [
+      {
+        "bindingId": "bnd_partner01",
+        "principal": "agent:partner-x",
+        "channel": "http",
+        "audience": "observatory:default",
+        "credentialRef": {
+          "kind": "bearer-sha256",
+          "digest": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "projects": [
+          "project:alpha"
+        ],
+        "workflows": null,
+        "scopes": [
+          "memory.read",
+          "memory.search",
+          "memory.record"
+        ],
+        "classCeiling": "project-internal",
+        "effectCeiling": "propose",
+        "issuedAt": "2026-10-04T10:00:00Z",
+        "expiresAt": "2026-11-04T10:00:00Z",
+        "revokedAt": null,
+        "issuedBy": "operator",
+        "via": "terminal"
+      },
+      {
+        "bindingId": "bnd_session01",
+        "principal": "agent:switchboard-session",
+        "channel": "http",
+        "audience": "observatory:default",
+        "credentialRef": {
+          "kind": "bearer-sha256",
+          "digest": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "projects": [
+          "project:alpha"
+        ],
+        "workflows": [
+          "wf_0123456789abcdef"
+        ],
+        "scopes": [
+          "memory.read",
+          "memory.search",
+          "memory.checkpoint",
+          "memory.handoff"
+        ],
+        "classCeiling": "confidential",
+        "effectCeiling": "propose",
+        "issuedAt": "2026-10-04T10:00:00Z",
+        "expiresAt": "2026-10-04T18:00:00Z",
+        "revokedAt": null,
+        "issuedBy": "service:fabric",
+        "via": "fabric-session"
+      },
+      {
+        "bindingId": "bnd_revoked1",
+        "principal": "agent:old-partner",
+        "channel": "http",
+        "audience": "observatory:default",
+        "credentialRef": {
+          "kind": "bearer-sha256",
+          "digest": "3333333333333333333333333333333333333333333333333333333333333333"
+        },
+        "projects": [
+          "project:alpha"
+        ],
+        "workflows": null,
+        "scopes": [
+          "memory.read"
+        ],
+        "classCeiling": "public",
+        "effectCeiling": "read",
+        "issuedAt": "2026-09-01T10:00:00Z",
+        "expiresAt": "2026-12-01T10:00:00Z",
+        "revokedAt": "2026-10-03T10:00:00Z",
+        "issuedBy": "operator",
+        "via": "terminal"
+      },
+      {
+        "bindingId": "bnd_expired1",
+        "principal": "agent:short-lived",
+        "channel": "http",
+        "audience": "observatory:default",
+        "credentialRef": {
+          "kind": "bearer-sha256",
+          "digest": "4444444444444444444444444444444444444444444444444444444444444444"
+        },
+        "projects": [
+          "project:alpha"
+        ],
+        "workflows": null,
+        "scopes": [
+          "memory.read"
+        ],
+        "classCeiling": "public",
+        "effectCeiling": "read",
+        "issuedAt": "2026-09-01T10:00:00Z",
+        "expiresAt": "2026-10-01T10:00:00Z",
+        "revokedAt": null,
+        "issuedBy": "operator",
+        "via": "terminal"
+      },
+      {
+        "bindingId": "bnd_reader01",
+        "principal": "agent:dashboard-reader",
+        "channel": "http",
+        "audience": "observatory:default",
+        "credentialRef": {
+          "kind": "bearer-sha256",
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "projects": [
+          "project:alpha"
+        ],
+        "workflows": null,
+        "scopes": [
+          "memory.read",
+          "memory.record"
+        ],
+        "classCeiling": "public",
+        "effectCeiling": "read",
+        "issuedAt": "2026-10-04T10:00:00Z",
+        "expiresAt": "2026-11-04T10:00:00Z",
+        "revokedAt": null,
+        "issuedBy": "operator",
+        "via": "terminal"
+      }
+    ]
+  },
+  "resolve": [
+    {
+      "name": "stdio is the operator's local agent, by the transport alone",
+      "channel": {
+        "channel": "stdio"
+      },
+      "expect": {
+        "binding": "local:stdio",
+        "reason": "stdio-local"
+      }
+    },
+    {
+      "name": "a known bearer for this audience resolves to its binding",
+      "channel": {
+        "channel": "http",
+        "audience": "observatory:default",
+        "bearerDigest": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "expect": {
+        "binding": "bnd_partner01",
+        "reason": "bearer-matched"
+      }
+    },
+    {
+      "name": "an http request without a bearer is denied",
+      "channel": {
+        "channel": "http",
+        "audience": "observatory:default"
+      },
+      "expect": {
+        "binding": null,
+        "reason": "no-credential"
+      }
+    },
+    {
+      "name": "an unknown bearer is denied",
+      "channel": {
+        "channel": "http",
+        "audience": "observatory:default",
+        "bearerDigest": "9999999999999999999999999999999999999999999999999999999999999999"
+      },
+      "expect": {
+        "binding": null,
+        "reason": "no-binding"
+      }
+    },
+    {
+      "name": "a bearer presented to another audience is denied",
+      "channel": {
+        "channel": "http",
+        "audience": "observatory:other",
+        "bearerDigest": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "expect": {
+        "binding": null,
+        "reason": "audience-mismatch"
+      }
+    },
+    {
+      "name": "a revoked binding is denied",
+      "channel": {
+        "channel": "http",
+        "audience": "observatory:default",
+        "bearerDigest": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      "expect": {
+        "binding": null,
+        "reason": "binding-revoked"
+      }
+    },
+    {
+      "name": "an expired binding is denied",
+      "channel": {
+        "channel": "http",
+        "audience": "observatory:default",
+        "bearerDigest": "4444444444444444444444444444444444444444444444444444444444444444"
+      },
+      "expect": {
+        "binding": null,
+        "reason": "binding-expired"
+      }
+    },
+    {
+      "name": "an unknown channel is denied",
+      "channel": {
+        "channel": "websocket"
+      },
+      "expect": {
+        "binding": null,
+        "reason": "unknown-channel"
+      }
+    },
+    {
+      "name": "a channel that claims an identity in its own fields is not one",
+      "channel": {
+        "channel": "http",
+        "audience": "observatory:default",
+        "principal": "agent:partner-x"
+      },
+      "expect": {
+        "binding": null,
+        "reason": "no-credential"
+      }
+    }
+  ],
+  "authorize": [
+    {
+      "name": "the local agent reads any project",
+      "binding": "local:stdio",
+      "request": {
+        "scope": "memory.read",
+        "projectId": "project:zeta",
+        "effect": "read"
+      },
+      "expect": {
+        "allow": true,
+        "reason": "allowed"
+      }
+    },
+    {
+      "name": "the local agent records a proposal",
+      "binding": "local:stdio",
+      "request": {
+        "scope": "memory.record",
+        "projectId": "project:zeta",
+        "effect": "propose"
+      },
+      "expect": {
+        "allow": true,
+        "reason": "allowed"
+      }
+    },
+    {
+      "name": "the local agent cannot act with the operator's authority",
+      "binding": "local:stdio",
+      "request": {
+        "scope": "memory.record",
+        "projectId": "project:zeta",
+        "effect": "operator"
+      },
+      "expect": {
+        "allow": false,
+        "reason": "effect-above-ceiling"
+      }
+    },
+    {
+      "name": "a partner reads its project",
+      "binding": "bnd_partner01",
+      "request": {
+        "scope": "memory.search",
+        "projectId": "project:alpha",
+        "effect": "read"
+      },
+      "expect": {
+        "allow": true,
+        "reason": "allowed"
+      }
+    },
+    {
+      "name": "a partner cannot read another project",
+      "binding": "bnd_partner01",
+      "request": {
+        "scope": "memory.read",
+        "projectId": "project:beta",
+        "effect": "read"
+      },
+      "expect": {
+        "allow": false,
+        "reason": "project-not-bound"
+      }
+    },
+    {
+      "name": "a partner cannot search across every project",
+      "binding": "bnd_partner01",
+      "request": {
+        "scope": "memory.search",
+        "projectId": null,
+        "effect": "read"
+      },
+      "expect": {
+        "allow": false,
+        "reason": "project-required"
+      }
+    },
+    {
+      "name": "a partner cannot write a checkpoint without the scope",
+      "binding": "bnd_partner01",
+      "request": {
+        "scope": "memory.checkpoint",
+        "projectId": "project:alpha",
+        "workflowId": "wf_0123456789abcdef",
+        "effect": "propose"
+      },
+      "expect": {
+        "allow": false,
+        "reason": "scope-not-bound"
+      }
+    },
+    {
+      "name": "a session writes the checkpoint of its own workflow",
+      "binding": "bnd_session01",
+      "request": {
+        "scope": "memory.checkpoint",
+        "projectId": "project:alpha",
+        "workflowId": "wf_0123456789abcdef",
+        "effect": "propose"
+      },
+      "expect": {
+        "allow": true,
+        "reason": "allowed"
+      }
+    },
+    {
+      "name": "a session cannot touch another workflow",
+      "binding": "bnd_session01",
+      "request": {
+        "scope": "memory.checkpoint",
+        "projectId": "project:alpha",
+        "workflowId": "wf_fedcba9876543210",
+        "effect": "propose"
+      },
+      "expect": {
+        "allow": false,
+        "reason": "workflow-not-bound"
+      }
+    },
+    {
+      "name": "a workflow-bound session must name its workflow",
+      "binding": "bnd_session01",
+      "request": {
+        "scope": "memory.handoff",
+        "projectId": "project:alpha",
+        "effect": "propose"
+      },
+      "expect": {
+        "allow": false,
+        "reason": "workflow-required"
+      }
+    },
+    {
+      "name": "an unknown scope is denied",
+      "binding": "bnd_session01",
+      "request": {
+        "scope": "memory.forget",
+        "projectId": "project:alpha",
+        "workflowId": "wf_0123456789abcdef",
+        "effect": "propose"
+      },
+      "expect": {
+        "allow": false,
+        "reason": "scope-not-bound"
+      }
+    },
+    {
+      "name": "no binding, no access",
+      "binding": null,
+      "request": {
+        "scope": "memory.read",
+        "projectId": "project:alpha",
+        "effect": "read"
+      },
+      "expect": {
+        "allow": false,
+        "reason": "no-binding"
+      }
+    },
+    {
+      "name": "a caller-supplied owner argument changes nothing",
+      "binding": "bnd_partner01",
+      "request": {
+        "scope": "memory.read",
+        "projectId": "project:beta",
+        "effect": "read",
+        "owner": "operator",
+        "principal": "local:stdio"
+      },
+      "expect": {
+        "allow": false,
+        "reason": "project-not-bound"
+      }
+    },
+    {
+      "name": "a read-only binding cannot write even with the scope listed",
+      "binding": "bnd_reader01",
+      "request": {
+        "scope": "memory.record",
+        "projectId": "project:alpha",
+        "effect": "propose"
+      },
+      "expect": {
+        "allow": false,
+        "reason": "effect-above-ceiling"
+      }
+    },
+    {
+      "name": "a read-only binding reads",
+      "binding": "bnd_reader01",
+      "request": {
+        "scope": "memory.read",
+        "projectId": "project:alpha",
+        "effect": "read"
+      },
+      "expect": {
+        "allow": true,
+        "reason": "allowed"
+      }
+    }
+  ],
+  "visibility": [
+    {
+      "name": "the local agent sees confidential",
+      "binding": "local:stdio",
+      "classification": "confidential",
+      "expect": true
+    },
+    {
+      "name": "a partner sees project-internal",
+      "binding": "bnd_partner01",
+      "classification": "project-internal",
+      "expect": true
+    },
+    {
+      "name": "a partner never sees confidential",
+      "binding": "bnd_partner01",
+      "classification": "confidential",
+      "expect": false
+    },
+    {
+      "name": "an unknown class is never visible",
+      "binding": "bnd_partner01",
+      "classification": "restricted",
+      "expect": false
+    },
+    {
+      "name": "a plan alias is mapped before comparing",
+      "binding": "bnd_partner01",
+      "classification": "private",
+      "expect": false
+    }
+  ],
+  "queryContext": [
+    {
+      "name": "a partner's query is classified by its ceiling, with binding authority",
+      "binding": "bnd_partner01",
+      "projectId": "project:alpha",
+      "expect": {
+        "project_id": "project:alpha",
+        "classification": "project-internal",
+        "authority": "binding"
+      }
+    },
+    {
+      "name": "the local agent's ceiling is confidential, so its query never leaves",
+      "binding": "local:stdio",
+      "projectId": "project:alpha",
+      "expect": {
+        "project_id": "project:alpha",
+        "classification": "confidential",
+        "authority": "binding"
+      }
+    },
+    {
+      "name": "a project outside the binding gives no trusted context",
+      "binding": "bnd_partner01",
+      "projectId": "project:beta",
+      "expect": {
+        "project_id": "project:beta",
+        "classification": null,
+        "authority": "caller-argument"
+      }
+    }
+  ],
+  "malformed": [
+    {
+      "name": "wrong registry schema",
+      "doc": {
+        "schema": "access-bindings/2",
+        "revision": 1,
+        "bindings": []
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "an http binding without a credential reference",
+      "doc": {
+        "schema": "access-bindings/1",
+        "revision": 1,
+        "bindings": [
+          {
+            "bindingId": "bnd_x0000001",
+            "principal": "agent:x",
+            "channel": "http",
+            "audience": "observatory:default",
+            "projects": [
+              "project:alpha"
+            ],
+            "workflows": null,
+            "scopes": [
+              "memory.read"
+            ],
+            "classCeiling": "public",
+            "effectCeiling": "read",
+            "issuedAt": "2026-10-04T10:00:00Z",
+            "expiresAt": "2026-11-04T10:00:00Z",
+            "revokedAt": null,
+            "issuedBy": "operator",
+            "via": "terminal"
+          }
+        ]
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "an http binding with no expiry",
+      "doc": {
+        "schema": "access-bindings/1",
+        "revision": 1,
+        "bindings": [
+          {
+            "bindingId": "bnd_x0000002",
+            "principal": "agent:x",
+            "channel": "http",
+            "audience": "observatory:default",
+            "credentialRef": {
+              "kind": "bearer-sha256",
+              "digest": "5555555555555555555555555555555555555555555555555555555555555555"
+            },
+            "projects": [
+              "project:alpha"
+            ],
+            "workflows": null,
+            "scopes": [
+              "memory.read"
+            ],
+            "classCeiling": "public",
+            "effectCeiling": "read",
+            "issuedAt": "2026-10-04T10:00:00Z",
+            "expiresAt": null,
+            "revokedAt": null,
+            "issuedBy": "operator",
+            "via": "terminal"
+          }
+        ]
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "an http binding over every project",
+      "doc": {
+        "schema": "access-bindings/1",
+        "revision": 1,
+        "bindings": [
+          {
+            "bindingId": "bnd_x0000003",
+            "principal": "agent:x",
+            "channel": "http",
+            "audience": "observatory:default",
+            "credentialRef": {
+              "kind": "bearer-sha256",
+              "digest": "6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            "projects": "all",
+            "workflows": null,
+            "scopes": [
+              "memory.read"
+            ],
+            "classCeiling": "public",
+            "effectCeiling": "read",
+            "issuedAt": "2026-10-04T10:00:00Z",
+            "expiresAt": "2026-11-04T10:00:00Z",
+            "revokedAt": null,
+            "issuedBy": "operator",
+            "via": "terminal"
+          }
+        ]
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "a binding that claims the operator's effect",
+      "doc": {
+        "schema": "access-bindings/1",
+        "revision": 1,
+        "bindings": [
+          {
+            "bindingId": "bnd_x0000004",
+            "principal": "agent:x",
+            "channel": "http",
+            "audience": "observatory:default",
+            "credentialRef": {
+              "kind": "bearer-sha256",
+              "digest": "7777777777777777777777777777777777777777777777777777777777777777"
+            },
+            "projects": [
+              "project:alpha"
+            ],
+            "workflows": null,
+            "scopes": [
+              "memory.read"
+            ],
+            "classCeiling": "public",
+            "effectCeiling": "operator",
+            "issuedAt": "2026-10-04T10:00:00Z",
+            "expiresAt": "2026-11-04T10:00:00Z",
+            "revokedAt": null,
+            "issuedBy": "operator",
+            "via": "terminal"
+          }
+        ]
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "a credential reference that looks like a raw token",
+      "doc": {
+        "schema": "access-bindings/1",
+        "revision": 1,
+        "bindings": [
+          {
+            "bindingId": "bnd_x0000005",
+            "principal": "agent:x",
+            "channel": "http",
+            "audience": "observatory:default",
+            "credentialRef": {
+              "kind": "bearer-sha256",
+              "digest": "sk-not-a-digest"
+            },
+            "projects": [
+              "project:alpha"
+            ],
+            "workflows": null,
+            "scopes": [
+              "memory.read"
+            ],
+            "classCeiling": "public",
+            "effectCeiling": "read",
+            "issuedAt": "2026-10-04T10:00:00Z",
+            "expiresAt": "2026-11-04T10:00:00Z",
+            "revokedAt": null,
+            "issuedBy": "operator",
+            "via": "terminal"
+          }
+        ]
+      },
+      "schemaRejects": true
+    },
+    {
+      "name": "two bindings with one credential",
+      "doc": {
+        "schema": "access-bindings/1",
+        "revision": 1,
+        "bindings": [
+          {
+            "bindingId": "bnd_x0000006",
+            "principal": "agent:x",
+            "channel": "http",
+            "audience": "observatory:default",
+            "credentialRef": {
+              "kind": "bearer-sha256",
+              "digest": "8888888888888888888888888888888888888888888888888888888888888888"
+            },
+            "projects": [
+              "project:alpha"
+            ],
+            "workflows": null,
+            "scopes": [
+              "memory.read"
+            ],
+            "classCeiling": "public",
+            "effectCeiling": "read",
+            "issuedAt": "2026-10-04T10:00:00Z",
+            "expiresAt": "2026-11-04T10:00:00Z",
+            "revokedAt": null,
+            "issuedBy": "operator",
+            "via": "terminal"
+          },
+          {
+            "bindingId": "bnd_x0000007",
+            "principal": "agent:y",
+            "channel": "http",
+            "audience": "observatory:default",
+            "credentialRef": {
+              "kind": "bearer-sha256",
+              "digest": "8888888888888888888888888888888888888888888888888888888888888888"
+            },
+            "projects": [
+              "project:alpha"
+            ],
+            "workflows": null,
+            "scopes": [
+              "memory.read"
+            ],
+            "classCeiling": "public",
+            "effectCeiling": "read",
+            "issuedAt": "2026-10-04T10:00:00Z",
+            "expiresAt": "2026-11-04T10:00:00Z",
+            "revokedAt": null,
+            "issuedBy": "operator",
+            "via": "terminal"
+          }
+        ]
+      },
+      "schemaRejects": false
+    },
+    {
+      "name": "a stored stdio binding (stdio is built in, never configured)",
+      "doc": {
+        "schema": "access-bindings/1",
+        "revision": 1,
+        "bindings": [
+          {
+            "bindingId": "bnd_x0000008",
+            "principal": "local:stdio",
+            "channel": "stdio",
+            "projects": "all",
+            "workflows": null,
+            "scopes": [
+              "memory.read"
+            ],
+            "classCeiling": "confidential",
+            "effectCeiling": "propose",
+            "issuedAt": "2026-10-04T10:00:00Z",
+            "expiresAt": null,
+            "revokedAt": null,
+            "issuedBy": "operator",
+            "via": "terminal"
+          }
+        ]
+      },
+      "schemaRejects": true
+    }
+  ]
+}

@@ -122,6 +122,8 @@ BOUNDARY += ('memory_eval',)
 BOUNDARY += ('textkeys',)
 # The header door: a vault value for one MCP server's headersHelper, and its binding.
 BOUNDARY += ('secret_header',)
+# access-bindings/1: who may do what with agent memory, from the transport (PB-137 N-007).
+BOUNDARY += ('access_binding',)
 # embedding-policy/1: which memory text may leave for a remote embedding model (PB-137 N-002).
 BOUNDARY += ('embedding_policy',)
 # embedding-policy/1 enforced at the provider, the indexer, the query path and the CLI (N-003).
@@ -138,6 +140,8 @@ HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
 # Suites and helpers ported by the second port stream.
 HELPERS += (
     'watched_repo.py',
+    # The accepted access-bindings/1 decision cases (PB-137 N-007).
+    'access_binding_cases.json',
     # The accepted embedding-policy/1 decision cases (PB-137 N-002).
     'embedding_policy_cases.json',
     # Grants a synthetic consent so vector-half suites still reach the provider stub.
@@ -149,7 +153,7 @@ ROOT_FILES = (
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py',
     'identity_map.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
-    'log_policy.py', 'code_freshness.py', 'embedding_policy.py',
+    'log_policy.py', 'code_freshness.py', 'access_binding.py', 'embedding_policy.py',
     'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',

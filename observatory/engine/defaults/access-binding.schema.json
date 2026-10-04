@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/observatory/engine/defaults/access-binding.schema.json",
+  "title": "access-bindings/1",
+  "description": "Who may do what with agent memory over HTTP (PB-137 N-007, plan §7.2). stdio is built in (local:stdio: every project and class, effect up to propose) and is never configured here. Structure only: the evaluator (access_binding.py) also refuses two bindings that share one credential. A workspace without this file serves stdio alone.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "revision",
+    "bindings"
+  ],
+  "properties": {
+    "schema": {
+      "const": "access-bindings/1"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "bindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bindingId",
+          "principal",
+          "channel",
+          "audience",
+          "credentialRef",
+          "projects",
+          "workflows",
+          "scopes",
+          "classCeiling",
+          "effectCeiling",
+          "issuedAt",
+          "expiresAt",
+          "revokedAt",
+          "issuedBy",
+          "via"
+        ],
+        "properties": {
+          "bindingId": {
+            "type": "string",
+            "pattern": "^bnd_[a-z0-9]{8,32}$"
+          },
+          "principal": {
+            "type": "string",
+            "pattern": "^(agent|service):[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"
+          },
+          "channel": {
+            "const": "http",
+            "description": "stdio is built in and never stored."
+          },
+          "audience": {
+            "type": "string",
+            "pattern": "^observatory:[a-z0-9][a-z0-9._-]{0,63}$"
+          },
+          "credentialRef": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "digest"
+            ],
+            "properties": {
+              "kind": {
+                "const": "bearer-sha256"
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "SHA-256 of the bearer; the token itself is never stored."
+              }
+            }
+          },
+          "projects": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^project:[a-z0-9][a-z0-9._-]{0,127}$"
+            },
+            "description": "An HTTP binding names its projects; it never covers every project."
+          },
+          "workflows": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "pattern": "^wf_[0-9a-f]{16}$"
+                }
+              }
+            ],
+            "description": "Set for a one-shot session binding (Fabric, Switchboard): only these workflows."
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "memory.read",
+                "memory.search",
+                "memory.record",
+                "memory.checkpoint",
+                "memory.handoff"
+              ]
+            }
+          },
+          "classCeiling": {
+            "enum": [
+              "public",
+              "project-internal",
+              "confidential"
+            ]
+          },
+          "effectCeiling": {
+            "enum": [
+              "read",
+              "propose"
+            ],
+            "description": "The operator's authority is never granted by a binding."
+          },
+          "issuedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+          },
+          "revokedAt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
+              }
+            ]
+          },
+          "issuedBy": {
+            "type": "string",
+            "pattern": "^(operator|service:[A-Za-z0-9][A-Za-z0-9._+-]{0,63})$"
+          },
+          "via": {
+            "enum": [
+              "terminal",
+              "fabric-session"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
