@@ -331,7 +331,9 @@ def status(config_dir: pathlib.Path, state_dir: pathlib.Path, configured: Mappin
 
     It never records a revision (that is `current`'s job when the indexer runs), so a
     look cannot change what the next run does. Names and dates only."""
-    out: dict = {"contract": SCHEMA, "file": str(config_dir / POLICY_FILE),
+    # The file is named relative to the workspace: this answer reaches the dashboard's
+    # pages, which never carry the builder's home path (test_demo_estate).
+    out: dict = {"contract": SCHEMA, "file": f"config/{POLICY_FILE}",
                  "configured": dict(configured or {}),
                  "command": "project-observatory full embedding-policy show"}
     try:

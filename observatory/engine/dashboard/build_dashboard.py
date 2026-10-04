@@ -406,6 +406,16 @@ def from_store() -> dict:
             "registry_proposals": conn.execute(
                 "SELECT COUNT(*) FROM proposals WHERE status='proposed'").fetchone()[0],
         }
+        # EMBEDDING POLICY (PB-137 N-003, OBS-33): whether any memory text may leave
+        # this machine for a remote embedding model, read-only, the same answer
+        # `full doctor` gives — a person sees it here without running a command.
+        try:
+            import embedding_policy
+            out["health"]["embedding_policy"] = embedding_policy.status(
+                paths.CONFIG, paths.STATE, embedding_policy.configured_model())
+        except Exception as exc:                                                     # noqa: BLE001
+            out["health"]["embedding_policy"] = {"state": "unknown",
+                                                 "reason": f"{type(exc).__name__}"}
         # AGENT WORKFLOWS, so the operator sees what agents are carrying between
         # sessions: how many are open, and how many handoffs wait for a session
         # to accept them (an offer nobody takes lapses, and the work stalls
@@ -2041,6 +2051,18 @@ const SERVERD_FIX = {
 if (H.leaks_open > 0) hb.push([T("secret leaks"), T("{n} not rotated — vault.py leaks", {n: H.leaks_open})]);
 if (H.proposed != null) hb.push([T("awaiting the operator's decision"), H.proposed]);
 if (H.registry_proposals) hb.push([T("registry edits proposed"), H.registry_proposals]);
+// Whether memory text may leave this machine (OBS-33): the state in words and the
+// command that shows the consents, ready to copy.
+if (H.embedding_policy) {
+  const EP = H.embedding_policy, show = fullCommand("embedding-policy show");
+  if (EP.state === "remote-for-consented")
+    hb.push([T("memory embeddings"), T("texts of {n} projects may go to {model}; confidential, workflow text and agents' queries never leave",
+      {n: (EP.inForce || []).length, model: ((EP.configured || {}).provider || "") + "/" + ((EP.configured || {}).model || "")}), show]);
+  else if (EP.state === "local-only")
+    hb.push([T("memory embeddings"), T("nothing leaves this machine"), show]);
+  else
+    hb.push([T("memory embeddings"), T("policy refused, nothing leaves this machine: {reason}", {reason: EP.reason || "?"}), show]);
+}
 if (H.workflows_open) hb.push([T("agent workflows open"), H.workflows_open]);
 if (H.handoffs_waiting) hb.push([T("handoffs waiting for a session"), H.handoffs_waiting]);
 if (H.projection_lag) hb.push([T("conclusions not indexed"),
@@ -2068,7 +2090,9 @@ if (H.spend_today != null)
     : H.server_age_s === -1 ? "down" : H.server_age_s < (H.server_silent_after_s || 90) ? "up" : "silent";
   const fix = SERVERD_FIX[state];
   document.getElementById("health").innerHTML = (hb.length
-    ? hb.map(([k, v]) => `<div class="hrow"><span>${E(k)}</span><b>${E(String(v))}</b></div>`).join("")
+    ? hb.map(([k, v, c]) => `<div class="hrow"><span>${E(k)}</span><b>${E(String(v))}` +
+        (c ? ` <span class="mono">${E(c)}</span> <button class="chip-btn" type="button" data-copy="${E(c)}">${T("copy")}</button>` : "") +
+        `</b></div>`).join("")
     : `<div class="hrow"><span>${T("observer")}</span><b>${T("no data")}</b></div>`)
     + (fix ? `<div class="hrow"><span>${E(fix[0])}</span><b><span class="mono">${E(fix[1])}</span>` +
              ` <button class="chip-btn" type="button" data-copy="${E(fix[1])}">${T("copy")}</button></b></div>` : "");

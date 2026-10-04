@@ -1936,5 +1936,14 @@
  "{project}: an agent's run read a key from a .env": "{project}: запуск агента взял ключ из .env",
  "An agent's run read a key from a .env": "Запуск агента взял ключ из .env",
  "An agent's secrets outside the vault": "Секреты агента вне хранилища",
- "Secret written into agent memory": "Секрет записан в память агента"
+ "Secret written into agent memory": "Секрет записан в память агента",
+ "memory embeddings": "эмбеддинги памяти",
+ "nothing leaves this machine": "ничего не уходит с этой машины",
+ "texts of {n} projects may go to {model}; confidential, workflow text and agents' queries never leave": {
+  "few": "тексты {n} проектов могут уходить в {model}; конфиденциальное, workflow и запросы агентов не уходят никогда",
+  "many": "тексты {n} проектов могут уходить в {model}; конфиденциальное, workflow и запросы агентов не уходят никогда",
+  "one": "тексты {n} проекта могут уходить в {model}; конфиденциальное, workflow и запросы агентов не уходят никогда",
+  "other": "тексты {n} проекта могут уходить в {model}; конфиденциальное, workflow и запросы агентов не уходят никогда"
+ },
+ "policy refused, nothing leaves this machine: {reason}": "политика отклонена, ничего не уходит с машины: {reason}"
 }
