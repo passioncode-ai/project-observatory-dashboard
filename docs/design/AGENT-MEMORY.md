@@ -294,8 +294,11 @@ query until bindings exist. The rules, the reason codes and where each is enforc
 
 ## Not built yet
 
-- Local multilingual embeddings, chosen by measurement, with a separate index per model and a
-  distance floor calibrated for each, so the vector arm can also say "nothing found".
+- Local multilingual embeddings. The per-model index exists (PB-137 N-005,
+  [VECTOR-NAMESPACES.md](VECTOR-NAMESPACES.md)): one namespace per pinned model identity, the
+  old OpenAI index quarantined as `legacy`, and a resumable backfill that never activates.
+  No local model is admitted yet: the 2026-10-04 measurement found good ranking but no
+  cosine floor that can say "nothing found" (N-004). The lexical arm keeps deciding abstention.
 - Per-caller access bindings: **decided** (PB-137 N-007, [ACCESS-BINDING.md](ACCESS-BINDING.md)).
   Identity comes from the transport, stdio is the operator's local agent and nothing more, and
   everything else is denied by default. Not enforced yet (N-008). Read scopes by classification
