@@ -1096,6 +1096,9 @@ def test_or_rotation_creates_and_delivers_before_deleting() -> None:
                               "limit": 10, "usage": 3}]}
         if path == "/keys" and payload:
             return {"data": {"hash": "h-new"}, "key": "sk-or-v1-" + "n" * 40}
+        # The door reads an issued key by the hash its ledger recorded (GET /keys/{hash}).
+        if path == "/keys/h-old" and method is None and payload is None:
+            return {"data": {"name": "fabric-agent", "hash": "h-old", "limit": 10, "usage": 3}}
         return {"data": {}}
     m._request = fake
     rc = m.cmd_rotate("fabric-agent", leaked=False)

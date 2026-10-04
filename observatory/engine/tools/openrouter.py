@@ -328,7 +328,8 @@ def _all_keys(admin: str, include_disabled: bool = True) -> list[dict]:
         if len(page) < PAGE:
             return rows
         offset += len(page)
-    raise RuntimeError(f"the provider listed more than {PAGES_MAX} pages of keys; refusing a partial answer")
+    raise RuntimeError(f"the provider listed more than {PAGES_MAX} pages of keys; refusing a partial answer — "
+                       "re-issue the key through this door, or record its hash in the ledger, so it is read by hash")
 
 
 def find_key(admin: str, name: str) -> dict | None:
@@ -683,7 +684,7 @@ def cmd_ping() -> int:
         try:
             # One page proves the provisioning key is alive; the account can hold far more keys
             # than any listing should walk (more than 20 000 on 2026-10-04).
-            first = _request(f"/keys?include_disabled=true&offset=0", key).get("data", [])
+            first = _request("/keys?include_disabled=true&offset=0", key).get("data", [])
             more = len(first) >= PAGE
             print(f"  admin/{label}: alive, {len(first)}{'+' if more else ''} key(s) at the provider")
             mine = {n for n, r in doc["issued"].items() if r["account"] == label}
