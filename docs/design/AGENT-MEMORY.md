@@ -282,6 +282,11 @@ gains it, these tools are what its schemas are written from.
 
 ## Not built yet
 
+- **Which text may leave the machine** is decided (PB-137 N-002) and not enforced yet. A
+  remote embedding model needs a recorded per-project consent that names the provider.
+  `confidential` text never leaves, and a query is exported only under a context the server
+  derived. Contract, rules and reason codes: [EMBEDDING-POLICY.md](EMBEDDING-POLICY.md).
+  Enforcement at the indexer, the query path and the worker is N-003.
 - Local multilingual embeddings, chosen by measurement, with a separate index per model and a
   distance floor calibrated for each, so the vector arm can also say "nothing found".
 - Per-caller access bindings, read scopes by classification and redaction on output, needed
