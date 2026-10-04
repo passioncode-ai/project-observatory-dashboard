@@ -1,0 +1,127 @@
+{
+  "schema": "verification/1",
+  "base_commit": "fb0350d081f2af53d5a18fa1dae67836774cf047",
+  "source_scope": "credential readiness flag only; execution-client obedience not accepted",
+  "checks": [
+    {
+      "command": "Credentials class before source repair",
+      "exit": 1,
+      "status": "EXPECTED_FAIL",
+      "cases": 8,
+      "failures": 3,
+      "receipt": "regression-red.txt"
+    },
+    {
+      "command": "TMPDIR canonical; workflow_memory suite after repair",
+      "exit": 0,
+      "status": "PASS",
+      "cases": 63
+    },
+    {
+      "command": "python -m unittest discover -s tests -v",
+      "exit": 0,
+      "status": "PASS",
+      "cases": 124
+    },
+    {
+      "command": "python -m observatory.cli full check (default parallel timeout)",
+      "exit": 1,
+      "status": "FAIL_TIMEOUT",
+      "suite_count": 210,
+      "passed": 204,
+      "timed_out": [
+        "tests/test_dashboard_render.py",
+        "tests/test_workspace.py",
+        "tests/test_agent_plugin.py",
+        "tests/test_backup_vault.py",
+        "tests/test_interop.py",
+        "tests/test_conformance_receipt.py"
+      ]
+    },
+    {
+      "command": "full check --suite <each timed-out suite> --jobs 1 --timeout 600",
+      "exit": 0,
+      "status": "PASS",
+      "suites": [
+        {
+          "file": "tests/test_backup_vault.py",
+          "seconds": 27.78,
+          "exit": 0
+        },
+        {
+          "file": "tests/test_dashboard_render.py",
+          "seconds": 11.88,
+          "exit": 0
+        },
+        {
+          "file": "tests/test_workspace.py",
+          "seconds": 24.41,
+          "exit": 0
+        },
+        {
+          "file": "tests/test_agent_plugin.py",
+          "seconds": 13.32,
+          "exit": 0
+        },
+        {
+          "file": "tests/test_interop.py",
+          "seconds": 20.3,
+          "exit": 0
+        },
+        {
+          "file": "tests/test_conformance_receipt.py",
+          "seconds": 36.97,
+          "exit": 0
+        }
+      ]
+    },
+    {
+      "command": "python tools/update_inventory.py --check",
+      "exit": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "python -m compileall -q store/workflow.py tests/test_workflow_memory.py",
+      "exit": 0,
+      "status": "PASS",
+      "python": "3.14.7"
+    },
+    {
+      "command": "python docs/site/check.py --self-test",
+      "exit": 0,
+      "status": "PASS",
+      "negative_probes": 15
+    },
+    {
+      "command": "uv build --wheel; python tools/check_package.py candidate.whl",
+      "exit": 0,
+      "status": "PASS",
+      "runtime_files": 515,
+      "archive_files": 522
+    },
+    {
+      "command": "public privacy tree + history --history-ref HEAD",
+      "exit": 0,
+      "status": "PASS",
+      "findings": 0
+    },
+    {
+      "command": "maintainer private-identifier scan of task-owned files against reviewed released baseline",
+      "exit": 0,
+      "status": "PASS",
+      "scope": "task-owned source/docs/receipts only; not all historical blobs"
+    }
+  ],
+  "independent_review": {
+    "actor": "research_architecture",
+    "scope": "source + stored red receipt; no independent test rerun",
+    "verdict": "bounded source change accepted"
+  },
+  "limitations": [
+    "Original full gate exited 1; isolated retries do not rewrite that receipt.",
+    "Credential declaration/accept transaction race not reproduced or fixed.",
+    "Readiness flag does not itself enforce downstream executor behavior.",
+    "Hosted OS/Python matrix, merge/release/install and live provider/host acceptance NOT_RUN.",
+    "Full maintainer private-identifier history scan has baseline findings; draft candidate is not integration/release approval."
+  ]
+}

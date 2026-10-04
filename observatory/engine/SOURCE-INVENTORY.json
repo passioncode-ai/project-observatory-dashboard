@@ -751,8 +751,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "1e65b0037730c5774ac9565be94c033a1a0b6ae1acf326cf87594d14a84e5031",
-      "bytes": 11910,
+      "export_sha256": "92e4b9f5660c018c65a4f257803f004497048379da9515eb83f162d7fd27be86",
+      "bytes": 12111,
       "upstream_modified": true
     },
     {
@@ -1526,8 +1526,8 @@
       "path": "store/workflow.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "dc6f7816773a77d2132636321379631ed77a9edd15da0fb63dd9c48de9c81b2d",
-      "bytes": 78203
+      "export_sha256": "9f2a54c9e76667e62e32a251ff94fa8fb22a08a5521034012bc4bdb22591061d",
+      "bytes": 78301
     },
     {
       "path": "store_faults.py",
@@ -3209,8 +3209,8 @@
       "path": "tests/test_workflow_memory.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bc7938884d4aa27a158d39187331527d7ab94d70d395023534a89abb9f945e8c",
-      "bytes": 54793
+      "export_sha256": "0b09f6926668b3d93e9d36b8dc0c47915115b7dbab37c901269794762456f874",
+      "bytes": 56875
     },
     {
       "path": "tests/test_workspace.py",

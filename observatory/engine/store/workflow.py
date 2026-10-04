@@ -419,10 +419,13 @@ def _survey_credentials(project: str) -> dict:
 
 
 def _blocking(states: list[dict]) -> bool:
-    """True when the next executor cannot run a declared step: a key that is not
-    in the vault. `env-only` blocks too — continuing on it would carry a breach
-    of the rule into another session."""
-    return any(s["state"] in ("missing", "env-only") for s in states)
+    """Continuation needs a verified vault slot for every declared credential.
+
+    An unreadable inventory is unknown, not missing, but neither state proves
+    that the executor can run. Only a fresh `vault` observation opens this gate;
+    ownership may still transfer so a successor can repair access.
+    """
+    return any(s.get("state") != "vault" for s in states)
 
 
 def executor_shape(raw: Any, field: str = "executor") -> dict[str, str]:

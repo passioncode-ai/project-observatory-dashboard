@@ -1,0 +1,44 @@
+test_a_handoff_says_where_each_key_is (__main__.Credentials.test_a_handoff_says_where_each_key_is) ... ok
+test_a_value_is_never_a_credential_address (__main__.Credentials.test_a_value_is_never_a_credential_address) ... ok
+test_acceptance_reads_the_vault_again (__main__.Credentials.test_acceptance_reads_the_vault_again) ... ok
+test_an_unreadable_vault_is_unknown_not_missing (__main__.Credentials.test_an_unreadable_vault_is_unknown_not_missing) ... FAIL
+test_no_declared_credentials_does_not_require_vault_access (__main__.Credentials.test_no_declared_credentials_does_not_require_vault_access) ... ok
+test_reader_failure_blocks_without_exposing_exception_text (__main__.Credentials.test_reader_failure_blocks_without_exposing_exception_text) ... FAIL
+test_redaction_names_the_slot_a_value_lives_in (__main__.Credentials.test_redaction_names_the_slot_a_value_lives_in) ... ok
+test_unknown_credentials_block_handoff_and_acceptance (__main__.Credentials.test_unknown_credentials_block_handoff_and_acceptance) ... FAIL
+
+======================================================================
+FAIL: test_an_unreadable_vault_is_unknown_not_missing (__main__.Credentials.test_an_unreadable_vault_is_unknown_not_missing)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<checkout>/observatory/engine/tests/test_workflow_memory.py", line 795, in test_an_unreadable_vault_is_unknown_not_missing
+    self.assertTrue(latest["credentialsMissing"],
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                    "an unreadable vault must not authorize continuation")
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true : an unreadable vault must not authorize continuation
+
+======================================================================
+FAIL: test_reader_failure_blocks_without_exposing_exception_text (__main__.Credentials.test_reader_failure_blocks_without_exposing_exception_text)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<checkout>/observatory/engine/tests/test_workflow_memory.py", line 819, in test_reader_failure_blocks_without_exposing_exception_text
+    self.assertTrue(latest["credentialsMissing"])
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_unknown_credentials_block_handoff_and_acceptance (__main__.Credentials.test_unknown_credentials_block_handoff_and_acceptance)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<checkout>/observatory/engine/tests/test_workflow_memory.py", line 801, in test_unknown_credentials_block_handoff_and_acceptance
+    self.assertTrue(h["credentialsMissing"])
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.299s
+
+FAILED (failures=3)
+
+EXIT_CODE=1
