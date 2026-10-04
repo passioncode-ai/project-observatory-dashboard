@@ -296,8 +296,10 @@ query until bindings exist. The rules, the reason codes and where each is enforc
 
 - Local multilingual embeddings, chosen by measurement, with a separate index per model and a
   distance floor calibrated for each, so the vector arm can also say "nothing found".
-- Per-caller access bindings, read scopes by classification and redaction on output, needed
-  before any caller other than the local operator's agents.
+- Per-caller access bindings: **decided** (PB-137 N-007, [ACCESS-BINDING.md](ACCESS-BINDING.md)).
+  Identity comes from the transport, stdio is the operator's local agent and nothing more, and
+  everything else is denied by default. Not enforced yet (N-008). Read scopes by classification
+  (N-009) and redaction on output (N-012) follow.
 - An MCP transport other than stdio (Streamable HTTP on loopback, as a `fabric-service`).
 
 They are rows OBS-04 to OBS-06 in the [backlog](../backlog.md). Search (OBS-03) and the
