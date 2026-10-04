@@ -185,6 +185,28 @@ def test_agent_workflows_reach_the_operator() -> None:
           str(health.get("handoffs_waiting")))
 
 
+def test_the_embedding_policy_reaches_the_operator() -> None:
+    """OBS-33: whether memory text may leave the machine is on the Health page, the
+    same read-only answer `full doctor` gives, and the page renders it with the
+    command that shows the consents."""
+    d, conn = fixture_db()
+    conn.close()
+    sys.path.insert(0, str(ROOT / "dashboard"))
+    import importlib
+    import paths
+    importlib.reload(paths)
+    import build_dashboard
+    importlib.reload(build_dashboard)
+    policy = build_dashboard.from_store()["health"].get("embedding_policy") or {}
+    check("the health data carries the embedding policy", policy.get("state") == "local-only",
+          str(policy)[:200])
+    check("with the command a person runs to see it",
+          policy.get("command") == "project-observatory full embedding-policy show", str(policy)[:200])
+    src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
+    check("and the page renders a row for it with a copy button",
+          'T("memory embeddings")' in src and "data-copy=\"${E(c)}\"" in src)
+
+
 def written_and_never_read(root: pathlib.Path) -> list[str]:
     """Tables with a writer and no reader outside the file that writes them.
 
@@ -260,6 +282,7 @@ if __name__ == "__main__":
                test_the_agent_receives_the_meaning_not_only_the_numbers,
                test_a_registry_proposal_reaches_the_operator,
                test_agent_workflows_reach_the_operator,
+               test_the_embedding_policy_reaches_the_operator,
                test_no_table_is_written_and_never_read,
                test_the_rule_catches_a_planted_dead_table,
                test_the_computed_and_unconsumed_field_is_gone):

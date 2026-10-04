@@ -466,8 +466,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "3f8934c18f862a09cf91c28b5d6b78011c0f5084c4c4080f21254b8bfadb92a3",
-      "bytes": 246706,
+      "export_sha256": "fdb520fb773c7cffeafdfd57393253e1fbdfa05ce5782bf5213789c1b51f3971",
+      "bytes": 248385,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -491,15 +491,15 @@
       "path": "dashboard/locales/en.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4c3ac2365ee0d53f5a98217cd9675ed4e91356c7bad4c029c304757ec16df09b",
-      "bytes": 24275
+      "export_sha256": "23938757a99417cb6ac847a4f3f684c032a42454bb3d48f909f98346d58491c5",
+      "bytes": 24612
     },
     {
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c855ba6df5410760816bebef9216bcc0dc3fdec7207b7b397fa1e60383b1c5ec",
-      "bytes": 140732
+      "export_sha256": "cbc992a9bd292cb2e5010678b2d9fbb321d408d93504a76ce8091a7c93ab7d7d",
+      "bytes": 141918
     },
     {
       "path": "dashboard/machine_page.py",
@@ -780,8 +780,8 @@
       "path": "embedding_policy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "db6c90dc08aa6acab4951efe40f9e5f02ee050fc32dd023eef7b658f6ec19b82",
-      "bytes": 16736
+      "export_sha256": "3c5de5a302eab7dbd25fc74c752cc858baef6b8f765546ac4f8601b6b84850a5",
+      "bytes": 16892
     },
     {
       "path": "engine_update.py",
@@ -2090,8 +2090,8 @@
       "path": "tests/test_dead_data.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "63e78b3c67d854fd5c29bc025d87fa6599ca2f99265cb43733cc1b195e0c31fb",
-      "bytes": 13146
+      "export_sha256": "23bd1b48bc2334b4bff0e51fe39b8601659238563a25efff033ec2e74356014a",
+      "bytes": 14286
     },
     {
       "path": "tests/test_degradations.py",
@@ -2139,8 +2139,8 @@
       "path": "tests/test_embedding_enforcement.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2dd29c4ea4c886bab0364484233ee20a9a4e039a2bfd218aca569ae90d689458",
-      "bytes": 20014
+      "export_sha256": "bee6ba4a180c253d0205e331c0b0e6d1d1f890ce6b6155d160d6bea5be06407e",
+      "bytes": 20364
     },
     {
       "path": "tests/test_embedding_policy.py",

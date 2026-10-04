@@ -30,6 +30,17 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "agent"))
 sys.path.insert(0, str(ROOT / "tests"))
 
+#: Every temporary workspace this suite made, removed when the module finishes: they
+#: hold a store and a config each, and 279 were once left behind on a nearly full disk.
+_MADE: list[pathlib.Path] = []
+
+
+def tearDownModule() -> None:
+    import shutil
+    for path in _MADE:
+        shutil.rmtree(path, ignore_errors=True)
+
+
 _CACHED = ("survey", "providers", "store.indexer", "store.ledger", "store.db", "store", "paths",
            "embedding_policy", "configuration", "textkeys")
 
@@ -39,6 +50,7 @@ def fresh_workspace():
     # Resolved: on macOS the temp directory sits behind the /var symlink, and the
     # engine's atomic writer refuses a path through a symbolic link.
     home = pathlib.Path(tempfile.mkdtemp(prefix="observatory-embed-")).resolve()
+    _MADE.append(home)
     os.environ["OBSERVATORY_HOME"] = str(home)
     os.environ["OBSERVATORY_DB"] = str(home / "store" / "observatory.db")
     # The sandbox may pin OBSERVATORY_STATE; the applied-revision record lives

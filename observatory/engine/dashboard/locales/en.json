@@ -609,5 +609,9 @@
  "{n} known secret values were written into agent memory": {
   "one": "{n} known secret value was written into agent memory",
   "other": "{n} known secret values were written into agent memory"
+ },
+ "texts of {n} projects may go to {model}; confidential, workflow text and agents' queries never leave": {
+  "one": "texts of {n} project may go to {model}; confidential, workflow text and agents' queries never leave",
+  "other": "texts of {n} projects may go to {model}; confidential, workflow text and agents' queries never leave"
  }
 }
