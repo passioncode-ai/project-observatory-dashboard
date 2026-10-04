@@ -44,9 +44,14 @@ body disagree it answers 400 (`-32020`). The SDK client sends all of this itself
 
 ## What this decision leaves to N-016
 
-- **Authentication.** Every HTTP request presents a bearer. The server computes its SHA-256
-  and resolves it to a binding with `access_binding.resolve` (N-007). A request without a
-  matching binding is refused before any tool runs. stdio stays `local:stdio`.
+- **Authentication.** Every HTTP request presents a bearer. The enforcement it plugs into
+  exists since N-008 ([ACCESS-BINDING.md](ACCESS-BINDING.md#enforcement-n-008)):
+  - the HTTP process calls `memory_access.serve_http()`, so nothing inherits the stdio
+    default;
+  - each request runs inside `memory_access.channel(memory_access.http_channel(bearer=…,
+    fabric_projects=<X-Fabric-Projects>))`;
+  - every tool then asks `memory_access`, which hashes the bearer, resolves the binding and
+    refuses without one before any handler runs. stdio stays `local:stdio`.
 - **Cancellation** is the client closing the response stream (2026-07-28). Long work stays a
   `fabric.job`, as today.
 - **Rate limits** are not a transport feature of this SDK. N-016 sets one per binding and says

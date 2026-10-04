@@ -524,7 +524,8 @@ def _workflow_open(conn: sqlite3.Connection, workflow_id: str | None) -> bool:
 
 def live_count(conn: sqlite3.Connection, project_id: str | None = None,
                states: tuple[str, ...] = ("supported", "contested", "observed",
-                                          "proposed")) -> int:
+                                          "proposed"),
+               classes: tuple[str, ...] | None = None) -> int:
     """How many live records the scope holds, ignoring any limit.
 
     A reader that returns fifty of a hundred and thirteen and reports `count: 50`
@@ -543,12 +544,25 @@ def live_count(conn: sqlite3.Connection, project_id: str | None = None,
         args.append(project_id)
     sql += f" AND l.state IN ({','.join('?' * len(states))})"
     args += list(states)
+    sql, args = _only_classes(sql, args, classes)
     return conn.execute(sql, args).fetchone()[0]
+
+
+def _only_classes(sql: str, args: list, classes: tuple[str, ...] | None) -> tuple[str, list]:
+    """Keep only records of these classification values (a binding's visible set,
+    `memory_access.visible_classes`). None keeps every class; an empty tuple keeps
+    none, so `total` and the page agree with what the reader may see."""
+    if classes is None:
+        return sql, args
+    if not classes:
+        return sql + " AND 0", args
+    return sql + f" AND l.classification IN ({','.join('?' * len(classes))})", [*args, *classes]
 
 
 def live(conn: sqlite3.Connection, project_id: str | None = None,
          states: tuple[str, ...] = ("supported", "contested", "observed", "proposed"),
-         limit: int = 100, cursor: str | None = None) -> list[dict]:
+         limit: int = 100, cursor: str | None = None,
+         classes: tuple[str, ...] | None = None) -> list[dict]:
     """Current revisions, tombstoned records excluded.
 
     Conflicting records are returned TOGETHER: a `contested` row appears beside
@@ -567,6 +581,7 @@ def live(conn: sqlite3.Connection, project_id: str | None = None,
         args.append(project_id)
     sql += f" AND l.state IN ({','.join('?' * len(states))})"
     args += list(states)
+    sql, args = _only_classes(sql, args, classes)
     # The cursor's key is the PAIR `(created_at, memory_id)`, because
     # `created_at` is second-resolution and therefore not unique: two records
     # written in the same second would make a cursor over the timestamp alone

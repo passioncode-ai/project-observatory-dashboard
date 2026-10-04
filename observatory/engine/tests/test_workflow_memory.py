@@ -792,6 +792,50 @@ class Credentials(WorkflowCase):
         self.assertFalse(got["credentialsMissing"], "the key was put in the vault meanwhile")
         self.assertEqual(got["credentials"][0]["state"], "vault")
 
+    def _racing_reader(self, wf: dict, times: int):
+        """A vault read during which the previous executor, still holding the lease,
+        writes a checkpoint declaring a different key — the window between the
+        acceptance's pre-transaction read and its write (PB-137 N-008)."""
+        base = vault_reader(slots=[("prod", "STRIPE_KEY")], env=["DB_URL"])
+        state = {"n": 0}
+
+        def read(project: str) -> dict:
+            if state["n"] < times:
+                state["n"] += 1
+                other = self.store.connect()
+                try:
+                    needs = self.NEEDS[1:2] if state["n"] % 2 else self.NEEDS[:1]
+                    W.checkpoint_write(other, owner=AGENT_A,
+                                       idempotency_key=f"key-race-{state['n']:04d}",
+                                       step_id="S2", status="in_progress",
+                                       body=body(credentials=needs),
+                                       workflow_id=wf["workflowId"],
+                                       lease_token=wf["leaseId"], redactor=redactor())
+                finally:
+                    other.close()
+            return base(project)
+        return read, state
+
+    def test_the_answer_carries_the_declaration_it_evaluated(self) -> None:
+        wf = self.start(body=body(credentials=self.NEEDS[:1]))
+        h = self.handoff(wf, credential_reader=vault_reader())
+        reader, state = self._racing_reader(wf, times=1)
+        got = self.accept(h["handoffId"], credential_reader=reader)
+        declared = [c["name"] for c in got["checkpoint"]["body"]["credentials"]]
+        self.assertEqual(declared, ["DB_URL"], "the race wrote a new checkpoint")
+        self.assertEqual([c["name"] for c in got["credentials"]], declared,
+                         "the credentials returned must be the checkpoint's in force")
+        self.assertEqual(state["n"], 1)
+
+    def test_a_declaration_that_keeps_moving_accepts_nothing(self) -> None:
+        wf = self.start(body=body(credentials=self.NEEDS[:1]))
+        h = self.handoff(wf, credential_reader=vault_reader())
+        reader, _ = self._racing_reader(wf, times=10)
+        with self.assertRaises(W.DeclarationMoved):
+            self.accept(h["handoffId"], credential_reader=reader)
+        self.assertEqual(W.handoff_get(self.conn, h["handoffId"])["status"], "offered",
+                         "nothing was accepted")
+
     def test_an_unreadable_vault_is_unknown_not_missing(self) -> None:
         wf = self.start(body=body(credentials=self.NEEDS[:1]))
         latest = W.checkpoint_latest(self.conn, wf["workflowId"],

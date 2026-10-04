@@ -416,6 +416,15 @@ def from_store() -> dict:
         except Exception as exc:                                                     # noqa: BLE001
             out["health"]["embedding_policy"] = {"state": "unknown",
                                                  "reason": f"{type(exc).__name__}"}
+        # MEMORY ACCESS (PB-137 N-008): who besides the local stdio agent may reach
+        # memory over HTTP, read-only and by name — the answer `full doctor` gives.
+        try:
+            import memory_access
+            out["health"]["access_bindings"] = memory_access.status(
+                paths.CONFIG, Path(paths.STATE))
+        except Exception as exc:                                                     # noqa: BLE001
+            out["health"]["access_bindings"] = {"state": "unknown",
+                                                "reason": f"{type(exc).__name__}"}
         # AGENT WORKFLOWS, so the operator sees what agents are carrying between
         # sessions: how many are open, and how many handoffs wait for a session
         # to accept them (an offer nobody takes lapses, and the work stalls
@@ -2062,6 +2071,18 @@ if (H.embedding_policy) {
     hb.push([T("memory embeddings"), T("nothing leaves this machine"), show]);
   else
     hb.push([T("memory embeddings"), T("policy refused, nothing leaves this machine: {reason}", {reason: EP.reason || "?"}), show]);
+}
+// Who may reach memory besides the local agent (N-008), with the command that lists them.
+if (H.access_bindings) {
+  const AB = H.access_bindings, show = fullCommand("access-binding show");
+  if (AB.state === "ok" && AB.inForce)
+    hb.push([T("memory access"), T("local agent, and bindings in force: {n} ({who})",
+      {n: AB.inForce, who: (AB.principals || []).join(", ")}), show]);
+  else if (AB.state === "ok" || AB.state === "absent")
+    hb.push([T("memory access"), T("only the local agent"), show]);
+  else
+    hb.push([T("memory access"), T("bindings refused, only the local agent is served: {reason}",
+      {reason: AB.reason || "?"}), show]);
 }
 if (H.workflows_open) hb.push([T("agent workflows open"), H.workflows_open]);
 if (H.handoffs_waiting) hb.push([T("handoffs waiting for a session"), H.handoffs_waiting]);

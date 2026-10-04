@@ -40,6 +40,7 @@ import configuration
 import credential_shape
 import interop
 import jobs
+import memory_access
 
 #: The version file this server process was started from (lifecycle LC-10). A
 #: call after an update replaced it answers `stale-server` instead of running
@@ -244,6 +245,13 @@ class InteropServer(MCPServer):
                     _meta={interop.INTEROP_KEY: {"protocol": interop.PROTOCOL}}))
         return tools
 
+    async def read_resource(self, uri: Any, context: Any = None) -> Any:
+        """Resources are local-only, like every tool outside the memory family."""
+        refused = memory_access.local_only(f"resource {uri}")
+        if refused is not None:
+            raise PermissionError(json.dumps(refused))
+        return await super().read_resource(uri, context)
+
     async def list_tools(self) -> list[Tool]:
         own = {t.name for t in self.interop_tools()}
         base = [t for t in await super().list_tools() if t.name not in own]
@@ -254,6 +262,13 @@ class InteropServer(MCPServer):
         stale = stale_answer()
         if stale is not None:
             return stale
+        # ONE DOOR FOR EVERY TOOL (access-bindings/1, PB-137 N-008). The memory tools
+        # authorize their own target inside; everything else serves the local stdio
+        # agent only, and a binding is refused here before any handler runs.
+        if name not in memory_access.TOOLS:
+            refused = memory_access.local_only(name)
+            if refused is not None:
+                return CallToolResult(content=[_text(refused)], is_error=True)
         is_job_tool = self._job_tools and name in (interop.JOB_GET, interop.JOB_CANCEL)
         is_assistant = name == "observatory_assistant_ask"
         if name not in self._definitions and not is_job_tool and not is_assistant:
