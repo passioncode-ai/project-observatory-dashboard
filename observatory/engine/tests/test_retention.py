@@ -158,7 +158,7 @@ def test_the_purge_attests_or_reports_incomplete() -> None:
     importlib.util.spec_from_file_location("ix_t", ROOT / "store/indexer.py").loader.exec_module(ix)
     import providers, hashlib
     dims = providers.config()["embedding"]["dims"]
-    providers.embed = lambda texts, log=None: {
+    providers.embed = lambda texts, log=None, **_kw: {
         "vectors": [[(hashlib.sha256(t.encode()).digest()[i % 32] / 255.0) - 0.5
                      for i in range(dims)] for t in texts],
         "tokens": 1, "cost": 0.0, "model": "stub", "cost_is_estimate": True}

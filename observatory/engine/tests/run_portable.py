@@ -124,6 +124,8 @@ BOUNDARY += ('textkeys',)
 BOUNDARY += ('secret_header',)
 # embedding-policy/1: which memory text may leave for a remote embedding model (PB-137 N-002).
 BOUNDARY += ('embedding_policy',)
+# embedding-policy/1 enforced at the provider, the indexer, the query path and the CLI (N-003).
+BOUNDARY += ('embedding_enforcement',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -138,6 +140,8 @@ HELPERS += (
     'watched_repo.py',
     # The accepted embedding-policy/1 decision cases (PB-137 N-002).
     'embedding_policy_cases.json',
+    # Grants a synthetic consent so vector-half suites still reach the provider stub.
+    'embedding_consent.py',
 )
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', 'tools')
 ROOT_FILES = (

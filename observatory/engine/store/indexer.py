@@ -28,6 +28,7 @@ from store import db as store_db
 from store import ledger
 import store_faults
 import providers
+import embedding_policy
 
 #: One owner, in the store's own vocabulary. This file used to declare its own
 #: constant while `store/ledger.py` stamped the literal `1` — see
@@ -94,7 +95,7 @@ def indexable(conn: sqlite3.Connection, memory_id: str, revision: int) -> sqlite
     `build_findings.py` all join on `memory_id`."""
     return conn.execute(
         "SELECT l.memory_id, l.revision, l.statement, l.why, l.project_id, l.state, l.kind,"
-        " l.body_json"
+        " l.body_json, l.classification, l.scope"
         " FROM ledger l LEFT JOIN tombstones t"
         "   ON t.memory_id = l.memory_id"
         " WHERE l.memory_id = ? AND l.revision = ? AND t.memory_id IS NULL",
@@ -131,11 +132,29 @@ def index_batch(conn: sqlite3.Connection, rows: list[sqlite3.Row], have_vec: boo
     # docs/design/AGENT-MEMORY.md rules out until a local embedding model indexes them. They
     # are found by workflow id, and by the lexical index for related records.
     embedded = [i for i, r in enumerate(rows) if _embeddable(r)]
+    # THE EMBEDDING POLICY (PB-137 N-003, docs/design/EMBEDDING-POLICY.md). A text
+    # leaves the machine only under a remote verdict, one project per request. A
+    # record the policy keeps local is a PERMANENT exclusion for this model: it
+    # gets its lexical entry and its outbox row is consumed, so the queue drains;
+    # a later local model reaches it from the ledger (N-005), not from this queue.
+    # Only a provider failure on an AUTHORIZED batch keeps rows queued.
+    batches: dict[str, tuple] = {}
     if have_vec and embedded:
+        door = authorize(conn, [rows[i] for i in embedded])
+        for k, i in enumerate(embedded):
+            verdict = door[k]
+            if verdict.remote:
+                project = rows[i]["project_id"]
+                batches.setdefault(project, (verdict, []))[1].append(i)
+    embedded = [i for _p, (_v, idx) in batches.items() for i in idx]
+    if embedded:
+        vectors = {}
         try:
-            res = providers.embed([text_of(rows[i]) for i in embedded])
-            got, cost, tokens = res["vectors"], res["cost"], res["tokens"]
-            vectors = {i: got[k] for k, i in enumerate(embedded)}
+            for _project, (verdict, idx) in batches.items():
+                res = providers.embed([text_of(rows[i]) for i in idx], authorization=verdict)
+                got = res["vectors"]
+                cost += res["cost"]; tokens += res["tokens"]
+                vectors.update({i: got[k] for k, i in enumerate(idx)})
         except providers.ProviderError as exc:
             print(f"  embedding unavailable ({type(exc).__name__}: {exc});"
                   f" writing the lexical index only — these revisions stay QUEUED so a "
@@ -183,6 +202,57 @@ def index_batch(conn: sqlite3.Connection, rows: list[sqlite3.Row], have_vec: boo
                              (r["memory_id"], r["revision"], serialize_float32(vectors[i])))
             written += 1
     return written, cost, tokens, (vectors is not None or not have_vec or not embedded)
+
+
+_POLICY_NOTICE: set[str] = set()
+
+
+def load_policy() -> tuple:
+    """(policy or None, configured model). None means the policy is refused —
+    every verdict is then local — and the reason is printed once per run."""
+    try:
+        policy = embedding_policy.current()
+    except embedding_policy.PolicyError as exc:
+        if str(exc) not in _POLICY_NOTICE:
+            _POLICY_NOTICE.add(str(exc))
+            print(f"  embedding policy refused ({exc}); nothing leaves this machine — "
+                  f"see {embedding_policy.POLICY_FILE}", file=sys.stderr)
+        policy = None
+    return policy, embedding_policy.configured_model()
+
+
+_UNSET = object()
+
+
+def authorize(conn: sqlite3.Connection, rows: list, *, policy=_UNSET, configured=None) -> list:
+    """One verdict per row: may its text leave for the configured model now?
+
+    Every row is judged on its CURRENT canonical revision: an older revision still
+    in the outbox, a record no longer live (stale, superseded, rejected, archived)
+    and anything embedding_policy keeps local all answer `local`. A policy that
+    cannot be read keeps everything local and says why, once per run."""
+    if policy is _UNSET:
+        policy, configured = load_policy()
+    out = []
+    for r in rows:
+        if policy is None:
+            out.append(embedding_policy.Verdict("local", "policy-invalid", 0))
+            continue
+        latest = conn.execute("SELECT max(revision) FROM ledger WHERE memory_id = ?",
+                              (r["memory_id"],)).fetchone()[0]
+        if latest != r["revision"]:
+            out.append(embedding_policy.Verdict("local", "not-current", policy.revision))
+            continue
+        if r["state"] not in LIVE_STATES:
+            out.append(embedding_policy.Verdict("local", "not-current", policy.revision))
+            continue
+        out.append(embedding_policy.for_record(policy, dict(r), configured=configured))
+    return out
+
+
+#: States whose text is current. `stale`, `superseded`, `rejected` and `archived`
+#: are history: they keep their lexical entry and never leave the machine.
+LIVE_STATES = frozenset({"proposed", "observed", "supported", "contested"})
 
 
 def _embeddable(row: sqlite3.Row) -> bool:
@@ -273,6 +343,25 @@ def cmd_index(conn: sqlite3.Connection, limit: int) -> int:
         (done_seqs if vectors_ok else held_seqs).extend(batch_seqs)
         batch, batch_seqs = [], []
 
+    # TWO LANES (PB-137 N-003). A row the embedding policy keeps local is batched
+    # apart from the rows that may leave, so a provider failure holds only the
+    # authorized rows for a retry; a policy exclusion is consumed like any row
+    # whose projection is complete. `index_batch` decides again inside — the lane
+    # is an ordering, not the authority.
+    local_batch: list = []
+    local_seqs: list[int] = []
+    policy, configured = load_policy()
+
+    def flush_local() -> None:
+        nonlocal batch, batch_seqs, local_batch, local_seqs
+        if not local_batch:
+            return
+        saved = (batch, batch_seqs)
+        batch, batch_seqs = local_batch, local_seqs
+        flush()
+        batch, batch_seqs = saved
+        local_batch, local_seqs = [], []
+
     for p in pending:
         row = indexable(conn, p["memory_id"], p["revision"])
         seqs.append(p["seq"])
@@ -280,11 +369,20 @@ def cmd_index(conn: sqlite3.Connection, limit: int) -> int:
             skipped += 1
             done_seqs.append(p["seq"])                                         
             continue
-        batch.append(row)
-        batch_seqs.append(p["seq"])
-        if len(batch) >= size:
-            flush()
+        leaves = have_vec and _embeddable(row) and \
+            authorize(conn, [row], policy=policy, configured=configured)[0].remote
+        if leaves:
+            batch.append(row)
+            batch_seqs.append(p["seq"])
+            if len(batch) >= size:
+                flush()
+        else:
+            local_batch.append(row)
+            local_seqs.append(p["seq"])
+            if len(local_batch) >= size:
+                flush_local()
     flush()
+    flush_local()
 
     # Checkpoint only what was actually handled, and only after the writes above
     # committed. An outbox row marked consumed before its projection landed is a

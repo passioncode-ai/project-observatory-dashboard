@@ -71,6 +71,8 @@ def fixture(rows: int = 2, *, committed_hours_ago: float = 0,
         conn.execute("INSERT INTO outbox (memory_id, revision, projection_version)"
                      " VALUES (?,?,?)", (f"mem:{i}", 1, version))
     conn.commit()
+    import embedding_consent
+    embedding_consent.grant("project:alpha")
     return d, conn
 
 
@@ -219,7 +221,7 @@ def test_the_indexer_degrades_to_lexical_when_the_ceiling_is_reached() -> None:
     # Not wedged: the queue drains as soon as the ceiling lifts, as the second
     # run below shows.
     check("the rows are HELD so a later run can embed them", left == 2, str(left))
-    ix.providers.embed = lambda texts, log=print: {
+    ix.providers.embed = lambda texts, log=print, **_kw: {
         "vectors": [[0.01] * 1536 for _ in texts], "cost": 0.0,
         "tokens": len(texts), "model": "stub", "cost_is_estimate": True}
     ix.cmd_index(conn, limit=10)

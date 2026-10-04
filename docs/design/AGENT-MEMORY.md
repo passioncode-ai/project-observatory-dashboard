@@ -280,13 +280,16 @@ These are protocol surface, **not Fabric capabilities**. The pinned Fabric contr
 memory capability family, and serving one would invent contract surface. When the contract
 gains it, these tools are what its schemas are written from.
 
+## What may leave the machine
+
+Nothing is sent to a remote embedding model without a per-project consent, given at a
+terminal with `full embedding-policy grant` (PB-137 N-002, N-003). `confidential` text,
+checkpoints, handoff packs and refused steps never leave, and neither does an agent's search
+query until bindings exist. The rules, the reason codes and where each is enforced are in
+[EMBEDDING-POLICY.md](EMBEDDING-POLICY.md).
+
 ## Not built yet
 
-- **Which text may leave the machine** is decided (PB-137 N-002) and not enforced yet. A
-  remote embedding model needs a recorded per-project consent that names the provider.
-  `confidential` text never leaves, and a query is exported only under a context the server
-  derived. Contract, rules and reason codes: [EMBEDDING-POLICY.md](EMBEDDING-POLICY.md).
-  Enforcement at the indexer, the query path and the worker is N-003.
 - Local multilingual embeddings, chosen by measurement, with a separate index per model and a
   distance floor calibrated for each, so the vector arm can also say "nothing found".
 - Per-caller access bindings, read scopes by classification and redaction on output, needed

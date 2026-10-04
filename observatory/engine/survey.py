@@ -979,7 +979,8 @@ COVERAGE = 0.4
 RETRIEVAL_WIDTH = 300
 
 
-def search(query: str, project_id: str | None = None, limit: int = 10) -> dict:
+def search(query: str, project_id: str | None = None, limit: int = 10, *,
+           authority: str = "caller-argument", classification: str | None = None) -> dict:
     """Recall over the narrative: by similarity where possible, lexically always.
 
     Two rules the contract makes non-negotiable, and both are visible in the
@@ -1003,8 +1004,31 @@ def search(query: str, project_id: str | None = None, limit: int = 10) -> dict:
     lexical_order: list[tuple[str, int]] = []
     try:
         have_vec = indexer.load_vec(conn)
-        # --- similarity, when the extension and a key are both there ----------
+        # --- the embedding policy decides first (PB-137 N-003) ----------------
+        # The query's words leave the machine only under a context the SERVER
+        # derived (`binding`, `operator-cli`) in one consented project. An MCP
+        # caller's arguments are `caller-argument`, so its query stays here and the
+        # lexical half answers; `degraded` says so. No budget check, no key read.
+        import embedding_policy
+        verdict = None
+        policy_now = None
         if have_vec:
+            try:
+                policy_now = embedding_policy.current()
+                verdict = embedding_policy.for_query(
+                    policy_now,
+                    {"project_id": project_id, "classification": classification,
+                     "authority": authority},
+                    configured=embedding_policy.configured_model())
+            except embedding_policy.PolicyError as exc:
+                verdict = embedding_policy.Verdict("local", "policy-invalid", 0)
+                degraded.append({"source": "embedding-policy", "reason": str(exc)})
+            if not verdict.remote:
+                degraded.append({"source": "vector",
+                                 "reason": f"embedding policy keeps this query on the machine "
+                                           f"({verdict.reason}); lexical only"})
+        # --- similarity, when the extension, a key and the policy allow it ---
+        if have_vec and verdict is not None and verdict.remote:
             try:
                 import providers
                 from sqlite_vec import serialize_float32
@@ -1019,12 +1043,23 @@ def search(query: str, project_id: str | None = None, limit: int = 10) -> dict:
                 stop = providers.check_budget()
                 if stop:
                     raise RuntimeError(f"spend guardrail reached — {stop}")
-                vec = providers.embed([query])["vectors"][0]
+                vec = providers.embed([query], authorization=verdict)["vectors"][0]
                 sql = ("SELECT v.memory_id, v.revision, v.distance FROM ("
                        "  SELECT memory_id, revision, distance FROM vec_notes"
                        "  WHERE embedding MATCH ? ORDER BY distance LIMIT ?) v")
+                configured = embedding_policy.configured_model()
                 for r in conn.execute(sql, (serialize_float32(vec), RETRIEVAL_WIDTH)):
                     key = (r["memory_id"], r["revision"])
+                    # A vector answers only for a record that may be embedded by
+                    # this model NOW, in the asked project: legacy vectors of a
+                    # project without consent, or under a revoked one, are not served.
+                    rec = conn.execute(
+                        "SELECT project_id, classification, scope, kind FROM ledger"
+                        " WHERE memory_id = ? AND revision = ?", key).fetchone()
+                    if rec is None or rec["project_id"] != project_id or not \
+                            embedding_policy.for_record(policy_now, dict(rec),
+                                                        configured=configured).remote:
+                        continue
                     vector_order.append(key)
                     hits[key] = {
                         "memoryId": r["memory_id"], "revision": r["revision"],
@@ -1032,7 +1067,7 @@ def search(query: str, project_id: str | None = None, limit: int = 10) -> dict:
             except Exception as exc:
                 degraded.append({"source": "vector",
                                  "reason": f"{type(exc).__name__}: {exc}"})
-        else:
+        elif not have_vec:
             degraded.append({"source": "vector",
                              "reason": "sqlite-vec is not loadable here"})
 
