@@ -792,7 +792,43 @@ class Credentials(WorkflowCase):
         latest = W.checkpoint_latest(self.conn, wf["workflowId"],
                                      credential_reader=vault_reader(blind=True))
         self.assertEqual(latest["credentials"][0]["state"], "unknown")
+        self.assertTrue(latest["credentialsMissing"],
+                        "an unreadable vault must not authorize continuation")
+
+    def test_unknown_credentials_block_handoff_and_acceptance(self) -> None:
+        wf = self.start(body=body(credentials=self.NEEDS[:1]))
+        h = self.handoff(wf, credential_reader=vault_reader(blind=True))
+        self.assertTrue(h["credentialsMissing"])
+        got = self.accept(h["handoffId"], credential_reader=vault_reader(blind=True))
+        self.assertEqual(got["credentials"][0]["state"], "unknown")
+        self.assertTrue(got["credentialsMissing"])
+        # Ownership may transfer so a successor can repair access, but the
+        # returned execution gate stays closed until a fresh read proves vault.
+        self.assertTrue(got["leaseId"])
+        latest = W.checkpoint_latest(self.conn, wf["workflowId"],
+                                     credential_reader=vault_reader(
+                                         slots=[("prod", "STRIPE_KEY")]))
         self.assertFalse(latest["credentialsMissing"])
+
+    def test_reader_failure_blocks_without_exposing_exception_text(self) -> None:
+        def unavailable(_project):
+            raise OSError("fixture detail must not appear in the response")
+        wf = self.start(body=body(credentials=self.NEEDS[:1]))
+        latest = W.checkpoint_latest(self.conn, wf["workflowId"],
+                                     credential_reader=unavailable)
+        self.assertTrue(latest["credentialsMissing"])
+        self.assertEqual(latest["credentials"][0]["state"], "unknown")
+        self.assertTrue(latest["degraded"])
+        self.assertNotIn("fixture detail", json.dumps(latest))
+
+    def test_no_declared_credentials_does_not_require_vault_access(self) -> None:
+        def forbidden(_project):
+            self.fail("an empty declaration must not inspect the vault")
+        wf = self.start()
+        latest = W.checkpoint_latest(self.conn, wf["workflowId"],
+                                     credential_reader=forbidden)
+        self.assertFalse(latest["credentialsMissing"])
+        self.assertEqual(latest["credentials"], [])
 
     def test_a_value_is_never_a_credential_address(self) -> None:
         bad = [{"project": "alpha-web", "name": SHAPED_KEY},

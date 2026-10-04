@@ -99,7 +99,9 @@ Assembled by the engine, immutable once written:
 
 1. `constraints`: the latest checkpoint's constraints, first and verbatim. Then
    `credentials`: each declared key's state (`vault`, `env-only`, `missing`, `unknown`) with
-   the command to use or store it, and `credentialsMissing`.
+   the command to use or store it, and `credentialsMissing`. Every declared key must be
+   verified as `vault` before continuation: `unknown` blocks too, while preserving its
+   distinction from `missing`. An empty declaration does not require vault access.
 2. `checkpoint`: the latest checkpoint, with its body.
 3. `git`: a fresh read of each git artifact's checkout — branch, a 12-character head and the
    paths that differ, never file contents. It is read through `safe_git`, so the checkout's
