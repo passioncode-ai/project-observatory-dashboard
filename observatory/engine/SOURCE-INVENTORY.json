@@ -2,6 +2,13 @@
   "format_version": 1,
   "files": [
     {
+      "path": "access_binding.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "782f6cf416c2586e6141a804fc9506397dde7c89868d019347d6928269ee5154",
+      "bytes": 15994
+    },
+    {
       "path": "activity.py",
       "source_sha256": "5ad6c1d24f1a6f84d53442730b51ac2d6d88ddc4fb5b92f3f279a215fea3fb52",
       "export_sha256": "33f6075aed982686c735f15c01fd7f74b8096e562a0968c3d4d22a435d7bca81",
@@ -541,6 +548,13 @@
       "upstream_modified": true,
       "export_sha256": "c4969509ec8f948d7ae38b34f17f95c67ee0bf9f9ab6aed102a634341239e00c",
       "bytes": 15724
+    },
+    {
+      "path": "defaults/access-binding.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "641e9db098027b6ed56919fd02136e2a8ad7c76566c0b876ba9fa812a700bcd1",
+      "bytes": 5110
     },
     {
       "path": "defaults/activity_tiers.json",
@@ -1564,6 +1578,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tests/access_binding_cases.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "0500a56145a493498c47e3fde5c6c9f7154f614f2077fc554fa6d8cce4187574",
+      "bytes": 21279
+    },
+    {
       "path": "tests/action_outcome_check.mjs",
       "source_sha256": null,
       "upstream_modified": true,
@@ -1698,8 +1719,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "ad01231eb562bd3b3502f11d9feff8be36f2ef15d40fab4b3ae512c271da5198",
-      "bytes": 16984,
+      "export_sha256": "aedd462e3ce6c5af40fc453fe0c300b9dc64683e1e311c46d1314781ca41a47b",
+      "bytes": 17229,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -1735,6 +1756,13 @@
       "upstream_modified": true,
       "export_sha256": "670724c73933bd2b94ca511ca097760e495f4819e22b198f2d313fa1599c89aa",
       "bytes": 8420
+    },
+    {
+      "path": "tests/test_access_binding.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "44c69dd6cf1770a65bfd40f987496fca4190c23a32aa2e0d800c789eeee1c915",
+      "bytes": 6336
     },
     {
       "path": "tests/test_accounts.py",
@@ -4045,7 +4073,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 514,
+  "file_count": 518,
   "excluded": [
     "git-history",
     "operator-registries",
