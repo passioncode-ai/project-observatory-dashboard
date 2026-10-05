@@ -5,6 +5,31 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.17.3 — 2026-10-05
+
+A patch release. It fixes the root cause behind the torn database copies of 0.17.0–0.17.2,
+found by the live verification on a maintainer's machine.
+
+### Fixed
+
+- **A copy of the store could be torn by any process writing to it** (OBS-37).
+  - The store's readers opened it `immutable` whenever its WAL was empty. Writers empty the
+    WAL at every checkpoint, so an empty WAL says nothing about whether someone is writing.
+    An immutable reader takes no locks.
+  - In an experiment, 12 copies out of 12 taken under a concurrent writer were torn. With
+    locks, 0 out of 12 were.
+  - On the maintainer's machine this refused the daily backup and the pre-update snapshot of
+    the first automatic update, though the live store was intact.
+  - A store is now read `immutable` only when no connection holds it (no `-wal` and no
+    `-shm`). Otherwise the reader takes the locks, which creates no file.
+- **An update refused for a moment waited a day.** The reason `full update` gives in its JSON
+  is now recorded. A transient one is retried the next hour: a torn or changed copy, a busy
+  lock, another update, a timeout.
+
+Installs at 0.17.0–0.17.2 take their pre-update snapshot with their own code, so on a busy
+machine their first automatic update can be refused a few times before one copy goes through.
+Nothing is changed by a refusal.
+
 ## 0.17.2 — 2026-10-05
 
 A patch release from the live verification of 0.17.0 and 0.17.1 on a maintainer's machine.

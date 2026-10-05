@@ -52,6 +52,16 @@ CHECK_EVERY = datetime.timedelta(hours=24)
 #: A check that could not look (network, rate limit, a timeout on a loaded machine) is
 #: tried again the next hour, not the next day.
 RETRY_UNDETERMINED = datetime.timedelta(hours=1)
+#: Why an update can be refused for a moment rather than for good: a copy torn or changed
+#: by a concurrent writer, a busy lock, another update. These are retried the next hour.
+TRANSIENT = ("integrity verification failed", "disk image is malformed", "changed during snapshot",
+             "is busy", "Another `full update --apply` is running", "TimeoutExpired")
+
+
+def _transient(record: dict) -> bool:
+    detail = str(record.get("detail") or "")
+    return record.get("result") in ("refused", "failed-rolled-back", "undetermined") and any(
+        marker in detail for marker in TRANSIENT)
 SNAPSHOT_EVERY = datetime.timedelta(hours=24)
 INTERVAL_SECONDS = 3600
 #: Exit codes of `full update` (engine_update.EXIT_*), named here so a change there is
@@ -267,7 +277,10 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
         return {"result": "waiting-for-person",
                 "detail": "the last automatic update could not roll back by itself; "
                           "`project-observatory full update` says what to do"}
-    every = RETRY_UNDETERMINED if (state.get("check") or {}).get("result") == "undetermined" else CHECK_EVERY
+    last_check, last_update = state.get("check") or {}, state.get("update") or {}
+    hourly = last_check.get("result") == "undetermined" or (
+        last_update.get("at") == last_check.get("at") and _transient(last_update))
+    every = RETRY_UNDETERMINED if hourly else CHECK_EVERY
     if not due(state, "check", every, at):
         return {"result": "not-due"}
     code, report, err = commands.full("update", "--check", timeout=600)
@@ -295,7 +308,8 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
     update = {"at": iso(at), "exit": code, "result": outcome, "from": config.VERSION,
               "to": report.get("version") or check.get("latest")}
     if code not in (UPDATE_OK, UPDATE_SERVICES):
-        update["detail"] = err or f"exit {code}"
+        # `full update` names its reason in the JSON it prints, not on stderr.
+        update["detail"] = (str(report.get("error") or "") or err or f"exit {code}")[:300]
         update["failures"] = int((state.get("update") or {}).get("failures") or 0) + 1
     state["update"] = update
     return {"result": outcome}
