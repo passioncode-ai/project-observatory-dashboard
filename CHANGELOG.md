@@ -5,6 +5,23 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.17.2 — 2026-10-05
+
+A patch release from the live verification of 0.17.0 and 0.17.1 on a maintainer's machine.
+
+### Fixed
+
+- **The maintenance job was throttled into timeouts.** It ran as a launchd `Background`
+  process with low-priority I/O. On a loaded machine (load average above 300) a
+  `full update --check` that takes 2 seconds by hand passed its 600-second limit. The job now
+  runs as a `Standard` process at nice 10. It is short and hourly.
+- **A check that could not look waited a whole day.** An undetermined check (network, rate
+  limit, timeout) is now tried again the next hour.
+- **A database that is not the workspace's own reached its backups root.** `backup_store`
+  exported whatever `OBSERVATORY_DB` named under the workspace's label, so three tiny copies of
+  another database pushed the real daily copies out of the rotation. The full snapshots kept
+  the data. A database outside `<home>/store` is now copied beside itself only.
+
 ## 0.17.1 — 2026-10-05
 
 A patch release. The first live run of the 0.17.0 maintenance job on a maintainer's machine

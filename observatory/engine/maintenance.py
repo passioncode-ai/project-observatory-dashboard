@@ -49,6 +49,9 @@ import backup_vault
 
 STATE_FILE = "maintenance.json"
 CHECK_EVERY = datetime.timedelta(hours=24)
+#: A check that could not look (network, rate limit, a timeout on a loaded machine) is
+#: tried again the next hour, not the next day.
+RETRY_UNDETERMINED = datetime.timedelta(hours=1)
 SNAPSHOT_EVERY = datetime.timedelta(hours=24)
 INTERVAL_SECONDS = 3600
 #: Exit codes of `full update` (engine_update.EXIT_*), named here so a change there is
@@ -264,7 +267,8 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
         return {"result": "waiting-for-person",
                 "detail": "the last automatic update could not roll back by itself; "
                           "`project-observatory full update` says what to do"}
-    if not due(state, "check", CHECK_EVERY, at):
+    every = RETRY_UNDETERMINED if (state.get("check") or {}).get("result") == "undetermined" else CHECK_EVERY
+    if not due(state, "check", every, at):
         return {"result": "not-due"}
     code, report, err = commands.full("update", "--check", timeout=600)
     check = {"at": iso(at), "exit": code}
@@ -471,8 +475,10 @@ class LaunchdSchedule:
             "WorkingDirectory": str(config.SOURCE),
             "StandardOutPath": str(logs / "maintain.log"),
             "StandardErrorPath": str(logs / "maintain.err"),
-            "ProcessType": "Background",
-            "LowPriorityIO": True,
+            # Not "Background" with LowPriorityIO: on a loaded machine that throttling
+            # stretched a 2-second `full update --check` past its 600-second limit (seen
+            # live, 2026-10-05). The pass is short and hourly; a nice value is enough.
+            "ProcessType": "Standard",
             "Nice": 10,
             "EnvironmentVariables": env,
             "Umask": 0o077,

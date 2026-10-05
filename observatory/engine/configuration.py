@@ -5,7 +5,7 @@ import os
 import re
 from pathlib import Path
 
-VERSION = "0.17.1"
+VERSION = "0.17.2"
 CONFIG_VERSION = 1
 WORKSPACE_VERSION = 1
 SOURCE = Path(__file__).resolve().parent
@@ -226,7 +226,7 @@ def load(base: Path | None = None) -> dict:
             raise ConfigurationError(f"Unknown storage setting: {key}")
         if not isinstance(value, str) or not Path(value).expanduser().is_absolute():
             raise ConfigurationError(f"Storage {key} must be an absolute path")
-    # UPDATES is optional and ignored by releases before 0.17.1.
+    # UPDATES is optional and ignored by releases before 0.17.2.
     updates = doc.get("updates", {})
     if not isinstance(updates, dict):
         raise ConfigurationError("Configuration updates must be an object")
