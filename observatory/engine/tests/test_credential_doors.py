@@ -1545,6 +1545,76 @@ def test_or_issue_refuses_a_name_that_already_exists() -> None:
           "caller's mistake, not the provider's)", rc == 2, str(rc))
 
 
+def test_or_issue_works_on_an_account_past_the_listing() -> None:
+    """An account holding more keys than the door will list could issue nothing at all.
+
+    The provisioning account also governs keys another system mints per user — more than
+    20 000 by 2026-10-05, past the PAGES_MAX listing — and a new name has no recorded hash,
+    so the uniqueness check paged to the limit and refused every issue. The listing it did
+    read and the ledger are still searched, a name found there is still refused, and an issue
+    past them goes ahead with what was not read named in its answer, the ledger and the
+    journal: once issued, the key is read by the hash recorded here, never by name.
+    """
+    m = orr()
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    m.ADMIN_STORE = d / "openrouter-admin"
+    m.ADMIN_STORE.mkdir(parents=True)
+    private_io.write(m.ADMIN_STORE / "example", "prov\n")
+    m.LEDGER = d / "ledger.json"
+    m.PAGES_MAX = 3
+    m.deliver = lambda value, to: f"file {to}"
+    journaled = []
+    m._journal = lambda event, secret, **detail: journaled.append((event, detail))
+    posted = []
+
+    def endless(path, key, payload=None, method=None):
+        if path.startswith("/keys?"):
+            off = int(path.split("offset=")[1].split("&")[0])
+            return {"data": [{"name": "taken" if off == 100 and i == 7 else f"user_{off + i}",
+                              "hash": f"h{off + i}"} for i in range(100)]}
+        if path == "/keys" and payload:
+            posted.append(payload)
+            return {"data": {"hash": "h-new", "label": "sk-or-v1-abc...def"}, "key": "sk-or-v1-" + "w" * 40}
+        if path == "/keys/h-new":
+            return {"data": {"name": "example-agent", "hash": "h-new"}}
+        return {"data": {}}
+    m._request = endless
+    r = m.issue_key("example-agent", 25.0, "example", "observatory", None)
+    check("a new name is issued on an account past the listing",
+          r["name"] == "example-agent" and posted and posted[0]["name"] == "example-agent", str(r))
+    check("and the answer names what the check did not read",
+          "300" in (r.get("name_check") or ""), str(r.get("name_check")))
+    led = json.loads(m.LEDGER.read_text())
+    check("the ledger records the partial check beside the hash",
+          led["issued"]["example-agent"]["hash"] == "h-new"
+          and "300" in (led["issued"]["example-agent"].get("name_check") or ""), str(led)[:300])
+    check("and so does the journal",
+          any(e == "issue" and "300" in str(dt.get("name_check")) for e, dt in journaled), str(journaled))
+    posted.clear()
+    try:
+        m.issue_key("taken", 5.0, "example", "observatory", None)
+        check("a name found in the pages that WERE read is still refused", False, "no raise")
+    except ValueError as exc:
+        check("a name found in the pages that WERE read is still refused",
+              "already exists" in str(exc) and not posted, str(exc))
+    try:
+        m.issue_key("example-agent", 5.0, "example", "observatory", None)
+        check("a name the ledger recorded is refused by its hash", False, "no raise")
+    except ValueError as exc:
+        check("a name the ledger recorded is refused by its hash", "already exists" in str(exc), str(exc))
+    m._request = lambda path, key, payload=None, method=None: (
+        {"data": []} if path.startswith("/keys?") else endless(path, key, payload, method))
+    check("a complete listing leaves no caveat",
+          m.issue_key("fresh", 5.0, "example", "observatory", None).get("name_check") is None, "")
+    # Every other reader still refuses a partial listing rather than act on it.
+    m._request = endless
+    m.save_ledger({"issued": {}})
+    try:
+        m.find_key("prov", "nowhere")
+        check("find_key still refuses a partial listing", False, "no raise")
+    except RuntimeError as exc:
+        check("find_key still refuses a partial listing", "pages" in str(exc), str(exc))
+
 def test_or_issue_is_one_function_with_a_monthly_reset() -> None:
     """The ONE issuer. `keyserver.py`'s mint used to be a second,
     ledger-less issuer — and the only one that set `limit_reset: monthly`.
@@ -1654,6 +1724,7 @@ if __name__ == "__main__":
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,
                test_or_issue_refuses_a_name_that_already_exists,
+               test_or_issue_works_on_an_account_past_the_listing,
                test_or_issue_is_one_function_with_a_monthly_reset,
                test_or_ping_names_the_strays_it_does_not_manage):
         fn()
