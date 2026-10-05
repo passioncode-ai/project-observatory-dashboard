@@ -5,6 +5,13 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+- **OpenRouter credits Project Observatory's public page.** Model and embedding calls to OpenRouter
+  now name `https://passioncode.ai/observatory/` as the app (`HTTP-Referer`), title it
+  `X-OpenRouter-Title: Project Observatory` and file it under `programming-app,cli-agent`, so every
+  install adds to one public listing. Before, the referer was the GitHub repository, and its app keeps
+  its history. A request to any other provider carries none of these headers
+  (`agent/providers.py` `attribution_headers`; organization roadmap RM-16).
+
 ## 0.17.0 — 2026-10-05
 
 A minor release, and it **changes behaviour**. Each installation now keeps itself current and
