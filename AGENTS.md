@@ -2,11 +2,16 @@
 
 ## Read first
 
-1. The PassionCode.ai knowledge base — `fabric-workspace/knowledge/` in your clone (org-index
+1. The organization's
+   [roadmap](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/roadmap.md) —
+   every major feature and release across PassionCode.ai as `RM-*` tracks with owner, phase and
+   state. It is the entry point: a task here that serves a track names it, and the track's status
+   is edited only in the roadmap.
+2. The PassionCode.ai knowledge base — `fabric-workspace/knowledge/` in your clone (org-index
    `scripts/clone_all.sh` makes it) or https://wiki.passioncode.ai/knowledge — at least its
    [README](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/README.md),
    vision, principles and how-to-work.
-2. This file, then the organization's
+3. This file, then the organization's
    [CONTRIBUTING.md](https://github.com/passioncode-ai/.github/blob/main/CONTRIBUTING.md) and this
    repository's [CONTRIBUTING.md](CONTRIBUTING.md); everything there applies to agents too.
 
