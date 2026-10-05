@@ -38,6 +38,7 @@ import plistlib
 import re
 import shutil
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -338,10 +339,16 @@ def step_snapshot(base: Path, state: dict, at: datetime.datetime, services=None,
                     record["detail"] = result["export_error"][:300]
                 state["snapshot"] = record
                 return {"result": "taken", "encrypted": record["encrypted"]}
-            except config.ConfigurationError as exc:
-                # A session MCP server's journal line, or a tick still releasing its lock.
-                last = str(exc)
+            except (config.ConfigurationError, sqlite3.Error, OSError) as exc:
+                # A session MCP server's journal line, a tick still releasing its lock, or a
+                # database copy torn by a session server writing during it (seen live on
+                # 2026-10-05: "database disk image is malformed" on the COPY; the live store
+                # was intact). The copy is verified, so a retry is safe.
+                last = f"{type(exc).__name__}: {exc}"
                 sleep(10 * (attempt + 1))
+            except Exception as exc:  # noqa: BLE001 — a pass records a failure, it never crashes
+                last = f"{type(exc).__name__}: {exc}"
+                break
         state["snapshot_failure"] = {"at": iso(at), "detail": last[:300]}
         return {"result": "failed", "detail": last[:300]}
     finally:

@@ -95,6 +95,32 @@ Separately, the first gate found that the portable runner copies root modules fr
 
 None yet.
 
+## Released and verified live (stage 8)
+
+**0.17.0 is out.** #169 merged as `9bc586e`, tag `v0.17.0`; release run 37331123714 succeeded
+(wheel, macos, publish). An agent approved the `release` environment on the operator's
+instruction, recorded as an exception as before. The downloaded assets were checked:
+- `shasum -a 256 -c` OK: wheel `cae84567…cdd342`, app `364adafc…0d761`;
+- GPG: good signature, key `63B3 0DC3 … C803 B6A7`;
+- both attestations: exit 0;
+- `check_package`: 552 files;
+- the app: Notarized Developer ID, stapled, version 0.17.0.
+
+**On the maintainer's machine:**
+
+| Check | Result |
+|---|---|
+| `full update --apply`, run by the 0.16.0 engine | `updated`, no rollback, `degraded: []`. `maintenance` is absent: the old transaction has no such step, which is the bridge case |
+| `OBSERVATORY_SYSTEM_SETUP=1 full maintain ensure`, the path the plugin hook takes | job `org.project-observatory.<sha16>.maintain` written and loaded; the person-set passphrase mirrored to the login Keychain (`kept_outside: keychain`) |
+| Keychain item "Project Observatory backups", account `<home>-<instance>` | present (looked up by attributes only, no value printed) |
+| First pass (`RunAtLoad`): update check | `up-to-date` |
+| First pass: app | the 0.17.0 app zip downloaded and passed the real `codesign`, team and Gatekeeper checks; `waiting-for-quit`, because the app was open |
+| First pass: daily snapshot | **failed**, and the pass crashed: `sqlite3.DatabaseError: database disk image is malformed` while verifying the COPY of `store/observatory.db`. The live store and the migration backup pass `quick_check`; copying again by hand worked 3 times out of 3. Cause: a session MCP server wrote during a copy whose source was opened `immutable`. The `finally` restarted the tick and server (both loaded, `/health` 0.17.0) |
+
+**Fixed in 0.17.1.** A torn copy is made again, the snapshot retries on a database error,
+and any other error is recorded without crashing the pass. A test for each layer was watched
+failing without its fix. The root cause, the immutable open, is OBS-37.
+
 ## State at handoff (2026-10-05, the session's usage limit)
 
 **Done on this branch.** R1–R10 are implemented and documented: ONBOARDING (both copies), AGENTS.md

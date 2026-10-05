@@ -156,18 +156,34 @@ def sqlite_file(file: Path) -> bool:
         return stream.read(16) == b'SQLite format 3\x00'
 
 
+#: A copy is verified before it counts. A session MCP server can write to the store while
+#: the tick and server are stopped, and a reader opened `immutable` (an empty WAL) does not
+#: see that write coming, so the copy can come out torn and fail its integrity check — seen
+#: live on 2026-10-05. The source is never touched, so copying again is safe.
+COPY_ATTEMPTS = 3
+
+
 def copy_database(source: Path, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
-    os.close(fd)
-    try:
-        with contextlib.closing(sqlite3.connect(compatibility.readonly_uri(source), uri=True)) as src:
-            with contextlib.closing(sqlite3.connect(target)) as dst:
-                src.backup(dst)
-                compatibility.verify_database(dst)
-    except BaseException:
-        target.unlink(missing_ok=True)
-        raise
+    for attempt in range(COPY_ATTEMPTS):
+        fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        os.close(fd)
+        try:
+            with contextlib.closing(sqlite3.connect(compatibility.readonly_uri(source), uri=True)) as src:
+                with contextlib.closing(sqlite3.connect(target)) as dst:
+                    src.backup(dst)
+                    compatibility.verify_database(dst)
+            return
+        except (sqlite3.DatabaseError, RuntimeError) as exc:
+            target.unlink(missing_ok=True)
+            # A torn copy reads as malformed, or as a failed integrity check; a missing
+            # sqlite-vec package is not torn and is not retried.
+            torn = isinstance(exc, sqlite3.DatabaseError) or "integrity verification failed" in str(exc)
+            if not torn or attempt == COPY_ATTEMPTS - 1:
+                raise
+        except BaseException:
+            target.unlink(missing_ok=True)
+            raise
 
 
 def require_stopped(writers_stopped: bool) -> None:
