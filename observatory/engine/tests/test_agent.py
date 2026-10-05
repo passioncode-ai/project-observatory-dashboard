@@ -499,6 +499,37 @@ def test_prompt_forbids_restating_the_delta() -> None:
           "more of the same kinds" not in p, p[-160:])
 
 
+def test_openrouter_attribution_names_the_product_page() -> None:
+    """OpenRouter credits the product page; no other provider receives the headers.
+
+    Roadmap RM-16: an app is identified by HTTP-Referer, so the value is the public
+    product page, and a request to any other host carries none of it.
+    """
+    import urllib.request as ur
+    pr = providers_mod()
+    on = pr.attribution_headers("https://openrouter.ai/api/v1")
+    check("referer is the product page", on.get("HTTP-Referer") == "https://passioncode.ai/observatory/")
+    check("title is the product's full name", on.get("X-OpenRouter-Title") == "Project Observatory")
+    check("two recognized categories", on.get("X-OpenRouter-Categories") == "programming-app,cli-agent")
+    check("at most two categories per request", len(on["X-OpenRouter-Categories"].split(",")) <= 2)
+    for other in ("https://api.openai.com/v1", "https://openrouter.ai.evil.example/v1", "http://localhost:8080/v1", ""):
+        check(f"no attribution to {other or 'an empty URL'}", pr.attribution_headers(other) == {})
+    seen = []
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b'{"choices": []}'
+    real = ur.urlopen
+    ur.urlopen = lambda req, timeout=0: (seen.append(req), _Resp())[1]
+    try:
+        pr._post("https://openrouter.ai/api/v1", "k", {"model": "m"})
+        pr._post("https://api.openai.com/v1", "k", {"model": "m"})
+    finally:
+        ur.urlopen = real
+    check("the chat call to OpenRouter is attributed", seen[0].get_header("Http-referer") == "https://passioncode.ai/observatory/")
+    check("the chat call elsewhere is not", seen[1].get_header("Http-referer") is None)
+
+
 def test_agent_cannot_promote() -> None:
     """Read the ledger's data, not the source that writes it.
 
@@ -549,7 +580,8 @@ if __name__ == "__main__":
                test_health_recovers_on_a_schedule, test_no_deltas_spends_nothing,
                test_degrades_without_credential, test_degrades_at_the_ceiling,
                test_a_broken_store_read_costs_one_project_not_the_run,
-               test_prompt_forbids_restating_the_delta, test_agent_cannot_promote):
+               test_prompt_forbids_restating_the_delta, test_agent_cannot_promote,
+               test_openrouter_attribution_names_the_product_page):
         fn()
     print()
     if FAILURES:
