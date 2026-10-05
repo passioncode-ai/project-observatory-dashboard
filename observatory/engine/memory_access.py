@@ -50,6 +50,8 @@ TOOLS: dict[str, tuple[str, str]] = {
     "observatory_search": ("memory.search", "read"),
     "observatory_recall": ("memory.read", "read"),
     "observatory_record": ("memory.record", "propose"),
+    # A lesson from a failure and its fix, always a proposal (PB-137 N-014).
+    "observatory_learn": ("memory.record", "propose"),
     "observatory_workflow_list": ("memory.read", "read"),
     "observatory_checkpoint_write": ("memory.checkpoint", "propose"),
     "observatory_checkpoint_latest": ("memory.checkpoint", "read"),

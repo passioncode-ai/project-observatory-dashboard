@@ -274,6 +274,22 @@ record's text in the ledger, in the handoff packs and cached answers that copied
 indexes and in the export, keeps the record's identity, and prints a receipt that names what
 it could not reach: backups and the export's git history ([FORGET.md](FORGET.md), PB-137 N-013).
 
+## Facts and lessons
+
+PB-137 N-014.
+
+- **A fact says until when it holds.** A new `semantic` record must carry `valid_to`, as an ISO 8601 time with a zone. A run that confirms the fact writes a new revision with a later end. `tools/record_lost_projects.py` gives its facts 30 days, and each daily run renews them.
+- **Validity decides what is current.**
+  - `observatory_recall` reads `validity: current` by default: inside `valid_from`/`valid_to`.
+  - `expired` returns what is past `valid_to`; `all` returns the history.
+  - Search serves current records only (N-009).
+  - A contested record still comes back beside the supported one it disagrees with.
+- **A lesson cites its evidence.** `observatory_learn` writes a lesson only from a failure record and a fix record that both belong to the project and are readable by the caller. A missing, erased, foreign or unreadable source gets one refusal, so the answer reveals nothing about which it was.
+  - The lesson is `kind: learning`, `function: experiential`, `state: proposed`, with confidence 0.5.
+  - It cites both records at their current revisions in `evidence` and `provenance`.
+- **Nobody promotes their own proposal.** Out of `proposed` there are two doors: the operator's review (`tools/review.py`), and `corroborate` by a different witness. An author can keep its proposal or withdraw it (`rejected`). Appending it as `observed` is refused (`IllegalTransition`), and so is corroborating it oneself. Confidence never promotes anything.
+- **Out of scope:** user preferences. They are not project memory and are not stored here.
+
 ## MCP tools
 
 | Tool | Writes | Notes |
@@ -284,6 +300,7 @@ it could not reach: backups and the export's git history ([FORGET.md](FORGET.md)
 | `observatory_handoff_create` | yes | reads git and the local index; spends nothing |
 | `observatory_handoff_accept` | yes | returns the new `leaseId`, the constraints, the current checkpoint and the pack |
 | `observatory_handoff_get` | no | status: `offered`, `accepted`, `expired`, `superseded`, `workflow-closed` |
+| `observatory_learn` | yes | a lesson from a failure and its fix, always a proposal; the candidate for the contract's reserved `memory.learning.propose` |
 
 Every refusal is a typed answer with `error`, `detail` and `remedy`; `LeaseLost` adds `keptAs`.
 The caller is `agent:<name>` or `service:<name>`: the operator's authority cannot be claimed
@@ -320,25 +337,32 @@ checkpoints, handoff packs and refused steps never leave, and neither does an ag
 query until bindings exist. The rules, the reason codes and where each is enforced are in
 [EMBEDDING-POLICY.md](EMBEDDING-POLICY.md).
 
-## Not built yet
+## Built, and what remains
 
-- Local multilingual embeddings. The per-model index exists (PB-137 N-005,
-  [VECTOR-NAMESPACES.md](VECTOR-NAMESPACES.md)): one namespace per pinned model identity, the
-  old OpenAI index quarantined as `legacy`, and a resumable backfill that never activates.
-  No local model is admitted yet: the 2026-10-04 measurement found good ranking but no
-  cosine floor that can say "nothing found" (N-004). The lexical arm keeps deciding abstention.
-- Per-caller access bindings: **decided** (PB-137 N-007, [ACCESS-BINDING.md](ACCESS-BINDING.md)).
-  Identity comes from the transport, stdio is the operator's local agent and nothing more, and
-  everything else is denied by default. Enforced at every entry point since N-008
-  ([ACCESS-BINDING.md](ACCESS-BINDING.md#enforcement-n-008)). Search filters project, class
-  and validity before its candidate window since N-009. The text fields of every memory answer are redacted on the
-  way out, and every search leaves a receipt that `observatory_explain` reads back without
-  searching again (N-012, [RETRIEVAL-AUDIT.md](RETRIEVAL-AUDIT.md)).
-- An MCP transport other than stdio (Streamable HTTP on loopback, as a `fabric-service`).
-  The protocol and limits are decided and measured (PB-137 N-015,
-  [HTTP-TRANSPORT.md](HTTP-TRANSPORT.md)): 2026-07-28 plus the handshake revisions,
-  stateless, loopback-only, Host/Origin checked, 4 MiB bodies. Served since N-016 by
-  `project-observatory full memory-http` to callers holding an access binding.
+Built (PB-137, 2026-10-04/05), each with its decision record:
 
-They are rows OBS-04 to OBS-06 in the [backlog](../backlog.md). Search (OBS-03) and the
-evaluation set (OBS-07) are described above.
+- **Per-caller access bindings.** Identity comes from the transport; stdio is the operator's
+  local agent and nothing more; everything else is denied by default. Decided by N-007 and
+  enforced at every entry point by N-008 ([ACCESS-BINDING.md](ACCESS-BINDING.md)).
+- **Search scoped before its candidate window** by project, class and validity (N-009).
+  Checkpoint and pack hits name the body chunk they matched (N-011).
+- **Redaction on the way out, receipts and explain** (N-012, [RETRIEVAL-AUDIT.md](RETRIEVAL-AUDIT.md)).
+- **Loopback HTTP**, as measured by N-015 and served by N-016: `project-observatory full memory-http`, for callers holding a binding ([HTTP-TRANSPORT.md](HTTP-TRANSPORT.md)).
+- **`memory/0.1` under the contract's names** (N-025): the same code as the `observatory_*` tools, with the schema vendored from fabric-agent-contract.
+
+Not built yet:
+
+- **Local multilingual embeddings.** The per-model index exists (N-005,
+  [VECTOR-NAMESPACES.md](VECTOR-NAMESPACES.md)). No local model is admitted: the 2026-10-04
+  measurement found good ranking, but no cosine floor that can say "nothing found" (N-004).
+  The lexical arm decides alone, and abstention stays with its coverage floor. Admission is
+  the operator's OBS-35 (finding F-016); the adapter (N-006) and calibrated semantic
+  abstention (N-010) wait for it.
+- **Other repositories.**
+  - Fabric's memory/0.1 client (N-023) and its hop-by-hop relay (N-020) are owned by Fabric.
+  - Switchboard's continuation (N-018) is owned by Switchboard.
+  - The task-pipeline stage-boundary checkpoint writer (N-024) is owned by task-pipeline.
+- **Joint acceptance** across real clients (N-021, N-022).
+
+The program and its order: org-index `docs/observatory/programs/2026-10-04-agent-memory/`.
+Search (OBS-03) and the evaluation set (OBS-07) are described above.

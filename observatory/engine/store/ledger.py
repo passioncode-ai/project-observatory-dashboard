@@ -81,6 +81,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _instant(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        at = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at if at.tzinfo is not None else None
+
+
 def current(conn: sqlite3.Connection, memory_id: str) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT * FROM ledger WHERE memory_id = ? ORDER BY revision DESC LIMIT 1",
@@ -288,6 +298,18 @@ def append(
         raise LedgerError(f"unknown scope {scope!r}; expected one of {SCOPES}")
     if confidence is not None and not (0 < confidence <= 1):
         raise LedgerError("confidence must be in (0, 1]")
+    for name, value in (("valid_from", valid_from), ("valid_to", valid_to)):
+        if value is not None and _instant(value) is None:
+            raise LedgerError(f"{name} must be an ISO 8601 time with a zone, e.g. "
+                              f"2026-12-31T00:00:00Z")
+    # A FACT SAYS UNTIL WHEN IT HOLDS (PB-137 N-014). A `semantic` record is a claim
+    # about the world, and a claim with no end is read as true for ever; `valid_to` is
+    # what lets a reader tell a current fact from an expired one. Required when a fact
+    # is created; corrections carry what they are given, so records written before
+    # this rule keep working.
+    if function == "semantic" and memory_id is None and not valid_to:
+        raise LedgerError("a fact (function 'semantic') must say until when it holds: pass "
+                          "valid_to, and write a new revision when it is confirmed again")
     # BOUNDED, and structurally — here rather than at each call site, for the
     # same reason `owner_exempt` is inlined into retention's SQL: an optional
     # guard is one that is eventually forgotten. Measured 2026-09-07 over the
@@ -343,6 +365,15 @@ def append(
                 f"{mid}: {prior['state']} -> {state} is not a lifecycle edge; "
                 f"from {prior['state']} the legal moves are "
                 f"{sorted(TRANSITIONS[prior['state']]) or 'none — it is terminal'}")
+        # NO SELF-PROMOTION (PB-137 N-014). Out of `proposed` there are two doors:
+        # the operator's review, and `corroborate` by a DIFFERENT witness. An author
+        # appending its own record as `observed` walked through neither; it may only
+        # keep its proposal or withdraw it.
+        if prior["state"] == "proposed" and state not in ("proposed", "rejected") \
+                and owner != OPERATOR:
+            raise IllegalTransition(
+                f"{mid}: {owner} may not promote a proposal; the operator reviews it "
+                f"(`review.py`) or an independent check corroborates it")
 
     revision = 1 if prior is None else prior["revision"] + 1
     supersedes = [] if prior is None else [f"{mid}@{prior['revision']}"]
@@ -525,7 +556,7 @@ def _workflow_open(conn: sqlite3.Connection, workflow_id: str | None) -> bool:
 def live_count(conn: sqlite3.Connection, project_id: str | None = None,
                states: tuple[str, ...] = ("supported", "contested", "observed",
                                           "proposed"),
-               classes: tuple[str, ...] | None = None) -> int:
+               classes: tuple[str, ...] | None = None, validity: str = "all") -> int:
     """How many live records the scope holds, ignoring any limit.
 
     A reader that returns fifty of a hundred and thirteen and reports `count: 50`
@@ -545,7 +576,26 @@ def live_count(conn: sqlite3.Connection, project_id: str | None = None,
     sql += f" AND l.state IN ({','.join('?' * len(states))})"
     args += list(states)
     sql, args = _only_classes(sql, args, classes)
+    sql += _validity(validity)
     return conn.execute(sql, args).fetchone()[0]
+
+
+#: Which records a reader asks for by their real-world validity (PB-137 N-014):
+#: `current` — inside valid_from/valid_to; `expired` — past valid_to; `all` — history.
+VALIDITY = {
+    "current": " AND (l.valid_to IS NULL OR datetime(l.valid_to) IS NULL"
+               " OR datetime(l.valid_to) > datetime('now'))"
+               " AND (l.valid_from IS NULL OR datetime(l.valid_from) IS NULL"
+               " OR datetime(l.valid_from) <= datetime('now'))",
+    "expired": " AND l.valid_to IS NOT NULL AND datetime(l.valid_to) <= datetime('now')",
+    "all": "",
+}
+
+
+def _validity(validity: str) -> str:
+    if validity not in VALIDITY:
+        raise LedgerError(f"validity must be one of {sorted(VALIDITY)}")
+    return VALIDITY[validity]
 
 
 def _only_classes(sql: str, args: list, classes: tuple[str, ...] | None) -> tuple[str, list]:
@@ -562,7 +612,7 @@ def _only_classes(sql: str, args: list, classes: tuple[str, ...] | None) -> tupl
 def live(conn: sqlite3.Connection, project_id: str | None = None,
          states: tuple[str, ...] = ("supported", "contested", "observed", "proposed"),
          limit: int = 100, cursor: str | None = None,
-         classes: tuple[str, ...] | None = None) -> list[dict]:
+         classes: tuple[str, ...] | None = None, validity: str = "all") -> list[dict]:
     """Current revisions, tombstoned records excluded.
 
     Conflicting records are returned TOGETHER: a `contested` row appears beside
@@ -582,6 +632,7 @@ def live(conn: sqlite3.Connection, project_id: str | None = None,
     sql += f" AND l.state IN ({','.join('?' * len(states))})"
     args += list(states)
     sql, args = _only_classes(sql, args, classes)
+    sql += _validity(validity)
     # The cursor's key is the PAIR `(created_at, memory_id)`, because
     # `created_at` is second-resolution and therefore not unique: two records
     # written in the same second would make a cursor over the timestamp alone

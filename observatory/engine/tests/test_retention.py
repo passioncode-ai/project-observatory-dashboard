@@ -128,8 +128,8 @@ def test_a_supported_row_is_never_pruned() -> None:
     conn, L, R = fresh()
     r = L.append(conn, owner="agent:observer", statement="observed then supported",
                  state="proposed", confidence=0.6)
-    a = L.transition(conn, r["memoryId"], to_state="observed", owner="agent:observer",
-                     expected_revision=1)
+    a = L.corroborate(conn, r["memoryId"], by="service:witness", check={"how": "fixture: an independent re-check"},
+                      expected_revision=1)
     L.transition(conn, r["memoryId"], to_state="supported", owner="agent:observer",
                  expected_revision=a["revision"])
     age(conn, r["memoryId"], 5000)

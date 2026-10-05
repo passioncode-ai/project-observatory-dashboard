@@ -658,6 +658,10 @@ def observatory_recall(
     cursor: Annotated[str | None,
                       Field(description="Continue after this point, from a previous "
                                         "answer's `nextCursor`.")] = None,
+    validity: Annotated[Literal["current", "expired", "all"],
+                        Field(description="By real-world validity: `current` (default) is "
+                                          "inside valid_from/valid_to, `expired` is past "
+                                          "valid_to, `all` is the history.")] = "current",
 ) -> dict[str, Any]:
     """Current ledger records — what has been recorded about projects, and why.
 
@@ -702,9 +706,9 @@ def observatory_recall(
         # inside a condition and never closed. Over-fetching by one is exact,
         # needs no second query, and leaks nothing.
         fetched = L.live(conn, project_id=projectId, limit=limit + 1, cursor=cursor,
-                         classes=classes)
+                         classes=classes, validity=validity)
         rows, more = fetched[:limit], len(fetched) > limit
-        total = L.live_count(conn, project_id=projectId, classes=classes)
+        total = L.live_count(conn, project_id=projectId, classes=classes, validity=validity)
     finally:
         conn.close()
     contested = [r["memory_id"] for r in rows if r["state"] == "contested"]
@@ -715,7 +719,7 @@ def observatory_recall(
     # alone is not unique at second resolution.
     rows, redacted = RA.scrub_rows(rows)
     degraded = RA.scrub_degraded(degraded)
-    out = {"projectId": projectId, "count": len(rows), "total": total,
+    out = {"projectId": projectId, "validity": validity, "count": len(rows), "total": total,
            "records": rows, "contested": contested, "redacted": redacted,
            "note": "conflicting records are returned together and are not ranked; "
                    "absence here is not proof of absence",
@@ -933,6 +937,76 @@ def observatory_record(
                         confidence=0.5)
         W._journal_known("note", None, None, report.as_dict())
         return result
+    except Exception as exc:
+        return _write_error(exc)
+    finally:
+        conn.close()
+
+
+@server.tool()
+def observatory_learn(
+    owner: Annotated[str, Field(min_length=1, description="Who learned it: `agent:<name>` or "
+                                                          "`service:<name>`.")],
+    statement: Annotated[str, Field(min_length=1, description="The lesson, in one claim: what "
+                                                              "to do differently next time.")],
+    failureId: Annotated[str, Field(description="The record of what went wrong (a `mem:…` id "
+                                                "you can read).")],
+    fixId: Annotated[str, Field(description="The record of what fixed it (a `mem:…` id you can "
+                                            "read).")],
+    projectId: Annotated[str, Field(description="The project both records belong to.")],
+    why: Annotated[str | None, Field(description="What the contrast between the two shows.")] = None,
+) -> dict[str, Any]:
+    """Propose a lesson learned from a failure and its fix. Both records must exist, belong
+    to `projectId` and be readable by you; the lesson cites both at their current revisions,
+    is written as a PROPOSAL with confidence 0.5, and nothing you do promotes it — the
+    operator reviews it, or an independent check corroborates it. Not for user preferences."""
+    bad = _owner_error(owner)
+    if bad:
+        return bad
+    try:
+        grant = MA.authorize("observatory_learn", project_id=projectId, owner=owner)
+    except MA.Refused as exc:
+        return exc.envelope
+    import memory_redact
+    from store import workflow as W
+    try:
+        L.check_text_bounds(statement, why)
+    except Exception as exc:
+        return _write_error(exc)
+    conn = store_db.connect()
+    try:
+        cited = []
+        for role, mid in (("failure", failureId), ("fix", fixId)):
+            row = conn.execute(
+                "SELECT l.memory_id, l.revision, l.project_id, l.classification, l.kind"
+                " FROM ledger l WHERE l.memory_id = ? AND NOT EXISTS (SELECT 1 FROM tombstones t"
+                " WHERE t.memory_id = l.memory_id) ORDER BY l.revision DESC LIMIT 1",
+                (mid,)).fetchone()
+            # One refusal for missing, erased, foreign and above-ceiling: a lesson must not
+            # tell its writer which of those a record id is.
+            if row is None or row["project_id"] != projectId \
+                    or not grant.may_see(row["classification"]) \
+                    or row["kind"] in grant.hidden_kinds:
+                return {"error": "learning refused", "code": "source-not-readable",
+                        "detail": f"the {role} record {credential_shape.echo(mid)} is not a record "
+                                  f"of {projectId} that you can read",
+                        "hint": "cite two records of this project you can recall",
+                        "degraded": []}
+            cited.append({"kind": role, "memoryId": row["memory_id"],
+                          "revision": row["revision"]})
+        if failureId == fixId:
+            return {"error": "learning refused", "code": "same-record",
+                    "detail": "a lesson contrasts two records: the failure and its fix",
+                    "hint": "cite the record of the failure and the record of the fix",
+                    "degraded": []}
+        cleaned, report = memory_redact.Redactor().scrub({"statement": statement, "why": why})
+        out = L.append(conn, owner=owner, kind="learning", function="experiential",
+                       statement=cleaned["statement"], why=cleaned["why"], project_id=projectId,
+                       state="proposed", confidence=0.5, evidence=cited,
+                       provenance=[{"source": "observatory_learn", "contrast": cited}])
+        W._journal_known("learning", None, None, report.as_dict())
+        out["cites"] = cited
+        return out
     except Exception as exc:
         return _write_error(exc)
     finally:

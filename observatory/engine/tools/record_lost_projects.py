@@ -38,7 +38,7 @@ changes.
 """
 from __future__ import annotations
 import argparse, json, pathlib, sqlite3, sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -53,6 +53,9 @@ OWNER = "agent:estate-history"
 #: `tools/corroborate.py` routes every kind but `session` to a person — which is
 #: the correct destination for "what became of this project".
 KIND = "estate-history"
+#: How long the fact "this project is gone" holds before a run must confirm it again.
+#: Each run's statement carries its scan date, so a daily run renews it.
+FACT_DAYS = 30
 #: One cursor per lost project, holding the record this tool has already written
 #: for it. The prefix keeps the namespace legible beside `deltas.diffed_through`.
 CURSOR_PREFIX = "estate-history.lost:"
@@ -172,6 +175,10 @@ def main(argv: list[str]) -> int:
                     # record exists to say is gone.
                     project_id=None, function="semantic", scope="global",
                     state="proposed", confidence=0.9,
+                    # A FACT SAYS UNTIL WHEN IT HOLDS (PB-137 N-014): thirty days from now,
+                    # renewed by the next run that still finds the project gone.
+                    valid_to=(datetime.now(timezone.utc) + timedelta(days=FACT_DAYS)
+                              ).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     memory_id=mid if prior else None,
                     expected_revision=prior["revision"] if prior else None,
                     provenance=[{"source": "tools/record_lost_projects", "measured": True,

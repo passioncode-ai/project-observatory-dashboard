@@ -48,8 +48,10 @@ def supported(conn, statement: str, **kw):
     """
     r = conn and L.append(conn, owner="agent:observer", statement=statement,
                           state="proposed", confidence=0.5, **kw)
-    r = L.transition(conn, r["memoryId"], to_state="observed", owner="agent:observer",
-                     expected_revision=r["revision"])
+    # Out of `proposed` through an independent witness (PB-137 N-014): an author may
+    # not promote its own proposal.
+    r = L.corroborate(conn, r["memoryId"], by="service:witness", check={"how": "fixture: an independent re-check"},
+                      expected_revision=r["revision"])
     return L.transition(conn, r["memoryId"], to_state="supported", owner="agent:observer",
                         expected_revision=r["revision"])
 
@@ -72,7 +74,8 @@ def test_operator_rows_are_sacred() -> None:
     # client could perform by typing the word. What this test checks, that such
     # a row is sacred once it exists, does not depend on how it was made.
     seed = L.append(conn, owner="agent:observer", statement="the paywall ships on Friday",
-                    function="semantic", state="proposed", confidence=0.5)
+                    function="semantic", state="proposed", confidence=0.5,
+                    valid_to="2099-01-01T00:00:00Z")
     r = L.transition(conn, seed["memoryId"], to_state="observed", owner=L.OPERATOR,
                      expected_revision=seed["revision"], why="the operator decided")
     ok, why = raises(L.OwnerRefused, L.append, conn, memory_id=r["memoryId"],
@@ -135,8 +138,11 @@ def test_lifecycle_edges() -> None:
     ok, why = raises(L.IllegalTransition, L.transition, conn, r["memoryId"],
                      to_state="supported", owner="agent:a", expected_revision=1)
     check("proposed cannot jump straight to supported", ok, why)
-    a = L.transition(conn, r["memoryId"], to_state="observed", owner="agent:a",
-                     expected_revision=1)
+    ok, why = raises(L.IllegalTransition, L.transition, conn, r["memoryId"],
+                     to_state="observed", owner="agent:a", expected_revision=1)
+    check("an author may not promote its own proposal (N-014)", ok, why)
+    a = L.corroborate(conn, r["memoryId"], by="service:witness", check={"how": "fixture: an independent re-check"},
+                      expected_revision=1)
     b = L.transition(conn, r["memoryId"], to_state="supported", owner="agent:a",
                      expected_revision=a["revision"])
     check("proposed -> observed -> supported walks the diagram", b["state"] == "supported",
@@ -186,8 +192,10 @@ def test_tombstone_keeps_the_row() -> None:
 def test_conflicts_return_together() -> None:
     """Two supported records that disagree come back together, unranked."""
     conn = fresh()
-    a = supported(conn, "the build is green", project_id="project:x", function="semantic")
+    a = supported(conn, "the build is green", project_id="project:x", function="semantic",
+                  valid_to="2099-01-01T00:00:00Z")
     b = supported(conn, "the build is red", project_id="project:x", function="semantic",
+                  valid_to="2099-01-01T00:00:00Z",
                   conflicts_with=[f"{a['memoryId']}@1"])
     L.transition(conn, a["memoryId"], to_state="contested", owner="agent:observer",
                  expected_revision=a["revision"])
