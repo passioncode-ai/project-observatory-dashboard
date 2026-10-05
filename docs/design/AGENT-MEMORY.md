@@ -268,6 +268,12 @@ The generic age rules skip checkpoints and packs (`retention.ledger_candidates`)
 workflow's checkpoint is never erased because the work took long. A workspace whose
 `retention.json` predates these keys uses the defaults above.
 
+Retention **withdraws**: a record leaves every read and index, and its ledger rows stay as the
+trail. To make a text **unrecoverable**, the operator runs `full forget`. It replaces the
+record's text in the ledger, in the handoff packs and cached answers that copied it, in the
+indexes and in the export, keeps the record's identity, and prints a receipt that names what
+it could not reach: backups and the export's git history ([FORGET.md](FORGET.md), PB-137 N-013).
+
 ## MCP tools
 
 | Tool | Writes | Notes |

@@ -485,6 +485,8 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   access-binding show|issue|revoke  which agent may reach memory over HTTP; issue writes the
                                bearer to a new owner-only file; issue and revoke need a terminal
   memory-http [--port N]       serve memory over loopback HTTP to bound callers (default 47313)
+  forget MEMORY_ID --why TEXT  withdraw a record and erase its text, with a receipt per backend;
+                               --plan reads only; erasing needs a terminal
   scan-mcp                     the MCP servers your agent configs declare (integration mcp)
 
 `project-observatory full-path` (outside `full`) prints the engine directory, where the
@@ -708,6 +710,10 @@ def refusal(argv: list[str]) -> str:
         sys.path.insert(0, str(ROOT / "mcp"))
         import http_service
         return argparse_refusal(lambda: http_service.parser().parse_args(rest))
+    if name == "forget":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import forget_cli
+        return argparse_refusal(lambda: forget_cli.parser().parse_args(rest))
     if name in WORKSPACE_COMMANDS:
         import workspace
         return argparse_refusal(lambda: workspace.parse(argv))
@@ -1076,6 +1082,10 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, str(ROOT / "mcp"))
         import http_service
         return http_service.main(argv[2:])
+    if len(argv) > 1 and argv[1] == "forget":
+        sys.path.insert(0, str(ROOT / "tools"))
+        import forget_cli
+        return forget_cli.main(argv[2:])
     if len(argv) > 1 and argv[1] in WORKSPACE_COMMANDS:
         import workspace
         return workspace.main(argv[1:])
