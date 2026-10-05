@@ -7,7 +7,10 @@
     python "$T/cloudflare.py" issue --preset dns-edit --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset d1-edit --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset r2-bucket --account <slug> --bucket NAME \
-        [--jurisdiction eu] [--expire-days 30] --vault PROJECT/ENV/PREFIX
+        [--jurisdiction eu] [--expire-days 30] [--lifecycle-rule PREFIX:DAYS ...] \
+        --vault PROJECT/ENV/PREFIX
+    python "$T/cloudflare.py" lifecycle --account <slug> --bucket NAME [--jurisdiction eu] \
+        [--expire-days 92] [--lifecycle-rule staging/:2 ...]   # rules only, no key
     python "$T/cloudflare.py" issue --preset email-send --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset email-routing --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
@@ -946,27 +949,166 @@ def r2_prove(endpoint: str, bucket: str, access_key: str, secret: str) -> str:
     return ""
 
 
-def r2_lifecycle(expire_days: int) -> dict:
-    """One rule over the whole bucket: objects expire, stale uploads abort."""
+#: Lifecycle bounds. Days: at least one, at most ten years — beyond that a rule
+#: is a typo, not a retention policy. A prefix is an object key's beginning, and
+#: an R2 key is at most 1024 bytes.
+R2_DAYS_MAX = 3650
+R2_PREFIX_MAX_BYTES = 1024
+#: The whole-bucket expiry `issue` writes when it is given no rule at all —
+#: what it has always written. `lifecycle` has no default: it REPLACES a live
+#: bucket's rules, and a guessed 30 days could shorten a 92-day retention.
+R2_ISSUE_DEFAULT_DAYS = 30
+
+
+def _shown(prefix: str) -> str:
+    """A prefix as a refusal names it: quoted, and cut short when long."""
+    return repr(prefix if len(prefix) <= 40 else prefix[:40] + "…")
+
+
+def r2_lifecycle_plan(expire_days: int | None, rule_texts: list[str],
+                      default: int | None = R2_ISSUE_DEFAULT_DAYS) -> list[tuple[str, int]]:
+    """The lifecycle asked for, as (prefix, days) — the whole bucket (prefix "")
+    first, then each `--lifecycle-rule PREFIX:DAYS` sorted by prefix, so the
+    same flags in any order write the same body. ValueError names what is wrong
+    before anything reaches Cloudflare.
+
+    A PREFIX RULE THAT CAN NEVER FIRE IS REFUSED. R2 applies the shortest age
+    that matches an object, so a rule for `staging/` at 120 days under a
+    whole-bucket rule at 92 deletes nothing the bucket rule has not already
+    deleted — almost certainly a mistake in the number, never a policy. The same
+    holds under any shorter prefix that covers it (`a/` at 5, `a/b/` at 9)."""
+    if expire_days is None and not rule_texts:
+        if default is None:
+            raise ValueError("give --expire-days, --lifecycle-rule PREFIX:DAYS, or both")
+        expire_days = default
+    plan: list[tuple[str, int]] = []
+    if expire_days is not None:
+        if not 1 <= expire_days <= R2_DAYS_MAX:
+            raise ValueError(f"--expire-days is between 1 and {R2_DAYS_MAX}")
+        plan.append(("", expire_days))
+    rules: dict[str, int] = {}
+    for text in rule_texts:
+        prefix, sep, days_text = text.rpartition(":")
+        if not sep or not re.fullmatch(r"[0-9]+", days_text):
+            raise ValueError(f"--lifecycle-rule {_shown(text)} is not PREFIX:DAYS "
+                             f"(for example staging/:2)")
+        days = int(days_text)
+        if not 1 <= days <= R2_DAYS_MAX:
+            raise ValueError(f"--lifecycle-rule {_shown(text)}: days are between 1 and {R2_DAYS_MAX}")
+        if not prefix:
+            raise ValueError("--lifecycle-rule needs a prefix; the whole bucket is --expire-days")
+        if prefix.startswith("/"):
+            raise ValueError(f"--lifecycle-rule prefix {_shown(prefix)} has a leading '/' — "
+                             f"R2 keys do not start with one, so it would match nothing")
+        if not prefix.isprintable():
+            raise ValueError(f"--lifecycle-rule prefix {_shown(prefix)} is not printable")
+        if len(prefix.encode("utf-8")) > R2_PREFIX_MAX_BYTES:
+            raise ValueError(f"--lifecycle-rule prefix {_shown(prefix)} is over "
+                             f"{R2_PREFIX_MAX_BYTES} bytes, longer than any R2 key")
+        if prefix in rules:
+            raise ValueError(f"--lifecycle-rule prefix {_shown(prefix)} is given more than once")
+        rules[prefix] = days
+    plan += sorted(rules.items())
+    for prefix, days in plan:
+        for cover, cover_days in plan:
+            if prefix and cover != prefix and prefix.startswith(cover) and days > cover_days:
+                by = ("the whole-bucket rule" if not cover
+                      else f"the rule for {_shown(cover)}")
+                raise ValueError(f"--lifecycle-rule {prefix}:{days} would never fire — {by} "
+                                 f"deletes those objects after {cover_days} days first; "
+                                 f"shorten it or drop it")
+    return plan
+
+
+def r2_rule_id(prefix: str, days: int) -> str:
+    """A rule's id: readable in the dashboard, unique per prefix, bounded.
+
+    The whole-bucket rule keeps the id it always had, so a bucket made before
+    prefix rules existed reads back unchanged. A prefix rule carries its slug
+    for the eye and 8 hex of its sha256 for uniqueness: `a/` and `a-` slug
+    alike."""
+    if not prefix:
+        return f"expire-after-{days}-days"
+    tag = hashlib.sha256(prefix.encode("utf-8")).hexdigest()[:8]
+    return f"expire-{slug(prefix)[:64]}-{tag}-after-{days}-days"
+
+
+def r2_lifecycle(plan: list[tuple[str, int]]) -> dict:
+    """The lifecycle body: per (prefix, days), objects under the prefix expire
+    after the days and that prefix's unfinished multipart uploads abort after
+    one — an upload abandoned half-way is billed storage nobody can read."""
     return {"rules": [{
-        "id": f"expire-after-{expire_days}-days",
+        "id": r2_rule_id(prefix, days),
         "enabled": True,
-        "conditions": {"prefix": ""},
-        "deleteObjectsTransition": {"condition": {"type": "Age", "maxAge": expire_days * 86400}},
+        "conditions": {"prefix": prefix},
+        "deleteObjectsTransition": {"condition": {"type": "Age", "maxAge": days * 86400}},
         "abortMultipartUploadsTransition": {"condition": {"type": "Age", "maxAge": 86400}},
-    }]}
+    } for prefix, days in plan]}
+
+
+def r2_lifecycle_summary(plan: list[tuple[str, int]]) -> str:
+    """The plan in one line, for the person who ran the command."""
+    whole = [d for p, d in plan if not p]
+    parts = [f"objects expire after {whole[0]} days" if whole else "no whole-bucket expiry"]
+    parts += [f"under {_shown(p)} after {d} days" for p, d in plan if p]
+    return "; ".join(parts) + "; unfinished multipart uploads abort after 1 day"
+
+
+def _rule_shape(rule: dict) -> tuple:
+    def cond(key: str) -> tuple:
+        c = (rule.get(key) or {}).get("condition") or {}
+        return (c.get("type"), c.get("maxAge"))
+    return (rule.get("enabled") is True, cond("deleteObjectsTransition"),
+            cond("abortMultipartUploadsTransition"))
+
+
+def _describe_shape(shape: tuple) -> str:
+    enabled, (_t, delete_age), (_a, abort_age) = shape
+    def days(age):
+        return f"{age // 86400} days" if isinstance(age, int) else "never"
+    return (f"{'enabled' if enabled else 'disabled'}, delete after {days(delete_age)}, "
+            f"abort uploads after {days(abort_age)}")
+
+
+def r2_lifecycle_mismatch(written: dict, read: list) -> str:
+    """Empty if what read back is EXACTLY the rules written, compared rule by
+    rule and keyed by prefix; else every difference, named by prefix. One rule
+    matching is not the lifecycle that was asked for — a dropped prefix rule or
+    a stray one left by someone else changes what gets deleted."""
+    def label(prefix: str) -> str:
+        return "the whole-bucket rule" if not prefix else f"the rule for {_shown(prefix)}"
+    want = {(r.get("conditions") or {}).get("prefix") or "": _rule_shape(r)
+            for r in written["rules"]}
+    got: dict[str, tuple] = {}
+    problems: list[str] = []
+    for r in read:
+        prefix = (r.get("conditions") or {}).get("prefix") or ""
+        if prefix in got:
+            problems.append(f"{label(prefix)} read back twice")
+        got[prefix] = _rule_shape(r)
+    for prefix, shape in want.items():
+        if prefix not in got:
+            problems.append(f"{label(prefix)} is missing")
+        elif got[prefix] != shape:
+            problems.append(f"{label(prefix)} read back {_describe_shape(got[prefix])}, "
+                            f"not {_describe_shape(shape)}")
+    problems += [f"{label(p)} was not asked for" for p in got if p not in want]
+    return "; ".join(problems)
 
 
 def r2_setup_bucket(admin: str, account_id: str, bucket: str, jurisdiction: str,
-                    expire_days: int, wait: float = 2.0) -> bool:
-    """Create the bucket if it is missing and replace its lifecycle, with a
-    setup token that is deleted before this returns. True if it created one.
+                    plan: list[tuple[str, int]], wait: float = 2.0,
+                    create: bool = True) -> bool:
+    """Create the bucket if it is missing (only when `create`) and replace its
+    lifecycle with exactly `plan`, with a setup token that is deleted before
+    this returns. True if it created one.
 
     The admin token can mint tokens and nothing else; R2's own API needs
     Storage Write, which is too broad to keep anywhere — so it lives for the
     length of this function. A delete that fails is an error, not a warning:
     a live account-wide storage writer nobody knows about is the thing this
-    door exists to prevent."""
+    door exists to prevent. The PUT replaces the whole lifecycle, so a re-run
+    with the same plan writes the same rules and nothing else survives."""
     tid, setup = mint(admin, account_id, R2_SETUP)
     created = False
     try:
@@ -986,16 +1128,19 @@ def r2_setup_bucket(admin: str, account_id: str, bucket: str, jurisdiction: str,
         except RuntimeError as exc:
             if "HTTP 404" not in str(exc):
                 raise
+            if not create:
+                raise RuntimeError(f"there is no bucket {bucket!r} in jurisdiction {jurisdiction} — "
+                                   f"`cloudflare.py issue --preset r2-bucket` creates one with its "
+                                   f"key; check --jurisdiction") from None
             _request(base, setup, {"name": bucket}, headers=hdr)
             created = True
-        _request(f"{base}/{bucket}/lifecycle", setup, r2_lifecycle(expire_days),
-                 method="PUT", headers=hdr)
+        body = r2_lifecycle(plan)
+        _request(f"{base}/{bucket}/lifecycle", setup, body, method="PUT", headers=hdr)
         rules = (_request(f"{base}/{bucket}/lifecycle", setup, headers=hdr)
                  .get("result") or {}).get("rules") or []
-        want = expire_days * 86400
-        if not any(((r.get("deleteObjectsTransition") or {}).get("condition") or {})
-                   .get("maxAge") == want for r in rules):
-            raise RuntimeError("the lifecycle rule did not read back as written")
+        wrong = r2_lifecycle_mismatch(body, rules)
+        if wrong:
+            raise RuntimeError(f"the lifecycle did not read back as written — {wrong}")
     finally:
         try:
             _request(f"/accounts/{account_id}/tokens/{tid}", admin, method="DELETE")
@@ -1005,14 +1150,26 @@ def r2_setup_bucket(admin: str, account_id: str, bucket: str, jurisdiction: str,
     return created
 
 
+def _r2_bucket_refusal(bucket: str | None, jurisdiction: str) -> str:
+    """Why a bucket and jurisdiction cannot be used, or an empty string."""
+    if not R2_BUCKET_RE.match(bucket or ""):
+        return ("an R2 bucket name is 3–63 characters of a–z, 0–9 and '-', "
+                "starting and ending with a letter or digit")
+    if jurisdiction not in R2_JURISDICTIONS:
+        return f"--jurisdiction is one of {', '.join(R2_JURISDICTIONS)}"
+    return ""
+
+
 def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
-                     expire_days: int, target: str | None, account_label: str | None,
-                     wait: float = 2.0) -> int:
+                     expire_days: int | None, target: str | None, account_label: str | None,
+                     wait: float = 2.0, lifecycle_rules: list[str] | tuple = ()) -> int:
     """Issue a one-bucket R2 key pair into three vault slots.
 
     `--vault PROJECT/ENV/PREFIX` names the slots PREFIX_ACCESS_KEY_ID,
     PREFIX_SECRET_ACCESS_KEY and PREFIX_ENDPOINT — the three things an S3
-    client needs, delivered together or not at all."""
+    client needs, delivered together or not at all. The bucket's lifecycle is
+    `--expire-days` over the whole bucket plus one rule per `--lifecycle-rule`;
+    with neither given, the whole bucket expires after 30 days, as it always did."""
     preset = PRESETS[preset_key]
     if preset.get("scope") != "bucket-vault":
         print(f"refused: preset {preset_key!r} is not a bucket preset", file=sys.stderr)
@@ -1021,17 +1178,12 @@ def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
         print(f"refused: preset {preset_key!r} needs --bucket and --vault PROJECT/ENV/PREFIX",
               file=sys.stderr)
         return 2
-    if not R2_BUCKET_RE.match(bucket):
-        print("refused: an R2 bucket name is 3–63 characters of a–z, 0–9 and '-', "
-              "starting and ending with a letter or digit", file=sys.stderr)
-        return 2
-    if jurisdiction not in R2_JURISDICTIONS:
-        print(f"refused: --jurisdiction is one of {', '.join(R2_JURISDICTIONS)}", file=sys.stderr)
-        return 2
-    if not 1 <= expire_days <= 3650:
-        print("refused: --expire-days is between 1 and 3650", file=sys.stderr)
+    why = _r2_bucket_refusal(bucket, jurisdiction)
+    if why:
+        print(f"refused: {why}", file=sys.stderr)
         return 2
     try:
+        plan = r2_lifecycle_plan(expire_days, list(lifecycle_rules))
         project, env, prefix = parse_vault_target(target)
         slots = [f"{prefix}_{s}" for s in ("ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "ENDPOINT")]
         for s in slots:
@@ -1043,7 +1195,7 @@ def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
     admin, account, tid, rolled = None, None, None, False
     try:
         _stash, admin, account = find_account(account_label)
-        created = r2_setup_bucket(admin, account["id"], bucket, jurisdiction, expire_days, wait)
+        created = r2_setup_bucket(admin, account["id"], bucket, jurisdiction, plan, wait)
         token_name = preset["name"].format(jurisdiction=jurisdiction, bucket=bucket)
         rolled = existing_token(admin, account["id"], token_name) is not None
         resource = f"com.cloudflare.edge.r2.bucket.{account['id']}_{jurisdiction}_{bucket}"
@@ -1067,14 +1219,56 @@ def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
         return 1
     _journal("rotate" if rolled else "issue", f"{project}/{env}/{prefix}_*",
              preset=preset_key, bucket=bucket, jurisdiction=jurisdiction,
-             expire_days=expire_days, account=account["name"])
-    print(f"  bucket {bucket} ({jurisdiction}): {'created' if created else 'already there'}, "
-          f"objects expire after {expire_days} days")
+             expire_days=next((d for p, d in plan if not p), None),
+             rules=[[p, d] for p, d in plan], account=account["name"])
+    print(f"  bucket {bucket} ({jurisdiction}): {'created' if created else 'already there'}; "
+          f"lifecycle: {r2_lifecycle_summary(plan)}")
     print(f"  {project}/{env}/{prefix}_{{ACCESS_KEY_ID,SECRET_ACCESS_KEY,ENDPOINT}}: "
           f"{'rolled' if rolled else 'issued'} — {', '.join(preset['groups'])} on {bucket} only, "
           f"proved by a put, a get and a delete, and refused a bucket list; "
           f"use: python \"$(project-observatory full-path)/tools/use_secret.py\" run --env {env} {project} "
           f"{','.join(slots)} -- <command>")
+    return 0
+
+
+def cmd_lifecycle(bucket: str | None, jurisdiction: str, expire_days: int | None,
+                  rule_texts: list[str], account_label: str | None, wait: float = 2.0) -> int:
+    """Replace an EXISTING bucket's lifecycle, and touch nothing else.
+
+    A COMMAND OF ITS OWN, NOT A FLAG ON `issue`. Changing how long objects
+    live is a different act from handing out a key: it needs no vault slot, no
+    proof, no delivery, and it must never roll the key the bucket's writer is
+    using right now — a roll kills the value its slot holds. As a flag on
+    `issue`, `--vault` and `--preset` would be accepted and ignored, and one
+    forgotten flag would turn a retention change into a key rotation. Here the
+    command cannot reach the bucket key at all: it mints only the ephemeral
+    setup token, which `r2_setup_bucket` deletes before returning, and it never
+    creates a bucket — a bucket without its key is `issue`'s job."""
+    why = _r2_bucket_refusal(bucket, jurisdiction)
+    if why:
+        print(f"refused: {why}", file=sys.stderr)
+        return 2
+    if expire_days is None and not rule_texts:
+        print("refused: give --expire-days, --lifecycle-rule PREFIX:DAYS, or both — "
+              "lifecycle replaces the bucket's whole lifecycle, so it never guesses one",
+              file=sys.stderr)
+        return 2
+    try:
+        plan = r2_lifecycle_plan(expire_days, list(rule_texts), default=None)
+    except ValueError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    try:
+        _stash, admin, account = find_account(account_label)
+        r2_setup_bucket(admin, account["id"], bucket, jurisdiction, plan, wait, create=False)
+    except RuntimeError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    _journal("lifecycle", f"r2/{jurisdiction}/{bucket}", bucket=bucket,
+             jurisdiction=jurisdiction, rules=[[p, d] for p, d in plan],
+             account=account["name"])
+    print(f"  bucket {bucket} ({jurisdiction}): lifecycle replaced and read back rule by rule — "
+          f"{r2_lifecycle_summary(plan)}; no key was minted, rolled or delivered")
     return 0
 
 
@@ -1325,8 +1519,22 @@ def main() -> int:
     p_issue.add_argument("--bucket", help="r2-bucket: the one bucket the key pair may touch")
     p_issue.add_argument("--jurisdiction", default="default", choices=R2_JURISDICTIONS,
                          help="r2-bucket: where the bucket's objects must stay")
-    p_issue.add_argument("--expire-days", type=int, default=30,
-                         help="r2-bucket: lifecycle — objects are deleted after this many days")
+    p_issue.add_argument("--expire-days", type=int, default=None,
+                         help="r2-bucket: whole-bucket lifecycle — objects are deleted after this "
+                              f"many days (default {R2_ISSUE_DEFAULT_DAYS} when no --lifecycle-rule is given)")
+    p_issue.add_argument("--lifecycle-rule", action="append", metavar="PREFIX:DAYS",
+                         help="r2-bucket: objects under PREFIX are deleted after DAYS, and its "
+                              "unfinished multipart uploads abort after 1 day; repeatable")
+    p_life = sub.add_parser("lifecycle", help="replace an existing R2 bucket's lifecycle; "
+                                              "no key is minted, rolled or delivered")
+    p_life.add_argument("--account", help="which stashed admin token to act through")
+    p_life.add_argument("--bucket", required=True, help="the existing bucket")
+    p_life.add_argument("--jurisdiction", default="default", choices=R2_JURISDICTIONS,
+                        help="where the bucket lives")
+    p_life.add_argument("--expire-days", type=int, default=None,
+                        help="whole-bucket rule: objects are deleted after this many days")
+    p_life.add_argument("--lifecycle-rule", action="append", metavar="PREFIX:DAYS",
+                        help="objects under PREFIX are deleted after DAYS; repeatable")
     sub.add_parser("list", help="what exists, with dates — never values")
     p_groups = sub.add_parser("groups", help="permission-group names and levels, for writing a preset")
     p_groups.add_argument("--account", help="which reachable account's catalogue")
@@ -1350,8 +1558,15 @@ def main() -> int:
             print("paste the narrow token on stdin", file=sys.stderr)
             return 2
         return cmd_install(sys.stdin.read().strip())
+    if a.cmd == "lifecycle":
+        return cmd_lifecycle(a.bucket, a.jurisdiction, a.expire_days, a.lifecycle_rule or [],
+                             a.account)
     if a.cmd == "issue":
         scope = PRESETS[a.preset].get("scope")
+        if scope != "bucket-vault" and (a.expire_days is not None or a.lifecycle_rule):
+            print("refused: --expire-days and --lifecycle-rule apply to --preset r2-bucket only",
+                  file=sys.stderr)
+            return 2
         if scope == "zone":
             return cmd_issue_zone(a.preset, a.zone, a.vault, a.account)
         if scope == "bucket-vault":
@@ -1360,7 +1575,7 @@ def main() -> int:
                       file=sys.stderr)
                 return 2
             return cmd_issue_bucket(a.preset, a.bucket, a.jurisdiction, a.expire_days,
-                                    a.vault, a.account)
+                                    a.vault, a.account, lifecycle_rules=a.lifecycle_rule or [])
         if scope == "account-vault":
             if a.zone:
                 print(f"refused: preset {a.preset!r} is account-scoped; --zone does not apply",

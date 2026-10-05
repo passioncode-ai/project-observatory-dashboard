@@ -728,8 +728,11 @@ def test_cf_sigv4_matches_the_published_aws_example() -> None:
 
 
 def _r2_fake(m, log, *, bucket_exists=False, existing=None, lifecycle_fails=False,
-             can_list=False, put_fails=0):
-    state = {"put_fails": put_fails, "lifecycle": None}
+             can_list=False, put_fails=0, lifecycle=None, readback=None):
+    """`lifecycle` is what the bucket already holds; `readback`, given the
+    stored lifecycle, returns what the provider answers on GET — a provider
+    that silently drops or rewrites a rule."""
+    state = {"put_fails": put_fails, "lifecycle": lifecycle}
     tokens = {}
 
     def fake(path, token, payload=None, method=None, headers=None):
@@ -776,7 +779,8 @@ def _r2_fake(m, log, *, bucket_exists=False, existing=None, lifecycle_fails=Fals
                 state["lifecycle"] = payload
                 return {"result": {}}
             if path.endswith("/lifecycle") and verb == "GET":
-                return {"result": state["lifecycle"] or {"rules": []}}
+                stored = json.loads(json.dumps(state["lifecycle"] or {"rules": []}))
+                return {"result": readback(stored) if readback else stored}
         raise AssertionError(f"unexpected call {verb} {path}")
 
     def s3(method, url, access_key, secret, body=b""):
@@ -910,6 +914,315 @@ def test_cf_r2_preset_refuses_and_cleans_up() -> None:
           not any(v == "POST" and p == "/accounts/a1/tokens" for v, p, *_ in log4), str(log4))
     check("the setup right is not a preset anyone can issue",
           "r2-setup" not in m.PRESETS and m.R2_SETUP["groups"] == ("Workers R2 Storage Write",), "")
+
+
+def _life_puts(log) -> list[dict]:
+    return [pl for v, p, _t, pl, _h in log if v == "PUT" and p.endswith("/lifecycle")]
+
+
+def _token_writes(log) -> list[tuple[str, str]]:
+    """Every call that creates, rewrites or rolls a token — never a read."""
+    return [(v, p) for v, p, *_ in log
+            if "/tokens" in p and "permission_groups" not in p and v in ("POST", "PUT")]
+
+
+def test_cf_r2_lifecycle_rules_per_prefix() -> None:
+    """A bucket can keep one prefix for days and the rest for months: each
+    `--lifecycle-rule PREFIX:DAYS` is one rule that deletes that prefix's objects
+    and aborts its stale multipart uploads after a day; `--expire-days` stays the
+    whole-bucket rule, prefix "", with the id it always had."""
+    m = cf()
+    plan = m.r2_lifecycle_plan(92, ["staging/:2"])
+    check("the whole-bucket rule comes first, then each prefix rule",
+          plan == [("", 92), ("staging/", 2)], str(plan))
+    body = m.r2_lifecycle(plan)
+    rules = body.get("rules") or []
+    check("one rule per entry", len(rules) == 2, str(body))
+    whole, staged = (rules + [{}, {}])[:2]
+    check("the whole-bucket rule keeps the id and shape it had before",
+          whole == {"id": "expire-after-92-days", "enabled": True, "conditions": {"prefix": ""},
+                    "deleteObjectsTransition": {"condition": {"type": "Age", "maxAge": 92 * 86400}},
+                    "abortMultipartUploadsTransition": {"condition": {"type": "Age", "maxAge": 86400}}},
+          str(whole))
+    check("the prefix rule deletes under its prefix after its days",
+          staged.get("enabled") is True and staged.get("conditions") == {"prefix": "staging/"}
+          and staged.get("deleteObjectsTransition") == {"condition": {"type": "Age", "maxAge": 2 * 86400}},
+          str(staged))
+    check("and aborts that prefix's multipart uploads after one day",
+          staged.get("abortMultipartUploadsTransition") == {"condition": {"type": "Age", "maxAge": 86400}},
+          str(staged))
+    check("rule ids are unique, name the prefix, and stay under 255 characters",
+          len({r["id"] for r in rules}) == 2 and "staging" in staged.get("id", "")
+          and all(len(r["id"]) <= 255 for r in rules), str([r.get("id") for r in rules]))
+    twins = m.r2_lifecycle(m.r2_lifecycle_plan(None, ["a/:3", "a-:3"]))["rules"]
+    check("two prefixes that slug alike still get two ids",
+          twins[0]["id"] != twins[1]["id"], str([r["id"] for r in twins]))
+    long_id = m.r2_lifecycle(m.r2_lifecycle_plan(None, ["x" * 1024 + ":3"]))["rules"][0]["id"]
+    check("a 1024-byte prefix still yields a bounded id", len(long_id) <= 255, str(len(long_id)))
+    check("the same input gives the same body, so a re-run rewrites nothing",
+          m.r2_lifecycle(m.r2_lifecycle_plan(92, ["staging/:2"])) == body, "")
+    check("a prefix may hold a colon: DAYS is after the LAST one",
+          m.r2_lifecycle_plan(None, ["logs:2026/:7"]) == [("logs:2026/", 7)], "")
+    check("--expire-days alone is today's single whole-bucket rule",
+          m.r2_lifecycle_plan(45, []) == [("", 45)], "")
+    check("with neither given, issue keeps its 30-day default",
+          m.r2_lifecycle_plan(None, []) == [("", 30)], "")
+    check("prefix rules alone need no whole-bucket rule",
+          m.r2_lifecycle_plan(None, ["staging/:2"]) == [("staging/", 2)], "")
+    check("a prefix rule as long as the whole-bucket one is allowed",
+          m.r2_lifecycle_plan(30, ["tmp/:30"]) == [("", 30), ("tmp/", 30)], "")
+
+
+def test_cf_r2_lifecycle_refuses_what_it_cannot_mean() -> None:
+    """Every refusal happens before anything is minted, and says why."""
+    import contextlib, io
+    m = cf()
+
+    def refusal(expire, rules) -> str:
+        try:
+            m.r2_lifecycle_plan(expire, rules)
+        except ValueError as exc:
+            return str(exc)
+        return ""
+    cases = [
+        ("a rule of 0 days", None, ["staging/:0"], "between 1 and 3650"),
+        ("a rule over ten years", None, ["staging/:3651"], "between 1 and 3650"),
+        ("a whole-bucket expiry of 0 days", 0, ["staging/:2"], "between 1 and 3650"),
+        ("a whole-bucket expiry over ten years", 3651, [], "between 1 and 3650"),
+        ("days that are not a number", None, ["staging/:two"], "PREFIX:DAYS"),
+        ("a rule with no colon", None, ["staging/"], "PREFIX:DAYS"),
+        ("an empty prefix", None, [":5"], "--expire-days"),
+        ("a leading slash", None, ["/staging/:2"], "leading '/'"),
+        ("a control character", None, ["stag\x07ing/:2"], "printable"),
+        ("a prefix over 1024 bytes", None, ["x" * 1025 + ":2"], "1024 bytes"),
+        ("1024 characters that are more than 1024 bytes", None, ["é" * 513 + ":2"], "1024 bytes"),
+        ("the same prefix twice", None, ["staging/:2", "staging/:3"], "more than once"),
+    ]
+    for name, expire, rules, words in cases:
+        said = refusal(expire, rules)
+        check(f"refused: {name}", bool(said) and words in said, repr(said))
+    said = refusal(92, ["staging/:120"])
+    check("a prefix rule longer than the whole-bucket rule is refused as one that never fires",
+          "never fire" in said and "staging/" in said and "92" in said, said)
+    said = refusal(None, ["a/:5", "a/b/:9"])
+    check("so is one longer than a rule over a shorter prefix that covers it",
+          "never fire" in said and "a/b/" in said, said)
+
+    _cf_with_admin(m)
+    log = []
+    _r2_fake(m, log)
+    m.deliver_to_vault = lambda *a: (_ for _ in ()).throw(AssertionError("nothing is delivered"))
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+        rc_issue = m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", 92, "proj/prod/OFFSITE",
+                                      None, wait=0, lifecycle_rules=["staging/:120"])
+        rc_life = m.cmd_lifecycle("offsite-backups", "eu", 92, ["staging/:120"], None, wait=0)
+        rc_none = m.cmd_lifecycle("offsite-backups", "eu", None, [], None, wait=0)
+    check("issue refuses a bad rule with exit 2", rc_issue == 2, str(rc_issue))
+    check("lifecycle refuses a bad rule with exit 2", rc_life == 2, str(rc_life))
+    check("lifecycle with no rule at all is refused rather than defaulted to 30 days",
+          rc_none == 2 and "--expire-days" in err.getvalue(), f"{rc_none} {err.getvalue()}")
+    check("and no refusal reached Cloudflare", log == [], str(log))
+
+
+def test_cf_r2_issue_writes_every_rule_and_reruns_idempotently() -> None:
+    """Issue with a whole-bucket and a prefix rule writes both and reads both
+    back; a re-run on the bucket it made writes the identical lifecycle and
+    ROLLS the same key, as a second issue always did."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    m._journal = lambda *a, **k: None
+    log, delivered = [], []
+    _r2_fake(m, log)
+    m.deliver_to_vault = lambda value, p, e, n: delivered.append(n)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+        rc = m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", 92, "proj/prod/OFFSITE",
+                                None, wait=0, lifecycle_rules=["staging/:2"])
+    want = m.r2_lifecycle([("", 92), ("staging/", 2)])
+    check("issue with a prefix rule succeeds", rc == 0, str(rc))
+    check("its lifecycle is the whole-bucket rule and the prefix rule, once",
+          _life_puts(log) == [want], str(_life_puts(log)))
+    check("the summary names every rule",
+          "staging/" in out.getvalue() and "92 days" in out.getvalue() and "2 days" in out.getvalue(),
+          out.getvalue())
+    check("and the three slots are delivered", len(delivered) == 3, str(delivered))
+
+    log2, delivered2 = [], []
+    _r2_fake(m, log2, bucket_exists=True, lifecycle=want,
+             existing="observatory-r2-bucket eu/offsite-backups (managed)")
+    m.deliver_to_vault = lambda value, p, e, n: delivered2.append((value, n))
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        rc = m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", 92, "proj/prod/OFFSITE",
+                                None, wait=0, lifecycle_rules=["staging/:2"])
+    check("a re-run succeeds", rc == 0, str(rc))
+    check("and writes exactly the same lifecycle", _life_puts(log2) == [want], str(_life_puts(log2)))
+    check("the existing bucket is not created again",
+          not any(v == "POST" and p == "/accounts/a1/r2/buckets" for v, p, *_ in log2), "")
+    check("the bucket key is rolled in place, never a twin",
+          ("PUT", "/accounts/a1/tokens/t-bucket/value") in _token_writes(log2)
+          and not any(v == "POST" and p == "/accounts/a1/tokens" and "setup" not in (pl or {}).get("name", "")
+                      for v, p, _t, pl, _h in log2)
+          and delivered2[:1] == [("t-bucket", "OFFSITE_ACCESS_KEY_ID")], str(_token_writes(log2)))
+
+    log3 = []
+    _r2_fake(m, log3, bucket_exists=True, lifecycle=want)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", None, "proj/prod/OFFSITE", None, wait=0)
+    check("issue with neither option keeps the old 30-day whole-bucket rule",
+          _life_puts(log3) == [m.r2_lifecycle([("", 30)])], str(_life_puts(log3)))
+
+
+def test_cf_r2_lifecycle_read_back_is_compared_rule_by_rule() -> None:
+    """A provider that drops, rewrites or adds a rule is a refusal, named by
+    prefix — one rule matching is not the lifecycle that was asked for."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    m._journal = lambda *a, **k: None
+    m.deliver_to_vault = lambda *a: (_ for _ in ()).throw(AssertionError("nothing is delivered"))
+
+    def drop_prefix(lc):
+        lc["rules"] = [r for r in lc["rules"] if r["conditions"]["prefix"] == ""]
+        return lc
+
+    def stretch_prefix(lc):
+        for r in lc["rules"]:
+            if r["conditions"]["prefix"] == "staging/":
+                r["deleteObjectsTransition"]["condition"]["maxAge"] = 7 * 86400
+        return lc
+
+    def add_stray(lc):
+        lc["rules"].append({"id": "stray", "enabled": True, "conditions": {"prefix": "old/"},
+                            "deleteObjectsTransition": {"condition": {"type": "Age", "maxAge": 86400}}})
+        return lc
+
+    def disable(lc):
+        lc["rules"][1]["enabled"] = False
+        return lc
+
+    def no_abort(lc):
+        lc["rules"][1].pop("abortMultipartUploadsTransition")
+        return lc
+    for name, tamper, words in (("a dropped prefix rule", drop_prefix, "staging/"),
+                                ("a prefix rule read back with other days", stretch_prefix, "staging/"),
+                                ("a rule nobody asked for", add_stray, "old/"),
+                                ("a rule read back disabled", disable, "staging/"),
+                                ("a rule without its multipart abort", no_abort, "staging/")):
+        for label, run in (
+                ("issue", lambda: m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", 92,
+                                                     "proj/prod/OFFSITE", None, wait=0,
+                                                     lifecycle_rules=["staging/:2"])),
+                ("lifecycle", lambda: m.cmd_lifecycle("offsite-backups", "eu", 92, ["staging/:2"],
+                                                      None, wait=0))):
+            log, err = [], io.StringIO()
+            tokens = _r2_fake(m, log, bucket_exists=True, readback=tamper)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                rc = run()
+            check(f"{label}: {name} is refused and named",
+                  rc == 1 and "did not read back" in err.getvalue() and words in err.getvalue(),
+                  f"{rc} {err.getvalue()}")
+            check(f"{label}: and the setup token is still deleted, no bucket key minted",
+                  "t-setup" not in tokens and "t-bucket-new" not in tokens, str(tokens))
+
+
+def test_cf_r2_lifecycle_only_changes_rules_and_never_a_key() -> None:
+    """`lifecycle` rewrites an existing bucket's rules through the same
+    ephemeral setup token, and does nothing else: no bucket key is minted,
+    rolled or delivered, no bucket is created, no vault slot is touched."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    journal = []
+    m._journal = lambda event, subject, **k: journal.append((event, subject, k))
+    m.deliver_to_vault = lambda *a: (_ for _ in ()).throw(AssertionError("no vault slot is touched"))
+    old = m.r2_lifecycle([("", 92)])
+    want = m.r2_lifecycle([("", 92), ("staging/", 2)])
+    log, out, err = [], io.StringIO(), io.StringIO()
+    tokens = _r2_fake(m, log, bucket_exists=True, lifecycle=old,
+                      existing="observatory-r2-bucket eu/offsite-backups (managed)")
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = m.cmd_lifecycle("offsite-backups", "eu", 92, ["staging/:2"], None, wait=0)
+    check("lifecycle succeeds on an existing bucket", rc == 0, f"{rc} {err.getvalue()}")
+    check("it replaces the lifecycle with exactly the set given",
+          _life_puts(log) == [want], str(_life_puts(log)))
+    check("the only token it creates is the setup token, and it deletes it",
+          _token_writes(log) == [("POST", "/accounts/a1/tokens")] and "t-setup" not in tokens
+          and ("DELETE", "/accounts/a1/tokens/t-setup") in [(v, p) for v, p, *_ in log],
+          str(_token_writes(log)))
+    check("the bucket key is neither rolled nor rewritten",
+          not any("t-bucket" in p for _v, p in _token_writes(log)), str(_token_writes(log)))
+    check("no S3 call is made: there is no key to prove",
+          not any(v.startswith("S3 ") for v, *_ in log), "")
+    check("every R2 call names the jurisdiction",
+          all(h.get("cf-r2-jurisdiction") == "eu" for _v, p, _t, _pl, h in log if "/r2/buckets" in p), "")
+    printed = out.getvalue() + err.getvalue()
+    check("the summary names the rules and says no key changed",
+          "staging/" in printed and "92 days" in printed and "no key" in printed, printed)
+    check("no value is printed", "setup-value-" not in printed and "bucket-value-" not in printed, printed)
+    check("the change is journaled under the bucket, not a slot",
+          journal and journal[0][0] == "lifecycle" and "offsite-backups" in journal[0][1]
+          and journal[0][2].get("rules") == [["", 92], ["staging/", 2]], str(journal))
+
+    log2 = []
+    _r2_fake(m, log2, bucket_exists=True, lifecycle=want)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        rc = m.cmd_lifecycle("offsite-backups", "eu", 92, ["staging/:2"], None, wait=0)
+    check("a re-run writes the identical lifecycle", rc == 0 and _life_puts(log2) == [want],
+          str(_life_puts(log2)))
+
+    log3, err3 = [], io.StringIO()
+    tokens3 = _r2_fake(m, log3)
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err3):
+        rc = m.cmd_lifecycle("offsite-backups", "eu", 92, ["staging/:2"], None, wait=0)
+    check("a missing bucket is refused, pointing at issue",
+          rc == 1 and "issue --preset r2-bucket" in err3.getvalue(), f"{rc} {err3.getvalue()}")
+    check("and is not created, nor any lifecycle written",
+          not any(v == "POST" and p == "/accounts/a1/r2/buckets" for v, p, *_ in log3)
+          and _life_puts(log3) == [], "")
+    check("and the setup token is still deleted", "t-setup" not in tokens3, str(tokens3))
+
+    with contextlib.redirect_stderr(io.StringIO()):
+        check("a bucket name R2 would refuse is refused before minting",
+              m.cmd_lifecycle("Bad_Name", "eu", 92, [], None, wait=0) == 2, "")
+        check("an unknown jurisdiction is refused",
+              m.cmd_lifecycle("offsite-backups", "mars", 92, [], None, wait=0) == 2, "")
+
+
+def test_cf_r2_lifecycle_command_line() -> None:
+    """The flags reach the functions: `--lifecycle-rule` repeats, `--expire-days`
+    is optional, and `lifecycle` takes no --vault and no --preset."""
+    m = cf()
+    seen = {}
+    m.cmd_issue_bucket = lambda *a, **k: seen.setdefault("issue", (a, k)) and 0
+    m.cmd_lifecycle = lambda *a, **k: seen.setdefault("lifecycle", (a, k)) and 0
+    argv = sys.argv
+    try:
+        sys.argv = ["cloudflare.py", "issue", "--preset", "r2-bucket", "--bucket", "b-1",
+                    "--jurisdiction", "eu", "--vault", "p/e/X",
+                    "--lifecycle-rule", "staging/:2", "--lifecycle-rule", "tmp/:1"]
+        m.main()
+        sys.argv = ["cloudflare.py", "lifecycle", "--account", "acct", "--bucket", "b-1",
+                    "--jurisdiction", "eu", "--expire-days", "92", "--lifecycle-rule", "staging/:2"]
+        m.main()
+        import contextlib, io
+        m.cmd_issue_account = lambda *a, **k: seen.setdefault("account", (a, k)) and 0
+        err = io.StringIO()
+        sys.argv = ["cloudflare.py", "issue", "--preset", "d1-edit", "--vault", "p/e/X",
+                    "--lifecycle-rule", "staging/:2"]
+        with contextlib.redirect_stderr(err):
+            rc_other = m.main()
+    finally:
+        sys.argv = argv
+    check("a lifecycle flag on another preset is refused, not silently ignored",
+          rc_other == 2 and "account" not in seen and "r2-bucket only" in err.getvalue(),
+          f"{rc_other} {err.getvalue()}")
+    a, k = seen.get("issue", ((), {}))
+    check("issue passes every --lifecycle-rule, and no expiry when none was given",
+          a[:5] == ("r2-bucket", "b-1", "eu", None, "p/e/X")
+          and k.get("lifecycle_rules") == ["staging/:2", "tmp/:1"], str(seen.get("issue")))
+    check("lifecycle passes bucket, jurisdiction, expiry, rules and account",
+          seen.get("lifecycle", ((), {}))[0] == ("b-1", "eu", 92, ["staging/:2"], "acct"),
+          str(seen.get("lifecycle")))
+    check("the usage lists the lifecycle command", "cloudflare.py\" lifecycle" in m.__doc__, "")
 
 
 def test_cf_groups_lists_names_and_levels_and_never_a_value() -> None:
@@ -1324,6 +1637,12 @@ if __name__ == "__main__":
                test_cf_sigv4_matches_the_published_aws_example,
                test_cf_r2_preset_issues_one_bucket_pair_into_the_vault,
                test_cf_r2_preset_refuses_and_cleans_up,
+               test_cf_r2_lifecycle_rules_per_prefix,
+               test_cf_r2_lifecycle_refuses_what_it_cannot_mean,
+               test_cf_r2_issue_writes_every_rule_and_reruns_idempotently,
+               test_cf_r2_lifecycle_read_back_is_compared_rule_by_rule,
+               test_cf_r2_lifecycle_only_changes_rules_and_never_a_key,
+               test_cf_r2_lifecycle_command_line,
                test_cf_groups_lists_names_and_levels_and_never_a_value,
                test_cf_email_presets_grant_exactly_what_the_email_service_needs,
                test_cf_email_presets_refuse_what_they_do_not_grant,
