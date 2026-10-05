@@ -43,9 +43,11 @@ codes are listed in EXIT_* below and in docs/ONBOARDING.md, "Staying in step".
 """
 from __future__ import annotations
 import argparse
+import contextlib
 import dataclasses
 import datetime
 import email.parser
+import fcntl
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -650,6 +652,21 @@ class NewEngine:
         code, out, err = self._full("doctor")
         return code, redact_tail(err if code else "")
 
+    def ensure_maintenance(self) -> tuple[int, str]:
+        """The new release schedules its own maintenance job (updates, the app, daily backups).
+
+        Run by the new code, so a release that changes the job's plist installs its own
+        version. Allowed to touch launchd/systemd and the credential store because a
+        person or the maintenance job itself started this update."""
+        saved = self.env
+        self.env = {**saved, "OBSERVATORY_SYSTEM_SETUP": "1"}
+        try:
+            # --if-wanted: a schedule a person removed stays removed (review F4).
+            code, out, err = self._full("maintain", "ensure", "--if-wanted")
+        finally:
+            self.env = saved
+        return code, redact_tail(err if code else "", 300)
+
 
 def session_servers() -> list[dict]:
     """Per-session MCP servers started from this engine's `mcp/server.py`: pid and how long it has run.
@@ -1041,6 +1058,14 @@ class Transaction:
                     report["snapshot"] = {"snapshot": str(snapshot), "encrypted": False,
                                           "export_error": f"{type(exc).__name__}: {exc}"}
         failed = self.start_writers() if self.stopped else []
+        if self.has_ws:
+            engine = self.deps.engine(self.base)
+            if hasattr(engine, "ensure_maintenance"):
+                try:
+                    code, detail = engine.ensure_maintenance()
+                except Exception as exc:  # noqa: BLE001 — the update is done; the plugin hook retries
+                    code, detail = 125, type(exc).__name__
+                report["maintenance"] = "scheduled" if code == 0 else f"not scheduled: {detail or f'exit {code}'}"
         if failed:
             report["services_not_restarted"] = failed
             report["human_steps"] = [f["fix"] for f in failed]
@@ -1074,6 +1099,46 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _update_lock_path(base: Path) -> Path:
+    return base.parent / f".{base.name}.observatory-update.lock"
+
+
+@contextlib.contextmanager
+def update_lock(base: Path):
+    """One `--apply` at a time per workspace, for the whole transaction.
+
+    The maintenance job, the plugin's bridge for older engines and a person can each start
+    one; two at once would install into one environment and restart each other's jobs
+    (review F6). The lock lives beside the home, so a restore that replaces the home in
+    place does not drop it."""
+    file = _update_lock_path(base)
+    file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(file, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise UpdateError("Another `full update --apply` is running for this workspace; "
+                              "nothing was changed") from None
+        yield
+    finally:
+        os.close(fd)
+
+
+def update_lock_held(base: Path) -> bool:
+    file = _update_lock_path(base)
+    if not file.exists():
+        return False
+    fd = os.open(file, os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    finally:
+        os.close(fd)
+    return False
+
+
 def main(argv: list[str], deps: Dependencies | None = None) -> int:
     args = parser().parse_args(argv)
     if deps is None:
@@ -1097,7 +1162,8 @@ def main(argv: list[str], deps: Dependencies | None = None) -> int:
                 except Exception as exc:  # noqa: BLE001 — an unusable helper is a refusal, not a crash
                     raise UpdateError(f"The launchd helpers could not be loaded ({type(exc).__name__}); "
                                       "stop the writers yourself and pass --writers-stopped") from None
-            code, result = Transaction(base, current, release, deps, args).run()
+            with update_lock(base):
+                code, result = Transaction(base, current, release, deps, args).run()
     except Undetermined as exc:
         code, result = EXIT_UNDETERMINED, {"status": "degraded", "current": current, "degraded": [str(exc)]}
     except UpdateError as exc:

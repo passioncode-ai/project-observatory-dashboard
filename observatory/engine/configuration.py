@@ -5,7 +5,7 @@ import os
 import re
 from pathlib import Path
 
-VERSION = "0.16.0"
+VERSION = "0.17.0"
 CONFIG_VERSION = 1
 WORKSPACE_VERSION = 1
 SOURCE = Path(__file__).resolve().parent
@@ -90,6 +90,11 @@ INTERFACE_SETTINGS = {"locale": ("en", "ru")}
 #: What `storage` in settings.json may hold. `backups` is the root encrypted
 #: backups are written to (backup_vault.root_info); an absolute path.
 STORAGE_SETTINGS = ("backups",)
+
+#: What `updates` in settings.json may hold (maintenance.py). Both default to true when
+#: absent: `auto` installs each new stable release by itself, `scheduled` keeps the
+#: hourly maintenance job in place. An older reader never reads the key.
+UPDATE_SETTINGS = ("auto", "scheduled")
 
 #: Every switch and source the engine reads. `configure` refuses any other name:
 #: a typo used to be answered "configured" and then did nothing. The workspace
@@ -221,6 +226,15 @@ def load(base: Path | None = None) -> dict:
             raise ConfigurationError(f"Unknown storage setting: {key}")
         if not isinstance(value, str) or not Path(value).expanduser().is_absolute():
             raise ConfigurationError(f"Storage {key} must be an absolute path")
+    # UPDATES is optional and ignored by releases before 0.17.0.
+    updates = doc.get("updates", {})
+    if not isinstance(updates, dict):
+        raise ConfigurationError("Configuration updates must be an object")
+    for key, value in updates.items():
+        if key not in UPDATE_SETTINGS:
+            raise ConfigurationError(f"Unknown updates setting: {key}")
+        if type(value) is not bool:
+            raise ConfigurationError(f"Updates {key} must be true or false")
     required = doc.get("must_understand", [])
     if not isinstance(required, list) or required:
         raise ConfigurationError("Configuration requires unsupported capabilities")

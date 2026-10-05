@@ -9,7 +9,7 @@ without the author's accounts, projects or paths. Agents working here also read
 
 Project Observatory is open source under the [GNU AGPL-3.0](LICENSE) (`AGPL-3.0-only`), and
 PassionCode.ai also offers it under a [commercial license](COMMERCIAL-LICENSE.md) for use that does
-not meet the AGPL's terms (<contact@passioncode.ai>). SPDX:
+not meet the AGPL's terms (<https://passioncode.ai/business/>). SPDX:
 `AGPL-3.0-only OR LicenseRef-PassionCode-Commercial`. Versions up to and including v0.9.1 were
 released under PolyForm Noncommercial or Internal Use (v0.8.2–v0.9.1) and the MIT License (v0.8.1
 and earlier); those releases keep their licence.

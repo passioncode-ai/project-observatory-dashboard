@@ -26,7 +26,7 @@ matters, because reasoning carries a vendor credential that does not travel and
 fails as a 400 rather than as degradation.
 """
 from __future__ import annotations
-import json, os, sys, pathlib, urllib.error, urllib.request
+import json, os, sys, pathlib, urllib.error, urllib.parse, urllib.request
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -71,6 +71,26 @@ KEY_FILES = ((pathlib.Path(os.environ["OBSERVATORY_KEY_FILE"]),)
              (paths.STATE / ".openrouter-key",
               paths.source_path("secret_store", paths.SECRETS) / 'openrouter'))
 UA = "project-observatory/0.1 (+https://github.com/passioncode-ai/project-observatory-dashboard)"
+
+# OpenRouter credits a request to the app named by HTTP-Referer, titled by X-OpenRouter-Title,
+# filed under at most two X-OpenRouter-Categories (https://openrouter.ai/docs/app-attribution).
+# The app is the product page, so every Observatory install adds to one public listing. Only the
+# requests Observatory itself makes carry it, and only to OpenRouter: another provider gets
+# nothing it would not otherwise see. None of these values is a secret. (Roadmap RM-16.)
+ATTRIBUTION_URL = "https://passioncode.ai/observatory/"
+ATTRIBUTION_TITLE = "Project Observatory"
+ATTRIBUTION_CATEGORIES = "programming-app,cli-agent"
+
+
+def attribution_headers(base_url: str) -> dict[str, str]:
+    """The app-attribution headers for a request to `base_url`, or none off OpenRouter."""
+    host = (urllib.parse.urlsplit(base_url).hostname or "").lower()
+    if host != "openrouter.ai" and not host.endswith(".openrouter.ai"):
+        return {}
+    return {"HTTP-Referer": ATTRIBUTION_URL,
+            "X-OpenRouter-Title": ATTRIBUTION_TITLE,
+            "X-Title": ATTRIBUTION_TITLE,  # the legacy name, still read
+            "X-OpenRouter-Categories": ATTRIBUTION_CATEGORIES}
 
 
 class ProviderError(Exception):
@@ -537,10 +557,7 @@ def _post(base_url: str, key: str, body: dict, timeout: int = 120) -> dict:
     req = urllib.request.Request(
         f"{base_url}/chat/completions", data=data, method="POST",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
-                 "User-Agent": UA,
-                 # OpenRouter attributes traffic by these two. They are not secrets.
-                 "HTTP-Referer": "https://github.com/passioncode-ai/project-observatory-dashboard",
-                 "X-Title": "Project Observatory"})
+                 "User-Agent": UA, **attribution_headers(base_url)})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))
@@ -774,7 +791,7 @@ def embed(texts: list[str], log=print, *, authorization=None) -> dict:
     req = urllib.request.Request(
         f"{cfg['base_url']}/embeddings", data=body, method="POST",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json",
-                 "User-Agent": UA})
+                 "User-Agent": UA, **attribution_headers(cfg["base_url"])})
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
             raw = json.loads(r.read().decode("utf-8"))
