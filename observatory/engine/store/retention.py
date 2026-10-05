@@ -32,10 +32,12 @@ an index copy), and that is a narrower claim than it sounds beside the word
 git history keeps the export for ever.
 
 If text must be unrecoverable rather than unreadable, a tombstone is not the
-mechanism and this project deliberately does not have one: revisions are
-immutable, so nothing here may rewrite one, and the audit trail was chosen over
-forgetting. `registry/ledger.jsonl`'s own header says the same thing, because
-that is the file somebody will read.
+mechanism. Retention still never rewrites a revision: the audit trail was chosen
+over forgetting, and that remains the default. Erasure is a separate, explicit act
+of the operator at a terminal — `project-observatory full forget MEMORY_ID --why TEXT` (`store/forget.py`,
+docs/design/FORGET.md, PB-137 N-013) — which keeps each revision's identity and
+replaces its text everywhere this machine can reach, and names in its receipt what
+it cannot reach (backups, git history of the export).
 
     python3 store/retention.py plan     # what WOULD go. Writes nothing.
     python3 store/retention.py apply    # do it, and collect the receipts

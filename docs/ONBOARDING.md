@@ -518,6 +518,10 @@ project-observatory full access-binding revoke BINDING_ID           # refused fr
   days. `--scope`, `--class`, `--effect propose`, `--workflow` and `--days` change that.
 - `full doctor` shows the state under `access_bindings`, and the Health page shows the same.
 - Every decision about a binding is logged in `store/logs/access.jsonl`, without the bearer.
+- `project-observatory full forget MEMORY_ID --why "TEXT"` erases a record's text everywhere
+  this workspace holds it and prints a receipt per backend; `--plan` shows what it would
+  touch first. Backups keep the text until they rotate, and the receipt says so
+  ([design/FORGET.md](design/FORGET.md)).
 - Every memory search leaves a receipt in `store/logs/retrieval.jsonl`. The receipt holds the
   exact results and the scope, and the query only as an HMAC; it holds no text. The caller
   that received a receipt can read it back with `observatory_explain`. Memory answers are

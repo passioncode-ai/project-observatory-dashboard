@@ -144,6 +144,8 @@ BOUNDARY += ('checkpoint_chunks',)
 BOUNDARY += ('memory_http',)
 # memory/0.1 served under its own names (PB-137 N-025).
 BOUNDARY += ('memory_wire',)
+# Forget with a receipt: withdrawal, erasure, retained copies named (PB-137 N-013).
+BOUNDARY += ('forget_receipt',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',

@@ -71,6 +71,7 @@ SAMPLES = {
     "PROVIDER": "anthropic", "REASON": "limit", "WHY": "abandoned",
     "{wid}": "wf_0123456789abcdef",
     "PROJECT": "project:alpha", "TEXT": "texts of alpha are sent to OpenAI",
+    "MEMORY_ID": "mem:0123456789abcdef",
     "PRINCIPAL": "agent:example-bot", "BINDING_ID": "bnd_0123456789ab",
     'shellArg(RUNTIME.user_home || "$HOME")': "/srv/example-ws/home",
 }

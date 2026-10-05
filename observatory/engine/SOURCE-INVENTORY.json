@@ -765,15 +765,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "30353161c8ed303b6de163e9f17ee34b0a22ed97ee399f585a49c24ff689ffb2",
-      "bytes": 55502,
+      "export_sha256": "bb4615a06aae10ea82fc3095470bc222c014915dad1a8e2ef9a9f4c5b04ae9bf",
+      "bytes": 55885,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "f64037ba19e9b9e66f4dd87d6ebc92055802f56d6936fae6fca362159d7f2ce0",
-      "bytes": 16605,
+      "export_sha256": "f6a9dc016f8195e5c5af2a911a8e92f80b23834d7bc8f0666756f47bb5998b65",
+      "bytes": 17245,
       "upstream_modified": true
     },
     {
@@ -1194,8 +1194,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "cc218845c8d004abb00df9af8db9271691af4fcc53166448b1f9836d5ad1812a",
-      "bytes": 80693,
+      "export_sha256": "c1cb40472db0700842de115cac688ce81e51169ed05b84c02f195f99ff8f0f68",
+      "bytes": 81203,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -1550,6 +1550,13 @@
       "upstream_modified": true
     },
     {
+      "path": "store/forget.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "80d4b777154e0cd4c7ae7b92bc5b99f121e13743c43e2e5693cb8adb24037a6d",
+      "bytes": 16381
+    },
+    {
       "path": "store/indexer.py",
       "source_sha256": "e37f934bac5efdf59f1f46ad26091316042553b87521bd48c4eb45c0045e3f14",
       "export_sha256": "378076adeb67e80884fe8dbd9f369c418bad3a18469452b4d1a756cdb66b91d1",
@@ -1589,8 +1596,8 @@
     {
       "path": "store/retention.py",
       "source_sha256": "18bfbd936b60a23c073945640fce30e6609e72600660bb660a47c93bae37f995",
-      "export_sha256": "2c1c0b45440961f82eb08648a5f6a50340e9306c89fe228e569d21fb4d917de2",
-      "bytes": 31072,
+      "export_sha256": "696eb3346387d0fd869be418ef1acd44bf0ad3cabf059ea5e9d17633f414181f",
+      "bytes": 31296,
       "python_comments_removed": 93,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -1782,8 +1789,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "c2a86c5cf93b67d82ff2821c6b5225bfc4fd96adb7eb9f216e9b42234ce68763",
-      "bytes": 18273,
+      "export_sha256": "12159a8fcf44205abdce03cf7958a343160cf2b6811cfd9854807123888dd773",
+      "bytes": 18389,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2345,6 +2352,13 @@
       "bytes": 10936
     },
     {
+      "path": "tests/test_forget_receipt.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "dac14d3e0d48006a434685ed43844a1de13b8ef5a7c2f5e6ff637806c47271bf",
+      "bytes": 11509
+    },
+    {
       "path": "tests/test_freshness.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -2397,8 +2411,8 @@
       "path": "tests/test_handed_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "395cab3fee3962c86342402f762b3e6a0115a0e26258763c8067d212399107bc",
-      "bytes": 18308
+      "export_sha256": "f9b60f68cb71717e5a422722c4ea061c416905ee4268e5fc3bfe0b7d7d087c1e",
+      "bytes": 18349
     },
     {
       "path": "tests/test_handoff.py",
@@ -3727,6 +3741,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/forget_cli.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "2e5ca4e6741cf729fa4b04251757975ee38808b81d2ea6d08c161056da1dd3d2",
+      "bytes": 2782
+    },
+    {
       "path": "tools/fresh_clone.py",
       "source_sha256": "031ad7514e3e2e473facc101c7f5217d8abe8397f828109c36ffbcc0c2efa6c4",
       "export_sha256": "12009e6f7c75a1de764382bb39c20877bda583bc9b7d5c51eaa46b53aca69daa",
@@ -4199,7 +4220,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 536,
+  "file_count": 539,
   "excluded": [
     "git-history",
     "operator-registries",
