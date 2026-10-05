@@ -284,7 +284,9 @@ class InteropServer(MCPServer):
             refused = {"error": "invalid-input", "code": "invalid-input", "detail": bad,
                        "hint": f"{name} takes only the fields {memory_wire.FAMILY} defines",
                        "degraded": []}
-            return CallToolResult(content=[_text(refused)], structured_content=refused)
+            # isError, as every malformed input here is (`_error`): the call never ran.
+            return CallToolResult(content=[_text(refused)], structured_content=refused,
+                                  is_error=True)
         out = await anyio.to_thread.run_sync(
             lambda: memory_wire.call(name, arguments, self._memory_tools))
         bad = _first_error(d["output"], out)

@@ -533,8 +533,29 @@ def mint(admin: str, account_id: str, preset: dict,
                  {"name": name, "policies": policies})
     res = d.get("result") or {}
     if not res.get("value"):
-        raise RuntimeError("cloudflare created the token but returned no value")
+        raise RuntimeError("cloudflare created the token but returned no value"
+                           + discard_fresh(admin, account_id, res.get("id"), False))
     return res.get("id", ""), res["value"]
+
+
+def discard_fresh(admin: str, account_id: str, tid: str | None, rolled: bool) -> str:
+    """What happened to a token minted by a call that then failed (issue #95).
+
+    A token this call CREATED has no holder once the call refuses, so it is deleted at
+    Cloudflare before the refusal is printed. A ROLLED token keeps its id and readers and its
+    old value is already dead, so it stays; the slot needs a fresh issue either way. Returns
+    the clause the refusal line carries, never the value."""
+    if not tid:
+        return ""
+    if rolled:
+        return ("; the existing token was rolled, so the value the slot held is dead — "
+                "issue again to deliver a working one")
+    try:
+        _request(f"/accounts/{account_id}/tokens/{tid}", admin, method="DELETE")
+    except RuntimeError as exc:
+        return (f"; the token this call created could NOT be deleted ({exc}) — "
+                f"delete it in the dashboard now")
+    return "; the token this call created was deleted again"
 
 
 def can_read_analytics(token: str, zone_ids: list[str]) -> str:
@@ -746,14 +767,16 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
     except ValueError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
+    # Known before the first call, so a refusal can say what became of a minted token.
+    admin, account, tid, rolled = None, None, None, False
     try:
         _stash, admin, account = find_account(account_label)
         zid = zone_id_of(admin, account["id"], zone)
         token_name = preset["name"].format(zone=zone, slot=f"{project}/{env}/{name}")
         rolled = existing_token(admin, account["id"], token_name) is not None
-        _tid, value = mint(admin, account["id"], preset,
-                           resources={f"com.cloudflare.api.account.zone.{zid}": "*"},
-                           name=token_name)
+        tid, value = mint(admin, account["id"], preset,
+                          resources={f"com.cloudflare.api.account.zone.{zid}": "*"},
+                          name=token_name)
         # A fresh token can take a moment to be honoured at the edge; the
         # value is delivered only once it has proved it can read the zone.
         probe = preset["probe"].format(zone_id=zid)
@@ -768,7 +791,8 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
                 time.sleep(wait)
         deliver_to_vault(value, project, env, name)
     except RuntimeError as exc:
-        print(f"refused: {exc}", file=sys.stderr)
+        print(f"refused: {exc}{discard_fresh(admin, (account or {}).get('id', ''), tid, rolled)}",
+              file=sys.stderr)
         return 1
     _journal("rotate" if rolled else "issue", f"{project}/{env}/{name}",
              preset=preset_key, zone=zone, account=account["name"])
@@ -794,11 +818,13 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
     except ValueError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
+    # Known before the first call, so a refusal can say what became of a minted token.
+    admin, account, tid, rolled = None, None, None, False
     try:
         _stash, admin, account = find_account(account_label)
         token_name = preset["name"].format(slot=f"{project}/{env}/{name}")
         rolled = existing_token(admin, account["id"], token_name) is not None
-        _tid, value = mint(admin, account["id"], preset, name=token_name)
+        tid, value = mint(admin, account["id"], preset, name=token_name)
         # The value reaches the vault only once it has proved, with its own
         # rights, the one thing its reader needs first.
         probe = preset["probe"].format(account_id=account["id"])
@@ -814,7 +840,8 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
                 time.sleep(wait)
         deliver_to_vault(value, project, env, name)
     except RuntimeError as exc:
-        print(f"refused: {exc}", file=sys.stderr)
+        print(f"refused: {exc}{discard_fresh(admin, (account or {}).get('id', ''), tid, rolled)}",
+              file=sys.stderr)
         return 1
     _journal("rotate" if rolled else "issue", f"{project}/{env}/{name}",
              preset=preset_key, account=account["name"])
@@ -1012,6 +1039,8 @@ def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
     except ValueError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
+    # Known before the first call, so a refusal can say what became of a minted token.
+    admin, account, tid, rolled = None, None, None, False
     try:
         _stash, admin, account = find_account(account_label)
         created = r2_setup_bucket(admin, account["id"], bucket, jurisdiction, expire_days, wait)
@@ -1033,7 +1062,8 @@ def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
         for slot, v in zip(slots, (access_key, secret, endpoint)):
             deliver_to_vault(v, project, env, slot)
     except RuntimeError as exc:
-        print(f"refused: {exc}", file=sys.stderr)
+        print(f"refused: {exc}{discard_fresh(admin, (account or {}).get('id', ''), tid, rolled)}",
+              file=sys.stderr)
         return 1
     _journal("rotate" if rolled else "issue", f"{project}/{env}/{prefix}_*",
              preset=preset_key, bucket=bucket, jurisdiction=jurisdiction,

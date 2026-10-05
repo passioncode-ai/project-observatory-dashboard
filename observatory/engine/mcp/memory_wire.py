@@ -141,4 +141,8 @@ def call(capability: str, arguments: dict, tools: dict[str, Callable[..., dict]]
     """Run the observatory tool behind `capability` with the contract's arguments."""
     tool, renames = COMPATIBILITY[capability]
     args = {renames.get(k, k): v for k, v in arguments.items()}
+    # The contract's `memory.record` evidence is a list of references (strings); the engine
+    # keeps evidence as objects everywhere else, so a reference becomes {"ref": …}.
+    if capability == "memory.record" and isinstance(args.get("evidence"), list):
+        args["evidence"] = [{"ref": e} if isinstance(e, str) else e for e in args["evidence"]]
     return tools[tool](**args)

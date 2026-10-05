@@ -35,19 +35,38 @@ def _safe_git():
     return module
 
 
+class Unmerged(Exception):
+    """The index still holds a conflict; an inventory of it would describe no tree."""
+
+
 def tracked_engine_files(root: Path = ROOT) -> list[str]:
-    """Engine files Git tracks, relative to the engine directory."""
-    out = _safe_git().run(["ls-files", "-z", "--", "observatory/engine"], repo=root, timeout=None,
-                          check=True, text=False).stdout.decode("utf-8")
+    """Engine files Git tracks, relative to the engine directory, each once.
+
+    `git ls-files` lists an unmerged path once per stage, which once wrote the same
+    `path` two or three times (issue #97); while a conflict is open this refuses."""
+    git = _safe_git()
+    unmerged = git.run(["ls-files", "-u", "-z", "--", "observatory/engine"], repo=root,
+                       timeout=None, check=True, text=False).stdout.decode("utf-8")
+    if unmerged.strip("\0"):
+        paths = sorted({row.split("\t", 1)[-1] for row in unmerged.split("\0") if row})
+        raise Unmerged(f"{len(paths)} unmerged path(s), e.g. {paths[0]}: resolve and "
+                       f"`git add` them, then regenerate")
+    out = git.run(["ls-files", "-z", "--", "observatory/engine"], repo=root, timeout=None,
+                  check=True, text=False).stdout.decode("utf-8")
     prefix = "observatory/engine/"
-    return sorted(p[len(prefix):] for p in out.split("\0")
-                  if p.startswith(prefix) and p != prefix + "SOURCE-INVENTORY.json")
+    return sorted({p[len(prefix):] for p in out.split("\0")
+                   if p.startswith(prefix) and p != prefix + "SOURCE-INVENTORY.json"})
 
 
 def refreshed(doc: dict, engine: Path, files: list[str]) -> tuple[dict, list[str]]:
     """Return (new inventory, human-readable differences)."""
     rows = {r["path"]: r for r in doc["files"]}
     changes: list[str] = []
+    seen: set[str] = set()
+    for r in doc["files"]:
+        if r["path"] in seen:
+            changes.append(f"duplicate: {r['path']}")
+        seen.add(r["path"])
     new_rows = []
     for path in files:
         data = (engine / path).read_bytes()
@@ -77,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         doc = json.loads(INVENTORY.read_text(encoding="utf-8"))
         files = tracked_engine_files()
-    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+    except (OSError, ValueError, subprocess.CalledProcessError, Unmerged) as exc:
         print(json.dumps({"gate": "source-inventory", "passed": False, "error": str(exc)}))
         return 2
     new, changes = refreshed(doc, ENGINE, files)

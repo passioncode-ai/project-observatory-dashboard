@@ -30,8 +30,10 @@ _MADE: list[pathlib.Path] = []
 ALPHA = "project:alpha-web"
 OWNER = "agent:forget-test"
 EXECUTOR = {"provider": "anthropic", "model": "claude-opus-5-5", "accountRef": "acct-a"}
-#: The text that must not survive. Distinctive, so a substring search cannot hit anything else.
-SECRET = "the vendor contract renews at forty-two thousand per quarter"
+#: The text that must not survive. Distinctive, so a substring search cannot hit anything else;
+#: "xylophonium" is a word no other record in these fixtures uses.
+SECRET = "the vendor contract renews at forty-two thousand xylophonium per quarter"
+UNIQUE = b"xylophonium"
 
 
 def tearDownModule() -> None:
@@ -134,6 +136,8 @@ class EverywhereThisMachineReaches(Base):
         self.assertTrue(receipt["erasedInStore"], receipt)
         self.assertFalse(receipt["complete"], "git history keeps the export: never complete")
         self.assertNotIn(SECRET.encode(), self.s.everything(), "no page of the file holds it")
+        self.assertNotIn(UNIQUE, self.s.everything(),
+                         "nor any of its words: the full-text segments were merged away")
         self.assertNotIn(SECRET, export.read_text(encoding="utf-8"))
         # The audit trail stays: the rows exist, say who and when, and say nothing else.
         row = self.s.conn.execute("SELECT * FROM ledger WHERE memory_id = ?",
@@ -157,10 +161,83 @@ class EverywhereThisMachineReaches(Base):
         c = self.s.copies()
         first = self.s.F.forget(self.s.conn, c["note"]["memoryId"], reason="contract withdrawn")
         again = self.s.F.forget(self.s.conn, c["note"]["memoryId"], reason="contract withdrawn")
-        self.assertTrue(again["erasedInStore"])
+        self.assertIsNone(again["erasedInStore"], "a rerun has no text left to search for")
         self.assertIn("0 revision(s) rewritten",
                       [b for b in again["backends"] if b["backend"] == "ledger"][0]["detail"])
-        self.assertEqual(len(first["backends"]), len(again["backends"]))
+        names = lambda r: [b["backend"] for b in r["backends"]]                  # noqa: E731
+        self.assertEqual(names(again), names(first) + ["residue"],
+                         "every backend checked again, plus the one it cannot check")
+
+
+class ReviewFindings(Base):
+    """Defects found by the pre-release review of 2026-10-05 (H1-H3)."""
+
+    def closed_workflow(self, goal: str) -> dict:
+        wf = self.s.W.checkpoint_write(self.s.conn, owner=OWNER, idempotency_key="key-fg-0201",
+                                       step_id="S1", status="in_progress", body={"goal": goal},
+                                       project_id=ALPHA, executor=EXECUTOR, redactor=self.s.redactor)
+        h = self.s.W.handoff_create(self.s.conn, owner=OWNER, idempotency_key="key-fg-0202",
+                                    workflow_id=wf["workflowId"], to={"provider": "anthropic"},
+                                    reason="limit", lease_token=wf["leaseId"],
+                                    git_reader=lambda p: {"path": p}, redactor=self.s.redactor)
+        self.s.W.checkpoint_write(self.s.conn, owner=OWNER, idempotency_key="key-fg-0203",
+                                  step_id="S2", status="done", body={"goal": goal},
+                                  workflow_id=wf["workflowId"], lease_token=wf["leaseId"],
+                                  close=True, redactor=self.s.redactor)
+        return {"wf": wf, "handoff": h}
+
+    def test_a_checkpoints_goal_leaves_the_handoff_statement_and_search(self) -> None:
+        c = self.closed_workflow("price the quokkaprice tier for partners")
+        statement = self.s.conn.execute("SELECT statement FROM ledger WHERE memory_id = ?",
+                                        (c["handoff"]["handoffId"],)).fetchone()[0]
+        self.assertIn("quokkaprice", statement, "the fixture's pack quotes the goal")
+        receipt = self.s.F.forget(self.s.conn, f"ckpt:{c['wf']['workflowId']}", reason="test")
+        self.assertTrue(receipt["erasedInStore"], receipt)
+        out = self.s.survey.search("quokkaprice tier", project_id=ALPHA)
+        self.assertEqual(out["results"], [], "the handoff no longer answers for the goal")
+        self.assertNotIn(b"quokkaprice", self.s.everything())
+
+    def test_provenance_and_conflicts_are_erased_too(self) -> None:
+        note = self.s.L.append(self.s.conn, owner=OWNER, statement="a plain claim",
+                               project_id=ALPHA, confidence=0.5,
+                               provenance=[{"quote": "the zanzibarite ledger said so"}])
+        self.s.conn.commit()
+        receipt = self.s.F.forget(self.s.conn, note["memoryId"], reason="test")
+        row = self.s.conn.execute("SELECT provenance_json FROM ledger WHERE memory_id = ?",
+                                  (note["memoryId"],)).fetchone()[0]
+        self.assertEqual(row, "[]")
+        self.assertNotIn(b"zanzibarite", self.s.everything())
+        self.assertTrue(receipt["erasedInStore"])
+
+    def test_a_rerun_says_it_cannot_search_for_what_is_gone(self) -> None:
+        note = self.s.L.append(self.s.conn, owner=OWNER, statement=SECRET, project_id=ALPHA,
+                               confidence=0.5)
+        self.s.conn.commit()
+        self.s.F.forget(self.s.conn, note["memoryId"], reason="test")
+        again = self.s.F.forget(self.s.conn, note["memoryId"], reason="test")
+        self.assertIsNone(again["erasedInStore"], "unknown, not a fresh claim of erasure")
+        self.assertFalse(again["complete"])
+        self.assertIn("residue", [b["backend"] for b in again["backends"]])
+
+    def test_an_interrupted_erasure_leaves_an_honest_partial_receipt(self) -> None:
+        note = self.s.L.append(self.s.conn, owner=OWNER, statement=SECRET, project_id=ALPHA,
+                               confidence=0.5)
+        self.s.conn.commit()
+        real = self.s.F._purge
+
+        def broken(conn, backends):
+            raise RuntimeError("database is locked")
+        self.s.F._purge = broken
+        try:
+            with self.assertRaises(self.s.F.ForgetError) as ctx:
+                self.s.F.forget(self.s.conn, note["memoryId"], reason="test")
+        finally:
+            self.s.F._purge = real
+        self.assertIn("run forget again", str(ctx.exception))
+        journal = (pathlib.Path(self.s.paths.STATE) / "logs" / "forget.jsonl").read_text()
+        last = json.loads(journal.splitlines()[-1])
+        self.assertEqual((last["interrupted"], last["erasedInStore"], last["complete"]),
+                         ("projections", False, False))
 
 
 class WhatIsRefusedOrKept(Base):

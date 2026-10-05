@@ -309,6 +309,17 @@ def survey(scope: dict | None = None, include_external: bool = False,
             degraded.append({"source": "store",
                              "reason": "no scan recorded yet; answered from the registry alone"})
 
+    # A ROW WITHOUT `ownership` IS NOT SERVED, AND SAID (OBS-24). The published schema's
+    # `ownership` is an enum with no "unknown", so the row cannot be answered truthfully;
+    # it raised `KeyError` and took the whole survey down. Only a hand-made registry row
+    # lacks it — collectors always write it.
+    unowned = [p.get("id", "?") for p in projects if "ownership" not in p]
+    if unowned:
+        projects = [p for p in projects if "ownership" in p]
+        degraded.append({"source": "registry",
+                         "reason": f"{len(unowned)} project row(s) declare no ownership and are "
+                                   f"not served until the registry names it: "
+                                   f"{', '.join(credential_shape.echo(pid) for pid in unowned[:5])}"})
     selected = projects
     if kind == "project":
         selected = [p for p in projects if p["id"] == scope.get("value")]

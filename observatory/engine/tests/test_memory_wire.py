@@ -127,11 +127,25 @@ class SameCodeSameAnswers(Base):
 class RefusedNotIgnored(Base):
     def test_an_unknown_field_is_refused_by_path_never_by_value(self) -> None:
         secret = "zebra-orchard-" + "4417"
-        out = self.answer("memory.recall", {"projectId": ALPHA, "sneaky": secret})
-        self.assertEqual(out["error"], "invalid-input", out)
-        self.assertNotIn(secret, json.dumps(out))
-        out = self.answer("memory.search", {"query": "x", "project_id": ALPHA})
-        self.assertEqual(out["error"], "invalid-input", "the tool's own spelling is not the contract's")
+        for args in ({"projectId": ALPHA, "sneaky": secret},):
+            result = self.call("memory.recall", args)
+            out = json.loads(result.content[0].text)
+            self.assertTrue(result.is_error, "a malformed call is an error, as everywhere here")
+            self.assertEqual(out["error"], "invalid-input", out)
+            self.assertNotIn(secret, json.dumps(out))
+        result = self.call("memory.search", {"query": "x", "project_id": ALPHA})
+        self.assertEqual(json.loads(result.content[0].text)["error"], "invalid-input",
+                         "the tool's own spelling is not the contract's")
+
+    def test_string_evidence_becomes_a_reference_object(self) -> None:
+        out = self.answer("memory.record", {"owner": "agent:alpha-bot", "statement": "cited",
+                                            "projectId": ALPHA, "evidence": ["commit:0123abcd"]})
+        from store import db as sdb
+        conn = sdb.connect()
+        stored = conn.execute("SELECT evidence_json FROM ledger WHERE memory_id = ?",
+                              (out["memoryId"],)).fetchone()[0]
+        conn.close()
+        self.assertEqual(json.loads(stored), [{"ref": "commit:0123abcd"}])
 
     def test_reserved_names_are_not_served(self) -> None:
         for name in ("memory.explain", "memory.forget", "memory.learning.propose"):

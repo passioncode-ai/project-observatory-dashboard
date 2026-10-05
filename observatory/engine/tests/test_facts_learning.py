@@ -58,7 +58,13 @@ class Facts(Base):
         self.assertIn("valid_to", str(ctx.exception))
         with self.assertRaises(self.L.LedgerError):
             self.fact("the exporter writes quarterly files", valid_to="next spring")
+        for unreadable in ("20991231T000000Z", "2099-12-31T00:00:00+0200", "2099-W01-1T00:00:00Z",
+                           "2099-12-31T00Z", "2099-12-31"):
+            with self.assertRaises(self.L.LedgerError, msg=unreadable):
+                self.fact("the exporter writes quarterly files", valid_to=unreadable)
         self.assertIn("memoryId", self.fact("the exporter writes quarterly files", valid_to=at(30)))
+        self.assertIn("memoryId", self.fact("the exporter writes weekly files",
+                                            valid_to="2099-12-31T00:00:00+02:00"))
         # An episode needs no end.
         self.assertTrue(self.L.append(self.conn, owner=OWNER, statement="ran the exporter",
                                       project_id=ALPHA, confidence=0.5)["memoryId"])
@@ -93,6 +99,18 @@ class Facts(Base):
         self.assertEqual(sorted(r["memory_id"] for r in out["records"]),
                          sorted([a["memoryId"], b["memoryId"]]))
         self.assertEqual(out["contested"], [b["memoryId"]])
+
+
+class LegacyRows(Base):
+    def test_a_row_written_before_the_rule_can_still_be_promoted(self) -> None:
+        """L4: transition carries the prior validity; it must not re-judge it."""
+        out = self.fact("a legacy fact", valid_to=at(30))
+        self.conn.execute("UPDATE ledger SET valid_to = '2099-12-31' WHERE memory_id = ?",
+                          (out["memoryId"],))
+        self.conn.commit()
+        moved = self.L.transition(self.conn, out["memoryId"], to_state="rejected",
+                                  owner="operator", expected_revision=1)
+        self.assertEqual(moved["state"], "rejected")
 
 
 class Learning(Base):

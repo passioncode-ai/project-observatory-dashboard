@@ -68,6 +68,16 @@ class RateLimiter:
             self._buckets[key] = (tokens, now)
             return False, max(1, int((1.0 - tokens) / self.refill + 0.999))
 
+    def peek(self, key: str, now: float | None = None) -> tuple[bool, int]:
+        """Would `allow` pass? Consumes nothing — for a budget charged only on failure."""
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            tokens, at = self._buckets.get(key, (self.capacity, now))
+            tokens = min(self.capacity, tokens + (now - at) * self.refill)
+            if tokens >= 1.0:
+                return True, 0
+            return False, max(1, int((1.0 - tokens) / self.refill + 0.999))
+
 
 async def _answer(send, status: int, body: dict, extra: list[tuple[bytes, bytes]] = ()) -> None:
     raw = json.dumps(body).encode("utf-8")
@@ -88,6 +98,10 @@ class BindingGate:
         self.origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
         self.audience = audience
         self.limiter = RateLimiter(rate)
+        #: Refusals per peer, checked BEFORE the binding is resolved and charged only when the
+        #: bearer is refused: an unauthenticated flood would otherwise write one journal line per
+        #: request (pre-release review, L2), while bindings sharing a peer keep their own rate.
+        self.refusals = RateLimiter(rate * 2)
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
@@ -102,6 +116,12 @@ class BindingGate:
             return await _answer(send, 403, {"error": "forbidden origin",
                                              "detail": "a browser page of another origin may "
                                                        "not call the memory service"})
+        peer = f"peer:{(scope.get('client') or ('?', 0))[0]}"
+        allowed, wait = self.refusals.peek(peer)
+        if not allowed:
+            return await _answer(send, 429, {"error": "rate-limited",
+                                             "detail": "too many refused requests from this peer"},
+                                 [(b"retry-after", str(wait).encode())])
         auth = headers.get("authorization", "")
         bearer = auth[7:].strip() if auth[:7].lower() == "bearer " else None
         observed = self.MA.http_channel(bearer=bearer, audience=self.audience,
@@ -111,6 +131,7 @@ class BindingGate:
             try:
                 binding = self.MA.caller()
             except self.MA.Refused as exc:
+                self.refusals.allow(peer)
                 return await _answer(send, 401, exc.envelope,
                                      [(b"www-authenticate", b'Bearer realm="observatory-memory"')])
             allowed, wait = self.limiter.allow(binding.binding_id)

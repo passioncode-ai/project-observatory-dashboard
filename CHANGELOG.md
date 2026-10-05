@@ -5,6 +5,121 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.16.0 — 2026-10-05
+
+A minor release, and it **changes behaviour**. Agent memory now decides who may reach it, what
+may leave the machine, what is current and what can be forgotten:
+- every call is authorized against an access binding;
+- nothing is embedded remotely without a per-project consent;
+- search is scoped before it ranks and leaves a receipt;
+- a loopback HTTP service and the `memory/0.1` contract names let agents beyond the local one reach memory;
+- facts expire, and lessons cite their evidence;
+- the operator can erase a record's text everywhere this machine holds it.
+
+The companion plugin `observatory-log` moves to 0.16.0. Its skills are unchanged and follow
+the release.
+
+**Upgrading** runs migration `0010-vector-namespaces`. The pre-namespace vector index is kept
+as `legacy` and quarantined, and no new index is activated. Nothing is lost.
+
+**Behaviour that changes on upgrade:**
+- An agent's MCP search is lexical only. No remote embedding is made until
+  `full embedding-policy grant` gives consent for a project.
+- `observatory_recall` returns current records by default. Pass `validity: expired` or
+  `validity: all` for history.
+- An author can no longer promote its own proposal. The operator's review or an independent
+  witness promotes it.
+- A new fact (`function: semantic`) must carry `valid_to`.
+
+### Added
+
+- **embedding-policy/1** (PB-137 N-002, N-003, #147, #148, #149, #151): which memory text may
+  leave the machine for a remote embedding model.
+  - Consent is per project, given at the operator's terminal (`full embedding-policy show|grant|revoke`).
+  - It is enforced before the budget, the key and the request.
+  - `full doctor` and the Health page show the policy.
+  - Confidential text, workflow memory and an agent's query never leave.
+- **access-bindings/1** (N-007, N-008, #150, #154, #158): who may do what with agent memory,
+  decided from the transport.
+  - stdio is the local agent.
+  - Any other caller needs a binding the operator issues at a terminal: `full access-binding issue`. The bearer goes only into a new owner-only file.
+  - Every tool asks the same gate. Everything outside the memory family is local-only.
+  - The target decides the project.
+  - `X-Fabric-Projects` narrows a binding and never widens it.
+  - Every decision is journalled without the bearer.
+- **Search scoped before the window** (N-009, #155): project, class and validity are filtered
+  inside the candidate query, so rows a caller may not see neither take a place nor move a
+  count.
+- **Receipts, explain and redaction on the way out** (N-012, #156, #158):
+  - every search names a receipt;
+  - `observatory_explain` re-reads exactly the revisions returned;
+  - text fields of memory answers and refusal details pass the shape and known-value filters.
+- **Checkpoint chunk provenance** (N-011, #157): a checkpoint hit names the body field it
+  matched (`decisions[3].why`). Engine ids are not search keys.
+- **`full memory-http`** (N-015, N-016, #153, #159): the same MCP server over loopback HTTP
+  (127.0.0.1:47313, protocol 2026-07-28).
+  - The door checks Host, then Origin, then the binding, then a per-binding rate, before the body is read.
+- **memory/0.1 under the contract's names** (N-025, #159): the nine `memory.*` capabilities of
+  fabric-agent-contract DEC-0023.
+  - They run the same code as the `observatory_*` tools.
+  - The schema is vendored at its pinned commit, and unknown fields are refused.
+- **`full forget`** (N-013, #161): withdrawal plus erasure of a record's text in the ledger,
+  handoff packs, cached answers, indexes, the file and the export.
+  - It prints a receipt per backend.
+  - Backups and the export's git history are named `retained`, so the receipt is never called
+    complete while they exist.
+- **Facts and lessons** (N-014, #162):
+  - facts carry `valid_to`;
+  - recall reads current, expired or all records;
+  - `observatory_learn` proposes a lesson from a failure and its fix, citing both.
+- **Vector namespaces** (N-005, #152): one index per pinned model identity, with a resumable
+  backfill that never activates on its own. No local model is admitted yet (finding F-016;
+  OBS-35 is the operator's decision).
+
+### Fixed
+
+- **A late outbox replay brought back the text of an older revision** into the lexical index
+  (#157).
+- **`handoff_accept` could answer with the previous checkpoint's credentials** when the
+  executor wrote a step during the acceptance. The race was observed and is closed:
+  `DeclarationMoved` (#154).
+- **Six defects found by an independent review** (#158):
+  - refusal codes told a foreign workflow from a missing one;
+  - search showed checkpoint text without its scope;
+  - evidence was not redacted;
+  - an owner was named above the class ceiling;
+  - an HTTP process could fall back to the local agent;
+  - a CLI failure was reported over a binding that had been recorded.
+- **A workflow continued while access to a declared credential was unknown** (#145).
+- **The OpenRouter door read only the first page of keys** (#144).
+- **`survey` raised `KeyError` on a registry row without `ownership`** (OBS-24). Such a row is
+  now left out and named in `degraded`.
+- **`full update` was refused by GitHub's anonymous rate limit** on a busy machine (OBS-31).
+  - It now reads with `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth token` when one is available.
+  - The token is sent only to api.github.com and never follows a redirect.
+
+- **A second independent review before the release** found these, and each fix landed with a
+  test that is red without it:
+  - `full forget` left the erased text in a handoff body's goal, its search chunks, provenance
+    and conflict links, and in old full-text segments. It now erases them all, checks the
+    store for whole texts and for the record's own distinctive words, says `unverified`
+    rather than claiming success when a rerun has nothing left to check, and journals an
+    interrupted erasure as one.
+  - A fact the operator had confirmed was rewritten as an agent's proposal by the daily
+    estate-history run. `ledger.renew` now extends only `valid_to`, keeping the operator's
+    state, owner and statement.
+  - Validity times in a form that compares wrongly as text (basic format, week dates, a bare
+    date) were accepted. One extended form is now required.
+  - An unauthenticated flood over HTTP wrote one journal line per request. Refusals are now
+    rate-limited per peer before the binding is resolved.
+  - `memory.*` input refusals were not marked `isError`, and `memory.record` stored evidence
+    strings in a shape the rest of the engine does not read.
+- **The Cloudflare door left a freshly minted token live** when its probe or the vault
+  refused it (#95). A token the call created is now deleted again, and a refusal says what
+  became of it.
+- **`tools/update_inventory.py` wrote a path twice while a conflict was open** and `--check`
+  accepted it (#97). It now refuses during a conflict and `--check` fails on a duplicate.
+
 ## 0.15.0 — 2026-10-04
 
 A minor release: agent memory grows into something agents and the operator use every day —

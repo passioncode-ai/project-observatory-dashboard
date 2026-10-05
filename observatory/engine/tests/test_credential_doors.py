@@ -262,8 +262,8 @@ def _cf_with_admin(m):
         {"account_id": "a1", "account_name": "Acct"}))
 
 
-def _dns_fake(m, log, existing=None, verify_fails=0):
-    state = {"verify_fails": verify_fails}
+def _dns_fake(m, log, existing=None, verify_fails=0, delete_fails=False):
+    state = {"verify_fails": verify_fails, "delete_fails": delete_fails}
 
     def fake(path, token, payload=None, method=None):
         log.append((method or ("POST" if payload is not None else "GET"), path, token, payload))
@@ -278,6 +278,10 @@ def _dns_fake(m, log, existing=None, verify_fails=0):
             return {"result": [{"id": "t-dns", "name": existing}] if existing else []}
         if path == "/accounts/a1/tokens" and method is None and payload is not None:
             return {"result": {"id": "t-new", "value": "dns-value-" + "y" * 30}}
+        if path == "/accounts/a1/tokens/t-new" and method == "DELETE":
+            if state.get("delete_fails"):
+                raise RuntimeError("cloudflare answered HTTP 500; provider response withheld")
+            return {"result": {"id": "t-new"}}
         if path.endswith("/tokens/t-dns") and method == "PUT":
             return {"result": {"id": "t-dns"}}
         if path.endswith("/tokens/t-dns/value"):
@@ -355,6 +359,61 @@ def test_cf_dns_preset_rolls_refuses_and_never_misfiles() -> None:
           not any(p == "/accounts/a1/tokens" and pl for _m, p, _t, pl in log2), str(log2))
 
 
+def test_cf_a_token_this_call_created_is_deleted_when_the_issue_fails() -> None:
+    """Issue #95: a mint followed by a failed probe or a refused delivery left a live
+    token with no holder. A CREATED token is deleted before the refusal; a ROLLED one
+    keeps its id and readers, and the refusal says the slot's value is dead."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    m._journal = lambda *a, **k: None
+    deletes = lambda log: [p for v, p, *_ in log if v == "DELETE"]
+
+    log, err = [], io.StringIO()
+    _dns_fake(m, log, verify_fails=9)
+    m.deliver_to_vault = lambda *a: (_ for _ in ()).throw(AssertionError("never delivered"))
+    with contextlib.redirect_stderr(err):
+        rc = m.cmd_issue_zone("dns-edit", "example.com", "proj/prod/CF_DNS", None, wait=0)
+    check("a zone token that never proves itself is deleted again",
+          rc == 1 and deletes(log) == ["/accounts/a1/tokens/t-new"], f"{rc} {deletes(log)}")
+    check("and the refusal says so", "created was deleted again" in err.getvalue(), err.getvalue())
+
+    def refuse(*_a):
+        raise RuntimeError("the vault refused the slot")
+    log, err = [], io.StringIO()
+    _d1_fake(m, log)
+    m.deliver_to_vault = refuse
+    with contextlib.redirect_stderr(err):
+        rc = m.cmd_issue_account("d1-edit", "proj/prod/CLOUDFLARE_API_TOKEN", None, wait=0)
+    check("an account token the vault refused is deleted again",
+          rc == 1 and deletes(log) == ["/accounts/a1/tokens/t-new"], f"{rc} {deletes(log)}")
+
+    log, err = [], io.StringIO()
+    _d1_fake(m, log, existing="observatory-d1-edit proj/prod/CLOUDFLARE_API_TOKEN (managed)")
+    with contextlib.redirect_stderr(err):
+        rc = m.cmd_issue_account("d1-edit", "proj/prod/CLOUDFLARE_API_TOKEN", None, wait=0)
+    check("a ROLLED token is not deleted — its id and readers stay",
+          rc == 1 and deletes(log) == [], f"{rc} {deletes(log)}")
+    check("and the refusal says the slot's value is dead",
+          "value the slot held is dead" in err.getvalue(), err.getvalue())
+
+    log, err = [], io.StringIO()
+    _dns_fake(m, log, verify_fails=9, delete_fails=True)
+    with contextlib.redirect_stderr(err):
+        rc = m.cmd_issue_zone("dns-edit", "example.com", "proj/prod/CF_DNS", None, wait=0)
+    check("a delete that fails is named, with what to do",
+          rc == 1 and "could NOT be deleted" in err.getvalue()
+          and "delete it in the dashboard now" in err.getvalue(), err.getvalue())
+    check("and no refusal carries the value", "dns-value-" not in err.getvalue(), err.getvalue())
+
+    log = []
+    tokens = _r2_fake(m, log, can_list=True)
+    m.deliver_to_vault = lambda *a: None
+    with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+        rc = m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", 30, "proj/prod/OFFSITE", None, wait=0)
+    check("a bucket pair that failed its proof is deleted, not only the setup token",
+          rc == 1 and "t-bucket-new" not in tokens and "t-setup" not in tokens, str(tokens))
+
+
 def test_cf_dns_delivery_goes_through_the_vault_on_stdin() -> None:
     """The slot is written by the vault's own `put`, value on stdin, and a
     refusal names the slot without the child's output."""
@@ -405,6 +464,8 @@ def _d1_fake(m, log, existing=None, verify_fails=0):
             return {"result": [{"id": "t-d1", "name": existing}] if existing else []}
         if path == "/accounts/a1/tokens" and method is None and payload is not None:
             return {"result": {"id": "t-new", "value": "d1-value-" + "y" * 31}}
+        if path == "/accounts/a1/tokens/t-new" and method == "DELETE":
+            return {"result": {"id": "t-new"}}
         if path.endswith("/tokens/t-d1") and method == "PUT":
             return {"result": {"id": "t-d1"}}
         if path.endswith("/tokens/t-d1/value"):
@@ -477,6 +538,8 @@ def test_cf_fabric_account_preset_grants_both_levels_on_one_account_into_the_vau
             return {"result": []}
         if path == "/accounts/a1/tokens" and payload is not None:
             return {"result": {"id": "t-f", "value": "fabric-value-" + "q" * 27}}
+        if path == "/accounts/a1/tokens/t-f" and method == "DELETE":
+            return {"result": {"id": "t-f"}}
         if path == "/accounts/a1/workers/scripts?per_page=1":
             if state["refuse"]:
                 raise RuntimeError("cloudflare answered HTTP 403; provider response withheld")
@@ -691,6 +754,9 @@ def _r2_fake(m, log, *, bucket_exists=False, existing=None, lifecycle_fails=Fals
             return {"result": {"id": "t-bucket"}}
         if path == "/accounts/a1/tokens/t-bucket/value":
             return {"result": "bucket-rolled-" + "r" * 26}
+        if path == "/accounts/a1/tokens/t-bucket-new" and verb == "DELETE":
+            tokens.pop("t-bucket-new", None)
+            return {"result": {"id": "t-bucket-new"}}
         if path == "/accounts/a1/tokens/t-setup" and verb == "DELETE":
             tokens.pop("t-setup", None)
             return {"result": {"id": "t-setup"}}
@@ -892,6 +958,8 @@ def _preset_fake(m, log, groups, probe_prefix, value_prefix):
             return {"result": []}
         if path == "/accounts/a1/tokens" and method is None and payload is not None:
             return {"result": {"id": "t-new", "value": value_prefix + "y" * 30}}
+        if path == "/accounts/a1/tokens/t-new" and method == "DELETE":
+            return {"result": {"id": "t-new"}}
         if path.startswith(probe_prefix):
             return {"result": []}
         raise AssertionError(f"unexpected call {path}")
@@ -1240,7 +1308,8 @@ def test_or_ping_names_the_strays_it_does_not_manage() -> None:
 
 if __name__ == "__main__":
     print("the credential doors — stash, issue, rotate, revoke, and what they refuse\n")
-    for fn in (test_no_door_takes_or_prints_a_value_outside_stdin,
+    for fn in (test_cf_a_token_this_call_created_is_deleted_when_the_issue_fails,
+               test_no_door_takes_or_prints_a_value_outside_stdin,
                test_the_ledgers_hold_no_values,
                test_cf_stash_refuses_an_admin_that_cannot_issue,
                test_cf_one_stash_can_span_several_accounts,

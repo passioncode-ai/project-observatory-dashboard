@@ -296,9 +296,38 @@ def test_nothing_mechanically_promotes_this_kind() -> None:
           "what a vanished project meant is not mechanically checkable")
 
 
+def test_a_fact_the_operator_confirmed_is_renewed_not_rewritten() -> None:
+    """Pre-release review M1: once the operator confirms a lost-project fact it is theirs; the
+    collector renews its validity while it runs short and changes nothing else."""
+    d, env = workspace([LOST])
+    record(env)
+    code = ("import sqlite3,sys; sys.path.insert(0,'.'); from store import db, ledger as L; "
+            "c=db.connect(); mid=c.execute(\"SELECT memory_id FROM ledger WHERE kind='estate-history'\").fetchone()[0]; "
+            "L.transition(c, mid, to_state='observed', owner='operator', expected_revision=1); "
+            "c.execute(\"UPDATE ledger SET valid_to=strftime('%Y-%m-%dT%H:%M:%SZ','now','+2 days') WHERE memory_id=? AND revision=2\", (mid,)); "
+            "c.commit()")
+    p = subprocess.run([PY, "-c", code], cwd=ROOT, env=env, capture_output=True, text=True, timeout=300)
+    check("the operator confirmed the fact", p.returncode == 0, p.stderr[-300:])
+    out = record(env)
+    check("the collector run succeeds", out.returncode == 0, out.stderr[-300:])
+    rows = rows_of(d, "SELECT revision, owner, state, statement, valid_to, provenance_json FROM ledger"
+                      " WHERE kind='estate-history' ORDER BY revision")
+    last, confirmed = rows[-1], rows[1]
+    check("a renewal revision was written", len(rows) == 3, str([r[:3] for r in rows]))
+    check("owner, state and statement stay as confirmed",
+          (last[1], last[2], last[3]) == (confirmed[1], confirmed[2], confirmed[3]), str(last[:4]))
+    check("validity is extended", last[4] > confirmed[4], f"{confirmed[4]} -> {last[4]}")
+    check("the renewer is recorded", '"renewal"' in last[5], last[5][-200:])
+    again = record(env)
+    rows2 = rows_of(d, "SELECT revision FROM ledger WHERE kind='estate-history'")
+    check("a fact with time left is not renewed again", again.returncode == 0 and len(rows2) == 3,
+          str(len(rows2)))
+
+
 if __name__ == "__main__":
     print("estate history — keeping what only somebody else's store remembers\n")
-    for fn in (test_a_lost_project_is_kept_under_the_writers_own_rules,
+    for fn in (test_a_fact_the_operator_confirmed_is_renewed_not_rewritten,
+               test_a_lost_project_is_kept_under_the_writers_own_rules,
                test_the_second_run_writes_nothing_and_a_change_revises,
                test_a_dry_run_writes_nothing,
                test_a_missing_collector_output_degrades_with_its_reason,

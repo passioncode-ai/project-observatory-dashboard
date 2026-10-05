@@ -65,13 +65,46 @@ def _now() -> str:
 
 
 def _texts(conn: sqlite3.Connection, memory_id: str) -> list[str]:
-    """The record's own text, every revision: what must not survive anywhere."""
+    """The record's own text, every revision: its statement, its why and the prose of its
+    body (a checkpoint's goal, decisions, constraints, notes). What must not survive."""
+    import textkeys
     out = []
-    for r in conn.execute("SELECT statement, why FROM ledger WHERE memory_id = ?", (memory_id,)):
-        for value in (r["statement"], r["why"]):
+    for r in conn.execute("SELECT statement, why, body_json FROM ledger WHERE memory_id = ?",
+                          (memory_id,)):
+        values = [r["statement"], r["why"]]
+        if r["body_json"]:
+            try:
+                body = json.loads(r["body_json"])
+            except ValueError:
+                body = {}
+            if isinstance(body, dict) and isinstance(body.get("goal"), str):
+                values.append(body["goal"])
+            values += [text for _path, text in textkeys.body_chunks(body)]
+        for value in values:
             if isinstance(value, str) and value.strip() and value != MARKER:
                 out.append(value)
     return sorted(set(out), key=len, reverse=True)
+
+
+#: A word shorter than this is too common to prove anything by its presence.
+TOKEN_MIN = 5
+
+
+def _unique_tokens(conn: sqlite3.Connection, texts: list[str]) -> list[str]:
+    """Lowercased words of the erased text that no remaining ledger text contains. Their
+    presence anywhere in the store — the full-text index's binary segments included — is
+    proof the text survived; a word another record also uses proves nothing."""
+    import textkeys
+    mine = {w.lower() for t in texts for w in textkeys._WORD.findall(t) if len(w) >= TOKEN_MIN}
+    if not mine:
+        return []
+    others: set[str] = set()
+    for r in conn.execute("SELECT statement, why, body_json, evidence_json, provenance_json"
+                          " FROM ledger"):
+        for value in r:
+            if isinstance(value, str) and value:
+                others.update(w.lower() for w in textkeys._WORD.findall(value))
+    return sorted(mine - others)
 
 
 def plan(conn: sqlite3.Connection, memory_id: str) -> dict:
@@ -134,7 +167,6 @@ def forget(conn: sqlite3.Connection, memory_id: str, *, reason: str,
            approved_by: str = "operator") -> dict:
     """Withdraw and erase `memory_id`, and return its receipt."""
     from store import ledger as L
-    from store import retention
     if not reason or not reason.strip():
         raise ForgetError("an erasure must say why")
     if L.current(conn, memory_id) is None:
@@ -149,29 +181,76 @@ def forget(conn: sqlite3.Connection, memory_id: str, *, reason: str,
         raise ForgetError(str(exc)) from None
     backends.append({"backend": "tombstones", "status": "withdrawn",
                      "detail": f"revisions {t['revisions']} tombstoned"})
+    step = "rewrite"
+    try:
+        _erase_in_store(conn, memory_id, texts, backends)
+        step = "projections"
+        _purge(conn, backends)
+        step = "export"
+        backends.append(_export(texts))
+        backends += _backups()
+        backends.append({"backend": "git-history", "status": "retained",
+                         "detail": "earlier commits of registry/ledger.jsonl keep the text; this "
+                                   "engine does not rewrite git history"})
+        step = "residue"
+        erased = _verify(conn, memory_id, texts, backends)
+    except Exception as exc:                                                       # noqa: BLE001
+        # A failure part-way is SAID, with the backends reached so far: the record is
+        # withdrawn already, and running forget again finishes the erasure.
+        receipt = {"memoryId": memory_id, "at": _now(), "reason": reason,
+                   "approvedBy": approved_by, "revisions": t["revisions"], "withdrawn": True,
+                   "erasedInStore": False, "interrupted": step,
+                   "error": f"{type(exc).__name__}: {str(exc)[:200]}", "backends": backends,
+                   "complete": False}
+        _journal(receipt)
+        raise ForgetError(f"erasure interrupted at {step} ({type(exc).__name__}); the record "
+                          f"is withdrawn — run forget again to finish") from exc
+    receipt = {"memoryId": memory_id, "at": _now(), "reason": reason, "approvedBy": approved_by,
+               "revisions": t["revisions"], "withdrawn": True, "erasedInStore": erased,
+               "backends": backends,
+               "complete": erased is True and not any(b["status"] in RETAINED for b in backends),
+               "note": "complete is false while any copy is retained or unverified: backups "
+                       "rotate out on their own schedule"}
+    _journal(receipt)
+    return receipt
 
-    # 2. The canon's text, and every copy in this store, in one transaction.
+
+def _erase_in_store(conn: sqlite3.Connection, memory_id: str, texts: list[str],
+                    backends: list[dict]) -> None:
+    """The canon's text and every copy in this store, in one transaction."""
     packs = _packs_quoting(conn, memory_id)
     cached = _idempotency_quoting(conn, memory_id, texts)
     with conn:
         cur = conn.execute(
-            "UPDATE ledger SET statement = ?, why = NULL, body_json = NULL, evidence_json = '[]'"
-            " WHERE memory_id = ? AND (statement != ? OR why IS NOT NULL OR body_json IS NOT NULL"
-            " OR evidence_json != '[]')", (MARKER, memory_id, MARKER))
+            "UPDATE ledger SET statement = ?, why = NULL, body_json = NULL, evidence_json = '[]',"
+            " provenance_json = '[]', conflicts_with_json = '[]' WHERE memory_id = ?"
+            " AND (statement != ? OR why IS NOT NULL OR body_json IS NOT NULL"
+            " OR evidence_json != '[]' OR provenance_json != '[]' OR conflicts_with_json != '[]')",
+            (MARKER, memory_id, MARKER))
         backends.append({"backend": "ledger", "status": "erased",
                          "detail": f"{cur.rowcount} revision(s) rewritten; ids, owner, times and "
                                    f"class kept as the audit trail"})
-        changed = 0
+        changed, restated = 0, set()
         for pid, rev in packs:
-            raw = conn.execute("SELECT body_json FROM ledger WHERE memory_id = ? AND revision = ?",
-                               (pid, rev)).fetchone()[0]
-            body, did = _scrub_pack(json.loads(raw or "{}"), memory_id)
-            if did:
-                conn.execute("UPDATE ledger SET body_json = ? WHERE memory_id = ? AND revision = ?",
-                             (json.dumps(body, ensure_ascii=False), pid, rev))
+            row = conn.execute("SELECT statement, body_json FROM ledger WHERE memory_id = ? AND"
+                               " revision = ?", (pid, rev)).fetchone()
+            body, did = _scrub_pack(json.loads(row["body_json"] or "{}"), memory_id)
+            # The pack's OWN statement quotes the checkpoint's goal ("handoff of … : goal"),
+            # and its lexical row indexes it: both lose the erased text too.
+            statement = row["statement"] or ""
+            for text in texts:
+                statement = statement.replace(text, MARKER)
+            if did or statement != row["statement"]:
+                conn.execute("UPDATE ledger SET body_json = ?, statement = ? WHERE memory_id = ?"
+                             " AND revision = ?",
+                             (json.dumps(body, ensure_ascii=False), statement, pid, rev))
                 changed += 1
+                restated.add(pid)
+        for pid in sorted(restated):
+            _reindex(conn, pid)
         backends.append({"backend": "handoff-packs", "status": "erased" if packs else "absent",
-                         "detail": f"{changed} pack revision(s) carried a copy and were rewritten"})
+                         "detail": f"{changed} pack revision(s) carried a copy and were rewritten, "
+                                   f"statement and lexical row included"})
         for principal, operation, key in cached:
             conn.execute("DELETE FROM idempotency WHERE principal = ? AND operation = ? AND key = ?",
                          (principal, operation, key))
@@ -179,62 +258,87 @@ def forget(conn: sqlite3.Connection, memory_id: str, *, reason: str,
                          "detail": f"{len(cached)} cached answer(s) quoting the record dropped; "
                                    f"a retry of one runs again instead of replaying"})
 
-    # 3. Derived projections, attested by retention's own purge.
+
+def _reindex(conn: sqlite3.Connection, memory_id: str) -> None:
+    """Rewrite one record's lexical row from its rewritten latest revision."""
+    from store import ledger as L
+    row = conn.execute("SELECT l.* FROM ledger l WHERE l.memory_id = ? AND NOT EXISTS (SELECT 1"
+                       " FROM tombstones t WHERE t.memory_id = l.memory_id) ORDER BY l.revision"
+                       " DESC LIMIT 1", (memory_id,)).fetchone()
+    conn.execute("DELETE FROM search_notes WHERE memory_id = ?", (memory_id,))
+    if row is not None:
+        L._index_lexically(conn, {"memory_id": row["memory_id"], "revision": row["revision"],
+                                  "statement": row["statement"], "why": row["why"],
+                                  "body": json.loads(row["body_json"]) if row["body_json"] else None})
+
+
+def _purge(conn: sqlite3.Connection, backends: list[dict]) -> None:
+    """Derived projections (attested by retention), the full-text index's own segments, and
+    the file."""
+    from store import retention
     receipts = retention.purge_projections(conn)
     for table, r in sorted(receipts.items()):
         status = {"purged": "erased", "absent": "absent"}.get(r.get("status"), r.get("status"))
         backends.append({"backend": f"projection:{table}",
                          "status": "unverified" if status == "UNVERIFIABLE" else status,
                          "detail": r.get("detail") or ""})
-
-    # 4. The file itself.
+    # FTS5 DELETE ONLY MARKS: the words of a deleted row stay in `search_notes_data` until
+    # the segments are merged, live pages a VACUUM keeps. `optimize` merges them away
+    # (found by the pre-release review, 2026-10-05).
+    try:
+        with conn:
+            conn.execute("INSERT INTO search_notes(search_notes) VALUES('optimize')")
+        backends.append({"backend": "fulltext-segments", "status": "erased",
+                         "detail": "search_notes optimized, so no segment keeps a deleted row's words"})
+    except sqlite3.Error as exc:
+        backends.append({"backend": "fulltext-segments", "status": "unverified",
+                         "detail": f"search_notes could not be optimized ({type(exc).__name__})"})
     scrubbed = retention.scrub(conn)
     backends.append({"backend": "file", "status": "erased" if scrubbed["scrubbed"] else "unverified",
                      "detail": scrubbed["detail"]})
 
-    # 5. Copies outside the store.
-    backends.append(_export(texts))
-    backends += _backups()
-    backends.append({"backend": "git-history", "status": "retained",
-                     "detail": "earlier commits of registry/ledger.jsonl keep the text; this engine "
-                               "does not rewrite git history"})
 
-    # 6. Nothing left in this store, checked rather than assumed.
-    left = _residue(conn, memory_id, texts)
+def _verify(conn: sqlite3.Connection, memory_id: str, texts: list[str],
+            backends: list[dict]) -> bool | None:
+    """Search the store for what was erased. True: nothing found; False: named in `residue`;
+    None: an earlier run erased the text, so this one has nothing left to search for."""
+    if not texts:
+        backends.append({"backend": "residue", "status": "unverified",
+                         "detail": "an earlier run already erased this record's text, so this "
+                                   "run cannot search for it; that run's receipt in "
+                                   "store/logs/forget.jsonl is the evidence"})
+        return None
+    left = _residue(conn, memory_id, texts, _unique_tokens(conn, texts))
     if left:
         backends.append({"backend": "residue", "status": "unverified", "detail": left})
-    receipt = {"memoryId": memory_id, "at": _now(), "reason": reason, "approvedBy": approved_by,
-               "revisions": t["revisions"], "withdrawn": True,
-               "erasedInStore": not left, "backends": backends,
-               "complete": not any(b["status"] in RETAINED for b in backends),
-               "note": "complete is false while any copy is retained or unverified: backups "
-                       "rotate out on their own schedule"}
-    _journal(receipt)
-    return receipt
+        return False
+    return True
 
 
-def _residue(conn: sqlite3.Connection, memory_id: str, texts: list[str]) -> str:
-    """Any table of this store that still holds the erased text, named; '' when none."""
-    if not texts:
-        return ""
+def _residue(conn: sqlite3.Connection, memory_id: str, texts: list[str],
+             tokens: list[str] | None = None) -> str:
+    """Every table and column of this store that still holds the erased text — a whole
+    passage, or one of its words no other record uses — named; '' when none. Text, untyped
+    and BLOB columns alike: the full-text index keeps words in binary segments."""
     found = []
     for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'"
                                 " AND name NOT LIKE 'sqlite_%'"):
         try:
             cols = [c[1] for c in conn.execute(f"PRAGMA table_info({name})")
-                    if (c[2] or "").upper() in ("TEXT", "")]
+                    if (c[2] or "").upper() in ("TEXT", "", "BLOB")]
         except sqlite3.Error:
             continue
         # The ledger is checked on this record's rows only: another record may say the
         # same thing and is not this erasure's business. `instr`, not LIKE: `%` and `_`
         # in the text would be wildcards.
         mine = " AND memory_id = ?" if name == "ledger" else ""
+        needles = [*texts[:5], *(tokens or [])[:40]]
         for col in cols:
-            for t in texts[:5]:
-                args = (t, memory_id) if mine else (t,)
+            for needle in needles:
+                args = (needle.encode("utf-8"), memory_id) if mine else (needle.encode("utf-8"),)
                 try:
-                    hit = conn.execute(f'SELECT 1 FROM "{name}" WHERE instr("{col}", ?) > 0'
-                                       f"{mine} LIMIT 1", args).fetchone()
+                    hit = conn.execute(f'SELECT 1 FROM "{name}" WHERE instr(CAST("{col}" AS BLOB),'
+                                       f" ?) > 0{mine} LIMIT 1", args).fetchone()
                 except sqlite3.Error:
                     hit = None
                 if hit:
