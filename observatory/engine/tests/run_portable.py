@@ -148,6 +148,8 @@ BOUNDARY += ('memory_wire',)
 BOUNDARY += ('forget_receipt',)
 # Facts that expire; lessons that cite their evidence (PB-137 N-014).
 BOUNDARY += ('facts_learning',)
+# Updates that arrive by themselves; data that survives a reinstall (docs/runs/2026-10-05-auto-update).
+BOUNDARY += ('maintenance',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -175,6 +177,8 @@ ROOT_FILES = (
     'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'log_policy.py', 'code_freshness.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
+    # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).
+    'maintenance.py', 'app_update.py',
     'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',

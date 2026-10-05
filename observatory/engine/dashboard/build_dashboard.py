@@ -416,6 +416,24 @@ def from_store() -> dict:
         except Exception as exc:                                                     # noqa: BLE001
             out["health"]["embedding_policy"] = {"state": "unknown",
                                                  "reason": f"{type(exc).__name__}"}
+        # UPDATES AND BACKUPS (docs/runs/2026-10-05-auto-update, R10): whether each new
+        # release installs itself, whether the hourly job is scheduled here, the last check
+        # and the newest full backup — the answer `full maintain status` gives.
+        try:
+            import maintenance
+            ms = maintenance.status(Path(paths.HOME))
+            out["health"]["maintenance"] = {
+                "auto": ms["auto_update"], "wanted": ms["schedule_wanted"],
+                "scheduled": bool((ms.get("schedule") or {}).get("installed")),
+                "check": (ms.get("check") or {}).get("result"), "checked": (ms.get("check") or {}).get("at"),
+                # The update's result belongs to the check that found it, never to a later one.
+                "update": (ms.get("update") or {}).get("result")
+                if (ms.get("update") or {}).get("at") == (ms.get("check") or {}).get("at") else None,
+                "snapshot": (ms.get("snapshot") or {}).get("at"),
+                "snapshot_kind": (ms.get("snapshot") or {}).get("result"),
+                "encrypted": (ms.get("snapshot") or {}).get("encrypted"), "warnings": ms.get("warnings") or []}
+        except Exception as exc:                                                     # noqa: BLE001
+            out["health"]["maintenance"] = {"state": "unknown", "reason": f"{type(exc).__name__}"}
         # MEMORY ACCESS (PB-137 N-008): who besides the local stdio agent may reach
         # memory over HTTP, read-only and by name — the answer `full doctor` gives.
         try:
@@ -2071,6 +2089,24 @@ if (H.embedding_policy) {
     hb.push([T("memory embeddings"), T("nothing leaves this machine"), show]);
   else
     hb.push([T("memory embeddings"), T("policy refused, nothing leaves this machine: {reason}", {reason: EP.reason || "?"}), show]);
+}
+// Updates and backups (R10): whether new releases install themselves and when the last
+// full backup was taken, with the command that turns the missing part on.
+if (H.maintenance && H.maintenance.state !== "unknown") {
+  const MT = H.maintenance, status = fullCommand("maintain status");
+  if (!MT.wanted || !MT.scheduled)
+    hb.push([T("updates and backups"), T("not scheduled on this machine — new releases and daily backups wait for a person"),
+      fullCommand("maintain ensure")]);
+  else if (!MT.auto)
+    hb.push([T("updates"), T("off — new releases are not installed by themselves"), fullCommand("auto-update on")]);
+  else
+    hb.push([T("updates"), MT.checked ? T("installed by themselves; last check {date}: {result}",
+      {date: MT.checked.slice(0, 10), result: T(MT.update || MT.check || "?")}) : T("installed by themselves; not checked yet"), status]);
+  const day = (MT.snapshot || "").slice(0, 10);
+  hb.push([T("full backup"), !MT.snapshot ? T("none yet — the hourly job takes one a day")
+    : MT.snapshot_kind === "before-upgrade" ? T("newest {date}, taken before the last update", {date: day})
+    : MT.encrypted === false ? T("newest {date}, NOT encrypted, inside the workspace — set a passphrase", {date: day})
+    : T("newest {date}, encrypted outside the workspace", {date: day}), status]);
 }
 // Who may reach memory besides the local agent (N-008), with the command that lists them.
 if (H.access_bindings) {

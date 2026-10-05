@@ -140,11 +140,15 @@ class Root(Base):
             with self.assertRaisesRegex(config.ConfigurationError, 'absolute'):
                 vault.root_info(self.home)
 
-    def test_settings_then_documents_then_workspace(self):
+    def test_settings_then_documents_then_beside_the_workspace(self):
         del os.environ['OBSERVATORY_BACKUPS']
-        docs = self.base / 'Documents'
-        with patch.object(vault, 'documents_dir', return_value=docs), patch.object(vault.sys, 'platform', 'darwin'):
-            self.assertEqual(vault.root_info(self.home)['source'], 'default-workspace')  # no Documents yet
+        docs, data = self.base / 'Documents', self.base / 'xdg-data'
+        with patch.object(vault, 'documents_dir', return_value=docs), patch.object(vault.sys, 'platform', 'darwin'), \
+                patch.object(vault, 'data_dir', return_value=data):
+            info = vault.root_info(self.home)  # no Documents yet: beside the workspace, never inside it
+            self.assertEqual(info['source'], 'default-data')
+            self.assertEqual(info['path'].parent, data / 'project-observatory-backups')
+            self.assertFalse(info['inside_workspace'])
             docs.mkdir()
             info = vault.root_info(self.home)
             self.assertEqual(info['source'], 'default-documents')
@@ -153,10 +157,16 @@ class Root(Base):
             self.assertEqual(workspace.main(['configure', 'storage', 'backups', str(chosen)]), 0)
             self.assertEqual(vault.root_info(self.home)['source'], 'settings')
             self.assertEqual(vault.root_info(self.home)['path'].parent, chosen)
-        with patch.object(vault, 'documents_dir', return_value=docs), patch.object(vault.sys, 'platform', 'linux'):
+        with patch.object(vault, 'documents_dir', return_value=docs), patch.object(vault.sys, 'platform', 'linux'), \
+                patch.object(vault, 'data_dir', return_value=data):
             doc = config.load(self.home); doc.pop('storage')
             workspace.write_json(self.home / 'config/settings.json', doc)
-            self.assertEqual(vault.root_info(self.home)['path'], self.home / 'backups')
+            # Off macOS the copies leave the workspace too, so deleting it or reinstalling
+            # into it leaves them behind (decision D5, docs/runs/2026-10-05-auto-update).
+            info = vault.root_info(self.home)
+            self.assertEqual(info['source'], 'default-data')
+            self.assertEqual(info['path'].parent, data / 'project-observatory-backups')
+            self.assertNotIn(self.home, info['path'].parents)
 
     def test_storage_setting_validated(self):
         self.assertEqual(workspace.main(['configure', 'storage', 'backups', 'relative']), 2)
@@ -377,10 +387,14 @@ class Doctor(Base):
         self.assertIn('backup-passphrase', joined)
         self.assertIn('configure storage backups', joined)
         del os.environ['OBSERVATORY_BACKUPS']
-        with patch.object(vault, 'documents_dir', return_value=self.base / 'no-documents'):
+        # With no ~/Documents the default is beside the workspace now, so only an explicit
+        # root inside it (above) earns the warning.
+        with patch.object(vault, 'documents_dir', return_value=self.base / 'no-documents'), \
+                patch.object(vault, 'data_dir', return_value=self.base / 'xdg-data'):
             report = vault.status(self.home)
-        self.assertEqual(report['root'], str(self.home / 'backups'))
-        self.assertIn('inside the workspace', ' '.join(report['warnings']))
+        self.assertEqual(report['root_source'], 'default-data')
+        self.assertFalse(report['inside_workspace'])
+        self.assertNotIn('inside the workspace', ' '.join(report['warnings']))
         # A root elsewhere carries no such warning.
         with patch.dict(os.environ, {'OBSERVATORY_BACKUPS': str(self.root)}):
             report = vault.status(self.home)

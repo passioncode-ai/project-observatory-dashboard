@@ -5,6 +5,54 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.17.0 — 2026-10-05
+
+A minor release, and it **changes behaviour**. Each installation now keeps itself current and
+keeps its data where a deletion or a reinstall cannot reach it. Nothing needs to be run after
+this release. The companion plugin `observatory-log` moves to 0.17.0: its SessionStart hook
+schedules the maintenance job and, for engines before 0.17.0, installs the newer release
+itself. Its skills are unchanged.
+
+**Behaviour that changes on upgrade:**
+- A new hourly job is scheduled (launchd on macOS, a systemd user timer on Linux). It installs
+  each new stable release, keeps the Mac app current and takes a daily encrypted backup.
+  `full auto-update off` keeps releases waiting; `full maintain uninstall` removes the job.
+- A backup passphrase is generated when none exists and kept in the OS credential store, so
+  backups leave the workspace by default.
+- Off macOS the default backups root is beside the workspace instead of inside it.
+
+### Added
+
+- **Updates install themselves**, on by default. One job per workspace runs every hour:
+  launchd on macOS, a systemd user timer on Linux. Once a day it checks for a newer stable
+  release and installs it with `full update --apply`, the same verified, reversible
+  transaction a person runs. A failure is rolled back and retried the next day.
+  `full auto-update off` keeps new releases waiting; `full maintain status` says what the
+  job last did.
+- **The Mac app follows the engine.** The job replaces an older app with the engine's
+  release once the app is not running. The new app must pass the GitHub digest,
+  `SHA256SUMS`, `codesign`, the same signing team and Gatekeeper. The replaced bundle is
+  kept.
+- **Installs from 0.7.0 to 0.16.0 are reached too.** The `observatory-log` plugin, which the
+  PassionCode launcher keeps current, runs such an engine's own `full update --apply` once a
+  day when a newer release exists, unless `updates.auto` is `false`.
+- **A full encrypted backup every day**, taken by the same job. It covers settings, the
+  registry, the vault and the connections, not only the database.
+- **A backup passphrase by default, kept outside the workspace.** On macOS it is in the login
+  Keychain. On Linux it is in the Secret Service, or in an owner-only file under
+  `~/.config`. So a deleted workspace or a reinstall can still open its backups.
+- **A reinstall restores.** `full init` in a terminal on an empty home, or
+  `full restore --latest`, restores the newest backup a workspace at the same path left.
+  `init --fresh` starts empty.
+- `doctor` and the Health page show whether updates and backups run by themselves, the last
+  check and the newest full backup.
+
+### Changed
+
+- Off macOS, and on macOS without `~/Documents`, the default backups root is
+  `${XDG_DATA_HOME:-~/.local/share}/project-observatory-backups`, beside the workspace. It
+  used to be `<home>/backups`, inside it, where deleting the workspace deleted the copies.
+
 ## 0.16.0 — 2026-10-05
 
 A minor release, and it **changes behaviour**. Agent memory now decides who may reach it, what

@@ -447,7 +447,7 @@ PUBLIC_SOURCE_ONLY = {
 }
 WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migrate-local", "open", "agent",
                       "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup",
-                      "update", "profile"}
+                      "update", "profile", "maintain", "auto-update"}
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
   init / onboard / configure   prepare your private workspace
@@ -468,7 +468,10 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   backup-passphrase set|status|show  the passphrase that encrypts backups (stdin)
   backups status|migrate|decrypt     where backups go; move legacy copies; decrypt one
   upgrade                      preview; --apply requires --writers-stopped
-  restore SNAPSHOT             restore a snapshot dir or encrypted .obsnap into a new empty workspace
+  restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
+                               --latest finds the newest backup a workspace at this path left
+  auto-update status|on|off    install each new stable release by itself (on by default)
+  maintain run|ensure|uninstall|status  the hourly job: updates, the app, a daily encrypted backup
   update [--version X.Y.Z] [--check|--apply]  move to a published release: verified,
                                workspace upgraded, rolled back on failure; --check exits 10
                                when an update exists, 3 when it could not look

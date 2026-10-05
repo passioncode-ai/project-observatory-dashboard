@@ -664,11 +664,16 @@ project-observatory full backups status            # root, which rule chose it, 
 project-observatory full backups migrate           # move the newest legacy copies there, encrypted
 ```
 
-The root is chosen in this order: `OBSERVATORY_BACKUPS`, then
-`project-observatory full configure storage backups /absolute/path`, then the
-platform default — on macOS `~/Documents/Project Observatory/Backups` when
-`~/Documents` exists, which iCloud Desktop & Documents can sync off the machine;
-elsewhere, or with no `~/Documents`, `<home>/backups`. A root inside the
+The root is chosen in this order:
+1. `OBSERVATORY_BACKUPS`;
+2. `project-observatory full configure storage backups /absolute/path`;
+3. the platform default. On macOS that is `~/Documents/Project Observatory/Backups` when
+   `~/Documents` exists; iCloud Desktop & Documents can sync it off the machine.
+   Elsewhere, or with no `~/Documents`, it is
+   `${XDG_DATA_HOME:-~/.local/share}/project-observatory-backups`, beside the workspace and
+   never inside it. Deleting the workspace, or reinstalling into it, leaves the copies.
+
+A root inside the
 workspace keeps the encrypted copies in the same tree as
 `secrets/backup-passphrase`, so one lost disk takes both: `backups status` and
 `doctor` warn about it (`inside_workspace: true`) until the root is pointed
@@ -687,9 +692,30 @@ which is why nothing reaches the root unencrypted: **without a passphrase,
 copies stay inside the workspace, plaintext, on this disk only**, and `full
 doctor` says so under `backups.warnings`.
 
-The passphrase lives in `<home>/secrets/backup-passphrase` (mode 600).
-`backup-passphrase show` prints it only to a terminal. Keep a copy outside the
-machine: restoring elsewhere needs it, and nothing can recover it.
+**From 0.17.0 a passphrase exists by default.** When none is configured, the maintenance job
+(or `full init` in a terminal) generates one from 32 random bytes. The passphrase lives in
+`<home>/secrets/backup-passphrase` (mode 600) and is **also kept outside the workspace**, so
+a deleted workspace or a reinstall can still open its backups:
+
+| Platform | Where the copy is kept |
+|---|---|
+| macOS | the login Keychain, item "Project Observatory backups", account `<home-name>-<instance>` |
+| Linux | the Secret Service through `secret-tool`; without it, `~/.config/project-observatory/backup-passphrases/<label>` (mode 600) |
+
+The value goes to the Keychain on `security -i`'s stdin and to `secret-tool` on stdin,
+never as an argument. A passphrase you set yourself is copied there too. One supplied through
+`OBSERVATORY_BACKUP_PASSPHRASE` is yours to keep and is not copied.
+
+`backup-passphrase show` prints it only to a terminal. Keep a copy off the machine as well:
+restoring on another machine needs it unless iCloud Keychain carries it there, and nothing
+can recover it.
+
+**A reinstall restores.** A full snapshot is taken every day. Run `full init` in a terminal
+on an empty home, or `full restore --latest` anywhere. It finds the newest backup a workspace
+at the same path left, in every backups root this machine knows, opens it with the kept
+passphrase and restores it. `init --fresh` starts empty instead. When no kept passphrase
+opens the backup, `init` creates the workspace and prints the backup it found and the
+restore command.
 
 ```sh
 # On another machine: the passphrase from the environment or a prompt
@@ -757,7 +783,61 @@ estate. On the new machine:
 
 ## Staying in step
 
-After each release, on both machines:
+### Updates install themselves (0.17.0 and later)
+
+Nothing needs to be run after a release. One job per workspace runs every hour: launchd
+`org.project-observatory.<id>.maintain` on macOS, a systemd user timer
+`project-observatory-<id>-maintain.timer` on Linux. Each run does only what is due:
+
+- Once a day it runs `full update --check`. When a newer **stable** release exists, it runs
+  `full update --apply`, the verified, reversible transaction described below.
+- On macOS, when the installed app is older than the engine, it replaces the app with that
+  release's app. The new app must pass the GitHub digest, `SHA256SUMS`, `codesign`, the same
+  signing team and Gatekeeper. It is never replaced while it runs.
+- Once a day it takes a full encrypted backup, `daily-*.obsnap`, the newest three kept. It
+  briefly stops this workspace's tick and server for the copy and starts them again. When a
+  tick is running, the backup waits for the next hour. Snapshots you take yourself
+  (`snapshot-*`) rotate separately and are never removed by the daily ones. See
+  [Encrypted backups off this disk](#encrypted-backups-off-this-disk).
+
+```sh
+project-observatory full auto-update status   # on or off, last check, last result, warnings
+project-observatory full auto-update off      # new releases wait for you; the daily backup keeps running
+project-observatory full auto-update on
+project-observatory full maintain status      # everything the job last did
+project-observatory full maintain run         # one pass now
+project-observatory full maintain uninstall   # no job at all; it stays off until `maintain ensure`
+```
+
+How the job gets scheduled:
+
+- `install_launchd.py install` schedules it together with the tick.
+- `full init` schedules it when you run it in a terminal.
+- `full update --apply` makes the new release schedule its own version of the job. It never
+  turns back on a job you removed with `maintain uninstall`. When the definition changes
+  while a pass is running, the new definition is written and loaded at the next scheduling
+  outside a pass, so the job is never stopped under itself.
+- `full upgrade --apply` (run by `full update`) schedules the job when it runs from a
+  terminal.
+- The `observatory-log` plugin's session hook schedules it where it is missing. On Linux
+  without a systemd user manager, the hook runs the pass itself.
+
+Only one `full update --apply` runs at a time per workspace. A second one, from the job, the
+plugin or a person, is refused before it changes anything. A failed update is rolled back
+and retried the next day. An update whose rollback needs a person stops the automatic
+attempts. Once you have run `full update` successfully, they resume. Until then, `doctor`, the Health page
+and `auto-update status` say so. `doctor` and the Health page also show when automatic
+updates are off or the job is not scheduled.
+
+**Installs from 0.7.0 to 0.16.0** have no job of their own. The `observatory-log` plugin,
+which the PassionCode launcher keeps current, checks such an engine once a day. When a
+newer stable release exists, it runs that engine's own `full update --apply`, unless
+`updates.auto` is `false` in `config/settings.json`. The new release then schedules its job.
+The bridge logs to `~/.local/state/project-observatory/update-bridge.log`.
+
+### Updating by hand
+
+To update yourself, or on a machine with no job:
 
 ```sh
 project-observatory full update --check     # 0 up to date, 10 update available, 3 could not look
@@ -852,6 +932,10 @@ and binding behavior retain their own tests; add the system utility directory to
 when collecting complete local socket evidence.
 
 ## Mac app
+
+From 0.17.0 the app updates itself: the hourly maintenance job replaces it with the engine's
+release once it is not running (see [Staying in step](#staying-in-step)). The replaced
+bundle is kept under `<home>/store/app-previous/`.
 
 0.12.0 ships a native macOS app (macOS 14+). It opens on this workspace's dashboard —
 live when the workspace's own server answers, otherwise the saved pages under a banner

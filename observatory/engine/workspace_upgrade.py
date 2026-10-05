@@ -222,7 +222,8 @@ def _snapshot(base: Path, output: Path) -> dict:
         raise
 
 
-def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = False) -> dict:
+def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = False,
+             kind: str = 'snapshot') -> dict:
     """An explicit --output is honoured as a plaintext directory, exactly as before.
     Without one the snapshot is staged under <home>/backups and then handed to
     backup_vault: exported encrypted to the backups root when a passphrase is
@@ -231,13 +232,15 @@ def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = 
     preflight(base)  # unknown versions refuse before locks or other writes
     require_stopped(writers_stopped)
     explicit = output is not None
-    output = output or base / 'backups' / ('snapshot-' + uuid.uuid4().hex)
+    if kind not in backup_vault.SNAPSHOT_KINDS:
+        raise config.ConfigurationError(f'Unknown snapshot kind: {kind}')
+    output = output or base / 'backups' / (f'{kind}-' + uuid.uuid4().hex)
     with operation_lock(base):
         result = _snapshot(base, output)
         if explicit:
             result['encrypted'] = False
             return result
-        result.update(backup_vault.after_snapshot(base, Path(result['snapshot']), 'snapshot'))
+        result.update(backup_vault.after_snapshot(base, Path(result['snapshot']), kind))
         return result
 
 
@@ -304,14 +307,15 @@ def verify_snapshot(source: Path) -> dict:
     return manifest
 
 
-def restore(source: Path, destination: Path) -> dict:
+def restore(source: Path, destination: Path, *, secret: str | None = None) -> dict:
     """A snapshot directory, or an encrypted `.obsnap` file from the backups root.
 
     The encrypted file is authenticated in full and decrypted beside the new home;
-    the passphrase comes from OBSERVATORY_BACKUP_PASSPHRASE or a terminal prompt,
-    because a new machine has no workspace to keep it in yet."""
+    the passphrase is `secret` when the caller found it (the OS credential store,
+    `maintenance.restore_latest`), else OBSERVATORY_BACKUP_PASSPHRASE or a terminal
+    prompt, because a new machine has no workspace to keep it in yet."""
     if source.is_file() and not source.is_symlink():
-        secret = backup_vault.require_passphrase(destination, prompt=True)
+        secret = secret or backup_vault.require_passphrase(destination, prompt=True)
         stage = backup_vault.extract_tree(source.resolve(), destination.resolve().parent, secret)
         try:
             return restore(stage, destination)
@@ -476,7 +480,10 @@ def parser() -> argparse.ArgumentParser:
     up.add_argument('--apply',action='store_true')
     up.add_argument('--writers-stopped',action='store_true')
     res = commands.add_parser('restore', prog='project-observatory full restore')
-    res.add_argument('snapshot',type=Path)
+    res.add_argument('snapshot',type=Path,nargs='?')
+    res.add_argument('--latest',action='store_true',
+                     help='the newest backup a workspace at this path left, opened with the passphrase '
+                          'kept in the OS credential store')
     return ap
 
 
@@ -488,7 +495,26 @@ def main(argv: list[str]) -> int:
             result = snapshot(base,args.output,writers_stopped=args.writers_stopped)
         elif args.command == 'upgrade':
             result = upgrade(base,apply=args.apply,writers_stopped=args.writers_stopped)
+            # An update from a release before 0.17.0 runs that release's transaction, which
+            # knows nothing of the maintenance job; this new code schedules it when it may
+            # touch the machine (a person's terminal, or OBSERVATORY_SYSTEM_SETUP=1).
+            import maintenance
+            if args.apply and maintenance.system_setup_allowed(base):
+                try:
+                    result['maintenance'] = maintenance.ensure(base)
+                except Exception as exc:  # noqa: BLE001 — the upgrade is done either way
+                    result['maintenance'] = {'result':'unscheduled','detail':f'{type(exc).__name__}: {exc}'[:300]}
+        elif args.latest:
+            if args.snapshot is not None:
+                raise config.ConfigurationError('Give a snapshot or --latest, not both')
+            import maintenance
+            result = maintenance.restore_latest(base)
+            if result.get('status') != 'restored':
+                print(json.dumps(result,indent=2))
+                return 2
         else:
+            if args.snapshot is None:
+                raise config.ConfigurationError('Name a snapshot, or pass --latest')
             result = restore(args.snapshot,base)
         print(json.dumps(result,indent=2))
         return 0
