@@ -2099,9 +2099,17 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
       fullCommand("maintain ensure")]);
   else if (!MT.auto)
     hb.push([T("updates"), T("off — new releases are not installed by themselves"), fullCommand("auto-update on")]);
-  else
+  else {
+    // Each result the job records, in words; an unknown one is shown as recorded.
+    const RESULT = {"up-to-date": T("up to date"), "update-available": T("a newer release exists"),
+      "undetermined": T("could not check"), "updated": T("updated"),
+      "updated-services-not-restarted": T("updated, a background job did not start"),
+      "failed-rolled-back": T("failed and rolled back"), "refused": T("refused"),
+      "needs-person": T("needs a person"), "another-update-running": T("another update was running")};
+    const last = MT.update || MT.check;
     hb.push([T("updates"), MT.checked ? T("installed by themselves; last check {date}: {result}",
-      {date: MT.checked.slice(0, 10), result: T(MT.update || MT.check || "?")}) : T("installed by themselves; not checked yet"), status]);
+      {date: MT.checked.slice(0, 10), result: RESULT[last] || last || "?"}) : T("installed by themselves; not checked yet"), status]);
+  }
   const day = (MT.snapshot || "").slice(0, 10);
   hb.push([T("full backup"), !MT.snapshot ? T("none yet — the hourly job takes one a day")
     : MT.snapshot_kind === "before-upgrade" ? T("newest {date}, taken before the last update", {date: day})
