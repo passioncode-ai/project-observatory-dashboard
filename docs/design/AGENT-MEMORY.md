@@ -312,7 +312,8 @@ query until bindings exist. The rules, the reason codes and where each is enforc
 - An MCP transport other than stdio (Streamable HTTP on loopback, as a `fabric-service`).
   The protocol and limits are decided and measured (PB-137 N-015,
   [HTTP-TRANSPORT.md](HTTP-TRANSPORT.md)): 2026-07-28 plus the handshake revisions,
-  stateless, loopback-only, Host/Origin checked, 4 MiB bodies. The endpoint is N-016.
+  stateless, loopback-only, Host/Origin checked, 4 MiB bodies. Served since N-016 by
+  `project-observatory full memory-http` to callers holding an access binding.
 
 They are rows OBS-04 to OBS-06 in the [backlog](../backlog.md). Search (OBS-03) and the
 evaluation set (OBS-07) are described above.

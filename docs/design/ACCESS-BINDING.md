@@ -137,8 +137,8 @@ project-observatory full access-binding revoke BINDING_ID
 
 ## What this decision does not do
 
-- It serves no HTTP. The loopback service and its bearer header are N-016. They plug into
-  `serve_http()` and `channel()` above.
+- HTTP is served by `full memory-http` since N-016 ([HTTP-TRANSPORT.md](HTTP-TRANSPORT.md#the-service-n-016)):
+  it calls `serve_http()` and runs each request inside `channel()` above.
 - The vector arm's nearest-neighbour search is not filtered before the KNN: the legacy index
   has no metadata to filter on. It runs only under a consent, and its hits pass the same
   canonical recheck and say so in `degraded` (`vector-window`). Filtering before the KNN
