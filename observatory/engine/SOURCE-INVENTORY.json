@@ -765,15 +765,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "8e948870f84b486d2aad029f1174a51c45a479d904cbad584d174802ba161a66",
-      "bytes": 55186,
+      "export_sha256": "30353161c8ed303b6de163e9f17ee34b0a22ed97ee399f585a49c24ff689ffb2",
+      "bytes": 55502,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "93ca36a78e57e937599e05013e825b1f085a55179d351580526838776a888e01",
-      "bytes": 15484,
+      "export_sha256": "8bee974dab0b16031d7e82e3f6c6209fee5500d29a8a7b624139d9bf7e11031b",
+      "bytes": 16027,
       "upstream_modified": true
     },
     {
@@ -1119,6 +1119,13 @@
       "bytes": 20007
     },
     {
+      "path": "mcp/http_service.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ae3f0b6d79c43d3418e2872c89fa65216f40600d65c31aa7f8d494d7c92a52d4",
+      "bytes": 8294
+    },
+    {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
       "export_sha256": "bebda117da66b5ae84defa9a26a04b77c979abb4e60a0842d213f3ae1d559306",
@@ -1152,8 +1159,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "2d50182bca5f2ba6eec7d9a41f95106596c04763d5c85fc8114860dcd32bed29",
-      "bytes": 80245,
+      "export_sha256": "cc218845c8d004abb00df9af8db9271691af4fcc53166448b1f9836d5ad1812a",
+      "bytes": 80693,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -1740,8 +1747,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "2b4f6223db5140ba944c41b439113462943adf385dd29d847e03e7ab4a547cee",
-      "bytes": 17957,
+      "export_sha256": "743de9936ee519b69d6c9f754333e10c90175b1c2c265721b98f916b94fb4838",
+      "bytes": 18049,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2611,6 +2618,13 @@
       "upstream_modified": true,
       "export_sha256": "cdf0f722f340f7824569048c79ac4d095682c2c8c5cf3127a8595b21e5d93f93",
       "bytes": 3573
+    },
+    {
+      "path": "tests/test_memory_http.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "a68673b0c814ad8440debcc08b4ffa662701ee4b71e166aac776936f44a726d3",
+      "bytes": 13826
     },
     {
       "path": "tests/test_merge_membership.py",
@@ -4143,7 +4157,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 528,
+  "file_count": 530,
   "excluded": [
     "git-history",
     "operator-registries",

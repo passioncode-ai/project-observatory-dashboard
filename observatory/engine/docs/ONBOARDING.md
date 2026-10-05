@@ -523,7 +523,10 @@ project-observatory full access-binding revoke BINDING_ID           # refused fr
   that received a receipt can read it back with `observatory_explain`. Memory answers are
   redacted on the way out too, and say so in `redacted`
   ([design/RETRIEVAL-AUDIT.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/RETRIEVAL-AUDIT.md)).
-- There is no HTTP endpoint yet (PB-137 N-016). Until then a binding is issued ahead of use.
+- `project-observatory full memory-http` serves memory over loopback HTTP (port 47313) to
+  callers holding a binding. A client sends its bearer as `Authorization: Bearer …` from the
+  file you gave it. Without a valid binding every request is refused before it is read
+  ([design/HTTP-TRANSPORT.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/HTTP-TRANSPORT.md)).
 
 Rules and reasons: [design/ACCESS-BINDING.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/ACCESS-BINDING.md).
 

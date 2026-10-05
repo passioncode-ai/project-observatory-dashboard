@@ -54,11 +54,36 @@ body disagree it answers 400 (`-32020`). The SDK client sends all of this itself
     refuses without one before any handler runs. stdio stays `local:stdio`.
 - **Cancellation** is the client closing the response stream (2026-07-28). Long work stays a
   `fabric.job`, as today.
-- **Rate limits** are not a transport feature of this SDK. N-016 sets one per binding and says
+- **Rate limits** are not a transport feature of this SDK. N-016 sets one per binding (done: `--rate`, 429) and says
   so in its refusal envelope.
 
-## Not done here
+## The service (N-016)
 
-No HTTP endpoint ships in this change, and nothing listens. `tests/test_http_transport_pin.py`
-pins the SDK properties this decision relies on, so an SDK upgrade that changes them fails a
-test instead of changing the service silently.
+`project-observatory full memory-http [--port 47313] [--rate 120]` serves the same MCP server
+as stdio on `127.0.0.1` ([`mcp/http_service.py`](../../observatory/engine/mcp/http_service.py)).
+It is a foreground process that the operator starts. Nothing installs it as a background job.
+
+Its door checks in this order, before the body is read:
+
+| Check | Refusal |
+|---|---|
+| `Host` is `127.0.0.1:<port>` or `localhost:<port>` | 421 |
+| `Origin`, when sent, is one of those as `http://` | 403 |
+| `Authorization: Bearer …` resolves to an access binding: present, known, this workspace's audience, unexpired, unrevoked, registry readable | 401 with the access-binding refusal envelope and `WWW-Authenticate` |
+| the binding's request rate (`--rate` a minute, a token bucket per binding) | 429 with `Retry-After` |
+
+The SDK's own Host/Origin check (above) is a second layer behind the door. Bodies over
+4 MiB are 413. Then the request runs inside its own channel (`X-Fabric-Projects`
+included), and every tool authorizes again (N-008).
+
+- **The bearer.** It is hashed at the door and goes no further: it is not logged, not stored and not forwarded upstream.
+- **Isolation.** The process calls `memory_access.serve_http()`, so nothing in it runs as the local agent.
+- **No state of its own.** The service keeps no session and no journal. Decisions go to `store/logs/access.jsonl` and receipts to `retrieval.jsonl`, as on stdio, so a restart loses nothing.
+- **`/mcp/`** answers 307 to `/mcp` on the same loopback address. The door has already confined the `Host`, so the redirect cannot point anywhere else.
+
+Proved end to end by [`tests/test_memory_http.py`](../../observatory/engine/tests/test_memory_http.py):
+a real uvicorn server and a real 2026-07-28 client, 11 tests. Five planted defects in the door
+were each caught.
+
+`tests/test_http_transport_pin.py` pins the SDK properties this decision relies on, so an SDK
+upgrade that changes them fails a test instead of changing the service silently.
