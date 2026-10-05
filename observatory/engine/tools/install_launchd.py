@@ -311,6 +311,16 @@ def main() -> int:
     print(f"  plist  {PLIST}")
     print(f"  log    {LOG_DIR / 'tick.log'}")
     print("  RunAtLoad is false on purpose: a login is not a reason to burn a scan.")
+    # The maintenance job (updates, the app, a daily encrypted backup) comes with the
+    # tick: a person who installs background jobs gets the one that keeps them current.
+    import maintenance
+    try:
+        done = maintenance.ensure(paths.HOME)
+        sched = done.get("schedule") or {}
+        print(f"  maintenance: {sched.get('label') or sched.get('result')} "
+              f"(automatic updates {'on' if done.get('auto_update') else 'off'})")
+    except Exception as exc:  # noqa: BLE001 — the tick is installed either way
+        print(f"  maintenance not scheduled: {type(exc).__name__}: {exc}", file=sys.stderr)
     return 0
 
 

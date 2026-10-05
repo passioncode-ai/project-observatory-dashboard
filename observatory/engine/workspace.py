@@ -483,6 +483,9 @@ def doctor(base: Path) -> dict:
             "interface": {"locale": doc.get("interface", {}).get("locale", "en")},
             "coverage_warnings": coverage_warnings(doc),
             "backups": __import__("backup_vault").status(base),
+            # Updates that arrive by themselves and the daily encrypted backup: whether the
+            # job is scheduled, what it last found, and what needs a person (maintenance.py).
+            "maintenance": __import__("maintenance").status(base),
             # PB-132: a dead or interrupted tick cannot report itself.
             "tick": _tick_health(base, doc),
             "credentials": "values are never returned", "network_calls": 0,
@@ -544,7 +547,9 @@ def _parser() -> argparse.ArgumentParser:
     """The parser for the workspace commands `main` handles itself."""
     ap = argparse.ArgumentParser(prog=PROG, description=__doc__)
     sub = ap.add_subparsers(dest="command", required=True)
-    sub.add_parser("init", help="create the private workspace, or complete one")
+    init = sub.add_parser("init", help="create the private workspace, or complete one; an empty home "
+                                       "first restores the newest backup a workspace at this path left")
+    init.add_argument("--fresh", action="store_true", help="start empty even when backups exist")
     sub.add_parser("doctor", help="workspace health, sources and backups")
     sub.add_parser("version", help="the engine, workspace and configuration versions")
     sub.add_parser("onboard", help="print the agent onboarding guide")
@@ -602,6 +607,12 @@ def parse(argv: list[str]) -> argparse.Namespace:
     if name == "update":
         import engine_update
         return engine_update.parser().parse_args(rest)
+    if name == "maintain":
+        import maintenance
+        return maintenance.parser().parse_args(rest)
+    if name == "auto-update":
+        import maintenance
+        return maintenance.auto_update_parser().parse_args(rest)
     if name == "profile":
         import workspace_profile
         return workspace_profile.parser().parse_args(rest)
@@ -621,6 +632,12 @@ def main(argv: list[str]) -> int:
     if argv and argv[0] == "update":
         import engine_update
         return engine_update.main(argv[1:])
+    if argv and argv[0] == "maintain":
+        import maintenance
+        return maintenance.main(argv[1:])
+    if argv and argv[0] == "auto-update":
+        import maintenance
+        return maintenance.auto_update_main(argv[1:])
     if argv and argv[0] == "profile":
         import workspace_profile
         return workspace_profile.main(argv[1:])
@@ -637,7 +654,7 @@ def main(argv: list[str]) -> int:
         if a.command == "backups":
             return _backups_command(base, a)
         if a.command == "init":
-            result = initialize(base)
+            result = _init(base, fresh=a.fresh)
         elif a.command == "version":
             result = {"application": config.VERSION, "workspace": config.WORKSPACE_VERSION, "config": config.CONFIG_VERSION}
         elif a.command == "doctor":
@@ -695,6 +712,36 @@ def main(argv: list[str]) -> int:
     except (config.ConfigurationError, OSError, sqlite3.Error) as exc:
         print(f"Observatory: {exc}", file=__import__('sys').stderr)
         return 2
+
+
+def _init(base: Path, *, fresh: bool = False) -> dict:
+    """`init`, and what makes a fresh install whole without a further step (D5, D7).
+
+    On an empty home, unless --fresh, the newest backup a workspace at this path left is
+    restored first. Then — only where this process may touch the machine
+    (`maintenance.system_setup_allowed`: a person's terminal, or OBSERVATORY_SYSTEM_SETUP=1)
+    — the hourly maintenance job is scheduled and the backup passphrase is generated and
+    kept outside the workspace. Elsewhere the answer says how that will happen."""
+    import maintenance
+    allowed = maintenance.system_setup_allowed(base)
+    restored = None
+    empty = not base.exists() or not any(p.name != ".workspace.lock" for p in base.iterdir())
+    if empty and not fresh and allowed:
+        restored = maintenance.restore_latest(base)
+    result = initialize(base)
+    if restored and restored.get("status") == "restored":
+        result = {**result, "status": "restored", "restored_from": restored.get("from"),
+                  "files": restored.get("files")}
+    elif restored and restored.get("status") == "backups-found-locked":
+        result["backups_found"] = {k: restored[k] for k in ("newest", "detail", "next")}
+    if allowed:
+        result["maintenance"] = maintenance.ensure(base)
+    else:
+        result["maintenance"] = {
+            "result": "not-scheduled-here",
+            "detail": "updates and daily backups are scheduled from a terminal, by the observatory-log "
+                      "plugin at the next session, or with `project-observatory full maintain ensure`"}
+    return result
 
 
 def _configure_models(base: Path, a) -> int:

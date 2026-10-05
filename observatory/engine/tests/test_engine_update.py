@@ -485,6 +485,43 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(rows[-1]["event"], "updated")
         self.assertTrue(all("at" in r and "event" in r for r in rows))
 
+    def test_the_new_release_schedules_its_own_maintenance_job(self):
+        # docs/runs/2026-10-05-auto-update R3: after a successful apply the NEW code
+        # schedules the hourly job, so a release that changes the job installs its version.
+        calls = []
+        self.engine.ensure_maintenance = lambda: (calls.append("ensure") or (0, ""))
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual((code, doc["status"], doc["maintenance"]), (0, "updated", "scheduled"))
+        self.assertEqual(calls, ["ensure"])
+
+    def test_a_schedule_that_fails_does_not_undo_an_update(self):
+        self.engine.ensure_maintenance = lambda: (3, "no systemd user manager")
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual((code, doc["status"]), (0, "updated"))
+        self.assertEqual(doc["maintenance"], "not scheduled: no systemd user manager")
+
+    def test_a_second_apply_is_refused_while_one_runs(self):
+        # docs/runs/2026-10-05-auto-update F6: the job, the plugin bridge and a person can
+        # each start one; only one transaction runs per workspace.
+        self.gh.publish(NEWER)
+        with self.mod.update_lock(self.home):
+            self.assertTrue(self.mod.update_lock_held(self.home))
+            code, doc = self.run_cli("--apply")
+        self.assertEqual((code, doc["status"]), (self.mod.EXIT_REFUSED, "refused"))
+        self.assertIn("Another `full update --apply` is running", doc["error"])
+        self.assertEqual(self.installer.calls, [], "nothing was installed")
+        self.assertFalse(self.mod.update_lock_held(self.home))
+        code, doc = self.run_cli("--apply")
+        self.assertEqual((code, doc["status"]), (0, "updated"))
+
+    def test_an_engine_without_the_method_is_left_alone(self):
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0)
+        self.assertNotIn("maintenance", doc)
+
     def test_the_release_lock_constrains_the_install(self):
         # A wheel's `[full]` extra pins only the direct dependencies; the release's
         # lock is what keeps the transitive ones at the versions CI tested.
@@ -778,6 +815,15 @@ class RealSeams(unittest.TestCase):
         self.assertEqual(argv[4:8], ["--home", str(self.home), "full", "version"])
         self.assertNotIn("PYTHONPATH", kw["env"])
         self.assertNotEqual(kw["cwd"], str(ROOT))
+
+    def test_new_engine_schedules_maintenance_with_the_system_setup_flag_only_for_that_call(self):
+        engine = self.mod.NewEngine(self.home, python="/synthetic/python", runner=self.runner())
+        self.assertEqual(engine.ensure_maintenance()[0], 0)
+        argv, kw = self.calls[0]
+        self.assertEqual(argv[4:], ["--home", str(self.home), "full", "maintain", "ensure", "--if-wanted"])
+        self.assertEqual(kw["env"].get("OBSERVATORY_SYSTEM_SETUP"), "1")
+        engine.version()
+        self.assertNotIn("OBSERVATORY_SYSTEM_SETUP", self.calls[1][1]["env"])
 
     def test_launchd_helpers_name_only_this_workspace(self):
         from tools import install_launchd
