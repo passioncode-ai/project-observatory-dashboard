@@ -205,6 +205,15 @@ class InteropServer(MCPServer):
                    jsonschema.Draft202012Validator(d["outputSchema"]) if "outputSchema" in d else None)
             for name, d in self._definitions.items()}
         self._job_tools = any(interop.is_job(c) for c in self._caps.values())
+        #: memory/0.1 (PB-137 N-025): capability → its definition and the tool it runs.
+        self._memory: dict[str, dict] = {}
+        self._memory_tools: dict[str, Callable[..., dict]] = {}
+
+    def serve_memory(self, tools: dict[str, Callable[..., dict]]) -> None:
+        """Serve the nine memory/0.1 capabilities over these observatory tools."""
+        import memory_wire
+        self._memory = memory_wire.definitions()
+        self._memory_tools = dict(tools)
 
     def capability(self, name: str) -> Callable[[Handler], Handler]:
         """Register the handler of a manifest capability (refused for any other name)."""
@@ -252,10 +261,38 @@ class InteropServer(MCPServer):
             raise PermissionError(json.dumps(refused))
         return await super().read_resource(uri, context)
 
+    def memory_listing(self) -> list[Tool]:
+        return [Tool(name=name, title=name, description=d["description"],
+                     input_schema=d["inputSchema"],
+                     annotations=ToolAnnotations(read_only_hint=name in (
+                         "memory.checkpoint.latest", "memory.handoff.get",
+                         "memory.workflow.list", "memory.search", "memory.recall")))
+                for name, d in self._memory.items()]
+
     async def list_tools(self) -> list[Tool]:
-        own = {t.name for t in self.interop_tools()}
+        own = {t.name for t in self.interop_tools()} | set(self._memory)
         base = [t for t in await super().list_tools() if t.name not in own]
-        return base + self.interop_tools()
+        return base + self.interop_tools() + self.memory_listing()
+
+    async def _memory_call(self, name: str, arguments: dict) -> CallToolResult:
+        """A memory/0.1 call: the contract's input checked, the observatory tool run, the
+        answer checked against the contract's output or refusal."""
+        import memory_wire
+        d = self._memory[name]
+        bad = _first_error(d["input"], arguments)
+        if bad:
+            refused = {"error": "invalid-input", "code": "invalid-input", "detail": bad,
+                       "hint": f"{name} takes only the fields {memory_wire.FAMILY} defines",
+                       "degraded": []}
+            return CallToolResult(content=[_text(refused)], structured_content=refused)
+        out = await anyio.to_thread.run_sync(
+            lambda: memory_wire.call(name, arguments, self._memory_tools))
+        bad = _first_error(d["output"], out)
+        if bad:
+            return CallToolResult(content=[_text(out), TextContent(
+                type="text", text=f"an answer that fails {memory_wire.FAMILY} at {bad}")],
+                is_error=True)
+        return CallToolResult(content=[_text(out)], structured_content=out)
 
     # ── calling ──────────────────────────────────────────────────────────────
     async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
@@ -271,6 +308,8 @@ class InteropServer(MCPServer):
                 return CallToolResult(content=[_text(refused)], is_error=True)
         is_job_tool = self._job_tools and name in (interop.JOB_GET, interop.JOB_CANCEL)
         is_assistant = name == "observatory_assistant_ask"
+        if name in self._memory:
+            return await self._memory_call(name, arguments or {})
         if name not in self._definitions and not is_job_tool and not is_assistant:
             return await self._sdk_call(name, arguments, context)
         meta = None

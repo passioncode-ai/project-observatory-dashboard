@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/common.schema.json",
+  "title": "Fabric Agent Contract common definitions",
+  "$defs": {
+    "uri": {
+      "type": "string",
+      "format": "uri",
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "revisionRef": {
+      "type": "object",
+      "required": [
+        "id",
+        "revision",
+        "contentHash"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uri"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "contentHash": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "additionalProperties": false
+    },
+    "revisionMeta": {
+      "type": "object",
+      "required": [
+        "id",
+        "revision",
+        "contentHash",
+        "createdAt",
+        "createdBy"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uri"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "contentHash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "createdBy": {
+          "$ref": "#/$defs/uri"
+        }
+      },
+      "additionalProperties": false
+    },
+    "dataClass": {
+      "enum": [
+        "public",
+        "project-internal",
+        "confidential",
+        "personal",
+        "credential",
+        "regulated"
+      ]
+    },
+    "effectClass": {
+      "enum": [
+        "none",
+        "draft",
+        "publish",
+        "send",
+        "reply",
+        "charge",
+        "delete",
+        "merge",
+        "deploy",
+        "change-policy"
+      ]
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": {
+        "format": "uri"
+      },
+      "additionalProperties": true
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "id",
+        "mediaType",
+        "uri",
+        "contentHash",
+        "classification",
+        "producer"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uri"
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "uri": {
+          "$ref": "#/$defs/uri"
+        },
+        "contentHash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "classification": {
+          "$ref": "#/$defs/dataClass"
+        },
+        "producer": {
+          "$ref": "#/$defs/revisionRef"
+        },
+        "schema": {
+          "$ref": "#/$defs/uri"
+        }
+      },
+      "additionalProperties": false
+    },
+    "capabilityName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{1,127}$"
+    },
+    "traceId": {
+      "type": "string",
+      "pattern": "^(?!0{32}$)[0-9a-f]{32}$"
+    },
+    "spanId": {
+      "type": "string",
+      "pattern": "^(?!0{16}$)[0-9a-f]{16}$"
+    },
+    "usage": {
+      "type": "object",
+      "required": [
+        "inputTokens",
+        "outputTokens",
+        "wallMs"
+      ],
+      "properties": {
+        "inputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outputTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cacheReadTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cacheWriteTokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "costUsd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "wallMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

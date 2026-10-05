@@ -1454,6 +1454,10 @@ def resource_dashboard() -> str:
     return f.read_text(encoding="utf-8")
 
 
+# memory/0.1 (PB-137 N-025): the contract's nine names, each running the tool above it is.
+server.serve_memory({tool: globals()[tool] for tool in MA.MEMORY_CAPABILITIES.values()})
+
+
 def main() -> int:
     configuration.validate_workspace(required=True)
     # A capability without its handler would be listed and then answer

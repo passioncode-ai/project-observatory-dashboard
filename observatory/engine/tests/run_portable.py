@@ -142,6 +142,8 @@ BOUNDARY += ('retrieval_audit',)
 BOUNDARY += ('checkpoint_chunks',)
 # The loopback HTTP memory service, end to end (PB-137 N-016).
 BOUNDARY += ('memory_http',)
+# memory/0.1 served under its own names (PB-137 N-025).
+BOUNDARY += ('memory_wire',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -208,6 +210,8 @@ def copy_source(target: Path) -> None:
     selected.add(ROOT / 'plugins/README.md')
     selected.add(ROOT / 'fabric/FABRIC-CONFORMANCE.md')
     selected.add(ROOT / 'fabric/interop-schemas/README.md')
+    selected.add(ROOT / 'fabric/memory-schemas/README.md')
+    selected.add(ROOT / 'fabric/memory-provider.json')
     selected.add(ROOT / 'store/schema.sql')
     # The agent-memory evaluation corpus (tools/memory_eval.py reads it).
     selected |= set((ROOT / 'tests' / 'memory_eval').glob('*.json'))
@@ -219,7 +223,7 @@ def copy_source(target: Path) -> None:
                      and '__pycache__' not in p.parts}
     # The dashboard's catalogs and the vendored brand manifest are data it reads.
     for folder in ('defaults', 'plugins', 'fabric/fixtures', 'fabric/schemas', 'fabric/service-schemas',
-                   'fabric/interop-schemas',
+                   'fabric/interop-schemas', 'fabric/memory-schemas',
                    'dashboard/locales', 'dashboard/brand'):
         selected |= set((ROOT / folder).glob('*.json'))
     for source in sorted(selected):

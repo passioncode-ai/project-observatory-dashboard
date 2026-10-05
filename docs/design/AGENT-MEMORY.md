@@ -283,9 +283,28 @@ Every refusal is a typed answer with `error`, `detail` and `remedy`; `LeaseLost`
 The caller is `agent:<name>` or `service:<name>`: the operator's authority cannot be claimed
 over stdio, as for every other write tool here.
 
-These are protocol surface, **not Fabric capabilities**. The pinned Fabric contract has no
-memory capability family, and serving one would invent contract surface. When the contract
-gains it, these tools are what its schemas are written from.
+**memory/0.1 serves them under the contract's names too** (fabric-agent-contract DEC-0023,
+PB-137 N-025):
+- `memory.checkpoint.write`, `memory.checkpoint.latest`;
+- `memory.handoff.create`, `memory.handoff.accept`, `memory.handoff.get`;
+- `memory.workflow.list`;
+- `memory.record`, `memory.search`, `memory.recall`.
+
+Each runs the same code as its `observatory_*` tool. That means the same authorization,
+redaction, receipts and refusals. The difference is that each call is checked against the
+contract's schema:
+- an input field the contract does not define is refused `invalid-input`, which names the field's path, never its value;
+- an answer that fits neither the contract's output nor its refusal is reported as `isError`.
+
+The schema is vendored, not owned: `observatory/engine/fabric/memory-schemas/` holds the
+contract's files at the commit and with the digests its README names. The provider
+declaration (`fabric/memory-provider.json`) maps each capability to its `observatory_*` tool.
+The single source of that pairing is `memory_access.MEMORY_CAPABILITIES`.
+
+The contract also names three capabilities and reserves them, unserved: `memory.explain`,
+`memory.forget` and `memory.learning.propose`. Of these, `observatory_explain` already serves
+the first under its engine name (N-012). The `observatory_*` tools stay for every client that
+calls them.
 
 ## What may leave the machine
 
