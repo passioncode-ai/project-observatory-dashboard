@@ -60,6 +60,15 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
+**2026-10-05, release 0.16.0 (published, installed on the maintainer's machine):** agent
+memory with access bindings, embedding consent, scoped search with receipts, a loopback HTTP
+service and memory/0.1, forgetting with a receipt, and facts that expire, plus the fixes from a
+second independent review. The downloaded set was verified, `full update` applied migration 0010,
+and the Mac app, `observatory-log` 0.16.0 (through launcher 0.1.28) and the website were updated.
+The release gate was approved by an agent on the operator's explicit instruction, which is
+recorded as an exception. Record and next task:
+[runs/2026-10-05-release-0.16.0](runs/2026-10-05-release-0.16.0/README.md).
+
 **2026-10-04, release 0.15.0 (published, installed on the maintainer's machine):** agent memory
 for everyday use (#136) and the header door. Verified downloaded set, `full update` applied
 with migration 0009, the Mac app 0.15.0, `observatory-log` 0.15.0 through the PassionCode
