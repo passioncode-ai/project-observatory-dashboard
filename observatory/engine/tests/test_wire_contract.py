@@ -246,7 +246,7 @@ def test_the_served_instructions_describe_the_served_surface() -> None:
     # rather than the names because the instructions below are what an LLM client
     # reads to decide what to call, and a tool that exists while the string says
     # otherwise is the drift this test was written for.
-    check("the server serves twenty-one observatory tools (observatory_explain, N-012)", tools == 21, str(tools))
+    check("the server serves twenty-two observatory tools (observatory_learn, N-014)", tools == 22, str(tools))
     manifest = json.loads((ROOT / "fabric-agent.json").read_text(encoding="utf-8"))
     served = set(re.findall(r'@server\.capability\("([^"]+)"\)', src))
     import interop

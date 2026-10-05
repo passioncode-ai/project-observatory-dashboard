@@ -146,6 +146,8 @@ BOUNDARY += ('memory_http',)
 BOUNDARY += ('memory_wire',)
 # Forget with a receipt: withdrawal, erasure, retained copies named (PB-137 N-013).
 BOUNDARY += ('forget_receipt',)
+# Facts that expire; lessons that cite their evidence (PB-137 N-014).
+BOUNDARY += ('facts_learning',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',

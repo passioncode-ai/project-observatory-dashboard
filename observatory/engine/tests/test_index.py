@@ -198,9 +198,10 @@ def test_search_returns_conflicts_together() -> None:
     def supported(statement: str, **kw):
         r = L.append(conn, owner="agent:observer", kind="observation",
                      project_id="project:x", statement=statement,
-                     function="semantic", state="proposed", confidence=0.5, **kw)
-        r = L.transition(conn, r["memoryId"], to_state="observed",
-                         owner="agent:observer", expected_revision=r["revision"])
+                     function="semantic", state="proposed", confidence=0.5,
+                     valid_to="2099-01-01T00:00:00Z", **kw)
+        r = L.corroborate(conn, r["memoryId"], by="service:witness", check={"how": "fixture: an independent re-check"},
+                          expected_revision=r["revision"])
         return L.transition(conn, r["memoryId"], to_state="supported",
                             owner="agent:observer", expected_revision=r["revision"])
 
