@@ -61,6 +61,7 @@ against the real MCP server module and a real store.
 | `InteropServer.call_tool` (`mcp/capability_tools.py`) | Every tool outside the memory family, Fabric capabilities included, serves the local stdio agent only. A binding gets `local-only` before any handler runs. |
 | `InteropServer.read_resource` | Resources are local-only too. |
 | `observatory_search`, `observatory_recall` | Scope `memory.search` / `memory.read`, effect `read`, the named project. A binding reads only the classes at or below its ceiling: `recall` filters in SQL, so `total` agrees with the page. `search` filters project, class and validity inside its candidate query, before the window (N-009). |
+| `observatory_explain` | Scope `memory.search`, effect `read`. The caller is identified first, and the receipt must be its own before its project is authorized ([RETRIEVAL-AUDIT.md](RETRIEVAL-AUDIT.md)). |
 | `observatory_record` | Scope `memory.record`, effect `propose`, `owner` = the binding's principal. A correction (`memoryId`) must be a record of the authorized project. |
 | `observatory_workflow_list` | Scope `memory.read`. A session binding lists only its own workflows, and `total` counts only those. |
 | `observatory_checkpoint_write`, `_latest` | Scope `memory.checkpoint`. A new workflow is authorized on the project it names. A continued one is authorized on the project it already belongs to, read from the store. |

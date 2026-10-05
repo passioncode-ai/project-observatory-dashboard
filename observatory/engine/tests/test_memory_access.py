@@ -204,6 +204,7 @@ class EveryMemoryToolAsks(Base):
         "observatory_handoff_accept": dict(owner="agent:alpha-bot", idempotencyKey="key-x-0003",
                                            handoffId="handoff:0000000000000000"),
         "observatory_handoff_get": dict(handoffId="handoff:0000000000000000"),
+        "observatory_explain": dict(receiptId="rcpt_00000000000000ff"),
     }
 
     def test_the_table_and_the_calls_agree(self) -> None:

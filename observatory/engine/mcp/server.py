@@ -63,6 +63,7 @@ import access_binding
 import credential_shape
 import interop                                                                    
 import memory_access as MA
+import retrieval_audit as RA
 import paths
 import proposals                                                                  
 import survey as survey_mod                                                       
@@ -589,13 +590,59 @@ def observatory_search(
     except MA.Refused as exc:
         return exc.envelope
     if grant.local:
-        return survey_mod.search(query, project_id=project_id, limit=limit)
-    # A binding vouches for its query at its class ceiling (rule 10) and sees only
-    # the classes under it.
-    ctx = access_binding.query_context(grant.binding, project_id)
-    return survey_mod.search(query, project_id=project_id, limit=limit,
-                             authority=ctx["authority"], classification=ctx["classification"],
-                             classes=grant.visible_classes)
+        out = survey_mod.search(query, project_id=project_id, limit=limit)
+    else:
+        # A binding vouches for its query at its class ceiling (rule 10) and sees only
+        # the classes under it.
+        ctx = access_binding.query_context(grant.binding, project_id)
+        out = survey_mod.search(query, project_id=project_id, limit=limit,
+                                authority=ctx["authority"], classification=ctx["classification"],
+                                classes=grant.visible_classes)
+    # REDACTED ON THE WAY OUT and RECEIPTED (PB-137 N-012): every free-text field passes
+    # the shape and known-value filters, and the answer names the receipt
+    # `observatory_explain` reads back without searching again.
+    out["results"], out["redacted"] = RA.scrub_rows(out.get("results", []))
+    out["receipt"] = RA.record(grant, query=query, project_id=project_id, answer=out,
+                               policy_revision=_policy_revision())
+    return out
+
+
+def _policy_revision() -> int | None:
+    """The embedding-policy revision a receipt names; read-only, None when unreadable."""
+    try:
+        import embedding_policy
+        return embedding_policy.load(embedding_policy.policy_path()).revision
+    except Exception:                                                             # noqa: BLE001
+        return None
+
+
+@server.tool()
+def observatory_explain(
+    receiptId: Annotated[str, Field(description="The `receipt.receiptId` an "
+                                                "`observatory_search` answer handed you.")],
+) -> dict[str, Any]:
+    """Why a search returned what it did, read back from its receipt — never by searching
+    again. Each result is re-read at the exact revision returned, with how it matched and
+    what it is now: `current`, `superseded` (with the latest revision), `expired`,
+    `erased` (no text) or `no-longer-visible` to you (no text). Only the caller that
+    received the receipt can explain it; any other id answers `unknown-receipt`. Text is
+    redacted like every memory answer."""
+    try:
+        who = MA.caller()
+        row = RA.find(receiptId)
+        if row is None or row.get("binding") != who.binding_id:
+            # Before any project is named: a receipt of another caller and no receipt at
+            # all are one answer, so an id says nothing about other projects.
+            return RA.refusal("unknown-receipt", f"{who.binding_id}: no receipt "
+                                                 f"{credential_shape.echo(receiptId)} for this caller")
+        grant = MA.authorize("observatory_explain", project_id=row.get("projectId"))
+    except MA.Refused as exc:
+        return exc.envelope
+    conn = store_db.connect()
+    try:
+        return RA.explain(conn, grant, receiptId)
+    finally:
+        conn.close()
 
 
 @server.tool()
@@ -661,8 +708,9 @@ def observatory_recall(
     # knows — a silent cap, in the tool a caller asks "what do you know".
     # `nextCursor` is keyed on `(created_at, memory_id)` because `created_at`
     # alone is not unique at second resolution.
+    rows, redacted = RA.scrub_rows(rows)
     out = {"projectId": projectId, "count": len(rows), "total": total,
-           "records": rows, "contested": contested,
+           "records": rows, "contested": contested, "redacted": redacted,
            "note": "conflicting records are returned together and are not ranked; "
                    "absence here is not proof of absence",
            "degraded": degraded}
@@ -707,7 +755,8 @@ def _write_error(exc: Exception) -> dict[str, Any]:
                              "message names the legal moves.",
         "LedgerError": "the write violates a ledger invariant; the message says which.",
     }.get(type(exc).__name__, "see the message")
-    out: dict[str, Any] = {"error": type(exc).__name__, "detail": str(exc), "remedy": remedy}
+    out: dict[str, Any] = {"error": type(exc).__name__, "detail": RA.scrub_text(str(exc)),
+                           "remedy": remedy}
     if isinstance(exc, L.RevisionConflict):
         out["currentRevision"] = exc.current
         out["expectedRevision"] = exc.expected
@@ -998,7 +1047,7 @@ _WORKFLOW_REMEDY = {
 def _workflow_error(exc: Exception) -> dict[str, Any]:
     from store import workflow as W
     if isinstance(exc, W.WorkflowError):
-        out: dict[str, Any] = {"error": type(exc).__name__, "detail": str(exc),
+        out: dict[str, Any] = {"error": type(exc).__name__, "detail": RA.scrub_text(str(exc)),
                                "remedy": _WORKFLOW_REMEDY.get(type(exc).__name__,
                                                               "see the message")}
         if isinstance(exc, W.LeaseLost) and exc.kept_as:
@@ -1029,6 +1078,36 @@ def _workflow_call(fn, *args, **kwargs) -> dict[str, Any]:
                 "remedy": "retry with the same `idempotencyKey`; nothing was written"}
     finally:
         conn.close()
+
+
+#: Keys of a workflow answer whose VALUES are agents' text: redacted on the way out. Ids,
+#: lease tokens and the transcript pointer (a session UUID the shape filter would eat) are
+#: never passed through the filters.
+_PACK_IDS = ("transcript",)
+
+
+def _scrub_workflow(out: dict[str, Any]) -> dict[str, Any]:
+    """Redact the agents' text in a workflow answer (PB-137 N-012): checkpoint bodies,
+    packs, constraints and goals. They were redacted on the way in, so the filters are
+    idempotent here; what they add is a secret the workspace learned since."""
+    if not isinstance(out, dict) or "error" in out:
+        return out
+    report: dict = {}
+    ckpt = out.get("checkpoint")
+    if isinstance(ckpt, dict) and "body" in ckpt:
+        ckpt["body"], report = RA.scrub_tree(ckpt["body"], report)
+    if isinstance(out.get("constraints"), list):
+        out["constraints"], report = RA.scrub_tree(out["constraints"], report)
+    pack = out.get("pack")
+    if isinstance(pack, dict):
+        kept = {k: pack[k] for k in _PACK_IDS if k in pack}
+        cleaned, report = RA.scrub_tree({k: v for k, v in pack.items() if k not in kept}, report)
+        out["pack"] = {**cleaned, **kept}
+    for row in out.get("workflows", []) if isinstance(out.get("workflows"), list) else []:
+        if isinstance(row.get("goal"), str):
+            row["goal"], report = RA.scrub_tree(row["goal"], report)
+    out["redacted"] = report
+    return out
 
 
 def _readable(grant: Any) -> Any:
@@ -1111,7 +1190,7 @@ def observatory_checkpoint_latest(
         "observatory_checkpoint_latest", c, workflow_id=workflowId))
         and W.checkpoint_latest(c, workflowId))
     out.setdefault("degraded", [])
-    return out
+    return _scrub_workflow(out)
 
 
 @server.tool()
@@ -1181,7 +1260,7 @@ def observatory_handoff_accept(
         return W.handoff_accept(
             c, owner=owner, idempotency_key=idempotencyKey, handoff_id=handoffId,
             executor=executor, session_id=sessionId, caller=grant.idempotency_caller(owner))
-    return _workflow_call(call)
+    return _scrub_workflow(_workflow_call(call))
 
 
 @server.tool()
@@ -1202,7 +1281,7 @@ def observatory_workflow_list(
                                cursor=cursor, workflow_ids=grant.binding.workflows)
     out = _workflow_call(call)
     out.setdefault("degraded", [])
-    return out
+    return _scrub_workflow(out)
 
 
 @server.tool()
@@ -1215,7 +1294,7 @@ def observatory_handoff_get(
     out = _workflow_call(lambda c: _readable(MA.authorize_target(
         "observatory_handoff_get", c, handoff_id=handoffId)) and W.handoff_get(c, handoffId))
     out.setdefault("degraded", [])
-    return out
+    return _scrub_workflow(out)
 
 
 def _published_shape(schema: dict, value: Any, dropped: set[str], path: str = "") -> Any:

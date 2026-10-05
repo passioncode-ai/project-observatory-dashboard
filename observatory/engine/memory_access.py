@@ -56,6 +56,8 @@ TOOLS: dict[str, tuple[str, str]] = {
     "observatory_handoff_create": ("memory.handoff", "propose"),
     "observatory_handoff_accept": ("memory.handoff", "propose"),
     "observatory_handoff_get": ("memory.handoff", "read"),
+    # Reads back a receipt this caller's own search produced (PB-137 N-012).
+    "observatory_explain": ("memory.search", "read"),
 }
 #: Tools that list workflows rather than act on one: a session binding lists its own.
 LISTINGS = frozenset({"observatory_workflow_list"})
@@ -71,8 +73,8 @@ _HINTS = {
                            "(`project-observatory full access-binding show` names the fault); "
                            "until then only the local stdio agent is served",
     "local-only": "this tool serves the local stdio agent only; a binding reaches the memory "
-                  "tools (observatory_search, _recall, _record, _workflow_list, _checkpoint_*, "
-                  "_handoff_*)",
+                  "tools (observatory_search, _explain, _recall, _record, _workflow_list, "
+                  "_checkpoint_*, _handoff_*)",
     "owner-not-principal": "over HTTP, `owner` must be this binding's principal",
     "fabric-projects-invalid": "X-Fabric-Projects must be a comma list of project:<slug> ids",
     "class-ceiling-below-workflow": "workflow memory is project-internal; this binding sees "
@@ -291,6 +293,17 @@ def _binding() -> AB.Binding:
     if found.binding is None:
         raise Refused(refusal(found.reason, None))
     return _narrow(found.binding, observed)
+
+
+def caller() -> AB.Binding:
+    """Who is calling, from the transport, before anything is authorized. Raises Refused
+    when the channel proves no binding. Used where the target must be checked against the
+    caller before its project may be named (an explain of someone else's receipt)."""
+    try:
+        return _binding()
+    except Refused as exc:
+        _journal(None, "caller", LOCAL_SCOPE, "read", None, None, False, exc.envelope.get("code"))
+        raise
 
 
 def authorize(tool: str, *, project_id: str | None = None, workflow_id: str | None = None,
