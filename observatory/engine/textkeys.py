@@ -86,28 +86,58 @@ _BODY_LISTS = (("plan", "title"), ("done", "result"), ("open", "next_action"),
 _BODY_STRINGS = ("constraints", "questions")
 
 
-def body_prose(body: dict | str | None) -> str:
-    """The searchable text of a checkpoint body (a dict or its stored JSON)."""
+#: Words per chunk of a long field. A chunk is what a hit points at, so a successor
+#: reads one decision or one paragraph of notes rather than the whole body. Lexical
+#: only for now: a chunk sized to an embedding model's token limit comes with an
+#: admitted local model (PB-137 N-011 semantic half, N-006).
+CHUNK_WORDS = 120
+
+#: The engine's own identifiers. They name a workflow or a handoff; they are found by
+#: the workflow tools, never by word form, and as search keys they would match every
+#: question that happens to contain a hex run (PB-137 N-011: ids do not dominate prose).
+IDENTIFIERS = re.compile(r"\b(?:ckpt:)?wf_[0-9a-f]{16}\b|\bhandoff:[0-9a-f]{16}\b")
+
+
+def _windows(path: str, text: str) -> list[tuple[str, str]]:
+    words = text.split()
+    if len(words) <= CHUNK_WORDS:
+        return [(path, text)] if text.strip() else []
+    return [(f"{path}#{k}", " ".join(words[i:i + CHUNK_WORDS]))
+            for k, i in enumerate(range(0, len(words), CHUNK_WORDS))]
+
+
+def body_chunks(body: dict | str | None) -> list[tuple[str, str]]:
+    """The prose of a checkpoint body as `(field path, text)` chunks, in body order:
+    `decisions[3].why`, `constraints[1]`, `notes#2`. A field longer than
+    `CHUNK_WORDS` words is cut into numbered windows."""
     if isinstance(body, str):
         try:
             body = json.loads(body)
         except ValueError:
-            return ""
+            return []
     if not isinstance(body, dict):
-        return ""
-    parts: list[str] = []
+        return []
+    out: list[tuple[str, str]] = []
     for field, key in _BODY_LISTS:
-        for item in body.get(field) or []:
+        for i, item in enumerate(body.get(field) or []):
             if isinstance(item, dict) and isinstance(item.get(key), str):
-                parts.append(item[key])
+                out += _windows(f"{field}[{i}].{key}", item[key])
     for field in _BODY_STRINGS:
-        parts.extend(x for x in body.get(field) or [] if isinstance(x, str))
+        for i, x in enumerate(body.get(field) or []):
+            if isinstance(x, str):
+                out += _windows(f"{field}[{i}]", x)
     if isinstance(body.get("notes"), str):
-        parts.append(body["notes"])
-    return "\n".join(parts)
+        out += _windows("notes", body["notes"])
+    return out
+
+
+def body_prose(body: dict | str | None) -> str:
+    """The searchable text of a checkpoint body (a dict or its stored JSON)."""
+    return "\n".join(text for _path, text in body_chunks(body))
 
 
 def stems_of(statement: str | None, why: str | None, body: dict | str | None = None) -> str:
     """The lexical index's `stems` column for one record: its statement, its why and,
     for a checkpoint, the prose of its body."""
-    return " ".join(keys(f"{statement or ''}\n{why or ''}\n{body_prose(body)}"))
+    text = f"{statement or ''}\n{why or ''}\n{body_prose(body)}"
+    return " ".join(keys(IDENTIFIERS.sub(" ", text)))

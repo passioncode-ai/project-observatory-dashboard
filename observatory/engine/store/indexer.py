@@ -78,8 +78,8 @@ def ensure_vec_table(conn: sqlite3.Connection, dims: int) -> None:
 
 
 def indexable(conn: sqlite3.Connection, memory_id: str, revision: int) -> sqlite3.Row | None:
-    """A revision worth indexing: it exists, it has text, and its RECORD is not
-    tombstoned.
+    """A revision worth indexing: it exists, it has text, it is its record's latest
+    revision, and its RECORD is not tombstoned.
 
     A tombstoned record is skipped rather than indexed and later purged — the
     contract requires an erasure to reach the projections, and the cheapest way
@@ -98,7 +98,12 @@ def indexable(conn: sqlite3.Connection, memory_id: str, revision: int) -> sqlite
         " l.body_json, l.classification, l.scope"
         " FROM ledger l LEFT JOIN tombstones t"
         "   ON t.memory_id = l.memory_id"
-        " WHERE l.memory_id = ? AND l.revision = ? AND t.memory_id IS NULL",
+        " WHERE l.memory_id = ? AND l.revision = ? AND t.memory_id IS NULL"
+        # THE LATEST REVISION ONLY (PB-137 N-011). An outbox row of an older revision
+        # replayed after a newer one was indexed deleted nothing newer and re-inserted
+        # the superseded text: two live-looking rows for one record. Measured red in
+        # tests/test_checkpoint_chunks.py before this line.
+        "   AND l.revision = (SELECT MAX(x.revision) FROM ledger x WHERE x.memory_id = l.memory_id)",
         (memory_id, revision)).fetchone()
 
 
