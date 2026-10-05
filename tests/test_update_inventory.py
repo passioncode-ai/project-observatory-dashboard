@@ -62,7 +62,14 @@ class RefreshTest(unittest.TestCase):
             f.write_text("x = 0\n"); git("add", "."); git("commit", "-qm", "base")
             git("checkout", "-qb", "side"); f.write_text("x = 1\n"); git("commit", "-qam", "side")
             git("checkout", "-q", "main"); f.write_text("x = 2\n"); git("commit", "-qam", "main")
-            subprocess.run(["git", "-C", repo, "merge", "-q", "side"], capture_output=True)
+            # The identity goes to the merge too: on a runner with none, git refuses before
+            # it ever reaches the conflict, and the test would be testing nothing.
+            merged = subprocess.run(["git", "-C", repo, "-c", "user.name=t",
+                                     "-c", "user.email=t@example.invalid", "merge", "-q", "side"],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(merged.returncode, 0, "the fixture must leave a conflict open")
+            self.assertTrue(subprocess.run(["git", "-C", repo, "ls-files", "-u"], capture_output=True,
+                                           text=True).stdout.strip(), merged.stderr)
             with self.assertRaises(inv.Unmerged):
                 inv.tracked_engine_files(Path(repo))
             f.write_text("x = 3\n"); git("add", ".")
