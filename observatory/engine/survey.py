@@ -1011,6 +1011,28 @@ def _scope_sql(alias: str, project_id: str | None,
     return sql, args
 
 
+#: At most this many chunks are named per hit.
+MAX_CHUNKS = 3
+
+
+def _chunk_provenance(body_json: str, qkeys: list[str]) -> list[dict]:
+    """The body chunks a question's keys fall in: `{field, covered}`, best coverage
+    first, body order among equals."""
+    import textkeys
+    if not qkeys:
+        return []
+    asked = set(qkeys)
+    scored = []
+    for order, (path, text) in enumerate(textkeys.body_chunks(body_json)):
+        have = set(textkeys.keys(text))
+        covered = len(asked & have) / len(asked)
+        if covered > 0:
+            scored.append((-covered, order, path, covered))
+    scored.sort()
+    return [{"field": path, "covered": round(covered, 3)}
+            for _c, _o, path, covered in scored[:MAX_CHUNKS]]
+
+
 def search(query: str, project_id: str | None = None, limit: int = 10, *,
            authority: str = "caller-argument", classification: str | None = None,
            classes: tuple[str, ...] | None = None,
@@ -1196,10 +1218,14 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
                 f" WHERE o.consumed_at IS NULL AND {lag_sql}", lag_args).fetchone()
             if lag and lag["n"]:
                 since = f", the oldest committed {lag['oldest']}" if lag["oldest"] else ""
+                # THE VECTOR ARM'S LAG (PB-137 N-011). The lexical index is written in
+                # the same transaction as each revision, so the outbox is what the
+                # vector index has not consumed; saying "not indexed" of both misled.
                 degraded.append({
-                    "source": "projection",
-                    "reason": f"{lag['n']} committed revision(s) are not indexed yet"
-                              f"{since}; this answer cannot include them"})
+                    "source": "projection", "arm": "vector",
+                    "reason": f"{lag['n']} committed revision(s) are not in the vector index "
+                              f"yet{since}; the lexical index is written with each revision, "
+                              f"so only a similarity match can miss them"})
         except sqlite3.Error as exc:
             degraded.append({"source": "projection", "reason": f"lag unknown: {exc}"})
 
@@ -1235,6 +1261,13 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
                                   (mid,)).fetchone()[0]
             if rev != latest:
                 continue
+            # WHERE IN THE BODY (PB-137 N-011): a checkpoint or pack hit names the
+            # chunks the question's keys fall in, best first — the field path, never
+            # the text again.
+            if row["body_json"]:
+                chunks = _chunk_provenance(row["body_json"], qkeys)
+                if chunks:
+                    h = {**h, "chunks": chunks}
             out.append({**h, "projectId": row["project_id"], "state": row["state"],
                         "owner": row["owner"], "confidence": row["confidence"],
                         "statement": row["statement"], "why": row["why"],

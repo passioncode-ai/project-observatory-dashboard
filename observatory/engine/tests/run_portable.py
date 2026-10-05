@@ -138,6 +138,8 @@ BOUNDARY += ('memory_access',)
 BOUNDARY += ('search_scope',)
 # Retrieval receipts, scoped explain, redaction on the way out (PB-137 N-012).
 BOUNDARY += ('retrieval_audit',)
+# Checkpoint prose with field/chunk provenance; replays resurrect nothing (PB-137 N-011).
+BOUNDARY += ('checkpoint_chunks',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',

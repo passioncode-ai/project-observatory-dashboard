@@ -584,6 +584,8 @@ def observatory_search(
     Only CURRENT records in the caller's scope compete for the 300-match window: the latest
     revision, not erased, inside its `valid_from`/`valid_to`, in the project and classes the
     caller may read (N-009). A full window is named in `degraded` (`source: window`).
+    A checkpoint or pack hit names where in its body the question matched: `chunks`, each
+    `{field, covered}` such as `decisions[3].why` (N-011).
     """
     try:
         grant = MA.authorize("observatory_search", project_id=project_id)

@@ -580,8 +580,13 @@ class ReviewFindings(WorkflowCase):
         wf = self.start()
         self.write(wf, wf["leaseId"], "key-h02-0002")
         mid = f"ckpt:{wf['workflowId']}"
+        # A superseded revision is not indexable at all (PB-137 N-011): a late replay of
+        # revision 1 must write nothing, so only revision 2 reaches the batch.
+        self.assertIsNone(indexer.indexable(self.conn, mid, 1))
         for rev in (1, 2):
-            indexer.index_batch(self.conn, [indexer.indexable(self.conn, mid, rev)], False, 3)
+            row = indexer.indexable(self.conn, mid, rev)
+            if row is not None:
+                indexer.index_batch(self.conn, [row], False, 3)
         revs = [r[0] for r in self.conn.execute(
             "SELECT revision FROM search_notes WHERE memory_id = ?", (mid,))]
         self.assertEqual(revs, [2], "only the latest revision stays searchable")
