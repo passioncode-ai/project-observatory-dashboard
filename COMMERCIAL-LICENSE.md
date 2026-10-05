@@ -5,7 +5,7 @@ This repository is open source under the [GNU Affero General Public License v3.0
 meet the AGPL's terms — for example inside a closed-source product, or as a modified hosted
 service whose source is not published.
 
-To obtain a commercial license, write to **contact@passioncode.ai**.
+To obtain a commercial license, tell us about your use at **https://passioncode.ai/business/**, or write to **commercial@passioncode.ai**.
 
 SPDX: `AGPL-3.0-only OR LicenseRef-PassionCode-Commercial`. Copyright (c) 2026 Siarhei Sheleh.
 Contributions are accepted under [CLA.md](CLA.md), which allows this dual licence.

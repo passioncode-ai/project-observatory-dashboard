@@ -190,7 +190,7 @@ repository path; verify pinned URL resolution before removing any compatibility 
 ## License
 
 Open source under the [GNU AGPL-3.0](LICENSE). A [commercial license](COMMERCIAL-LICENSE.md) is
-available for use that does not meet the AGPL's terms — contact@passioncode.ai.
+available for use that does not meet the AGPL's terms — [passioncode.ai/business](https://passioncode.ai/business/).
 Versions up to and including v0.9.1 were released under PolyForm Noncommercial or Internal Use (v0.8.2–v0.9.1) and the MIT License (v0.8.1 and earlier); those releases keep their licence.
 Contributions are accepted under the [CLA](CLA.md).
 

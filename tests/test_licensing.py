@@ -48,7 +48,10 @@ class LicenseFileTest(unittest.TestCase):
         body = text("COMMERCIAL-LICENSE.md")
         self.assertTrue(body.startswith("# Commercial license\n"))
         self.assertIn(f"SPDX: `{EXPRESSION}`", body)
-        self.assertIn("contact@passioncode.ai", body)
+        # Operator decision 2026-10-05: commercial paths lead to the business form;
+        # commercial@ is the commercial contact and contact@ stays the security address.
+        self.assertIn("https://passioncode.ai/business/", body)
+        self.assertIn("commercial@passioncode.ai", body)
         self.assertIn("[CLA.md](CLA.md)", body)
 
 
@@ -151,7 +154,8 @@ class CurrentWordingTest(unittest.TestCase):
         section = readme.split("\n## License\n", 1)[1]
         self.assertIn(SHORT_LINE, section)
         self.assertIn("[commercial license](COMMERCIAL-LICENSE.md)", section)
-        self.assertIn("contact@passioncode.ai", section)
+        self.assertIn("https://passioncode.ai/business/", section)
+        self.assertNotIn("contact@passioncode.ai", section)
         self.assertIn(HISTORY, section)
         self.assertNotIn("Version 0.2 brings", readme)
 
