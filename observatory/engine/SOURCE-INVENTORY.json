@@ -411,7 +411,7 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "730959171a15fae1218f22e25b37e88e447fcb6b9bbc03f02d25e5d16612581b",
+      "export_sha256": "cea1089b744036f5933358260688a0e21ccfa4d131594127eb28c94933dd3bf9",
       "bytes": 13846,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
@@ -765,7 +765,7 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "4d6c86d332f8cc61b4230aecfd8131009d65e3332b6615a9a940ecb1be7dd087",
+      "export_sha256": "927321d39658e82da842ccb12c35beb08dc7a7a3e5fae349e59af0c210ecefd9",
       "bytes": 12755,
       "upstream_modified": true
     },
@@ -1150,8 +1150,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "519d774474b207e423d67133e4c4b069a452256a02ec2d502358de33bab868e8",
-      "bytes": 38309
+      "export_sha256": "1d73e19a5f3bdc7bb54a318fa6eede9fa7ecd93d04765d9027efc1f18609285f",
+      "bytes": 39198
     },
     {
       "path": "mcp/capability_tools.py",
@@ -1472,14 +1472,14 @@
     {
       "path": "skill/.claude-plugin/marketplace.json",
       "source_sha256": "68a99261f346d399ff411a8bbe6cb46d7b169e6ef030d84f7b92c41a2f797c57",
-      "export_sha256": "944cb3d5b4b5b8b68498e21164f8ecc0215fdbe9d235608d15777402dac1a034",
+      "export_sha256": "43723bd1ce2a1ab190f6047d5e8ddcb64ff58582e6e246277ab2ff28ca00ae18",
       "bytes": 941,
       "upstream_modified": true
     },
     {
       "path": "skill/plugins/observatory-log/.claude-plugin/plugin.json",
       "source_sha256": "1f267b5383edab6b68302df81f1790f73ebf2ef0a5e697bff81778bc0e9b31f2",
-      "export_sha256": "2c18384f0d7ac2933f1232b3bae9530883204ae3a2c0eaaca0ac05a59c4bc5d8",
+      "export_sha256": "672d544cf38a63a05f12d03bcae7882c9e1be58e982d3d7b67c4f4fef78c08f7",
       "bytes": 626,
       "upstream_modified": true
     },
@@ -1518,14 +1518,14 @@
     {
       "path": "skill/plugins/observatory-log/skills/explaining-changes/SKILL.md",
       "source_sha256": "1a0b0708fc8a17a9bc1c45d89c59aeb44330147e77bc0e5e2262f197b97d31d4",
-      "export_sha256": "04a3227f0b6836e53ed8d9dc158c5e04c688d99982068437747db1382de4cf84",
+      "export_sha256": "6eec44e5b8848bc0d150ae4481c0761f8785ecb9ca4f2e49db5f7c7c9e7fb1f3",
       "bytes": 5451,
       "upstream_modified": true
     },
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "b2c035c23621695f8fb8b8e1d36834cb6a0b8acbafa38991ec70662da832f566",
+      "export_sha256": "ea7084653437e0af2f0f9cf752991791e6e8fa0fbbfd2e9af876dda07b482c0d",
       "bytes": 14068,
       "upstream_modified": true
     },
@@ -1533,7 +1533,7 @@
       "path": "skill/plugins/observatory-log/skills/tracking-resources/SKILL.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3521b7ceacc48ec314c0554b227d7aeb02c9df8c77bc86f36ac37c8523f5579b",
+      "export_sha256": "b5b6600987ad085d757269fd2910c84dae4484dfb56372df521230090e2dd6bb",
       "bytes": 4618
     },
     {
@@ -1546,8 +1546,8 @@
     {
       "path": "store/compatibility.py",
       "source_sha256": "d3ed7b3502649639bb30d0872dc319183168718a883c392249641fc16e0bec00",
-      "export_sha256": "9bc89b05aceef5339b8096760d9e7cb2b9c49f7828ef79242e3d36c364197903",
-      "bytes": 3858,
+      "export_sha256": "d143de35fa7bc66bebf85606562d5b245ed36ede28a4cd6728cc8473df51f009",
+      "bytes": 4547,
       "python_comments_removed": 0,
       "python_docstrings_removed": 6,
       "tool_descriptions_retained": 0,
@@ -2655,8 +2655,8 @@
       "path": "tests/test_maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "30bba61b8502883734da0ca6b0ad5e37a5b8644eb7dc4c5adb06dd58a35099f2",
-      "bytes": 53898
+      "export_sha256": "c6503c151f11920ffc12d9a9037bfe36ade5f03600133595c669e92e28f999fc",
+      "bytes": 57867
     },
     {
       "path": "tests/test_mcp_inventory.py",

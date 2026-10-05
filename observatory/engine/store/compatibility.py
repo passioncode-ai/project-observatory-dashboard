@@ -17,7 +17,15 @@ def readonly_uri(target: Path) -> str:
     shared-memory index, but never changes database or committed WAL content.
     """
     wal = Path(str(target) + "-wal")
-    immutable = not wal.exists() or wal.stat().st_size == 0
+    shm = Path(str(target) + "-shm")
+    # IMMUTABLE ONLY WHEN NOTHING CAN BE WRITING. An open WAL connection always keeps a
+    # `-shm` beside the database, and its writers empty the WAL on every checkpoint, so an
+    # empty WAL says nothing about whether someone writes. An immutable reader takes no
+    # locks and sees none of those writes: copying a store that session MCP servers wrote to
+    # tore 12 copies out of 12 in an experiment, against 0 out of 12 with locks (seen live
+    # on 2026-10-05; OBS-37). With a `-shm` present the reader takes the locks, and creates
+    # no file: `-shm` already exists, and a read-only connection never creates a WAL.
+    immutable = (not wal.exists() or wal.stat().st_size == 0) and not shm.exists()
     return target.resolve().as_uri() + "?mode=ro" + ("&immutable=1" if immutable else "")
 
 

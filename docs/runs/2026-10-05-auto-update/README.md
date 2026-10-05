@@ -142,6 +142,22 @@ data was lost. These did not cause it:
 Fixed in 0.17.2: a database outside `<home>/store` is copied beside itself, never into the
 workspace's root. The caller is OBS-39.
 
+## 0.17.2 live: the job updated itself, and was refused safely (stage 8, continued)
+
+After its check record was cleared, the live 0.17.0 job was started by launchd at
+2026-10-05T17:59:45Z.
+- The load had fallen to about 41. The check found 0.17.2 in seconds (`update-available`).
+- The job ran `full update --apply` by itself.
+- The update was **refused before any change**: `RuntimeError: Database snapshot integrity
+  verification failed` on the pre-update copy, taken by the running 0.17.0 code. The tick and
+  server were started again.
+
+The live store passes a full `integrity_check` with sqlite-vec loaded. An experiment found
+the cause: an immutable reader copying under a concurrent writer tore 12/12 copies, and a
+locking reader 0/12. The rule that chose immutable (an empty WAL) is wrong whenever another
+connection holds the store. Fixed in 0.17.3 (OBS-37), which also retries a transient refusal
+the next hour.
+
 ## State at handoff (2026-10-05, the session's usage limit)
 
 **Done on this branch.** R1–R10 are implemented and documented: ONBOARDING (both copies), AGENTS.md

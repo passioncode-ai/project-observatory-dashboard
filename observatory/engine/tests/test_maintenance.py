@@ -320,6 +320,29 @@ class Pass(Base):
         status = M.status(self.home, schedule=FakeSchedule())
         self.assertTrue(any("failed" in w for w in status["warnings"]))
 
+    def test_an_update_refused_for_a_moment_is_retried_the_next_hour(self):
+        # Seen live: the pre-update copy was torn by a session server and the update was
+        # refused (exit 2) with its reason only in the JSON; it then waited a day.
+        commands = FakeCommands(check=10, apply=2)
+        commands.full_orig = commands.full
+
+        def full(*args, timeout=0, env=None):
+            code, doc, err = commands.full_orig(*args, timeout=timeout, env=env)
+            if args[-1] == "--apply":
+                return code, {"status": "refused", "error": "RuntimeError: Database snapshot integrity verification failed"}, ""
+            return code, doc, err
+        commands.full = full
+        self.assertEqual(self.run_pass(commands)["update"]["result"], "refused")
+        self.assertIn("integrity verification failed", M.read_state(self.home)["update"]["detail"])
+        commands.apply = 0
+        later = self.run_pass(commands, at=AT + datetime.timedelta(hours=1))
+        self.assertEqual(later["update"]["result"], "updated", "a transient refusal is tried again the next hour")
+
+    def test_a_refusal_for_good_waits_a_day(self):
+        commands = FakeCommands(check=10, apply=2)
+        self.run_pass(commands)
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(hours=1))["update"]["result"], "not-due")
+
     def test_an_update_that_needs_a_person_stops_the_attempts(self):
         commands = FakeCommands(check=10, apply=4)
         self.assertEqual(self.run_pass(commands)["update"]["result"], "needs-person")
@@ -695,6 +718,58 @@ class ForeignDatabase(Base):
                              capture_output=True, text=True, timeout=120)
         self.assertEqual(own.returncode, 0, own.stderr)
         self.assertEqual(len(list(root.glob("observatory-db-*.obsdb"))), 1, "the workspace's own store still goes there")
+
+
+class ConcurrentWriter(Base):
+    def test_a_copy_taken_while_another_process_writes_is_never_torn(self):
+        # OBS-37: an immutable reader tore every copy of a store a session server wrote to.
+        import sqlite3
+        from store import compatibility
+        db = self.base / "busy.db"
+        with sqlite3.connect(db) as w:
+            w.execute("PRAGMA journal_mode=WAL")
+            w.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, x)")
+            w.execute("CREATE INDEX ix ON t (x)")
+            w.executemany("INSERT INTO t (x) VALUES (?)", [(os.urandom(300),) for _ in range(20000)])
+        writer = subprocess.Popen([sys.executable, "-c", (
+            "import sqlite3, os, time\n"
+            f"c = sqlite3.connect({str(db)!r}, timeout=30)\n"
+            "end = time.time() + 30\n"
+            "while time.time() < end:\n"
+            "    c.execute('INSERT INTO t (x) VALUES (?)', (os.urandom(300),))\n"
+            "    c.execute('DELETE FROM t WHERE id IN (SELECT id FROM t ORDER BY random() LIMIT 1)')\n"
+            "    c.commit()\n"
+            "    if os.urandom(1)[0] < 40: c.execute('PRAGMA wal_checkpoint(TRUNCATE)')\n")])
+        self.addCleanup(writer.kill)
+        time.sleep(1)
+        self.assertTrue(Path(str(db) + "-shm").exists(), "the writer keeps a -shm, as live servers do")
+        self.assertNotIn("immutable", compatibility.readonly_uri(db))
+        torn = 0
+        for i in range(6):
+            out = self.base / f"copy-{i}.db"
+            src = sqlite3.connect(compatibility.readonly_uri(db), uri=True, timeout=30)
+            dst = sqlite3.connect(out)
+            src.backup(dst)
+            src.close()
+            torn += dst.execute("PRAGMA integrity_check").fetchone()[0] != "ok"
+            dst.close()
+        self.assertEqual(torn, 0)
+
+    def test_a_quiet_database_is_still_read_without_creating_files(self):
+        import sqlite3
+        from store import compatibility
+        db = self.base / "quiet.db"
+        w = sqlite3.connect(db)
+        w.execute("PRAGMA journal_mode=WAL")
+        w.execute("CREATE TABLE t (x)")
+        w.commit()
+        w.close()  # the last connection checkpoints and removes -wal and -shm
+        self.assertFalse(Path(str(db) + "-shm").exists())
+        self.assertIn("immutable=1", compatibility.readonly_uri(db))
+        before = sorted(p.name for p in self.base.iterdir())
+        with contextlib.closing(sqlite3.connect(compatibility.readonly_uri(db), uri=True)) as conn:
+            conn.execute("SELECT count(*) FROM t").fetchone()
+        self.assertEqual(sorted(p.name for p in self.base.iterdir()), before)
 
 
 # --- R8: a reinstall restores ----------------------------------------------------------
