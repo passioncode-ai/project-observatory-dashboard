@@ -121,6 +121,27 @@ instruction, recorded as an exception as before. The downloaded assets were chec
 and any other error is recorded without crashing the pass. A test for each layer was watched
 failing without its fix. The root cause, the immutable open, is OBS-37.
 
+## 0.17.1 live: the job updating itself, and two more findings (stage 8, continued)
+
+**The update check.** The live 0.17.0 job was started by launchd after its check record was
+cleared, so the check was due. Its `full update --check` hit the 600-second limit
+(`TimeoutExpired`, recorded as `undetermined`). By hand the same check took 2.1 s and saw
+0.17.1 (exit 10). Cause: the job ran as `ProcessType Background` with `LowPriorityIO`, on a
+machine at load average 280–370 from other sessions. Fixed in 0.17.2: `Standard`, nice 10,
+and an undetermined check is retried the next hour.
+
+**The database copies in the backups root.** Three `observatory-db-*.obsdb` copies of 8522
+bytes each, written by the installed 0.17.0 engine at 16:51:13/15/17 UTC, pushed the real
+daily copies out of the rotation. The daily and pre-update snapshots hold the store, so no
+data was lost. These did not cause it:
+- the gate, which ended 16:23 UTC;
+- the root suite and `test_agent`/`test_docs_current`/`test_i18n`, probed against a
+  temporary root;
+- the tick, which has no log lines then.
+
+Fixed in 0.17.2: a database outside `<home>/store` is copied beside itself, never into the
+workspace's root. The caller is OBS-39.
+
 ## State at handoff (2026-10-05, the session's usage limit)
 
 **Done on this branch.** R1–R10 are implemented and documented: ONBOARDING (both copies), AGENTS.md

@@ -98,6 +98,8 @@ def due(db: pathlib.Path, base: pathlib.Path, hours: int = 24) -> bool:
     import backup_vault, time
     newest = [p.stat().st_mtime for p in existing(db.parent)]
     try:
+        if db.resolve() != (base / "store" / "observatory.db").resolve():
+            raise ValueError("not this workspace's store")  # its root is not its own
         root = backup_vault.root_info(base)["path"]
         newest += [p.stat().st_mtime for p in backup_vault.artifacts(root, backup_vault.DB_KIND, backup_vault.DB_SUFFIX)]
     except Exception:  # noqa: BLE001 — an unreadable root means: take one
@@ -116,6 +118,17 @@ def main(argv: list[str]) -> int:
     if "--if-due" in argv and db.is_file() and not due(db, base):
         print("backup not due: a copy younger than 24 hours exists")
         return 0
+    # ONLY THE WORKSPACE'S OWN STORE goes to its backups root. A database named by
+    # OBSERVATORY_DB elsewhere (a test, another tool) is copied beside itself: three tiny
+    # copies of such a database, under this workspace's label, once pushed the real daily
+    # copies out of the rotation (seen on a maintainer's machine, 2026-10-05).
+    try:
+        own = db.resolve() == (base / "store" / "observatory.db").resolve()
+    except OSError:
+        own = False
+    if "--list" not in argv and db.is_file() and not own:
+        print(f"{db} is not this workspace's store; its copy stays beside it", file=sys.stderr)
+        return local(db)
     if "--list" not in argv and db.is_file():
         secret = backup_vault.passphrase(base)
         if secret:

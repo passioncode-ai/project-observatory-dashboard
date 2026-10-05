@@ -329,9 +329,15 @@ class Pass(Base):
         self.assertTrue(any("needs a person" in w for w in M.status(self.home, schedule=FakeSchedule())["warnings"]))
 
     def test_no_network_is_undetermined_and_never_up_to_date(self):
-        report = self.run_pass(FakeCommands(check=3))
+        commands = FakeCommands(check=3)
+        report = self.run_pass(commands)
         self.assertEqual(report["update"]["result"], "undetermined")
         self.assertEqual(M.read_state(self.home)["check"]["detail"], "network down")
+        # Seen live: a check that timed out on a loaded machine waited a whole day. It is
+        # tried again the next hour.
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(minutes=30))["update"]["result"], "not-due")
+        commands.check = 10
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(hours=1))["update"]["result"], "updated")
 
     def test_turned_off_means_no_check_and_the_backup_still_runs(self):
         M.set_setting(self.home, "auto", False)
@@ -480,6 +486,9 @@ class Schedule(Base):
         self.assertTrue(doc["Label"].endswith(".maintain"))
         self.assertEqual(doc["ProgramArguments"][1:], [str(ROOT / "tools" / "maintain.py"), "run"])
         self.assertEqual((doc["StartInterval"], doc["RunAtLoad"]), (3600, True))
+        # No Background/LowPriorityIO throttling: it stretched a 2 s check past 600 s live.
+        self.assertEqual(doc["ProcessType"], "Standard")
+        self.assertNotIn("LowPriorityIO", doc)
         self.assertEqual(doc["EnvironmentVariables"]["OBSERVATORY_HOME"], str(self.home))
         self.assertEqual(doc["EnvironmentVariables"]["OBSERVATORY_SYSTEM_SETUP"], "1")
         self.assertEqual(sched.launch.lint_plist(doc), [])
@@ -658,6 +667,34 @@ class Schedule(Base):
 
 def backup_vault_store():
     return vault
+
+
+# --- a database that is not the workspace's own never reaches its backups root ---------
+
+class ForeignDatabase(Base):
+    def test_a_copy_of_another_database_stays_beside_it(self):
+        # Seen on a maintainer's machine: three tiny copies of a database named by
+        # OBSERVATORY_DB, under the workspace's label, pushed the real daily copies out.
+        vault.ensure_passphrase(self.home, self.store)
+        other = self.base / "elsewhere" / "other.db"
+        other.parent.mkdir()
+        import sqlite3
+        with sqlite3.connect(other) as conn:
+            conn.execute("CREATE TABLE t (x)")
+        env = {**os.environ, "OBSERVATORY_DB": str(other)}
+        out = subprocess.run([sys.executable, str(ROOT / "tools" / "backup_store.py")], env=env,
+                             capture_output=True, text=True, timeout=120)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("is not this workspace's store", out.stderr)
+        root = vault.root_info(self.home)["path"]
+        self.assertEqual(list(root.glob("observatory-db-*")) if root.exists() else [], [])
+        self.assertTrue(any(p.name.startswith("observatory.db.backup-") or p.name.startswith("other.db")
+                            for p in other.parent.iterdir()))
+        own = subprocess.run([sys.executable, str(ROOT / "tools" / "backup_store.py")],
+                             env={k: v for k, v in os.environ.items() if k != "OBSERVATORY_DB"},
+                             capture_output=True, text=True, timeout=120)
+        self.assertEqual(own.returncode, 0, own.stderr)
+        self.assertEqual(len(list(root.glob("observatory-db-*.obsdb"))), 1, "the workspace's own store still goes there")
 
 
 # --- R8: a reinstall restores ----------------------------------------------------------
