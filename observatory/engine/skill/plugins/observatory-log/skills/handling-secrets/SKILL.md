@@ -154,6 +154,16 @@ bucket's resource only. Before anything is delivered, the S3 pair must prove a
 put, a get and a delete, and must be refused a bucket list. It lands in three
 slots on stdin: `<PREFIX>_ACCESS_KEY_ID`, `<PREFIX>_SECRET_ACCESS_KEY` and
 `<PREFIX>_ENDPOINT`. A second issue rolls the same token and keeps the key id.
+The lifecycle is `--expire-days` over the whole bucket (30 when nothing else is
+given) plus one rule per repeatable `--lifecycle-rule PREFIX:DAYS`, for example
+`--lifecycle-rule staging/:2`: objects under the prefix are deleted after DAYS,
+and its unfinished multipart uploads are aborted after a day. Each run replaces
+the bucket's lifecycle with exactly that set and reads every rule back. A rule
+that could never fire is refused, such as a prefix kept longer than the
+whole-bucket rule. To change only an existing bucket's rules, run
+`cloudflare.py lifecycle --account <slug> --bucket <name> [--jurisdiction eu]
+[--expire-days N] [--lifecycle-rule PREFIX:DAYS ...]`. It mints only the setup
+token, never creates a bucket and never mints, rolls or delivers a key.
 
 An application that sends transactional email through Cloudflare Email Service
 gets `cloudflare.py issue --preset email-send --account <slug> --vault

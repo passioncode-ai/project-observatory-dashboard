@@ -1203,8 +1203,18 @@ def test_cf_r2_lifecycle_command_line() -> None:
         sys.argv = ["cloudflare.py", "lifecycle", "--account", "acct", "--bucket", "b-1",
                     "--jurisdiction", "eu", "--expire-days", "92", "--lifecycle-rule", "staging/:2"]
         m.main()
+        import contextlib, io
+        m.cmd_issue_account = lambda *a, **k: seen.setdefault("account", (a, k)) and 0
+        err = io.StringIO()
+        sys.argv = ["cloudflare.py", "issue", "--preset", "d1-edit", "--vault", "p/e/X",
+                    "--lifecycle-rule", "staging/:2"]
+        with contextlib.redirect_stderr(err):
+            rc_other = m.main()
     finally:
         sys.argv = argv
+    check("a lifecycle flag on another preset is refused, not silently ignored",
+          rc_other == 2 and "account" not in seen and "r2-bucket only" in err.getvalue(),
+          f"{rc_other} {err.getvalue()}")
     a, k = seen.get("issue", ((), {}))
     check("issue passes every --lifecycle-rule, and no expiry when none was given",
           a[:5] == ("r2-bucket", "b-1", "eu", None, "p/e/X")
