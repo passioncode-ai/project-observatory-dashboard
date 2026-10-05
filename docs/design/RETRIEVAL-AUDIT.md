@@ -1,8 +1,9 @@
 # Retrieval receipts, scoped explain and redaction on the way out
 
 Decision record for PB-137 N-012, 2026-10-05. Memory answers can now be audited after
-the fact and explained without searching again, and no answer, error or log line carries
-a secret the workspace knows or a credential shape.
+the fact and explained without searching again. The fields listed under "Redaction on the
+way out" carry no secret the workspace knows and no credential shape. A field not listed
+there is an identifier, a number or a state.
 
 - **Module:** [`retrieval_audit.py`](../../observatory/engine/retrieval_audit.py).
 - **Tool:** `observatory_explain` (scope `memory.search`, effect `read`). It is the
@@ -68,9 +69,10 @@ The memory tools therefore run the same two filters on everything they return:
 
 | Answer | What is filtered |
 |---|---|
-| `observatory_search`, `observatory_recall`, `observatory_explain` | `statement` and `why` of every row |
+| `observatory_search`, `observatory_recall`, `observatory_explain` | `statement`, `why`, `evidence_json` and `provenance_json` of every row; the search's echoed `query`; every `degraded` reason |
 | `observatory_checkpoint_latest`, `_handoff_get`, `_handoff_accept`, `_workflow_list` | the checkpoint body, the pack, `constraints`, each workflow's `goal` |
 | every refusal of the ledger and workflow tools | `detail` |
+| `observatory_record` on the way in | `statement`, `why` and `evidence`; the same filters as a checkpoint |
 
 - Each answer carries `redacted`: counts and field paths, never the replaced text.
 - Identifiers are never filtered: `wf_…`, `handoff:…`, `leaseId`, `leaseRef`, and the pack's `transcript` pointer, which is a session UUID the shape filter would otherwise eat. A redacted id would break the protocol.

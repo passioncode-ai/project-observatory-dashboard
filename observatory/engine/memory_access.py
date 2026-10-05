@@ -79,6 +79,8 @@ _HINTS = {
     "fabric-projects-invalid": "X-Fabric-Projects must be a comma list of project:<slug> ids",
     "class-ceiling-below-workflow": "workflow memory is project-internal; this binding sees "
                                     "only public records",
+    "target-not-bound": "no such workflow or handoff within this binding: it does not exist, "
+                        "or it belongs to a project or workflow the binding does not cover",
 }
 
 _CHANNEL: contextvars.ContextVar[Mapping | None] = contextvars.ContextVar(
@@ -118,6 +120,20 @@ class Grant:
         return AB.may_see(self.binding, classification)
 
     @property
+    def hidden_kinds(self) -> tuple[str, ...]:
+        """Record kinds a general reader (search) must not show this caller: workflow
+        memory needs its own scope, as the workflow tools require. Empty for the local
+        agent."""
+        if self.local:
+            return ()
+        hidden = []
+        if "memory.checkpoint" not in self.binding.scopes:
+            hidden.append("checkpoint")
+        if "memory.handoff" not in self.binding.scopes:
+            hidden.append("handoff")
+        return tuple(hidden)
+
+    @property
     def visible_classes(self) -> tuple[str, ...] | None:
         """The stored classification values this caller may read, aliases included;
         None for the local agent, which reads every class."""
@@ -129,17 +145,35 @@ class Grant:
 
 # ─────────────────────────────── the channel ────────────────────────────────
 
+#: Set once a process serves HTTP. From then on `serve_stdio` cannot hand calls without a
+#: channel back to the local agent — importing `mcp/server.py` after `serve_http()`
+#: would otherwise have failed open (review 2026-10-05).
+_HTTP_PROCESS = False
+
+
 def serve_stdio() -> None:
-    """This process serves stdio: a call with no channel of its own is the local agent."""
+    """This process serves stdio: a call with no channel of its own is the local agent.
+    A no-op in a process that already serves HTTP."""
     global _DEFAULT
+    if _HTTP_PROCESS:
+        return
     _DEFAULT = {"channel": "stdio"}
 
 
 def serve_http() -> None:
     """This process serves HTTP: every call must carry its own channel, and none
-    inherits the local agent's."""
-    global _DEFAULT
+    inherits the local agent's — now or after any later `serve_stdio()`."""
+    global _DEFAULT, _HTTP_PROCESS
+    _HTTP_PROCESS = True
     _DEFAULT = None
+
+
+def reset_for_tests() -> None:
+    """Back to a stdio process. For test fixtures that serve HTTP and stdio in turn;
+    nothing in the engine calls it."""
+    global _DEFAULT, _HTTP_PROCESS
+    _HTTP_PROCESS = False
+    _DEFAULT = {"channel": "stdio"}
 
 
 @contextlib.contextmanager
@@ -372,20 +406,28 @@ def target(conn, *, workflow_id: str | None = None, handoff_id: str | None = Non
 
 def authorize_target(tool: str, conn, *, workflow_id: str | None = None,
                      handoff_id: str | None = None, owner: str | None = None) -> Grant:
-    """`authorize` on the target's own project. To a binding, a target that does not
-    exist is refused like a foreign one; the local agent gets the store's own answer."""
+    """`authorize` on the target's own project.
+
+    TO A BINDING, A TARGET OUTSIDE IT AND A TARGET THAT DOES NOT EXIST ARE ONE ANSWER,
+    `target-not-bound`, given BEFORE owner, effect or scope are looked at. Checking those
+    first made the refusal code differ by whether a foreign id existed (found in review,
+    2026-10-05: `effect-above-ceiling` for a foreign handoff, `project-not-bound` for a
+    made-up one). The local agent gets the store's own answer."""
     project, wid, exists = target(conn, workflow_id=workflow_id, handoff_id=handoff_id)
-    if not exists and not is_local():
+    if not is_local():
         binding = None
         try:
             binding = _binding()
-            code = "workflow-not-bound" if binding.workflows is not None else "project-not-bound"
-            envelope = refusal(code, binding.binding_id)
+            outside = (not exists
+                       or (binding.projects != "all" and project not in binding.projects)
+                       or (binding.workflows is not None and wid not in binding.workflows))
+            envelope = refusal("target-not-bound", binding.binding_id) if outside else None
         except Refused as exc:
             envelope = exc.envelope
-        scope, effect = TOOLS[tool]
-        _journal(binding, tool, scope, effect, None, wid, False, envelope.get("code"))
-        raise Refused(envelope)
+        if envelope is not None:
+            scope, effect = TOOLS[tool]
+            _journal(binding, tool, scope, effect, None, wid, False, envelope.get("code"))
+            raise Refused(envelope)
     return authorize(tool, project_id=project, workflow_id=wid, owner=owner)
 
 

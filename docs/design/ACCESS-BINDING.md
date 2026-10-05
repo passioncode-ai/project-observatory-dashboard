@@ -73,7 +73,10 @@ The rules the doors share:
   - `mcp/server.py` is the stdio server, and it calls `memory_access.serve_stdio()` at import. A call with no channel of its own is therefore the local agent.
   - A process that serves HTTP calls `serve_http()`. It then runs each request inside `memory_access.channel(memory_access.http_channel(bearer=…, fabric_projects=…))`.
   - With no channel set, a request is refused `unknown-channel`. It is never served as stdio.
-- **The target decides the project.** A workflow or handoff of another project is refused. To a binding, one that does not exist is refused the same way: `project-not-bound`, or `workflow-not-bound` for a session binding. The local agent still gets the store's own `UnknownWorkflow`.
+- **The target decides the project.** To a binding, a workflow or handoff outside it and one that does not exist get one answer, `target-not-bound`. It is given before owner, effect or scope are checked, so no other code can tell the two apart. "Outside it" means another project, or a workflow a session binding does not name. The local agent still gets the store's own `UnknownWorkflow`.
+- **A record above the caller's class ceiling** is refused like a missing one (`project-not-bound`) when a binding tries to correct it, before the ledger could name its owner.
+- **Search hides workflow memory without its scope.** Checkpoints need `memory.checkpoint`, and handoff packs need `memory.handoff`. Otherwise they are left out of the candidate query, as the workflow tools would refuse them.
+- **An HTTP process stays one.** After `serve_http()`, a later `serve_stdio()`, for example from importing `mcp/server.py` again, changes nothing.
 - **A binding writes as its principal.** Over HTTP, `owner` must equal the binding's principal (`owner-not-principal`). Idempotency records are kept per binding, so another binding that repeats a key and a request starts new work and never receives the first answer's `leaseId`.
 - **Workflow memory is `project-internal`.** A binding whose ceiling is `public` is refused the workflow tools (`class-ceiling-below-workflow`). It is never handed a filtered pack.
 - **Fabric narrows, never widens.** This is F-015, fabric-agent-contract DEC-0023.
@@ -90,6 +93,7 @@ The rules the doors share:
   - The local agent's allowed calls are not journalled; its refusals are.
 
 Codes added by enforcement:
+- `target-not-bound`
 - `registry-unreadable`
 - `local-only`
 - `owner-not-principal`

@@ -183,7 +183,7 @@ class TheLocalAgent(Base):
             out = self.ws.srv.observatory_recall(projectId=ALPHA)
             self.assertTrue(refused(out, "unknown-channel"), out)
         finally:
-            self.ws.MA.serve_stdio()
+            self.ws.MA.reset_for_tests()
 
 
 class EveryMemoryToolAsks(Base):
@@ -270,9 +270,9 @@ class ABinding(Base):
                             owner="agent:alpha-bot", idempotencyKey="key-steal-0002",
                             workflowId=theirs["workflowId"], to={"provider": "anthropic"},
                             reason="limit", leaseId=theirs["leaseId"])):
-                self.assertTrue(refused(out, "project-not-bound"), out)
+                self.assertTrue(refused(out, "target-not-bound"), out)
             missing = self.ws.srv.observatory_checkpoint_latest(workflowId="wf_00000000000000ff")
-        self.assertTrue(refused(missing, "project-not-bound"),
+        self.assertTrue(refused(missing, "target-not-bound"),
                         "a missing workflow reads like a foreign one to a binding")
         self.assertEqual(self.ws.srv.observatory_checkpoint_latest(
             workflowId="wf_00000000000000ff")["error"], "UnknownWorkflow",
@@ -408,7 +408,7 @@ class SessionBinding(Base):
             self.assertEqual([w["workflowId"] for w in listed["workflows"]], [mine["workflowId"]])
             self.assertEqual(listed["total"], 1)
             self.assertTrue(refused(self.ws.srv.observatory_checkpoint_latest(
-                workflowId=other["workflowId"]), "workflow-not-bound"))
+                workflowId=other["workflowId"]), "target-not-bound"))
             self.assertIn("checkpoint", self.ws.srv.observatory_checkpoint_latest(
                 workflowId=mine["workflowId"]))
             self.assertTrue(refused(self.ws.start(ALPHA, owner="service:switchboard",
@@ -441,6 +441,108 @@ class LocalOnlySurface(Base):
         local = asyncio.run(over_stdio())
         self.assertFalse(local.is_error)
         self.assertIn("findings", json.loads(local.content[0].text))
+
+
+SHAPED = "gh" + "p_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
+
+
+class ReviewFixes(Base):
+    """Defects found by an independent review of N-008/N-009/N-012 on 2026-10-05."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.ws.bind("agent:alpha-bot", [ALPHA], bearer="tok-alpha")
+
+    def test_a_foreign_and_a_missing_target_are_one_answer_whatever_else_is_wrong(self) -> None:
+        theirs = self.ws.start(BETA)
+        h = self.ws.srv.observatory_handoff_create(
+            owner="agent:alpha-bot", idempotencyKey="key-hand-0001", workflowId=theirs["workflowId"],
+            to={"provider": "anthropic"}, reason="limit", leaseId=theirs["leaseId"])
+        self.ws.bind("agent:reader", [ALPHA], bearer="tok-read", effect="read",
+                     scopes=("memory.read",))
+        self.ws.bind("service:sess", [ALPHA], bearer="tok-sess",
+                     workflows=[self.ws.start(ALPHA, key="key-own-0001")["workflowId"]])
+        cases = [
+            ("tok-read", lambda wid, hid: self.ws.srv.observatory_handoff_accept(
+                owner="agent:reader", idempotencyKey="key-acc-0001", handoffId=hid)),
+            ("tok-read", lambda wid, hid: self.ws.srv.observatory_handoff_get(handoffId=hid)),
+            ("tok-sess", lambda wid, hid: self.ws.srv.observatory_checkpoint_latest(workflowId=wid)),
+            ("tok-alpha", lambda wid, hid: self.ws.srv.observatory_handoff_accept(
+                owner="agent:somebody", idempotencyKey="key-acc-0002", handoffId=hid)),
+        ]
+        for bearer, fn in cases:
+            with self.ws.http(bearer):
+                foreign = fn(theirs["workflowId"], h["handoffId"])
+                missing = fn("wf_00000000000000ee", "handoff:00000000000000ee")
+            self.assertEqual((foreign.get("code"), missing.get("code")),
+                             ("target-not-bound", "target-not-bound"), (bearer, foreign, missing))
+
+    def test_search_shows_workflow_memory_only_with_its_scope(self) -> None:
+        self.ws.start(ALPHA, key="key-mig-0001")
+        self.ws.bind("agent:searcher", [ALPHA], bearer="tok-search",
+                     scopes=("memory.read", "memory.search"), effect="read")
+        with self.ws.http("tok-search"):
+            blind = self.ws.srv.observatory_search(query=f"work on {ALPHA}", project_id=ALPHA)
+        with self.ws.http("tok-alpha"):
+            seen = self.ws.srv.observatory_search(query=f"work on {ALPHA}", project_id=ALPHA)
+        self.assertFalse([r for r in blind["results"] if r["memoryId"].startswith("ckpt:")], blind)
+        self.assertTrue([r for r in seen["results"] if r["memoryId"].startswith("ckpt:")], seen)
+
+    def test_evidence_is_redacted_on_the_way_in_and_out(self) -> None:
+        out = self.ws.srv.observatory_record(owner="agent:alpha-bot", statement="a link",
+                                             projectId=ALPHA,
+                                             evidence=[{"uri": f"https://x.example/?t={SHAPED}"}])
+        from store import db as sdb
+        from store import ledger as L
+        conn = sdb.connect()
+        stored = conn.execute("SELECT evidence_json FROM ledger WHERE memory_id = ?",
+                              (out["memoryId"],)).fetchone()[0]
+        L.append(conn, owner="agent:collector", statement="raw evidence", project_id=ALPHA,
+                 confidence=0.5, evidence=[{"uri": f"https://x.example/?t={SHAPED}"}])
+        conn.commit()
+        conn.close()
+        self.assertNotIn(SHAPED, stored)
+        recall = self.ws.srv.observatory_recall(projectId=ALPHA)
+        self.assertNotIn(SHAPED, json.dumps(recall))
+        for row in recall["records"]:
+            json.loads(row["evidence_json"])          # still valid JSON after redaction
+        found = self.ws.srv.observatory_search(query=f"raw evidence {SHAPED}", project_id=ALPHA)
+        self.assertNotIn(SHAPED, json.dumps(found))
+
+    def test_a_record_above_the_ceiling_is_refused_like_a_missing_one(self) -> None:
+        secret = self.ws.note(ALPHA, statement="classified", classification="confidential")
+        self.ws.bind("agent:public", [ALPHA], bearer="tok-pub", class_ceiling="public")
+        with self.ws.http("tok-pub"):
+            hidden = self.ws.srv.observatory_record(owner="agent:public", statement="fix",
+                                                    projectId=ALPHA, memoryId=secret["memoryId"],
+                                                    expectedRevision=1)
+            missing = self.ws.srv.observatory_record(owner="agent:public", statement="fix",
+                                                     projectId=ALPHA, memoryId="mem:nothing",
+                                                     expectedRevision=1)
+        self.assertEqual((hidden.get("code"), missing.get("code")),
+                         ("project-not-bound", "project-not-bound"), hidden)
+        self.assertNotIn("agent:alpha-bot", json.dumps(hidden))
+
+    def test_an_http_process_never_returns_to_the_stdio_default(self) -> None:
+        self.ws.MA.serve_http()
+        try:
+            self.ws.MA.serve_stdio()                  # what importing server.py again does
+            self.assertTrue(refused(self.ws.srv.observatory_recall(projectId=ALPHA),
+                                    "unknown-channel"))
+        finally:
+            self.ws.MA.reset_for_tests()
+
+    def test_job_assistant_and_capability_tools_are_local_only(self) -> None:
+        async def over_http(name, args):
+            with self.ws.http("tok-alpha"):
+                return await self.ws.srv.server.call_tool(name, args)
+        for name, args in (("fabric.job.get", {"job": "job_x"}),
+                           ("fabric.job.cancel", {"job": "job_x"}),
+                           ("observatory_assistant_ask", {"question": "q", "request_id": "r1"}),
+                           ("estate.survey", {}), ("project.record", {})):
+            out = asyncio.run(over_http(name, args))
+            self.assertTrue(out.is_error, name)
+            self.assertEqual(json.loads(out.content[0].text)["code"], "local-only", name)
 
 
 class OperatorCli(Base):
@@ -494,6 +596,28 @@ class OperatorCli(Base):
         with self.ws.http(bearer):
             self.assertTrue(refused(self.ws.srv.observatory_recall(projectId=ALPHA),
                                     "binding-revoked"))
+
+    def test_a_write_that_cannot_be_recorded_leaves_nothing_behind(self) -> None:
+        import access_binding_cli as cli
+        token = self.ws.home / "bearer"
+        real = self.ws.MA.registry
+        calls = {"n": 0}
+
+        def flaky(*a, **k):
+            calls["n"] += 1
+            if calls["n"] >= 2:
+                raise self.ws.AB.BindingError("the applied revision cannot be recorded (test)")
+            return real(*a, **k)
+        cli.MA.registry = flaky
+        try:
+            code, _, err = self.run_cli("issue", "agent:x", "--project", ALPHA, "--token-file",
+                                        str(token), terminal=True)
+        finally:
+            cli.MA.registry = real
+        self.assertNotEqual(code, 0)
+        self.assertIn("no binding was issued", err)
+        self.assertFalse(self.ws.MA.registry_path().exists(), "the registry is rolled back")
+        self.assertFalse(token.exists())
 
     def test_doctor_names_the_bindings_read_only(self) -> None:
         self.ws.bind("agent:alpha-bot", [ALPHA], bearer="tok-alpha")

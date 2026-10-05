@@ -43,7 +43,9 @@ JOURNAL = "retrieval.jsonl"
 GENERATIONS = 5
 RECEIPT_PREFIX = "rcpt_"
 #: The free-text fields of a search or recall row; everything else is an id or a number.
-TEXT_FIELDS = ("statement", "why")
+#: `evidence_json` and `provenance_json` are JSON held as text: a redaction marker inside
+#: one of their strings keeps it valid JSON (the marker carries no quote).
+TEXT_FIELDS = ("statement", "why", "evidence_json", "provenance_json")
 
 _HINTS = {
     "unknown-receipt": "explain only a receipt this caller received from observatory_search; "
@@ -85,6 +87,12 @@ def scrub_tree(value: Any, report: dict | None = None) -> tuple[Any, dict]:
 
 def scrub_text(text: str) -> str:
     return _redactor().scrub(text)[0]
+
+
+def scrub_degraded(entries: list) -> list:
+    """`degraded` reasons carry exception text, which can quote what failed."""
+    return [{**d, "reason": scrub_text(d["reason"])} if isinstance(d, dict)
+            and isinstance(d.get("reason"), str) else d for d in entries]
 
 
 def _merge(a: dict | None, b: dict) -> dict:
@@ -190,7 +198,7 @@ def refusal(code: str, detail: str) -> dict:
             "hint": _HINTS[code], "degraded": []}
 
 
-def explain(conn, grant: Any, receipt_id: str) -> dict:
+def explain(conn, grant: Any, receipt_id: str, hidden_kinds: tuple = ()) -> dict:
     """The receipt's own results, re-read at their exact revisions. Never a new query."""
     row = find(receipt_id)
     if row is None or row.get("binding") != grant.binding.binding_id:
@@ -211,7 +219,8 @@ def explain(conn, grant: Any, receipt_id: str) -> dict:
         if rec is None or rec["erased"]:
             item["now"] = "erased"
         elif not grant.local and (rec["project_id"] not in _projects(grant)
-                                  or not grant.may_see(rec["classification"])):
+                                  or not grant.may_see(rec["classification"])
+                                  or rec["kind"] in hidden_kinds):
             item["now"] = "no-longer-visible"
         else:
             item["now"] = ("superseded" if rec["latest"] != rec["revision"] else

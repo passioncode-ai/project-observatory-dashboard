@@ -597,11 +597,14 @@ def observatory_search(
         ctx = access_binding.query_context(grant.binding, project_id)
         out = survey_mod.search(query, project_id=project_id, limit=limit,
                                 authority=ctx["authority"], classification=ctx["classification"],
-                                classes=grant.visible_classes)
+                                classes=grant.visible_classes, hidden_kinds=grant.hidden_kinds)
     # REDACTED ON THE WAY OUT and RECEIPTED (PB-137 N-012): every free-text field passes
     # the shape and known-value filters, and the answer names the receipt
     # `observatory_explain` reads back without searching again.
     out["results"], out["redacted"] = RA.scrub_rows(out.get("results", []))
+    # The query and the degradation reasons come back too: they pass the same filters.
+    out["query"] = RA.scrub_text(out.get("query") or "")
+    out["degraded"] = RA.scrub_degraded(out.get("degraded", []))
     out["receipt"] = RA.record(grant, query=query, project_id=project_id, answer=out,
                                policy_revision=_policy_revision())
     return out
@@ -640,7 +643,7 @@ def observatory_explain(
         return exc.envelope
     conn = store_db.connect()
     try:
-        return RA.explain(conn, grant, receiptId)
+        return RA.explain(conn, grant, receiptId, hidden_kinds=grant.hidden_kinds)
     finally:
         conn.close()
 
@@ -709,6 +712,7 @@ def observatory_recall(
     # `nextCursor` is keyed on `(created_at, memory_id)` because `created_at`
     # alone is not unique at second resolution.
     rows, redacted = RA.scrub_rows(rows)
+    degraded = RA.scrub_degraded(degraded)
     out = {"projectId": projectId, "count": len(rows), "total": total,
            "records": rows, "contested": contested, "redacted": redacted,
            "note": "conflicting records are returned together and are not ranked; "
@@ -727,11 +731,13 @@ def _same_project(memory_id: str, project_id: str | None, grant: Any) -> None:
     other projects from the difference)."""
     conn = store_db.connect()
     try:
-        row = conn.execute("SELECT project_id FROM ledger WHERE memory_id = ?"
+        row = conn.execute("SELECT project_id, classification FROM ledger WHERE memory_id = ?"
                            " ORDER BY revision DESC LIMIT 1", (memory_id,)).fetchone()
     finally:
         conn.close()
-    if row is None or row[0] != project_id:
+    # A record above the caller's class ceiling is refused exactly like a missing one,
+    # before the ledger could answer `OwnerRefused` and name its owner (review 2026-10-05).
+    if row is None or row[0] != project_id or not grant.may_see(row[1]):
         raise MA.Refused(access_binding.Decision(False, "project-not-bound",
                                                  grant.binding.binding_id).envelope())
 
@@ -905,8 +911,11 @@ def observatory_record(
         L.check_text_bounds(statement, why)
     except Exception as exc:
         return _write_error(exc)
-    cleaned, report = memory_redact.Redactor().scrub({"statement": statement, "why": why})
-    statement, why = cleaned["statement"], cleaned["why"]
+    # EVIDENCE TOO (review 2026-10-05): a token pasted into an evidence URI was stored
+    # and served back whole while the same token in `statement` was redacted.
+    cleaned, report = memory_redact.Redactor().scrub(
+        {"statement": statement, "why": why, "evidence": evidence or []})
+    statement, why, evidence = cleaned["statement"], cleaned["why"], cleaned["evidence"]
     conn = store_db.connect()
     try:
         result = L.append(conn, owner=owner, statement=statement, why=why,

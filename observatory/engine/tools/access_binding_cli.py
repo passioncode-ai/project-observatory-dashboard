@@ -68,14 +68,28 @@ def _read() -> dict:
 
 
 def _write(doc: dict) -> AB.Registry:
+    """Write the new revision and record it as applied, or neither.
+
+    If the applied revision cannot be recorded, the previous file is put back: a
+    registry that holds the change while the command reports failure is the state a
+    review found on 2026-10-05."""
     import atomic
     doc["revision"] = int(doc["revision"]) + 1
     reg = AB.parse(doc)
     path = MA.registry_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    previous = path.read_bytes() if path.exists() else None
     atomic.write_json(path, doc, indent=2)
     os.chmod(path, 0o600)
-    MA.registry()                # record the applied revision now, so a rollback is caught
+    try:
+        MA.registry()            # record the applied revision now, so a rollback is caught
+    except (AB.BindingError, OSError):
+        if previous is None:
+            path.unlink(missing_ok=True)
+        else:
+            atomic.write_text(path, previous.decode("utf-8"))
+            os.chmod(path, 0o600)
+        raise
     return reg
 
 
