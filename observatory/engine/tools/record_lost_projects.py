@@ -154,6 +154,33 @@ def main(argv: list[str]) -> int:
             statement = statement_for(row, scanned_on)
             mid = cursor_for(conn, row["name"])
             prior = L.current(conn, mid) if mid else None
+            if prior is not None and (prior["owner"] != OWNER or prior["state"] != "proposed"):
+                # CONFIRMED BY SOMEONE ELSE — usually the operator through review.py. The
+                # record is no longer this tool's to rewrite, but the fact it states is
+                # measured again, so its validity is renewed while it runs short; the
+                # statement, state and owner stay as confirmed (pre-release review, M1).
+                ends = prior["valid_to"]
+                left = None if not ends else (datetime.fromisoformat(ends.replace("Z", "+00:00"))
+                                              - datetime.now(timezone.utc)).days
+                if left is not None and left >= FACT_DAYS // 2:
+                    unchanged += 1
+                    notes.append({"name": row["name"], "memoryId": mid, "outcome": "confirmed-current"})
+                    continue
+                if args.dry_run:
+                    notes.append({"name": row["name"], "memoryId": mid, "outcome": "would-renew"})
+                    continue
+                try:
+                    L.renew(conn, mid, by=OWNER, expected_revision=prior["revision"],
+                            valid_to=(datetime.now(timezone.utc) + timedelta(days=FACT_DAYS)
+                                      ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            evidence={"source_ref": "SRC-0012", "scanned_on": scanned_on})
+                    conn.commit()
+                    revised += 1
+                    notes.append({"name": row["name"], "memoryId": mid, "outcome": "renewed"})
+                except L.LedgerError as exc:
+                    notes.append({"name": row["name"], "memoryId": mid,
+                                  "outcome": f"NOT renewed: {type(exc).__name__}: {exc}"})
+                continue
             if prior is not None and prior["statement"] == statement:
                 # Nothing moved. A revision saying exactly what the last one said
                 # is the append-only equivalent of noise, and this tool runs on

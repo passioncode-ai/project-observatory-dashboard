@@ -84,6 +84,14 @@
     {
       "token": "firebase",
       "reason": "a third-party Google product the tracking-resources skill names as a resource to record"
+    },
+    {
+      "token": "GITHUB_TOKEN",
+      "reason": "the environment variable GitHub Actions and the gh CLI define; `full update` reads it to authenticate (OBS-31). A standard name, not a project's"
+    },
+    {
+      "token": "okolos",
+      "reason": "the public repository ssheleg/okolos, named by the OBS-32 backlog row the operator added in #143"
     }
   ]
 }

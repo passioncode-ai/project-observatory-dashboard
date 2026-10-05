@@ -121,6 +121,8 @@ not on the contract.
 **memory/0.1 is served too** (PB-137 N-025):
 - The nine `memory.*` tools are checked against `memory-schemas/memory-capability.schema.json`, vendored from fabric-agent-contract at the commit its README names.
 - The provider declaration is `memory-provider.json`.
+- Where the provider is narrower than the contract, it answers a call the schema allows with `invalid-input` (`isError`), never by silently changing it. Two such limits exist: a checkpoint `status` of `failed` is not accepted (the engine keeps `in_progress`, `done`, `blocked`), and `offerTtlSeconds` is capped at 86400 (the contract allows 604800).
+- `memory.record` evidence arrives as reference strings; the engine stores each as `{"ref": …}`, the shape its own evidence has everywhere else.
 - They are not in `fabric-agent.json`. That manifest pins the observatory-local-mcp profile v0.2.0, whose contract has no memory family.
 
 Schemas live in `schemas/`, with fictional requests in `fixtures/`. Published

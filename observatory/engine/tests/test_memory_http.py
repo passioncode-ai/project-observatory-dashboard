@@ -246,6 +246,16 @@ class TheGateAlone(unittest.TestCase):
         self.assertNotIn("tok-alpha", json.dumps(self.reached[0]))
 
 
+class UnauthenticatedFloods(Base):
+    def test_a_peer_flooding_without_a_bearer_is_limited_before_the_journal(self) -> None:
+        self.svc.stop()
+        self.svc = Service(free_port(), rate=2)
+        codes = [self.raw(MODERN)[0] for _ in range(6)]
+        self.assertEqual(codes[:4], [401] * 4, codes)
+        self.assertEqual(codes[4:], [429, 429], "past twice the binding rate, refused unread")
+        self.assertLessEqual(len(self.ws.journal()), 4, "the journal stops growing")
+
+
 class ConcurrencyAndRestart(Base):
     def test_two_bindings_at_once_each_see_their_own_project(self) -> None:
         # This process now serves HTTP and has no default channel (serve_http), so the

@@ -15,7 +15,7 @@ Three rules the rest of the system leans on:
    keeps the two consistent: an index can lag the ledger, never lead it.
 """
 from __future__ import annotations
-import json, sqlite3, sys, pathlib, uuid
+import json, re, sqlite3, sys, pathlib, uuid
 from datetime import datetime, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -81,8 +81,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+#: An identity that may renew a fact: an agent or a service, never the operator's word.
+_IDENTITY = re.compile(r"^(agent|service):[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
+#: The validity form SQLite's `datetime()` reads, which every reader compares with. Python's
+#: `fromisoformat` accepts more (`20200101T000000Z`, `+0200`, week dates); SQLite answers NULL
+#: for those, and a NULL `valid_to` reads as "current" for ever (pre-release review, M2).
+_VALIDITY = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?(Z|[+-]\d{2}:\d{2})$")
+
+
 def _instant(value: object) -> datetime | None:
-    if not isinstance(value, str):
+    if not isinstance(value, str) or not _VALIDITY.match(value):
         return None
     try:
         at = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -298,10 +306,6 @@ def append(
         raise LedgerError(f"unknown scope {scope!r}; expected one of {SCOPES}")
     if confidence is not None and not (0 < confidence <= 1):
         raise LedgerError("confidence must be in (0, 1]")
-    for name, value in (("valid_from", valid_from), ("valid_to", valid_to)):
-        if value is not None and _instant(value) is None:
-            raise LedgerError(f"{name} must be an ISO 8601 time with a zone, e.g. "
-                              f"2026-12-31T00:00:00Z")
     # A FACT SAYS UNTIL WHEN IT HOLDS (PB-137 N-014). A `semantic` record is a claim
     # about the world, and a claim with no end is read as true for ever; `valid_to` is
     # what lets a reader tell a current fact from an expired one. Required when a fact
@@ -354,6 +358,13 @@ def append(
             f"workflow's executor lease and a handoff pack never changes. Use the "
             f"checkpoint and handoff operations (store/workflow.py) instead.")
     _check_owner(prior, owner)
+    # Validity is checked when it is NEW: a revision carrying its prior's value forward
+    # (`transition`, a correction) must not fail on a row written before this rule.
+    for name, value in (("valid_from", valid_from), ("valid_to", valid_to)):
+        if value is not None and (prior is None or value != prior[name]) \
+                and _instant(value) is None:
+            raise LedgerError(f"{name} must be YYYY-MM-DDTHH:MM[:SS[.fff]] with Z or ±HH:MM, "
+                              f"e.g. 2026-12-31T00:00:00Z — the form the store compares")
 
     if prior is not None:
         if expected_revision is None:
@@ -480,6 +491,54 @@ def corroborate(conn: sqlite3.Connection, memory_id: str, *, by: str, check: dic
         created_at=created, **_carried(prior)))
     return {"memoryId": memory_id, "revision": revision, "state": "observed",
             "owner": prior["owner"], "corroboratedBy": by,
+            "consistencyCursor": cursor, "createdAt": created}
+
+
+def renew(conn: sqlite3.Connection, memory_id: str, *, valid_to: str, by: str,
+          expected_revision: int, evidence: dict | None = None) -> dict:
+    """Extend a fact's `valid_to` because a measurement confirmed it again (PB-137 N-014).
+
+    The narrow door a collector needs once the operator has confirmed its fact: the
+    operator then owns the record, and a collector may neither write it nor demote it to
+    `proposed`, so without this the confirmed fact fell out of `current` thirty days later
+    (pre-release review, M1). It changes NOTHING but `valid_to`, and only later: statement,
+    state, owner and confidence are carried, the renewer is recorded in `provenance`, and
+    the operator's authority is untouched. Library only — no wire reaches it."""
+    prior = current(conn, memory_id)
+    if prior is None:
+        raise LedgerError(f"{memory_id} does not exist")
+    if not _IDENTITY.match(by or ""):
+        raise OwnerRefused("a renewal names an agent: or service: identity")
+    if prior["function"] != "semantic":
+        raise LedgerError(f"{memory_id} is not a fact; only a fact's validity is renewed")
+    if expected_revision != prior["revision"]:
+        raise RevisionConflict(memory_id, expected_revision, prior["revision"])
+    if prior["state"] in ("rejected", "archived", "superseded"):
+        raise IllegalTransition(f"{memory_id} is {prior['state']!r}; a closed record is not renewed")
+    new_end, old_end = _instant(valid_to), _instant(prior["valid_to"]) if prior["valid_to"] else None
+    if new_end is None:
+        raise LedgerError("valid_to must be YYYY-MM-DDTHH:MM[:SS] with Z or ±HH:MM")
+    if old_end is not None and new_end <= old_end:
+        raise LedgerError(f"{memory_id} already holds until {prior['valid_to']}; a renewal only extends")
+    revision = prior["revision"] + 1
+    created = _now()
+    cursor = _commit_revision(conn, dict(
+        memory_id=memory_id, revision=revision, kind=prior["kind"],
+        project_id=prior["project_id"], agent_id=prior["agent_id"],
+        run_id=prior["run_id"], session_id=prior["session_id"],
+        function=prior["function"], scope=prior["scope"], statement=prior["statement"],
+        why=prior["why"], state=prior["state"], confidence=prior["confidence"],
+        owner=prior["owner"], classification=prior["classification"],
+        valid_from=prior["valid_from"], valid_to=valid_to,
+        supersedes=[f"{memory_id}@{prior['revision']}"],
+        conflicts_with=json.loads(prior["conflicts_with_json"]),
+        provenance=json.loads(prior["provenance_json"]) +
+                   [{"source": "renewal", "by": by, "at": created, "valid_to": valid_to}],
+        evidence=json.loads(prior["evidence_json"]) + ([dict(evidence, kind="renewal")]
+                                                       if evidence else []),
+        created_at=created, **_carried(prior)))
+    return {"memoryId": memory_id, "revision": revision, "state": prior["state"],
+            "owner": prior["owner"], "renewedBy": by, "validTo": valid_to,
             "consistencyCursor": cursor, "createdAt": created}
 
 

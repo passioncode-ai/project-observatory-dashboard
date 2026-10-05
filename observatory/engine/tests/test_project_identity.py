@@ -490,9 +490,31 @@ def test_an_overridden_project_keeps_its_relation_ids() -> None:
           all(r.get("rule") for r in rels if r["type"] == "implemented_by"), str(rels)[:300])
 
 
+def test_a_row_without_ownership_is_named_not_fatal() -> None:
+    """OBS-24: a hand-made registry row with no `ownership` took the survey down."""
+    d, env = planted_store()
+    unowned = {k: v for k, v in PUBLISHED.items() if k != "ownership"}
+    unowned["id"] = "project:hand-made"
+    (d / "registry/projects.json").write_text(json.dumps({"projects": [PUBLISHED, unowned]}))
+    import survey
+    importlib.reload(survey)
+    try:
+        got = survey.survey({"kind": "estate"})
+    except KeyError as exc:
+        check("a row without ownership does not raise", False, repr(exc))
+        return
+    ids = [p["id"] for p in got["projects"]]
+    check("the well-formed project is served", "project:sample-site" in ids, str(ids))
+    check("the row without ownership is not served", "project:hand-made" not in ids, str(ids))
+    check("and it is named in degraded",
+          any(x.get("source") == "registry" and "project:hand-made" in x.get("reason", "")
+              for x in got["degraded"]), str(got["degraded"])[:300])
+
+
 if __name__ == "__main__":
     print("project identity — publishing a project detached its history\n")
-    for fn in (test_an_overridden_project_keeps_its_relation_ids,
+    for fn in (test_a_row_without_ownership_is_named_not_fatal,
+               test_an_overridden_project_keeps_its_relation_ids,
                test_the_naming_rule_lives_in_one_place,
                test_a_projects_former_ids_are_derived_from_its_folders,
                test_the_index_maps_old_ids_to_the_project_that_holds_them_now,

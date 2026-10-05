@@ -278,7 +278,8 @@ it could not reach: backups and the export's git history ([FORGET.md](FORGET.md)
 
 PB-137 N-014.
 
-- **A fact says until when it holds.** A new `semantic` record must carry `valid_to`, as an ISO 8601 time with a zone. A run that confirms the fact writes a new revision with a later end. `tools/record_lost_projects.py` gives its facts 30 days, and each daily run renews them.
+- **A fact says until when it holds.** A new `semantic` record must carry `valid_to`, as an ISO 8601 time with a zone. A run that confirms the fact writes a new revision with a later end. `tools/record_lost_projects.py` gives its facts 30 days, and each daily run renews them. A fact the operator has already confirmed is renewed with `ledger.renew`, which extends only `valid_to` and keeps the operator's state, owner and statement; it is renewed when fewer than 15 days are left, and an agent can never use a renewal to rewrite it.
+- **A time is read in one form only:** `YYYY-MM-DDTHH:MM[:SS[.ffffff]]` with `Z` or `±HH:MM`. A basic-format time, a week date or a bare date is refused, because it would compare wrongly as text. Rows written before 0.16.0 keep their value until it is changed.
 - **Validity decides what is current.**
   - `observatory_recall` reads `validity: current` by default: inside `valid_from`/`valid_to`.
   - `expired` returns what is past `valid_to`; `all` returns the history.

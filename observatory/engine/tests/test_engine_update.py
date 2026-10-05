@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import socket
+from unittest import mock
 import subprocess
 import sys
 import tempfile
@@ -340,6 +341,42 @@ class UpdateTest(unittest.TestCase):
         code, doc = self.run_cli("--check")
         self.assertEqual((code, doc["status"]), (self.mod.EXIT_UNDETERMINED, "degraded"))
         self.assertIn("rate limit", doc["degraded"][0])
+
+    def test_a_token_reads_as_you_and_never_follows_a_redirect(self):
+        """OBS-31: authenticated reads when a token is available, only to the API host."""
+        import urllib.request
+        token = "gh" + "o_" + "T" * 36
+        old_env = {k: os.environ.pop(k, None) for k in ("GH_TOKEN", "GITHUB_TOKEN")}
+        try:
+            os.environ["GH_TOKEN"] = token
+            self.assertEqual(self.mod.github_token(), token)
+            seen = []
+
+            class Opener:
+                def open(self, request, timeout):
+                    seen.append((request.full_url, dict(request.header_items())))
+                    raise OSError("stop here")
+            f = self.mod.Fetcher(attempts=1, sleep=lambda s: None)
+            f.opener = Opener()
+            for url in ("https://api.github.com/repos/x/y/releases/latest", "http://127.0.0.1:9/x"):
+                with self.assertRaises(self.mod.Undetermined):
+                    f._open(url, "application/json")
+            self.assertEqual(seen[0][1].get("Authorization"), f"Bearer {token}")
+            self.assertNotIn("Authorization", seen[1][1], "no token to any other host")
+            req = urllib.request.Request("https://api.github.com/repos/x/y/releases/assets/1",
+                                         headers={"Authorization": f"Bearer {token}"})
+            away = self.mod._Redirects().redirect_request(
+                req, None, 302, "Found", {}, "https://objects.githubusercontent.com/asset")
+            self.assertNotIn("Authorization", dict(away.header_items()),
+                             "the token does not follow a redirect off the API host")
+            os.environ.pop("GH_TOKEN")
+            with mock.patch("shutil.which", return_value=None):
+                self.assertIsNone(self.mod.github_token(), "no env, no gh: anonymous")
+        finally:
+            os.environ.pop("GH_TOKEN", None)
+            for k, v in old_env.items():
+                if v is not None:
+                    os.environ[k] = v
 
     def test_plain_http_to_a_remote_host_is_refused(self):
         with self.assertRaises(self.mod.UpdateError):

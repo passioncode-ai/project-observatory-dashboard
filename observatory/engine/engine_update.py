@@ -178,12 +178,42 @@ def release_source(repository: str | None = None, api: str | None = None) -> tup
     return check_url(base), repo
 
 
+API_HOST = "api.github.com"
+
+
+def github_token() -> str | None:
+    """A GitHub token for reads, or None: `GH_TOKEN`, then `GITHUB_TOKEN`, then `gh auth
+    token` when the GitHub CLI is signed in. Read on demand, never stored."""
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    import shutil
+    import subprocess
+    gh = shutil.which("gh")
+    if not gh:
+        return None
+    try:
+        r = subprocess.run([gh, "auth", "token"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = r.stdout.strip() if r.returncode == 0 else ""
+    return value or None
+
+
 class _Redirects(urllib.request.HTTPRedirectHandler):
-    """GitHub serves assets through a redirect; the same scheme rule applies to it."""
+    """GitHub serves assets through a redirect; the same scheme rule applies to it, and a
+    token sent to the API never follows the redirect to another host."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         check_url(newurl)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and urllib.parse.urlsplit(newurl).hostname != API_HOST:
+            for key in list(new.headers):
+                if key.lower() == "authorization":
+                    del new.headers[key]
+            new.unredirected_hdrs.pop("Authorization", None)
+        return new
 
 
 class Fetcher:
@@ -195,9 +225,16 @@ class Fetcher:
 
     def _open(self, url: str, accept: str):
         check_url(url)
-        request = urllib.request.Request(url, headers={
-            "Accept": accept, "User-Agent": f"project-observatory/{config.VERSION} (update)",
-            "X-GitHub-Api-Version": "2022-11-28"})
+        headers = {"Accept": accept, "User-Agent": f"project-observatory/{config.VERSION} (update)",
+                   "X-GitHub-Api-Version": "2022-11-28"}
+        # AUTHENTICATED WHEN A TOKEN IS AVAILABLE (OBS-31): the anonymous limit refused
+        # 0.14.0's update for about an hour on a busy machine. The token goes only in a
+        # header, only to api.github.com — `_Redirects` drops it before any other host —
+        # and is never logged, printed or stored.
+        token = github_token() if urllib.parse.urlsplit(url).hostname == API_HOST else None
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        request = urllib.request.Request(url, headers=headers)
         last = "no attempt was made"
         for attempt in range(self.attempts):
             try:
@@ -207,8 +244,9 @@ class Fetcher:
                 if exc.code == 404:
                     raise UpdateError(f"{urllib.parse.urlsplit(url).path} was not found", EXIT_REFUSED) from None
                 if exc.code == 403 and (exc.headers.get("X-RateLimit-Remaining") == "0"):
-                    raise Undetermined("GitHub API rate limit reached for anonymous requests; "
-                                       "retry after it resets (about an hour at most)") from None
+                    raise Undetermined("GitHub API rate limit reached; retry after it resets "
+                                       "(about an hour at most), or sign in with `gh auth login` "
+                                       "or set GH_TOKEN so the update reads as you") from None
                 if exc.code < 500 and exc.code != 429:
                     raise Undetermined(f"GitHub answered HTTP {exc.code}") from None
                 last = f"HTTP {exc.code}"
