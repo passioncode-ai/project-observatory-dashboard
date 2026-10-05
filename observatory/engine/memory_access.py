@@ -59,6 +59,22 @@ TOOLS: dict[str, tuple[str, str]] = {
     # Reads back a receipt this caller's own search produced (PB-137 N-012).
     "observatory_explain": ("memory.search", "read"),
 }
+#: memory/0.1 (fabric-agent-contract DEC-0023, PB-137 N-025): each capability IS the
+#: observatory tool named here — same scope, same effect, same code. `mcp/memory_wire.py`
+#: serves them; this is the one place the pairing is written.
+MEMORY_CAPABILITIES: dict[str, str] = {
+    "memory.checkpoint.write": "observatory_checkpoint_write",
+    "memory.checkpoint.latest": "observatory_checkpoint_latest",
+    "memory.handoff.create": "observatory_handoff_create",
+    "memory.handoff.accept": "observatory_handoff_accept",
+    "memory.handoff.get": "observatory_handoff_get",
+    "memory.workflow.list": "observatory_workflow_list",
+    "memory.record": "observatory_record",
+    "memory.search": "observatory_search",
+    "memory.recall": "observatory_recall",
+}
+TOOLS.update({cap: TOOLS[tool] for cap, tool in MEMORY_CAPABILITIES.items()})
+
 #: Tools that list workflows rather than act on one: a session binding lists its own.
 LISTINGS = frozenset({"observatory_workflow_list"})
 #: The scope a local-only tool is refused under, so the refusal names what is missing.

@@ -1,0 +1,27 @@
+{
+  "kind": "memory-provider",
+  "family": "memory/0.1",
+  "provider": "project-observatory",
+  "capabilities": [
+    "memory.checkpoint.write",
+    "memory.checkpoint.latest",
+    "memory.handoff.create",
+    "memory.handoff.accept",
+    "memory.handoff.get",
+    "memory.workflow.list",
+    "memory.record",
+    "memory.search",
+    "memory.recall"
+  ],
+  "compatibility": {
+    "memory.checkpoint.write": "observatory_checkpoint_write",
+    "memory.checkpoint.latest": "observatory_checkpoint_latest",
+    "memory.handoff.create": "observatory_handoff_create",
+    "memory.handoff.accept": "observatory_handoff_accept",
+    "memory.handoff.get": "observatory_handoff_get",
+    "memory.workflow.list": "observatory_workflow_list",
+    "memory.record": "observatory_record",
+    "memory.search": "observatory_search",
+    "memory.recall": "observatory_recall"
+  }
+}

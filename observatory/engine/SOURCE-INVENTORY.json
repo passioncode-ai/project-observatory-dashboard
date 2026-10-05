@@ -772,8 +772,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "8bee974dab0b16031d7e82e3f6c6209fee5500d29a8a7b624139d9bf7e11031b",
-      "bytes": 16027,
+      "export_sha256": "f64037ba19e9b9e66f4dd87d6ebc92055802f56d6936fae6fca362159d7f2ce0",
+      "bytes": 16605,
       "upstream_modified": true
     },
     {
@@ -817,8 +817,8 @@
     {
       "path": "fabric/FABRIC-CONFORMANCE.md",
       "source_sha256": "8353184efa4e9f48a2b464028d7366b975bf217c42b7736ab404f06e188a4fc8",
-      "export_sha256": "40a97dbe1f5ceba56800d0fad7a565c242f2dfef0b665fd928ebbbfe3f1c8d4e",
-      "bytes": 12108,
+      "export_sha256": "eb0f27ca0057ae914134c0bd67d4b4955206076939f91b2456d6e68ccc1ea069",
+      "bytes": 12509,
       "upstream_modified": true
     },
     {
@@ -940,6 +940,34 @@
       "upstream_modified": true,
       "export_sha256": "adb36e58c4628ec785d9e5dfd931fe425f69e87535b04e49c395655a47493fea",
       "bytes": 4012
+    },
+    {
+      "path": "fabric/memory-provider.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "17fcd31c6488e4d88041419d5439fbd48fde7b773d870d44196af81bfa31bd45",
+      "bytes": 867
+    },
+    {
+      "path": "fabric/memory-schemas/README.md",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "338fe5fa278904d59eccf819ed289ed36f84778efa4b6e9b3502ed090e2e9d67",
+      "bytes": 1030
+    },
+    {
+      "path": "fabric/memory-schemas/common.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "8c7c781e2b798a549eaf19175740f5873aa3d51518e3316ee35177c79630209a",
+      "bytes": 4066
+    },
+    {
+      "path": "fabric/memory-schemas/memory-capability.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f404a079519632c255e5dc9ad72accac42b6fd97517c625bf88bdcf0ea6df733",
+      "bytes": 32766
     },
     {
       "path": "fabric/schemas/capability-input.schema.json",
@@ -1115,8 +1143,8 @@
       "path": "mcp/capability_tools.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "77125c73217a7880c92dce49b7247665b961d9425ead97ec4f875a718dec2779",
-      "bytes": 20007
+      "export_sha256": "878fa363537c18e1a9bac3c758acaf71aea85f6898b2a4253a90ff7d77789836",
+      "bytes": 22201
     },
     {
       "path": "mcp/http_service.py",
@@ -1126,10 +1154,17 @@
       "bytes": 8294
     },
     {
+      "path": "mcp/memory_wire.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "0c8c49c25e5fdf27e0faa148eeaa6da6c2e82c2b13ef711d10b574b06373f9bc",
+      "bytes": 6656
+    },
+    {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "bebda117da66b5ae84defa9a26a04b77c979abb4e60a0842d213f3ae1d559306",
-      "bytes": 84512,
+      "export_sha256": "02c9b501a11ffda5a22e0ab36cad44f3b775cd3d106560b0892962e61ca3472c",
+      "bytes": 84694,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -1146,8 +1181,8 @@
       "path": "memory_access.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e0f823faa74326aad623f26345813c5a7e092feababd085d6f8a9ba9124225e7",
-      "bytes": 21431
+      "export_sha256": "12dde16bf2411696a77ffd2ef9afbe0c006a601d57bba6a25722abf6f5db96d6",
+      "bytes": 22276
     },
     {
       "path": "memory_redact.py",
@@ -1747,8 +1782,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "743de9936ee519b69d6c9f754333e10c90175b1c2c265721b98f916b94fb4838",
-      "bytes": 18049,
+      "export_sha256": "c2a86c5cf93b67d82ff2821c6b5225bfc4fd96adb7eb9f216e9b42234ce68763",
+      "bytes": 18273,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2609,8 +2644,8 @@
       "path": "tests/test_memory_access.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ec6d6ec5ad9ccec3850f80de4346806b33de663bb8d00d3dd1a6d7926adbd9ba",
-      "bytes": 34101
+      "export_sha256": "3f8c5c5b9d249fd54eedca5196b568f024d197edc79f24c06a45a60d2ab3060c",
+      "bytes": 34300
     },
     {
       "path": "tests/test_memory_eval.py",
@@ -2625,6 +2660,13 @@
       "upstream_modified": true,
       "export_sha256": "a68673b0c814ad8440debcc08b4ffa662701ee4b71e166aac776936f44a726d3",
       "bytes": 13826
+    },
+    {
+      "path": "tests/test_memory_wire.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "bd826cd101ad2a2e2dd9760a45e620cf16aa3dcb0b5615a250a8f30df1546083",
+      "bytes": 7592
     },
     {
       "path": "tests/test_merge_membership.py",
@@ -4157,7 +4199,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 530,
+  "file_count": 536,
   "excluded": [
     "git-history",
     "operator-registries",

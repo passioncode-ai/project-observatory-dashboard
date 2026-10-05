@@ -118,6 +118,11 @@ pinned contract defines no resource concept and no rendering capability, so the
 manifest declares neither; a host that relies on these resources relies on MCP,
 not on the contract.
 
+**memory/0.1 is served too** (PB-137 N-025):
+- The nine `memory.*` tools are checked against `memory-schemas/memory-capability.schema.json`, vendored from fabric-agent-contract at the commit its README names.
+- The provider declaration is `memory-provider.json`.
+- They are not in `fabric-agent.json`. That manifest pins the observatory-local-mcp profile v0.2.0, whose contract has no memory family.
+
 Schemas live in `schemas/`, with fictional requests in `fixtures/`. Published
 schema URLs are pinned to the release selected by the lock. An application patch
 release does not silently move that schema pin.

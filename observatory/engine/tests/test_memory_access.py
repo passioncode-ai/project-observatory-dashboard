@@ -208,7 +208,10 @@ class EveryMemoryToolAsks(Base):
     }
 
     def test_the_table_and_the_calls_agree(self) -> None:
-        self.assertEqual(set(self.CALLS), set(self.ws.MA.TOOLS))
+        # The memory/0.1 names are aliases of these tools (N-025); tests/test_memory_wire.py
+        # proves they reach the same gate.
+        self.assertEqual(set(self.CALLS),
+                         set(self.ws.MA.TOOLS) - set(self.ws.MA.MEMORY_CAPABILITIES))
 
     def test_each_refuses_a_request_without_a_bearer(self) -> None:
         before = (self.ws.count("ledger"), self.ws.count("workflows"))
