@@ -518,6 +518,11 @@ project-observatory full access-binding revoke BINDING_ID           # refused fr
   days. `--scope`, `--class`, `--effect propose`, `--workflow` and `--days` change that.
 - `full doctor` shows the state under `access_bindings`, and the Health page shows the same.
 - Every decision about a binding is logged in `store/logs/access.jsonl`, without the bearer.
+- Every memory search leaves a receipt in `store/logs/retrieval.jsonl`. The receipt holds the
+  exact results and the scope, and the query only as an HMAC; it holds no text. The caller
+  that received a receipt can read it back with `observatory_explain`. Memory answers are
+  redacted on the way out too, and say so in `redacted`
+  ([design/RETRIEVAL-AUDIT.md](design/RETRIEVAL-AUDIT.md)).
 - There is no HTTP endpoint yet (PB-137 N-016). Until then a binding is issued ahead of use.
 
 Rules and reasons: [design/ACCESS-BINDING.md](design/ACCESS-BINDING.md).

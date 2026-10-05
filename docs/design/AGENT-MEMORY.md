@@ -303,8 +303,9 @@ query until bindings exist. The rules, the reason codes and where each is enforc
   Identity comes from the transport, stdio is the operator's local agent and nothing more, and
   everything else is denied by default. Enforced at every entry point since N-008
   ([ACCESS-BINDING.md](ACCESS-BINDING.md#enforcement-n-008)). Search filters project, class
-  and validity before its candidate window since N-009. Redaction on output, the retrieval
-  audit and explain (N-012) follow.
+  and validity before its candidate window since N-009. Every memory answer is redacted on the
+  way out, and every search leaves a receipt that `observatory_explain` reads back without
+  searching again (N-012, [RETRIEVAL-AUDIT.md](RETRIEVAL-AUDIT.md)).
 - An MCP transport other than stdio (Streamable HTTP on loopback, as a `fabric-service`).
   The protocol and limits are decided and measured (PB-137 N-015,
   [HTTP-TRANSPORT.md](HTTP-TRANSPORT.md)): 2026-07-28 plus the handshake revisions,
