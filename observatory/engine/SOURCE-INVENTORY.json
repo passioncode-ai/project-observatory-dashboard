@@ -38,8 +38,8 @@
     {
       "path": "agent/providers.py",
       "source_sha256": "e2d88a03c47dc5985b106877fc894951b0b5972f37bed90df0a0e54dd03caaaf",
-      "export_sha256": "0ec27e6141f7d8525deffe4cefd197d0119f0ece6258a4cb8333eee7d724216c",
-      "bytes": 53524,
+      "export_sha256": "67da1dee5f065244119a36ea1b6ea864f70e28511a41fe92604a066ee1e397a1",
+      "bytes": 54539,
       "python_comments_removed": 168,
       "python_docstrings_removed": 24,
       "tool_descriptions_retained": 0,
@@ -1883,8 +1883,8 @@
       "path": "tests/test_agent.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4328524d4e58dee5b1a27828e2b1f6093757ceaf47457f17f4aa1ec3920f59da",
-      "bytes": 28553
+      "export_sha256": "1adb5ab56d61b6c837ad94b0ab9e6061075ac5f6ba73568d1efb2b7925915382",
+      "bytes": 30353
     },
     {
       "path": "tests/test_agent_faults.py",
