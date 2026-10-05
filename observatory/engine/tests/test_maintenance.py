@@ -403,6 +403,55 @@ class Pass(Base):
         self.assertEqual(len(list(root.glob("snapshot-*.obsnap"))), 1)
         self.assertEqual(len(list(root.glob("daily-*.obsnap"))), vault.KEEP)
 
+    def test_a_torn_database_copy_is_retried_not_fatal(self):
+        # Seen live on 2026-10-05: a session MCP server wrote to the store during the copy,
+        # the copy failed its check ("database disk image is malformed") and the pass crashed.
+        import sqlite3
+        from store import compatibility
+        real, calls = compatibility.verify_database, []
+
+        def flaky(conn):
+            calls.append(1)
+            # Torn every time within one snapshot: only the pass's own retry can recover.
+            if len(calls) <= workspace_upgrade.COPY_ATTEMPTS:
+                raise sqlite3.DatabaseError("database disk image is malformed")
+            return real(conn)
+        with patch.object(compatibility, "verify_database", flaky):
+            report = self.run_pass(FakeCommands(), services=FakeServices())
+        self.assertEqual(report["snapshot"]["result"], "taken")
+        self.assertGreater(len(calls), workspace_upgrade.COPY_ATTEMPTS, "the snapshot was taken again")
+
+    def test_copy_database_makes_a_torn_copy_again_and_stops_at_a_missing_package(self):
+        import sqlite3
+        from store import compatibility
+        src = self.home / "store" / "observatory.db"
+        real, calls = compatibility.verify_database, []
+
+        def flaky(conn):
+            calls.append(1)
+            if len(calls) < workspace_upgrade.COPY_ATTEMPTS:
+                raise RuntimeError("Database snapshot integrity verification failed")
+            return real(conn)
+        with patch.object(compatibility, "verify_database", flaky):
+            workspace_upgrade.copy_database(src, self.base / "copy.db")
+        self.assertEqual(len(calls), workspace_upgrade.COPY_ATTEMPTS)
+        self.assertTrue((self.base / "copy.db").is_file())
+        with patch.object(compatibility, "verify_database",
+                          side_effect=RuntimeError("install the locked sqlite-vec dependency")):
+            with self.assertRaisesRegex(RuntimeError, "sqlite-vec"):
+                workspace_upgrade.copy_database(src, self.base / "copy2.db")
+        self.assertFalse((self.base / "copy2.db").exists(), "a refused copy leaves nothing behind")
+
+    def test_an_unexpected_error_in_the_backup_is_recorded_and_the_pass_completes(self):
+        services = FakeServices()
+        with patch.object(workspace_upgrade, "snapshot", side_effect=RuntimeError("synthetic surprise")):
+            report = self.run_pass(FakeCommands(), services=services)
+        self.assertEqual(report["snapshot"]["result"], "failed")
+        self.assertIn("synthetic surprise", M.read_state(self.home)["snapshot_failure"]["detail"])
+        self.assertIn("pass", M.read_state(self.home), "the pass recorded itself")
+        self.assertEqual(sorted(c for c in services.calls if c[0] == "start"),
+                         [("start", "server"), ("start", "tick")])
+
     def test_a_second_pass_finds_the_first_busy(self):
         with M.pass_lock(self.home) as held:
             self.assertTrue(held)

@@ -5,12 +5,31 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.17.1 — 2026-10-05
+
+A patch release. The first live run of the 0.17.0 maintenance job on a maintainer's machine
+failed while taking the daily backup. The live database was intact.
+
+### Changed
+
 - **OpenRouter credits Project Observatory's public page.** Model and embedding calls to OpenRouter
   now name `https://passioncode.ai/observatory/` as the app (`HTTP-Referer`), title it
   `X-OpenRouter-Title: Project Observatory` and file it under `programming-app,cli-agent`, so every
   install adds to one public listing. Before, the referer was the GitHub repository, and its app keeps
   its history. A request to any other provider carries none of these headers
   (`agent/providers.py` `attribution_headers`; organization roadmap RM-16).
+
+### Fixed
+
+- **A database copy torn by a concurrent writer crashed the maintenance pass.** Session MCP
+  servers keep writing to the store while the tick and server are stopped. A reader opened
+  `immutable` (when the WAL is empty) does not see such a write coming, so the copy failed
+  its integrity check with "database disk image is malformed".
+  - `copy_database` now makes a torn copy again, up to three times. The copy is still
+    verified before it counts, and the source is never touched.
+  - The daily backup retries the whole snapshot on a database error.
+  - Any other error in the backup is recorded in the job's state; the pass completes and the
+    tick and server are started again.
 
 ## 0.17.0 — 2026-10-05
 
