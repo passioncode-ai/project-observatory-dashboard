@@ -993,9 +993,14 @@ _CURRENT = ("NOT EXISTS (SELECT 1 FROM tombstones t WHERE t.memory_id = {l}.memo
 
 
 def _scope_sql(alias: str, project_id: str | None,
-               classes: tuple[str, ...] | None) -> tuple[str, list]:
-    """The `_CURRENT` predicate plus the caller's project and classes, with its args."""
+               classes: tuple[str, ...] | None,
+               hidden_kinds: tuple[str, ...] = ()) -> tuple[str, list]:
+    """The `_CURRENT` predicate plus the caller's project, classes and the record kinds
+    it may not read (workflow memory without its scope), with its args."""
     sql, args = _CURRENT.format(l=alias), []
+    if hidden_kinds:
+        sql += f" AND {alias}.kind NOT IN ({','.join('?' * len(hidden_kinds))})"
+        args += list(hidden_kinds)
     if project_id:
         sql += f" AND {alias}.project_id = ?"
         args.append(project_id)
@@ -1008,7 +1013,8 @@ def _scope_sql(alias: str, project_id: str | None,
 
 def search(query: str, project_id: str | None = None, limit: int = 10, *,
            authority: str = "caller-argument", classification: str | None = None,
-           classes: tuple[str, ...] | None = None) -> dict:
+           classes: tuple[str, ...] | None = None,
+           hidden_kinds: tuple[str, ...] = ()) -> dict:
     """Recall over the narrative: by similarity where possible, lexically always.
 
     Two rules the contract makes non-negotiable, and both are visible in the
@@ -1125,7 +1131,7 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
                 # match must be current and the caller's before it may take one of
                 # the `RETRIEVAL_WIDTH` places; filtering after the LIMIT let three
                 # hundred stronger foreign matches push the caller's own record out.
-                scope_sql, scope_args = _scope_sql("l", project_id, classes)
+                scope_sql, scope_args = _scope_sql("l", project_id, classes, hidden_kinds)
                 fts = ("SELECT search_notes.memory_id AS memory_id,"
                        " search_notes.revision AS revision, search_notes.rank AS rank,"
                        " search_notes.stems AS stems FROM search_notes"
@@ -1183,7 +1189,7 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
         try:
             # IN THE CALLER'S SCOPE: another project's queue is not this answer's lag,
             # and counting it would tell a binding that rows it may not see exist.
-            lag_sql, lag_args = _scope_sql("l", project_id, classes)
+            lag_sql, lag_args = _scope_sql("l", project_id, classes, hidden_kinds)
             lag = conn.execute(
                 "SELECT count(*) AS n, min(l.created_at) AS oldest FROM outbox o"
                 " JOIN ledger l ON l.memory_id = o.memory_id AND l.revision = o.revision"
@@ -1211,7 +1217,7 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
             # THE CANONICAL RECHECK, the same predicate the lexical window used:
             # a vector hit was never filtered before its KNN, so its validity and
             # visibility are decided here.
-            hscope, hargs = _scope_sql("l", project_id, classes)
+            hscope, hargs = _scope_sql("l", project_id, classes, hidden_kinds)
             if conn.execute(f"SELECT 1 FROM ledger l WHERE l.memory_id = ? AND l.revision = ?"
                             f" AND {hscope}", (mid, rev, *hargs)).fetchone() is None:
                 continue

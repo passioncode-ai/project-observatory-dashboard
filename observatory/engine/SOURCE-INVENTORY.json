@@ -1121,8 +1121,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "167e1ba84deb72270f5b87a8ca5076ca49b8ce8b5720cc31a365244f0d7e659e",
-      "bytes": 83588,
+      "export_sha256": "2bf366a44d2767091f1704a2c1b80d7d73ed9669d096e832e783e3efcff810c9",
+      "bytes": 84363,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -1139,8 +1139,8 @@
       "path": "memory_access.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c6e27934d2a983bfbd7a859e14ce2fa57235480436ae91ba0f1205dbc5c9c862",
-      "bytes": 19544
+      "export_sha256": "e0f823faa74326aad623f26345813c5a7e092feababd085d6f8a9ba9124225e7",
+      "bytes": 21431
     },
     {
       "path": "memory_redact.py",
@@ -1375,8 +1375,8 @@
       "path": "retrieval_audit.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "616f7520b0860e165b3ca8b3be9433bfefe0d923cd38201ea830058b1ddc621a",
-      "bytes": 11631
+      "export_sha256": "f37ae4f9a6a1e5e055f07abcd6e8680ffc14640b4ba9af601d8fe15597488f01",
+      "bytes": 12198
     },
     {
       "path": "runtime_identity.py",
@@ -1591,8 +1591,8 @@
     {
       "path": "survey.py",
       "source_sha256": "2c692bcd4b6deac11f6608cce06abe134b748382d7037e43a6d2034d193aac0f",
-      "export_sha256": "23e3159fd1721f48ab99bc61b99e0f0304ec13398c27d4cbdfd4880f62cc4203",
-      "bytes": 69194,
+      "export_sha256": "6253e5af795fb901bfed165a4ffa4cb102f673beee00b8ec15656eb32b22141d",
+      "bytes": 69545,
       "python_comments_removed": 210,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
@@ -2595,8 +2595,8 @@
       "path": "tests/test_memory_access.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b804a521aabdd332296b4b25a6125635a9b998b625ee159c36f4093bc327b3b8",
-      "bytes": 27116
+      "export_sha256": "ec6d6ec5ad9ccec3850f80de4346806b33de663bb8d00d3dd1a6d7926adbd9ba",
+      "bytes": 34101
     },
     {
       "path": "tests/test_memory_eval.py",
@@ -3455,8 +3455,8 @@
       "path": "tools/access_binding_cli.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "dfd9b65d0868a55fb71423484dc5ad9d55fde172ee9a3b520cad4368ca72dac7",
-      "bytes": 10091
+      "export_sha256": "9e27bcf6e75a39b7b3204e5c4dc958e6d67133eb7e4b3b4403a7d76401723af3",
+      "bytes": 10662
     },
     {
       "path": "tools/ack.py",
