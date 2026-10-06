@@ -4,9 +4,9 @@
     T="$(project-observatory full-path)/tools"            # the installed engine's tools
     python "$T/openrouter.py" stash --as main < key-file   # provisioning key, labeled; a protected file
     python "$T/openrouter.py" adopt --as main               # take the legacy file in
-    python "$T/openrouter.py" issue --name my-agent --limit 10 --to vault:PROJECT/prod/OPENROUTER_API_KEY
+    python "$T/openrouter.py" issue --name my-agent --limit 10 [--reset daily] --to vault:PROJECT/prod/OPENROUTER_API_KEY
     python "$T/openrouter.py" list | ping
-    python "$T/openrouter.py" limit my-agent --set 25
+    python "$T/openrouter.py" limit my-agent --set 25 [--reset daily]
     python "$T/openrouter.py" disable my-agent              # or enable
     python "$T/openrouter.py" rotate my-agent               # or --leaked
     python "$T/openrouter.py" revoke my-agent
@@ -394,8 +394,20 @@ def _name_check(admin: str, name: str) -> str | None:
     return caveat
 
 
+#: The periods a key's ceiling can reset on (the provider's `limit_reset`). A daily reset is
+#: what a per-day spending ceiling needs (Fabric Switchboard SB-72: paid fallback agents run
+#: under a daily ceiling).
+RESETS = ("daily", "weekly", "monthly")
+
+
+def _reset(value: str | None) -> str:
+    if value not in RESETS:
+        raise ValueError(f"the ceiling resets daily, weekly or monthly, not {value!r}")
+    return value
+
+
 def issue_key(name: str, limit: float, account: str | None, to: str,
-              project: str | None) -> dict:
+              project: str | None, reset: str = "monthly") -> dict:
     """Mint, deliver, record. The ONE issuer: `tools/keyserver.py`'s HTTP
     `mint` calls this, so a key born from a button and a key born from the
     command line are the same key, in the same ledger, with the same ceiling.
@@ -406,6 +418,7 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
         raise ValueError("the consumer's name cannot be empty")
     if not math.isfinite(limit) or limit <= 0:
         raise ValueError("a key without a ceiling is an unbounded liability; give one")
+    reset = _reset(reset)
     to = vault_destination(to)
     doc = ledger()
     label, admin = read_admin(account)
@@ -413,11 +426,11 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
         name_check = _name_check(admin, name)
     except ValueError as exc:
         raise ValueError(str(exc).replace(" already exists", f" already exists in {label!r}", 1)) from None
-    # A MONTHLY RESET, not a lifetime cap (trap T17): a lifetime cap works until
-    # the total is reached and then stops — months later, with no warning.
-    # Found in the audit that merged keyserver's mint into this door: it set
-    # the reset, the door did not.
-    d = _request("/keys", admin, {"name": name, "limit": limit, "limit_reset": "monthly"})
+    # A RESET, never a lifetime cap (trap T17): a lifetime cap works until the
+    # total is reached and then stops — months later, with no warning. Found in
+    # the audit that merged keyserver's mint into this door: it set the reset,
+    # the door did not. Monthly unless the caller asks for daily or weekly.
+    d = _request("/keys", admin, {"name": name, "limit": limit, "limit_reset": reset})
     value = d.get("key") or (d.get("data") or {}).get("key")
     row = d.get("data") or d
     if not value:
@@ -430,26 +443,26 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     doc["issued"][name] = {
         "account": label, "hash": row.get("hash"), "destination": to,
         "delivered_to": place, "project": project,
-        "limit_usd": limit, "limit_reset": "monthly", "issued_on": today(),
+        "limit_usd": limit, "limit_reset": reset, "issued_on": today(),
         "rotated_on": None, "rotations": 0, "name_check": name_check}
     save_ledger(doc)
     _journal("issue", f"openrouter/{label}/{name}", to=to, limit_usd=limit, name_check=name_check)
     return {"name": name, "account": label, "label": row.get("label"),
-            "limit": limit, "limit_reset": "monthly", "delivered_to": place,
+            "limit": limit, "limit_reset": reset, "delivered_to": place,
             "name_check": name_check}
 
 
 def cmd_issue(name: str, limit: float, account: str | None, to: str,
-              project: str | None) -> int:
+              project: str | None, reset: str = "monthly") -> int:
     try:
-        r = issue_key(name, limit, account, to, project)
+        r = issue_key(name, limit, account, to, project, reset)
     except ValueError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
     except RuntimeError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
-    print(f"issued {r['name']!r} from {r['account']!r}, ceiling ${r['limit']:g} monthly, "
+    print(f"issued {r['name']!r} from {r['account']!r}, ceiling ${r['limit']:g} {r['limit_reset']}, "
           f"delivered to {r['delivered_to']}")
     if r.get("name_check"):
         print(f"note: {r['name_check']}", file=sys.stderr)
@@ -476,10 +489,13 @@ def resolve_issued(name_or_label: str) -> tuple[str, dict]:
     raise LookupError(f"no issued key called {name_or_label!r} — `list` shows what exists")
 
 
-def set_limit(name_or_label: str, limit: float, reset: str = "monthly") -> dict:
+def set_limit(name_or_label: str, limit: float, reset: str | None = None) -> dict:
+    """Moves a key's ceiling. Without a `reset` the key keeps the period it has: moving a daily
+    ceiling never turns it into a monthly one behind the caller's back."""
     if not math.isfinite(limit) or limit <= 0:
         raise ValueError("a positive ceiling is required")
     name, rec = resolve_issued(name_or_label)
+    reset = _reset(reset if reset is not None else (rec.get("limit_reset") or "monthly"))
     label, admin = read_admin(rec["account"])
     row = find_key(admin, name)
     if not row:
@@ -494,7 +510,10 @@ def set_limit(name_or_label: str, limit: float, reset: str = "monthly") -> dict:
     return {"name": name, "label": row.get("label"), "limit": limit, "limit_reset": reset}
 
 
-def cmd_limit(name: str, set_to: float | None) -> int:
+def cmd_limit(name: str, set_to: float | None, reset: str | None = None) -> int:
+    if set_to is None and reset is not None:
+        print("refused: --reset moves with a ceiling; give --set too", file=sys.stderr)
+        return 2
     if set_to is None:
         try:
             n, rec = resolve_issued(name)
@@ -508,7 +527,7 @@ def cmd_limit(name: str, set_to: float | None) -> int:
               + (", DISABLED" if row.get("disabled") else ""))
         return 0
     try:
-        r = set_limit(name, set_to)
+        r = set_limit(name, set_to, reset)
     except (ValueError, LookupError, RuntimeError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
@@ -783,11 +802,15 @@ def main() -> int:
     p_is.add_argument("--to", required=True,
                       help="observatory | claude-mem | vault:<project>/<env>/<NAME>")
     p_is.add_argument("--project", help="the project this key serves")
+    p_is.add_argument("--reset", choices=RESETS, default="monthly",
+                      help="when the ceiling starts again (default monthly)")
     sub.add_parser("list", help="what exists — names, ceilings, places; never values")
     sub.add_parser("ping", help="alive? spent how much of its ceiling?")
     p_li = sub.add_parser("limit", help="show or move a key's USD ceiling")
     p_li.add_argument("name")
     p_li.add_argument("--set", type=float, dest="set_to")
+    p_li.add_argument("--reset", choices=RESETS, default=None,
+                      help="with --set: the new period; without it the key keeps its own")
     p_di = sub.add_parser("disable", help="stop a key spending, reversibly")
     p_di.add_argument("name")
     p_en = sub.add_parser("enable", help="let a disabled key spend again")
@@ -807,13 +830,13 @@ def main() -> int:
     if a.cmd == "adopt":
         return cmd_adopt(a.label)
     if a.cmd == "issue":
-        return cmd_issue(a.name, a.limit, a.account, a.to, a.project)
+        return cmd_issue(a.name, a.limit, a.account, a.to, a.project, a.reset)
     if a.cmd == "list":
         return cmd_list()
     if a.cmd == "ping":
         return cmd_ping()
     if a.cmd == "limit":
-        return cmd_limit(a.name, a.set_to)
+        return cmd_limit(a.name, a.set_to, a.reset)
     if a.cmd == "disable":
         return cmd_toggle(a.name, True)
     if a.cmd == "enable":

@@ -1709,6 +1709,48 @@ def test_or_issue_is_one_function_with_a_monthly_reset() -> None:
           "issue_key(" in code and '"/keys"' not in code and "def api(" not in code, "")
 
 
+def test_or_a_daily_ceiling_is_issued_and_keeps_its_period() -> None:
+    """A per-day spending ceiling (Fabric Switchboard SB-72): `issue --reset daily` creates the key
+    with a daily reset, and moving its ceiling later keeps the period — before, `limit --set` and
+    the dashboard's limit button sent `monthly` and silently turned a daily key monthly."""
+    m = orr()
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    m.ADMIN_STORE = d / "openrouter-admin"
+    m.ADMIN_STORE.mkdir(parents=True)
+    private_io.write(m.ADMIN_STORE / "example", "prov\n")
+    m.LEDGER = d / "ledger.json"
+    m.deliver = lambda value, to: f"file {to}"
+    sent = []
+
+    def fake(path, key, payload=None, method=None):
+        if path.startswith("/keys?"):
+            return {"data": []}
+        if path == "/keys" and payload:
+            sent.append(("create", payload))
+            return {"data": {"hash": "h-d", "label": "sk-or-v1-d...d"}, "key": "sk-or-v1-" + "d" * 40}
+        if method == "PATCH":
+            sent.append(("patch", payload))
+        return {"data": {"name": "fallback-agent", "hash": "h-d", "label": "sk-or-v1-d...d"}}
+    m._request = fake
+    m.find_key = lambda admin, name: {"name": name, "hash": "h-d", "label": "sk-or-v1-d...d"}
+    r = m.issue_key("fallback-agent", 5.0, "example", "observatory", None, "daily")
+    check("a daily ceiling is created daily", sent[0] == ("create", {"name": "fallback-agent", "limit": 5.0, "limit_reset": "daily"}), str(sent))
+    check("and reported daily", r["limit_reset"] == "daily", str(r))
+    moved = m.set_limit("fallback-agent", 8.0)
+    check("moving the ceiling keeps the daily period", sent[-1] == ("patch", {"limit": 8.0, "limit_reset": "daily"}) and moved["limit_reset"] == "daily", str(sent))
+    led = json.loads(m.LEDGER.read_text())
+    check("the ledger still says daily", led["issued"]["fallback-agent"]["limit_reset"] == "daily", str(led)[:200])
+    m.set_limit("fallback-agent", 8.0, "weekly")
+    check("an explicit period still moves it", sent[-1][1]["limit_reset"] == "weekly", str(sent[-1]))
+    for bad in ("hourly", "", "Daily"):
+        try:
+            m.issue_key("other", 5.0, "example", "observatory", None, bad)
+            check(f"a period {bad!r} is refused", False, "no raise")
+        except ValueError as exc:
+            check(f"a period {bad!r} is refused", "daily, weekly or monthly" in str(exc), str(exc))
+    check("--reset without --set is refused, nothing moved", m.cmd_limit("fallback-agent", None, "daily") == 2, "")
+
+
 def test_or_ping_names_the_strays_it_does_not_manage() -> None:
     """100 PRODUCTION_user_* keys live on the operator's account, minted by
     another system (measured 2026-09-13). Ping must SAY they exist and NEVER
@@ -1777,6 +1819,7 @@ if __name__ == "__main__":
                test_or_issue_refuses_a_name_that_already_exists,
                test_or_issue_works_on_an_account_past_the_listing,
                test_or_issue_is_one_function_with_a_monthly_reset,
+               test_or_a_daily_ceiling_is_issued_and_keeps_its_period,
                test_or_ping_names_the_strays_it_does_not_manage):
         fn()
     print()

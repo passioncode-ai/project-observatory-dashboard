@@ -5,6 +5,14 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+- **The OpenRouter door issues daily and weekly ceilings** (`openrouter.py issue --reset daily|weekly|monthly`,
+  `limit <name> --set N [--reset …]`; the dashboard's mint takes `limit_reset`). A per-day ceiling
+  is what Fabric Switchboard's paid fallback agents run under (its SB-72).
+- **Moving a ceiling no longer changes its period.** `limit <name> --set N` and the dashboard's
+  limit button sent `monthly` whatever the key had, so a daily or weekly key silently became
+  monthly; without `--reset` the key now keeps its own period
+  (`test_or_a_daily_ceiling_is_issued_and_keeps_its_period`).
+
 ## 0.17.3 — 2026-10-05
 
 A patch release. It fixes the root cause behind the torn database copies of 0.17.0–0.17.2,

@@ -248,9 +248,10 @@ def act_mint(body: dict) -> dict:
     limit = float(body.get("limit") or 0)
     if not math.isfinite(limit) or limit <= 0:
         raise ValueError("a mint without a limit is a key with no ceiling; give one")
-    audit("mint", name, {"destination": dest, "limit": limit})
+    reset = body.get("limit_reset") or "monthly"
+    audit("mint", name, {"destination": dest, "limit": limit, "limit_reset": reset})
     try:
-        r = _door().issue_key(name, limit, body.get("account"), dest, body.get("project"))
+        r = _door().issue_key(name, limit, body.get("account"), dest, body.get("project"), reset)
     except (ValueError, RuntimeError) as exc:
         raise LookupError(str(exc)) from None
     return {"ok": True, **r, "destination": dest}
@@ -259,7 +260,8 @@ def act_mint(body: dict) -> dict:
 def act_limit(body: dict) -> dict:
     label = body.get("label") or body.get("name") or ""
     limit = float(body.get("limit") or 0)
-    reset = body.get("limit_reset") or "monthly"
+    # None keeps the key's own period: a daily ceiling stays daily (the door decides).
+    reset = body.get("limit_reset") or None
     if not label or not math.isfinite(limit) or limit <= 0:
         raise ValueError("a label and a positive limit are both required")
     audit("limit", label, {"limit": limit, "limit_reset": reset})
