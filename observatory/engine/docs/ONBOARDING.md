@@ -808,7 +808,9 @@ Nothing needs to be run after a release. One job per workspace runs every hour: 
 - On macOS, when the installed app is older than the engine, it replaces the app with that
   release's app. The new app must pass the GitHub digest, `SHA256SUMS` and its signature by
   the organization's release key, `codesign`, the same signing team and Gatekeeper. It is
-  never replaced while this user has it open.
+  never replaced while this user has it open: the open app offers **Restart to update** (app
+  menu and the dashboard's toolbar), and installs the waiting version when you quit it or when
+  it has had no window on screen and no input for 30 minutes.
 - Once a day it takes a full encrypted backup, `daily-*.obsnap`, the newest three kept. It
   briefly stops this workspace's tick and server for the copy and starts them again. When a
   tick or an update is running, the backup waits for the next hour. Snapshots you take yourself
@@ -821,6 +823,7 @@ project-observatory full auto-update off      # new releases wait for you; the d
 project-observatory full auto-update on
 project-observatory full maintain status      # everything the job last did
 project-observatory full maintain run         # one pass now
+project-observatory full maintain app         # only the app step: swap a staged app (quit the app first)
 project-observatory full maintain uninstall   # no job at all; it stays off until `maintain ensure`
 ```
 

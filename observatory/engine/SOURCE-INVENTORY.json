@@ -772,8 +772,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "8c707947654dd382c72e7e347d71ec8319498b808e7ed399738275f00888411c",
-      "bytes": 63476,
+      "export_sha256": "93b85a840a3b6b69d662501faef976c417a148470a9e318bb10013aec4de2007",
+      "bytes": 63786,
       "upstream_modified": true
     },
     {
@@ -1150,8 +1150,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f031273c7869482e154ee8f72c6f67743e377ad38e662f57c362050dc5341d10",
-      "bytes": 54269
+      "export_sha256": "4d3b1345bbd1991f89c524a23b03f51d9c3a2df3a68478fb5d4ca6c7b978d5b0",
+      "bytes": 55798
     },
     {
       "path": "mcp/capability_tools.py",
@@ -1208,8 +1208,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "84e0ef07967426b8cad6c0f77a60635b9baf0b7b62d78873f96747bfac06a4e6",
-      "bytes": 81513,
+      "export_sha256": "0118cfa4f0234eea205cb6be5ee3ed53a64e977682f9ac4ea9c05747ba4c4755",
+      "bytes": 81681,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -1817,8 +1817,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "688ce7b93d40864654247569408e451c93c6d6ff3e940bc96a3da5e58a71468f",
-      "bytes": 21780,
+      "export_sha256": "4dabdc0060880f64a85c8cd2b538f2ac0a1ca26a6bb781366700b2c5d33ef00d",
+      "bytes": 21899,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2664,6 +2664,13 @@
       "upstream_modified": true,
       "export_sha256": "b7c77587c002de33404d16112fdefae5aafec66ed718ef71c8c219b91653178a",
       "bytes": 13907
+    },
+    {
+      "path": "tests/test_maintain_app.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "1a42f952ea96faf9bc4f2e099ab627792a0d6fd2bc3e63be3c005f27d910ef88",
+      "bytes": 4549
     },
     {
       "path": "tests/test_maintenance.py",
@@ -4276,7 +4283,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 547,
+  "file_count": 548,
   "excluded": [
     "git-history",
     "operator-registries",

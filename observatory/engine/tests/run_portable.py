@@ -150,6 +150,8 @@ BOUNDARY += ('forget_receipt',)
 BOUNDARY += ('facts_learning',)
 # Updates that arrive by themselves; data that survives a reinstall (docs/runs/2026-10-05-auto-update).
 BOUNDARY += ('maintenance',)
+# The app step alone, which the Mac app's Restart to update runs after it quits (LC-16).
+BOUNDARY += ('maintain_app',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',

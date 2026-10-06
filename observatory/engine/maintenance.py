@@ -18,6 +18,8 @@ timer on Linux — and each pass does only what is due:
     full maintain ensure               schedule the pass and mirror the passphrase
     full maintain uninstall            remove the schedule; it stays off until `ensure`
     full maintain status               what ran, when, and what it found
+    full maintain app                  the app step alone: swap a staged app now (the
+                                       Mac app runs it after it quits — LC-16 activation)
     full restore --latest              restore the newest backup of a workspace at this path
 
 The maintenance job is deliberately NOT one of install_launchd.managed_jobs(): those are
@@ -610,6 +612,30 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
         return report
 
 
+def run_app_step(base: Path, *, at: datetime.datetime | None = None, app=None) -> dict:
+    """Only the app step of a pass, under the same lock and in the same record.
+
+    The Mac app starts this from a detached helper once it has quit — its *Restart to
+    update*, a quit, or a long idle — so a verified bundle that waited with
+    `waiting-for-quit` is swapped in now instead of at the next hourly pass. Nothing else
+    a pass does (the engine update, the backup, the passphrase) runs here."""
+    at = at or now()
+    config.validate_workspace(base, required=True)
+    if sys.platform != "darwin" and app is None:
+        return {"status": "skipped", "detail": "the app exists only on macOS"}
+    with pass_lock(base) as held:
+        if not held:
+            return {"status": "busy", "detail": "another maintenance pass holds the lock"}
+        state = read_state(base)
+        try:
+            import app_update
+            result = (app or app_update.AppUpdater(base)).step(state, at)
+        except Exception as exc:  # noqa: BLE001 — recorded, as in a full pass
+            result = {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+        write_state(base, state)
+        return {"status": "ran", "at": iso(at), "app": result}
+
+
 def _rotate_logs(base: Path) -> None:
     """The job's own logs and the plugin hook's, under the engine's log policy (LC-12).
     The tick rotates store/logs too, but the tick is off by default (audit A19)."""
@@ -1034,7 +1060,7 @@ def restore_latest(base: Path, *, store=None, label: str | None = None) -> dict:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="project-observatory full maintain",
                                  description="updates that arrive by themselves and a daily backup")
-    ap.add_argument("action", choices=["run", "ensure", "uninstall", "status", "hook"])
+    ap.add_argument("action", choices=["run", "ensure", "uninstall", "status", "hook", "app"])
     ap.add_argument("--if-wanted", action="store_true",
                     help="with ensure: keep a schedule a person removed with `maintain uninstall` removed")
     return ap
@@ -1087,6 +1113,8 @@ def main(argv: list[str]) -> int:
             result = unschedule(base)
         elif a.action == "hook":
             result = hook(base)
+        elif a.action == "app":
+            result = run_app_step(base)
         else:
             result = status(base)
         print(json.dumps(result, indent=2))
