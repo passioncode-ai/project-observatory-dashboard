@@ -212,7 +212,6 @@
  "Notification channel failing": "Канал уведомлений сбоит",
  "Observatory MCP server not declared": "MCP-сервер обсерватории не объявлен",
  "Observer state": "Состояние наблюдателя",
- "Observer state, data freshness and the decision queue.": "Состояние наблюдателя, свежесть данных и очередь решений.",
  "One order by the chosen column": "Общий порядок по выбранному столбцу",
  "Organisation analytics account unreadable": "Аккаунт аналитики организации не читается",
  "Origin": "Источник",
@@ -2054,5 +2053,6 @@
  "step {step}, {at}": "шаг {step}, {at}",
  "step {step} in progress, {at}": "шаг {step} в работе, {at}",
  "step {step} done, {at}": "шаг {step} готов, {at}",
- "step {step} blocked, {at}": "шаг {step} заблокирован, {at}"
+ "step {step} blocked, {at}": "шаг {step} заблокирован, {at}",
+ "Observer state, data freshness and the agents' records.": "Состояние наблюдателя, свежесть данных и записи агентов."
 }

@@ -56,7 +56,7 @@ QUESTIONS: dict[str, str] = {
     "env":      "Variables by project, compared with the running environments.",
     "mcp":      "Agent servers, connections and reachability.",
     "traffic":  "Product audiences, data sources and linked projects.",
-    "health":   "Observer state, data freshness and the decision queue.",
+    "health":   "Observer state, data freshness and the agents' records.",
     "machine":  "What runs on this machine, where memory and disk go, and what was cleaned.",
 }
 #: The product's name is never translated (docs/brand/locales/*.md).

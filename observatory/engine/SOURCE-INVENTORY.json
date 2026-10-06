@@ -505,8 +505,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "59b1d078c64dc76cf30361171d4bc5cf903954b6b0580024c544d92fd6d73e49",
-      "bytes": 152335
+      "export_sha256": "0c63b635a660491fa09cfa6b6d819ce980de4c41a7efb15bbb10e3e51764e0aa",
+      "bytes": 152334
     },
     {
       "path": "dashboard/machine_page.py",
@@ -518,8 +518,8 @@
     {
       "path": "dashboard/shell.py",
       "source_sha256": "d4249174d8cbd7296825e38c520b3d841a13573022239d559b7d06f342218d30",
-      "export_sha256": "f52cbe7b5c7625b038f236f9c88e3674ac1cd420a59ca2adb2274ce81579ff3f",
-      "bytes": 23068,
+      "export_sha256": "359567dc991036e7994069281fa886a9f33e0fa9c470b82458c5b6014b93ccfa",
+      "bytes": 23069,
       "python_comments_removed": 38,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
