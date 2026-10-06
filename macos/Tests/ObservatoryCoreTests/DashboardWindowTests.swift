@@ -44,7 +44,7 @@ import ObservatoryCore
     private func open(_ model: Model, _ web: WebController) -> NSWindow {
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 620), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         w.isReleasedWhenClosed = false
-        w.contentView = NSHostingView(rootView: DashboardView().environmentObject(model).environmentObject(web))
+        w.contentView = NSHostingView(rootView: DashboardView().environmentObject(model).environmentObject(web).environmentObject(scratchUpdates()))
         windows.append(w)
         return w
     }

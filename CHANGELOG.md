@@ -5,6 +5,21 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Changed
+
+- **The Mac app installs its own updates.** When a new version is ready while the app is
+  open, the app menu and the dashboard's toolbar offer **Restart to update**. Choosing it
+  restarts the app on the new version. Quitting the app installs the waiting version too, and
+  so does leaving the app with no window open and untouched for 30 minutes; it then reopens in
+  the background. If the update cannot be installed, the previous version opens again. Until
+  now a person who kept the app open never got an update. Each step is logged in
+  `~/Library/Logs/Project Observatory/app.log`. `project-observatory full maintain app` runs
+  only the app step of the hourly job.
+- **The Mac app speaks Russian.** Menus, both windows, alerts and Settings open in Russian
+  when Russian is the first language in System Settings. Settings → Language now offers
+  System, English and Русский, and the choice is kept across updates. Counts use real Russian
+  plural forms.
+
 ## 0.18.0 — 2026-10-06
 
 A minor release, and it **changes behaviour**: an automatic or manual update installs only a

@@ -334,7 +334,7 @@ import ObservatoryCore
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/ObservatoryApp/App.swift"), encoding: .utf8)
         XCTAssertFalse(app.contains("WindowGroup("), "the dashboard must not be a WindowGroup")
-        XCTAssertTrue(app.contains("Window(model.t(\"Dashboard\", \"Дашборд\"), id: WindowID.dashboard)"))
+        XCTAssertTrue(app.contains("Window(model.t(\"Dashboard\"), id: WindowID.dashboard)"))
         XCTAssertFalse(app.contains("CommandGroup(before: .windowList)"), "no second Dashboard item in the Window menu")
     }
     func testAnUnmeasuredMachineIsNotCalledUnreadable() {

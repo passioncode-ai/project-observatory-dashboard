@@ -1,5 +1,7 @@
 import XCTest
 import Foundation
+@testable import ObservatoryApp
+import ObservatoryCore
 
 /// Defaults that live in memory only. A suite (`UserDefaults(suiteName:)`) is backed
 /// by cfprefsd, and `removePersistentDomain` empties it but leaves its file — and
@@ -29,6 +31,11 @@ final class MemoryDefaults: UserDefaults {
 extension XCTestCase {
     /// Defaults for this test only; nothing reaches the disk.
     func scratchDefaults(_ prefix: String = "observatory-tests") -> UserDefaults { MemoryDefaults() }
+    /// An update watch that logs into a temporary folder and can neither spawn nor quit.
+    @MainActor func scratchUpdates(_ defaults: UserDefaults? = nil) -> Updates {
+        let log = AppLog(file: FileManager.default.temporaryDirectory.appendingPathComponent("obs-log-\(UUID().uuidString)/app.log"))
+        return Updates(defaults: defaults ?? scratchDefaults(), log: log, spawn: { _, _ in throw BridgeError.configuration }, terminate: {})
+    }
 }
 
 final class ScratchDefaultsTests: XCTestCase {

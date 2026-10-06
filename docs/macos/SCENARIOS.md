@@ -19,6 +19,8 @@ ST-03: another agent invokes the same capability. Product outcome: unobserved.
 | SCN-007 | Opening the app shows the dashboard | draft |
 | SCN-008 | No server: saved pages, then Start server | draft |
 | SCN-009 | Window closed, Dock click brings it back | draft |
+| SCN-010 | An update is waiting: restart, quit or idle installs it | draft |
+| SCN-011 | The app speaks the person's language | draft |
 
 These scenarios are specified from the autonomous implementation brief, not human usability validation;
 coverage below names the regression tests and the native walkthroughs run on 2026-10-02 and in the three 2026-10-03 audits. See [receipts](../runs/2026-10-01-macos-app/README.md).
@@ -171,3 +173,55 @@ Assistant, so with only the Assistant open a Dock click brought nothing back (au
 decision — Assistant only → open, minimised → restore, dashboard visible → nothing; the single-window
 source check is `testTheDashboardIsOneWindowThatEveryCommandBringsForward` (`ModelTests.swift`). The
 reopen itself (SwiftUI creating the window) is verified by the walkthroughs only.
+
+## SCN-010 — An update is waiting: restart, quit or idle installs it
+Status: draft
+Product: unobserved
+Persona: P-01
+Traces: ST-02, JTBD-01, FLW-05
+Preconditions: the app is open; the engine's hourly pass verified a newer app and recorded
+`waiting-for-quit` with its `pending` version in the workspace's `store/maintenance.json`.
+Trigger: the app's launch or its 6-hourly check reads the record.
+Steps: **Restart to update** appears in the app menu and in the dashboard's toolbar (its help
+names the version) → the person chooses it → the app quits, a detached helper waits for it,
+runs `full maintain app` and opens the new app in front. Or: the person quits → the same swap,
+nothing reopens. Or: no window on screen, the app in the background, no input and no work for
+30 minutes → the same swap, the app reopens with no window and no focus.
+Expected result: a person who keeps the app open is never left on an old version, and nothing
+they are doing is interrupted: an open window, input in the last 30 minutes or a running
+question or build keeps the idle restart from happening.
+Errors & recovery: a swap that does not happen (refused bundle, another pass holding the lock
+for > 5 min, an engine failure) opens the old app again and logs `update_install failed` with
+its reason code; a helper that cannot start keeps the app running, logs `update_restart refused`
+and the toolbar's help says the update installs at quit; no newer pending version → no affordance.
+Coverage: `AppUpdateTests` (`testOnlyAStrictlyNewerReadableVersionIsOffered`,
+`testAStagedUpdateIsReadFromTheMaintenanceRecord`, `testIdleRestartNeedsAStagedUpdateNoWindowNoInputAndNoWork`,
+`testRestartWaitsForTheAppSwapsAndOpensTheNewOne`, `testARefusedSwapReopensTheOldAppAndSaysWhy`,
+`testAFailedEngineInTheBackgroundReopensWithoutAWindow`, `testAQuitSwapsAndOpensNothing`,
+`testTheHelperRunsInASessionOfItsOwn`, `testTheLogHoldsCodesOnlyInUTC`), `UpdatesTests`
+(restart, refusal, quit, no bundle) in `macos/Tests/ObservatoryCoreTests/AppUpdateTests.swift`;
+engine `observatory/engine/tests/test_maintain_app.py`. Not yet walked on a real Mac with a
+signed release: the menu item and toolbar button on screen, the real swap and relaunch, and
+`--background` keeping the reopened window hidden.
+
+## SCN-011 — The app speaks the person's language
+Status: draft
+Product: unobserved
+Persona: P-01
+Traces: ST-01, JTBD-01
+Preconditions: none.
+Trigger: launch; or Settings → Language.
+Steps: the app opens in Russian when the first preferred system language is Russian, in English
+otherwise → Settings → Language offers System / English / Русский → a choice re-words every window
+at once, reaches the dashboard page through `observatory.locale`, survives updates, and the menus
+macOS draws itself follow at the next launch.
+Expected result: one language across menus, windows, alerts and the dashboard; counts in real
+Russian plural forms; dates in the chosen language.
+Errors & recovery: an unknown stored value is System; a string with no Russian entry shows in
+English, never as a key; choosing a language on the dashboard page is adopted by the app.
+Coverage: `LocalizationTests` (`testTheSystemLanguageDecidesWhenNothingIsChosen` — `ru-RU`, `ru`,
+`en-US`, empty; `testAnUnknownStoredValueIsSystemAndTheOldSwitchIsStillRead`;
+`testTheChoicePersistsAndPinsTheMenusLanguage`; `testEveryKeyTheAppUsesHasARussianEntryWithTheSamePlaceholders`;
+`testEveryPluralEntryHasEachFormOfItsLanguage`; `testACountReadsInTheRightFormInBothLanguages`;
+`testTheBuiltResourcesAreTheSourceDictionaries`); `ModelTests` for the page round-trip. Not yet walked
+on a real Mac: the AppKit menus in Russian after a relaunch with Русский chosen on an English system.

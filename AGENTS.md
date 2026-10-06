@@ -185,7 +185,7 @@ The organisation's [lifecycle contract](https://github.com/passioncode-ai/fabric
 | keyserver `tools/keyserver.py` on `127.0.0.1:7717` | a person, by hand | — | while the terminal runs it | Ctrl-C | — |
 | memory over HTTP: `mcp/http_service.py`, Streamable HTTP on `127.0.0.1:47313` (`--port`) | `full memory-http`, by a person or the caller's own supervisor; no job is ever installed for it | — | while the process runs | Ctrl-C or its supervisor; nothing to clean up, it keeps no state | stateless; per-binding rate `--rate` (default 120/min); bodies over 4 MiB refused 413 by the MCP SDK's session manager (`DEFAULT_MAX_REQUEST_BODY_SIZE`) |
 | plugin `observatory-log` hooks | Claude Code: `SessionStart` (15 s), `Stop` (20 s) | per session start and per agent turn | nothing resident | the hook's own timeout | — |
-| `Project Observatory.app` | the person (not a login item) | — | stays in the Dock after its window closes; no polling at idle | Quit; `install-app.sh` quits it before replacing it | ~80 MB, 0% CPU |
+| `Project Observatory.app` | the person (not a login item); its own update helper reopens it after *Restart to update* (in front) or an idle restart (`--background`: no window, no focus) | reads `store/maintenance.json` at launch and every 6 h; an idle check every 60 s | stays in the Dock after its window closes; no polling at idle beyond those two | Quit; `install-app.sh` quits it before replacing it. A staged update is activated only at the person's *Restart to update*, the person's quit, or 30 min with no window on screen, no input and no work in flight (LC-16): a detached `/bin/sh` helper waits for the app to exit, runs `full maintain app`, reopens it (≤ 60 s wait, ≤ 15 min run) | ~80 MB, 0% CPU |
 
 - **No background job touches a protected place** (LC-06): disk sizing skips Documents, Downloads,
   Desktop, media folders, iCloud Drive and other apps' containers unless a person runs
@@ -194,6 +194,9 @@ The organisation's [lifecycle contract](https://github.com/passioncode-ai/fabric
   0600, launchd-held files copied and truncated — applied by the tick's `logs` step and by the
   server to its own `serverd.err`/`.out`. The logs live in the workspace's `store/logs/`, not
   `~/Library/Logs/<Product>/`: one account can hold several workspaces, and each keeps its own.
+  The app is one per account, so its own update events (`update_restart`, `update_install`,
+  codes only, UTC) go to `~/Library/Logs/Project Observatory/app.log`, 0600, under 1 MB with one
+  previous generation (`macos/Sources/ObservatoryCore/AppUpdate.swift`, `AppLog`).
 - **Plists** (LC-05): a minimal `PATH` (the directories holding the engine's tools, then the
   system ones) and the interpreter by its virtual-environment or Homebrew `opt` path; the
   installers refuse a plist naming a Cellar path (`install_launchd.lint_plist`).

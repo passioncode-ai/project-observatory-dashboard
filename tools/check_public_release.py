@@ -145,14 +145,19 @@ NATIVE_SOURCES = {
     "macos/Package.swift", "macos/scripts/build-app.sh",
     "macos/scripts/make-icon.swift", "macos/scripts/install-app.sh", "macos/scripts/notarize.sh",
     "macos/Sources/ObservatoryCore/Bridge.swift", "macos/Sources/ObservatoryCore/Navigation.swift",
-    "macos/Sources/ObservatoryCore/Palette.swift",
+    "macos/Sources/ObservatoryCore/Palette.swift", "macos/Sources/ObservatoryCore/Localization.swift",
+    "macos/Sources/ObservatoryCore/AppUpdate.swift",
+    "macos/Sources/ObservatoryCore/Resources/ru.lproj/Localizable.strings",
+    "macos/Sources/ObservatoryCore/Resources/ru.lproj/Localizable.stringsdict",
+    "macos/Sources/ObservatoryCore/Resources/en.lproj/Localizable.stringsdict",
     "macos/Sources/ObservatoryApp/App.swift", "macos/Sources/ObservatoryApp/Model.swift",
     "macos/Sources/ObservatoryApp/Assistant.swift", "macos/Sources/ObservatoryApp/Dashboard.swift",
-    "macos/Sources/ObservatoryApp/Theme.swift",
+    "macos/Sources/ObservatoryApp/Theme.swift", "macos/Sources/ObservatoryApp/Updates.swift",
     "macos/Tests/ObservatoryCoreTests/BridgeTests.swift", "macos/Tests/ObservatoryCoreTests/ModelTests.swift",
     "macos/Tests/ObservatoryCoreTests/NavigationTests.swift", "macos/Tests/ObservatoryCoreTests/PaletteTests.swift",
     "macos/Tests/ObservatoryCoreTests/DashboardWindowTests.swift", "macos/Tests/ObservatoryCoreTests/AccessibilityTests.swift",
-    "macos/Tests/ObservatoryCoreTests/ScratchDefaults.swift",
+    "macos/Tests/ObservatoryCoreTests/ScratchDefaults.swift", "macos/Tests/ObservatoryCoreTests/LocalizationTests.swift",
+    "macos/Tests/ObservatoryCoreTests/AppUpdateTests.swift",
 }
 
 
