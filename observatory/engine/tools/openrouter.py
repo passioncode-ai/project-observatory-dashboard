@@ -312,6 +312,16 @@ PAGE = 100
 PAGES_MAX = 200
 
 
+class ListingTooLong(RuntimeError):
+    """The provider listed more than PAGES_MAX pages. A RuntimeError, so every reader that
+    refuses a partial answer keeps refusing; `rows` holds the pages that were read, for the
+    one caller that can act on them and say what it did not read (`_name_check`)."""
+
+    def __init__(self, message: str, rows: list[dict]):
+        super().__init__(message)
+        self.rows = rows
+
+
 def _all_keys(admin: str, include_disabled: bool = True) -> list[dict]:
     """Every key the provisioning key governs, every page of them.
 
@@ -328,8 +338,9 @@ def _all_keys(admin: str, include_disabled: bool = True) -> list[dict]:
         if len(page) < PAGE:
             return rows
         offset += len(page)
-    raise RuntimeError(f"the provider listed more than {PAGES_MAX} pages of keys; refusing a partial answer — "
-                       "re-issue the key through this door, or record its hash in the ledger, so it is read by hash")
+    raise ListingTooLong(f"the provider listed more than {PAGES_MAX} pages of keys; refusing a partial answer — "
+                         "re-issue the key through this door, or record its hash in the ledger, so it is read by hash",
+                         rows)
 
 
 def find_key(admin: str, name: str) -> dict | None:
@@ -354,6 +365,35 @@ def find_key(admin: str, name: str) -> dict | None:
     return None
 
 
+def _name_check(admin: str, name: str) -> str | None:
+    """Refuse a name a key already carries; None when everything was read, else what was not.
+
+    A name the ledger recorded is read by its hash, completely. Any other name is searched in
+    the provider's listing — and an account governing more keys than PAGES_MAX pages (another
+    system mints a key per user under the same provisioning key: more than 20 000 on
+    2026-10-05) could then issue NOTHING, every issue refused for a listing it would never
+    finish. The pages that were read are still searched and a match there is still refused;
+    past them the issue goes ahead with the unread remainder named. That is safe for this
+    door: once issued, every operation reads the key by the hash recorded at issue, so a
+    same-named key past the listing is never mistaken for it.
+    """
+    if (ledger().get("issued", {}).get(name) or {}).get("hash"):
+        rows, caveat = [r for r in [find_key(admin, name)] if r], None
+    else:
+        try:
+            rows, caveat = _all_keys(admin), None
+        except ListingTooLong as exc:
+            rows = exc.rows
+            caveat = (f"the provider lists more than {len(rows)} keys; the name was checked against "
+                      f"the first {len(rows)} and this door's ledger, not the rest")
+    if any(r.get("name") == name for r in rows):
+        raise ValueError(f"a key called {name!r} already exists — "
+                         f"`rotate {name}` replaces its value, `limit {name} --set` "
+                         f"moves its ceiling; a second key with the same name is how "
+                         f"spend becomes unattributable")
+    return caveat
+
+
 def issue_key(name: str, limit: float, account: str | None, to: str,
               project: str | None) -> dict:
     """Mint, deliver, record. The ONE issuer: `tools/keyserver.py`'s HTTP
@@ -369,11 +409,10 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     to = vault_destination(to)
     doc = ledger()
     label, admin = read_admin(account)
-    if find_key(admin, name):
-        raise ValueError(f"a key called {name!r} already exists in {label!r} — "
-                         f"`rotate {name}` replaces its value, `limit {name} --set` "
-                         f"moves its ceiling; a second key with the same name is how "
-                         f"spend becomes unattributable")
+    try:
+        name_check = _name_check(admin, name)
+    except ValueError as exc:
+        raise ValueError(str(exc).replace(" already exists", f" already exists in {label!r}", 1)) from None
     # A MONTHLY RESET, not a lifetime cap (trap T17): a lifetime cap works until
     # the total is reached and then stops — months later, with no warning.
     # Found in the audit that merged keyserver's mint into this door: it set
@@ -392,11 +431,12 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
         "account": label, "hash": row.get("hash"), "destination": to,
         "delivered_to": place, "project": project,
         "limit_usd": limit, "limit_reset": "monthly", "issued_on": today(),
-        "rotated_on": None, "rotations": 0}
+        "rotated_on": None, "rotations": 0, "name_check": name_check}
     save_ledger(doc)
-    _journal("issue", f"openrouter/{label}/{name}", to=to, limit_usd=limit)
+    _journal("issue", f"openrouter/{label}/{name}", to=to, limit_usd=limit, name_check=name_check)
     return {"name": name, "account": label, "label": row.get("label"),
-            "limit": limit, "limit_reset": "monthly", "delivered_to": place}
+            "limit": limit, "limit_reset": "monthly", "delivered_to": place,
+            "name_check": name_check}
 
 
 def cmd_issue(name: str, limit: float, account: str | None, to: str,
@@ -411,6 +451,8 @@ def cmd_issue(name: str, limit: float, account: str | None, to: str,
         return 1
     print(f"issued {r['name']!r} from {r['account']!r}, ceiling ${r['limit']:g} monthly, "
           f"delivered to {r['delivered_to']}")
+    if r.get("name_check"):
+        print(f"note: {r['name_check']}", file=sys.stderr)
     return 0
 
 
