@@ -361,10 +361,6 @@
   "one": "{n} log of {product} is readable by other accounts",
   "other": "{n} logs of {product} are readable by other accounts"
  },
- "{n} more are waiting; the page shows the newest. The whole queue:": {
-  "one": "{n} more is waiting; the page shows the newest. The whole queue:",
-  "other": "{n} more are waiting; the page shows the newest. The whole queue:"
- },
  "{n} names": {
   "one": "{n} name",
   "other": "{n} names"
@@ -617,5 +613,14 @@
  "{n} commits": {
   "one": "{n} commit",
   "other": "{n} commits"
- }
+ },
+ "{n} records agents wrote are not yet confirmed. An independent source confirms a record, or it is retired after {days} d. Nothing here needs you.": {
+  "one": "{n} record an agent wrote is not yet confirmed. An independent source confirms a record, or it is retired after {days} d. Nothing here needs you.",
+  "other": "{n} records agents wrote are not yet confirmed. An independent source confirms a record, or it is retired after {days} d. Nothing here needs you."
+ },
+ "Show the newest {n}": {
+  "one": "Show the newest {n}",
+  "other": "Show the newest {n}"
+ },
+ "language@@System": "System"
 }

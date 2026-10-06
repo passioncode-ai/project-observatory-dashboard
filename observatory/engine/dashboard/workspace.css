@@ -72,15 +72,23 @@ body[data-page] .pages a.pg .n {
   opacity: 1;
   color: var(--muted);
 }
+/* Language: System on its own row, English and Russian beneath it — three
+ * words do not fit the rail side by side (L10N-01). */
 body[data-page] .locale-switch {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   margin: auto 0 0;
   flex: 0 0 auto;
 }
 body[data-page] .locale-switch button {
-  flex: 1;
   padding: var(--space-2) var(--space-1);
+  letter-spacing: 0;
 }
+body[data-page] .locale-switch button[data-locale="system"] {
+  grid-column: 1 / -1;
+  border-bottom: 1px solid var(--border-strong);
+}
+body[data-page] .locale-switch button[data-locale="en"] { border-left: 0; }
 body[data-page] .family-link {
   padding: 0 var(--space-2);
 }

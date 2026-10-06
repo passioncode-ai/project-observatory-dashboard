@@ -5,6 +5,91 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.19.0 — 2026-10-07
+
+A minor release, and it **changes behaviour**: updates follow the organization's one update
+behaviour (LC-16) — a check every six hours, a switch file, activation only when nobody is using
+the observatory, held releases — and the Mac app installs its own updates. The dashboard and the
+Mac app follow the reader's system language and the organization's glossary. The companion
+plugin `observatory-log` moves to 0.19.0.
+
+### Changed
+
+- **The agents' records ask nothing of you.** Observations, notes and sessions agents write
+  are their working memory: an independent source confirms one, or it is retired after 90
+  days. The Health page no longer shows them as "Awaiting a person's decision" with accept and
+  reject buttons on every row; a section "Agents' records" says nothing there needs you and
+  folds the newest rows, and the overview card no longer counts them.
+
+- **The Mac app installs its own updates.** When a new version is ready while the app is
+  open, the app menu and the dashboard's toolbar offer **Restart to update**. Choosing it
+  restarts the app on the new version. Quitting the app installs the waiting version too, and
+  so does leaving the app with no window open and untouched for 30 minutes; it then reopens in
+  the background. If the update cannot be installed, the previous version opens again. Until
+  now a person who kept the app open never got an update. Each step is logged in
+  `~/Library/Logs/Project Observatory/app.log`. `project-observatory full maintain app` runs
+  only the app step of the hourly job.
+- **The Mac app speaks Russian.** Menus, both windows, alerts and Settings open in Russian
+  when Russian is the first language in System Settings. Settings → Language now offers
+  System, English and Русский, and the choice is kept across updates. Counts use real Russian
+  plural forms.
+- **The dashboard follows the reader's system language.** It opens in Russian when the first
+  preferred system language is Russian and in English otherwise, whatever language the pages
+  were built in. The language switch now offers System, English and Русский; a reader's
+  choice is kept in the browser and survives rebuilds and updates, and System hands the
+  decision back to the system. `interface.locale` is now the language of a build that no
+  browser reads (the CLI, the session hook, the checks) and of a browser that reports no
+  language.
+- **Russian terms follow the organisation's glossary.** A workflow is «задача» (a background
+  job is «задание»), a backup «резервная копия», the vault «хранилище», an account «аккаунт».
+- **Dates and numbers follow the language.** Russian pages write dates as `02.01.2026` and
+  numbers with a decimal comma; sizes on the Machine page carry their unit in the reader's
+  language.
+- **Refusals and degraded reasons are translated where they are shown.** Text the engine
+  writes in English reads in Russian when the catalog has it, and in English otherwise.
+
+### Fixed
+
+- **The Dock no longer draws a blank icon for the app.** The updater stages the new bundle and
+  keeps the retired one; macOS registers every bundle it sees, and one deleted while still
+  registered stayed the app's record. Each bundle is now unregistered before its folder is
+  removed.
+- **An automatic update waits for a running tick** instead of stopping it halfway, as the daily
+  backup already did.
+- **Every line the local server writes to `serverd.err` starts with its time** (UTC).
+- A page built in one language and read in the other no longer keeps words, units, dates or
+  tooltips in the build's language on the Machine and Agents pages.
+- **Updates behave as in every other product of the organization** (lifecycle LC-16). This
+  changes behaviour:
+  - **The switch is a file.** "Install updates automatically" is the file `auto-update` in the
+    workspace folder: without it updates are on, and only the word `off` in it turns them off.
+    `full auto-update on|off` writes it. An update, a reinstall or an uninstall never writes it.
+    If you turned updates off in 0.17 or 0.18 (`updates.auto: false` in `settings.json`), they
+    stay off, and the next `full auto-update` command moves that choice into the file and says
+    so. Off now also stops the Mac app's update.
+  - **A check every six hours** instead of once a day. The first check comes 90 seconds after
+    the job starts at login. A check that could not reach GitHub is tried once more within the
+    hour, then every six hours again.
+  - **A new release starts running only when nobody is using it.** The job installs an update
+    when the local server has served no page or agent, and no memory-over-HTTP client has
+    called, for five minutes. Otherwise the release waits as "ready" and the next hourly pass
+    tries again. It also waits while a tick is running, which an automatic update used to stop
+    half-way. `full update --apply` by hand still installs at once. A running Claude Code
+    session is never stopped by an update.
+  - **A release that needs a person waits for one.** When a release declares a step to do by
+    hand (`RELEASE.json` inside its signed wheel), the job downloads and verifies it, and
+    `doctor`, the Health page and `auto-update status` show the step. It is not installed until
+    you run `full update --apply`, which shows the step first.
+  - **An installed release reads only the organization's feed.** `OBSERVATORY_RELEASE_REPOSITORY`
+    and `OBSERVATORY_RELEASE_API` now work only from a source checkout; an installed release
+    ignores them and says so. `--repository` and `--api-url` still choose a fork or a mirror.
+  - **The Mac app is installed only when signed by the organization's team** (`KJ35UYYL22`),
+    whoever signed the copy already installed. An installed app with no team is still left
+    alone.
+- **Every update stage is logged by code** in `~/Library/Logs/Project Observatory/updates.jsonl`
+  (`~/.local/state/project-observatory/logs/` on Linux): checks, downloads, installs, restarts
+  and the switch. Codes only, with no version, path or message.
+
 ## 0.18.0 — 2026-10-06
 
 A minor release, and it **changes behaviour**: an automatic or manual update installs only a

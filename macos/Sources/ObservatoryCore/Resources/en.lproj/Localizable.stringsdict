@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Plural forms (L10N-03). The key is the English sentence the code passes to `plural`;
+     the variable named in NSStringLocalizedFormatKey is the count that picks the form.
+     The forms use the app's {name} placeholders, filled by ObservatoryCore.Localizer,
+     not printf specifiers: these entries are read by the app, not by NSLocalizedString. -->
+<plist version="1.0">
+<dict>
+	<key>A question must be 1 to {limit} characters.</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@limit@</string>
+		<key>limit</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>d</string>
+			<key>one</key>
+			<string>A question must be 1 to {limit} character.</string>
+			<key>other</key>
+			<string>A question must be 1 to {limit} characters.</string>
+		</dict>
+	</dict>
+	<key>The question is longer than {limit} characters.</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@limit@</string>
+		<key>limit</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>d</string>
+			<key>one</key>
+			<string>The question is longer than {limit} character.</string>
+			<key>other</key>
+			<string>The question is longer than {limit} characters.</string>
+		</dict>
+	</dict>
+	<key>{shown} of {total} findings were included, most severe first.</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@total@</string>
+		<key>total</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>d</string>
+			<key>one</key>
+			<string>{shown} of {total} finding was included, most severe first.</string>
+			<key>other</key>
+			<string>{shown} of {total} findings were included, most severe first.</string>
+		</dict>
+	</dict>
+	<key>{shown} of {total} projects were included; choose a project for detail.</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@total@</string>
+		<key>total</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>d</string>
+			<key>one</key>
+			<string>{shown} of {total} project was included; choose a project for detail.</string>
+			<key>other</key>
+			<string>{shown} of {total} projects were included; choose a project for detail.</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

@@ -5,7 +5,7 @@ import os
 import re
 from pathlib import Path
 
-VERSION = "0.18.0"
+VERSION = "0.19.0"
 CONFIG_VERSION = 1
 WORKSPACE_VERSION = 1
 SOURCE = Path(__file__).resolve().parent
@@ -92,8 +92,11 @@ INTERFACE_SETTINGS = {"locale": ("en", "ru")}
 STORAGE_SETTINGS = ("backups",)
 
 #: What `updates` in settings.json may hold (maintenance.py). Both default to true when
-#: absent: `auto` installs each new stable release by itself, `scheduled` keeps the
-#: hourly maintenance job in place. An older reader never reads the key.
+#: absent: `scheduled` keeps the hourly maintenance job in place. `auto` is how 0.17 and
+#: 0.18 turned automatic updates off; since 0.19 the switch is the file `auto-update` in
+#: the home (LC-16), a false `auto` is still read as off while that file is absent, and
+#: the next `full auto-update` command moves it into the file. An older reader never
+#: reads the key.
 UPDATE_SETTINGS = ("auto", "scheduled")
 
 #: Every switch and source the engine reads. `configure` refuses any other name:
@@ -182,7 +185,8 @@ def known_names(section: str) -> frozenset:
     return frozenset(names)
 
 def interface_locale(base: Path | None = None) -> str:
-    """The dashboard's language for this workspace: `interface.locale`, else English."""
+    """The language this workspace builds its pages in: `interface.locale`, else English.
+    A reader's browser decides its own (dashboard/i18n.py, L10N-01)."""
     return load(base).get("interface", {}).get("locale", "en")
 
 def load(base: Path | None = None) -> dict:

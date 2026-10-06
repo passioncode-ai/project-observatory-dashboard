@@ -33,6 +33,7 @@ import backup_vault as vault
 import maintenance as M
 import app_update as A
 import release_signature
+import update_events
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pgp_fixture
 
@@ -130,7 +131,9 @@ class Base(unittest.TestCase):
         self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home),
                                            "OBSERVATORY_BACKUPS": str(self.root),
                                            "HOME": str(self.base / "user"),
-                                           "XDG_CONFIG_HOME": str(self.base / "xdg-config")}, clear=True)
+                                           "XDG_CONFIG_HOME": str(self.base / "xdg-config"),
+                                           "OBSERVATORY_PRODUCT_LOG_DIR": str(self.base / "product-logs")},
+                              clear=True)
         self.env.start()
         workspace.initialize(self.home)
         import paths
@@ -161,19 +164,83 @@ class Base(unittest.TestCase):
 
 # --- R1: the switch ------------------------------------------------------------------
 
+def events():
+    rows = update_events.read()
+    for row in rows:
+        assert set(row) <= {"at", "event", "code", "subject", "instance"}, row
+    return [(r["event"], r["code"]) for r in rows]
+
+
 class Switch(Base):
+    """LC-16: the file `auto-update` in the home; absent = on, only `off` is off."""
+
     def test_automatic_updates_are_on_until_a_person_turns_them_off(self):
         self.assertTrue(M.auto_enabled(self.home))
         self.assertTrue(M.schedule_wanted(self.home))
+        self.assertFalse((self.home / "auto-update").exists(), "a new workspace writes no switch")
         code, doc, _ = self.cli("auto-update", "off")
         self.assertEqual((code, doc["auto_update"]), (0, False))
-        self.assertIs(config.load(self.home)["updates"]["auto"], False)
+        self.assertEqual((self.home / "auto-update").read_text(), "off\n")
+        self.assertEqual(stat.S_IMODE((self.home / "auto-update").stat().st_mode), 0o600)
+        self.assertNotIn("updates", config.load(self.home), "the switch is the file, not settings.json")
+        self.assertEqual(doc["switch"]["label"], "Install updates automatically")
         code, doc, _ = self.cli("auto-update", "on")
         self.assertEqual((code, doc["auto_update"]), (0, True))
         code, doc, _ = self.cli("auto-update", "status")
         self.assertEqual(code, 0)
         self.assertIs(doc["auto_update"], True)
+        self.assertEqual(doc["switch"]["source"], "file")
         self.assertIn("warnings", doc)
+        self.assertEqual(events(), [("auto_update", "off"), ("auto_update", "on")])
+
+    def test_only_the_word_off_turns_it_off(self):
+        switch = self.home / "auto-update"
+        for text, on in (("off", False), ("  OFF \n", False), ("Off", False), ("on", True), ("", True),
+                         ("no", True), ("off please", True), ("false", True)):
+            with self.subTest(text=text):
+                switch.write_text(text)
+                self.assertIs(M.auto_enabled(self.home), on)
+        switch.unlink()
+        target = self.base / "elsewhere"
+        target.write_text("off")
+        switch.symlink_to(target)
+        self.assertTrue(M.auto_enabled(self.home), "a link in the switch's place is not a switch")
+
+    def test_an_older_installs_setting_is_still_off_and_moves_into_the_file(self):
+        M.set_setting(self.home, "auto", False)        # how 0.17 and 0.18 turned updates off
+        self.assertFalse(M.auto_enabled(self.home))
+        self.assertEqual(M.switch_status(self.home)["source"], "settings")
+        code, doc, err = self.cli("auto-update", "status")
+        self.assertEqual(code, 0)
+        self.assertIs(doc["auto_update"], False)
+        self.assertIn("moved", doc["migrated"])
+        self.assertIn("moved", err, "the move is said, not done in silence")
+        self.assertEqual((self.home / "auto-update").read_text(), "off\n")
+        self.assertNotIn("auto", config.load(self.home).get("updates", {}))
+        self.assertFalse(M.auto_enabled(self.home))
+        # A file a person wrote wins over a setting left behind.
+        M.set_setting(self.home, "auto", False)
+        (self.home / "auto-update").write_text("on\n")
+        self.assertTrue(M.auto_enabled(self.home))
+
+    def test_an_update_a_reinstall_or_an_uninstall_never_writes_the_switch(self):
+        commands = FakeCommands(check=10, apply=0)
+        with patch.object(M, "_services", return_value=None):
+            M.run_pass(self.home, at=AT, commands=commands, services=None, store=self.store, app=NoApp(),
+                       sleep=lambda s: None)
+        M.ensure(self.home, schedule=FakeSchedule(), store=self.store)
+        M.unschedule(self.home, schedule=FakeSchedule())
+        self.assertFalse((self.home / "auto-update").exists(), "never written back to on")
+        (self.home / "auto-update").write_text("off\n")
+        M.ensure(self.home, schedule=FakeSchedule(), store=self.store, explicit=True)
+        M.run_pass(self.home, at=AT + datetime.timedelta(days=1), commands=commands, services=None,
+                   store=self.store, app=NoApp(), sleep=lambda s: None)
+        self.assertEqual((self.home / "auto-update").read_text(), "off\n", "and never to off either")
+        # A snapshot and its restore carry the switch as it was (a rollback swaps the home).
+        restored = self.base / "restored home"
+        snap = workspace_upgrade.snapshot(self.home, self.base / "snap", writers_stopped=True)
+        workspace_upgrade.restore(Path(snap["snapshot"]), restored)
+        self.assertEqual((restored / "auto-update").read_text(), "off\n")
 
     def test_the_setting_is_validated_and_stays_optional(self):
         doc = config.load(self.home)
@@ -187,6 +254,49 @@ class Switch(Base):
         self.assertEqual(config.load(self.home)["updates"], {"auto": False, "scheduled": True})
         # An older reader reads only the keys it knows and `must_understand` stays empty.
         self.assertEqual(config.load(self.home).get("must_understand", []), [])
+
+
+class UpdateLog(Base):
+    """LC-16 "Log events": codes only, in the product's log folder, never the real one in tests."""
+
+    def test_the_folder_is_the_products_and_overridable(self):
+        self.assertEqual(update_events.directory(), self.base / "product-logs")
+        with patch.dict(os.environ, {update_events.DIR_ENV: ""}), patch.object(sys, "platform", "darwin"):
+            self.assertEqual(update_events.directory(),
+                             self.base / "user" / "Library" / "Logs" / "Project Observatory")
+        with patch.dict(os.environ, {update_events.DIR_ENV: "", "XDG_STATE_HOME": str(self.base / "state")}), \
+                patch.object(sys, "platform", "linux"):
+            self.assertEqual(update_events.directory(), self.base / "state" / "project-observatory" / "logs")
+
+    def test_one_line_per_event_codes_only_owner_only(self):
+        update_events.emit("update_check", "ready", base=self.home)
+        update_events.emit("update_install", "started", subject="app", base=self.home)
+        file = self.base / "product-logs" / update_events.FILE
+        self.assertEqual(stat.S_IMODE(file.stat().st_mode), 0o600)
+        rows = [json.loads(line) for line in file.read_text().splitlines()]
+        self.assertEqual([(r["event"], r["code"], r["subject"]) for r in rows],
+                         [("update_check", "ready", "engine"), ("update_install", "started", "app")])
+        for row in rows:
+            self.assertRegex(row["at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+            self.assertRegex(row["instance"], r"^[0-9a-f]{16}$")
+            self.assertNotIn(str(self.home), json.dumps(row), "no path")
+        with self.assertRaises(ValueError):
+            update_events.emit("update_check", "something-else")
+
+    def test_every_lc16_code_is_known(self):
+        self.assertEqual({k: set(v) for k, v in update_events.EVENTS.items()}, {
+            "update_check": {"current", "ready", "check_failed", "download_failed", "signature_failed",
+                             "install_failed", "needs_migration"},
+            "update_download": {"started", "done"},
+            "update_install": {"started", "installed", "failed", "timeout"},
+            "update_restart": {"requested", "refused"},
+            "auto_update": {"on", "off"}})
+
+    def test_a_folder_that_cannot_be_written_loses_the_line_not_the_caller(self):
+        blocker = self.base / "a file"
+        blocker.write_text("")
+        with patch.dict(os.environ, {update_events.DIR_ENV: str(blocker / "logs")}):
+            update_events.emit("auto_update", "on")      # no exception
 
 
 # --- R5: the passphrase outside the workspace ------------------------------------------
@@ -457,11 +567,11 @@ class Pass(Base):
     def test_codes_match_the_updater(self):
         import engine_update as eu
         self.assertEqual((M.UPDATE_OK, M.UPDATE_FAILED, M.UPDATE_REFUSED, M.UPDATE_UNDETERMINED,
-                          M.UPDATE_NEEDS_PERSON, M.UPDATE_SERVICES, M.UPDATE_AVAILABLE),
+                          M.UPDATE_NEEDS_PERSON, M.UPDATE_SERVICES, M.UPDATE_HELD, M.UPDATE_AVAILABLE),
                          (eu.EXIT_OK, eu.EXIT_FAILED, eu.EXIT_REFUSED, eu.EXIT_UNDETERMINED,
-                          eu.EXIT_NEEDS_PERSON, eu.EXIT_SERVICES, eu.EXIT_UPDATE_AVAILABLE))
+                          eu.EXIT_NEEDS_PERSON, eu.EXIT_SERVICES, eu.EXIT_HELD, eu.EXIT_UPDATE_AVAILABLE))
 
-    def test_up_to_date_checks_once_a_day_and_takes_the_daily_backup(self):
+    def test_up_to_date_checks_on_its_cadence_and_takes_the_daily_backup(self):
         commands = FakeCommands(check=0)
         report = self.run_pass(commands, services=FakeServices())
         self.assertEqual(report["update"]["result"], "up-to-date")
@@ -480,7 +590,7 @@ class Pass(Base):
         commands = FakeCommands(check=10, apply=0, latest="9.9.9")
         report = self.run_pass(commands)
         self.assertEqual(report["update"]["result"], "updated")
-        self.assertEqual([c[0] for c in commands.calls], [("update", "--check"), ("update", "--apply")])
+        self.assertEqual([c[0] for c in commands.calls], [("update", "--check"), ("update", "--apply", "--unattended")])
         self.assertEqual(commands.calls[1][1].get("OBSERVATORY_SYSTEM_SETUP"), "1")
         state = M.read_state(self.home)
         self.assertEqual((state["update"]["from"], state["update"]["to"]), (config.VERSION, "9.9.9"))
@@ -492,7 +602,7 @@ class Pass(Base):
         commands = FakeCommands(check=10, apply=0)
         with patch.object(M, "_services", return_value=None):
             self.assertEqual(self.run_pass(commands)["update"]["result"], "updated")
-        self.assertEqual(commands.calls[1][0], ("update", "--apply", "--writers-stopped"))
+        self.assertEqual(commands.calls[1][0], ("update", "--apply", "--unattended", "--writers-stopped"))
 
     def test_an_update_already_running_is_left_alone_and_tried_the_next_hour(self):
         commands = FakeCommands(check=10)
@@ -623,7 +733,7 @@ class Pass(Base):
         self.assertTrue((big.parent / "maintenance.log.1").exists())
         self.assertTrue((hooks / "update-bridge.log.1").exists())
 
-    def test_a_failed_update_is_retried_the_next_day_not_the_next_hour(self):
+    def test_a_failed_update_is_retried_at_the_next_check_not_the_next_hour(self):
         commands = FakeCommands(check=10, apply=1)
         self.assertEqual(self.run_pass(commands)["update"]["result"], "failed-rolled-back")
         self.assertEqual(M.read_state(self.home)["update"]["failures"], 1)
@@ -681,6 +791,168 @@ class Pass(Base):
         self.assertEqual(report["update"]["result"], "off")
         self.assertEqual(commands.calls, [])
         self.assertEqual(report["snapshot"]["result"], "taken")
+
+    # --- LC-16 -------------------------------------------------------------------------
+
+    def test_the_switch_set_to_off_stops_checks_downloads_and_installs_the_apps_too(self):
+        (self.home / "auto-update").write_text("off\n")
+        commands = FakeCommands(check=10)
+        app = RecordingApp()
+        report = self.run_pass(commands, services=FakeServices(), app=app)
+        self.assertEqual((report["update"]["result"], report["app"]["result"]), ("off", "off"))
+        self.assertEqual((commands.calls, app.calls), ([], []), "no check, no download, no install")
+        self.assertEqual(report["snapshot"]["result"], "taken", "the daily backup keeps running")
+
+    def test_a_check_every_six_hours(self):
+        self.assertEqual(M.CHECK_EVERY, datetime.timedelta(hours=6))
+        commands = FakeCommands(check=0)
+        self.run_pass(commands)
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(hours=5, minutes=59))["update"]["result"],
+                         "not-due")
+        self.assertEqual(self.run_pass(commands, at=AT + datetime.timedelta(hours=6))["update"]["result"], "up-to-date")
+        self.assertEqual(len(commands.calls), 2)
+
+    def test_a_failed_check_is_retried_once_within_the_hour_then_every_six_hours(self):
+        commands = FakeCommands(check=3)
+        self.assertEqual(self.run_pass(commands)["update"]["result"], "undetermined")
+        hour = AT + datetime.timedelta(hours=1)
+        self.assertEqual(self.run_pass(commands, at=hour)["update"]["result"], "undetermined")
+        self.assertEqual(M.read_state(self.home)["check"]["failures"], 2)
+        self.assertEqual(self.run_pass(commands, at=hour + datetime.timedelta(hours=1))["update"]["result"], "not-due",
+                         "one retry, then back to the six-hour cadence")
+        self.assertEqual(self.run_pass(commands, at=hour + datetime.timedelta(hours=6))["update"]["result"],
+                         "undetermined")
+        commands.check = 0
+        later = hour + datetime.timedelta(hours=12)
+        self.assertEqual(self.run_pass(commands, at=later)["update"]["result"], "up-to-date")
+        self.assertNotIn("failures", M.read_state(self.home)["check"])
+
+    def test_the_schedulers_first_check_waits_90_seconds_after_the_start(self):
+        order = []
+        commands = FakeCommands(check=0)
+        original = commands.full
+
+        def full(*args, **kw):
+            order.append("check")
+            return original(*args, **kw)
+        commands.full = full
+        report = M.run_pass(self.home, at=AT, commands=commands, services=None, store=self.store, app=NoApp(),
+                            sleep=lambda s: order.append(("sleep", s)), first_check_delay=90,
+                            clock=lambda: M.PROCESS_STARTED + 10)
+        self.assertEqual(report["update"]["result"], "up-to-date")
+        self.assertEqual(order[:2], [("sleep", 80), "check"], "the check waits, then runs")
+        order.clear()
+        M.run_pass(self.home, at=AT + datetime.timedelta(hours=1), commands=commands, services=None,
+                   store=self.store, app=NoApp(), sleep=lambda s: order.append(("sleep", s)),
+                   first_check_delay=90, clock=lambda: M.PROCESS_STARTED + 10)
+        self.assertNotIn("check", order)
+        self.assertFalse([o for o in order if isinstance(o, tuple) and o[1] == 80], "no wait when no check is due")
+        code = M.parser().parse_args(["run", "--first-check-delay", "90"])
+        self.assertEqual(code.first_check_delay, 90)
+
+    def receipt(self, at, recent=True, silent=480):
+        raw = self.home / "store" / "raw"
+        raw.mkdir(parents=True, exist_ok=True)
+        (raw / "serverd.json").write_text(json.dumps({"at": M.iso(at), "silent_after_s": silent,
+                                                      "clients": {"recent": recent, "window_s": 300}}))
+
+    def test_a_live_client_of_the_server_defers_the_activation_to_the_next_pass(self):
+        self.receipt(AT, recent=True)
+        commands = FakeCommands(check=10, apply=0)
+        report = self.run_pass(commands)
+        self.assertEqual(report["update"]["result"], "deferred")
+        self.assertEqual([c[0] for c in commands.calls], [("update", "--check")], "nothing installed")
+        self.assertIn(("update_restart", "refused"), events())
+        state = M.read_state(self.home)
+        self.assertEqual((state["update"]["result"], state["update"]["to"]), ("deferred", "9.9.9"))
+        self.assertIn("deferred", [w["code"] for w in M.status(self.home, schedule=FakeSchedule())["warning_items"]])
+        # The next hourly pass, the client gone: installed.
+        self.receipt(AT + datetime.timedelta(hours=1), recent=False)
+        later = self.run_pass(commands, at=AT + datetime.timedelta(hours=1))
+        self.assertEqual(later["update"]["result"], "updated")
+        self.assertEqual(commands.calls[-1][0], ("update", "--apply", "--unattended"))
+
+    def test_a_running_tick_defers_the_update_instead_of_stopping_it(self):
+        # 2026-10-06: an automatic update stopped the tick that had started a minute
+        # earlier, and it never finished. The real lock, held as a tick holds it.
+        commands = FakeCommands(check=10, apply=0)
+        with workspace_upgrade.operation_lock(self.home):
+            report = self.run_pass(commands)
+        self.assertEqual(report["update"]["result"], "deferred")
+        self.assertIn("tick", report["update"]["detail"])
+        self.assertEqual([c[0] for c in commands.calls], [("update", "--check")], "nothing installed")
+        later = self.run_pass(commands, at=AT + datetime.timedelta(hours=1))
+        self.assertEqual(later["update"]["result"], "updated", "the next pass, the tick done")
+
+    def test_a_running_tick_defers_the_update_and_is_never_stopped(self):
+        # Seen live on 2026-10-06: an automatic update booted out a tick 57 s into its run.
+        import fcntl
+        lock = self.home / "store" / "tick.lock"
+        fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)      # a tick is running
+            commands = FakeCommands(check=10, apply=0)
+            report = self.run_pass(commands)
+            self.assertEqual(report["update"]["result"], "deferred")
+            self.assertIn("tick", report["update"]["detail"])
+            self.assertEqual([c[0] for c in commands.calls], [("update", "--check")], "no apply, nothing stopped")
+        finally:
+            os.close(fd)
+        later = self.run_pass(commands, at=AT + datetime.timedelta(hours=1))
+        self.assertEqual(later["update"]["result"], "updated", "the next pass, the tick done, installs")
+
+    def test_a_silent_server_and_a_probe_are_no_clients(self):
+        self.receipt(AT - datetime.timedelta(hours=1), recent=True)      # the server stopped an hour ago
+        self.assertEqual(M.live_clients(self.home, AT), [])
+        self.receipt(AT, recent=False)
+        self.assertEqual(M.live_clients(self.home, AT), [])
+
+    def test_a_memory_http_client_defers_and_a_refused_or_old_call_does_not(self):
+        logs = self.home / "store" / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        journal = logs / "access.jsonl"
+
+        def row(at, allowed, binding="binding-1"):
+            return json.dumps({"at": M.iso(at), "binding": binding, "tool": "memory.search", "allowed": allowed}) + "\n"
+        journal.write_text(row(AT - datetime.timedelta(minutes=10), True) + row(AT - datetime.timedelta(seconds=30), False))
+        self.assertEqual(M.live_clients(self.home, AT), [])
+        journal.write_text(journal.read_text() + row(AT - datetime.timedelta(seconds=20), True))
+        self.assertEqual(len(M.live_clients(self.home, AT)), 1)
+        self.assertEqual(self.run_pass(FakeCommands(check=10))["update"]["result"], "deferred")
+
+    def test_a_persons_update_applies_at_once_whatever_the_clients(self):
+        # `full update --apply` from a person never asks maintenance; only the job defers.
+        import engine_update as eu
+        self.assertNotIn("live_clients", Path(eu.__file__).read_text())
+
+    def test_a_held_release_is_shown_and_not_attempted_again_until_a_person_acts(self):
+        step = "run the store migration by hand: https://example.com/runbook"
+
+        class Held(FakeCommands):
+            def apply(self, *args, env=None):
+                self.calls.append((("update", *args), dict(env or {})))
+                return 6, {"status": "held", "version": self.latest, "needs_person": step}, ""
+        commands = Held(check=10, latest="9.9.9")
+        report = self.run_pass(commands)
+        self.assertEqual(report["update"]["result"], "held")
+        state = M.read_state(self.home)
+        self.assertEqual((state["update"]["needs_person"], state["update"]["to"]), (step, "9.9.9"))
+        self.assertNotIn("failures", state["update"], "a held release is not a failure")
+        items = {w["code"]: w for w in M.status(self.home, schedule=FakeSchedule())["warning_items"]}
+        self.assertEqual((items["needs-migration"]["version"], items["needs-migration"]["step"]), ("9.9.9", step))
+        later = self.run_pass(commands, at=AT + datetime.timedelta(hours=6))
+        self.assertEqual(later["update"]["result"], "held")
+        self.assertEqual([c[0][1] for c in commands.calls], ["--check", "--apply", "--check"],
+                         "verified once; the same release is not downloaded again")
+        # The person did the step and updated: the engine now runs the held release.
+        state = M.read_state(self.home)
+        state["update"]["to"] = config.VERSION
+        M.write_state(self.home, state)
+        self.assertNotIn("needs-migration",
+                         [w["code"] for w in M.status(self.home, schedule=FakeSchedule())["warning_items"]])
+        after = self.run_pass(FakeCommands(check=0), at=AT + datetime.timedelta(hours=12))
+        self.assertEqual(after["update"]["result"], "up-to-date")
+        self.assertEqual(M.read_state(self.home)["update"]["result"], "resolved-by-person")
 
     def test_the_backup_stops_and_restarts_only_loaded_jobs(self):
         services = FakeServices(loaded=("server",))
@@ -812,6 +1084,15 @@ class NoApp:
         return {"result": "not-installed"}
 
 
+class RecordingApp:
+    def __init__(self):
+        self.calls = []
+
+    def step(self, state, at):
+        self.calls.append(at)
+        return {"result": "current"}
+
+
 # --- R3: the schedule -------------------------------------------------------------------
 
 class Schedule(Base):
@@ -819,7 +1100,8 @@ class Schedule(Base):
         sched = M.LaunchdSchedule(self.home)
         doc = sched.document()
         self.assertTrue(doc["Label"].endswith(".maintain"))
-        self.assertEqual(doc["ProgramArguments"][1:], [str(ROOT / "tools" / "maintain.py"), "run"])
+        self.assertEqual(doc["ProgramArguments"][1:], [str(ROOT / "tools" / "maintain.py"), "run",
+                                                       "--first-check-delay", "90"])
         self.assertEqual((doc["StartInterval"], doc["RunAtLoad"]), (3600, True))
         # No Background/LowPriorityIO throttling: it stretched a 2 s check past 600 s live.
         self.assertEqual(doc["ProcessType"], "Standard")
@@ -920,6 +1202,9 @@ class Schedule(Base):
         # A stop or a logout must not take the detached update down with the pass (A03 review).
         self.assertIn("KillMode=process", service.splitlines())
         self.assertIn("OnUnitActiveSec=60min", timer)
+        # LC-16: the first pass, and its check, 90 seconds after the user manager starts.
+        self.assertIn("OnStartupSec=90s", timer.splitlines())
+        self.assertNotIn("OnBootSec=10min", timer)
         self.assertIn("Persistent=true", timer)
         self.assertEqual(calls, [["systemctl", "--user", "daemon-reload"],
                                  ["systemctl", "--user", "enable", "--now", f"{sched.name}.timer"]])
@@ -1377,7 +1662,7 @@ class FakeAppSystem:
         self.teams, self.refuse, self.is_running, self.calls = teams or {}, refuse, running, []
 
     def team(self, app):
-        return self.teams.get(app.name if app.name != A.APP_NAME else str(app.parent.name), "TEAM1")
+        return self.teams.get(app.name if app.name != A.APP_NAME else str(app.parent.name), A.TEAM_ID)
 
     def verify(self, app):
         self.calls.append(("verify", app.parent.name))
@@ -1395,6 +1680,11 @@ class FakeAppSystem:
 
     def register(self, app):
         self.calls.append(("register", app.name))
+
+    def unregister(self, app):
+        # Recorded with the path, and only while the bundle still exists: forgetting a
+        # bundle after its folder is gone is what left a stale record (2026-10-06).
+        self.calls.append(("unregister", str(app), app.is_dir()))
 
 
 class FakeFetcher:
@@ -1464,6 +1754,25 @@ class App(Base):
         self.assertIn(("register", A.APP_NAME), updater.system.calls)
         self.assertEqual(self.step(updater)["result"], "current")
 
+    def test_every_bundle_is_forgotten_before_its_folder_is_deleted(self):
+        # 2026-10-06: a staged NEWER bundle, deleted while still registered, stayed macOS's
+        # record of the app, and the Dock drew a blank icon for the installed one.
+        system = FakeAppSystem(running=True)
+        updater, app = self.updater(system=system)
+        self.step(updater)                       # staged, waiting for the app to quit
+        staged = self.home / "store/app-update/9.9.9" / A.APP_NAME
+        self.assertTrue(staged.is_dir())
+        system.is_running = False
+        updater.fetcher = None
+        self.assertEqual(self.step(updater)["result"], "updated")
+        gone = [(path, existed) for kind, path, existed in
+                (c for c in system.calls if c[0] == "unregister")]
+        self.assertIn((str(staged), True), gone, "the staged bundle is forgotten, while it still exists")
+        self.assertTrue(any(path.endswith(f".{A.APP_NAME}.previous") and existed for path, existed in gone),
+                        "and the retired one beside /Applications")
+        self.assertFalse(any(not existed for _, existed in gone), gone)
+        self.assertFalse((self.home / "store/app-update").exists())
+
     def test_a_running_app_waits_and_is_updated_after_it_quits(self):
         system = FakeAppSystem(running=True)
         updater, app = self.updater(system=system)
@@ -1476,13 +1785,31 @@ class App(Base):
 
     def test_a_bundle_from_another_team_never_replaces_the_app(self):
         system = FakeAppSystem()
-        system.team = lambda app: "TEAM1" if "Applications" in str(app) and ".installing" not in str(app) \
+        system.team = lambda app: A.TEAM_ID if "Applications" in str(app) and ".installing" not in str(app) \
             and "app-update" not in str(app) else "SOMEONE-ELSE"
         updater, app = self.updater(system=system)
         out = self.step(updater)
         self.assertEqual(out["result"], "refused")
-        self.assertIn("not signed by the team", out["detail"])
+        self.assertIn("not signed by the organization's team", out["detail"])
         self.assertEqual(A.bundle_info(app)["version"], "0.1.0")
+
+    def test_the_team_is_the_pinned_one_never_whatever_signed_the_installed_app(self):
+        # LC-16: an installed copy signed by another team does not make that team trusted.
+        self.assertEqual(A.TEAM_ID, "KJ35UYYL22")
+        system = FakeAppSystem()
+        system.team = lambda app: "OTHERTEAM1"
+        updater, app = self.updater(system=system)
+        out = self.step(updater)
+        self.assertEqual(out["result"], "refused")
+        self.assertIn(A.TEAM_ID, out["detail"])
+        self.assertEqual(A.bundle_info(app)["version"], "0.1.0")
+        # The organization's bundle replaces an installed app another team signed.
+        shutil.rmtree(self.base / "Applications")
+        system = FakeAppSystem()
+        system.team = lambda app: "OTHERTEAM1" if "Applications" in str(app) and ".installing" not in str(app) \
+            else A.TEAM_ID
+        updater, app = self.updater(system=system)
+        self.assertEqual(self.step(updater)["result"], "updated")
 
     def test_gatekeeper_refusal_digest_mismatch_and_wrong_bundles_are_refused(self):
         for system, fetcher, why in (

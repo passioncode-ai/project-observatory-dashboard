@@ -32,6 +32,15 @@ for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)) {
   parts.push(src ? fs.readFileSync(path.join(path.dirname(file), src), "utf8") : m[2]);
 }
 
+// THE READER'S LANGUAGE (L10N-01): `--languages ru-RU,en` is what the browser
+// reports as `navigator.languages` (absent: none, as before), `--stored ru`
+// the switch's stored choice; the page's own `data-build-locale` is read from
+// the markup, so the page resolves its language here as it would in a browser.
+const opt = name => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : null; };
+const languagesArg = opt("--languages");
+const storedArg = opt("--stored");
+const buildLocale = (html.match(/data-build-locale="([^"]*)"/) || [])[1] || null;
+
 const listeners = [];
 const doc = { activeElement: null };
 const nodes = new Map();
@@ -67,7 +76,8 @@ function node(key) {
 }
 const document = {
   get activeElement() { return doc.activeElement; },
-  documentElement: Object.assign(node("html"), { getAttribute: () => null }),
+  documentElement: Object.assign(node("html"), {
+    getAttribute: k => (k === "data-build-locale" ? buildLocale : null) }),
   body: node("body"),
   getElementById: id => node("#" + id),
   // The keyserver's token is ABSENT: a page opened from a file. Everything else
@@ -80,14 +90,14 @@ const document = {
 };
 const location = { hash: "", search: "", href: "file://" + file, protocol: "file:",
                    assign() {}, replace() {} };
-const storage = { getItem: () => null, setItem() {}, removeItem() {} };
+const storage = { getItem: k => (k === "observatory.locale" ? storedArg : null), setItem() {}, removeItem() {} };
 const context = {
   document, location, URLSearchParams, Intl,
   addEventListener(type, fn) { listeners.push(["window", type, fn]); },
   removeEventListener() {},
   setTimeout: () => 0, clearTimeout() {},
   requestAnimationFrame: fn => fn(),
-  navigator: {},
+  navigator: languagesArg === null ? {} : { languages: languagesArg ? languagesArg.split(",") : [] },
   localStorage: storage, sessionStorage: storage,
   ResizeObserver: class { observe() {} unobserve() {} disconnect() {} },
   console: { log() {}, warn() {}, error() {} },

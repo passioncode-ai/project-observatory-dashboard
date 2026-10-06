@@ -69,6 +69,9 @@ KEEPALIVE_SECONDS have passed (that rewrite is what proves the server alive),
 and the beat slows from REFRESH_SECONDS to IDLE_SECONDS when no client has asked
 anything for CLIENT_WINDOW_SECONDS. The receipt carries `silent_after_s`, the
 age past which its readers call it silent, so they never assume the old 20 s.
+It also carries `clients.recent`: whether anything other than a host's probe
+(PROBE_ROUTES) asked within CLIENT_WINDOW_SECONDS. The maintenance job reads it and
+activates a new release only when no person or agent is using the server (LC-16).
 
 SECURITY. Binds 127.0.0.1 only. Serves NO secret values anywhere: `/leaks` is
 names, places and dates from the register, which never held values to begin
@@ -298,6 +301,11 @@ def heartbeat() -> dict:
         "workspace": str(paths.HOME),
         "uptime_s": int(time.time() - STARTED),
         "silent_after_s": SILENT_AFTER_SECONDS,
+        # Whether a person or an agent is using the server right now: the maintenance job
+        # activates a new release only when not (lifecycle LC-16). A boolean, so the
+        # receipt is rewritten only when it flips.
+        "clients": {"recent": client_recent(time.monotonic(), LAST_CLIENT[0]),
+                    "window_s": CLIENT_WINDOW_SECONDS},
         "remote": refresh_remote(),
         "leaks": refresh_leaks(),
         "skills": refresh_skills(),
@@ -317,6 +325,11 @@ def heartbeat() -> dict:
 
 #: time.monotonic() of the last HTTP request, None before the first.
 LAST_REQUEST: list = [None]
+#: time.monotonic() of the last request from a CLIENT — anything but a host's probe —, None before one.
+LAST_CLIENT: list = [None]
+#: What a host asks by itself (Fabric Dashboards' probe, the service document, the events
+#: feed it keeps open): not a person or an agent an update would interrupt.
+PROBE_ROUTES = frozenset({"/health", "/.well-known/fabric-service", "/fabric/v1/events"})
 #: Set by a request that arrives while the beat is slow, so the next snapshot is not 2 minutes away.
 WAKE = threading.Event()
 
@@ -326,6 +339,16 @@ def beat_interval(now: float, last_request: float | None) -> float:
     if last_request is None or now - last_request > CLIENT_WINDOW_SECONDS:
         return IDLE_SECONDS
     return REFRESH_SECONDS
+
+
+def client_recent(now: float, last_client: float | None) -> bool:
+    """A client (not a probe) asked within CLIENT_WINDOW_SECONDS."""
+    return last_client is not None and now - last_client <= CLIENT_WINDOW_SECONDS
+
+
+def note_client(route: str) -> None:
+    if route not in PROBE_ROUTES:
+        LAST_CLIENT[0] = time.monotonic()
 
 
 def note_request() -> None:
@@ -565,6 +588,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json({"error": "only local browser origins are accepted"}, 403)
             return
         route = self.path.split("?", 1)[0].rstrip("/") or "/"
+        note_client(route)
         # THE SPLIT PAGES: `/dashboard/<name>.html` from the built
         # directory, names from the shell's whitelist only — a path with `..`
         # or a name the shell does not know is 404, never a file read.
@@ -617,7 +641,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif route == "/fabric/v1/events":
             self._events()
         elif route == "/health":
-            self._json(heartbeat())
+            # The published health document keeps its shape (fabric-service/0.1): the
+            # `clients` field is the update job's input and stays in the receipt file.
+            self._json({k: v for k, v in heartbeat().items() if k != "clients"})
         elif route == "/remote":
             self._json(refresh_remote())
         elif route == "/leaks":
@@ -859,6 +885,32 @@ def status() -> int:
     return 0 if alive else 1
 
 
+class StampedLines:
+    """A stream that starts every line with a UTC timestamp (LC-12): launchd hands the
+    server's stderr to serverd.err, and its lines — refusals, heartbeat failures,
+    tracebacks — carried no time, so nobody could tell when a fault began."""
+
+    def __init__(self, stream, clock=None):
+        self.stream, self.at_line_start = stream, True
+        self.clock = clock or (lambda: datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+    def write(self, text: str) -> int:
+        out = []
+        for piece in text.splitlines(keepends=True):
+            if self.at_line_start and piece.strip():
+                out.append(self.clock() + " ")
+            out.append(piece)
+            self.at_line_start = piece.endswith("\n")
+        self.stream.write("".join(out))
+        return len(text)
+
+    def flush(self) -> None:
+        self.stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
 def main(argv: list[str]) -> int:  # noqa: PLW0603 — PORT set via globals()
     ap = argparse.ArgumentParser(description=(__doc__ or "Serve the private Project Observatory dashboard.").splitlines()[0])
     g = ap.add_mutually_exclusive_group(required=True)
@@ -876,6 +928,7 @@ def main(argv: list[str]) -> int:  # noqa: PLW0603 — PORT set via globals()
                          ensure_ascii=False))
         return 0
     if a.run:
+        sys.stderr = StampedLines(sys.stderr)
         return serve(a.port)
     if a.install:
         return install()

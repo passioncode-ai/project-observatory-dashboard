@@ -56,7 +56,7 @@ QUESTIONS: dict[str, str] = {
     "env":      "Variables by project, compared with the running environments.",
     "mcp":      "Agent servers, connections and reachability.",
     "traffic":  "Product audiences, data sources and linked projects.",
-    "health":   "Observer state, data freshness and the decision queue.",
+    "health":   "Observer state, data freshness and the agents' records.",
     "machine":  "What runs on this machine, where memory and disk go, and what was cleaned.",
 }
 #: The product's name is never translated (docs/brand/locales/*.md).
@@ -114,13 +114,17 @@ def _machine(payload: dict, t: Translator) -> str:
 
 
 def locale_switch_html(t: Translator) -> str:
-    """EN/RU: the reader's language. Each button names its language in itself,
-    and the page script keeps the choice (see `LOCALE_KEY` in the template)."""
+    """Language: System / English / Russian (L10N-01). "System" follows the
+    system's preferred language; each language names itself in itself and is
+    not translated. The page script presses the reader's choice and keeps it
+    (see `LOCALE_KEY` in the template)."""
+    system = t.mark("language@@System", tag="button",
+                    attrs=' type="button" data-locale="system" aria-pressed="false"')
     buttons = "".join(
-        f'<button type="button" data-locale="{code}" lang="{code}" aria-pressed="false"'
-        f' title="{html.escape(LOCALE_NAMES[code])}">{code.upper()}</button>'
+        f'<button type="button" data-locale="{code}" lang="{code}" aria-pressed="false">'
+        f'{html.escape(LOCALE_NAMES[code])}</button>'
         for code in LOCALES)
-    return f'<div class="locale-switch" role="group"{t.attr("aria-label", "Language")}>{buttons}</div>'
+    return f'<div class="locale-switch" role="group"{t.attr("aria-label", "Language")}>{system}{buttons}</div>'
 
 
 def nav_html(page: str, counts: dict[str, int | str], t: Translator | None = None) -> str:
@@ -283,10 +287,9 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
         "traffic": _traffic_line(payload, t),
         "machine": _machine_line(payload, t),
         "agents": _agents_line(payload, t),
-        # TWO NUMBERS, because one of them is the reason to open the page: the
-        # observer's state, and how many rows are waiting for a person (S4/F9).
-        "health": (_observer(health, t) + " · "
-                   + t.mark("awaiting a decision: {n}", n=health.get("proposed", 0))),
+        # The observer's state alone: the agents' unconfirmed records ask nothing of a
+        # person (operator, 2026-10-06), so they are no reason to open the page.
+        "health": _observer(health, t),
     }
     # A page nobody scanned says so on its card, instead of "0 apps".
     for name, key in (("heroku", "heroku"), ("creds", "creds"), ("env", "env"), ("mcp", "mcp")):

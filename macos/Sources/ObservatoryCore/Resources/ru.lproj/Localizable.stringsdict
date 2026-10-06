@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Plural forms (L10N-03). The key is the English sentence the code passes to `plural`;
+     the variable named in NSStringLocalizedFormatKey is the count that picks the form.
+     The forms use the app's {name} placeholders, filled by ObservatoryCore.Localizer,
+     not printf specifiers: these entries are read by the app, not by NSLocalizedString. -->
+<plist version="1.0">
+<dict>
+	<key>A question must be 1 to {limit} characters.</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@limit@</string>
+		<key>limit</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>d</string>
+			<key>few</key>
+			<string>Вопрос должен быть от 1 до {limit} символов.</string>
+			<key>many</key>
+			<string>Вопрос должен быть от 1 до {limit} символов.</string>
+			<key>one</key>
+			<string>Вопрос должен быть от 1 до {limit} символа.</string>
+			<key>other</key>
+			<string>Вопрос должен быть от 1 до {limit} символов.</string>
+		</dict>
+	</dict>
+	<key>The question is longer than {limit} characters.</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@limit@</string>
+		<key>limit</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>d</string>
+			<key>few</key>
+			<string>Вопрос длиннее {limit} символов.</string>
+			<key>many</key>
+			<string>Вопрос длиннее {limit} символов.</string>
+			<key>one</key>
+			<string>Вопрос длиннее {limit} символа.</string>
+			<key>other</key>
+			<string>Вопрос длиннее {limit} символов.</string>
+		</dict>
+	</dict>
+	<key>{shown} of {total} findings were included, most severe first.</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@total@</string>
+		<key>total</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>d</string>
+			<key>few</key>
+			<string>Включено {shown} из {total} находок, самые серьёзные первыми.</string>
+			<key>many</key>
+			<string>Включено {shown} из {total} находок, самые серьёзные первыми.</string>
+			<key>one</key>
+			<string>Включено {shown} из {total} находки, самые серьёзные первыми.</string>
+			<key>other</key>
+			<string>Включено {shown} из {total} находок, самые серьёзные первыми.</string>
+		</dict>
+	</dict>
+	<key>{shown} of {total} projects were included; choose a project for detail.</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%#@total@</string>
+		<key>total</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>d</string>
+			<key>few</key>
+			<string>Включено {shown} из {total} проектов; выберите проект для подробностей.</string>
+			<key>many</key>
+			<string>Включено {shown} из {total} проектов; выберите проект для подробностей.</string>
+			<key>one</key>
+			<string>Включено {shown} из {total} проекта; выберите проект для подробностей.</string>
+			<key>other</key>
+			<string>Включено {shown} из {total} проектов; выберите проект для подробностей.</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

@@ -19,6 +19,8 @@ import ObservatoryCore
     private var observers: [NSKeyValueObservation] = []
     /// A language chosen on the page itself travels back to the app, which adopts it.
     var onPageLocale: ((String) -> Void)?
+    /// The app's words in its chosen language, for the sheets the page asks for.
+    var t: (String) -> String = { $0 }
     /// A failed load of a live page usually means the server went away: re-check.
     var onLiveFailure: (() -> Void)?
 
@@ -135,12 +137,12 @@ import ObservatoryCore
     }
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping @MainActor (Bool) -> Void) {
-        let a = alert(message); a.addButton(withTitle: "OK"); a.addButton(withTitle: NSLocalizedString("Cancel", comment: ""))
+        let a = alert(message); a.addButton(withTitle: "OK"); a.addButton(withTitle: t("Cancel"))
         present(a) { completionHandler($0 == .alertFirstButtonReturn) }
     }
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping @MainActor (String?) -> Void) {
-        let a = alert(prompt); a.addButton(withTitle: "OK"); a.addButton(withTitle: NSLocalizedString("Cancel", comment: ""))
+        let a = alert(prompt); a.addButton(withTitle: "OK"); a.addButton(withTitle: t("Cancel"))
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24)); field.stringValue = defaultText ?? ""
         a.accessoryView = field; a.window.initialFirstResponder = field
         present(a) { completionHandler($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
@@ -179,13 +181,14 @@ enum WindowID { static let dashboard = "dashboard"; static let assistant = "assi
 struct DashboardView: View {
     @EnvironmentObject var m: Model
     @EnvironmentObject var web: WebController
+    @EnvironmentObject var updates: Updates
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(spacing: 0) {
             banner
             switch m.dashboardMode {
-            case .checking: placeholder { ProgressView(m.t("Opening the dashboard…", "Открываю дашборд…")) }
+            case .checking: placeholder { ProgressView(m.t("Opening the dashboard…")) }
             case .live, .files:
                 ZStack {
                     WebViewHost(web: web, view: web.view)
@@ -206,6 +209,8 @@ struct DashboardView: View {
             let model = m
             web.onPageLocale = { [weak model] code in model?.adoptPageLocale(code) }
             web.onLiveFailure = { [weak model] in Task { await model?.refreshDashboard() } }
+            web.t = { [weak model] key in model?.t(key) ?? key }
+            updates.workInFlight = { [weak model] in model.map { $0.busy || $0.dashboardWorking } ?? false }
             await m.refreshDashboard()
             await m.refresh()
         }
@@ -225,8 +230,8 @@ struct DashboardView: View {
 
     private var subtitle: String {
         switch m.dashboardMode {
-        case .live: return m.t("Live", "С сервера")
-        case .files(_, let at, _, _): return m.t("Saved pages", "Сохранённые страницы") + (at.map { " · " + m.when($0) } ?? "")
+        case .live: return m.t("Live")
+        case .files(_, let at, _, _): return at.map { m.t("Saved pages · {time}", ["time": m.when($0)]) } ?? m.t("Saved pages")
         default: return ""
         }
     }
@@ -234,14 +239,13 @@ struct DashboardView: View {
     @ViewBuilder private var banner: some View {
         if case .files(_, let at, let alwaysOn, let busy) = m.dashboardMode {
             Banner(tone: busy ? .warning : .neutral, symbol: "externaldrive",
-                   title: m.t("The dashboard server is not running — these are the saved pages", "Сервер дашборда не запущен — показаны сохранённые страницы")
-                       + (at.map { m.t(" from ", " от ") + m.when($0) } ?? "") + ".",
+                   title: at.map { m.t("The dashboard server is not running — these are the saved pages from {time}.", ["time": m.when($0)]) }
+                       ?? m.t("The dashboard server is not running — these are the saved pages."),
                    detail: [busy ? m.message("dashboard-port-busy")
-                                 : m.t("Reading works as usual. “Start server” serves the same pages on 127.0.0.1.",
-                                       "Чтение работает как обычно. «Запустить сервер» отдаёт те же страницы на 127.0.0.1."),
+                                 : m.t("Reading works as usual. “Start server” serves the same pages on 127.0.0.1."),
                             m.dashboardError].compactMap { $0 }.joined(separator: "\n")) {
                 if m.dashboardWorking { ProgressView().controlSize(.small) }
-                Button(alwaysOn ? m.t("Restart server", "Перезапустить сервер") : m.t("Start server", "Запустить сервер")) { Task { await m.startServer() } }
+                Button(alwaysOn ? m.t("Restart server") : m.t("Start server")) { Task { await m.startServer() } }
                     .buttonStyle(SecondaryButtonStyle()).disabled(!m.canStartServer)
             }
         }
@@ -254,11 +258,11 @@ struct DashboardView: View {
         placeholder {
             VStack(spacing: 14) {
                 Image(systemName: "square.grid.2x2").font(.system(size: 40)).foregroundStyle(Theme.muted).accessibilityHidden(true)
-                Text(m.t("This workspace has no dashboard yet", "У этой папки данных ещё нет дашборда")).font(.title2.bold()).foregroundStyle(Theme.text)
-                Text(m.t("Build it from the registry — local, no model call.", "Постройте его из реестра — локально, без вызова модели.")).foregroundStyle(Theme.muted)
+                Text(m.t("This workspace has no dashboard yet")).font(.title2.bold()).foregroundStyle(Theme.text)
+                Text(m.t("Build it from the registry — local, no model call.")).foregroundStyle(Theme.muted)
                 if busy { Text(m.message("dashboard-port-busy")).font(.callout).foregroundStyle(Tone.warning.color).multilineTextAlignment(.center).frame(maxWidth: 560) }
                 HStack {
-                    Button(m.t("Build the dashboard", "Построить дашборд")) { Task { await m.buildDashboard() } }
+                    Button(m.t("Build the dashboard")) { Task { await m.buildDashboard() } }
                         .buttonStyle(PrimaryButtonStyle()).disabled(m.dashboardWorking)
                     if m.dashboardWorking { ProgressView().controlSize(.small) }
                 }
@@ -269,9 +273,9 @@ struct DashboardView: View {
     /// A first launch is not a failure: no engine yet, or no workspace yet, says so.
     private var unavailableTitle: String {
         switch m.dashboardFailure?.code {
-        case "backend-missing": return m.t("Observatory is not installed yet", "Observatory ещё не установлен")
-        case "unknown-workspace": return m.t("This folder is not a workspace yet", "Эта папка ещё не папка данных")
-        default: return m.t("The dashboard cannot be opened", "Дашборд не открывается")
+        case "backend-missing": return m.t("Observatory is not installed yet")
+        case "unknown-workspace": return m.t("This folder is not a workspace yet")
+        default: return m.t("The dashboard cannot be opened")
         }
     }
     private var unavailable: some View {
@@ -284,10 +288,10 @@ struct DashboardView: View {
                     Text(rendered(e)).foregroundStyle(Theme.text).multilineTextAlignment(.center).textSelection(.enabled).frame(maxWidth: 560)
                 }
                 HStack {
-                    Button(m.t("Retry", "Повторить")) { Task { await m.refreshDashboard() } }.buttonStyle(PrimaryButtonStyle())
-                    SettingsLink { Text(m.t("Settings", "Настройки")) }.buttonStyle(SecondaryButtonStyle())
+                    Button(m.t("Retry")) { Task { await m.refreshDashboard() } }.buttonStyle(PrimaryButtonStyle())
+                    SettingsLink { Text(m.t("Settings")) }.buttonStyle(SecondaryButtonStyle())
                     if m.dashboardFailure?.code == "backend-missing" {
-                        Link(m.t("Installation guide", "Как установить"), destination: Model.installGuide).buttonStyle(SecondaryButtonStyle())
+                        Link(m.t("Installation guide"), destination: Model.installGuide).buttonStyle(SecondaryButtonStyle())
                     }
                 }
             }.padding()
@@ -295,9 +299,9 @@ struct DashboardView: View {
     }
     private func loadFailure(_ err: String) -> some View {
         VStack(spacing: 12) {
-            Text(m.t("The page did not load", "Страница не загрузилась")).font(.title3.bold()).foregroundStyle(Theme.text)
+            Text(m.t("The page did not load")).font(.title3.bold()).foregroundStyle(Theme.text)
             Text(err).foregroundStyle(Theme.muted).textSelection(.enabled)
-            Button(m.t("Reload", "Обновить")) { web.reload() }.buttonStyle(PrimaryButtonStyle())
+            Button(m.t("Reload")) { web.reload() }.buttonStyle(PrimaryButtonStyle())
         }
         .padding(24).background(Theme.raised, in: RoundedRectangle(cornerRadius: Theme.radiusPanel))
         .overlay(RoundedRectangle(cornerRadius: Theme.radiusPanel).strokeBorder(Theme.border))
@@ -305,21 +309,22 @@ struct DashboardView: View {
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
-            Button { web.view.goBack() } label: { Label(m.t("Back", "Назад"), systemImage: "chevron.left") }
-                .disabled(!web.canGoBack).help(m.t("Back (⌘[)", "Назад (⌘[)"))
-            Button { web.view.goForward() } label: { Label(m.t("Forward", "Вперёд"), systemImage: "chevron.right") }
-                .disabled(!web.canGoForward).help(m.t("Forward (⌘])", "Вперёд (⌘])"))
+            Button { web.view.goBack() } label: { Label(m.t("Back"), systemImage: "chevron.left") }
+                .disabled(!web.canGoBack).help(m.t("Back (⌘[)"))
+            Button { web.view.goForward() } label: { Label(m.t("Forward"), systemImage: "chevron.right") }
+                .disabled(!web.canGoForward).help(m.t("Forward (⌘])"))
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            Button { web.home() } label: { Label(m.t("Overview", "Обзор"), systemImage: "house") }
-                .disabled(m.dashboardMode.origin == nil).help(m.t("Overview (⇧⌘H)", "Обзор (⇧⌘H)"))
+            UpdateToolbarButton()
+            Button { web.home() } label: { Label(m.t("Overview"), systemImage: "house") }
+                .disabled(m.dashboardMode.origin == nil).help(m.t("Overview (⇧⌘H)"))
             Button { Task { await m.refreshDashboard(); web.reload() } } label: {
-                if web.isLoading { ProgressView().controlSize(.small) } else { Label(m.t("Reload", "Обновить"), systemImage: "arrow.clockwise") }
-            }.help(m.t("Reload (⌘R)", "Обновить (⌘R)"))
-            Button { if let u = web.currentURL { NSWorkspace.shared.open(u) } } label: { Label(m.t("Open in Browser", "Открыть в браузере"), systemImage: "safari") }
-                .disabled(m.dashboardMode.origin == nil).help(m.t("Open this page in the default browser", "Открыть эту страницу в браузере по умолчанию"))
-            Button { openWindow(id: WindowID.assistant) } label: { Label(m.t("Assistant", "Ассистент"), systemImage: "bubble.left.and.text.bubble.right") }
-                .help(m.t("Ask about your projects (⇧⌘A)", "Спросить о проектах (⇧⌘A)"))
+                if web.isLoading { ProgressView().controlSize(.small) } else { Label(m.t("Reload"), systemImage: "arrow.clockwise") }
+            }.help(m.t("Reload (⌘R)"))
+            Button { if let u = web.currentURL { NSWorkspace.shared.open(u) } } label: { Label(m.t("Open in Browser"), systemImage: "safari") }
+                .disabled(m.dashboardMode.origin == nil).help(m.t("Open this page in the default browser"))
+            Button { openWindow(id: WindowID.assistant) } label: { Label(m.t("Assistant"), systemImage: "bubble.left.and.text.bubble.right") }
+                .help(m.t("Ask about your projects (⇧⌘A)"))
         }
     }
 }

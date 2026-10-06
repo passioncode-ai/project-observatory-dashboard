@@ -22,6 +22,16 @@ ICONSET="$SCRATCH/AppIcon.iconset"
 swift "$ROOT/macos/scripts/make-icon.swift" "$ROOT/observatory/engine/dashboard/brand/observatory-mark.svg" "$ICONSET" >/dev/null
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
+# The interface's words (L10N): the Russian dictionary and both languages' plural forms,
+# in the bundle's own Resources — where the app looks first, and where macOS looks to
+# draw its own menus (Quit, Hide, Window) in Russian. A file that does not parse stops
+# the build rather than shipping an app that falls back to English.
+for lproj in "$ROOT/macos/Sources/ObservatoryCore/Resources/"*.lproj; do
+  for f in "$lproj"/*; do plutil -lint -s "$f"; done
+  cp -R "$lproj" "$APP/Contents/Resources/"
+done
+test -f "$APP/Contents/Resources/ru.lproj/Localizable.strings"
+
 # CFBundleVersion counts commits, so every build from a newer source is a newer
 # bundle to Launch Services; the short version is the engine release it ships beside.
 BUILD=$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)

@@ -36,6 +36,13 @@ the Python environment, the background jobs and the workspace:
    knows exactly what happened and what to do. The report lists their pids as
    the processes this update could not reach.
 
+A release whose wheel declares a step that needs a person (RELEASE_MEMBER, below) is
+fetched and verified like any other; `--unattended` (the maintenance job) then stops there
+and exits EXIT_HELD, while a person's `--apply` shows the step and proceeds.
+
+Each stage also writes a code to the shared update log (update_events.py, LC-16):
+`update_check`, `update_download`, `update_install`, `update_restart`.
+
 A failure after step 4 reinstalls the rollback wheel. When the workspace was
 changed by then (a committed upgrade), the pre-update snapshot is restored at the
 same path and the changed copy is kept beside it — nothing is overwritten. Exit
@@ -71,6 +78,7 @@ import configuration as config
 import workspace
 import workspace_upgrade
 import backup_vault
+import update_events
 # Imported before the installer runs: once pip has replaced the package's files, a
 # lazy import here would load NEW code into this OLD process. Everything the
 # rollback path needs is therefore already in memory by the time anything changes.
@@ -98,7 +106,22 @@ EXIT_REFUSED = 2           # refused before any change: verification, downgrade,
 EXIT_UNDETERMINED = 3      # the release could not be looked up (network, rate limit)
 EXIT_NEEDS_PERSON = 4      # rollback incomplete; `human_steps` says exactly what to do
 EXIT_SERVICES = 5          # updated, but a stopped job did not start again
+EXIT_HELD = 6              # --unattended only: the release declares a step that needs a person
 EXIT_UPDATE_AVAILABLE = 10  # --check only
+
+#: A release that cannot be installed without a person (a data or schema migration that must
+#: be run or confirmed by hand) says so in its own verified wheel, at this path:
+#:
+#:     {"version": "X.Y.Z", "needs_person": "what to do, or the runbook's URL"}
+#:
+#: Inside the wheel, the marker is covered by the same GitHub digest, SHA256SUMS line and
+#: organization signature as the code it describes; no separate asset can go missing or be
+#: swapped. A marker naming another version is a leftover of an earlier release and is
+#: ignored (tools/check_package.py refuses to build such a wheel). docs/RELEASE.md says when
+#: to write one.
+RELEASE_MEMBER = "observatory/engine/RELEASE.json"
+MAX_RELEASE_MARKER = 16 * 1024
+MAX_STEP_TEXT = 1000
 
 
 class UpdateError(RuntimeError):
@@ -172,9 +195,33 @@ def plugin_advice() -> str:
         return generic
 
 
-def release_source(repository: str | None = None, api: str | None = None) -> tuple[str, str]:
-    repo = repository or os.environ.get(REPOSITORY_ENV) or default_repository()
-    base = (api or os.environ.get(API_ENV) or DEFAULT_API).rstrip("/")
+def development_build(origin: Callable[[], dict] | None = None) -> bool:
+    """A checkout or an editable install — anything but the installed release wheel."""
+    try:
+        return (origin or install_origin)().get("kind") != "wheel"
+    except Exception:  # noqa: BLE001 — undecidable is treated as a release: overrides ignored
+        return False
+
+
+def release_source(repository: str | None = None, api: str | None = None,
+                   origin: Callable[[], dict] | None = None) -> tuple[str, str]:
+    """The release feed: the organization's repository on GitHub's API.
+
+    LC-16: a feed the environment can redirect belongs to a development build, never to
+    a release. OBSERVATORY_RELEASE_REPOSITORY and OBSERVATORY_RELEASE_API are therefore
+    honoured only when this engine runs from a checkout or an editable install; an
+    installed wheel ignores them and says so on stderr. `--repository` and `--api-url`
+    on the command line stay a person's explicit choice (a fork, a mirror); the automatic
+    job never passes them. Whatever the feed, the signature is checked against the key
+    pinned in the engine."""
+    env_repo, env_api = os.environ.get(REPOSITORY_ENV), os.environ.get(API_ENV)
+    if (env_repo or env_api) and not development_build(origin):
+        print(f"Observatory: {REPOSITORY_ENV} and {API_ENV} are ignored: an installed release reads "
+              "only the organization's feed (use --repository / --api-url to choose another)",
+              file=sys.stderr)
+        env_repo = env_api = None
+    repo = repository or env_repo or default_repository()
+    base = (api or env_api or DEFAULT_API).rstrip("/")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}", repo):
         raise UpdateError("Release repository must be OWNER/NAME")
     return check_url(base), repo
@@ -441,6 +488,41 @@ def wheel_lock(wheel: Path, folder: Path) -> Path | None:
     target = folder / f"constraints-{wheel.stem}.txt"
     target.write_bytes(data)
     return target
+
+
+def release_step(wheel: Path, version: str) -> str | None:
+    """The step a person must take before this release is installed, or None.
+
+    Read from the verified wheel's RELEASE_MEMBER. A marker that cannot be read is held
+    too — an unreadable declaration is not proof that nothing is needed."""
+    unreadable = ("this release carries a RELEASE.json that could not be read; read the release "
+                  "notes before installing it")
+    try:
+        with zipfile.ZipFile(wheel) as zf:
+            try:
+                info = zf.getinfo(RELEASE_MEMBER)
+            except KeyError:
+                return None
+            if info.file_size > MAX_RELEASE_MARKER:
+                return unreadable
+            raw = zf.read(info)
+    except (zipfile.BadZipFile, OSError):
+        return unreadable
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, ValueError):
+        return unreadable
+    if not isinstance(doc, dict):
+        return unreadable
+    if doc.get("version") != version:
+        return None
+    step = doc.get("needs_person")
+    if step is None or step == "":
+        return None
+    if not isinstance(step, str):
+        return unreadable
+    text = " ".join("".join(c if c.isprintable() else " " for c in step).split())
+    return text[:MAX_STEP_TEXT] or None
 
 
 MAX_SIGNATURE = 16 * 1024
@@ -926,7 +1008,7 @@ class Transaction:
             if cached:
                 return cached
         try:
-            api, repo = release_source(self.args.repository, self.args.api_url)
+            api, repo = release_source(self.args.repository, self.args.api_url, self.deps.origin)
             release = resolve_release(self.deps.fetcher, api, repo, self.current)
             folder = work / "rollback"
             folder.mkdir(mode=0o700)
@@ -957,6 +1039,15 @@ class Transaction:
         if services is None or not services.available():
             raise UpdateError("launchd is not available here, so this command cannot stop the scheduler it did not "
                               "install; stop your own tick and server, then pass --writers-stopped")
+        if getattr(self.args, "unattended", False):
+            # The automatic pass never stops a tick mid-run (it checked before starting this
+            # update; this closes the window since). A person's --apply stops it as before.
+            try:
+                with workspace_upgrade.operation_lock(self.base):
+                    pass
+            except config.ConfigurationError:
+                raise UpdateError("A tick or another workspace operation is running, so the workspace is busy; "
+                                  "the automatic update waits for it and nothing was changed") from None
         jobs = [j for j in services.managed() if services.loaded(j["label"])]
         for job in jobs:
             if not Path(job["plist"]).is_file():
@@ -1037,6 +1128,10 @@ class Transaction:
         self.step("undo-ended", outcome="needs-person" if human else "rolled-back", error=str(error)[:300])
         return (EXIT_NEEDS_PERSON if human else EXIT_FAILED), report
 
+    def install_failed(self, code: str) -> None:
+        self.event("update_install", code)
+        self.event("update_check", "install_failed")
+
     def verify(self, meta: dict) -> str:
         engine = self.deps.engine(self.base)
         installed = engine.distribution_version()
@@ -1059,14 +1154,41 @@ class Transaction:
                 return f"`full doctor` of the new release failed (exit {code}): {detail}"
         return ""
 
+    def event(self, event: str, code: str) -> None:
+        update_events.emit(event, code, base=self.base if self.has_ws else None)
+
     def run(self) -> tuple[int, dict]:
         self.refuse_early()
         work = Path(tempfile.mkdtemp(prefix="observatory-update-"))
         try:
             self.work = work
-            wheel, meta = fetch_verified(self.deps.fetcher, self.release, work)
+            self.event("update_download", "started")
+            try:
+                wheel, meta = fetch_verified(self.deps.fetcher, self.release, work)
+            except Undetermined:
+                self.event("update_check", "download_failed")
+                raise
+            except UpdateError:
+                # A digest, a SHA256SUMS line, the signature or the wheel's own metadata
+                # disagreed: the package is not the organization's, as published.
+                self.event("update_check", "signature_failed")
+                raise
+            self.event("update_download", "done")
             self.step("verified", wheel=wheel.name, sha256=meta["sha256"],
                       checks=["github-digest", SUMS, f"{SUMS}.asc"], signed_by=meta.get("signed_by"))
+            needs_person = release_step(wheel, self.release.version)
+            if needs_person:
+                self.report["needs_person"] = needs_person
+                if getattr(self.args, "unattended", False):
+                    # Downloaded and verified, never installed by the automatic pass: the
+                    # step is the person's (LC-16, held releases).
+                    self.step("held", needs_person=needs_person[:300])
+                    self.event("update_check", "needs_migration")
+                    self.report.update(status="held", version=self.release.version,
+                                       next="do the step above, then `project-observatory full update --apply`")
+                    return EXIT_HELD, self.report
+                print(f"Observatory: {self.release.version} declares a step that needs a person: {needs_person}",
+                      file=sys.stderr)
             self.report["constraints"] = LOCK_MEMBER if meta["constraints"] else None
             if not meta["constraints"]:
                 self.report["degraded"].append(
@@ -1088,20 +1210,24 @@ class Transaction:
                 self.start_writers()
                 raise
             # The point of change: from here every failure goes through undo().
+            self.event("update_install", "started")
             try:
                 self.deps.installer.install(wheel, force=relation(self.current, self.release.version) == 0,
                                             constraints=meta["constraints"])
                 self.step("installed", wheel=wheel.name, constraints=self.report["constraints"])
             except InstallFailed as exc:
+                self.install_failed("timeout" if "TimeoutExpired" in str(exc) else "failed")
                 return self.undo(f"install failed: {exc}", rollback, snapshot, before)
             if self.has_ws:
                 code, detail = self.deps.engine(self.base).upgrade()
                 if code:
+                    self.install_failed("timeout" if code == 125 and "TimeoutExpired" in detail else "failed")
                     return self.undo(f"the new release's workspace upgrade failed (exit {code}): {detail}",
                                      rollback, snapshot, before)
                 self.step("workspace-upgraded")
             problem = self.verify(meta)
             if problem:
+                self.install_failed("failed")
                 return self.undo(f"verification failed: {problem}", rollback, snapshot, before)
             self.step("verified-installed")
             return self.finish(wheel, rollback, snapshot)
@@ -1124,6 +1250,10 @@ class Transaction:
                 except Exception as exc:  # noqa: BLE001 — the update is done; the snapshot exists either way
                     report["snapshot"] = {"snapshot": str(snapshot), "encrypted": False,
                                           "export_error": f"{type(exc).__name__}: {exc}"}
+        self.event("update_install", "installed")
+        if self.stopped:
+            # Activation: the tick and the server start again on the new code.
+            self.event("update_restart", "requested")
         failed = self.start_writers() if self.stopped else []
         if self.has_ws:
             engine = self.deps.engine(self.base)
@@ -1161,8 +1291,11 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--writers-stopped", action="store_true", help="you stopped the tick and server yourself")
     ap.add_argument("--reinstall", action="store_true", help="allow installing the version already running")
     ap.add_argument("--no-rollback", action="store_true", help="apply even without a verified rollback wheel")
-    ap.add_argument("--repository", help=f"OWNER/NAME of the release source (default: the plugin's repository, or ${REPOSITORY_ENV})")
-    ap.add_argument("--api-url", help=f"GitHub API base (default {DEFAULT_API}, or ${API_ENV})")
+    ap.add_argument("--unattended", action="store_true",
+                    help="the automatic pass: a release that declares a step needing a person is verified, "
+                         f"not installed (exit {EXIT_HELD})")
+    ap.add_argument("--repository", help=f"OWNER/NAME of the release source (default: the plugin's repository; ${REPOSITORY_ENV} only in a development build)")
+    ap.add_argument("--api-url", help=f"GitHub API base (default {DEFAULT_API}; ${API_ENV} only in a development build)")
     return ap
 
 
@@ -1207,6 +1340,10 @@ def update_lock_held(base: Path) -> bool:
     return False
 
 
+def _workspace_or_none(base: Path | None) -> Path | None:
+    return base if base is not None and (base / "workspace.json").is_file() else None
+
+
 def main(argv: list[str], deps: Dependencies | None = None) -> int:
     args = parser().parse_args(argv)
     if deps is None:
@@ -1217,10 +1354,12 @@ def main(argv: list[str], deps: Dependencies | None = None) -> int:
         base = config.home()
         if args.version:
             config.version_tuple(args.version)
-        api, repo = release_source(args.repository, args.api_url)
+        api, repo = release_source(args.repository, args.api_url, deps.origin)
         release = resolve_release(deps.fetcher, api, repo, args.version)
         if args.check:
             code, result = check_result(current, release)
+            update_events.emit("update_check", {EXIT_OK: "current", EXIT_UPDATE_AVAILABLE: "ready"}.get(
+                code, "check_failed"), base=_workspace_or_none(base))
         elif not args.apply:
             code, result = EXIT_OK, preview(base, current, release, deps, args)
         else:
@@ -1234,8 +1373,12 @@ def main(argv: list[str], deps: Dependencies | None = None) -> int:
                 code, result = Transaction(base, current, release, deps, args).run()
     except Undetermined as exc:
         code, result = EXIT_UNDETERMINED, {"status": "degraded", "current": current, "degraded": [str(exc)]}
+        if args.check:
+            update_events.emit("update_check", "check_failed", base=_workspace_or_none(base))
     except UpdateError as exc:
         code, result = exc.code, {"status": "refused", "current": current, "error": str(exc), "degraded": []}
+        if args.check:
+            update_events.emit("update_check", "check_failed", base=_workspace_or_none(base))
     except (config.ConfigurationError, RuntimeError, OSError) as exc:
         code, result = EXIT_REFUSED, {"status": "refused", "current": current,
                                       "error": f"{type(exc).__name__}: {exc}", "degraded": []}

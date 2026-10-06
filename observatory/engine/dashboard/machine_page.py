@@ -2,8 +2,9 @@
 
 Rendered here, at build time, from `machine_view.summary()` — the page reads and
 never acts (OSS scenarios: no administrative mutation from the dashboard). Every
-visible string is an English message id marked for the page script, so the
-EN/RU switch re-translates this page like the others. Tables reuse the
+visible string is an English message id marked for the page script, and every
+size and date a marked value, so a page built in one language reads in the
+reader's (L10N-01, L10N-05) like the others. Tables reuse the
 dashboard's own table, card and narrow-screen rules; nothing here adds a style.
 """
 from __future__ import annotations
@@ -43,19 +44,28 @@ def stamp(value) -> str:
     return f"{m.group(1)} {m.group(2)}" + (" UTC" if m.group(3) else "")
 
 
-def _gb(mb) -> str:
-    return "—" if mb is None else f"{mb / 1024:.1f}"
+def _gb(mb):
+    """Megabytes as gigabytes to one decimal, or None."""
+    return None if mb is None else round(mb / 1024, 1)
 
 
-def _unit(t: Translator) -> str:
-    """The one size unit this page prints, in the reader's language: a Russian
-    build that mixed the English and the Russian unit on one screen was the
-    audit's A42."""
-    return t("GB")
+def _gigabytes(gb, t: Translator) -> str:
+    """A size in the one unit this page prints, marked: the unit and the
+    decimal separator follow the reader's language (a Russian build that mixed
+    the English and the Russian unit on one screen was the audit's A42)."""
+    if gb is None or isinstance(gb, bool) or not isinstance(gb, (int, float)):
+        return "—"
+    return t.mark("{size} GB", size=gb)
 
 
 def _size(mb, t: Translator) -> str:
-    return "—" if mb is None else f"{_gb(mb)} {_unit(t)}"
+    return _gigabytes(_gb(mb), t)
+
+
+def _word(t: Translator, msgid) -> str:
+    """A value the engine writes as an English id (a disk kind, a worktree
+    state, a cleanup class), marked so the language switch reaches it."""
+    return t.known(msgid) if msgid else ""
 
 
 def _project(pid, names: dict) -> str:
@@ -92,18 +102,23 @@ def summary_html(m: dict, t: Translator) -> str:
     if mem.get("total_mb") is not None and mem.get("free_mb") is not None:
         used = mem["total_mb"] - mem["free_mb"] - (mem.get("inactive_mb") or 0)
     auto = t.mark("auto cleanup on") if cleanup.get("autoEnabled") else t.mark("auto cleanup off")
-    unit = _unit(t)
+    swap = _gb(mem.get("swap_used_mb"))
+    total_gb = disk.get("total_gb")
     tiles = [
-        (t.mark("Memory in use"), f"{_gb(used)} / {_gb(mem.get('total_mb'))} {unit}" if used is not None else "—",
-         t.mark("swap {size}", size=_size(mem.get("swap_used_mb"), t))),
-        (t.mark("Free disk"), f"{disk.get('free_gb', '—')} {unit}",
-         t.mark("{percent}% of {total}", percent=disk.get("free_percent", "—"),
-                total=f"{disk.get('total_gb', '—')} {unit}")),
+        (t.mark("Memory in use"),
+         t.mark("{used} / {total} GB", used=_gb(used), total=_gb(mem.get("total_mb")))
+         if used is not None and mem.get("total_mb") is not None else "—",
+         t.mark("swap {size} GB", size=swap) if swap is not None else t.mark("swap {size}", size="—")),
+        (t.mark("Free disk"), _gigabytes(disk.get("free_gb"), t),
+         t.mark("{percent}% of {total} GB", percent=disk.get("free_percent", "—"), total=total_gb)
+         if isinstance(total_gb, (int, float)) else t.mark("{percent}% of {total}", percent=disk.get("free_percent", "—"),
+                                                          total="—")),
         (t.mark("Processes"), _e(procs.get("count", "—")),
          t.mark("{n} origins", n=len(procs.get("groups") or []))),
-        (t.mark("Cleaned in 7 days"), _e(len(done)), auto + (f" · {freed:.1f} {unit}" if freed else "")),
+        (t.mark("Cleaned in 7 days"), _e(len(done)),
+         auto + (" · " + _gigabytes(round(freed, 1), t) if freed else "")),
     ]
-    cells = "".join(f'<div class="tile">{k}<b>{_e(v)}</b>{sub}</div>' for k, v, sub in tiles)
+    cells = "".join(f'<div class="tile">{k}<b>{v}</b>{sub}</div>' for k, v, sub in tiles)
     return f'<div class="tiles machine-tiles">{cells}</div>'
 
 
@@ -118,7 +133,7 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     names = {r.get("id"): r.get("name") for r in payload.get("rows") or [] if isinstance(r, dict) and r.get("id")}
     parts.append(_table(t, "Memory by origin",
                         [("Origin", False), ("Processes", True), ("Sessions", True), ("Memory", True), ("CPU %", True)],
-                        [[_e(g["origin"]), _e(g["processes"]), _e(g["sessions"]), _size(g["rss_mb"], t), _e(g["cpu"])]
+                        [[_e(g["origin"]), _e(g["processes"]), _e(g["sessions"]), _size(g["rss_mb"], t), t.number(g["cpu"])]
                          for g in (procs.get("groups") or [])[:ROWS]],
                         "No process survey yet."))
     parts.append(_table(t, "Largest processes",
@@ -136,9 +151,9 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     disk = m.get("disk") or {}
     parts.append(_table(t, "Where the disk goes",
                         [("Place", False), ("Kind", False), ("Size", True), ("How it comes back", False)],
-                        [[_e(t(l["label"])) + f'<br><span class="mono">{_e(l["path"])}</span>', _e(t(l["kind"])),
-                          f"{l['gb']:.1f} {_unit(t)}",
-                          _e(t(l.get("reclaim", "")) if l.get("reclaim") else "")
+                        [[_word(t, l["label"]) + f'<br><span class="mono">{_e(l["path"])}</span>', _word(t, l["kind"]),
+                          _gigabytes(round(l["gb"], 1) if isinstance(l.get("gb"), (int, float)) else None, t),
+                          _word(t, l.get("reclaim"))
                           + (f'<br><span class="mono">{_e(l["command"])}</span>' if l.get("command") else "")]
                          for l in disk.get("locations") or []],
                         "No disk location measured yet."))
@@ -150,7 +165,7 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     parts.append(_table(t, "Worktrees to look at",
                         [("Repository", False), ("Worktree", False), ("Branch", False), ("State", False), ("Idle days", True)],
                         [[_e(w["repository"].split(":", 1)[-1]), f'<span class="mono">{_e(w["path"])}</span>',
-                          _e(w.get("branch") or ""), _e(t(w["state"])) + (" · " + _e(t("in use")) if w.get("busy") else ""),
+                          _e(w.get("branch") or ""), _word(t, w["state"]) + (" · " + t.mark("in use") if w.get("busy") else ""),
                           _e(w.get("idle_days", ""))]
                          for w in sorted(idle, key=lambda w: -(w.get("idle_days") or 0))[:ROWS]],
                         "Every worktree is clean and in recent use." if git else UNMEASURED_GIT))
@@ -163,8 +178,8 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     counts = cleanup.get("counts") or {}
     parts.append(_table(t, "Cleanup plan",
                         [("What", False), ("Tier", False), ("Count", True)],
-                        [[_e(t(k)), _e(t("auto") if k in ("branch-merged", "branch-pushed", "worktree-missing",
-                                                          "worktree-clean", "build-artifacts") else t("manual")), _e(v)]
+                        [[_word(t, k), t.mark("auto") if k in ("branch-merged", "branch-pushed", "worktree-missing",
+                                                               "worktree-clean", "build-artifacts") else t.mark("manual"), _e(v)]
                          for k, v in counts.items() if v],
                         "Nothing to clean." if cleanup else UNMEASURED_GIT))
     parts.append(t.mark("The auto tier loses nothing and runs on the tick when features.auto_cleanup is on; "
@@ -172,14 +187,15 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                         tag="p", attrs=' class="machine-hint"'))
     parts.append(_table(t, "Cleaned in the last 7 days",
                         [("When", False), ("What", False), ("Item", False), ("Result", False)],
-                        [[_e(stamp(r.get("at"))), _e(t(r.get("class", ""))), f'<span class="mono">{_e(r.get("target"))}</span>',
-                          _e(t(r.get("result", ""))) + (f' — {_e(r["reason"])}' if r.get("reason") else "")]
+                        [[t.date(stamp(r.get("at"))), _word(t, r.get("class")), f'<span class="mono">{_e(r.get("target"))}</span>',
+                          _word(t, r.get("result")) + (" — " + t.known(r["reason"]) if r.get("reason") else "")]
                          for r in (cleanup.get("journal") or [])[:ROWS]],
                         "Nothing was cleaned in the last 7 days."))
     degraded = m.get("degraded") or []
     if degraded:
         # A reason with a `code` is a message id, so the Russian page reads Russian;
-        # one without (a collector's own words) is shown as written.
+        # one without (a collector's own words) is translated when the catalog
+        # holds it and shown as written otherwise (L10N-04).
         def reason(d: dict) -> str:
             if d.get("code") == "not-surveyed":
                 # Each survey names the command that runs it (machine_view._load).
@@ -188,7 +204,7 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                 return t.mark("not surveyed yet — enable features.machine_watch, or run project-observatory full machine")
             if d.get("code") == "unreadable":
                 return t.mark("unreadable: {error}", error=d.get("error", ""))
-            return _e(d.get("reason"))
+            return t.known(d.get("reason"))
         items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span> — {reason(d)}</li>' for d in degraded)
         parts.append(f'<section class="card panel">{t.mark("Not measured", tag="h2", attrs=HEADING)}<ul>{items}</ul></section>')
     parts.append("</section>")
@@ -231,4 +247,4 @@ def _location_labels() -> tuple[str, ...]:
 
 #: The swap row's label, written by collectors/scan_machine.py itself.
 SWAP_LABEL = "Swap files (memory written to disk)"
-DYNAMIC = DYNAMIC + (SWAP_LABEL, "GB") + _location_labels()
+DYNAMIC = DYNAMIC + (SWAP_LABEL,) + _location_labels()

@@ -29,10 +29,32 @@ enum DashboardMode: Equatable {
     static let questionLimit = 6000           // the engine's, in code points (Python `len`)
     @Published var executable: String
     @Published var workspace: String
-    @Published var russian: Bool { didSet { if russian != oldValue { defaults.set(russian, forKey: "russian"); if !localeFromPage { localeSeed += 1 } } } }
+    /// The person's choice — System, English or Русский (L10N-01). Persisted, and pinned
+    /// for the menus AppKit draws itself, which follow at the next launch.
+    @Published var language: AppLanguage {
+        didSet {
+            guard language != oldValue else { return }
+            defaults.set(language.rawValue, forKey: Localization.choiceKey)
+            Localization.pinBundleLanguage(language, in: defaults)
+            let before = Localization.resolve(oldValue, preferred: preferredLanguages())
+            if before != languageCode && !localeFromPage { localeSeed += 1 }
+        }
+    }
+    /// The language the app speaks now: `en` or `ru`.
+    var languageCode: String { Localization.resolve(language, preferred: preferredLanguages()) }
+    /// Whether the app speaks Russian; setting it chooses that language explicitly.
+    var russian: Bool {
+        get { languageCode == "ru" }
+        set { language = newValue ? .russian : .english }
+    }
+    private let preferredLanguages: () -> [String]
     /// Set while a language choice made INSIDE the dashboard is being adopted.
     private var localeFromPage = false
-    func adoptPageLocale(_ code: String) { localeFromPage = true; russian = code == "ru"; localeFromPage = false }
+    /// The page switched its own language: the app follows, unless it already speaks it.
+    func adoptPageLocale(_ code: String) {
+        guard ["en", "ru"].contains(code), code != languageCode else { return }
+        localeFromPage = true; language = code == "ru" ? .russian : .english; localeFromPage = false
+    }
     @Published var conversations: [Conversation] = []
     @Published var turns: [Turn] = []
     @Published var projects: [Conversation] = []
@@ -74,14 +96,21 @@ enum DashboardMode: Equatable {
     private let defaults: UserDefaults
     private let transport: ((String, [String: String]) async throws -> [String: Any])?
     init(defaults: UserDefaults = .standard,
-         transport: ((String, [String: String]) async throws -> [String: Any])? = nil) {
-        self.defaults = defaults; self.transport = transport
-        let cli = defaults.string(forKey: "executable") ?? Self.defaultExecutable(home: NSHomeDirectory())
-        let home = defaults.string(forKey: "workspace") ?? NSHomeDirectory() + "/.local/share/project-observatory-full"
+         transport: ((String, [String: String]) async throws -> [String: Any])? = nil,
+         preferredLanguages: @escaping () -> [String] = Localization.systemPreferredLanguages) {
+        self.defaults = defaults; self.transport = transport; self.preferredLanguages = preferredLanguages
+        let (cli, home) = Self.configured(defaults)
         executable = cli; activeExecutable = cli; workspace = home; activeWorkspace = home
-        // `bool(forKey:)` also reads "YES"/"1" given as a launch argument (a string there).
-        russian = defaults.object(forKey: "russian") != nil ? defaults.bool(forKey: "russian")
-            : Locale.preferredLanguages.first?.hasPrefix("ru") ?? false
+        // The 0.18 switch is read when no choice is stored; `bool(forKey:)` also reads
+        // "YES"/"1" given as a launch argument (a string there).
+        language = Localization.choice(stored: defaults.object(forKey: Localization.choiceKey),
+                                       legacy: defaults.object(forKey: Localization.legacyKey) != nil ? defaults.bool(forKey: Localization.legacyKey) : nil)
+    }
+    /// The saved program and workspace, or where a first launch looks for them. The
+    /// update check reads the same pair, so it follows the workspace Settings saved.
+    nonisolated static func configured(_ defaults: UserDefaults) -> (executable: String, workspace: String) {
+        (defaults.string(forKey: "executable") ?? defaultExecutable(home: NSHomeDirectory()),
+         defaults.string(forKey: "workspace") ?? NSHomeDirectory() + "/.local/share/project-observatory-full")
     }
     /// Where a first launch looks for the engine, before anything was chosen in
     /// Settings: a link on PATH first, then the virtual environment README → Install
@@ -96,22 +125,30 @@ enum DashboardMode: Equatable {
     /// Where a person without an engine learns to install one.
     nonisolated static let installGuide = URL(string: "https://github.com/passioncode-ai/project-observatory-dashboard#install")!
     private var backend: Backend { Backend(executable: activeExecutable, workspace: activeWorkspace) }
-    func t(_ en: String, _ ru: String) -> String { russian ? ru : en }
+    /// The English text in the app's language (L10N-02): the Russian dictionary maps it,
+    /// a missing entry shows the English. `{name}` placeholders are filled from `args`.
+    func t(_ key: String, _ args: [String: String] = [:]) -> String { Localizer.shared.text(key, language: languageCode, args) }
+    /// A sentence about `count` things, in the language's plural form (L10N-03).
+    func plural(_ key: String, _ count: Int, _ args: [String: String] = [:]) -> String {
+        Localizer.shared.plural(key, count: count, language: languageCode, args)
+    }
+    /// The app's language as a locale, for dates and numbers (L10N-05).
+    var locale: Locale { Locale(identifier: russian ? "ru_RU" : "en_US") }
     /// A date in the APP's language, not the system's: "2 окт. 2026 г., 18:57" beside Russian text.
     func when(_ date: Date) -> String {
-        date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Locale(identifier: russian ? "ru_RU" : "en_US")))
+        date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(locale))
     }
 
     var questionTooLong: Bool { question.unicodeScalars.count > Self.questionLimit }
     var questionBlank: Bool { question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     /// Why Send is unavailable, in words; nil when it is available.
     var sendBlocked: String? {
-        if !connected { return t("Not connected to an engine.", "Нет подключения к движку.") }
-        if !agentEnabled { return t("The agent is turned off in this workspace.", "В этой папке данных агент выключен.") }
-        if !providerConfigured { return t("No model provider is configured.", "Провайдер модели не настроен.") }
-        if modelState == "no-budget" { return t("No spending limit is set.", "Лимит расходов не задан.") }
-        if modelState != nil { return t("No model is chosen.", "Модель не выбрана.") }
-        if questionTooLong { return t("The question is longer than \(Self.questionLimit) characters.", "Вопрос длиннее \(Self.questionLimit) символов.") }
+        if !connected { return t("Not connected to an engine.") }
+        if !agentEnabled { return t("The agent is turned off in this workspace.") }
+        if !providerConfigured { return t("No model provider is configured.") }
+        if modelState == "no-budget" { return t("No spending limit is set.") }
+        if modelState != nil { return t("No model is chosen.") }
+        if questionTooLong { return plural("The question is longer than {limit} characters.", Self.questionLimit, ["limit": String(Self.questionLimit)]) }
         return nil
     }
 
@@ -119,62 +156,55 @@ enum DashboardMode: Equatable {
         let extra = detail.map { " (\($0))" } ?? ""
         switch code {
         case "backend-incompatible":
-            return t("This Observatory engine is too old for this app — it needs version 0.12 or newer. Update it with `project-observatory full update --apply`, then Refresh.",
-                     "Этот движок Observatory слишком старый для приложения — нужна версия 0.12 или новее. Обновите его командой `project-observatory full update --apply` и нажмите «Обновить».") + extra
+            return t("This Observatory engine is too old for this app — it needs version 0.12 or newer. Update it with `project-observatory full update --apply`, then Refresh.") + extra
         case "backend-missing":
-            return t("No Observatory engine was found at \(detail ?? "the chosen path"). Install it as README → Install describes (a Python 3.11+ virtual environment), then choose its `project-observatory` in Settings.",
-                     "Движок Observatory не найден по пути \(detail ?? "из настроек"). Установите его, как описано в README → Install (виртуальное окружение Python 3.11+), и выберите его `project-observatory` в настройках.")
+            return t("No Observatory engine was found at {path}. Install it as README → Install describes (a Python 3.11+ virtual environment), then choose its `project-observatory` in Settings.",
+                     ["path": detail ?? t("the chosen path")])
         case "backend-configuration":
-            return t("Choose the absolute path of the project-observatory program and its workspace folder in Settings.",
-                     "Укажите в настройках абсолютный путь к программе project-observatory и её папку данных.")
+            return t("Choose the absolute path of the project-observatory program and its workspace folder in Settings.")
         case "backend-failed":
-            return t("The engine stopped with an error", "Движок завершился с ошибкой") + extra + ". " + t("Check the program and workspace in Settings.", "Проверьте программу и папку данных в настройках.")
-        case "backend-timeout": return t("The engine took too long. Refresh to check whether your request was accepted.", "Движок не ответил вовремя. Обновите состояние, чтобы проверить, принят ли запрос.")
-        case "backend-cancelled": return t("The request was stopped before it finished.", "Запрос остановлен до завершения.")
+            return t("The engine stopped with an error{detail}. Check the program and workspace in Settings.", ["detail": extra])
+        case "backend-timeout": return t("The engine took too long. Refresh to check whether your request was accepted.")
+        case "backend-cancelled": return t("The request was stopped before it finished.")
         case "backend-invalid-response", "backend-response-too-large":
-            return t("The engine returned an answer this app cannot read. Check that Settings point at a project-observatory program.", "Движок вернул ответ, который приложение не может прочитать. Проверьте, что в настройках выбрана программа project-observatory.")
+            return t("The engine returned an answer this app cannot read. Check that Settings point at a project-observatory program.")
         case "dashboard-port-busy":
-            return t("The dashboard port is held by another workspace's server. Stop it, or choose that workspace in Settings.", "Порт дашборда занят сервером другой папки данных. Остановите его или выберите ту папку в настройках.")
+            return t("The dashboard port is held by another workspace's server. Stop it, or choose that workspace in Settings.")
         case "dashboard-start-failed":
-            return t("The dashboard server did not start. Its log is store/logs/serverd.out in the workspace; `project-observatory full open --serve` shows the reason.", "Сервер дашборда не запустился. Его журнал — store/logs/serverd.out в папке данных; причину покажет `project-observatory full open --serve`.")
+            return t("The dashboard server did not start. Its log is store/logs/serverd.out in the workspace; `project-observatory full open --serve` shows the reason.")
         case "dashboard-build-failed":
-            return t("The dashboard could not be built. Run `project-observatory full local` once; it measures this machine and builds the pages.", "Дашборд не удалось построить. Один раз выполните `project-observatory full local` — команда измерит машину и построит страницы.")
+            return t("The dashboard could not be built. Run `project-observatory full local` once; it measures this machine and builds the pages.")
         case "unknown-workspace":
-            return t("This folder is not an Observatory workspace yet. Create it with `project-observatory full init` (with OBSERVATORY_HOME set to it), or choose an existing workspace in Settings.",
-                     "Эта папка ещё не папка данных Observatory. Создайте её командой `project-observatory full init` (с OBSERVATORY_HOME, указывающим на неё) или выберите существующую папку в настройках.")
+            return t("This folder is not an Observatory workspace yet. Create it with `project-observatory full init` (with OBSERVATORY_HOME set to it), or choose an existing workspace in Settings.")
         case "dashboard-workspace-mismatch", "dashboard-unavailable":
-            return t("No running dashboard was verified for this workspace. Start its server with `project-observatory full open --serve`, then try again.", "Не подтверждено, что дашборд этой папки данных запущен. Запустите её сервер командой `project-observatory full open --serve` и попробуйте снова.")
-        case "agent-disabled": return t("The agent is turned off in this workspace. Turn it on with `project-observatory full configure features agent true`, then Refresh.", "В этой папке данных агент выключен. Включите его командой `project-observatory full configure features agent true` и нажмите «Обновить».")
-        case "provider-unconfigured": return t("No model provider is configured. Install its key from a protected file on stdin: `python \"$(project-observatory full-path)/tools/install_key.py\" --for observatory < KEY_FILE` (see ONBOARDING), then Refresh.",
-                                              "Провайдер модели не настроен. Установите его ключ из защищённого файла через stdin: `python \"$(project-observatory full-path)/tools/install_key.py\" --for observatory < KEY_FILE` (см. ONBOARDING) и нажмите «Обновить».") + extra
-        case "model-unconfigured": return t("No model is chosen for this workspace. Choose one with `project-observatory full configure model chain MODEL_ID` (an id from your provider's model list), then Refresh.",
-                                            "Для этой папки данных не выбрана модель. Выберите её командой `project-observatory full configure model chain MODEL_ID` (идентификатор из списка моделей провайдера) и нажмите «Обновить».")
-        case "budget-unset": return t("No spending limit is set, so nothing is sent. Set all three with `project-observatory full configure budget daily_ceiling 0.50` (and `monthly_ceiling`, `velocity_ceiling`), then Refresh.",
-                                      "Лимит расходов не задан, поэтому ничего не отправляется. Задайте все три командой `project-observatory full configure budget daily_ceiling 0.50` (а также `monthly_ceiling`, `velocity_ceiling`) и нажмите «Обновить».")
-        case "assistant-busy": return t("Another question is running. Open its conversation or wait until it finishes.", "Другой запрос ещё выполняется. Откройте его диалог или дождитесь завершения.")
-        case "budget-reached": return t("The configured model budget has been reached.", "Достигнут заданный бюджет модели.")
-        case "cancelled": return t("Stopped. Provider usage already incurred may still be charged.", "Остановлено. Уже израсходованное у провайдера может быть списано.")
-        case "interrupted", "runner-failed": return t("The runner stopped before an answer was saved. Send the question again.", "Процесс остановился до сохранения ответа. Отправьте вопрос снова.")
-        case "provider-failed", "assistant-timeout", "job-failed": return t("The model did not return an answer. Your question is saved; try again.", "Модель не вернула ответ. Вопрос сохранён; попробуйте ещё раз.")
-        case "invalid-evidence", "invalid-answer": return t("The model's answer cited facts it was not given, so it was refused. Try again.", "Ответ модели ссылался на факты, которых ей не давали, поэтому он отклонён. Попробуйте ещё раз.")
-        case "conversation-full": return t("This conversation has reached its limit of 32 turns. Start a new conversation.", "В этом диалоге уже 32 хода. Начните новый диалог.")
-        case "history-full": return t("100 conversations are stored. Delete old ones to start another.", "Сохранено 100 диалогов. Удалите старые, чтобы начать новый.")
-        case "request-history-full": return t("Too many recent requests are still tracked. Try again later.", "Слишком много недавних запросов ещё отслеживается. Попробуйте позже.")
-        case "conversation-busy": return t("Wait for the answer before deleting this conversation.", "Дождитесь ответа, прежде чем удалять диалог.")
-        case "credential-shaped-input": return t("The question looks like it contains a credential. Remove it — keys are never sent to the model.", "Похоже, в вопросе есть ключ доступа. Удалите его — ключи модели не передаются.")
-        case "invalid-question", "input-too-large": return t("A question must be 1 to \(Self.questionLimit) characters.", "Вопрос должен быть от 1 до \(Self.questionLimit) символов.")
-        case "unknown-project": return t("That project is no longer in the registry. The scope was reset to all projects.", "Этого проекта больше нет в реестре. Область сброшена на все проекты.")
-        case "unknown-job", "expired-request": return t("That request is no longer tracked. Send the question again.", "Этот запрос больше не отслеживается. Отправьте вопрос снова.")
-        case "unknown-conversation": return t("That conversation no longer exists.", "Этого диалога больше нет.")
-        case "disk-full": return t("The disk is full, so nothing was sent. Free some space and try again.", "Диск заполнен, поэтому ничего не отправлено. Освободите место и попробуйте снова.")
-        case "workspace-unwritable", "workspace-write-failed", "OSError": return t("The workspace could not be written. Check its permissions and free space.", "Не удалось записать в папку данных. Проверьте права доступа и свободное место.")
-        case "unreadable-history", "linked-history": return t("Stored conversation history could not be read safely; it was left untouched.", "Сохранённую историю не удалось безопасно прочитать; она не изменена.")
-        case "request-id-conflict": return t("That request was already sent with a different question. Send the question again.", "Этот запрос уже был отправлен с другим вопросом. Отправьте вопрос снова.")
+            return t("No running dashboard was verified for this workspace. Start its server with `project-observatory full open --serve`, then try again.")
+        case "agent-disabled": return t("The agent is turned off in this workspace. Turn it on with `project-observatory full configure features agent true`, then Refresh.")
+        case "provider-unconfigured": return t("No model provider is configured. Install its key from a protected file on stdin: `python \"$(project-observatory full-path)/tools/install_key.py\" --for observatory < KEY_FILE` (see ONBOARDING), then Refresh.") + extra
+        case "model-unconfigured": return t("No model is chosen for this workspace. Choose one with `project-observatory full configure model chain MODEL_ID` (an id from your provider's model list), then Refresh.")
+        case "budget-unset": return t("No spending limit is set, so nothing is sent. Set all three with `project-observatory full configure budget daily_ceiling 0.50` (and `monthly_ceiling`, `velocity_ceiling`), then Refresh.")
+        case "assistant-busy": return t("Another question is running. Open its conversation or wait until it finishes.")
+        case "budget-reached": return t("The configured model budget has been reached.")
+        case "cancelled": return t("Stopped. Provider usage already incurred may still be charged.")
+        case "interrupted", "runner-failed": return t("The runner stopped before an answer was saved. Send the question again.")
+        case "provider-failed", "assistant-timeout", "job-failed": return t("The model did not return an answer. Your question is saved; try again.")
+        case "invalid-evidence", "invalid-answer": return t("The model's answer cited facts it was not given, so it was refused. Try again.")
+        case "conversation-full": return t("This conversation has reached its limit of 32 turns. Start a new conversation.")
+        case "history-full": return t("100 conversations are stored. Delete old ones to start another.")
+        case "request-history-full": return t("Too many recent requests are still tracked. Try again later.")
+        case "conversation-busy": return t("Wait for the answer before deleting this conversation.")
+        case "credential-shaped-input": return t("The question looks like it contains a credential. Remove it — keys are never sent to the model.")
+        case "invalid-question", "input-too-large": return plural("A question must be 1 to {limit} characters.", Self.questionLimit, ["limit": String(Self.questionLimit)])
+        case "unknown-project": return t("That project is no longer in the registry. The scope was reset to all projects.")
+        case "unknown-job", "expired-request": return t("That request is no longer tracked. Send the question again.")
+        case "unknown-conversation": return t("That conversation no longer exists.")
+        case "disk-full": return t("The disk is full, so nothing was sent. Free some space and try again.")
+        case "workspace-unwritable", "workspace-write-failed", "OSError": return t("The workspace could not be written. Check its permissions and free space.")
+        case "unreadable-history", "linked-history": return t("Stored conversation history could not be read safely; it was left untouched.")
+        case "request-id-conflict": return t("That request was already sent with a different question. Send the question again.")
         case "invalid-input", "invalid-conversation-id", "invalid-project-id", "invalid-request-id":
-            return t("The engine refused the app's request (\(code)). The app and the engine may be from different releases: update both, then Refresh.",
-                     "Движок отклонил запрос приложения (\(code)). Возможно, приложение и движок из разных выпусков: обновите оба и нажмите «Обновить».")
-        case "completed": return t("The answer was empty.", "Ответ пустой.")
-        default: return t("Could not complete the request", "Не удалось выполнить запрос") + " (\(code))." + extra
+            return t("The engine refused the app's request ({code}). The app and the engine may be from different releases: update both, then Refresh.", ["code": code])
+        case "completed": return t("The answer was empty.")
+        default: return t("Could not complete the request ({code}).{detail}", ["code": code, "detail": extra])
         }
     }
     /// One evidence limitation in the chosen language; an unknown code keeps the engine's own sentence.
@@ -183,16 +213,16 @@ enum DashboardMode: Equatable {
         let shown = (d["shown"] as? NSNumber)?.intValue, total = (d["total"] as? NSNumber)?.intValue
         switch (d["code"] as? String, source) {
         case ("trimmed", "findings"):
-            if let shown, let total { return t("\(shown) of \(total) findings were included, most severe first.", "Включено \(shown) из \(total) находок, самые серьёзные первыми.") }
+            if let shown, let total { return plural("{shown} of {total} findings were included, most severe first.", total, ["shown": String(shown), "total": String(total)]) }
         case ("trimmed", "projects"):
-            if let shown, let total { return t("\(shown) of \(total) projects were included; choose a project for detail.", "Включено \(shown) из \(total) проектов; выберите проект для подробностей.") }
-        case ("freshness-unknown", _): return t("Some snapshots carry no measurement time, so their freshness is unknown.", "У части снимков нет времени измерения, поэтому их свежесть неизвестна.")
-        case ("not-measured", "machine"): return t("This machine's disk and memory are not measured yet: run `project-observatory full machine`.", "Диск и память этой машины ещё не измерены: выполните `project-observatory full machine`.")
-        case ("unavailable", "machine"): return t("The machine snapshot could not be read.", "Не удалось прочитать снимок машины.")
-        case ("unavailable", "projects.json"): return t("The project registry could not be read.", "Не удалось прочитать реестр проектов.")
-        case ("unavailable", "findings.json"): return t("The findings could not be read.", "Не удалось прочитать находки.")
-        case ("unavailable", _): return t("\(source) could not be read.", "Не удалось прочитать \(source).")
-        case ("relations-unavailable", _): return t("Repository and site links could not be read; only findings naming the project itself are included.", "Связи с репозиториями и сайтами не прочитаны; включены только находки о самом проекте.")
+            if let shown, let total { return plural("{shown} of {total} projects were included; choose a project for detail.", total, ["shown": String(shown), "total": String(total)]) }
+        case ("freshness-unknown", _): return t("Some snapshots carry no measurement time, so their freshness is unknown.")
+        case ("not-measured", "machine"): return t("This machine's disk and memory are not measured yet: run `project-observatory full machine`.")
+        case ("unavailable", "machine"): return t("The machine snapshot could not be read.")
+        case ("unavailable", "projects.json"): return t("The project registry could not be read.")
+        case ("unavailable", "findings.json"): return t("The findings could not be read.")
+        case ("unavailable", _): return t("{source} could not be read.", ["source": source])
+        case ("relations-unavailable", _): return t("Repository and site links could not be read; only findings naming the project itself are included.")
         default: break
         }
         return "\(source): \(reason)"
@@ -363,7 +393,7 @@ enum DashboardMode: Equatable {
             let doc = try await call("dashboard"); guard g == generation else { return }
             // An engine before 0.12 answers in its old shape, without `server`.
             guard doc["server"] is String else {
-                throw BridgeError.incompatible(t("engine without the dashboard actions", "движок без действий дашборда"))
+                throw BridgeError.incompatible(t("engine without the dashboard actions"))
             }
             dashboardMode = Self.mode(doc, workspace: activeWorkspace)
             dashboardBuiltAt = doc["built_at"] as? String

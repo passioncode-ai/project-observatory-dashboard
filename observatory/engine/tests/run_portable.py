@@ -150,6 +150,8 @@ BOUNDARY += ('forget_receipt',)
 BOUNDARY += ('facts_learning',)
 # Updates that arrive by themselves; data that survives a reinstall (docs/runs/2026-10-05-auto-update).
 BOUNDARY += ('maintenance',)
+# The app step alone, which the Mac app's Restart to update runs after it quits (LC-16).
+BOUNDARY += ('maintain_app',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -168,6 +170,9 @@ HELPERS += (
     'embedding_policy_cases.json',
     # Grants a synthetic consent so vector-half suites still reach the provider stub.
     'embedding_consent.py',
+    # The page script's re-translation, for the checks that a page built in one
+    # language reads in the other (L10N-01).
+    'relocalize.py',
 )
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', 'tools')
 ROOT_FILES = (
@@ -178,7 +183,7 @@ ROOT_FILES = (
     'log_policy.py', 'code_freshness.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
     # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).
-    'maintenance.py', 'app_update.py',
+    'maintenance.py', 'app_update.py', 'update_events.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
     'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
@@ -273,6 +278,9 @@ def clean_env(base: Path) -> dict[str, str]:
         # No suite may schedule a launchd/systemd job or write a Keychain item on the machine
         # running it (audit A07). HOME is temporary, so the backups root is too.
         'OBSERVATORY_SYSTEM_SETUP': '0',
+        # The shared update log (update_events.py, LC-16) goes beside the suite, never into
+        # ~/Library/Logs or ~/.local/state of the machine running it.
+        'OBSERVATORY_PRODUCT_LOG_DIR': str(base / 'product-logs'),
     }
 
 
@@ -291,9 +299,11 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 #: Suites whose honest run takes longer than the default per-suite timeout, with the
 #: seconds they are given at least (measured 2026-10-06 at --jobs 4: maintenance 217 s
 #: with its pty and planted-writer cases, conformance_receipt 129 s for its full check;
-#: backup_vault 52–104 s alone, past 120 s under the gate's --jobs 6).
+#: backup_vault 52–104 s alone, past 120 s under the gate's --jobs 6; workspace, interop and
+#: indexer_load passed 120 s under the 0.19.0 gate's load).
 #: A larger --timeout still wins; a smaller one never cuts these short.
-SUITE_SECONDS = {'maintenance': 480, 'conformance_receipt': 360, 'backup_vault': 300}
+SUITE_SECONDS = {'maintenance': 480, 'conformance_receipt': 360, 'backup_vault': 300, 'dashboard_render': 600,
+                 'workspace': 300, 'interop': 300, 'indexer_load': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:

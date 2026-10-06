@@ -103,14 +103,14 @@ The Keys and ENV pages' buttons (mint, cap, revoke, mark a leak, reveal one inve
 
 ### Choose the dashboard's language
 
-The dashboard speaks English by default and Russian by choice. Set the language for your workspace, then rebuild the pages:
+The dashboard opens in the reader's system language: Russian when the system's first preferred language is Russian, English otherwise. Each reader can override it with **System / English / Русский** in the navigation rail; that choice stays in the browser, survives rebuilds and updates, and works for pages opened as local files. The workspace setting is the language the pages are built in, used where no browser reports a language (the CLI, the session hook):
 
 ```sh
 project-observatory full configure interface locale ru   # or: en
 project-observatory full open --rebuild
 ```
 
-Each reader can also switch with **EN / RU** in the navigation rail; that choice stays in the browser and works for pages opened as local files. Interface strings and finding titles are translated; a finding's details and suggested action stay in English. To add or change a string, see [Contributing](CONTRIBUTING.md#interface-strings).
+Interface strings and finding titles are translated; a finding's details and suggested action stay in English. To add or change a string, see [Contributing](CONTRIBUTING.md#interface-strings).
 
 `--no-browser` prints the address instead of opening it; `--rebuild` rebuilds the pages first; `--port` picks another loopback port. The pages live in `$OBSERVATORY_HOME/docs/dashboard/`, and `project-observatory full local` refreshes what they show. The server binds `127.0.0.1` only.
 

@@ -803,24 +803,37 @@ Nothing needs to be run after a release. One job per workspace runs every hour: 
 `org.project-observatory.<id>.maintain` on macOS, a systemd user timer
 `project-observatory-<id>-maintain.timer` on Linux. Each run does only what is due:
 
-- Once a day it runs `full update --check`. When a newer **stable** release exists, it runs
-  `full update --apply`, the verified, reversible transaction described below.
+- Every six hours it runs `full update --check`; at login the first check waits 90 seconds
+  after the job starts. When a newer **stable** release exists, it runs `full update --apply
+  --unattended`, the verified, reversible transaction described below, at a safe point (see
+  [When a new release starts running](#when-a-new-release-starts-running)).
 - On macOS, when the installed app is older than the engine, it replaces the app with that
   release's app. The new app must pass the GitHub digest, `SHA256SUMS` and its signature by
-  the organization's release key, `codesign`, the same signing team and Gatekeeper. It is
-  never replaced while this user has it open.
+  the organization's release key, `codesign`, the organization's pinned signing team
+  (`KJ35UYYL22`) and Gatekeeper. It is never replaced while this user has it open: the open app
+  offers **Restart to update** (app menu and the dashboard's toolbar), and installs the waiting
+  version when you quit it or when it has had no window on screen and no input for 30 minutes.
 - Once a day it takes a full encrypted backup, `daily-*.obsnap`, the newest three kept. It
   briefly stops this workspace's tick and server for the copy and starts them again. When a
   tick or an update is running, the backup waits for the next hour. Snapshots you take yourself
   (`snapshot-*`) rotate separately and are never removed by the daily ones. See
   [Encrypted backups off this disk](#encrypted-backups-off-this-disk).
 
+**The switch, "Install updates automatically"**, is the file `auto-update` in the workspace
+home. Without it, updates are on; only the word `off` in it turns them off. The commands
+below write it, and you can write it yourself. An update, a reinstall or an uninstall never
+writes it, neither `on` nor `off`. Off stops the checks, the downloads and the installs, the
+Mac app's included; the daily backup keeps running. An install that turned updates off before
+0.19.0 did it with `updates.auto: false` in `config/settings.json`: that still counts as off,
+and the next `auto-update` command moves it into the file and says so.
+
 ```sh
 project-observatory full auto-update status   # on or off, last check, last result, warnings
-project-observatory full auto-update off      # new releases wait for you; the daily backup keeps running
+project-observatory full auto-update off      # writes `off`; new releases wait for you, the daily backup keeps running
 project-observatory full auto-update on
 project-observatory full maintain status      # everything the job last did
 project-observatory full maintain run         # one pass now
+project-observatory full maintain app         # only the app step: swap a staged app (quit the app first)
 project-observatory full maintain uninstall   # no job at all; it stays off until `maintain ensure`
 ```
 
@@ -846,7 +859,8 @@ reboot or a power loss is different: it ends the update too, and the next pass r
 `failed` ("the update ended without a final journal entry"). Health and `doctor` then show
 the failure; `doctor` also says whether the engine and its jobs run. Where there are no launchd
 jobs (Linux), the job and the plugin pass `--writers-stopped`, because there is nothing for the
-update to stop. A failed update is rolled back and retried the next day, or the next hour when
+update to stop. A check that could not look is retried once within the hour, then every six
+hours. A failed update is rolled back and retried at the next check, or the next hour when
 the reason was momentary (a copy changed while it was taken, a busy lock). An update whose
 rollback needs a person stops the automatic attempts. Once you have run `full update`
 successfully, they resume. Until then, `doctor`, the Health page and `auto-update status` say
@@ -854,10 +868,51 @@ so. `doctor` and the Health page also show when automatic updates are off, when 
 installed but not loaded, the engine and app versions, where the backup passphrase is kept,
 and a daily backup that failed.
 
+#### When a new release starts running
+
+Writing a verified release to disk and starting to run it are two moments. The update
+restarts this workspace's tick and local server on the new code, and the job does that only
+at a safe point: when the local server has answered no page and no agent in the last five
+minutes (a host's `/health` probe, the service document and the events feed do not count),
+no memory-http client has called in that time, and no tick or other workspace operation is
+running (the update would stop the tick half-way). Otherwise the release is recorded as
+`deferred`, `auto-update status` and Health show it as ready, and the next hourly pass tries
+again. A `full update --apply` you run yourself installs at once.
+
+A running Claude Code session is never stopped by an update. Its MCP server
+(`mcp/server.py`) is a Python process that imported the engine when the session started.
+`pip` replaces the files on disk in place; the process keeps the code it already loaded, but
+a module it imports for the first time afterwards comes from the new release. The server
+therefore checks the installed version on each call and answers `stale-server` once the code
+under it changed, and the session gets the new release when it restarts or reconnects the
+server. `full update` lists those servers in its report and never signals them.
+
+#### A release that needs a person
+
+A release whose wheel carries `RELEASE.json` with its own version and a
+`needs_person` step (a data or schema migration to run or confirm by hand) is downloaded and
+verified by the job but not installed. `doctor`, Health and `auto-update status` show the step
+and the version; the same release is not downloaded again. Do the step, then run
+`project-observatory full update --apply`: by hand, the update shows the step and installs.
+Releases before 0.19.0 do not read the marker, so such a release must also refuse its own
+`upgrade --apply` until the step is done. The format is in [COMPATIBILITY.md](COMPATIBILITY.md).
+
+#### The update log
+
+Besides `store/logs/update.jsonl` (this workspace's journal, step by step), every stage writes
+a code to `~/Library/Logs/Project Observatory/updates.jsonl` on macOS, or
+`$XDG_STATE_HOME/project-observatory/logs/updates.jsonl` (`~/.local/state/…`) elsewhere:
+`update_check` (`current`, `ready`, `check_failed`, `download_failed`, `signature_failed`,
+`install_failed`, `needs_migration`), `update_download` (`started`, `done`), `update_install`
+(`started`, `installed`, `failed`, `timeout`), `update_restart` (`requested`, `refused`) and
+`auto_update` (`on`, `off`). A line holds the event, its code, a UTC time, `engine` or `app`
+and the workspace's instance id. It holds no version, path or message.
+`OBSERVATORY_PRODUCT_LOG_DIR` moves the folder.
+
 **Installs from 0.7.0 to 0.16.0** have no job of their own. The `observatory-log` plugin,
 which the PassionCode launcher keeps current, checks such an engine once a day. When a
-newer stable release exists, it runs that engine's own `full update --apply`, unless
-`updates.auto` is `false` in `config/settings.json`. The new release then schedules its job.
+newer stable release exists, it runs that engine's own `full update --apply`, unless the
+`auto-update` file in the home says `off` or `updates.auto` is `false` in `config/settings.json`. The new release then schedules its job.
 The bridge logs to `~/.local/state/project-observatory/update-bridge.log`.
 
 ### Updating by hand
@@ -896,9 +951,12 @@ copy is kept beside it as `<home>.failed-update-…`. Every step is a line in
 
 It refuses a downgrade, the same version without `--reinstall`, and a source checkout or
 editable install (update those with Git). `--version X.Y.Z` pins the target; `--repository
-OWNER/NAME` and `--api-url URL` (or `OBSERVATORY_RELEASE_REPOSITORY`,
-`OBSERVATORY_RELEASE_API`) select a fork or a mirror. Only HTTPS is accepted, except to
-this machine.
+OWNER/NAME` and `--api-url URL` select a fork or a mirror; the signature is still checked
+against the organization's key pinned in the engine. The environment variables
+`OBSERVATORY_RELEASE_REPOSITORY` and `OBSERVATORY_RELEASE_API` do the same only in a
+development build (a checkout or an editable install): an installed release ignores them
+and says so, because a feed the environment can redirect is not a release's (LC-16). Only
+HTTPS is accepted, except to this machine.
 
 | Exit | `--check` | `--apply` |
 |---|---|---|
@@ -915,19 +973,27 @@ scheduler every few hours stays far below it.
 
 ## Choose the dashboard's language
 
-The dashboard is English unless the workspace says otherwise. The setting lives in
-`config/settings.json` as `"interface": {"locale": "ru"}` and is written by
+The dashboard opens in the reader's system language: Russian when the first preferred
+language of the system (the browser's `navigator.languages`) is Russian, English otherwise.
+Each reader can override it with **System / English / Русский** in the navigation rail; the
+choice is stored in that browser, applied before the first paint, kept for pages opened as
+local files and across rebuilds and updates, and **System** forgets it again. An unknown
+stored value reads as System.
+
+The workspace setting is the language the pages are built in — what a reader without a
+browser gets (the CLI, the session hook, the checks) and what a browser that reports no
+language shows. It lives in `config/settings.json` as `"interface": {"locale": "ru"}` and is
+written by
 
 ```sh
 project-observatory full configure interface locale ru   # en | ru
 project-observatory full open --rebuild                  # pages carry the language they were built in
 ```
 
-`full doctor` reports it under `interface`. Only `en` and `ru` are accepted; an unknown
-key or value is refused. Releases before 0.4.0 ignore the section. Each reader can also
-press **EN** or **RU** in the navigation rail: the choice is stored in that browser,
-applied before the first paint and kept for pages opened as local files; choosing the
-workspace's own language forgets it again. The interface and finding titles are
+Precedence, first match wins: the reader's choice, the system's first language, then this
+setting (`OBSERVATORY_LOCALE` overrides it for one build), else English. `full doctor`
+reports it under `interface`. Only `en` and `ru` are accepted; an unknown key or value is
+refused. Releases before 0.4.0 ignore the section. The interface and finding titles are
 translated; a finding's details and suggested action stay in English. An agent asked to set the language runs the
 `configure` command above and never edits other settings to do it.
 

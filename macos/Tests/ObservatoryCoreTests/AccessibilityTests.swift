@@ -98,12 +98,12 @@ import ApplicationServices
     func testSettingsReadsEveryControlByItsOwnName() async {
         for russian in [false, true] {
             let m = model(russian: russian) { _ in self.status(ready: true) }
-            let w = await host(SettingsView().environmentObject(m), size: NSSize(width: 600, height: 420))
+            let w = await host(SettingsView().environmentObject(m), size: NSSize(width: 600, height: 480))
             let found = elements(w)
             assertNamed(found)
             let labels = Set(found.map(\.label))
-            XCTAssertTrue(labels.contains(m.t("Choose", "Выбрать") + ": " + m.t("Workspace", "Папка данных")), "\(labels)")
-            XCTAssertTrue(labels.contains(m.t("Choose", "Выбрать") + ": " + m.t("Program", "Программа")), "\(labels)")
+            XCTAssertTrue(labels.contains(m.t("Choose: {field}", ["field": m.t("Workspace")])), "\(labels)")
+            XCTAssertTrue(labels.contains(m.t("Choose: {field}", ["field": m.t("Program")])), "\(labels)")
         }
     }
 
@@ -115,7 +115,7 @@ import ApplicationServices
             await m.refresh()
             let w = await host(AssistantView().environmentObject(m))
             // The two Settings links (the footer's gear and the setup banner's button) open one window.
-            assertNamed(elements(w), allowedTwins: [m.t("Settings", "Настройки")])
+            assertNamed(elements(w), allowedTwins: [m.t("Settings")])
         }
     }
 
@@ -133,11 +133,11 @@ import ApplicationServices
             let d = scratchDefaults("observatory-ax-dash")
             d.set(base, forKey: "workspace"); d.set("/usr/bin/false", forKey: "executable")
             let m = Model(defaults: d) { action, _ in action == "dashboard" ? answer : self.status(ready: true) }
-            let w = await host(DashboardView().environmentObject(m).environmentObject(WebController()))
+            let w = await host(DashboardView().environmentObject(m).environmentObject(WebController()).environmentObject(scratchUpdates()))
             let found = elements(w)
             assertNamed(found)
-            if i < 2 { XCTAssertTrue(found.contains { $0.label == m.t("Start server", "Запустить сервер") }, "mode \(i): \(found.map(\.label))") }
-            else { XCTAssertTrue(found.contains { $0.label == m.t("Build the dashboard", "Построить дашборд") }, "\(found.map(\.label))") }
+            if i < 2 { XCTAssertTrue(found.contains { $0.label == m.t("Start server") }, "mode \(i): \(found.map(\.label))") }
+            else { XCTAssertTrue(found.contains { $0.label == m.t("Build the dashboard") }, "\(found.map(\.label))") }
         }
     }
 }

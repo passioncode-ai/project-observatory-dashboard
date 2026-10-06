@@ -1134,7 +1134,11 @@ def build():
 def build_locale() -> str:
     """The language the pages are built in: `OBSERVATORY_LOCALE` when set (the
     checks and the screenshot use it), else the workspace's `interface.locale`,
-    else English. An unsupported value stops the build rather than guessing."""
+    else English. An unsupported value stops the build rather than guessing.
+
+    It is the language of the HTML before the page script runs, and the one a
+    reader gets only when the browser names no system language: the reader's
+    choice and then the system language win (`LOCALE_RESOLVER`, i18n.py)."""
     value = os.environ.get("OBSERVATORY_LOCALE")
     if value:
         return i18n.check_locale(value)
@@ -1142,10 +1146,34 @@ def build_locale() -> str:
     return i18n.check_locale(configuration.interface_locale())
 
 
+#: THE READER'S LANGUAGE (L10N-01), one function shared by the head script —
+#: which sets `lang` before first paint — and the page script, so the two can
+#: never settle on different languages. ES5, because the head runs it before
+#: anything else. `stored` is the switch's value in the browser; `languages`
+#: the system's preferred languages, first first; `fallback` the build locale.
+LOCALE_RESOLVER = r"""var OBSERVATORY_LOCALES = __LOCALES__;
+function observatoryLocale(stored, languages, fallback) {
+  if (OBSERVATORY_LOCALES.indexOf(stored) >= 0) return stored;
+  var first = languages && languages.length ? String(languages[0] || "") : "";
+  if (first) {
+    var primary = first.toLowerCase().split(/[-_]/)[0];
+    return OBSERVATORY_LOCALES.indexOf(primary) >= 0 ? primary : "en";
+  }
+  return OBSERVATORY_LOCALES.indexOf(fallback) >= 0 ? fallback : "en";
+}
+function observatorySystemLanguages(nav) {
+  if (nav === undefined) nav = typeof navigator !== "undefined" ? navigator : null;
+  if (!nav) return [];
+  if (nav.languages && nav.languages.length) return Array.prototype.slice.call(nav.languages);
+  return nav.language ? [nav.language] : [];
+}""".replace("__LOCALES__", json.dumps(list(i18n.LOCALES)))
+
+
 def template_for(locale: str) -> str:
     """The template in one language, with the catalogs the script needs."""
     catalogs = json.dumps(i18n.catalogs(), ensure_ascii=False, sort_keys=True)
     return (i18n.localize_markup(TEMPLATE, locale)
+            .replace("__LOCALE_RESOLVER__", LOCALE_RESOLVER)
             .replace("__LOCALE__", locale)
             .replace("__I18N__", catalogs.replace("</", "<\\/")))
 
@@ -1177,18 +1205,16 @@ TEMPLATE = r"""<!doctype html>
 <title>__TITLE__</title>
 <link rel="icon" type="image/svg+xml" href="__ICON__">
 <script>
-/* THE READER'S LANGUAGE, BEFORE FIRST PAINT. The page is built in the
-   workspace's language (`interface.locale`); a reader who picked the other one
-   with the EN/RU switch keeps it in localStorage, and `lang` is set here so
-   that the first paint, hyphenation and screen readers already agree with it.
+/* THE READER'S LANGUAGE, BEFORE FIRST PAINT (L10N-01). The reader's choice on
+   the language switch, else the system's first preferred language, else the
+   language the page was built in. `lang` is set here so that the first paint,
+   hyphenation and screen readers already agree with the page script.
    Guarded: the smoke harness has no localStorage. */
+__LOCALE_RESOLVER__
 (function () {
-  var root = document.documentElement, locale = root.getAttribute("data-build-locale");
-  try {
-    var chosen = localStorage.getItem("observatory.locale");
-    if (chosen === "en" || chosen === "ru") locale = chosen;
-  } catch (e) {}
-  root.lang = locale;
+  var root = document.documentElement, stored = null;
+  try { stored = localStorage.getItem("observatory.locale"); } catch (e) {}
+  root.lang = observatoryLocale(stored, observatorySystemLanguages(), root.getAttribute("data-build-locale"));
 })();
 </script>
 <style>
@@ -1819,12 +1845,12 @@ __AGENTS__
   <section id="observer">
     <h3 data-t>Observer state</h3>
     <p data-t>What the observatory knows about itself: when it last looked, how much
-    it has collected and how many conclusions wait for a person's decision. Empty here
+    it has collected and how many of the agents' records are still unconfirmed. Empty here
     means there is no local store — the registry still reads as before.</p>
     <div id="health" class="health"></div>
   </section>
   <section id="queue-s">
-    <h3 id="queue-h" data-t>Awaiting a person's decision</h3>
+    <h3 id="queue-h" data-t>Agents' records</h3>
     <div id="queue"></div>
   </section>
   <section id="dups-s">
@@ -1887,23 +1913,53 @@ const E = s => String(s == null ? "" : s).replace(/[&<>"']/g,
 
 // THE LANGUAGE. English message ids in the code, one catalog per language
 // (dashboard/locales/*.json — the builder reads the same files). The page is
-// built in the workspace's language; the EN/RU switch keeps the reader's own
-// choice in localStorage and reloads, so every renderer below simply runs again
-// in it. Static text carries its English id in `data-t` and is re-translated by
+// built in one language and the reader's is resolved here (L10N-01): the
+// switch's stored choice, else the system's first preferred language, else the
+// build's. The switch reloads, so every renderer below simply runs again in
+// it. Static text carries its English id in `data-t` and is re-translated by
 // `localizeStatic` when the two languages differ.
 const I18N = __I18N__;
+__LOCALE_RESOLVER__
 const LOCALE_KEY = "observatory.locale";
 const BUILD_LOCALE = document.documentElement.getAttribute("data-build-locale") || "en";
-const LOCALE = (() => {
+// What the switch shows pressed: "system" unless the reader picked a language.
+// An unknown stored value (an older build's, a hand edit) reads as "system".
+const LOCALE_CHOICE = (() => {
   try {
     const chosen = localStorage.getItem(LOCALE_KEY);
-    if (chosen && Object.prototype.hasOwnProperty.call(I18N, chosen)) return chosen;
+    if (OBSERVATORY_LOCALES.includes(chosen)) return chosen;
   } catch (e) {}
-  return Object.prototype.hasOwnProperty.call(I18N, BUILD_LOCALE) ? BUILD_LOCALE : "en";
+  return "system";
 })();
+const localeFor = choice => {
+  const l = observatoryLocale(choice, observatorySystemLanguages(), BUILD_LOCALE);
+  return Object.prototype.hasOwnProperty.call(I18N, l) ? l : "en";
+};
+const LOCALE = localeFor(LOCALE_CHOICE);
 const PLURAL = new Intl.PluralRules(LOCALE);
 // Numbers are grouped the way the reader's language groups them.
 const NUM = v => Number(v).toLocaleString(LOCALE);
+// DATES in the reader's format (L10N-05): `02.01.2026 03:04 UTC` in Russian;
+// English keeps the ISO form the engine writes. Text that is not an ISO date
+// is returned as it is. `i18n.format_date` is the builder's twin.
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2})?)(?:\.\d+)?)?( ?(?:Z|UTC|[+-]00:?00))?$/;
+function DATE(v) {
+  const m = typeof v === "string" ? DATE_RE.exec(v) : null;
+  if (!m || LOCALE !== "ru") return v;
+  return `${m[3]}.${m[2]}.${m[1]}` + (m[4] ? " " + m[4] : "") + (m[5] ? " UTC" : "");
+}
+// A number argument in the reader's digits: grouped integers everywhere, and
+// a decimal comma in Russian (`i18n.format_number`).
+const ARGNUM = v => Number.isInteger(v) || LOCALE !== "en" ? NUM(v) : String(v);
+// TEXT THE ENGINE WROTE IN ENGLISH — a refusal, a degraded reason — shown in
+// the reader's language when the catalog holds it, else as written (L10N-04).
+// Never a key: an entry that is not plain text is not a translation of it.
+function KNOWN(text) {
+  const s = text == null ? "" : String(text);
+  if (/\{[a-z_][a-z0-9_]*\}/.test(s)) return s;
+  const entry = (I18N[LOCALE] || {})[s];
+  return typeof entry === "string" ? entry : s;
+}
 // T("{n} projects", {n: 3}): the translation, its plural form chosen by `n`,
 // its placeholders filled; an id with no translation reads as English, never
 // as an empty string.
@@ -1918,7 +1974,8 @@ function T(id, args) {
   const text = typeof entry === "string" ? entry : id.split("@@").pop();
   if (!args) return text;
   return text.replace(/\{([a-z_][a-z0-9_]*)\}/g, (m, k) => !(k in args) ? m
-    : (typeof args[k] === "number" && Number.isInteger(args[k]) ? NUM(args[k]) : String(args[k])));
+    : (typeof args[k] === "number" && Number.isFinite(args[k]) ? ARGNUM(args[k])
+       : typeof args[k] === "string" ? DATE(args[k]) : String(args[k])));
 }
 // A finding's title in the reader's language: its message id and arguments
 // (`finding_types.titled` in the rule modules). A findings.json written before
@@ -1934,30 +1991,42 @@ function localizeStatic(root) {
     el.textContent = T(el.dataset.t, args);
   });
   for (const name of ["aria-label", "placeholder", "title", "data-label"])
-    root.querySelectorAll(`[data-t-${name}]`).forEach(el =>
-      el.setAttribute(name, T(el.getAttribute(`data-t-${name}`))));
+    root.querySelectorAll(`[data-t-${name}]`).forEach(el => {
+      let args;
+      try { args = el.hasAttribute(`data-t-${name}-args`) ? JSON.parse(el.getAttribute(`data-t-${name}-args`)) : undefined; } catch (e) {}
+      el.setAttribute(name, T(el.getAttribute(`data-t-${name}`), args));
+    });
+  root.querySelectorAll("[data-date]").forEach(el => { el.textContent = DATE(el.dataset.date); });
+  root.querySelectorAll("[data-num]").forEach(el => {
+    const n = Number(el.dataset.num);
+    if (Number.isFinite(n)) el.textContent = ARGNUM(n);
+  });
 }
 if (LOCALE !== BUILD_LOCALE) {
   localizeStatic(document);
   if (PAGE_TITLE) document.title = T(PAGE_TITLE) + " — Project Observatory";
 }
-document.querySelectorAll(".locale-switch button[data-locale]").forEach(b => {
-  b.setAttribute("aria-pressed", String(b.dataset.locale === LOCALE));
-  b.addEventListener("click", () => {
-    if (b.dataset.locale === LOCALE) return;
-    try {
-      // Choosing the workspace's own language forgets the override, so a
-      // later change of `interface.locale` reaches this reader too.
-      if (b.dataset.locale === BUILD_LOCALE) localStorage.removeItem(LOCALE_KEY);
-      else localStorage.setItem(LOCALE_KEY, b.dataset.locale);
-    } catch (e) {
-      // Storage refused (a private window): the choice cannot outlive the
-      // page, so say so instead of pretending the switch worked.
-      return toast(T("Your browser keeps no settings here; set interface.locale in the workspace instead."));
-    }
-    location.reload();
-  });
-});
+// THE SWITCH: System / English / Russian. The choice is the reader's and
+// lives in the browser, so it survives a rebuild and an update; "System"
+// forgets it, and the system language decides again.
+const localeButtons = [...document.querySelectorAll(".locale-switch button[data-locale]")];
+const pressLocale = choice => localeButtons.forEach(b =>
+  b.setAttribute("aria-pressed", String(b.dataset.locale === choice)));
+pressLocale(LOCALE_CHOICE);
+localeButtons.forEach(b => b.addEventListener("click", () => {
+  const choice = b.dataset.locale;
+  if (choice === LOCALE_CHOICE && b.getAttribute("aria-pressed") === "true") return;
+  try {
+    if (choice === "system") localStorage.removeItem(LOCALE_KEY);
+    else localStorage.setItem(LOCALE_KEY, choice);
+  } catch (e) {
+    // Storage refused (a private window): the choice cannot outlive the
+    // page, so say so instead of pretending the switch worked.
+    return toast(T("Your browser keeps no settings here, so the page follows the system language."));
+  }
+  if (localeFor(choice) !== LOCALE) location.reload();
+  else pressLocale(choice);
+}));
 // `/` focuses the search box, unless the reader is already typing.
 document.addEventListener("keydown", ev => {
   if (ev.key !== "/" || ev.metaKey || ev.ctrlKey || ev.altKey) return;
@@ -1972,13 +2041,13 @@ document.addEventListener("keydown", ev => {
 // Never "Measured not measured": with no scan yet the label itself says so.
 if (D.measured) {
   // The space lives with the value, so "Not measured yet" meets the semicolon directly.
-  document.getElementById("upd").textContent = " " + D.measured.replace("T", " ").replace("Z", " UTC");
+  document.getElementById("upd").textContent = " " + DATE(D.measured.replace("T", " ").replace("Z", " UTC"));
 } else {
   document.getElementById("upd-label").textContent = T("Not measured yet");
   document.getElementById("upd").textContent = "";
 }
 const cs = document.getElementById("content-stamp");
-if (cs) cs.textContent = D.updated || "—";
+if (cs) cs.textContent = DATE(D.updated || "—");
 const S = D.stats;
 // A TILE'S CAPTION AGREES WITH ITS NUMBER. A counted noun is a plural id
 // (`tile@@{n} …`): the catalog picks the form for the number ("1 inactive
@@ -2103,7 +2172,7 @@ if (MORE_TILES) MORE_TILES.onclick = e => {
 const H = D.health || {};
 const hb = [];
 if (D.store_degraded) hb.push([T("store"), T(D.store_degraded.text || D.store_degraded, D.store_degraded.args)]);
-if (H.last_scan) hb.push([T("last scan"), H.last_scan.replace("T", " ").replace("Z", " UTC")]);
+if (H.last_scan) hb.push([T("last scan"), DATE(H.last_scan.replace("T", " ").replace("Z", " UTC"))]);
 if (H.events != null) hb.push([T("events"), NUM(H.events)]);
 if (H.weeks != null) hb.push([T("weekly snapshots"), NUM(H.weeks)]);
 if (H.metrics != null) hb.push([T("plugin measurements"), NUM(H.metrics)]);
@@ -2126,7 +2195,7 @@ const SERVERD_FIX = {
   silent: [T("the observer is silent — check it"), toolCommand("serverd.py", ["--status"])],
 };
 if (H.leaks_open > 0) hb.push([T("secret leaks"), T("{n} not rotated — vault.py leaks", {n: H.leaks_open})]);
-if (H.proposed != null) hb.push([T("awaiting the operator's decision"), H.proposed]);
+if (H.proposed != null) hb.push([T("agents' records not yet confirmed"), NUM(H.proposed)]);
 if (H.registry_proposals) hb.push([T("registry edits proposed"), H.registry_proposals]);
 // Whether memory text may leave this machine (OBS-33): the state in words and the
 // command that shows the consents, ready to copy.
@@ -2149,19 +2218,20 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
     "undetermined": T("could not check"), "updated": T("updated"),
     "updated-services-not-restarted": T("updated, a background job did not start"),
     "failed-rolled-back": T("failed and rolled back"), "refused": T("refused"),
-    "needs-person": T("needs a person"), "another-update-running": T("another update was running")};
+    "needs-person": T("needs a person"), "another-update-running": T("another update was running"),
+    "held": T("waits for a step by a person"), "deferred": T("ready, waits for a moment with no client")};
   const RESULT_WORD = r => RESULT[r] || r || "?";
   if (!MT.wanted || MT.scheduled === false)
     hb.push([T("updates and backups"), T("not scheduled on this machine — new releases and daily backups wait for a person"),
       fullCommand("maintain ensure")]);
   else if (!MT.auto)
-    hb.push([T("updates"), T("off — new releases are not installed by themselves"), fullCommand("auto-update on")]);
+    hb.push([T("Install updates automatically"), T("off — new releases are not installed by themselves"), fullCommand("auto-update on")]);
   else {
     const last = MT.update || MT.check;
     // What the last update moved (A14).
     const moved = MT.update === "updated" && MT.update_from && MT.update_to
       ? " (" + MT.update_from + " → " + MT.update_to + ")" : "";
-    hb.push([T("updates"), MT.checked ? T("installed by themselves; last check {date}: {result}",
+    hb.push([T("Install updates automatically"), MT.checked ? T("installed by themselves; last check {date}: {result}",
       {date: MT.checked.slice(0, 10), result: (RESULT[last] || last || "?") + moved}) : T("installed by themselves; not checked yet"), status]);
   }
   // What is installed, on every path (A14 review: the versions showed only when updates
@@ -2177,10 +2247,15 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
                                      toolCommand("serverd.py", ["--install"])],
     "app-refused": w => [T("the Mac app update was refused: {detail}", {detail: w.detail || ""}), status],
     "needs-person": () => [T("the last automatic update needs a person"), fullCommand("update")],
+    // A held release (LC-16): verified, not installed by the job; the step is the person's.
+    "needs-migration": w => [T("release {version} needs a step by a person before it is installed: {step}",
+                               {version: w.version || "?", step: w.step || ""}), fullCommand("update --apply")],
+    "deferred": w => [T("release {version} is ready and waits for a moment with no client; tried again within the hour",
+                        {version: w.version || "?"}), status],
     "update-incomplete": w => [w.soon
       ? T("the last automatic update did not complete ({result}: {detail}); tried again within the hour",
           {result: RESULT_WORD(w.result), detail: w.detail || ""})
-      : T("the last automatic update did not complete ({result}: {detail}); tried again tomorrow",
+      : T("the last automatic update did not complete ({result}: {detail}); tried again within six hours",
           {result: RESULT_WORD(w.result), detail: w.detail || ""}), status],
     "snapshot-failed": w => [T("the last daily backup failed: {detail}; tried again within the hour", {detail: w.detail || ""}),
                              fullCommand("backups status")],
@@ -2600,7 +2675,7 @@ function metrics(list) {
       const shown = m.u === "bytes" ? bytes(diff) : NUM(diff);
       const was = m.u === "bytes" ? bytes(m.p) : NUM(+m.p);
       d = ` <span class="delta ${up ? "up" : "down"}" title="${T("was {value}", {value: was})}` +
-          ` — ${E((m.pat || "").slice(0, 10))}">${up ? "↑" : "↓"}${shown}</span>`;
+          ` — ${E(DATE((m.pat || "").slice(0, 10)))}">${up ? "↑" : "↓"}${shown}</span>`;
     }
     return `<div class="tier" title="${E(m.n)}">` +
            `<span class="cap">${E(cap)}</span> ${val}${d}</div>`;
@@ -3131,11 +3206,15 @@ async function call(action, body, ms = CALL_TIMEOUT_MS) {
     if (!d) throw new Uncertain(T("an answer arrived but cannot be read"));
     return d;
   }
+  // The server refuses in English, which stays the refusal's identity
+  // (`err.refusal`); the reader sees its translation where the catalog holds
+  // one (L10N-04).
   const said = (d && d.error) || ("HTTP " + r.status);
+  const refused = Kind => Object.assign(new Kind(KNOWN(said)), {refusal: said});
   // 502 is the provider's own refusal, relayed; any other 5xx is a fault that
   // may have struck after the action took effect.
-  if (r.status >= 500 && r.status !== 502) throw new Uncertain(said);
-  throw new Error(said);
+  if (r.status >= 500 && r.status !== 502) throw refused(Uncertain);
+  throw refused(Error);
 }
 
 // One credential action: confirm what cannot be undone, ask for what the
@@ -3462,7 +3541,7 @@ function movementsSection() {
       ${cmds.map((c, i) => `<button class="chip-btn" type="button" data-copy="${E(c)}" title="${T("copy the movement record")}">${T("Command: record {name}", {name: E(u.vars[i])})}</button>`).join(" ")}</li>`;
   }).join("");
   const rows = mv.map(m => `<tr>
-      <td class="num"><span class="mono">${E(String(m.at || "").slice(0, 16).replace("T", " "))}</span></td>
+      <td class="num"><span class="mono">${E(DATE(String(m.at || "").slice(0, 16).replace("T", " ")))}</span></td>
       <td>${E(EVENT_LABEL[m.event] || m.event || "")}</td>
       <td><span class="mono">${E(m.secret || m.of || "")}</span></td>
       <td>${E(m.by || "")}${m.tool ? ` <span class="none">· ${E(m.tool)}</span>` : ""}</td>
@@ -3667,7 +3746,7 @@ function renderEnv() {
   const prodGaps = ((D.remote && D.remote.degraded) || []).filter(g => g && g.reason);
   const prodNote = prodGaps.length ? '<div class="empty not-scanned degraded-note"><p>' +
     T("Production could not be read in full, so the Prod column is incomplete:") + '</p><ul>' +
-    prodGaps.map(g => '<li><span class="mono">' + E(g.source || "") + '</span> — ' + E(g.reason) +
+    prodGaps.map(g => '<li><span class="mono">' + E(g.source || "") + '</span> — ' + E(KNOWN(g.reason)) +
       (g.effect ? '<div class="anchor">' + E(g.effect) + '</div>' : '') + '</li>').join("") + '</ul></div>' : "";
   out.innerHTML = prodNote + filterLine(rows.length, ENVV.length, "of@@{n} variables") + '<div class="action-mode"><b>' + (LIVE ? T("Actions connected") : T("Command mode")) + '</b> · ' + (LIVE ? T("A value opens only on request and is hidden again.") : T("The buttons copy commands for a terminal; no values are shown here.")) + '<details><summary>' + T("How to use the actions") + '</summary>' + howto + '</details></div><div class="card"><table>' +
     '<colgroup><col style="width:26%"><col style="width:17%"><col style="width:20%">' +
@@ -3930,7 +4009,7 @@ function renderDomains() {
     if (n === null) return NONE;
     const word = n < 0 ? chip(T("expired"), "danger")
       : n <= 90 ? chip(T("{n} d", {n}), "warn") : T("{n} d", {n});
-    return `${E(d.expires_on)}<div class="tier">${word}` +
+    return `${E(DATE(d.expires_on))}<div class="tier">${word}` +
       (d.auto_renew === false ? " " + chip(T("no auto-renewal"), "warn") : "") + `</div>`;
   };
   sortInPlace(doms, {name: d => lower(d.name), expiry: d => dateOr(d.expires_on)});
@@ -4012,7 +4091,7 @@ function renderHeroku() {
   const gaps = (D.heroku.degraded || []).filter(d => d && d.reason);
   const gapsHtml = gaps.length ? `<div class="empty not-scanned degraded-note"><p>${
     APPS.length ? T("Part of Heroku could not be read:") : T("Heroku could not be read:")}</p><ul>${
-    gaps.map(d => `<li><span class="mono">${E(d.source || "heroku")}</span> — ${E(d.reason)}</li>`).join("")}</ul><p>${
+    gaps.map(d => `<li><span class="mono">${E(d.source || "heroku")}</span> — ${E(KNOWN(d.reason))}</li>`).join("")}</ul><p>${
     T("Scan again once the Heroku CLI answers:")}</p><p><button class="chip-btn mono" type="button" data-copy="${
     E(fullCommand("heroku"))}" title="${T("copy the command")}">${E(fullCommand("heroku"))}</button></p></div>` : "";
   if (!APPS.length && gaps.length) { out.innerHTML = gapsHtml; return; }
@@ -4020,7 +4099,7 @@ function renderHeroku() {
   const team = sel.value;
   const apps = APPS.filter(a => keepApp(a, q, team));
   if (!apps.length) { out.innerHTML = gapsHtml + nothingFound(APPS.length); return; }
-  const money = n => n == null || !Number.isFinite(Number(n)) ? "—" : "$" + Number(n).toLocaleString("en", {maximumFractionDigits: 2});
+  const money = n => n == null || !Number.isFinite(Number(n)) ? "—" : "$" + Number(n).toLocaleString(LOCALE, {maximumFractionDigits: 2});
   sortInPlace(apps, {name: a => lower(a.name), cost: a => numOr(a.monthly_cost)});
   const groups = new Map();
   apps.forEach(a => { const key = SORT.key ? T("Selected entries") : a.team; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(a); });
@@ -4138,51 +4217,32 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
 // THE REVIEW QUEUE, read-only: the newest proposals, each with the commands
 // that accept or reject it. The decision itself is taken in a terminal.
 (function renderQueue() {
+  // AGENTS' RECORDS ARE NOT A PERSON'S WORK (operator, 2026-10-06: "I cannot decide
+  // anything there"). Observations, notes and sessions are the agents' working memory:
+  // an independent source confirms one, or retention retires it. The section says so,
+  // keeps the newest few folded for the curious, and asks nothing; deciding by hand
+  // stays possible from a terminal (`review.py`), never as a call to action here.
   const host = document.getElementById("queue"), head = document.getElementById("queue-h");
   const q = D.queue || [];
+  head.textContent = T("Agents' records");
   if (!q.length) {
-    head.textContent = T("Awaiting a person's decision");
     host.innerHTML = `<p class="none">${D.store_degraded
-      ? E(T(D.store_degraded.text || D.store_degraded, D.store_degraded.args)) : T("nothing proposed — the queue is empty")}</p>`;
+      ? E(T(D.store_degraded.text || D.store_degraded, D.store_degraded.args)) : T("nothing proposed")}</p>`;
     return;
   }
-  // The header says how many are shown of how many wait in total.
   const total = (D.health && D.health.proposed) || q.length;
-  head.textContent = T("Awaiting a person's decision — {shown} of {total}", {shown: q.length, total});
-  // One line above the rows: what waits, of which kinds, and what
-  // retention erases first.
-  const dg = D.digest || null;
-  const digestLine = dg ? `<p class="dmeta" id="queue-digest">${T("{n} waiting:", {n: dg.waiting})} ` +
-    // "kind: n", not "n kind": the kinds are nouns in the singular, and a count
-    // before a singular noun broke the grammar of every language with plurals (A34 review).
-    Object.entries(dg.by_kind || {}).map(([k, n]) => `${E(T(`kind@@${k}`))}: ${NUM(n)}`).join(", ") +
-    " · " + T("retention erases a proposal after {n} d", {n: dg.horizon_days}) +
-    (dg.erases_within_7d ? " — " + T("{n} go before {date}", {n: `<b>${dg.erases_within_7d}</b>`, date: E(dg.first_erase_on || "")}) : " — " + T("nothing goes this week")) +
-    ` · <button class="chip-btn" type="button" data-copy="${E(toolCommand("review.py", ["digest"]))}" title="${T("copy the command")}">${T("Command: {label}", {label: T("queue digest")})}</button></p>` : "";
-  host.innerHTML = digestLine + q.map(r => {
-    // A visible placeholder, never an empty reason the tool refuses (audit A32).
-    const ok = toolCommand("review.py", ["promote", r.id, "--why", "REASON"]);
-    const no = toolCommand("review.py", ["reject", r.id, "--why", "REASON"]);
-    return `<div class="qrow" id="q-${E(r.id)}">
+  const days = (D.digest && D.digest.horizon_days) || 90;
+  const rows = q.map(r => `<div class="qrow" id="q-${E(r.id)}">
       <span class="qm">${E(r.at)}<br>${E(T(`kind@@${r.kind}`))}</span>
       <span>${E(r.statement)}${r.project
-        ? ` <a class="plink" href="projects.html#${E(r.project)}">${E(projLabel(r.project))}</a>` : ""}
-        <div class="anchor mono">${E(r.id)} r${E(r.rev)}</div>
-        <div class="qacts"><button class="chip-btn" type="button" data-copy="${E(ok)}"
-             title="${T("copy the accept command")}">${T("Command: {label}", {label: T("accept")})}</button>
-          <button class="chip-btn" type="button" data-copy="${E(no)}"
-             title="${T("copy the reject command")}">${T("Command: {label}", {label: T("reject")})}</button></div></span>
-    </div>`;
-  }).join("") +
-    // The page carries the newest rows only; the rest are one command away,
-    // and the command is handed over rather than left for the reader to find.
-    (total > q.length ? (() => {
-      const all = toolCommand("review.py", ["list"]);
-      return `<p class="dmeta" id="queue-rest">${T("{n} more are waiting; the page shows the newest. The whole queue:", {n: total - q.length})} ` +
-        `<span class="mono">${E(all)}</span> <button class="chip-btn" type="button" data-copy="${E(all)}" title="${T("copy the command")}">${T("Command: {label}", {label: T("the whole queue")})}</button></p>`;
-    })() : "") +
-    `<p class="none">${T("The button puts the command on the clipboard — the decision is taken in a terminal ({list} for the list): a write without a terminal is refused on purpose, and there is no {flag} flag.",
-      {list: `<span class="mono">${E(cliCommand("review"))}</span>`, flag: '<span class="mono">--yes</span>'})}</p>`;
+        ? ` <a class="plink" href="projects.html#${E(r.project)}">${E(projLabel(r.project))}</a>` : ""}</span>
+    </div>`).join("");
+  const all = toolCommand("review.py", ["list"]);
+  host.innerHTML =
+    `<p class="dmeta" id="queue-why">${T("{n} records agents wrote are not yet confirmed. An independent source confirms a record, or it is retired after {days} d. Nothing here needs you.", {n: total, days})}</p>` +
+    `<details id="queue-fold"><summary>${T("Show the newest {n}", {n: q.length})}</summary>${rows}` +
+    `<p class="dmeta" id="queue-rest">${T("The whole list, and deciding by hand if you ever want to, are in a terminal:")} ` +
+    `<span class="mono">${E(all)}</span></p></details>`;
 })();
 
 (function renderFindings() {

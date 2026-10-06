@@ -123,8 +123,9 @@ class DashboardShellTests(unittest.TestCase):
         self.assertEqual(counts["index"], "")
         self.assertEqual(counts["health"], "")
         self.assertEqual(counts["findings"], 132)
-        self.assertIn("awaiting a decision: 304", text(shell.cards_html(payload, counts)))
-        self.assertIn("ждут решения: 304", text(shell.cards_html(payload, counts, RU)))
+        # The agents' unconfirmed records are no reason to open the page (operator, 2026-10-06).
+        self.assertNotIn("awaiting a decision", text(shell.cards_html(payload, counts)))
+        self.assertNotIn("ждут решения", text(shell.cards_html(payload, counts, RU)))
 
     def test_traffic_summary_distinguishes_unknown_zero_and_partial_resource_sum(self):
         # In Russian, which has the plural and grouping rules worth checking.
@@ -309,7 +310,7 @@ class AuditFixes(unittest.TestCase):
         src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
         # UX-12: no space between the label and an empty value ("yet ;").
         self.assertIn('<span id="upd-label" data-t>Measured</span><span class="mono" id="upd"></span>', src)
-        self.assertIn('textContent = " " + D.measured', src)
+        self.assertIn('textContent = " " + DATE(D.measured', src)
         # UX-8: a port is an identifier, not a number to group ("47,391").
         self.assertIn("{port: String(H.server_port)", src)
         # UX-9: a lowercase title id reads as a sentence; a {name} first keeps its case.

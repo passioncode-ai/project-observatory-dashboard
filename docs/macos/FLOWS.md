@@ -12,7 +12,7 @@ not observed usability outcomes.
 | FLW-02 | SCN-002, SCN-003 | composer → persisted job → working → answer/sources or typed failure | SCR-01 |
 | FLW-03 | SCN-004 | working → Stop → cancelled; close/reopen → read persisted job → resume/terminal | SCR-01 |
 | FLW-04 | SCN-006 | MCP ask → validated bounded input → shared job → poll/cancel → envelope/history | CLI/MCP, no new screen |
-| FLW-05 | SCN-007, SCN-008, SCN-009 | launch/reopen → dashboard window → live, or saved pages → Start server → live; no pages → Build | SCR-00 |
+| FLW-05 | SCN-007, SCN-008, SCN-009, SCN-010 | launch/reopen → dashboard window → live, or saved pages → Start server → live; no pages → Build; an update waiting → Restart to update → reopen | SCR-00 |
 
 ## SCR-00 — Dashboard window (the app's main window)
 

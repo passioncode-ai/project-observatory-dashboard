@@ -111,13 +111,56 @@ new conversation, refresh and dashboard (the project scope sits above the compos
 disclosure, composer and Send/Stop. Returning users see stored history. Empty state
 explains the job and offers concrete starter questions; loading/error states preserve
 input. Settings: program and workspace fields with pickers, Save and check connection,
-language (English/Русский), and visible backend/version status. A first launch looks for
+language (System/English/Русский), and visible backend/version status. A first launch looks for
 the engine at `~/.local/bin/project-observatory`, then in the virtual environment README →
 Install creates (`~/.local/share/project-observatory-venv/bin/`), then Homebrew's prefixes;
 no engine is `backend-missing` with the path and an installation-guide link, a folder
 without `workspace.json` names `project-observatory full init`. Absolute executable path, argv
 array, no shell interpolation. The app never edits other agents' MCP configs. No hidden
 enrollment or automatic service takeover: a server starts only from Start server.
+
+**Language (2026-10-06, the organization's L10N-01…06).** The app's own interface — menus,
+alerts, both windows, Settings and the update affordance — speaks Russian when the first
+preferred system language is `ru`/`ru-*` and English otherwise; Settings → Language
+(*System / English / Русский*) overrides it, persisted in the app's defaults (`language`; the
+0.18 Bool `russian` is still read when no choice is stored, an unknown value is System). An
+explicit choice is also written as the app's `AppleLanguages`, so the menu items macOS draws
+itself (Quit, Hide, Window) follow at the next launch; System removes it. English is the
+source and the key: views call `t("English text", ["name": value])`, the Russian lives in
+`macos/Sources/ObservatoryCore/Resources/ru.lproj/Localizable.strings`, counts go through
+`plural(…)` with forms in `Localizable.stringsdict` (Russian one/few/many, English
+one/other), values in named `{placeholders}`, never concatenated fragments. A missing entry
+shows in English. `build-app.sh` copies both `.lproj` folders into the bundle's Resources
+(`CFBundleLocalizations` en, ru); `ObservatoryCore.Localizer` reads them there, or from
+SwiftPM's resource bundle for `swift run` and the tests. The resolved language reaches the
+dashboard through its own `observatory.locale` key, as before. Dates and numbers follow the
+app's language. Checked by `LocalizationTests` (every key the app uses has its Russian with the
+same placeholders, no stale entries, three Russian plural forms, the language resolution for
+`ru-RU`, `ru`, `en-US`, an empty list and an unknown stored value).
+
+**Updates (2026-10-06, LC-16 "Install vs activation").** The engine's hourly maintenance pass
+verifies and stages a new app and swaps it only while the app is not running, recording
+`app.result = "waiting-for-quit"` with the `pending` version in
+`<workspace>/store/maintenance.json`. The app reads that record at launch and every 6 h (and
+again before acting on it); a pending `X.Y.Z` strictly newer than its own
+`CFBundleShortVersionString` shows **Restart to update** in the app menu and as a toolbar
+button in the dashboard window — never a modal. Activation happens only at a safe point:
+the person's *Restart to update*, the person's quit (⌘Q), or 30 minutes with no titled window
+on screen, the app not frontmost, no key press, click or scroll, and no question, build or
+start in flight. Each starts one detached helper (`/bin/sh`, its own session, values as
+arguments only) that waits ≤ 60 s for the app to exit, runs the single documented command
+`OBSERVATORY_HOME=<workspace> <program> full maintain app` (the engine's app step alone, under
+the maintenance lock; retried while another pass holds it, ≤ 5 min; ≤ 15 min in all), then
+opens the app again — in front after *Restart to update*, with `--background` (no window, no
+focus) after an idle restart, not at all after a quit. When the swap does not happen the old
+app is opened again and the reason is logged. `~/Library/Logs/Project Observatory/app.log`
+holds one JSON line per event, UTC, codes only (`update_restart` `requested`/`refused`,
+`update_install` `started`/`installed`/`failed`/`timeout`, with `trigger`, `reason` and
+`version` codes), 0600 under a 0700 folder, under 1 MB with one previous generation. A build
+that is not inside an `.app` (`swift run`) refuses a restart (`not-a-bundle`). Checked by
+`AppUpdateTests`/`UpdatesTests` (version order, the record, the idle decision, the plan, the
+real helper against a stand-in engine and `open`, the detached session, the log) and the
+engine's `tests/test_maintain_app.py`.
 
 Icon: the product mark (`dashboard/brand/observatory-mark.svg`, pinned in its
 manifest) rasterized on the macOS grid by `macos/scripts/make-icon.swift` at every

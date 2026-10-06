@@ -8,15 +8,21 @@ every one of these holds:
   and that SHA256SUMS carries the organization's signature (`SHA256SUMS.asc`, checked
   against the pinned release key; the same checks `full update` gives the wheel);
 - the bundle inside names `ai.passioncode.observatory` and exactly the engine's version;
-- `codesign --verify --strict --deep` passes, and the signing team is the one that signed
-  the installed app — a bundle signed by anyone else never replaces it;
+- `codesign --verify --strict --deep` passes, and the signing team is the organization's
+  pinned team (TEAM_ID, lifecycle LC-16) — never "whatever signed the installed copy": a
+  bundle signed by anyone else never replaces the app, whoever signed the installed one;
 - Gatekeeper (`spctl --assess --type execute`) accepts it.
 
 The swap happens only while the app is not running: a running app keeps working, the
 verified bundle waits under `<home>/store/app-update/`, and the next hourly pass installs
 it once the app has quit. The replaced bundle is kept under `<home>/store/app-previous/`
 (one copy). An app that is not installed, or lives somewhere this user cannot write, is
-named in the answer and left alone. Nothing here asks for a password or a person.
+named in the answer and left alone. An installed app that carries no team at all (a local
+or ad hoc build) is named too and never replaced. Nothing here asks for a password or a person.
+
+Each stage writes its code to the shared update log with the subject `app`
+(update_events.py): `update_check`, `update_download`, `update_install`, and
+`update_restart refused` while the app is open and the new bundle waits for its quit.
 """
 from __future__ import annotations
 
@@ -30,8 +36,12 @@ import sys
 import tempfile
 
 import configuration as config
+import update_events
 
 BUNDLE_ID = "ai.passioncode.observatory"
+#: The organization's Apple Developer ID team. Every released bundle is signed by it
+#: (.github/workflows/release.yml, `vars.APPLE_TEAM_ID`); no other team's bundle is installed.
+TEAM_ID = "KJ35UYYL22"
 APP_NAME = "Project Observatory.app"
 ZIP = "ProjectObservatory-{version}-macos.zip"
 PROCESS = "ProjectObservatory"
@@ -42,7 +52,14 @@ LSREGISTER = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/"
 
 
 class AppUpdateError(RuntimeError):
-    """Why a downloaded bundle was refused. Never carries a value."""
+    """Why a downloaded bundle was refused. Never carries a value.
+
+    `code` is the shared update-log code: `signature_failed` when the bytes or the bundle
+    are not the organization's as published, `download_failed` when they never arrived."""
+
+    def __init__(self, message: str, code: str = "signature_failed"):
+        super().__init__(message)
+        self.code = code
 
 
 def bundle_info(app: Path) -> dict | None:
@@ -104,6 +121,14 @@ class System:
         if os.path.exists(LSREGISTER):
             self.run(LSREGISTER, "-f", str(app))
 
+    def unregister(self, app: Path) -> None:
+        """Forget a bundle that is about to be deleted. macOS registers every bundle it
+        sees, a staged copy included; deleted unregistered, a NEWER staged version stayed
+        the app's record and the Dock drew a blank icon for the installed one
+        (2026-10-06)."""
+        if os.path.exists(LSREGISTER):
+            self.run(LSREGISTER, "-u", str(app))
+
 
 def installed_app(home: Path | None = None) -> Path | None:
     """The installed bundle install-app.sh puts in /Applications, else ~/Applications."""
@@ -141,10 +166,27 @@ class AppUpdater:
             # the network budget of decision D2 (review F9).
             return {"result": "not-due", "detail": "refused earlier today"}
         record = self._step()
+        self._log(record)
         record["target"] = self.version
         record["at"] = at.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         state["app"] = record
         return {k: v for k, v in record.items() if k != "at"}
+
+    def _log(self, record: dict) -> None:
+        result = record.get("result")
+        emit = lambda event, code: update_events.emit(event, code, subject="app", base=self.base)  # noqa: E731
+        if result == "current":
+            emit("update_check", "current")
+        elif result == "updated":
+            emit("update_install", "installed")
+        elif result == "waiting-for-quit":
+            emit("update_check", "ready")
+            emit("update_restart", "refused")
+        elif result == "refused":
+            emit("update_check", record.get("code") or "signature_failed")
+        elif result == "install-failed":
+            emit("update_install", "failed")
+            emit("update_check", "install_failed")
 
     def _step(self) -> dict:
         if self.app is None:
@@ -156,7 +198,7 @@ class AppUpdater:
         except (ValueError, config.ConfigurationError):
             behind = True
         if not behind:
-            shutil.rmtree(self.staged, ignore_errors=True)
+            self._discard(self.staged)
             return {"result": "current", "version": have}
         if not os.access(self.app.parent, os.W_OK):
             return {"result": "not-writable", "version": have,
@@ -170,11 +212,20 @@ class AppUpdater:
         try:
             bundle = self._staged_bundle() or self._download()
         except AppUpdateError as exc:
-            shutil.rmtree(self.staged, ignore_errors=True)
-            return {"result": "refused", "version": have, "detail": str(exc)[:300]}
-        if self.system.running() or not self._swap(bundle):
+            self._discard(self.staged)
+            return {"result": "refused", "version": have, "detail": str(exc)[:300], "code": exc.code}
+        if self.system.running():
             return {"result": "waiting-for-quit", "version": have, "pending": self.version}
-        shutil.rmtree(self.staged, ignore_errors=True)
+        update_events.emit("update_install", "started", subject="app", base=self.base)
+        try:
+            swapped = self._swap(bundle)
+        except AppUpdateError as exc:
+            return {"result": "install-failed", "version": have, "detail": str(exc)[:300]}
+        except OSError as exc:
+            return {"result": "install-failed", "version": have, "detail": f"{type(exc).__name__}"}
+        if not swapped:
+            return {"result": "waiting-for-quit", "version": have, "pending": self.version}
+        self._discard(self.staged)
         return {"result": "updated", "from": have, "version": self.version}
 
     # --- verification ----------------------------------------------------------------
@@ -188,9 +239,8 @@ class AppUpdater:
         why = self.system.verify(bundle)
         if why:
             raise AppUpdateError(why)
-        expected, actual = self.system.team(self.app), self.system.team(bundle)
-        if not expected or actual != expected:
-            raise AppUpdateError("the new bundle is not signed by the team that signed the installed app")
+        if self.system.team(bundle) != TEAM_ID:
+            raise AppUpdateError(f"the new bundle is not signed by the organization's team ({TEAM_ID})")
 
     def _staged_bundle(self) -> Path | None:
         """A bundle staged by an earlier pass, verified again before it is used."""
@@ -207,19 +257,20 @@ class AppUpdater:
         try:
             doc = fetcher.get_json(f"{api}/repos/{repo}/releases/tags/v{self.version}")
         except eu.UpdateError as exc:
-            raise AppUpdateError(f"the release v{self.version} could not be read: {exc}") from None
+            raise AppUpdateError(f"the release v{self.version} could not be read: {exc}", "download_failed") from None
         assets = {row.get("name"): row for row in doc.get("assets") or [] if isinstance(row, dict)}
         name = ZIP.format(version=self.version)
         zipped_row, sums_row = assets.get(name), assets.get(eu.SUMS)
         if not zipped_row or not sums_row:
-            raise AppUpdateError(f"release v{self.version} has no {name} or {eu.SUMS}")
+            raise AppUpdateError(f"release v{self.version} has no {name} or {eu.SUMS}", "download_failed")
         zipped_asset, sums_asset = eu._asset(zipped_row), eu._asset(sums_row)
         signature_row = assets.get(eu.SUMS + ".asc")
         if not zipped_asset or not sums_asset or not zipped_asset.digest or not sums_asset.digest:
             raise AppUpdateError(f"GitHub publishes no sha256 digest for {name} or {eu.SUMS}")
-        shutil.rmtree(self.staged, ignore_errors=True)
+        self._discard(self.staged)
         work = self.staged / self.version
         work.mkdir(parents=True, mode=0o700)
+        update_events.emit("update_download", "started", subject="app", base=self.base)
         try:
             sums_file = work / eu.SUMS
             digest, _ = fetcher.fetch_file(sums_asset.url, sums_file, eu.MAX_SUMS)
@@ -248,11 +299,30 @@ class AppUpdater:
             for leftover in work.glob(f"*{eu.SUMS}.asc"):
                 leftover.unlink(missing_ok=True)
             self._check(bundle)
+            update_events.emit("update_download", "done", subject="app", base=self.base)
             return bundle
+        except eu.Undetermined as exc:
+            raise AppUpdateError(str(exc), "download_failed") from None
         except eu.UpdateError as exc:
             raise AppUpdateError(str(exc)) from None
 
     # --- the swap --------------------------------------------------------------------
+
+    def _discard(self, folder: Path) -> None:
+        """Delete a folder that may hold app bundles, unregistering each first: a bundle
+        removed while still registered stays macOS's record of the app."""
+        if folder.is_symlink() or not folder.exists():
+            return
+        # A bundle is a folder with Contents/Info.plist, whatever its name says: the copy
+        # being installed and the retired one are `.<name>.app.installing` / `.previous`.
+        if (folder / "Contents" / "Info.plist").is_file():
+            bundles = [folder]
+        else:
+            bundles = [p for p in folder.rglob("*.app") if p.is_dir() and not p.is_symlink()
+                       and len(p.relative_to(folder).parts) <= 3]
+        for bundle in bundles:
+            self.system.unregister(bundle)
+        shutil.rmtree(folder, ignore_errors=True)
 
     def _swap(self, bundle: Path) -> bool:
         """Copy beside the installed app, then two renames; the old bundle is kept.
@@ -260,12 +330,12 @@ class AppUpdater:
         dest = self.app
         installing = dest.parent / f".{APP_NAME}.installing"
         retired = dest.parent / f".{APP_NAME}.previous"
-        shutil.rmtree(installing, ignore_errors=True)
-        shutil.rmtree(retired, ignore_errors=True)
+        self._discard(installing)
+        self._discard(retired)
         self.system.copy(bundle, installing)
         self._check(installing)
         if self.system.running():
-            shutil.rmtree(installing, ignore_errors=True)
+            self._discard(installing)
             return False
         os.rename(dest, retired)
         try:
@@ -273,11 +343,11 @@ class AppUpdater:
         except OSError:
             os.rename(retired, dest)
             raise
-        shutil.rmtree(self.previous, ignore_errors=True)
+        self._discard(self.previous)
         self.previous.mkdir(parents=True, mode=0o700)
         try:
             self.system.copy(retired, self.previous / APP_NAME)
         finally:
-            shutil.rmtree(retired, ignore_errors=True)
+            self._discard(retired)
         self.system.register(dest)
         return True

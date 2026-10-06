@@ -117,7 +117,19 @@ def test_every_route_answers_and_none_serves_a_value() -> None:
         check("and the receipt landed in the redirected scratch",
               (work / "scratch/serverd.json").is_file(),
               "the heartbeat must go through OBSERVATORY_SCRATCH or tests write the live one")
+        # LC-16: a host's probe is not a client an update would interrupt; a page or an
+        # agent asking anything else is.
+        # Read from the receipt, which the update job reads; the published /health keeps
+        # its shape (fabric-service/0.1) and does not carry `clients`.
+        receipt = lambda: json.loads((work / "scratch/serverd.json").read_text(encoding="utf-8"))  # noqa: E731
+        check("/health keeps its published shape", "clients" not in health, str(sorted(health)))
+        check("a probe alone is no client", (receipt().get("clients") or {}).get("recent") is False,
+              str(receipt().get("clients")))
         code, remote = get("/remote")
+        code2, health = get("/health")
+        clients = receipt().get("clients") or {}
+        check("a request other than a probe makes the server's clients recent",
+              clients.get("recent") is True and clients.get("window_s") == 300, str(clients))
         check("/remote summarises the sync states", code == 200 and "states" in remote,
               str(remote)[:120])
         check("and counts what is at risk", isinstance(remote.get("at_risk_total"), int))
@@ -323,6 +335,25 @@ def test_a_server_started_with_sigterm_blocked_still_stops() -> None:
             p.kill(); p.wait()
 
 
+def test_the_daemons_stderr_lines_carry_a_utc_time() -> None:
+    """LC-12: serverd.err lines had no time, so a fault could not be dated."""
+    spec = importlib.util.spec_from_file_location("serverd_stamp", ROOT / "tools/serverd.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    sink = io.StringIO()
+    out = mod.StampedLines(sink, clock=lambda: "2026-10-07T10:00:00Z")
+    out.write("heartbeat: OSError: disk full\nTraceback (most recent call last):\n")
+    out.write("  File \"x\", line 1")
+    out.write("\n\n")
+    lines = sink.getvalue().split("\n")
+    check("every non-empty line starts with the UTC time",
+          lines[0] == "2026-10-07T10:00:00Z heartbeat: OSError: disk full"
+          and lines[1].startswith("2026-10-07T10:00:00Z Traceback")
+          and lines[2] == '2026-10-07T10:00:00Z   File "x", line 1', repr(lines))
+    check("a line written in pieces is stamped once, and a blank line not at all",
+          sink.getvalue().count("2026-10-07T10:00:00Z") == 3 and lines[3] == "", repr(lines))
+
+
 if __name__ == "__main__":
     print("the always-on server — every route, every state, both board rules\n")
     for fn in (test_every_route_answers_and_none_serves_a_value,
@@ -331,7 +362,8 @@ if __name__ == "__main__":
                test_the_stale_session_rule_reads_the_handshake,
                test_the_daemon_never_binds_beyond_localhost,
                test_disconnected_clients_are_not_server_failures,
-               test_a_server_started_with_sigterm_blocked_still_stops):
+               test_a_server_started_with_sigterm_blocked_still_stops,
+               test_the_daemons_stderr_lines_carry_a_utc_time):
         fn()
     print()
     if FAILURES:
