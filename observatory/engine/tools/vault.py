@@ -346,6 +346,21 @@ def cmd_put(a) -> int:
     return 0
 
 
+#: An S3-compatible account endpoint whose first label IS the account id — an identifier the
+#: provider prints in every URL and dashboard, not a secret (Cloudflare R2:
+#: `<32 hex>.r2.cloudflarestorage.com`, with `eu.` or `fedramp.` for a jurisdiction). The shape
+#: check reads 32 hex as a key; for exactly this label of exactly these hosts it is waived, and the
+#: rest of the address is still checked. Without it a secret bound to its own R2 endpoint was
+#: refused, and the only way left to read it put the value in a child's environment.
+_ACCOUNT_ENDPOINT = re.compile(r"^((?:https?://)?)[0-9a-fA-F]{32}"
+                               r"(\.(?:eu\.|fedramp\.)?r2\.cloudflarestorage\.com(?::[0-9]{1,5})?(?:/.*)?)$")
+
+
+def _shape_checked(raw: str) -> str:
+    """`raw` as the credential-shape check should see it: an account endpoint's id label masked."""
+    return _ACCOUNT_ENDPOINT.sub(lambda m: f"{m.group(1)}account{m.group(2)}", raw)
+
+
 #: An HTTP host as a binding may name it: DNS labels, or an IP literal.
 _HOST = re.compile(r"(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
                    r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*")
@@ -369,7 +384,7 @@ def origin(text: str, *, https_only: bool = True) -> tuple[str, str, str]:
     secrets, and a refusal that names the wrong one is the useful kind.
     """
     raw = (text or "").strip()
-    if credential_shape.find(raw):
+    if credential_shape.find(_shape_checked(raw)):
         raise VaultBoundaryError("the address looks like it carries a credential; give the "
                                  "server's https URL or its host, never a value")
     import ipaddress
