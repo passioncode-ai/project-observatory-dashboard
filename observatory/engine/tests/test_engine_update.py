@@ -64,6 +64,10 @@ def wheel_bytes(version: str, requires: tuple[str, ...] = ('mcp==2.2.0; extra ==
 LOCK_MEMBER = "observatory/engine/requirements-full.lock"
 
 
+def locked_wheel_with(version: str, files: dict[str, str]) -> bytes:
+    return wheel_bytes(version, extra_files={LOCK_MEMBER: f"# synthetic lock of {version}\nmcp==2.2.0\n", **files})
+
+
 def locked_wheel(version: str) -> bytes:
     """A wheel carrying its tested dependency set where a real release carries it."""
     return wheel_bytes(version, extra_files={LOCK_MEMBER: f"# synthetic lock of {version}\nmcp==2.2.0\n"})
@@ -255,7 +259,9 @@ class UpdateTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name).resolve()
         self.home = self.base / "workspace"
-        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(self.base / "user")}, clear=True)
+        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(self.base / "user"),
+                                           "OBSERVATORY_PRODUCT_LOG_DIR": str(self.base / "product-logs")},
+                              clear=True)
         self.env.start()
         pinned = patch.object(release_signature, "PINNED", SIGNER.pinned())
         pinned.start()
@@ -570,6 +576,85 @@ class UpdateTest(unittest.TestCase):
         self.assertFalse(doc["rollback_available"])
 
     # --- the transaction ------------------------------------------------------
+
+    # --- LC-16: held releases and the shared update log ---------------------------------
+
+    def events(self):
+        import update_events
+        rows = update_events.read()
+        for row in rows:
+            self.assertLessEqual(set(row), {"at", "event", "code", "subject", "instance"}, "codes only, no values")
+        return [(r["event"], r["code"]) for r in rows]
+
+    def held_wheel(self, marker):
+        return locked_wheel_with(NEWER, {self.mod.RELEASE_MEMBER: json.dumps(marker)})
+
+    def test_a_held_release_is_verified_and_never_installed_unattended(self):
+        step = "run `project-observatory full migrate-store` first; https://example.com/runbook"
+        self.gh.publish(NEWER, wheel=self.held_wheel({"version": NEWER, "needs_person": step}))
+        before = self.tree()
+        code, doc = self.run_cli("--apply", "--unattended")
+        self.assertEqual(code, self.mod.EXIT_HELD, doc)
+        self.assertEqual((doc["status"], doc["needs_person"], doc["version"]), ("held", step, NEWER))
+        self.assertEqual(self.installer.calls, [], "downloaded and verified, not installed")
+        self.assertFalse([c for c in self.services.calls if c[0] in ("stop", "start")], "nothing was stopped")
+        self.assertEqual(self.tree(), before)
+        rows = [json.loads(line) for line in (self.home / "store/logs/update.jsonl").read_text().splitlines()]
+        self.assertEqual([r["event"] for r in rows][-2:], ["verified", "held"])
+        self.assertEqual(self.events(), [("update_download", "started"), ("update_download", "done"),
+                                         ("update_check", "needs_migration")])
+
+    def test_a_person_may_still_install_a_held_release_after_seeing_the_step(self):
+        step = "back up the store by hand first"
+        self.gh.publish(NEWER, wheel=self.held_wheel({"version": NEWER, "needs_person": step}))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code, doc = self.run_cli("--apply")
+        self.assertEqual((code, doc["status"]), (0, "updated"), doc)
+        self.assertEqual(doc["needs_person"], step)
+        self.assertIn(step, err.getvalue(), "the step is shown before the install goes on")
+
+    def test_a_marker_for_another_version_is_ignored_and_an_unreadable_one_holds(self):
+        self.gh.publish(NEWER, wheel=self.held_wheel({"version": CURRENT, "needs_person": "an older step"}))
+        code, doc = self.run_cli("--apply", "--unattended")
+        self.assertEqual((code, doc["status"]), (0, "updated"), doc)
+        self.assertNotIn("needs_person", doc)
+        wheel = self.tmp_wheel(locked_wheel_with(NEWER, {self.mod.RELEASE_MEMBER: "{not json"}))
+        self.assertIn("could not be read", self.mod.release_step(wheel, NEWER))
+        wheel = self.tmp_wheel(locked_wheel_with(NEWER, {self.mod.RELEASE_MEMBER: json.dumps(
+            {"version": NEWER, "needs_person": "line one\n\x1b[31mline two"})}))
+        self.assertEqual(self.mod.release_step(wheel, NEWER), "line one [31mline two",
+                         "control characters never reach a terminal or the Health page")
+        self.assertIsNone(self.mod.release_step(self.tmp_wheel(locked_wheel(NEWER)), NEWER))
+
+    def tmp_wheel(self, data):
+        path = self.base / f"probe-{len(list(self.base.glob('probe-*')))}.whl"
+        path.write_bytes(data)
+        return path
+
+    def test_every_stage_writes_its_code_to_the_shared_log(self):
+        self.gh.publish(NEWER)
+        self.run_cli("--check")
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self.events(), [("update_check", "ready"), ("update_download", "started"),
+                                         ("update_download", "done"), ("update_install", "started"),
+                                         ("update_install", "installed"), ("update_restart", "requested")])
+        self.gh.latest = CURRENT          # the fakes do not change the running version
+        self.run_cli("--check")
+        self.assertEqual(self.events()[-1], ("update_check", "current"))
+        self.gh.rate_limited = True
+        self.run_cli("--check")
+        self.assertEqual(self.events()[-1], ("update_check", "check_failed"))
+
+    def test_a_tampered_package_and_a_failed_install_are_logged_by_code(self):
+        self.gh.publish(NEWER, digest="0" * 64)
+        self.assertEqual(self.run_cli("--apply")[0], self.mod.EXIT_REFUSED)
+        self.assertEqual(self.events()[-1], ("update_check", "signature_failed"))
+        self.gh.publish(NEWER)
+        self.installer.fail_on = {NEWER}
+        self.assertEqual(self.run_cli("--apply")[0], self.mod.EXIT_FAILED)
+        self.assertEqual(self.events()[-2:], [("update_install", "failed"), ("update_check", "install_failed")])
 
     def test_success_stops_and_restarts_only_loaded_services(self):
         self.services = FakeServices(loaded=("tick",))

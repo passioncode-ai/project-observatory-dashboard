@@ -5,15 +5,33 @@ workspace runs `tools/maintain.py run` every hour — launchd on macOS, a system
 timer on Linux — and each pass does only what is due:
 
 1. a backup passphrase exists and is kept outside the workspace (backup_vault.SecretStore);
-2. once a day, with `updates.auto` on (the default): `full update --check`, and when a
-   newer stable release exists, `full update --apply` — verified and reversible, the
-   same transaction a person runs. A failure is recorded and retried the next day; a
-   rollback that needs a person stops the automatic attempts until one succeeds;
+2. every six hours, with automatic updates on (the default; the switch is below):
+   `full update --check`, and when a newer stable release exists, `full update --apply
+   --unattended` — verified and reversible, the same transaction a person runs — but only
+   at a safe point: while the local server has answered no client and no memory-http
+   client has called in the last five minutes (`live_clients`); otherwise the update waits
+   for the next pass. A release that declares a step needing a person is verified and
+   held, never installed by the job. A check that could not look is retried once within
+   the hour; a failed update is retried at the next check, sooner when the reason was
+   momentary; a rollback that needs a person stops the automatic attempts until one
+   succeeds;
 3. macOS: the app follows the engine (app_update.py), never while it runs;
 4. once a day: a full encrypted snapshot of the workspace (settings, registry, vault,
    store), with this workspace's tick and server stopped for the copy.
 
-    full auto-update status|on|off     the switch (`updates.auto`); off keeps the backups
+The scheduler runs the pass hourly and at load; launchd passes `--first-check-delay 90`
+so the first check waits 90 seconds after the job starts (a login, a boot), and the
+systemd timer starts 90 seconds after the user manager does (lifecycle LC-16).
+
+THE SWITCH (LC-16) is the file `auto-update` in the workspace home: absent means on, and
+only the word `off` turns automatic updates off. `full auto-update on|off` writes it; an
+update, a reinstall or an uninstall never does. Installs that turned updates off before
+0.19.0 did it with `updates.auto: false` in config/settings.json: that is still honoured
+as off while the file is absent, and the next `auto-update` command moves it into the file
+and says so. Off stops the checks, the downloads and the installs, the app's included;
+the daily backup keeps running.
+
+    full auto-update status|on|off     the switch; off keeps the backups
     full maintain run                  one pass now (what the scheduler runs)
     full maintain ensure               schedule the pass and mirror the passphrase
     full maintain uninstall            remove the schedule; it stays off until `ensure`
@@ -49,12 +67,23 @@ import time
 
 import configuration as config
 import backup_vault
+import update_events
 
 STATE_FILE = "maintenance.json"
-CHECK_EVERY = datetime.timedelta(hours=24)
+#: How often a newer release is looked for (lifecycle LC-16: every six hours).
+CHECK_EVERY = datetime.timedelta(hours=6)
 #: A check that could not look (network, rate limit, a timeout on a loaded machine) is
-#: tried again the next hour, not the next day.
+#: tried once more within the hour, then back to CHECK_EVERY (LC-16).
 RETRY_UNDETERMINED = datetime.timedelta(hours=1)
+#: The scheduler's first check waits this long after the job started (LC-16: 90 s).
+FIRST_CHECK_DELAY = 90
+#: The switch: a file in the workspace home (LC-16). Absent = on; only `off` turns it off.
+SWITCH_FILE = "auto-update"
+SWITCH_LABEL = "Install updates automatically"
+#: How recent a client must be to count as live: the server's own CLIENT_WINDOW_SECONDS.
+CLIENT_WINDOW = datetime.timedelta(minutes=5)
+#: When this process started; the first-check delay is measured from it.
+PROCESS_STARTED = time.monotonic()
 #: Why an update can be refused for a moment rather than for good: a copy torn or changed
 #: by a concurrent writer, a busy lock, another update. These are retried the next hour.
 TRANSIENT = ("integrity verification failed", "disk image is malformed", "changed during snapshot",
@@ -72,7 +101,7 @@ def _transient(record: dict) -> bool:
 
 #: The journal events that end a `full update --apply` (engine_update.Transaction).
 FINAL_EVENTS = {"updated": "updated", "rolled-back": "failed-rolled-back",
-                "rollback-failed": "needs-person", "refused": "refused"}
+                "rollback-failed": "needs-person", "refused": "refused", "held": "held"}
 
 
 def reconcile_in_flight(base: Path, state: dict) -> dict | None:
@@ -105,6 +134,8 @@ def reconcile_in_flight(base: Path, state: dict) -> dict | None:
         if row.get("event") in FINAL_EVENTS:
             outcome = {"at": flight.get("at"), "result": FINAL_EVENTS[row["event"]],
                        "from": row.get("from"), "to": row.get("to"), "reconciled": True}
+            if row.get("needs_person"):
+                outcome["needs_person"] = str(row["needs_person"])[:1000]
             if row.get("error"):
                 outcome["detail"] = str(row["error"])[:300]
             break
@@ -121,7 +152,7 @@ INTERVAL_SECONDS = 3600
 #: Exit codes of `full update` (engine_update.EXIT_*), named here so a change there is
 #: caught by tests/test_maintenance.py rather than by a user's stalled install.
 UPDATE_OK, UPDATE_FAILED, UPDATE_REFUSED, UPDATE_UNDETERMINED = 0, 1, 2, 3
-UPDATE_NEEDS_PERSON, UPDATE_SERVICES, UPDATE_AVAILABLE = 4, 5, 10
+UPDATE_NEEDS_PERSON, UPDATE_SERVICES, UPDATE_HELD, UPDATE_AVAILABLE = 4, 5, 6, 10
 SNAPSHOT_ATTEMPTS = 3
 #: Set in every process a maintenance pass starts. A schedule installed from inside a pass
 #: never boots the job out: that would kill the pass and whatever it runs (review F1).
@@ -135,9 +166,87 @@ def settings(base: Path) -> dict:
     return config.load(base).get("updates", {})
 
 
+def switch_path(base: Path) -> Path:
+    return base / SWITCH_FILE
+
+
+def read_switch(base: Path) -> str | None:
+    """`on` or `off` from the switch file, or None when there is none.
+
+    Only the word `off` (any case, surrounding space ignored) turns updates off; anything
+    else a person wrote reads as on. A link or a folder in its place is not a switch."""
+    file = switch_path(base)
+    try:
+        if file.is_symlink() or not file.is_file():
+            return None
+        text = file.read_text(encoding="utf-8", errors="replace")[:64]
+    except OSError:
+        return None
+    return "off" if text.strip().lower() == "off" else "on"
+
+
+def legacy_off(base: Path) -> bool:
+    """`updates.auto: false` in settings.json — how 0.17 and 0.18 turned updates off."""
+    return settings(base).get("auto", True) is False
+
+
 def auto_enabled(base: Path) -> bool:
-    """`updates.auto` is on unless a person turned it off (D1)."""
-    return settings(base).get("auto", True) is not False
+    """On unless a person turned it off: the switch file decides; without one, an older
+    install's `updates.auto: false` still reads as off (D1, LC-16)."""
+    word = read_switch(base)
+    if word is not None:
+        return word != "off"
+    return not legacy_off(base)
+
+
+def switch_status(base: Path) -> dict:
+    word = read_switch(base)
+    source = "file" if word is not None else "settings" if legacy_off(base) else "default"
+    out = {"label": SWITCH_LABEL, "on": auto_enabled(base), "file": str(switch_path(base)), "source": source}
+    if source == "settings":
+        out["note"] = ("off by `updates.auto: false` in config/settings.json; the next "
+                       "`project-observatory full auto-update status` (or `on`, `off`) moves it into the file")
+    return out
+
+
+def write_switch(base: Path, on: bool) -> None:
+    """The person's choice, written to the file (owner-only, atomic, never through a link)."""
+    import workspace
+    file = switch_path(base)
+    workspace.reject_symlinks(file)
+    fd, tmp = tempfile.mkstemp(dir=base, prefix=".auto-update-")
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write("on\n" if on else "off\n")
+        os.replace(tmp, file)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def migrate_legacy(base: Path) -> str | None:
+    """Move `updates.auto` out of settings.json into the switch file; what happened, or None.
+
+    Run by every `auto-update` command. A false setting becomes `off` in the file (unless a
+    file already says otherwise); the key is then removed so the two never disagree."""
+    import workspace
+    with workspace.lock(base):
+        doc = config.load(base)
+        updates = doc.get("updates") or {}
+        if "auto" not in updates:
+            return None
+        was = updates.pop("auto")
+        had_file = read_switch(base) is not None
+        if was is False and not had_file:
+            write_switch(base, False)
+        if not updates:
+            doc.pop("updates", None)
+        workspace.write_json(base / "config" / "settings.json", doc)
+    if was is False and not had_file:
+        return (f"`updates.auto: false` in config/settings.json was moved to {switch_path(base)} (off); "
+                "the file is the switch from now on")
+    return "`updates.auto` was removed from config/settings.json; the file `auto-update` is the switch"
 
 
 def schedule_wanted(base: Path) -> bool:
@@ -393,8 +502,67 @@ def update_running(base: Path) -> bool:
     return engine_update.update_lock_held(base)
 
 
-def step_update(base: Path, state: dict, at: datetime.datetime, commands: Commands) -> dict:
-    """Check once a day; apply a newer stable release. Returns what happened."""
+def live_clients(base: Path, at: datetime.datetime) -> list[str]:
+    """Why activating a new release now would interrupt someone; empty when it would not.
+
+    Installing an update restarts this workspace's tick and local server on the new code
+    (that is its activation). A person reading the dashboard, or an agent asking the
+    server, is a live client of it: tools/serverd.py records in its receipt whether any
+    request other than a host's probe (`/health`, the service document, the events feed)
+    arrived in its last CLIENT_WINDOW_SECONDS. A memory-http caller is journalled in
+    store/logs/access.jsonl. A receipt older than the age the server itself calls silent
+    is a server that is not running, and so has no client to interrupt."""
+    reasons = []
+    receipt = base / "store" / "raw" / "serverd.json"
+    try:
+        doc = json.loads(receipt.read_text(encoding="utf-8")) if receipt.is_file() and not receipt.is_symlink() else {}
+    except (OSError, ValueError):
+        doc = {}
+    if isinstance(doc, dict):
+        when = parse_iso(doc.get("at"))
+        silent = doc.get("silent_after_s") if type(doc.get("silent_after_s")) is int else 480
+        clients = doc.get("clients") if isinstance(doc.get("clients"), dict) else {}
+        if when is not None and abs((at - when).total_seconds()) <= silent and clients.get("recent") is True:
+            reasons.append("the local server answered a client in the last five minutes")
+    journal = base / "store" / "logs" / "access.jsonl"
+    try:
+        if journal.is_file() and not journal.is_symlink():
+            with open(journal, "rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                fh.seek(max(0, fh.tell() - 65536))
+                tail = fh.read().decode("utf-8", errors="replace").splitlines()
+        else:
+            tail = []
+    except OSError:
+        tail = []
+    for line in reversed(tail):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        when = parse_iso(row.get("at")) if isinstance(row, dict) else None
+        if when is None:
+            continue
+        if at - when > CLIENT_WINDOW:
+            break
+        # Only allowed calls by a binding: the local stdio agent's allowed calls are never
+        # journalled, and a refused caller is not a session an update would interrupt.
+        if row.get("allowed") is True and row.get("binding"):
+            reasons.append("a memory-http client called in the last five minutes")
+            break
+    return reasons
+
+
+def _engine_moved_past(target) -> bool:
+    try:
+        return config.version_tuple(config.VERSION) >= config.version_tuple(str(target))
+    except (ValueError, TypeError, config.ConfigurationError):
+        return False
+
+
+def step_update(base: Path, state: dict, at: datetime.datetime, commands: Commands,
+                before_check=None) -> dict:
+    """Check every six hours; apply a newer stable release at a safe point. Returns what happened."""
     if not auto_enabled(base):
         return {"result": "off"}
     reconcile_in_flight(base, state)
@@ -408,16 +576,26 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
         # needed them, so the automatic attempts resume (review F3).
         state["update"] = {**last, "result": "resolved-by-person", "resolved_at": iso(at)}
         last = state["update"]
+    if last.get("result") == "held" and _engine_moved_past(last.get("to")):
+        # The person did the step and installed the held release (or a later one).
+        state["update"] = {**last, "result": "resolved-by-person", "resolved_at": iso(at)}
+        last = state["update"]
     if last.get("result") == "needs-person":
         return {"result": "waiting-for-person",
                 "detail": "the last automatic update could not roll back by itself; "
                           "`project-observatory full update` says what to do"}
     last_check, last_update = state.get("check") or {}, state.get("update") or {}
-    hourly = last_check.get("result") == "undetermined" or (
-        last_update.get("at") == last_check.get("at") and _transient(last_update))
+    same_pass = last_update.get("at") == last_check.get("at")
+    # One retry within the hour after a check that could not look, then every six hours
+    # (LC-16); an update deferred for a live client or refused for a moment is tried at
+    # the next hourly pass.
+    hourly = (last_check.get("result") == "undetermined" and int(last_check.get("failures") or 1) <= 1) or (
+        same_pass and (last_update.get("result") == "deferred" or _transient(last_update)))
     every = RETRY_UNDETERMINED if hourly else CHECK_EVERY
     if not due(state, "check", every, at):
         return {"result": "not-due"}
+    if before_check is not None:
+        before_check()
     code, report, err = commands.full("update", "--check", timeout=600)
     check = {"at": iso(at), "exit": code}
     if code == UPDATE_OK:
@@ -429,16 +607,29 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
     else:
         check["result"] = "undetermined"
         check["detail"] = err or f"exit {code}"
+        check["failures"] = int(last_check.get("failures") or 0) + 1 if last_check.get("result") == "undetermined" else 1
     state["check"] = check
     if code != UPDATE_AVAILABLE:
         return {"result": check["result"]}
+    if last.get("result") == "held" and check.get("latest") == last.get("to"):
+        # Downloaded and verified once already; the step is still the person's.
+        state["update"] = {**last, "checked_at": iso(at)}
+        return {"result": "held", "detail": last.get("needs_person") or ""}
     if update_running(base):
         # A person (or the plugin's bridge) is updating right now; never a second
         # transaction. Recorded, so the next hour tries again (audit A13).
         state["update"] = {"at": iso(at), "result": "another-update-running", "from": config.VERSION,
                            "detail": "another update was running"}
         return {"result": "another-update-running"}
-    args = ["--apply"]
+    busy = live_clients(base, at)
+    if busy:
+        # Activation restarts the tick and the server on the new code: never under a live
+        # client (LC-16). The release stays `ready`; the next pass tries again.
+        state["update"] = {"at": iso(at), "result": "deferred", "from": config.VERSION,
+                           "to": check.get("latest"), "detail": "; ".join(busy)}
+        update_events.emit("update_restart", "refused", base=base)
+        return {"result": "deferred", "detail": "; ".join(busy)}
+    args = ["--apply", "--unattended"]
     if _services() is None:
         # No launchd jobs here (Linux): nothing for the update to stop, and saying so is
         # what lets it run at all (audit A02).
@@ -449,10 +640,13 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
     state.pop("update_in_flight", None)
     outcome = {UPDATE_OK: "updated", UPDATE_SERVICES: "updated-services-not-restarted",
                UPDATE_FAILED: "failed-rolled-back", UPDATE_REFUSED: "refused",
-               UPDATE_UNDETERMINED: "undetermined", UPDATE_NEEDS_PERSON: "needs-person"}.get(code, "failed")
+               UPDATE_UNDETERMINED: "undetermined", UPDATE_NEEDS_PERSON: "needs-person",
+               UPDATE_HELD: "held"}.get(code, "failed")
     update = {"at": iso(at), "exit": code, "result": outcome, "from": config.VERSION,
               "to": report.get("version") or check.get("latest")}
-    if code not in (UPDATE_OK, UPDATE_SERVICES):
+    if code == UPDATE_HELD:
+        update["needs_person"] = str(report.get("needs_person") or "")[:1000]
+    elif code not in (UPDATE_OK, UPDATE_SERVICES):
         # `full update` names its reason in the JSON it prints, not on stderr.
         update["detail"] = (str(report.get("error") or "") or err or f"exit {code}")[:300]
         update["failures"] = int((state.get("update") or {}).get("failures") or 0) + 1
@@ -570,9 +764,14 @@ def restart_left_stopped(base: Path, state: dict, services) -> list[dict]:
 
 
 def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Commands | None = None,
-             services=..., store=None, app=None, sleep=time.sleep) -> dict:
+             services=..., store=None, app=None, sleep=time.sleep, first_check_delay: float = 0,
+             clock=time.monotonic) -> dict:
     """One pass of everything that is due. Never raises for a step's own failure: each
-    is recorded in store/maintenance.json and named in the answer."""
+    is recorded in store/maintenance.json and named in the answer.
+
+    `first_check_delay` (the scheduler's `--first-check-delay`): a check this pass makes
+    waits until that many seconds after the process started, so a job loaded at login does
+    not reach the network in the same moment as everything else (LC-16)."""
     at = at or now()
     config.validate_workspace(base, required=True)
     with pass_lock(base) as held:
@@ -592,14 +791,22 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
         # recorded by name and place, never the value.
         state["passphrase"] = {k: v for k, v in report["passphrase"].items()
                                if k in ("passphrase", "kept_outside", "warning", "error")}
-        report["update"] = step_update(base, state, at, commands or Commands(base))
+        def settle() -> None:
+            wait = first_check_delay - (clock() - PROCESS_STARTED)
+            if wait > 0:
+                sleep(wait)
+        report["update"] = step_update(base, state, at, commands or Commands(base),
+                                       before_check=settle if first_check_delay > 0 else None)
         if report["update"]["result"].startswith("updated"):
             # The new release's code is what should run next: the app and the snapshot
             # wait for the next pass, and the update's before-upgrade snapshot counts.
             state["snapshot"] = {"at": iso(at), "result": "before-upgrade"}
             report["next"] = "the next pass runs the new release"
         else:
-            if sys.platform == "darwin" or app is not None:
+            if not auto_enabled(base):
+                # The switch covers the app too: off means no check, download or install.
+                report["app"] = {"result": "off"}
+            elif sys.platform == "darwin" or app is not None:
                 try:
                     import app_update
                     report["app"] = (app or app_update.AppUpdater(base)).step(state, at)
@@ -642,6 +849,7 @@ def _rotate_logs(base: Path) -> None:
     try:
         import log_policy
         log_policy.sweep(base / "store" / "logs")
+        log_policy.sweep(update_events.directory())
         state_dir = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
         hooks = state_dir / "project-observatory"
         if hooks.is_dir():
@@ -692,8 +900,11 @@ class LaunchdSchedule:
         logs = self.base / "store" / "logs"
         return {
             "Label": self.label,
+            # RunAtLoad starts the pass at login with everything else; its check waits
+            # FIRST_CHECK_DELAY seconds after the start (LC-16).
             "ProgramArguments": [self.launch.stable_interpreter(engine_python()),
-                                 str(config.SOURCE / "tools" / "maintain.py"), "run"],
+                                 str(config.SOURCE / "tools" / "maintain.py"), "run",
+                                 "--first-check-delay", str(FIRST_CHECK_DELAY)],
             "StartInterval": INTERVAL_SECONDS,
             "RunAtLoad": True,
             "WorkingDirectory": str(config.SOURCE),
@@ -758,7 +969,7 @@ class LaunchdSchedule:
 
 
 class SystemdSchedule:
-    """A systemd user timer: hourly, 10 minutes after boot, catching up a missed run."""
+    """A systemd user timer: hourly, 90 seconds after the user manager starts (LC-16)."""
 
     kind = "systemd"
 
@@ -802,7 +1013,9 @@ class SystemdSchedule:
             f"Description=Run Project Observatory maintenance hourly for {self.base}",
             "",
             "[Timer]",
-            "OnBootSec=10min",
+            # The user manager starts at login: the first pass, and so the first check,
+            # comes 90 seconds after it (LC-16), then hourly.
+            f"OnStartupSec={FIRST_CHECK_DELAY}s",
             f"OnUnitActiveSec={INTERVAL_SECONDS // 60}min",
             "Persistent=true",
             "",
@@ -933,7 +1146,7 @@ def status(base: Path, *, schedule=None) -> dict:
         warn("not-scheduled", "updates and daily backups are not scheduled on this machine yet: "
                               "`project-observatory full maintain ensure`")
     if not auto_enabled(base):
-        warn("auto-off", "automatic updates are off: `project-observatory full auto-update on`")
+        warn("auto-off", f"{SWITCH_LABEL}: off — new releases wait for you: `project-observatory full auto-update on`")
     update = state.get("update") or {}
     if state.get("services_not_restarted") or update.get("result") == "updated-services-not-restarted":
         # This engine's own interpreter, as the dashboard's commands carry it: a Mac has no
@@ -947,13 +1160,22 @@ def status(base: Path, *, schedule=None) -> dict:
     if (state.get("app") or {}).get("result") == "refused":
         detail = str((state.get("app") or {}).get("detail", ""))[:240]
         warn("app-refused", f"the Mac app update was refused: {detail}", detail=detail)
+    if update.get("result") == "held" and not _engine_moved_past(update.get("to")):
+        step = str(update.get("needs_person") or "")[:400]
+        warn("needs-migration", f"release {update.get('to')} needs a person before it is installed: {step}; "
+                                "then `project-observatory full update --apply`",
+             version=update.get("to"), step=step)
+    if update.get("result") == "deferred":
+        warn("deferred", f"release {update.get('to')} is ready and waits for a moment with no client "
+                         f"({update.get('detail')}); it is tried again the next hour",
+             version=update.get("to"), detail=str(update.get("detail") or ""))
     if update.get("result") == "needs-person":
         warn("needs-person", "the last automatic update needs a person: run `project-observatory full update`")
     elif update.get("failures"):
         hour = _transient(update)
         detail = str(update.get("detail", ""))[:120]
         warn("update-incomplete", f"the last automatic update did not complete ({update.get('result')}: "
-                                  f"{detail}); it is tried again {'the next hour' if hour else 'the next day'}",
+                                  f"{detail}); it is tried again {'the next hour' if hour else 'within six hours'}",
              result=update.get("result"), detail=detail, soon=hour)
     failure = state.get("snapshot_failure") or {}
     if failure and (parse_iso(failure.get("at")) or now()) >= (parse_iso((state.get("snapshot") or {}).get("at"))
@@ -980,7 +1202,8 @@ def status(base: Path, *, schedule=None) -> dict:
                 versions["app"] = (app_update.bundle_info(app) or {}).get("version")
         except Exception:  # noqa: BLE001
             pass
-    return {"auto_update": auto_enabled(base), "schedule_wanted": schedule_wanted(base), "schedule": sched,
+    return {"auto_update": auto_enabled(base), "switch": switch_status(base),
+            "schedule_wanted": schedule_wanted(base), "schedule": sched,
             "scheduled": scheduled, "versions": versions, "passphrase": state.get("passphrase"),
             "last_pass": (state.get("pass") or {}).get("at"), "check": state.get("check"),
             "update": state.get("update"), "update_in_flight": state.get("update_in_flight"),
@@ -1063,6 +1286,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("action", choices=["run", "ensure", "uninstall", "status", "hook", "app"])
     ap.add_argument("--if-wanted", action="store_true",
                     help="with ensure: keep a schedule a person removed with `maintain uninstall` removed")
+    ap.add_argument("--first-check-delay", type=float, default=0, metavar="SECONDS",
+                    help="with run: a check waits until SECONDS after this process started (the scheduler's)")
     return ap
 
 
@@ -1081,7 +1306,8 @@ def hook(base: Path) -> dict:
 
 def auto_update_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="project-observatory full auto-update",
-                                 description="install each new stable release by itself (on by default)")
+                                 description=f"{SWITCH_LABEL} (on by default): the file `auto-update` "
+                                             "in the workspace home")
     ap.add_argument("action", choices=["status", "on", "off"])
     return ap
 
@@ -1102,7 +1328,7 @@ def main(argv: list[str]) -> int:
             # launchd and systemd stop a job with SIGTERM; the default handler would skip
             # the `finally` that starts the tick and server again (review F2).
             signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
-            result = run_pass(base)
+            result = run_pass(base, first_check_delay=max(0.0, min(a.first_check_delay, 600.0)))
         elif a.action == "ensure":
             if not system_setup_allowed(base):
                 raise config.ConfigurationError(
@@ -1129,13 +1355,18 @@ def auto_update_main(argv: list[str]) -> int:
     try:
         base = config.home()
         config.validate_workspace(base, required=True)
+        migrated = migrate_legacy(base)
         if a.action in ("on", "off"):
-            set_setting(base, "auto", a.action == "on")
-        result = {"auto_update": auto_enabled(base)}
+            write_switch(base, a.action == "on")
+            update_events.emit("auto_update", a.action, base=base)
+        result = {"auto_update": auto_enabled(base), "switch": switch_status(base)}
         if a.action == "on" and system_setup_allowed(base):
             result["ensure"] = ensure(base, explicit=True)
         elif a.action == "status":
             result = status(base)
+        if migrated:
+            result["migrated"] = migrated
+            print(f"Observatory: {migrated}", file=sys.stderr)
         print(json.dumps(result, indent=2))
         return 0
     except (config.ConfigurationError, OSError) as exc:

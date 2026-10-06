@@ -18,6 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 #: `full update` and for a wheel user's own install; it must be the tested one, byte for byte.
 LOCK = "requirements-full.lock"
 LOCK_MEMBER = "observatory/engine/" + LOCK
+#: A held release's marker (engine_update.RELEASE_MEMBER, LC-16): when the wheel carries
+#: one, it must name this very version and say what the person does. One written for an
+#: earlier release and left in the tree would otherwise be ignored by the updater in silence.
+RELEASE_MEMBER = "observatory/engine/RELEASE.json"
 
 
 def check(wheel: Path) -> dict:
@@ -60,6 +64,15 @@ def check(wheel: Path) -> dict:
             failures.append('the tested dependency lock is missing: ' + LOCK_MEMBER)
         elif z.read(LOCK_MEMBER) != (ROOT / LOCK).read_bytes():
             failures.append('the tested dependency lock differs from ' + LOCK + '; run tools/sync_engine_docs.py')
+        if RELEASE_MEMBER in names:
+            try:
+                marker = json.loads(z.read(RELEASE_MEMBER).decode("utf-8"))
+            except (UnicodeError, ValueError):
+                marker = None
+            if not isinstance(marker, dict) or marker.get("version") != project["version"] \
+                    or not isinstance(marker.get("needs_person"), str) or not marker["needs_person"].strip():
+                failures.append(RELEASE_MEMBER + ' must be {"version": "' + project["version"]
+                                + '", "needs_person": "<the step>"}; delete it when the release needs no person')
         for name in names:
             if name not in expected and name not in metadata_names:
                 failures.append('unexpected package resource: ' + name)

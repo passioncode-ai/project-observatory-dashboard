@@ -92,8 +92,11 @@ INTERFACE_SETTINGS = {"locale": ("en", "ru")}
 STORAGE_SETTINGS = ("backups",)
 
 #: What `updates` in settings.json may hold (maintenance.py). Both default to true when
-#: absent: `auto` installs each new stable release by itself, `scheduled` keeps the
-#: hourly maintenance job in place. An older reader never reads the key.
+#: absent: `scheduled` keeps the hourly maintenance job in place. `auto` is how 0.17 and
+#: 0.18 turned automatic updates off; since 0.19 the switch is the file `auto-update` in
+#: the home (LC-16), a false `auto` is still read as off while that file is absent, and
+#: the next `full auto-update` command moves it into the file. An older reader never
+#: reads the key.
 UPDATE_SETTINGS = ("auto", "scheduled")
 
 #: Every switch and source the engine reads. `configure` refuses any other name:
