@@ -5,6 +5,7 @@
     python "$T/cloudflare.py" stash < token-file   # admin token on stdin from a protected file, once per account
     python "$T/cloudflare.py" issue --preset analytics [--project project:x]
     python "$T/cloudflare.py" issue --preset dns-edit --zone example.com --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset zone-analytics-read --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset d1-edit --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset r2-bucket --account <slug> --bucket NAME \
         [--jurisdiction eu] [--expire-days 30] [--lifecycle-rule PREFIX:DAYS ...] \
@@ -98,6 +99,19 @@ PRESETS: dict[str, dict] = {
         "why": "edits DNS records in one zone for the project named by the vault slot",
         "scope": "zone",
         "probe": "/zones/{zone_id}/dns_records?per_page=1",
+    },
+    # ANALYTICS READ, ONE ZONE, INTO THE VAULT. An agent that measures one site
+    # (a brand agent counting its site's weekly visitors, server side, without a
+    # script on the page) needs that zone's counters and nothing else: not the
+    # account's other zones, not DNS, and not the plugin folder, which every
+    # zone of the account can read. Verified with the GraphQL read the analytics
+    # plugin itself does, because listing a zone is not reading its analytics.
+    "zone-analytics-read": {
+        "name": "observatory-zone-analytics-read {zone} (managed)",
+        "groups": ("Zone Read", "Analytics Read"),
+        "why": "reads one zone's request and visitor counters for the project named by the vault slot",
+        "scope": "zone",
+        "verify": "analytics",
     },
     # D1 WRITE, ONE ACCOUNT, INTO THE VAULT. A project whose Worker keeps its
     # data in D1 needs a machine that can write that database — `wrangler d1
@@ -782,15 +796,21 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
                           name=token_name)
         # A fresh token can take a moment to be honoured at the edge; the
         # value is delivered only once it has proved it can read the zone.
-        probe = preset["probe"].format(zone_id=zid)
+        probe = preset.get("probe", "").format(zone_id=zid)
         for attempt in range(5):
             try:
-                _request(probe, value)
+                if preset.get("verify") == "analytics":
+                    why = can_read_analytics(value, [zid])
+                    if why:
+                        raise RuntimeError(why)
+                else:
+                    _request(probe, value)
                 break
             except RuntimeError:
                 if attempt == 4:
-                    raise RuntimeError(f"the issued token cannot do its read on {zone} "
-                                       f"({probe.split('?')[0].replace(zid, '<zone>')})") from None
+                    what = "the zone's analytics" if preset.get("verify") == "analytics" else \
+                        probe.split('?')[0].replace(zid, '<zone>')
+                    raise RuntimeError(f"the issued token cannot do its read on {zone} ({what})") from None
                 time.sleep(wait)
         deliver_to_vault(value, project, env, name)
     except RuntimeError as exc:

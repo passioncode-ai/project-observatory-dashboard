@@ -329,6 +329,56 @@ def test_cf_dns_preset_is_scoped_to_one_zone_and_lands_in_the_vault() -> None:
           'use_secret.py" run --env prod proj CF_DNS -- ' in out.getvalue(), out.getvalue())
 
 
+def test_cf_zone_analytics_preset_reads_one_zone_into_the_vault() -> None:
+    """An agent that measures one site gets that zone's counters and nothing else, in its vault
+    slot, verified by the GraphQL read the plugin does (listing a zone is not reading analytics)."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    log, delivered, reads = [], [], []
+    _dns_fake(m, log)
+    base = m._request
+
+    def fake(path, token, payload=None, method=None):
+        if "permission_groups" in path:
+            log.append(("GET", path, token, None))
+            return {"result": [{"id": "g1", "name": "Zone Read", "scopes": ["com.cloudflare.api.account.zone"]},
+                               {"id": "g5", "name": "Analytics Read", "scopes": ["com.cloudflare.api.account.zone"]},
+                               {"id": "g4", "name": "DNS Write", "scopes": ["com.cloudflare.api.account.zone"]}]}
+        return base(path, token, payload, method)
+    m._request = fake
+    state = {"fails": 1}
+
+    def can_read(token, zone_ids):
+        reads.append((token, list(zone_ids)))
+        if state["fails"]:
+            state["fails"] -= 1
+            return "zones [z1] are not authorized"
+        return ""
+    m.can_read_analytics = can_read
+    m.deliver_to_vault = lambda value, p, e, n: delivered.append((value, p, e, n))
+    m._journal = lambda *a, **k: None
+    m.token_dir = lambda: (_ for _ in ()).throw(AssertionError("a zone preset never reaches the plugin folder"))
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_zone("zone-analytics-read", "example.com", "proj/local/CF_ANALYTICS", None, wait=0)
+    check("zone-analytics-read issues", rc == 0, str(rc))
+    create = [p for meth, path, tok, p in log if path == "/accounts/a1/tokens" and p]
+    pol = create[0]["policies"][0] if create else {}
+    check("the grant is the zone's own resource",
+          pol.get("resources") == {"com.cloudflare.api.account.zone.z1": "*"}, str(pol))
+    check("with exactly Zone Read and Analytics Read",
+          [g["id"] for g in pol.get("permission_groups", [])] == ["g1", "g5"], str(pol))
+    check("named after the zone", bool(create)
+          and create[0]["name"] == "observatory-zone-analytics-read example.com (managed)", str(create))
+    check("verified by reading that zone's analytics with the NEW token, retried until honoured",
+          len(reads) == 2 and all(t.startswith("dns-value-") and z == ["z1"] for t, z in reads), str(reads))
+    check("no REST probe is needed for it",
+          not any(path.startswith("/zones/z1/dns_records") for _m, path, _t, _p in log), "")
+    check("delivered to the named slot",
+          delivered == [("dns-value-" + "y" * 30, "proj", "local", "CF_ANALYTICS")], str(delivered))
+    check("and the value is never printed", "dns-value-" not in out.getvalue(), out.getvalue())
+
+
 def test_cf_dns_preset_rolls_refuses_and_never_misfiles() -> None:
     m = cf(); _cf_with_admin(m)
     log, delivered = [], []
@@ -1650,6 +1700,7 @@ if __name__ == "__main__":
                test_cf_fabric_account_preset_grants_both_levels_on_one_account_into_the_vault,
                test_cf_fabric_presets_refuse_what_they_do_not_grant,
                test_cf_logs_preset_reads_telemetry_with_a_post_and_grants_nothing_more,
+               test_cf_zone_analytics_preset_reads_one_zone_into_the_vault,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,
