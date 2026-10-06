@@ -315,6 +315,38 @@ class HeaderDoorTests(unittest.TestCase):
                 self.assertNotEqual(p.returncode, 0, p.stdout)
                 self.assertNotIn("header_for", self.meta())
 
+    def test_an_r2_account_endpoint_is_a_host_not_a_credential(self):
+        # The first label is the account id: an identifier, printed in every R2 URL. Composed, so no
+        # literal in this file has a key's shape.
+        account = "0a1b2c3d" + "4e5f6071" + "8293a4b5" + "c6d7e8f9"
+        self.put()
+        for host in (f"https://{account}.r2.cloudflarestorage.com",
+                     f"{account}.eu.r2.cloudflarestorage.com",
+                     f"https://{account}.fedramp.r2.cloudflarestorage.com/bucket"):
+            with self.subTest(host=host):
+                b = self.bind(host)
+                self.assertEqual(b.returncode, 0, b.stderr)
+                want = "https://" + host.split("://")[-1].split("/")[0]
+                self.assertEqual(self.meta()["header_for"], want)
+        b = self.bind(f"https://{account}.r2.cloudflarestorage.com")
+        self.assertEqual(b.returncode, 0, b.stderr)
+        p = self.header("--env", "prod", "--scheme", "", "alpha-web", "ALPHA_TOKEN",
+                        url=f"https://{account}.r2.cloudflarestorage.com")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(json.loads(p.stdout), {"Authorization": VALUE})
+
+    def test_the_waiver_covers_only_the_r2_account_label(self):
+        account = "0a1b2c3d" + "4e5f6071" + "8293a4b5" + "c6d7e8f9"
+        self.put()
+        for host in (f"https://{account}.example.invalid",
+                     f"https://{account}.r2.cloudflarestorage.com.example.invalid",
+                     f"https://x{account}.r2.cloudflarestorage.com",
+                     f"https://{account}.r2.cloudflarestorage.com/{VALUE}"):
+            with self.subTest(host=host):
+                b = self.bind(host)
+                self.assertNotEqual(b.returncode, 0, b.stdout)
+                self.assertNotIn("header_for", self.meta() if (self.store / "alpha-web" / "prod" / "ALPHA_TOKEN.meta.json").exists() else {})
+
     def test_binding_a_slot_that_holds_nothing_is_refused(self):
         p = self.bind()
         self.assertNotEqual(p.returncode, 0)
