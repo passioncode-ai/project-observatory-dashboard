@@ -5,13 +5,6 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
-### Added
-
-- **`cloudflare.py issue --preset zone-analytics-read --zone Z --vault PROJECT/ENV/NAME`.** Zone Read
-  and Analytics Read on one zone, delivered to a vault slot (not the plugin folder, which reads every
-  zone of the account), and verified with the analytics plugin's own GraphQL read before delivery.
-  For an agent that counts one site's visitors server side, without a script on the page.
-
 ## 0.17.3 — 2026-10-05
 
 A patch release. It fixes the root cause behind the torn database copies of 0.17.0–0.17.2,

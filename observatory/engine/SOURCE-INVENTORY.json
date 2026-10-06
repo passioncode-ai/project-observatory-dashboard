@@ -2101,8 +2101,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "9c147702429072556f4abde3bf651406db479304c8f7a3aab595e9c1f3df1b0b",
-      "bytes": 94655,
+      "export_sha256": "21a6f55928557d11e2972b17866c3344145605ea0bc94271884229bfae3e1d46",
+      "bytes": 97603,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -3677,8 +3677,8 @@
     {
       "path": "tools/cloudflare.py",
       "source_sha256": "554f7d6d0d677c887404479e33a84d40e76f022ecd49ce15e85cf409d5e6738f",
-      "export_sha256": "ed11655c86f0684f49a99ec93b4679015a65f0dc20e9160b7c3e6a8fdd6296c8",
-      "bytes": 80891,
+      "export_sha256": "432b662e1f59f6e4e514269373efa4da7c95f1df621c70a694978c74f967bc67",
+      "bytes": 82099,
       "python_comments_removed": 37,
       "python_docstrings_removed": 16,
       "tool_descriptions_retained": 0,
