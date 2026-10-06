@@ -157,6 +157,20 @@ class EverywhereThisMachineReaches(Base):
         self.assertIn("1 plain backup", backup["detail"])
         self.assertFalse(receipt["complete"])
 
+    def test_plaintext_snapshots_and_a_rolled_back_updates_copy_are_named(self) -> None:
+        # Audit A15: both hold the whole store in plain text, and a restore brings it back.
+        c = self.s.copies()
+        (self.s.home / "backups" / "daily-20261005T000000Z" / "data").mkdir(parents=True)
+        failed = self.s.home.parent / f"{self.s.home.name}.failed-update-20261005T000000Z"
+        (failed / "store").mkdir(parents=True)
+        _MADE.append(failed)
+        receipt = self.s.F.forget(self.s.conn, c["note"]["memoryId"], reason="contract withdrawn")
+        status = {b["backend"]: b for b in receipt["backends"]}
+        self.assertEqual(status["workspace-snapshots"]["status"], "retained")
+        self.assertEqual(status["failed-update-copies"]["status"], "retained")
+        self.assertIn(failed.name, status["failed-update-copies"]["detail"])
+        self.assertFalse(receipt["complete"])
+
     def test_forgetting_again_rechecks_and_changes_nothing_new(self) -> None:
         c = self.s.copies()
         first = self.s.F.forget(self.s.conn, c["note"]["memoryId"], reason="contract withdrawn")

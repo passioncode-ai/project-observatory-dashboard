@@ -154,6 +154,36 @@ class DoorTests(unittest.TestCase):
         self.assertIn("--env stage", p.stderr)
         self.assertIn('full-path)/tools/vault.py" put', p.stderr)
 
+    def test_names_lists_every_folder_of_one_project(self):
+        # 2026-10-06: a key issued into the project's folder (`beta-api`) was absent
+        # from `names` for the registry slug whose folder held older slots.
+        plant_slot("local-beta-api", "prod", "OLDER_KEY")
+        plant_slot("beta-api", "stage", "NEWER_KEY")
+        plant_slot("alpha-web", "prod", "ANOTHER_PROJECTS_KEY")
+        for typed in ("local-beta-api", "beta-api", "project:local-beta-api"):
+            with self.subTest(typed=typed):
+                p = run("use_secret.py", "names", typed)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertIn("vault:local-beta-api/prod", p.stdout)
+                self.assertIn("vault:beta-api/stage", p.stdout)
+                self.assertNotIn("ANOTHER_PROJECTS_KEY", p.stdout)
+
+    def test_a_key_put_by_one_name_is_read_by_the_other(self):
+        # 2026-10-06: `put` filed a key under the project's folder while the older slots
+        # sat under the registry name; `run` and `list` by that name did not find it.
+        plant_slot("local-beta-api", "prod", "OLDER_KEY")
+        p = run("vault.py", "put", "local-beta-api", "prod", "NEWER_KEY", stdin="synthetic-newer")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertTrue((STORE / "beta-api/prod/NEWER_KEY").is_file(), "put files under the project's folder")
+        p = run("use_secret.py", "run", "--env", "prod", "local-beta-api", "NEWER_KEY",
+                "--", sys.executable, "-c", "import os; print(len(os.environ['NEWER_KEY']))")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.stdout.strip(), str(len("synthetic-newer")))
+        p = run("vault.py", "list", "local-beta-api", "prod")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("local-beta-api/prod/OLDER_KEY", p.stdout)
+        self.assertIn("beta-api/prod/NEWER_KEY", p.stdout)
+
     def test_keyserver_mint_destination_uses_the_same_rule(self):
         import keyserver
         self.assertEqual(keyserver.check_destination("vault:local-beta-api/prod/OPENROUTER_API_KEY"),
@@ -194,6 +224,33 @@ class DoorTests(unittest.TestCase):
         self.assertIn("--env prod beta-api CF_API_TOKEN ", rows["CF_API_TOKEN"]["use"])
         self.assertEqual(out["project"], "beta-api", "a new slot goes under the project's folder")
         self.assertEqual(survey.credentials("beta-api")["projectId"], "project:local-beta-api")
+
+
+class FreshWorkspaceVault(unittest.TestCase):
+    """Audit A10: a workspace's own vault does not exist until the first `vault.py put`."""
+
+    def test_the_absent_default_vault_is_empty_not_unreadable(self):
+        import importlib
+        with tempfile.TemporaryDirectory() as tmp:
+            home = pathlib.Path(tmp).resolve() / "home"
+            env = {k: v for k, v in os.environ.items() if k != "OBSERVATORY_VAULT_DIR"}
+            env["OBSERVATORY_HOME"] = str(home)
+            with patch.dict(os.environ, env, clear=True):
+                import workspace
+                workspace.initialize(home)
+                import paths
+                importlib.reload(paths)
+                import survey
+                importlib.reload(survey)
+                self.assertFalse((paths.SECRETS / "projects").exists())
+                out = survey.credentials("project:fresh-one")
+                self.assertFalse([d for d in out["degraded"] if d["source"] == "vault"], out["degraded"])
+                with patch.dict(os.environ, {"OBSERVATORY_VAULT_DIR": str(pathlib.Path(tmp) / "elsewhere")}):
+                    out = survey.credentials("project:fresh-one")
+                self.assertTrue([d for d in out["degraded"] if d["source"] == "vault"],
+                                "a vault named elsewhere that is not there is still unknown")
+            importlib.reload(paths)
+            importlib.reload(survey)
 
 
 if __name__ == "__main__":

@@ -247,8 +247,16 @@ def validate_data(base: Path, *, integrity: bool = False) -> dict:
     try:
         compatibility.preflight(database)
         if integrity and present:
-            with contextlib.closing(sqlite3.connect(compatibility.readonly_uri(database), uri=True)) as conn:
-                compatibility.verify_database(conn)
+            try:
+                with contextlib.closing(sqlite3.connect(compatibility.readonly_uri(database), uri=True)) as conn:
+                    compatibility.verify_database(conn)
+            except (sqlite3.Error, RuntimeError):
+                # A reader opened immutable sees a write that lands during the check as
+                # damage. Before calling the store corrupt — which during `full update` would
+                # roll a good update back — check once more with locks (audit A11).
+                with contextlib.closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro",
+                                                        uri=True, timeout=30)) as conn:
+                    compatibility.verify_database(conn)
     except (sqlite3.Error, migrate.CompatibilityError, RuntimeError):
         raise config.ConfigurationError("Workspace database is corrupt or incompatible; use a compatible release or restore a verified backup") from None
     return {"present": present, "compatibility_checked": present,
@@ -557,7 +565,7 @@ def _parser() -> argparse.ArgumentParser:
     migration.add_argument("source", type=Path)
     migration.add_argument("--apply", action="store_true")
     migration.add_argument("--writers-stopped", action="store_true")
-    conf = sub.add_parser("configure", help="set one setting in config/settings.json")
+    conf = sub.add_parser("configure", help="set one setting in config/settings.json; model and budget write config/models.json")
     conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage", "model", "budget"])
     conf.add_argument("name")
     conf.add_argument("value")
@@ -732,8 +740,9 @@ def _init(base: Path, *, fresh: bool = False) -> dict:
     if restored and restored.get("status") == "restored":
         result = {**result, "status": "restored", "restored_from": restored.get("from"),
                   "files": restored.get("files")}
-    elif restored and restored.get("status") == "backups-found-locked":
-        result["backups_found"] = {k: restored[k] for k in ("newest", "detail", "next")}
+    elif restored and restored.get("status") in ("backups-found-locked", "several-workspaces", "restore-failed"):
+        result["backups_found"] = {k: restored[k] for k in ("newest", "backups", "detail", "next", "skipped")
+                                   if k in restored}
     if allowed:
         result["maintenance"] = maintenance.ensure(base)
     else:
@@ -803,7 +812,9 @@ def machine_command(name: str, argv: list[str]) -> int:
         print(json.dumps({"memory": doc["memory"], "volume": doc["disk"]["volume"],
                           "largest_origins": doc["processes"].get("groups", [])[:12],
                           "largest_locations": (doc["disk"].get("locations") or [])[:12],
-                          "page": "projects-dashboard.html → Machine"}, indent=1, ensure_ascii=False))
+                          # The split dashboard's own page; the single page this named
+                          # was retired with the split (2026-10-06).
+                          "page": str(paths.DASHBOARD_DIR / "machine.html")}, indent=1, ensure_ascii=False))
         return 0
     import scan_git_hygiene
     import cleanup

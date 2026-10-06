@@ -515,6 +515,45 @@ def test_a_cached_scan_from_another_salt_is_not_served_as_current() -> None:
 
 
 
+def test_a_failed_heroku_scan_is_not_an_empty_production() -> None:
+    """Audit A26, seen live: the Heroku scan timed out, `heroku.json` held no
+    application, and the ENV page's "Prod" column was "—" on every row with nothing
+    saying why. The comparison now carries the scan's reason as `degraded`."""
+    m = load("collectors/scan_remote_env.py", "scan_remote_env_a26")
+    import paths
+    raw = pathlib.Path(paths.SCRATCH) / "heroku.json"
+    raw.parent.mkdir(parents=True, exist_ok=True)
+    before = raw.read_text(encoding="utf-8") if raw.exists() else None
+    raw.write_text(json.dumps({"apps": [], "degraded": [
+        {"source": "heroku", "reason": "heroku auth:token did not finish in 30s"}]}), encoding="utf-8")
+
+    class FakeHeroku:
+        API = "https://api.heroku.invalid"
+
+        @staticmethod
+        def token():
+            return "synthetic", None
+
+        @staticmethod
+        def get(url, tok):
+            raise AssertionError("no application to ask about")
+    real = m._load
+    m._load = lambda rel, name: FakeHeroku if "scan_heroku" in rel else real(rel, name)
+    try:
+        rows, degraded = m.scan_heroku_apps("pepper")
+    finally:
+        m._load = real
+        if before is None:
+            raw.unlink()
+        else:
+            raw.write_text(before, encoding="utf-8")
+    check("no application row is invented", rows == [], str(rows))
+    check("the Heroku scan's own reason is carried",
+          degraded and "did not finish in 30s" in degraded[0]["reason"], str(degraded))
+    check("and it says unknown, not empty", degraded and "unknown, not empty" in degraded[0]["effect"],
+          str(degraded))
+
+
 if __name__ == "__main__":
     enable_remote_env_in_sandbox()
     print("what production holds — the comparison, and what never leaves it\n")
@@ -532,7 +571,8 @@ if __name__ == "__main__":
                test_nothing_to_compare_is_not_a_namespace_complaint,
                test_a_retired_value_is_still_found_across_a_namespace_refusal,
                test_the_refusal_reaches_the_board_with_its_remedy,
-               test_a_cached_scan_from_another_salt_is_not_served_as_current):
+               test_a_cached_scan_from_another_salt_is_not_served_as_current,
+               test_a_failed_heroku_scan_is_not_an_empty_production):
         fn()
     print()
     if FAILURES:

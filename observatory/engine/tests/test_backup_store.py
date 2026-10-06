@@ -108,10 +108,43 @@ def test_a_missing_store_is_not_a_failure_and_list_names_what_exists() -> None:
     check("and names each copy with its size", "2026-09-14T1300Z" in out and "MB" in out, out[-120:])
 
 
+def backup_gate(src: str) -> tuple[str, list[str]]:
+    """The `if` condition that encloses tick.sh's `step "backup"` line, and that block's
+    body. ("", []) when the step is not inside an `if … fi` of its own.
+
+    Audit A24: the earlier check asked only whether `-mmin -1440` occurred anywhere in
+    tick.sh, and it does — for four OTHER steps. The backup step is gated by
+    `backup_store.py --due`, so a tick.sh that ran the backup on every tick still passed."""
+    lines = src.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().startswith('step "backup"'):
+            start = next((j for j in range(i - 1, -1, -1) if lines[j].lstrip().startswith(("if ", "fi"))), None)
+            end = next((j for j in range(i + 1, len(lines)) if lines[j].strip() == "fi"), None)
+            if start is None or end is None or not lines[start].lstrip().startswith("if "):
+                return "", []
+            return lines[start].strip(), [l.strip() for l in lines[start + 1:end]]
+    return "", []
+
+
 def test_the_tick_takes_one_a_day() -> None:
     src = (ROOT / "tools/tick.sh").read_text(encoding="utf-8")
-    check("tick.sh runs backup_store when no copy is younger than a day",
-          "backup_store.py" in src and "-mmin -1440" in src)
+    condition, body = backup_gate(src)
+    check("tick.sh's backup step runs only inside the `backup_store.py --due` question",
+          "tools/backup_store.py --due" in condition and any(l.startswith('step "backup"') for l in body),
+          condition or "the backup step is not inside an `if` of its own")
+    check("and that block runs nothing else", len(body) == 2 and body[0].startswith("log "), str(body))
+    # The question itself: due with no copy, not due once one exists, due again a day later.
+    db = planted()
+    home = db.parent / "home"
+    env = {**os.environ, "OBSERVATORY_DB": str(db), "OBSERVATORY_HOME": str(home)}
+    ask = lambda: subprocess.run([PY, str(ROOT / "tools/backup_store.py"), "--due"], cwd=ROOT, env=env,
+                                 capture_output=True, text=True, timeout=120).returncode
+    check("--due says due (exit 0) when no copy exists", ask() == 0)
+    copy = load().take(db, "2026-09-14T1400Z")
+    check("--due says not due (exit 1) once a copy younger than a day exists", ask() == 1)
+    old = copy.stat().st_mtime - 25 * 3600
+    os.utime(copy, (old, old))
+    check("--due says due again when the newest copy is older than a day", ask() == 0)
 
 
 if __name__ == "__main__":

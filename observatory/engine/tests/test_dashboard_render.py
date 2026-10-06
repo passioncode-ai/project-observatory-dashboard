@@ -297,6 +297,178 @@ def test_a_finding_title_reads_in_the_readers_language() -> None:
           all(n[l]["Synthetic title from an older build"] >= 1 for l in n), str(n))
 
 
+def test_a_findings_command_runs_as_copied() -> None:
+    """Audit A29 and A32: a rule's action named `python "$(project-observatory
+    full-path)/tools/…"`, and this Mac has no `python`; the silence command ended
+    in `--why ''`, which the tool refuses. On the page the first is this engine's
+    own interpreter and path, and the second carries a visible REASON."""
+    rows = [{"id": "secret.leaked_unrotated:secret:x", "type": "secret.leaked_unrotated",
+             "subject": "secret:x", "severity": "critical", "title": "synthetic leak",
+             "detail": "Recorded 2026-09-14 14:18 UTC: the value was seen — echoed by a traceback.",
+             "action": 'rotate with `python "$(project-observatory full-path)/tools/vault.py" rotate x prod X`',
+             "evidence": []}]
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-runnable-")).resolve()
+    env = dashboard_fixture.seed(d)
+    (d / "registry/findings.json").write_text(json.dumps(
+        {"counts": {"info": 0, "warning": 0, "critical": 1}, "findings": rows}))
+    p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT, env=env,
+                       capture_output=True, text=True)
+    check("the findings page builds", p.returncode == 0, p.stderr[-300:])
+    page = page_with_its_script(pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"]), "findings", d)
+    got = {k: render(page, count=k) for k in ("project-observatory full-path", "tools/vault.py", PY, "REASON")}
+    if any(v is None for v in got.values()):
+        print("  SKIP  node is not on this machine")
+        return
+    n = {k: sum((v.get("counts") or {}).values()) for k, v in got.items()}
+    check("no `python \"$(project-observatory full-path)\"` survives on the page",
+          n["project-observatory full-path"] == 0, str(n))
+    check("the tool is still named", n["tools/vault.py"] >= 1, str(n))
+    check("with this engine's own interpreter", n[PY] >= 1, str(n))
+    check("and the silence command carries a visible REASON", n["REASON"] >= 1, str(n))
+
+
+def test_the_health_page_names_versions_kinds_and_dollars() -> None:
+    """Audit A14 and A34: the updates row named no version, the job's warnings and the
+    passphrase's place were computed and never shown, the backup row handed over the
+    wrong command, the queue printed raw kind codes and spend read "кред."."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-health-a14-")).resolve()
+    env = dashboard_fixture.seed(d)
+    import workspace
+    home = d / "home"
+    workspace.initialize(home)
+    at = "2026-10-05T21:19:46Z"
+    (home / "store" / "maintenance.json").write_text(json.dumps({
+        "check": {"at": at, "result": "updated", "exit": 10},
+        "update": {"at": at, "result": "updated", "from": "0.17.2", "to": "0.17.3"},
+        "snapshot": {"at": at, "result": "taken", "encrypted": True},
+        "snapshot_failure": {"at": "2099-01-01T00:00:00Z", "detail": "synthetic disk full"},
+        "passphrase": {"passphrase": "generated", "kept_outside": "keychain"}}), encoding="utf-8")
+    from store import db as sdb, ledger as L
+    conn = sdb.connect(d / "state/data.db")
+    L.append(conn, owner="agent:fixture", kind="observation", statement="a synthetic observation",
+             project_id="project:fixture-a", confidence=0.5)
+    conn.commit()
+    conn.close()
+    env = {**env, "OBSERVATORY_HOME": str(home), "OBSERVATORY_LOCALE": "ru", "OBSERVATORY_SYSTEM_SETUP": "0"}
+    p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT, env=env,
+                       capture_output=True, text=True)
+    check("the health page builds", p.returncode == 0, p.stderr[-300:])
+    page = page_with_its_script(pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"]), "health", d)
+    words = ("0.17.2 → 0.17.3", "движок", "keychain", "backups status", "synthetic disk full",
+             "наблюдение", "$4.0000", "кред.")
+    got = {w: render(page, count=w) for w in words}
+    if any(v is None for v in got.values()):
+        print("  SKIP  node is not on this machine")
+        return
+    n = {k: sum((v.get("counts") or {}).values()) for k, v in got.items()}
+    check("the updates row says what the last update moved", n["0.17.2 → 0.17.3"] >= 1, str(n))
+    check("and which engine is installed", n["движок"] >= 1, str(n))
+    check("where the backup passphrase is kept", n["keychain"] >= 1, str(n))
+    check("the backup row hands over `backups status`", n["backups status"] >= 1, str(n))
+    check("a maintenance warning reaches the page", n["synthetic disk full"] >= 1, str(n))
+    check("a queue kind reads in Russian", n["наблюдение"] >= 1, str(n))
+    check("spend reads in dollars", n["$4.0000"] >= 1 and n["кред."] == 0, str(n))
+    # A14 review: with updates off the versions still show, a warning a row already
+    # says is not repeated, and none is left in English; the digest reads "kind: n".
+    import maintenance
+    maintenance.set_setting(home, "auto", False)
+    p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT, env=env,
+                       capture_output=True, text=True)
+    check("the health page builds with updates off", p.returncode == 0, p.stderr[-300:])
+    page = page_with_its_script(pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"]), "health", d)
+    words = ("движок", "automatic updates are off", "the last daily backup failed", "synthetic disk full",
+             "наблюдение: 1", "1 наблюдение")
+    n = {w: sum((render(page, count=w).get("counts") or {}).values()) for w in words}
+    check("the installed versions show on every path", n["движок"] >= 1, str(n))
+    check("a warning a row already says is not repeated in English",
+          n["automatic updates are off"] == 0, str(n))
+    check("the rest read in Russian", n["the last daily backup failed"] == 0 and n["synthetic disk full"] >= 1, str(n))
+    check("the queue digest reads kind: n", n["наблюдение: 1"] >= 1 and n["1 наблюдение"] == 0, str(n))
+
+
+def test_the_mcp_page_says_how_to_probe_and_names_a_command_once() -> None:
+    """Audit A36 and A37."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-mcp-a36-")).resolve()
+    env = dashboard_fixture.seed(d)
+    rows = [{"name": "alpha", "agent": "claude", "scope": "user", "transport": "stdio",
+             "target": "npx -y alpha-mcp", "command": "npx -y alpha-mcp", "liveness": "not-probed",
+             "key_in_url": False, "key_in_header": False, "key_in_env": False},
+            # A37 review: a stdio row whose binary is gone said nothing once its command
+            # was printed only as the target.
+            {"name": "beta", "agent": "claude", "scope": "user", "transport": "stdio",
+             "target": "beta-mcp", "command": "beta-mcp", "command_present": False, "liveness": "not-probed",
+             "key_in_url": False, "key_in_header": False, "key_in_env": False}]
+    (d / "registry" / "mcp-servers.json").write_text(json.dumps({
+        "schema_version": 1, "scanned_on": "2026-10-05", "servers": rows, "degraded": [],
+        "probe": {"state": "never", "probed_at": None, "complete": None},
+        "totals": {"declarations": 2, "distinct_servers": 2}}), encoding="utf-8")
+    p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT, env=env,
+                       capture_output=True, text=True)
+    check("the MCP page builds", p.returncode == 0, p.stderr[-300:])
+    page = page_with_its_script(pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"]), "mcp", d)
+    got = {w: render(page, count=w) for w in ("full scan-mcp", "npx -y alpha-mcp", "mcp-probe", "not on disk")}
+    if any(v is None for v in got.values()):
+        print("  SKIP  node is not on this machine")
+        return
+    n = {k: sum((v.get("counts") or {}).values()) for k, v in got.items()}
+    check("a page of 'not probed' hands over the probe", n["full scan-mcp"] >= 1 and n["mcp-probe"] >= 1, str(n))
+    check("a stdio command is shown once", n["npx -y alpha-mcp"] == 1, str(n))
+    check("a missing binary is said on its own line", n["not on disk"] >= 1, str(n))
+
+
+def test_domains_and_traffic_read_as_a_person_names_them() -> None:
+    """Audit A39 and A43, in the Russian build. One registrar spelled two ways
+    ("godaddy (id: 146)", "godaddy.com, llc (id: 146)") is one group; the copied
+    DNS command asks every record type (dig keeps only the last type it is
+    given); a Cloudflare state and the paused mark read in Russian; and a
+    project two organizations name ".github" reads as "owner/.github", never as
+    the id's slug "example-org-.github"."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-names-")).resolve()
+    env = dashboard_fixture.seed(d)
+    reg = d / "registry"
+    (reg / "domains.json").write_text(json.dumps({"schema_version": 1, "updated_on": "2026-10-06", "domains": [
+        {"name": "one.example", "registrar": "godaddy (id: 146)"},
+        {"name": "two.example", "registrar": "godaddy.com, llc (id: 146)"}]}))
+    (reg / "cloudflare-zones.json").write_text(json.dumps({
+        "schema_version": 1, "updated_on": "2026-10-06", "scanned_on": "2026-10-06", "accounts": [], "degraded": [],
+        "totals": {}, "source_refs": [],
+        "zones": [{"name": "one.example", "status": "active", "paused": True, "plan": "free",
+                   "account_label": "fixture-account"}]}))
+    projects = json.loads((reg / "projects.json").read_text())
+    base = projects["projects"][0]
+    for owner in ("example-org", "otherorg"):
+        projects["projects"].append({**base, "id": f"project:{owner}-.github", "name": ".github"})
+    (reg / "projects.json").write_text(json.dumps(projects))
+    (reg / "google-properties.json").write_text(json.dumps({
+        "schema_version": 1, "updated_on": "2026-10-06", "scanned_on": "2026-10-06", "source_refs": [],
+        "totals": {"properties": 1}, "credentials": [], "accounts": [], "search_console": [], "degraded": [],
+        "properties": [{"property": "properties/1", "name": "Fixture property", "account_name": "fixture",
+                        "project": "project:example-org-.github", "link_rule": "operator-claim",
+                        "standing": "linked", "users_30d": 1}]}))
+    p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT,
+                       env={**env, "OBSERVATORY_LOCALE": "ru"}, capture_output=True, text=True)
+    check("the pages build", p.returncode == 0, p.stderr[-300:])
+    pages = pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"])
+    dom = page_with_its_script(pages, "domains", d)
+    got = {k: render(dom, count=k) for k in (">godaddy.com, llc", "godaddy (id: 146)", "for t in A AAAA CNAME",
+                                             "активна", "на паузе", "тариф free", "· paused", "без слова")}
+    if any(v is None for v in got.values()):
+        print("  SKIP  node is not on this machine")
+        return
+    n = {k: sum((v.get("counts") or {}).values()) for k, v in got.items()}
+    # The recorded spelling stays on hover (a `title`), never as the text.
+    check("one registrar id is one spelling everywhere", n[">godaddy.com, llc"] == 0 and n["godaddy (id: 146)"] >= 1, str(n))
+    check("the copied DNS command asks each record type", n["for t in A AAAA CNAME"] >= 1, str(n))
+    check("the zone's state, pause and plan read in Russian",
+          n["активна"] >= 1 and n["на паузе"] >= 1 and n["тариф free"] >= 1 and n["· paused"] == 0, str(n))
+    check("the opaque chip is gone", n["без слова"] == 0, str(n))
+    traffic = page_with_its_script(pages, "traffic", d)
+    got = {k: render(traffic, count=k) for k in (">example-org/.github<", ">example-org-.github<")}
+    n = {k: sum((v.get("counts") or {}).values()) for k, v in got.items()}
+    check("a shared project name carries its owner", n[">example-org/.github<"] >= 1, str(n))
+    check("and the id's slug is not the label", n[">example-org-.github<"] == 0, str(n))
+
+
 def test_an_unmeasured_estate_does_not_say_measured_not_measured() -> None:
     """A workspace with no scan yet printed "Измерено не измерено" (and "Measured not
     measured") in every page's header: the label must carry the absence itself."""
@@ -357,6 +529,48 @@ def test_a_stub_document_is_not_scanned_and_says_how_to_scan() -> None:
         check(f"{name}: says it was not scanned", n[says] >= 1, str(n))
         check(f"{name}: hands over the command that scans it", n[command] >= 1, str(n))
         check(f"{name}: never 'the registry holds no row'", n["registry holds no row"] == 0, str(n))
+
+
+def test_a_heroku_scan_that_read_nothing_is_not_zero_apps() -> None:
+    """Audit A09, seen live: `heroku auth:token did not finish in 30s`, and the board
+    said "0 Heroku apps", "$0/mo" and "the registry holds no row of this kind". The
+    scan's reason is on the page now, with the command that scans again."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-heroku-unread-")).resolve()
+    env = dashboard_fixture.seed(d)
+    empty = json.loads((ROOT / "defaults/empty-registry.json").read_text(encoding="utf-8"))
+    doc = dict(empty["heroku-apps.json"], schema_version=1, scanned_on="2026-10-05", apps=[],
+               degraded=[{"source": "heroku", "reason": "heroku auth:token did not finish in 30s"}])
+    (d / "registry" / "heroku-apps.json").write_text(json.dumps(doc), encoding="utf-8")
+    p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT, env=env,
+                       capture_output=True, text=True)
+    check("the page builds over an unread Heroku scan", p.returncode == 0, p.stderr[-300:])
+    pages = pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"])
+    page = page_with_its_script(pages, "heroku", d)
+    words = ("Heroku could not be read", "did not finish in 30s", "full heroku", "registry holds no row")
+    got = {w: render(page, count=w) for w in words}
+    if any(v is None for v in got.values()):
+        print("  SKIP  node is not on this machine")
+        return
+    n = {k: sum((v.get("counts") or {}).values()) for k, v in got.items()}
+    check("heroku: says the scan could not read", n[words[0]] >= 1, str(n))
+    check("heroku: names the scan's own reason", n[words[1]] >= 1, str(n))
+    check("heroku: hands over the command that scans again", n[words[2]] >= 1, str(n))
+    check("heroku: never 'the registry holds no row'", n[words[3]] == 0, str(n))
+    # A26: the ENV page says why its Prod column is empty.
+    (d / "registry" / "remote-env.json").write_text(json.dumps({
+        "schema_version": 1, "scanned_on": "2026-10-05", "apps": [], "totals": {"apps": 0},
+        "degraded": [{"source": "heroku", "reason": "heroku auth:token did not finish in 30s",
+                      "effect": "production configuration is unknown, not empty"}]}), encoding="utf-8")
+    p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT, env=env,
+                       capture_output=True, text=True)
+    envpage = page_with_its_script(pages, "env", d)
+    r = render(envpage, count="Prod column is incomplete")
+    check("env: says the Prod column is incomplete and why",
+          r is not None and sum((r.get("counts") or {}).values()) >= 1, str(r and r.get("counts")))
+    index = page_with_its_script(pages, "index", d)
+    r = render(index, count="not read")
+    check("index: the Heroku tiles say 'not read', not 0",
+          r is not None and sum((r.get("counts") or {}).values()) >= 3, str(r and r.get("counts")))
 
 
 def test_no_panel_renders_an_object_as_text() -> None:
@@ -774,6 +988,11 @@ if __name__ == "__main__":
                test_an_unmeasured_estate_does_not_say_measured_not_measured,
                test_no_panel_renders_an_object_as_text,
                test_a_stub_document_is_not_scanned_and_says_how_to_scan,
+               test_a_heroku_scan_that_read_nothing_is_not_zero_apps,
+               test_a_findings_command_runs_as_copied,
+               test_domains_and_traffic_read_as_a_person_names_them,
+               test_the_health_page_names_versions_kinds_and_dollars,
+               test_the_mcp_page_says_how_to_probe_and_names_a_command_once,
                test_a_metric_that_moved_says_so_on_the_page,
                test_a_single_sample_renders_no_movement,
                test_the_panel_says_why_history_was_not_recorded,

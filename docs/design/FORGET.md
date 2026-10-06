@@ -38,6 +38,8 @@ Every backend the text can reach is named, with one status. The statuses are `er
 | `file` | WAL checkpointed and the file vacuumed (`retention.scrub`), so no freed page holds the text; `unverified` when another writer holds the store |
 | `export` | `registry/ledger.jsonl` rewritten from the erased canon at once and checked, so `export-ledger --check` stays consistent |
 | `backups`, `encrypted-backups`, `migration-backups` | **retained** while any copy taken before the erasure exists: it keeps the text until it rotates out |
+| `workspace-snapshots` | **retained** while a plaintext snapshot folder exists under `<home>/backups/` (one taken without a passphrase): it keeps the whole store until it rotates out or `full backups migrate` moves it into the encrypted root |
+| `failed-update-copies` | **retained** while a `<home>.failed-update-*` folder exists beside the workspace. A rolled-back update keeps the changed workspace there, unencrypted and with `secrets/`, and nothing removes it: a person deletes it once the restored workspace is confirmed (`full backups status` names it) |
 | `git-history` | **retained**: earlier commits of the export keep the text, and this engine does not rewrite git history |
 | `residue` | listed only if any table of the store still contains the text — whole, or any word of five letters or more that no other record uses — checked with `instr` over text and blob columns and never assumed; `unverified` on a rerun, when the text is already gone and nothing is left to look for |
 
@@ -55,5 +57,5 @@ Every backend the text can reach is named, with one status. The statuses are `er
 
 ## Not done here
 
-- **Backups are not rewritten.** An encrypted backup is the recovery path, and editing it would make it no longer the state it recorded. They rotate out on their own schedule, and the receipt says so.
+- **Backups are not rewritten.** An encrypted backup is the recovery path, and editing it would make it no longer the state it recorded. They rotate out on their own schedule, and the receipt says so. **A restore brings erased text back:** restoring a snapshot taken before the erasure restores the record as it was then, so run `forget` again after any restore.
 - **The wiki projection, transcripts and anything outside this workspace** are not reached. They hold no ledger text by this engine's hand. A narrative someone wrote by hand is theirs to edit.

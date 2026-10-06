@@ -36,6 +36,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import shlex
 import shutil
 import signal
 import sqlite3
@@ -55,13 +56,64 @@ RETRY_UNDETERMINED = datetime.timedelta(hours=1)
 #: Why an update can be refused for a moment rather than for good: a copy torn or changed
 #: by a concurrent writer, a busy lock, another update. These are retried the next hour.
 TRANSIENT = ("integrity verification failed", "disk image is malformed", "changed during snapshot",
-             "is busy", "Another `full update --apply` is running", "TimeoutExpired")
+             "is busy", "Another `full update --apply` is running", "TimeoutExpired",
+             "still holds the lock", "another update")
 
 
 def _transient(record: dict) -> bool:
     detail = str(record.get("detail") or "")
+    if record.get("result") == "another-update-running":
+        return True
     return record.get("result") in ("refused", "failed-rolled-back", "undetermined") and any(
         marker in detail for marker in TRANSIENT)
+
+
+#: The journal events that end a `full update --apply` (engine_update.Transaction).
+FINAL_EVENTS = {"updated": "updated", "rolled-back": "failed-rolled-back",
+                "rollback-failed": "needs-person", "refused": "refused"}
+
+
+def reconcile_in_flight(base: Path, state: dict) -> dict | None:
+    """An apply the previous pass started and did not see end (the pass was stopped while
+    the update ran on, in its own session). Its outcome is read from the update journal
+    once the update lock is free (audit A03)."""
+    flight = state.get("update_in_flight")
+    if not flight or update_running(base):
+        return None
+    since = parse_iso(flight.get("at"))
+    outcome = None
+    try:
+        lines = (base / "store" / "logs" / "update.jsonl").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    for line in reversed(lines):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        when = parse_iso(row.get("at"))
+        if since and when and when < since:
+            break
+        if row.get("event") == "undo-ended":
+            outcome = {"at": flight.get("at"), "reconciled": True, "from": row.get("from"), "to": row.get("to"),
+                       "result": "needs-person" if row.get("outcome") == "needs-person" else "failed-rolled-back"}
+            if row.get("error"):
+                outcome["detail"] = str(row["error"])[:300]
+            break
+        if row.get("event") in FINAL_EVENTS:
+            outcome = {"at": flight.get("at"), "result": FINAL_EVENTS[row["event"]],
+                       "from": row.get("from"), "to": row.get("to"), "reconciled": True}
+            if row.get("error"):
+                outcome["detail"] = str(row["error"])[:300]
+            break
+    state.pop("update_in_flight", None)
+    if outcome is None:
+        outcome = {"at": flight.get("at"), "result": "failed", "reconciled": True,
+                   "detail": "the update ended without a final journal entry"}
+    state["update"] = outcome
+    return outcome
+
+
 SNAPSHOT_EVERY = datetime.timedelta(hours=24)
 INTERVAL_SECONDS = 3600
 #: Exit codes of `full update` (engine_update.EXIT_*), named here so a change there is
@@ -168,15 +220,43 @@ def system_setup_allowed(base: Path) -> bool:
         return True
     if flag == "0":
         return False
+    # A $HOME that is not this account's own home is a test's or a sandbox's (audit A07):
+    # launchd, the Keychain and systemd would still be the real ones.
+    if not _real_home():
+        return False
     try:
         temp = Path(tempfile.gettempdir()).resolve()
         resolved = base.resolve()
-        if resolved == temp or temp in resolved.parents or Path("/private/tmp") in resolved.parents \
-                or Path("/tmp") in resolved.parents:
+        if resolved == temp or temp in resolved.parents \
+                or any(root in resolved.parents for root in SYSTEM_TEMP_ROOTS):
             return False
     except OSError:
         return False
     return sys.stdin is not None and sys.stdin.isatty()
+
+
+#: Where the operating system keeps temporary directories, whatever TMPDIR this process was
+#: handed. A test runner gives each child its own TMPDIR beside the workspace it builds
+#: (`base/tmp` next to `base/runtime`), so the child's `gettempdir()` is not an ancestor of
+#: that workspace — but the runner's own temporary directory is, and on macOS that lives
+#: under /var/folders (audit A24: the guard's test patched `gettempdir` in-process and could
+#: not see this). No real workspace lives under any of these.
+SYSTEM_TEMP_ROOTS = (Path("/tmp"), Path("/private/tmp"), Path("/var/tmp"), Path("/private/var/tmp"),
+                     Path("/var/folders"), Path("/private/var/folders"))
+
+
+def _real_home() -> bool:
+    import pwd
+    try:
+        return Path.home().resolve() == Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+    except (KeyError, OSError):
+        return False
+
+
+def probes_allowed() -> bool:
+    """Read-only probes of launchd/systemd (status, doctor, the dashboard) — skipped when
+    OBSERVATORY_SYSTEM_SETUP=0 says this process must not touch the machine (audit A25)."""
+    return os.environ.get("OBSERVATORY_SYSTEM_SETUP") != "0" and _real_home()
 
 
 def engine_python() -> str:
@@ -203,6 +283,40 @@ class Commands:
     def __init__(self, base: Path, python: str | None = None, runner=subprocess.run):
         self.base, self.python, self.runner = base, python or engine_python(), runner
 
+    def apply(self, *args: str, env: dict | None = None) -> tuple[int, dict, str]:
+        """`full update --apply …`, in a session of its own with its output in a file.
+
+        Never given a timeout and never killed: a SIGTERM to the pass, a launchd bootout or
+        the pass's own end must not stop pip or the new release's upgrade half-way, which
+        would leave the jobs it stopped down (audit A03). `update_lock` keeps it single."""
+        environ = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "OBSERVATORY_ROOT"}}
+        environ.update(env or {})
+        environ[IN_PASS_ENV] = "1"
+        # BESIDE the home, next to the update lock, never inside it: a rollback renames the
+        # home to `.failed-update-*` and puts the snapshot in its place, and output written
+        # inside followed the old copy, so the pass read an empty report (A03 review).
+        out_path, err_path = apply_output_paths(self.base)
+        out_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            with _private_file(out_path) as out, _private_file(err_path) as err:
+                proc = subprocess.Popen(
+                    [self.python, "-P", "-m", "observatory", "--home", str(self.base), "full", "update", *args],
+                    stdin=subprocess.DEVNULL, stdout=out, stderr=err, env=environ,
+                    cwd=tempfile.gettempdir(), start_new_session=True)
+            code = proc.wait()
+        except OSError as exc:
+            return 125, {}, type(exc).__name__
+        try:
+            text = out_path.read_text(encoding="utf-8")
+            doc = json.loads(text) if text.strip() else {}
+        except (OSError, ValueError):
+            doc = {}
+        try:
+            tail = err_path.read_text(encoding="utf-8").strip().splitlines()
+        except OSError:
+            tail = []
+        return code, doc if isinstance(doc, dict) else {}, (tail[-1] if tail else "")[:300]
+
     def full(self, *args: str, timeout: int = 3600, env: dict | None = None) -> tuple[int, dict, str]:
         environ = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "OBSERVATORY_ROOT"}}
         environ.update(env or {})
@@ -219,6 +333,20 @@ class Commands:
             doc = {}
         tail = (p.stderr or "").strip().splitlines()
         return p.returncode, doc if isinstance(doc, dict) else {}, (tail[-1] if tail else "")[:300]
+
+
+def apply_output_paths(base: Path) -> tuple[Path, Path]:
+    """Where an automatic apply's stdout and stderr go: beside the workspace, as the
+    update lock is (engine_update._update_lock_path), so a rollback's swap of the home
+    cannot carry them away."""
+    return (base.parent / f".{base.name}.update-apply.out", base.parent / f".{base.name}.update-apply.err")
+
+
+def _private_file(path: Path):
+    """Truncated, owner-only, and never through a symbolic link."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    os.fchmod(fd, 0o600)
+    return os.fdopen(fd, "w", encoding="utf-8")
 
 
 # --- one pass ---------------------------------------------------------------------
@@ -267,7 +395,12 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
     """Check once a day; apply a newer stable release. Returns what happened."""
     if not auto_enabled(base):
         return {"result": "off"}
+    reconcile_in_flight(base, state)
     last = state.get("update") or {}
+    if last.get("failures") and last.get("from") != config.VERSION:
+        # The engine moved on (a person updated, or a later automatic update worked):
+        # earlier failures are history, not a warning (audit A13).
+        state["update"] = last = {k: v for k, v in last.items() if k != "failures"}
     if last.get("result") == "needs-person" and last.get("from") != config.VERSION:
         # A person ran `full update` (or reinstalled): the engine is no longer the one that
         # needed them, so the automatic attempts resume (review F3).
@@ -298,10 +431,20 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
     if code != UPDATE_AVAILABLE:
         return {"result": check["result"]}
     if update_running(base):
-        # A person (or the plugin's bridge) is updating right now; never a second transaction.
+        # A person (or the plugin's bridge) is updating right now; never a second
+        # transaction. Recorded, so the next hour tries again (audit A13).
+        state["update"] = {"at": iso(at), "result": "another-update-running", "from": config.VERSION,
+                           "detail": "another update was running"}
         return {"result": "another-update-running"}
-    code, report, err = commands.full("update", "--apply", timeout=3600,
-                                      env={"OBSERVATORY_SYSTEM_SETUP": "1"})
+    args = ["--apply"]
+    if _services() is None:
+        # No launchd jobs here (Linux): nothing for the update to stop, and saying so is
+        # what lets it run at all (audit A02).
+        args.append("--writers-stopped")
+    state["update_in_flight"] = {"at": iso(at), "to": check.get("latest")}
+    write_state(base, state)
+    code, report, err = commands.apply(*args, env={"OBSERVATORY_SYSTEM_SETUP": "1"})
+    state.pop("update_in_flight", None)
     outcome = {UPDATE_OK: "updated", UPDATE_SERVICES: "updated-services-not-restarted",
                UPDATE_FAILED: "failed-rolled-back", UPDATE_REFUSED: "refused",
                UPDATE_UNDETERMINED: "undetermined", UPDATE_NEEDS_PERSON: "needs-person"}.get(code, "failed")
@@ -311,6 +454,10 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
         # `full update` names its reason in the JSON it prints, not on stderr.
         update["detail"] = (str(report.get("error") or "") or err or f"exit {code}")[:300]
         update["failures"] = int((state.get("update") or {}).get("failures") or 0) + 1
+    else:
+        # The check found a release, and it is now installed: the check reads as done, so
+        # `maintain status` never says "update available" beside "updated" (audit A14).
+        check["result"] = "updated"
     state["update"] = update
     return {"result": outcome}
 
@@ -328,11 +475,26 @@ def step_snapshot(base: Path, state: dict, at: datetime.datetime, services=None,
     """A full encrypted snapshot once a day. An update's before-upgrade snapshot counts."""
     if not due(state, "snapshot", SNAPSHOT_EVERY, at):
         return {"result": "not-due"}
-    import workspace_upgrade
+    import engine_update
     if _tick_busy(base):
         # Booting a running tick out would interrupt it every day (review F10); the next
         # hourly pass tries again.
         return {"result": "deferred", "detail": "a tick or another workspace operation is running"}
+    # A person's `full update` stops and starts the same jobs (audit A12). A check was not
+    # enough: an update started while the snapshot had the jobs down found nothing to
+    # stop, and this step's `finally` then started them in the middle of its install.
+    # The snapshot HOLDS the update lock from the stop to the start, so that update is
+    # refused instead, and one already running defers the snapshot (A12 review).
+    try:
+        with engine_update.update_lock(base):
+            return _snapshot_with_jobs_stopped(base, state, at, services, sleep)
+    except engine_update.UpdateError:
+        return {"result": "deferred", "detail": "an update is running"}
+
+
+def _snapshot_with_jobs_stopped(base: Path, state: dict, at: datetime.datetime, services,
+                                sleep) -> dict:
+    import workspace_upgrade
     stopped, failures = [], []
     if services is not None:
         for job in services.managed():
@@ -356,6 +518,7 @@ def step_snapshot(base: Path, state: dict, at: datetime.datetime, services=None,
                 if result.get("export_error"):
                     record["detail"] = result["export_error"][:300]
                 state["snapshot"] = record
+                state.pop("snapshot_failure", None)
                 return {"result": "taken", "encrypted": record["encrypted"]}
             except (config.ConfigurationError, sqlite3.Error, OSError) as exc:
                 # A session MCP server's journal line, a tick still releasing its lock, or a
@@ -377,6 +540,8 @@ def step_snapshot(base: Path, state: dict, at: datetime.datetime, services=None,
         state.pop("stopped_services", None)
         if failures:
             state["services_not_restarted"] = failures
+        elif stopped:
+            state.pop("services_not_restarted", None)
 
 
 def _tick_busy(base: Path) -> bool:
@@ -421,6 +586,10 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
             report["passphrase"] = backup_vault.ensure_passphrase(base, store)
         except (backup_vault.BackupError, OSError) as exc:
             report["passphrase"] = {"error": str(exc)[:300]}
+        # Where the passphrase is kept is part of what doctor and Health show (audit A14):
+        # recorded by name and place, never the value.
+        state["passphrase"] = {k: v for k, v in report["passphrase"].items()
+                               if k in ("passphrase", "kept_outside", "warning", "error")}
         report["update"] = step_update(base, state, at, commands or Commands(base))
         if report["update"]["result"].startswith("updated"):
             # The new release's code is what should run next: the app and the snapshot
@@ -437,7 +606,22 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
             report["snapshot"] = step_snapshot(base, state, at, services, sleep=sleep)
         state["pass"] = {"at": iso(at)}
         write_state(base, state)
+        _rotate_logs(base)
         return report
+
+
+def _rotate_logs(base: Path) -> None:
+    """The job's own logs and the plugin hook's, under the engine's log policy (LC-12).
+    The tick rotates store/logs too, but the tick is off by default (audit A19)."""
+    try:
+        import log_policy
+        log_policy.sweep(base / "store" / "logs")
+        state_dir = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+        hooks = state_dir / "project-observatory"
+        if hooks.is_dir():
+            log_policy.sweep(hooks)
+    except Exception:  # noqa: BLE001 — rotation never fails a pass
+        pass
 
 
 # --- the schedule ------------------------------------------------------------------
@@ -578,8 +762,11 @@ class SystemdSchedule:
             f"Environment={self.quote('OBSERVATORY_HOME=' + str(self.base))}",
             'Environment="OBSERVATORY_SYSTEM_SETUP=1"',
             "Nice=10",
-            "IOSchedulingClass=idle",
             "UMask=0077",
+            # The pass starts an update in a session of its own and never waits to kill
+            # it (audit A03); systemd's default control-group kill would take it down with
+            # the pass on a stop or a logout, leaving the jobs it stopped down (A03 review).
+            "KillMode=process",
             "",
         ])
 
@@ -678,6 +865,11 @@ def ensure(base: Path, *, schedule=None, store=None, explicit: bool = False) -> 
 
 def unschedule(base: Path, *, schedule=None) -> dict:
     config.validate_workspace(base, required=True)
+    if pass_running(base):
+        # Booting the job out now would stop the pass and perhaps an update it runs
+        # (audit A03).
+        raise config.ConfigurationError("a maintenance pass is running; run `maintain uninstall` "
+                                        "again when it has ended (`maintain status` shows the last pass)")
     set_setting(base, "scheduled", False)
     return (schedule or schedule_for(base)).uninstall()
 
@@ -687,81 +879,154 @@ def unschedule(base: Path, *, schedule=None) -> dict:
 def status(base: Path, *, schedule=None) -> dict:
     """Whether updates and backups run by themselves, and what they last found. No value."""
     state = read_state(base)
-    try:
-        sched = (schedule or schedule_for(base)).status()
-    except Exception as exc:  # noqa: BLE001 — a status never fails doctor
-        sched = {"error": f"{type(exc).__name__}"}
-    warnings = []
-    scheduled = bool(sched.get("installed")) and sched.get("loaded", sched.get("active", True)) is not False
+    if schedule is None and not probes_allowed():
+        sched = {"probed": False, "detail": "OBSERVATORY_SYSTEM_SETUP=0: launchd/systemd not asked"}
+    else:
+        try:
+            sched = (schedule or schedule_for(base)).status()
+        except Exception as exc:  # noqa: BLE001 — a status never fails doctor
+            sched = {"error": f"{type(exc).__name__}"}
+    warnings, items = [], []
+
+    def warn(code: str, text: str, **params) -> None:
+        # The sentence for `maintain status` and doctor, and a code with its parameters
+        # for the Health page, which shows each in the reader's language and leaves out
+        # what one of its own rows already says (A14 review: every problem twice, the
+        # second time in English).
+        warnings.append(text)
+        items.append({"code": code, "text": text, **params})
+
+    # Scheduled means installed AND loaded (or, on Linux, the timer active) — audit A14.
+    scheduled = bool(sched.get("installed")) and sched.get("loaded", sched.get("active")) is True
     if not schedule_wanted(base):
-        warnings.append("the maintenance schedule was turned off; updates and daily backups do not run by "
-                        "themselves: `project-observatory full maintain ensure`")
+        warn("schedule-off", "the maintenance schedule was turned off; updates and daily backups do not run by "
+                             "themselves: `project-observatory full maintain ensure`")
+    elif sched.get("probed") is False:
+        pass
     elif not scheduled:
-        warnings.append("updates and daily backups are not scheduled on this machine yet: "
-                        "`project-observatory full maintain ensure`")
+        warn("not-scheduled", "updates and daily backups are not scheduled on this machine yet: "
+                              "`project-observatory full maintain ensure`")
     if not auto_enabled(base):
-        warnings.append("automatic updates are off: `project-observatory full auto-update on`")
+        warn("auto-off", "automatic updates are off: `project-observatory full auto-update on`")
     update = state.get("update") or {}
     if state.get("services_not_restarted") or update.get("result") == "updated-services-not-restarted":
-        warnings.append("a background job did not start again after the last backup or update: "
-                        "`project-observatory full doctor` names it; `install_launchd.py install` and "
-                        "`serverd.py --install` start them")
+        # This engine's own interpreter, as the dashboard's commands carry it: a Mac has no
+        # `python` on PATH (A29), and a command that cannot run is not a remedy.
+        py = shlex.quote(engine_python())
+        warn("services-not-restarted",
+             "a background job did not start again after the last backup or update: "
+             f"`{py} \"$(project-observatory full-path)/tools/serverd.py\" --install` starts the "
+             f"server, `{py} \"$(project-observatory full-path)/tools/install_launchd.py\" install` "
+             "the tick (with `features.scheduler` on)")
     if (state.get("app") or {}).get("result") == "refused":
-        warnings.append(f"the Mac app update was refused: {(state.get('app') or {}).get('detail', '')}"[:300])
+        detail = str((state.get("app") or {}).get("detail", ""))[:240]
+        warn("app-refused", f"the Mac app update was refused: {detail}", detail=detail)
     if update.get("result") == "needs-person":
-        warnings.append("the last automatic update needs a person: run `project-observatory full update`")
+        warn("needs-person", "the last automatic update needs a person: run `project-observatory full update`")
     elif update.get("failures"):
-        warnings.append(f"the last automatic update failed ({update.get('result')}); it is retried daily")
+        hour = _transient(update)
+        detail = str(update.get("detail", ""))[:120]
+        warn("update-incomplete", f"the last automatic update did not complete ({update.get('result')}: "
+                                  f"{detail}); it is tried again {'the next hour' if hour else 'the next day'}",
+             result=update.get("result"), detail=detail, soon=hour)
+    failure = state.get("snapshot_failure") or {}
+    if failure and (parse_iso(failure.get("at")) or now()) >= (parse_iso((state.get("snapshot") or {}).get("at"))
+                                                              or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)):
+        detail = str(failure.get("detail", ""))[:160]
+        warn("snapshot-failed", f"the last daily backup failed: {detail}; it is tried again the next hour",
+             detail=detail)
+    phrase = state.get("passphrase") or {}
+    if phrase.get("warning") or phrase.get("error"):
+        warn("passphrase", str(phrase.get("warning") or phrase.get("error"))[:200])
     snapshot = state.get("snapshot") or {}
     if snapshot.get("result") == "taken" and snapshot.get("encrypted") is False:
-        warnings.append("the last daily backup is not encrypted and stays inside the workspace: "
-                        + (snapshot.get("detail") or "no passphrase"))
+        warn("not-encrypted", "the last daily backup is not encrypted and stays inside the workspace: "
+                              + (snapshot.get("detail") or "no passphrase"))
     snap = parse_iso(snapshot.get("at"))
     if snap is None or now() - snap > SNAPSHOT_EVERY * 2:
-        warnings.append("no full backup in the last two days")
+        warn("no-backup", "no full backup in the last two days")
+    versions = {"engine": config.VERSION}
+    if sys.platform == "darwin":
+        try:
+            import app_update
+            app = app_update.installed_app()
+            if app is not None:
+                versions["app"] = (app_update.bundle_info(app) or {}).get("version")
+        except Exception:  # noqa: BLE001
+            pass
     return {"auto_update": auto_enabled(base), "schedule_wanted": schedule_wanted(base), "schedule": sched,
+            "scheduled": scheduled, "versions": versions, "passphrase": state.get("passphrase"),
             "last_pass": (state.get("pass") or {}).get("at"), "check": state.get("check"),
-            "update": state.get("update"), "snapshot": state.get("snapshot"), "app": state.get("app"),
-            "warnings": warnings}
+            "update": state.get("update"), "update_in_flight": state.get("update_in_flight"),
+            "snapshot": state.get("snapshot"), "snapshot_failure": state.get("snapshot_failure"),
+            "app": state.get("app"), "warnings": warnings, "warning_items": items}
 
 
 # --- a reinstall restores ------------------------------------------------------------
 
-def restore_latest(base: Path, *, store=None) -> dict:
-    """Restore the newest backup a workspace at this path left (D7). Only into an empty home."""
+def restore_latest(base: Path, *, store=None, label: str | None = None) -> dict:
+    """Restore the newest backup a workspace at this path left (D7). Only into an empty home.
+
+    When backups of more than one workspace exist under this name (a reinstall that could
+    not find its passphrase starts a second, empty workspace with its own daily backups),
+    nothing is chosen: the answer lists them and `--label` picks one (audit A06). Within
+    one workspace the newest snapshot that opens is restored, falling back to older ones."""
     import workspace_upgrade
     if base.exists() and any(p.name != ".workspace.lock" for p in base.iterdir()):
         raise config.ConfigurationError("Restore requires a new empty destination; existing state is never overwritten")
     found = backup_vault.candidates(base)
+    if label:
+        found = [c for c in found if c["label"] == label]
+        if not found:
+            return {"status": "no-backup", "detail": f"no backups under the label {label!r}"}
     if not found:
         return {"status": "no-backup", "detail": f"no backups of a workspace named {base.name!r} were found"}
-    store = store or backup_vault.SecretStore()
+    labels: dict[str, dict] = {}
+    for c in found:  # newest first, so the first one seen per label is its newest
+        entry = labels.setdefault(c["label"], {"label": c["label"], "newest": str(c["snapshot"]),
+                                                "stamp": c["stamp"], "snapshots": 0})
+        entry["snapshots"] += 1
+    if len(labels) > 1:
+        return {"status": "several-workspaces", "backups": list(labels.values()),
+                "detail": "backups of more than one workspace with this name exist; choose one",
+                "next": "project-observatory full restore --latest --label LABEL"}
+    # OBSERVATORY_SYSTEM_SETUP=0 keeps this process away from the Keychain (audit A25);
+    # a store handed in by the caller is its own choice and is used.
     env_secret = os.environ.get(backup_vault.PASS_ENV)
+    if store is None and os.environ.get("OBSERVATORY_SYSTEM_SETUP") == "0":
+        secrets_for = lambda _label: [env_secret] if env_secret else []  # noqa: E731
+    else:
+        store = store or backup_vault.SecretStore()
+        secrets_for = lambda lbl: ([env_secret] if env_secret else []) + backup_vault.stored_passphrases(store, lbl)  # noqa: E731
     problems: list[dict] = []
+    tried_any = False
     for candidate in found:
-        secret = env_secret or store.get(candidate["label"])
-        if not secret:
-            continue
-        try:
-            result = workspace_upgrade.restore(candidate["snapshot"], base, secret=secret)
-        except (backup_vault.BackupError, config.ConfigurationError, OSError) as exc:
-            # A wrong passphrase, a damaged copy or one that needs a newer release: try the
-            # next older backup rather than leave the person with nothing (review F10).
-            problems.append({"snapshot": candidate["snapshot"].name, "detail": str(exc)[:200]})
-            if not base.exists() or not any(p.name != ".workspace.lock" for p in base.iterdir()):
-                continue
-            raise
-        result.update({"status": "restored", "from": str(candidate["snapshot"]), "label": candidate["label"]})
-        if problems:
-            result["skipped"] = problems
-        return result
+        for secret in secrets_for(candidate["label"]):
+            tried_any = True
+            try:
+                result = workspace_upgrade.restore(candidate["snapshot"], base, secret=secret)
+            except (backup_vault.BackupError, config.ConfigurationError, OSError) as exc:
+                # A wrong passphrase, a damaged copy or one that needs a newer release: try
+                # the next passphrase, then the next older backup (review F10).
+                problems.append({"snapshot": candidate["snapshot"].name, "detail": str(exc)[:200]})
+                if not base.exists() or not any(p.name != ".workspace.lock" for p in base.iterdir()):
+                    continue
+                raise
+            result.update({"status": "restored", "from": str(candidate["snapshot"]), "label": candidate["label"]})
+            if problems:
+                result["skipped"] = problems
+            return result
     newest = found[0]
-    if problems and not all("authentication" in p["detail"] for p in problems):
+    # The command a person can run as given: an EMPTY home (a fresh `init` already made
+    # this one non-empty), and no passphrase on the command line — `restore` asks for it
+    # at a terminal (audit A05).
+    by_hand = f"project-observatory --home NEW_EMPTY_HOME full restore '{newest['snapshot']}'"
+    if tried_any and not all("authentication" in p["detail"] for p in problems):
         return {"status": "restore-failed", "newest": str(newest["snapshot"]), "skipped": problems,
                 "next": "`project-observatory full init --fresh` starts empty; the backups are left as they are"}
     return {"status": "backups-found-locked", "newest": str(newest["snapshot"]),
-            "detail": "no passphrase for these backups was found in the OS credential store",
-            "next": f"OBSERVATORY_BACKUP_PASSPHRASE=… project-observatory full restore '{newest['snapshot']}'"}
+            "detail": "no passphrase that opens these backups was found in the OS credential store",
+            "next": by_hand + " (it asks for the passphrase)"}
 
 
 # --- CLI ------------------------------------------------------------------------------
@@ -799,6 +1064,14 @@ def main(argv: list[str]) -> int:
     a = parser().parse_args(argv)
     try:
         base = config.home()
+        # `run` and `hook` write the Keychain and may bootstrap launchd: the same consent
+        # `ensure` asks for (audit A07 review). The jobs and the plugin hook set
+        # OBSERVATORY_SYSTEM_SETUP=1; a person's terminal passes on its own.
+        if a.action in ("run", "hook") and not system_setup_allowed(base):
+            raise config.ConfigurationError(
+                f"`maintain {a.action}` touches launchd/systemd and the credential store; this process "
+                "may not (OBSERVATORY_SYSTEM_SETUP=0, a temporary workspace, or not this account's home). "
+                "Run it from a terminal, or with OBSERVATORY_SYSTEM_SETUP=1")
         if a.action == "run":
             # launchd and systemd stop a job with SIGTERM; the default handler would skip
             # the `finally` that starts the tick and server again (review F2).

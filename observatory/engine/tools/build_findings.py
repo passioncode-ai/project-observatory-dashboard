@@ -294,6 +294,13 @@ AT_RISK = frozenset({"local-only-branch", "ahead", "unpushed-and-remote-moved",
                      "diverged"})
 
 
+def readable_time(value) -> str:
+    """An ISO stamp as a person reads it: `2026-09-14 14:18 UTC` (audit A28)."""
+    text = str(value or "")
+    m = re.match(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})", text)
+    return f"{m.group(1)} {m.group(2)} UTC" if m else (text or "at an unrecorded time")
+
+
 def clipped(text: str, limit: int = 300) -> str:
     """`text`, and a MARKER when it did not fit.
 
@@ -2706,12 +2713,14 @@ def collect() -> list[dict]:
             age_d = hours_since(first.get("at") or "")
             age_d = None if age_d is None else age_d / 24.0
             _hint = _rotation_hint(secret, first.get("at") or "")
+            # `where` is a place ("a session transcript") or a manner ("echoed by a
+            # urllib traceback"), so it follows a dash rather than "at" (audit A28).
             if len(sightings) == 1:
-                seen = (f"Recorded {first.get('at')}: the value was seen at "
-                        f"{first.get('where', 'an unrecorded place')}. ")
+                seen = (f"Recorded {readable_time(first.get('at'))}: the value was seen — "
+                        f"{first.get('where', 'in an unrecorded place')}. ")
             else:
                 seen = (f"{len(sightings)} sightings are recorded: "
-                        + "; ".join(f"{r.get('at')} at {r.get('where', 'an unrecorded place')}"
+                        + "; ".join(f"{readable_time(r.get('at'))} — {r.get('where', 'in an unrecorded place')}"
                                     for r in sightings) + ". ")
             out.append({
                 "type": "secret.leaked_unrotated", "subject": f"secret:{secret}",
@@ -4089,7 +4098,9 @@ def collect() -> list[dict]:
                 "type": "work.unwitnessed",
                 "subject": row.get("memory_id", "unknown"),
                 "severity": "info",
-                **titled("recorded work no clone here can witness"),
+                **(titled("recorded work in {repo} that no clone here can witness",
+                          repo=row["repository"]) if row.get("repository") else
+                   titled("recorded work no clone here can witness")),
                 "detail": f"{row.get('why', 'nothing could be asked')}. Nothing is known "
                           f"to be wrong with this record: no witness contradicted it, "
                           f"there was simply none to ask. It stays `proposed` for that "

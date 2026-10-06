@@ -1,6 +1,6 @@
 # Next interface improvements for the full engine
 
-The full engine already generates ten local pages, including project, metric and
+The full engine already generates twelve local pages (`PAGES` in `dashboard/shell.py`), including project, metric and
 finding views. The earlier portable overview remains a separate compatibility UI.
 This plan improves the full instrument; it does not describe it as an empty shell.
 The scenario contract is [full-engine scenarios](../../observatory/engine/docs/ux/portable-scenarios.md).

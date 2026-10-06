@@ -47,17 +47,28 @@ fi
 # rate-limited, so a session never waits for it and never fails because of it.
 stamps="${XDG_STATE_HOME:-$HOME/.local/state}/project-observatory"
 mkdir -p "$stamps" 2>/dev/null && chmod 700 "$stamps" 2>/dev/null
-# claim NAME SECONDS: true for exactly one caller per window. `mkdir` is atomic, so twenty
-# sessions starting at once start one job, not twenty (review F6).
+# claim NAME SECONDS: true for exactly one caller per window. The check and the stamp happen
+# under one exclusive lock, so twenty sessions starting at once start one job, not twenty —
+# also when the previous window has just expired (audit A20).
 claim() {
-  local lock="$stamps/$1.claim" then now
-  if ! mkdir "$lock" 2>/dev/null; then
-    then="$(stat -c %Y "$lock" 2>/dev/null || stat -f %m "$lock" 2>/dev/null || echo 0)"
-    now="$(date +%s)"
-    [ $((now - then)) -ge "$2" ] || return 1
-    rmdir "$lock" 2>/dev/null; mkdir "$lock" 2>/dev/null || return 1
-  fi
-  return 0
+  "$py" - "$stamps/$1.at" "$2" <<'PYCLAIM' 2>/dev/null
+import fcntl, os, sys, time
+path, window = sys.argv[1], int(sys.argv[2])
+fd = os.open(path + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
+try:
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    sys.exit(1)
+try:
+    last = os.stat(path).st_mtime
+except OSError:
+    last = 0
+if time.time() - last < window:
+    sys.exit(1)
+with open(path, "a"):
+    pass
+os.utime(path, None)
+PYCLAIM
 }
 # detach LOG CMD...: a new session of its own, so ending this session or its process group
 # cannot stop an install half-way (review F8).
@@ -93,7 +104,10 @@ print(1 if (d.get(\"updates\") or {}).get(\"auto\") is False else 0)" "$home/con
       "$po" full update --check >/dev/null 2>&1; rc=$?
       echo "$(date -u +%FT%TZ) check exit $rc"
       [ "$rc" = "10" ] || exit 0
-      "$po" full update --apply; echo "$(date -u +%FT%TZ) apply exit $?"
+      # No launchd (Linux): nothing for the update to stop, and saying so lets it run (A02).
+      if command -v launchctl >/dev/null 2>&1; then "$po" full update --apply
+      else "$po" full update --apply --writers-stopped; fi
+      echo "$(date -u +%FT%TZ) apply exit $?"
     ' _ "$po" "$py"
   fi
 fi

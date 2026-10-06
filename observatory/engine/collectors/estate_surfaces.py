@@ -438,6 +438,9 @@ def mcp_document(scan: dict, rows: list[dict], obs_date: str) -> dict:
                  "string, where its key sits (URL, header, env: booleans only), and "
                  "Claude's own liveness verdict where Claude was the agent asked."),
         "own_server": scan.get("own_server"), "own_declared": bool(scan.get("own_declared")),
+        # WHEN LIVENESS WAS LAST ASKED, so a page of "not probed" can say how to probe
+        # and how old the last answer is (audit A36). The verdicts are on the rows.
+        "probe": {k: (scan.get("probe") or {}).get(k) for k in ("state", "probed_at", "complete")},
         "degraded": scan.get("degraded", []),
         "servers": rows,
         "totals": {"declarations": len(rows), "distinct_servers": len(names),

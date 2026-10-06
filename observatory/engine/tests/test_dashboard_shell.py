@@ -252,7 +252,11 @@ class AuditFixes(unittest.TestCase):
         self.assertEqual(counts["mcp"], 3, "declarations, the MCP page's own unit")
         cards = text(shell.cards_html({"env": env, "mcp": mcp}, {**counts, "projects": 0, "findings": 0,
                                                                  "domains": 0, "heroku": 0, "creds": 0}))
-        self.assertIn("2 variables · 4 read as a secret", cards)
+        # Both numbers from ONE population, the view the ENV page opens on: the
+        # card once printed `totals.secrets` (4, templates included) beside a
+        # view of 2 — more secrets than variables (audit A40).
+        self.assertIn("2 variables · 1 read as a secret", cards)
+        self.assertNotIn("4 read as a secret", cards)
         self.assertIn("3 declarations · 2 servers", cards)
 
     def test_domain_counts_are_the_domains_page_rows(self):

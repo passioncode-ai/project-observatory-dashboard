@@ -29,6 +29,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import configuration as config
 import workspace
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import pgp_fixture
+import release_signature
+
+#: The release key every FakeGitHub signs with; setUp pins it in place of the organization's.
+SIGNER = pgp_fixture.Key()
 
 REPO = "example-org/example-observatory"
 CURRENT = config.VERSION
@@ -75,6 +81,8 @@ class FakeGitHub:
         self.latest: str | None = None
         self.requests: list[str] = []
         self.rate_limited = False
+        self.reject_token = False
+        self.tokens_seen = 0
         outer = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -83,6 +91,10 @@ class FakeGitHub:
 
             def do_GET(self):  # noqa: N802
                 outer.requests.append(self.path)
+                if self.headers.get("Authorization"):
+                    outer.tokens_seen += 1
+                    if outer.reject_token:
+                        return self._send(401, b'{"message":"Bad credentials"}')
                 if outer.rate_limited:
                     body = b'{"message":"API rate limit exceeded"}'
                     self.send_response(403); self.send_header("X-RateLimit-Remaining", "0")
@@ -119,12 +131,15 @@ class FakeGitHub:
 
     def publish(self, version: str, *, latest: bool = True, wheel: bytes | None = None,
                 digest: str | None = None, sums_line: str | None = None, omit: tuple[str, ...] = (),
-                no_digest: bool = False) -> bytes:
+                no_digest: bool = False, signer=SIGNER, signature: str | None = None) -> bytes:
         data = wheel if wheel is not None else wheel_bytes(version)
         name = f"project_observatory-{version}-py3-none-any.whl"
         sums = (sums_line if sums_line is not None else f"{sha(data)}  {name}") + "\n"
         files = {name: data, "SHA256SUMS": sums.encode()}
-        digests = {name: digest or sha(data), "SHA256SUMS": sha(sums.encode())}
+        if signature is not None or signer is not None:
+            files["SHA256SUMS.asc"] = (signature if signature is not None else signer.sign(sums.encode())).encode()
+        digests = {n: sha(b) for n, b in files.items()}
+        digests[name] = digest or sha(data)
         self.releases[version] = {"files": files, "digests": digests, "omit": omit, "no_digest": no_digest}
         if latest:
             self.latest = version
@@ -242,6 +257,9 @@ class UpdateTest(unittest.TestCase):
         self.home = self.base / "workspace"
         self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(self.base / "user")}, clear=True)
         self.env.start()
+        pinned = patch.object(release_signature, "PINNED", SIGNER.pinned())
+        pinned.start()
+        self.addCleanup(pinned.stop)
         workspace.initialize(self.home)
         import paths
         importlib.reload(paths)
@@ -413,6 +431,95 @@ class UpdateTest(unittest.TestCase):
         self.gh.publish(NEWER, sums_line=f"{'1' * 64}  project_observatory-{NEWER}-py3-none-any.whl")
         code, doc = self.run_cli("--apply")
         self.assert_refused_untouched(code, doc, "SHA256SUMS")
+
+    def test_a_refused_token_falls_back_to_anonymous_reads(self):
+        # Audit A13: an expired GH_TOKEN otherwise fails every daily check until noticed.
+        self.gh.reject_token = True
+        self.gh.publish(NEWER)
+        err = io.StringIO()
+        with patch.object(self.mod, "API_HOST", "127.0.0.1"), \
+                patch.object(self.mod, "github_token", return_value="synthetic-token-value"), \
+                contextlib.redirect_stderr(err):
+            code, doc = self.run_cli("--check")
+        self.assertEqual(code, self.mod.EXIT_UPDATE_AVAILABLE, doc)
+        self.assertGreaterEqual(self.gh.tokens_seen, 1, "the token was offered first")
+        self.assertIn("HTTP 401", err.getvalue())
+        # Dropped for the rest of the run (A13 review): offered once, said once — an
+        # --apply reads the release, its sums, its signature and the wheel.
+        seen = self.gh.tokens_seen
+        err = io.StringIO()
+        with patch.object(self.mod, "API_HOST", "127.0.0.1"), \
+                patch.object(self.mod, "github_token", return_value="synthetic-token-value"), \
+                contextlib.redirect_stderr(err):
+            code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(self.gh.tokens_seen - seen, 1, "the refused token is offered once per run")
+        self.assertEqual(err.getvalue().count("HTTP 401"), 1, err.getvalue())
+        self.assertNotIn("synthetic-token-value", err.getvalue() + json.dumps(doc))
+
+    def test_unsigned_release_is_refused_before_anything(self):
+        self.gh.publish(NEWER, signer=None)
+        code, doc = self.run_cli("--apply")
+        self.assert_refused_untouched(code, doc, "unsigned release")
+
+    def test_release_signed_by_another_key_is_refused_before_anything(self):
+        self.gh.publish(NEWER, signer=pgp_fixture.Key())
+        code, doc = self.run_cli("--apply")
+        self.assert_refused_untouched(code, doc, "release key")
+
+    def test_signature_over_other_bytes_is_refused_before_anything(self):
+        self.gh.publish(NEWER, signature=SIGNER.sign(b"another list\n"))
+        code, doc = self.run_cli("--apply")
+        self.assert_refused_untouched(code, doc, "release key")
+
+    def test_the_verified_step_names_the_signing_key(self):
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0, doc)
+        steps = [json.loads(line) for line in (self.home / "store/logs/update.jsonl").read_text().splitlines()
+                 if '"verified"' in line]
+        self.assertTrue(steps and steps[-1].get("signed_by") == SIGNER.fingerprint, steps)
+
+    def test_a_rollback_release_from_before_signatures_still_rolls_back(self):
+        # A running version older than the first signed release (0.14.0) has no .asc to
+        # check; refusing it as the rollback wheel would leave that install unable to
+        # update at all. Simulated by moving the boundary past the running version.
+        self.gh.publish(CURRENT, latest=False, signer=None)
+        self.gh.publish(NEWER)
+        with patch.object(self.mod, "FIRST_SIGNED_RELEASE", NEWER):
+            code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0, doc)
+        self.assertTrue(doc["rollback_available"], doc)
+
+    def test_an_unsigned_rollback_release_of_a_signed_version_is_refused(self):
+        # Audit A04 review: deleting SHA256SUMS.asc from the running version's release
+        # and uploading another wheel must not make that wheel the rollback target.
+        self.assertTrue(self.mod.signature_required_for(CURRENT))
+        self.assertFalse(self.mod.signature_required_for("0.13.0"))
+        self.assertTrue(self.mod.signature_required_for("0.14.0"))
+        self.assertTrue(self.mod.signature_required_for("not-a-version"))
+        self.gh.publish(CURRENT, latest=False, signer=None)
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertNotEqual(code, 0, doc)
+        self.assertIn("unsigned release", json.dumps(doc))
+        self.assertNotEqual(self.installer.installed, NEWER)
+
+    def test_a_malformed_signature_is_a_refusal_not_a_traceback(self):
+        for junk in ("-----BEGIN PGP SIGNATURE-----\n\nBA==\n-----END PGP SIGNATURE-----\n",
+                     "-----BEGIN PGP SIGNATURE-----\n\nBAAWCg==\n-----END PGP SIGNATURE-----\n"):
+            with self.subTest(junk=junk):
+                self.gh.publish(NEWER, signature=junk)
+                code, doc = self.run_cli("--apply")
+                self.assert_refused_untouched(code, doc, "release key")
+
+    def test_a_rollback_release_with_a_bad_signature_is_refused(self):
+        self.gh.publish(CURRENT, latest=False, signer=pgp_fixture.Key())
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertNotEqual(code, 0, doc)
+        self.assertIn("release key", json.dumps(doc))
+        self.assertNotEqual(self.installer.installed, NEWER)
 
     def test_release_without_published_digests_is_refused(self):
         self.gh.publish(NEWER, no_digest=True)
@@ -667,6 +774,10 @@ class UpdateTest(unittest.TestCase):
         self.assertTrue((kept / "config/upgraded-by-new-release.json").exists())
         self.assertTrue((self.home / "backups/engine-releases").is_dir(), "backups travel with the home")
         self.assertEqual(self.services.state, {"tick": True, "server": True})
+        # The restored home's journal ends with the outcome (A03 review): a pass that
+        # reconciles reads it there, not in the failed copy.
+        last = json.loads((self.home / "store/logs/update.jsonl").read_text().splitlines()[-1])
+        self.assertEqual((last["event"], last["outcome"]), ("undo-ended", "rolled-back"))
 
     def test_missing_dependency_after_install_rolls_back(self):
         self.engine.deps = {}

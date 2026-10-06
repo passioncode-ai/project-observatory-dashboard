@@ -12,7 +12,20 @@ from emitter_fixture import seed as seed_emitter
 PYTHON=str(ROOT/'.venv/bin/python') if (ROOT/'.venv/bin/python').exists() else sys.executable
 
 
+def _require_bootstrapped_home() -> None:
+    """These suites run on the synthetic workspace `run_portable.py` builds (its
+    LEGACY bootstrap: `init`, sample projects, a first registry). Started directly
+    they used to inherit the operator's live workspace and read its configuration
+    without a word; tests/tmp.py now hands them an empty sandbox instead (audit A08
+    review), and this says what to run rather than failing deep in the emitter."""
+    home = Path(os.environ.get("OBSERVATORY_HOME", ""))
+    if not (home / "config" / "settings.json").is_file():
+        raise RuntimeError("this suite needs the synthetic workspace of the portable runner: "
+                           "python tests/run_portable.py --suite <name>  (from observatory/engine)")
+
+
 def seed(root: Path, *, samples=2) -> dict:
+    _require_bootstrapped_home()
     env=seed_emitter(root)
     for name in ('state','estate','wiki','empty-vault'):(root/name).mkdir(exist_ok=True)
     env.update(OBSERVATORY_DATA=str(root/'estate'), OBSERVATORY_VAULT=str(root/'wiki'),

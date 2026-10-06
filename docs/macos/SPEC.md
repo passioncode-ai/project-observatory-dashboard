@@ -87,9 +87,10 @@ assistant. The first version put the conversation in the main window and kept th
 dashboard in the browser; the operator expected the dashboard. Supersedes the
 "no WebView, dashboard stays in the browser" choice of 2026-10-01.
 
-Dashboard window (main, a single `Window` scene; opens at launch and on Dock reopen — the
-app opens it itself, because AppKit's reopen and a launch restored with no window do not
-recreate a SwiftUI scene window): the workspace's
+Dashboard window (main, a single `Window` scene; opens at launch and on Dock reopen whenever
+the dashboard itself is not on screen, even with the Assistant open — the app opens it
+itself, because AppKit's reopen and a launch restored with no window do not recreate a
+SwiftUI scene window, and AppKit's `hasVisibleWindows` counts the Assistant): the workspace's
 dashboard in a WKWebView. Live when `assistant dashboard` verifies a loopback server
 for THIS workspace; otherwise the built pages from `docs/dashboard/`, which are
 self-contained, under a banner that names their build time and offers **Start

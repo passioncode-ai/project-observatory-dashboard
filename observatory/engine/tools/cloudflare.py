@@ -66,6 +66,15 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+
+#: What closes the leak register once the leaked values are dead. It named `vault.py
+#: rotate`, which writes a new value and leaves the register open (2026-10-06); the
+#: command is `settle`, with this engine's own interpreter, as every handed command is.
+SETTLE_HINT = ("the leaked values are dead; close each row the register names with "
+               f"`{__import__('shlex').quote(sys.executable)} \"$(project-observatory full-path)/tools/vault.py\" "
+               "settle PROJECT ENV NAME --how \"rotated at the provider\" "
+               "--revocation-evidence \"…\" --consumer-evidence \"…\"`")
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "plugins"))
@@ -768,6 +777,41 @@ def deliver_to_vault(value: str, project: str, env: str, name: str) -> None:
                            f"(exit {r.returncode}); child output withheld")
 
 
+
+#: How long a freshly minted token is given to be honoured at the edge before a
+#: proof calls it bad (2026-10-06: an R2 pair answered HTTP 401 for longer than the
+#: old 5 × 2 s, twice in a row, and worked on a third issue — the door had deleted
+#: two good tokens). The pauses double from `wait` up to eight times it, so a
+#: prompt answer costs one call and a slow edge about 80 s with the default 2 s.
+PROOF_ATTEMPTS = 8
+
+
+def proof_delays(wait: float) -> list[float]:
+    """The pauses between proof attempts: `wait`, doubling, capped at 8 × `wait`."""
+    return [min(wait * 2 ** i, wait * 8) for i in range(PROOF_ATTEMPTS - 1)]
+
+
+def until_honoured(attempt, wait: float):
+    """Call `attempt()` until it returns None (proved) or the delays run out; returns
+    the last reason it gave. `attempt` returns a reason string to retry, or a
+    `(reason, final)` tuple whose `final` stops at once (a refusal no wait can fix)."""
+    reason = None
+    for delay in [*proof_delays(wait), None]:
+        got = attempt()
+        if isinstance(got, tuple):
+            reason, final = got
+            if final:
+                return reason
+        else:
+            reason = got
+        if reason is None:
+            return None
+        if delay is None:
+            return reason
+        time.sleep(delay)
+    return reason
+
+
 def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
                    account_label: str | None, wait: float = 2.0) -> int:
     """Issue a zone-scoped token (DNS edit, Email Routing rules) into a vault slot."""
@@ -797,21 +841,19 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
         # A fresh token can take a moment to be honoured at the edge; the
         # value is delivered only once it has proved it can read the zone.
         probe = preset.get("probe", "").format(zone_id=zid)
-        for attempt in range(5):
+        analytics = preset.get("verify") == "analytics"
+
+        def read_zone():
             try:
-                if preset.get("verify") == "analytics":
-                    why = can_read_analytics(value, [zid])
-                    if why:
-                        raise RuntimeError(why)
-                else:
-                    _request(probe, value)
-                break
-            except RuntimeError:
-                if attempt == 4:
-                    what = "the zone's analytics" if preset.get("verify") == "analytics" else \
-                        probe.split('?')[0].replace(zid, '<zone>')
-                    raise RuntimeError(f"the issued token cannot do its read on {zone} ({what})") from None
-                time.sleep(wait)
+                if analytics:
+                    return can_read_analytics(value, [zid]) or None
+                _request(probe, value)
+                return None
+            except RuntimeError as exc:
+                return str(exc)
+        if until_honoured(read_zone, wait) is not None:
+            what = "the zone's analytics" if analytics else probe.split('?')[0].replace(zid, '<zone>')
+            raise RuntimeError(f"the issued token cannot do its read on {zone} ({what})")
         deliver_to_vault(value, project, env, name)
     except RuntimeError as exc:
         print(f"refused: {exc}{discard_fresh(admin, (account or {}).get('id', ''), tid, rolled)}",
@@ -851,16 +893,17 @@ def cmd_issue_account(preset_key: str, target: str | None, account_label: str | 
         # The value reaches the vault only once it has proved, with its own
         # rights, the one thing its reader needs first.
         probe = preset["probe"].format(account_id=account["id"])
-        for attempt in range(5):
+
+        def read_account():
             try:
                 # A probe that is a POST (telemetry) carries its body; the rest are GETs.
                 _request(probe, value, preset.get("probe_body"))
-                break
-            except RuntimeError:
-                if attempt == 4:
-                    raise RuntimeError("the issued token cannot do its read on this account "
-                                       f"({probe.split('?')[0].replace(account['id'], '<account>')})") from None
-                time.sleep(wait)
+                return None
+            except RuntimeError as exc:
+                return str(exc)
+        if until_honoured(read_account, wait) is not None:
+            raise RuntimeError("the issued token cannot do its read on this account "
+                               f"({probe.split('?')[0].replace(account['id'], '<account>')})")
         deliver_to_vault(value, project, env, name)
     except RuntimeError as exc:
         print(f"refused: {exc}{discard_fresh(admin, (account or {}).get('id', ''), tid, rolled)}",
@@ -1134,15 +1177,15 @@ def r2_setup_bucket(admin: str, account_id: str, bucket: str, jurisdiction: str,
     try:
         hdr = {"cf-r2-jurisdiction": jurisdiction}
         base = f"/accounts/{account_id}/r2/buckets"
-        for attempt in range(5):
+        def list_buckets():
             try:
                 _request(f"{base}?per_page=1", setup, headers=hdr)
-                break
-            except RuntimeError:
-                if attempt == 4:
-                    raise RuntimeError("the setup token was never honoured for R2 — "
-                                       "is R2 enabled on this account?") from None
-                time.sleep(wait)
+                return None
+            except RuntimeError as exc:
+                return str(exc)
+        if until_honoured(list_buckets, wait) is not None:
+            raise RuntimeError("the setup token was never honoured for R2 — "
+                               "is R2 enabled on this account?")
         try:
             _request(f"{base}/{bucket}", setup, headers=hdr)
         except RuntimeError as exc:
@@ -1223,12 +1266,11 @@ def cmd_issue_bucket(preset_key: str, bucket: str | None, jurisdiction: str,
                           name=token_name)
         access_key, secret = r2_s3_keys(tid, value)
         endpoint = r2_endpoint(account["id"], jurisdiction)
-        why = ""
-        for attempt in range(5):
+        def prove_pair():
             why = r2_prove(endpoint, bucket, access_key, secret)
-            if not why or "broader" in why:
-                break
-            time.sleep(wait)
+            # A pair that reaches more than its bucket is refused at once: no wait mends it.
+            return (why or None, bool(why) and "broader" in why)
+        why = until_honoured(prove_pair, wait)
         if why:
             raise RuntimeError(f"the issued pair failed its proof — {why}; nothing delivered")
         for slot, v in zip(slots, (access_key, secret, endpoint)):
@@ -1413,8 +1455,8 @@ def cmd_rotate(label: str | None, leaked: bool) -> int:
                               m["preset"], m.get("project"), True,
                               stash=m.get("stash") or p.name)
     if leaked and not bad:
-        print("the leaked values are dead; settle the register with "
-              "`python \"$(project-observatory full-path)/tools/vault.py\" rotate` for each row it names")
+        # `settle` closes a leak; `rotate` writes a new value and leaves the register open.
+        print(SETTLE_HINT)
     return 1 if bad else 0
 
 

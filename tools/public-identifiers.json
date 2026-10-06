@@ -1,97 +1,153 @@
 {
-  "about": "Names that a maintainer's private identifier list may contain but this repository publishes on purpose. check_public_release.py subtracts them from --private-denylist. Every entry needs a reason; adding one is a review decision, not a way to silence a finding.",
-  "identifiers": [
-    {
-      "token": "sergey sheleg",
-      "reason": "the author, credited in package metadata, the plugin manifests, the site and the articles"
-    },
-    {
-      "token": "sshlg-skills",
-      "reason": "the author's published skill family, cited as a public repository"
-    },
-    {
-      "token": "make-skill",
-      "reason": "published member of the skill family, a public repository"
-    },
-    {
-      "token": "seo-aeo-audit",
-      "reason": "published member of the skill family, a public repository"
-    },
-    {
-      "token": "agent-stack",
-      "reason": "published member of the skill family, a public repository"
-    },
-    {
-      "token": "sheleg-dev",
-      "reason": "published member of the skill family, a public repository"
-    },
-    {
-      "token": "telegram-dev",
-      "reason": "published member of the skill family, a public repository"
-    },
-    {
-      "token": "xr-dev",
-      "reason": "published member of the skill family, a public repository"
-    },
-    {
-      "token": "оператор",
-      "reason": "the ordinary Russian word for 'operator', used in interface text"
-    },
-    {
-      "token": "passioncode",
-      "reason": "the product family and its public organization: the dashboard's rail, the website, the brand manifest"
-    },
-    {
-      "token": "passioncode.ai",
-      "reason": "the family's public website, linked from the dashboard, the site and the README"
-    },
-    {
-      "token": "passioncode-ai",
-      "reason": "the public GitHub organization that owns this repository since 0.4.0"
-    },
-    {
-      "token": "passioncode-ai.github.io",
-      "reason": "the public repository of the PassionCode design system, pinned by commit in dashboard/brand/manifest.json"
-    },
-    {
-      "token": "switchboard",
-      "reason": "PassionCode's public open-source tool, named on the website beside Observatory"
-    },
-    {
-      "token": "fabric-switchboard",
-      "reason": "Switchboard's public repository"
-    },
-    {
-      "token": "project-observatory-contract",
-      "reason": "the public Fabric contract repository (passioncode-ai/project-observatory-contract), named in the 0.4.0 handoff"
-    },
-    {
-      "token": "project-observatory-dashboard",
-      "reason": "this public repository's own name: package URLs, the plugin marketplace, the README and every install instruction"
-    },
-    {
-      "token": "fabric-workspace",
-      "reason": "the organisation's knowledge base (fabric-workspace/knowledge), which AGENTS.md sends every contributor to first; private, readable by organisation members"
-    },
-    {
-      "token": "org-index",
-      "reason": "the organisation's repository map, linked from AGENTS.md so contributors can find it; private, readable by organisation members, and its name names no project"
-    },
-    {
-      "token": "figma",
-      "reason": "a third-party design product the tracking-resources skill names so that agents route Figma file creation to Figma's own skills"
-    },
-    {
-      "token": "firebase",
-      "reason": "a third-party Google product the tracking-resources skill names as a resource to record"
-    },
-    {
-      "token": "GITHUB_TOKEN",
-      "reason": "the environment variable GitHub Actions and the gh CLI define; `full update` reads it to authenticate (OBS-31). A standard name, not a project's"
-    },
-    {
-      "token": "okolos",
-      "reason": "the public repository ssheleg/okolos, named by the OBS-32 backlog row the operator added in #143"
-    }
-  ]
+ "about": "Names that a maintainer's private identifier list may contain but this repository publishes on purpose. check_public_release.py subtracts them from --private-denylist. Every entry needs a reason; adding one is a review decision, not a way to silence a finding.",
+ "identifiers": [
+  {
+   "token": "sergey sheleg",
+   "reason": "the author, credited in package metadata, the plugin manifests, the site and the articles"
+  },
+  {
+   "token": "sshlg-skills",
+   "reason": "the author's published skill family, cited as a public repository"
+  },
+  {
+   "token": "make-skill",
+   "reason": "published member of the skill family, a public repository"
+  },
+  {
+   "token": "seo-aeo-audit",
+   "reason": "published member of the skill family, a public repository"
+  },
+  {
+   "token": "agent-stack",
+   "reason": "published member of the skill family, a public repository"
+  },
+  {
+   "token": "sheleg-dev",
+   "reason": "published member of the skill family, a public repository"
+  },
+  {
+   "token": "telegram-dev",
+   "reason": "published member of the skill family, a public repository"
+  },
+  {
+   "token": "xr-dev",
+   "reason": "published member of the skill family, a public repository"
+  },
+  {
+   "token": "оператор",
+   "reason": "the ordinary Russian word for 'operator', used in interface text"
+  },
+  {
+   "token": "passioncode",
+   "reason": "the product family and its public organization: the dashboard's rail, the website, the brand manifest"
+  },
+  {
+   "token": "passioncode.ai",
+   "reason": "the family's public website, linked from the dashboard, the site and the README"
+  },
+  {
+   "token": "passioncode-ai",
+   "reason": "the public GitHub organization that owns this repository since 0.4.0"
+  },
+  {
+   "token": "passioncode-ai.github.io",
+   "reason": "the public repository of the PassionCode design system, pinned by commit in dashboard/brand/manifest.json"
+  },
+  {
+   "token": "switchboard",
+   "reason": "PassionCode's public open-source tool, named on the website beside Observatory"
+  },
+  {
+   "token": "fabric-switchboard",
+   "reason": "Switchboard's public repository"
+  },
+  {
+   "token": "project-observatory-contract",
+   "reason": "the public Fabric contract repository (passioncode-ai/project-observatory-contract), named in the 0.4.0 handoff"
+  },
+  {
+   "token": "project-observatory-dashboard",
+   "reason": "this public repository's own name: package URLs, the plugin marketplace, the README and every install instruction"
+  },
+  {
+   "token": "fabric-workspace",
+   "reason": "the organisation's knowledge base (fabric-workspace/knowledge), which AGENTS.md sends every contributor to first; private, readable by organisation members"
+  },
+  {
+   "token": "org-index",
+   "reason": "the organisation's repository map, linked from AGENTS.md so contributors can find it; private, readable by organisation members, and its name names no project"
+  },
+  {
+   "token": "figma",
+   "reason": "a third-party design product the tracking-resources skill names so that agents route Figma file creation to Figma's own skills"
+  },
+  {
+   "token": "firebase",
+   "reason": "a third-party Google product the tracking-resources skill names as a resource to record"
+  },
+  {
+   "token": "GITHUB_TOKEN",
+   "reason": "the environment variable GitHub Actions and the gh CLI define; `full update` reads it to authenticate (OBS-31). A standard name, not a project's"
+  },
+  {
+   "token": "okolos",
+   "reason": "the public repository ssheleg/okolos, named by the OBS-32 backlog row the operator added in #143"
+  },
+  {
+   "token": "fabric-agent-contract",
+   "reason": "a public passioncode-ai repository the engine's Fabric manifest and docs name"
+  },
+  {
+   "token": "fabric-agent-adapter",
+   "reason": "a public passioncode-ai repository and its published plugin, named in the docs"
+  },
+  {
+   "token": "fabric-inbox",
+   "reason": "a public passioncode-ai repository, named as a Fabric product in the docs and the site"
+  },
+  {
+   "token": "chrome-devtools",
+   "reason": "the public Chrome DevTools project and its MCP server, named as a tool"
+  },
+  {
+   "token": "google_application_credentials",
+   "reason": "Google's documented environment variable name, not a value"
+  },
+  {
+   "token": "mcp_servers",
+   "reason": "the documented configuration key of MCP clients (Codex config.toml), not a server name"
+  },
+  {
+   "token": "mcp_enabled",
+   "reason": "an identifier in this engine's own tests"
+  },
+  {
+   "token": "r2_endpoint",
+   "reason": "a function in this engine's Cloudflare door (tools/cloudflare.py)"
+  },
+  {
+   "token": "samesite",
+   "reason": "the standard cookie attribute"
+  },
+  {
+   "token": "webhooks",
+   "reason": "a common technical word"
+  },
+  {
+   "token": "spreadsheet",
+   "reason": "a common word"
+  },
+  {
+   "token": "download",
+   "reason": "a common word"
+  },
+  {
+   "token": "inbox",
+   "reason": "a common word"
+  },
+  {
+   "token": "backoff",
+   "reason": "a common technical word (retry backoff)"
+  }
+ ]
 }

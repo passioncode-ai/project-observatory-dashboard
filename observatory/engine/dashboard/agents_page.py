@@ -26,6 +26,14 @@ def _e(v) -> str:
     return html.escape("" if v is None else str(v))
 
 
+def _project(pid, names: dict | None) -> str:
+    """A project as its registry name, linked to its panel on the Projects page."""
+    if not pid:
+        return "—"
+    name = (names or {}).get(pid) or pid
+    return f'<a href="projects.html#{_e(pid)}">{_e(name)}</a>'
+
+
 def _stamp(value) -> str:
     text = str(value or "")
     return text.replace("T", " ").replace("Z", " UTC") if text else "—"
@@ -80,7 +88,7 @@ def _counters(c: dict, t: Translator) -> str:
     return f'<div class="tiles agents-tiles">{cells}</div>'
 
 
-def _need(n: dict, t: Translator) -> str:
+def _need(n: dict, t: Translator, names: dict | None = None) -> str:
     wf = f'<span class="mono">{_e(n["workflowId"])}</span>'
     kind = n["kind"]
     if kind == "stalled":
@@ -91,10 +99,13 @@ def _need(n: dict, t: Translator) -> str:
         what = t.mark("{n} step(s) kept after a lost lease wait for review", n=n.get("count", 0))
     elif kind == "credential-missing":
         what = t.mark("key {name} ({env}) is not in the vault", name=n.get("name"), env=n.get("env"))
+    elif kind == "credential-unknown":
+        what = t.mark("key {name} ({env}) could not be checked: the vault could not be read",
+                      name=n.get("name"), env=n.get("env"))
     else:
         what = t.mark("key {name} ({env}) is only in a .env — move it to the vault",
                       name=n.get("name"), env=n.get("env"))
-    return (f'<li class="agents-need"><div>{wf} · {_e(n.get("projectId"))} — {what}</div>'
+    return (f'<li class="agents-need"><div>{wf} · {_project(n.get("projectId"), names)} — {what}</div>'
             f'{_cmd(n["command"]) if n.get("command") else ""}</li>')
 
 
@@ -144,7 +155,7 @@ def _events(w: dict, t: Translator) -> str:
     return f'<ol class="agents-events visually-hidden-list">{"".join(items)}</ol>'
 
 
-def _workflow(w: dict, t: Translator) -> str:
+def _workflow(w: dict, t: Translator, names: dict | None = None) -> str:
     step = w.get("step") or {}
     state = ("closed" if w["status"] == "closed" else "stalled" if w.get("stalled")
              else "handoff waiting" if w.get("pendingHandoff") else "active")
@@ -161,7 +172,7 @@ def _workflow(w: dict, t: Translator) -> str:
     lease = w.get("lease") or {}
     head = (f'<summary><span class="mono">{_e(w["workflowId"])}</span> '
             f'{_chip(t, "workflow@@" + state, tone)} <b>{_e(w.get("goal"))}</b>'
-            f'<span class="agents-meta">{_e(w.get("projectId"))} · '
+            f'<span class="agents-meta">{_e((names or {}).get(w.get("projectId")) or w.get("projectId"))} · '
             f'{t.mark("step {step}", step=step.get("stepId") or "—")} {_m(t, "step", step.get("status"))} · '
             f'{t.mark("last checkpoint")} {_age(t, w.get("silentSeconds"))} {t.mark("ago")} · '
             f'{_e(_who(lease.get("executor")))} · {t.mark("{n} handoff(s)", n=w.get("handoffs", 0))}</span></summary>')
@@ -180,7 +191,7 @@ def _workflow(w: dict, t: Translator) -> str:
     return f'<details class="card panel agents-wf"{is_open}>{head}{"".join(body)}</details>'
 
 
-def _sessions(sessions: list[dict], t: Translator) -> str:
+def _sessions(sessions: list[dict], t: Translator, names: dict | None = None) -> str:
     if not sessions:
         return (f'<section class="card panel">{t.mark("Sessions", tag="h2", attrs=HEADING)}'
                 f'{t.mark("No agent session recorded a turn in the last day.", tag="p", attrs=EMPTY)}</section>')
@@ -192,7 +203,7 @@ def _sessions(sessions: list[dict], t: Translator) -> str:
         rows.append(
             "<tr>"
             f'<td{t.attr("data-label", "Session")}><span class="mono">{_e((s.get("sessionId") or "")[:8])}</span> {live}</td>'
-            f'<td{t.attr("data-label", "Project")}>{_e(s.get("projectId"))}</td>'
+            f'<td{t.attr("data-label", "Project")}>{_project(s.get("projectId"), names)}</td>'
             f'<td{t.attr("data-label", "Last turn")}>{_e(_stamp(s.get("lastTurnAt")))}</td>'
             f'<td{t.attr("data-label", "Turns")} class="num">{_e(s.get("turns"))}</td>'
             f'<td{t.attr("data-label", "Workflow")}><span class="mono">{_e(s.get("workflowId") or "—")}</span></td>'
@@ -201,12 +212,28 @@ def _sessions(sessions: list[dict], t: Translator) -> str:
             f'<table><thead><tr>{th}</tr></thead><tbody>{"".join(rows)}</tbody></table></section>')
 
 
+def signature(a: dict) -> str:
+    """What the page SAYS, without its clocks: the live refresh announces a change to
+    a screen reader only when this differs (audit A27), not every 15 seconds."""
+    import hashlib
+    import json
+    said = {"counters": a.get("counters"),
+            "needs": [(n.get("kind"), n.get("workflowId"), n.get("name")) for n in a.get("needsYou") or []],
+            "workflows": [(w.get("workflowId"), w.get("status"), w.get("stalled"),
+                           w.get("step"),
+                           w.get("handoffs")) for w in a.get("workflows") or []],
+            "sessions": [(s.get("sessionId"), s.get("turns"), s.get("active")) for s in a.get("sessions") or []],
+            "degraded": [d.get("code") or d.get("reason") for d in a.get("degraded") or []]}
+    return hashlib.sha256(json.dumps(said, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
 def agents_html(payload: dict, t: Translator | None = None, live: bool = False) -> str:
     """The page body. `live` marks a fragment served for the page's refresh."""
     t = t or Translator()
     a = payload.get("agents") or {}
+    names = a.get("projectNames") or {}
     parts = [f'<section id="agents" class="agents" data-measured="{_e(a.get("measuredAt"))}"'
-             f'{" data-live" if live else ""}>']
+             f' data-signature="{signature(a)}"{" data-live" if live else ""}>']
     parts.append(t.mark("Read {at}", tag="p", attrs=' class="machine-at" id="agents-at"',
                         at=_stamp(a.get("measuredAt"))))
     parts.append(f'<p class="machine-hint" id="agents-live" role="status" aria-live="polite"></p>')
@@ -214,7 +241,7 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
     needs = a.get("needsYou") or []
     parts.append(f'<section class="card panel">{t.mark("Needs you", tag="h2", attrs=HEADING)}')
     if needs:
-        parts.append(f'<ul class="agents-needs">{"".join(_need(n, t) for n in needs)}</ul>')
+        parts.append(f'<ul class="agents-needs">{"".join(_need(n, t, names) for n in needs)}</ul>')
     else:
         parts.append(t.mark("Nothing is waiting for you.", tag="p", attrs=EMPTY))
     parts.append("</section>")
@@ -225,14 +252,14 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
         for w in workflows:
             by_project.setdefault(w.get("projectId") or "—", []).append(w)
         for pid, rows in sorted(by_project.items()):
-            parts.append(f'<h3 class="agents-project mono">{_e(pid)}</h3>')
-            parts += [_workflow(w, t) for w in rows]
+            parts.append(f'<h3 class="agents-project">{_project(pid, names) if pid != "—" else "—"}</h3>')
+            parts += [_workflow(w, t, names) for w in rows]
     elif not any(d.get("code") in ("no-store", "unreadable", "before-agent-memory")
                  for d in a.get("degraded") or []):
         parts.append(f'<section class="card panel">'
                      f'{t.mark("No workflow yet. An agent starts one by writing its first checkpoint: observatory_checkpoint_write.", tag="p", attrs=EMPTY)}'
                      f'</section>')
-    parts.append(_sessions(a.get("sessions") or [], t))
+    parts.append(_sessions(a.get("sessions") or [], t, names))
     degraded = a.get("degraded") or []
     if degraded:
         def reason(d: dict) -> str:

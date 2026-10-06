@@ -660,4 +660,4 @@ if __name__ == "__main__":
         for f in FAILURES:
             print("  -", f)
         raise SystemExit(1)
-    print("\033[32mnine addressable pages, the nav above the alarms, and nothing loaded twice\033[0m")
+    print(f"\033[32m{len(shell.PAGES)} addressable pages, the nav above the alarms, and nothing loaded twice\033[0m")

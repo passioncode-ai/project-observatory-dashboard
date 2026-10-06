@@ -8,6 +8,12 @@
 //
 // The messages go through the page's own language runtime (the catalog and
 // `T`), taken from the same page, in the locale the second argument names.
+//
+// OSS-12 promises more than the classification: what the BUTTON says and whether
+// it can be pressed again. So the page's own click handler, `credAction()`, is
+// taken out of the same page and driven with the same answers; the result's
+// `buttons` holds, per case, the label, `disabled` while the call is pending and
+// after the outcome, the hover title and the toast.
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
@@ -45,4 +51,36 @@ await run("dropped", async () => { throw new TypeError("network"); });
 await run("timeout", (url, opts) => new Promise((_, reject) =>
   opts.signal.addEventListener("abort", () => reject(new Error("aborted")))), 50);
 await run("success", answer(200, { ok: true }));
+
+// The click handler, as the page runs it on a "revoke" press.
+const handler = html.match(/\nfunction credAction\(btn, c\) \{[\s\S]*?\n\}\n/);
+if (!handler) { console.log(JSON.stringify({ ...results, error: "credAction() not found in the page" })); process.exit(1); }
+results.buttons = {};
+async function press(name, fetchImpl) {
+  const toasts = [];
+  const btn = { dataset: { act: "revoke" }, disabled: false, textContent: "revoke", title: "" };
+  const ctx = vm.createContext({
+    fetch: fetchImpl, AbortController, clearTimeout, JSON, Math, Error, Number, Object, Intl, String,
+    // The page's 60 s ceiling, elapsed at once: the message still names 60 s.
+    setTimeout: (f, ms) => setTimeout(f, Math.min(ms, 20)),
+    TOKEN: "t", localStorage: { getItem: () => locale },
+    confirm: () => true, prompt: () => null, toast: text => toasts.push(String(text)),
+    document: { body: { dataset: { page: "creds" } },
+                documentElement: { getAttribute: () => "en" } },
+  });
+  vm.runInContext(lang[0] + m[0] + handler[0] + "\nthis.credAction = credAction;", ctx);
+  ctx.credAction(btn, { id: "cred:x", label: "fixture-key", name: "fixture-key" });
+  const pending = { disabled: btn.disabled, label: btn.textContent };
+  await new Promise(resolve => setTimeout(resolve, 200));
+  results.buttons[name] = { pending, label: btn.textContent, disabled: btn.disabled,
+                            title: btn.title, toast: toasts.join(" | ") };
+}
+await press("refused", answer(400, { error: "limit must be a number" }));
+await press("provider refused", answer(502, { error: "the provider refused: HTTP 401" }));
+await press("server fault", answer(500, { error: "action failed" }));
+await press("unreadable success", answer(200, undefined));
+await press("dropped", async () => { throw new TypeError("network"); });
+await press("timeout", (url, opts) => new Promise((_, reject) =>
+  opts.signal.addEventListener("abort", () => reject(new Error("aborted")))));
+await press("success", answer(200, { ok: true }));
 console.log(JSON.stringify(results));

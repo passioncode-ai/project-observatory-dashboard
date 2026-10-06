@@ -198,6 +198,16 @@ def resolve(project: str, name: str, env: str | None = None,
     `vault_only` refuses the `.env` fallback: a name held only in a project's
     env file is an error that says how to move it into the vault."""
     slot, got_env = vault_slot(project, name, env)
+    if slot is None:
+        # The project's other vault folder: `put` files new slots under the project's
+        # own folder, while older slots stay under the name they were filed by, and a
+        # read that looked in one folder missed a key in the other (2026-10-06).
+        for other in project_vault_folders(project):
+            if other != project:
+                found, found_env = vault_slot(other, name, env)
+                if found is not None:
+                    slot, got_env, project = found, found_env, other
+                    break
     files = env_candidates(project, name, env)
     if slot is None and vault_only:
         held = f" It is in {files[0].relative_to(paths.DATA)}, which is not the vault." \
@@ -298,6 +308,12 @@ def project_for_reading(text: str) -> str:
     return folder
 
 
+def project_vault_folders(folder: str) -> list[str]:
+    """Every vault folder that holds this project's slots (vault_project.folders_of)."""
+    import vault_project
+    return vault_project.folders_of(folder, VAULT)
+
+
 def cmd_names(args) -> int:
     private_files.validate_names(args.project)
     private_files._no_symlinks(VAULT / args.project)
@@ -310,8 +326,8 @@ def cmd_names(args) -> int:
                 continue
             for v in f.get("variables", []):
                 rows.append((v["name"], v["class"], f["path"]))
-    vdir = VAULT / args.project
-    if vdir.is_dir():
+    for folder in project_vault_folders(args.project):
+        vdir = VAULT / folder
         for directory in sorted(vdir.iterdir()):
             private_files._no_symlinks(directory)
             if not directory.is_dir() or directory.name not in private_files.ENVS:
@@ -319,7 +335,7 @@ def cmd_names(args) -> int:
             for slot in sorted(directory.iterdir()):
                 private_files._no_symlinks(slot)
                 if slot.is_file() and re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", slot.name):
-                    rows.append((slot.name, "vault", f"vault:{args.project}/{directory.name}"))
+                    rows.append((slot.name, "vault", f"vault:{folder}/{directory.name}"))
     if not rows:
         print(f"{args.project}: nothing in the vault and nothing in the env "
               f"inventory. `project-observatory full env` refreshes the second.")

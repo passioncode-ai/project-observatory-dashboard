@@ -462,5 +462,25 @@ class Tool(Base):
         self.assertEqual(set(out), {"explain", "measuredAt", "degraded"})
 
 
+
+class Command(Base):
+    """`full machine` names the page it fills: the split dashboard's machine.html,
+    not the single page the split retired (2026-10-06)."""
+
+    def test_the_survey_names_the_machine_page(self):
+        import io, contextlib, paths, scan_machine
+
+        def survey(argv):
+            pathlib_out = Path(argv[1])
+            pathlib_out.parent.mkdir(parents=True, exist_ok=True)
+            pathlib_out.write_text(json.dumps({"memory": {}, "disk": {"volume": {}}, "processes": {}}))
+            return 0
+        out = io.StringIO()
+        with patch.object(scan_machine, "main", side_effect=survey), contextlib.redirect_stdout(out):
+            self.assertEqual(workspace.machine_command("machine", []), 0)
+        page = json.loads(out.getvalue())["page"]
+        self.assertEqual(page, str(paths.DASHBOARD_DIR / "machine.html"))
+        self.assertNotIn("projects-dashboard.html", out.getvalue())
+
 if __name__ == "__main__":
     unittest.main()

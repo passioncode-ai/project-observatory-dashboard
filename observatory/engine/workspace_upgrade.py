@@ -191,6 +191,21 @@ def require_stopped(writers_stopped: bool) -> None:
         raise config.ConfigurationError('Stop foreground/background writers, then pass --writers-stopped for a cross-file snapshot')
 
 
+LOG_SUFFIXES = ('.log', '.err', '.out', '.jsonl')
+
+
+def volatile(name: str, databases: set[str]) -> bool:
+    """A path the snapshot copies without requiring it to hold still: a database and its
+    WAL companions, or an append-only log (with its rotated generations) under store/logs."""
+    if name in databases or (name.endswith(('-wal', '-journal', '-shm')) and name.rsplit('-', 1)[0] in databases):
+        return True
+    path = PurePosixPath(name)
+    if path.parts[:2] != ('store', 'logs'):
+        return False
+    stem, _, tail = path.name.rpartition('.')
+    return path.suffix in LOG_SUFFIXES or (tail.isdigit() and PurePosixPath(stem).suffix in LOG_SUFFIXES)
+
+
 def _snapshot(base: Path, output: Path) -> dict:
     marker = preflight(base)
     workspace.reject_symlinks(output)
@@ -208,9 +223,9 @@ def _snapshot(base: Path, output: Path) -> dict:
         (stage/'data').mkdir(mode=0o700)
         for name in sorted(before_dirs):
             (stage/'data'/name).mkdir(mode=0o700,parents=True,exist_ok=True)
-        databases = {name for name in before if not name.endswith(('-wal', '-journal')) and sqlite_file(base / name)}
+        databases = {name for name in before if not name.endswith(('-wal', '-journal', '-shm')) and sqlite_file(base / name)}
         for name in before:
-            if name.endswith(('-wal', '-journal')) and name.rsplit('-', 1)[0] in databases:
+            if name.endswith(('-wal', '-journal', '-shm')) and name.rsplit('-', 1)[0] in databases:
                 continue
             source, dest = base / name, stage / 'data' / name
             if name in databases:
@@ -219,7 +234,13 @@ def _snapshot(base: Path, output: Path) -> dict:
                 workspace.copy_private(source, dest)
             entries.append({'path':name, 'sha256':digest(dest), 'size':dest.stat().st_size,
                             'kind':'sqlite' if name in databases else 'file'})
-        if before != inventory(base) or before_dirs != directories(base):
+        # WHAT MUST HOLD STILL is everything but the databases and the append-only logs.
+        # Session MCP servers and the Stop hook keep writing to both while the tick and server
+        # are stopped; a database is copied through the backup API and verified, and a log
+        # copied mid-line loses at most that line (audit A11). A settings, registry or vault
+        # file that changed during the copy still refuses the snapshot.
+        steady = lambda inv: {k: v for k, v in inv.items() if not volatile(k, databases)}  # noqa: E731
+        if steady(before) != steady(inventory(base)) or before_dirs != directories(base):
             raise config.ConfigurationError('Workspace changed during snapshot; stop all writers and retry')
         manifest = {'format_version':SNAPSHOT_FORMAT, 'application_version':config.VERSION,
                     'minimum_reader':marker['minimum_reader'], 'minimum_writer':marker['minimum_writer'],
@@ -500,6 +521,7 @@ def parser() -> argparse.ArgumentParser:
     res.add_argument('--latest',action='store_true',
                      help='the newest backup a workspace at this path left, opened with the passphrase '
                           'kept in the OS credential store')
+    res.add_argument('--label',help='with --latest: which workspace\'s backups, when several exist')
     return ap
 
 
@@ -524,7 +546,7 @@ def main(argv: list[str]) -> int:
             if args.snapshot is not None:
                 raise config.ConfigurationError('Give a snapshot or --latest, not both')
             import maintenance
-            result = maintenance.restore_latest(base)
+            result = maintenance.restore_latest(base, label=args.label)
             if result.get('status') != 'restored':
                 print(json.dumps(result,indent=2))
                 return 2

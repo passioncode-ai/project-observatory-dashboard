@@ -909,6 +909,45 @@ def test_cf_r2_preset_issues_one_bucket_pair_into_the_vault() -> None:
           "OFFSITE_ACCESS_KEY_ID,OFFSITE_SECRET_ACCESS_KEY,OFFSITE_ENDPOINT -- " in printed, printed)
 
 
+def test_cf_proof_waits_long_enough_for_a_slow_edge() -> None:
+    """2026-10-06: a new R2 pair answered HTTP 401 for longer than the old 5 × 2 s,
+    twice in a row, and the door deleted two good pairs. The proof now waits with
+    doubling pauses (about 80 s at the default 2 s); a pair broader than its bucket
+    is refused at once, since no wait mends that."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    check("the pauses double from wait and stop at eight times it",
+          m.proof_delays(2.0) == [2.0, 4.0, 8.0, 16.0, 16.0, 16.0, 16.0], str(m.proof_delays(2.0)))
+    check("so a slow edge is given well over the old ten seconds", sum(m.proof_delays(2.0)) >= 60, "")
+    for answers, expect_rc, expect_calls in (
+            (["a probe put answered HTTP 401"] * 6 + [""], 0, 7),     # honoured on the 7th try
+            (["the pair can list every bucket: broader than one bucket"], 1, 1)):
+        log, delivered, calls, slept = [], [], [], []
+        _r2_fake(m, log)
+        m.deliver_to_vault = lambda value, p, e, n: delivered.append(n)
+        m._journal = lambda *a, **k: None
+        queue = list(answers)
+
+        def prove(*_a):
+            calls.append(1)
+            return queue.pop(0) if queue else ""
+        m.r2_prove = prove
+        real_sleep = m.time.sleep
+        m.time.sleep = slept.append
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                rc = m.cmd_issue_bucket("r2-bucket", "offsite-backups", "eu", 30, "proj/prod/OFFSITE", None, wait=2.0)
+        finally:
+            m.time.sleep = real_sleep
+        check(f"rc {expect_rc} after {expect_calls} proof call(s)",
+              rc == expect_rc and len(calls) == expect_calls, f"rc={rc} calls={len(calls)} slept={slept}")
+        if expect_rc == 0:
+            check("and the slots are delivered only after the proof", len(delivered) == 3, str(delivered))
+            check("waiting the doubling pauses", slept[-6:] == [2.0, 4.0, 8.0, 16.0, 16.0, 16.0], str(slept))
+        else:
+            check("a broader pair is not waited on", len(calls) == 1 and not delivered, str(slept))
+
+
 def test_cf_r2_preset_refuses_and_cleans_up() -> None:
     import contextlib, io
     m = cf(); _cf_with_admin(m)
@@ -1549,6 +1588,37 @@ def test_or_rotation_creates_and_delivers_before_deleting() -> None:
           and led["issued"]["fabric-agent"]["rotations"] == 1, str(led)[:200])
 
 
+def test_a_ceiling_move_is_journaled_and_a_leak_hint_names_settle() -> None:
+    """2026-10-06: `limit --set` moved what a key may spend and left no movement, and
+    after `rotate --leaked` both doors told the person to run `vault.py rotate`, which
+    writes a new value and leaves the leak register open; `settle` closes it."""
+    m = orr()
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    m.ADMIN_STORE = d / "openrouter-admin"
+    m.ADMIN_STORE.mkdir(parents=True)
+    private_io.write(m.ADMIN_STORE / "example", "prov\n")
+    m.LEDGER = d / "ledger.json"
+    m.save_ledger({"issued": {"fabric-agent": {"account": "example", "hash": "h-old",
+                                               "destination": "observatory", "limit_usd": 10,
+                                               "issued_on": "2026-09-01"}}})
+    journal = []
+    m._journal = lambda event, secret, **detail: journal.append((event, secret, detail))
+
+    def fake(path, key, payload=None, method=None):
+        if path == "/keys/h-old" and method is None and payload is None:
+            return {"data": {"name": "fabric-agent", "hash": "h-old", "limit": 10, "usage": 3}}
+        return {"data": {}}
+    m._request = fake
+    m.set_limit("fabric-agent", 25)
+    check("the ceiling move is a movement, with the old and the new ceiling",
+          journal == [("limit", "openrouter/example/fabric-agent",
+                       {"limit_usd": 25, "previous_usd": 10, "limit_reset": "monthly"})], str(journal))
+    for door in (m, cf()):
+        check(f"{door.__name__}: the leak hint names settle, not rotate",
+              'vault.py\" settle' in door.SETTLE_HINT and "rotate`" not in door.SETTLE_HINT
+              and "--revocation-evidence" in door.SETTLE_HINT, door.SETTLE_HINT)
+
+
 def test_or_issue_deletes_the_key_when_delivery_fails() -> None:
     """A minted key that reached no consumer is live spend capacity nobody
     holds — the door deletes it rather than leaving it."""
@@ -1709,6 +1779,48 @@ def test_or_issue_is_one_function_with_a_monthly_reset() -> None:
           "issue_key(" in code and '"/keys"' not in code and "def api(" not in code, "")
 
 
+def test_or_a_daily_ceiling_is_issued_and_keeps_its_period() -> None:
+    """A per-day spending ceiling (Fabric Switchboard SB-72): `issue --reset daily` creates the key
+    with a daily reset, and moving its ceiling later keeps the period — before, `limit --set` and
+    the dashboard's limit button sent `monthly` and silently turned a daily key monthly."""
+    m = orr()
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    m.ADMIN_STORE = d / "openrouter-admin"
+    m.ADMIN_STORE.mkdir(parents=True)
+    private_io.write(m.ADMIN_STORE / "example", "prov\n")
+    m.LEDGER = d / "ledger.json"
+    m.deliver = lambda value, to: f"file {to}"
+    sent = []
+
+    def fake(path, key, payload=None, method=None):
+        if path.startswith("/keys?"):
+            return {"data": []}
+        if path == "/keys" and payload:
+            sent.append(("create", payload))
+            return {"data": {"hash": "h-d", "label": "sk-or-v1-d...d"}, "key": "sk-or-v1-" + "d" * 40}
+        if method == "PATCH":
+            sent.append(("patch", payload))
+        return {"data": {"name": "fallback-agent", "hash": "h-d", "label": "sk-or-v1-d...d"}}
+    m._request = fake
+    m.find_key = lambda admin, name: {"name": name, "hash": "h-d", "label": "sk-or-v1-d...d"}
+    r = m.issue_key("fallback-agent", 5.0, "example", "observatory", None, "daily")
+    check("a daily ceiling is created daily", sent[0] == ("create", {"name": "fallback-agent", "limit": 5.0, "limit_reset": "daily"}), str(sent))
+    check("and reported daily", r["limit_reset"] == "daily", str(r))
+    moved = m.set_limit("fallback-agent", 8.0)
+    check("moving the ceiling keeps the daily period", sent[-1] == ("patch", {"limit": 8.0, "limit_reset": "daily"}) and moved["limit_reset"] == "daily", str(sent))
+    led = json.loads(m.LEDGER.read_text())
+    check("the ledger still says daily", led["issued"]["fallback-agent"]["limit_reset"] == "daily", str(led)[:200])
+    m.set_limit("fallback-agent", 8.0, "weekly")
+    check("an explicit period still moves it", sent[-1][1]["limit_reset"] == "weekly", str(sent[-1]))
+    for bad in ("hourly", "", "Daily"):
+        try:
+            m.issue_key("other", 5.0, "example", "observatory", None, bad)
+            check(f"a period {bad!r} is refused", False, "no raise")
+        except ValueError as exc:
+            check(f"a period {bad!r} is refused", "daily, weekly or monthly" in str(exc), str(exc))
+    check("--reset without --set is refused, nothing moved", m.cmd_limit("fallback-agent", None, "daily") == 2, "")
+
+
 def test_or_ping_names_the_strays_it_does_not_manage() -> None:
     """100 PRODUCTION_user_* keys live on the operator's account, minted by
     another system (measured 2026-09-13). Ping must SAY they exist and NEVER
@@ -1762,6 +1874,7 @@ if __name__ == "__main__":
                test_cf_r2_issue_writes_every_rule_and_reruns_idempotently,
                test_cf_r2_lifecycle_read_back_is_compared_rule_by_rule,
                test_cf_r2_lifecycle_only_changes_rules_and_never_a_key,
+               test_cf_proof_waits_long_enough_for_a_slow_edge,
                test_cf_r2_lifecycle_command_line,
                test_cf_groups_lists_names_and_levels_and_never_a_value,
                test_cf_email_presets_grant_exactly_what_the_email_service_needs,
@@ -1774,9 +1887,11 @@ if __name__ == "__main__":
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,
+               test_a_ceiling_move_is_journaled_and_a_leak_hint_names_settle,
                test_or_issue_refuses_a_name_that_already_exists,
                test_or_issue_works_on_an_account_past_the_listing,
                test_or_issue_is_one_function_with_a_monthly_reset,
+               test_or_a_daily_ceiling_is_issued_and_keeps_its_period,
                test_or_ping_names_the_strays_it_does_not_manage):
         fn()
     print()

@@ -205,6 +205,13 @@ DYNAMIC_IDS = {
     "Projects — the operator's registry",  # build(): the single page's title, via `title`
     "Search",                              # render(): the placeholder when no tab matches
     "nothing to lose",                     # at_risk_total(): a stats value the script translates
+    # The review queue's kinds, `T("kind@@" + kind)` on the Health page (audit A34):
+    # the ledger kinds the store writes.
+    *(f"kind@@{k}" for k in ("observation", "note", "session", "estate-history", "step_result",
+                              "checkpoint", "handoff", "commit", "corroboration", "renewal")),
+    # Cloudflare zone states on the Domains page, `T(`zone@@${status}`)` (audit A39).
+    *(f"zone@@{s}" for s in ("active", "pending", "initializing", "moved", "deleted", "deactivated",
+                             "read only", "paused")),
 }
 
 

@@ -160,11 +160,19 @@ def scan_heroku_apps(pepper: str) -> tuple[list[dict], list[dict]]:
                      "effect": "production configuration is unknown, not empty"}]
     raw = paths.SCRATCH / "heroku.json"
     try:
-        apps = json.loads(raw.read_text(encoding="utf-8")).get("apps", [])
+        listing = json.loads(raw.read_text(encoding="utf-8"))
+        apps = listing.get("apps", [])
     except (OSError, ValueError) as exc:
         return [], [{"source": "heroku", "reason": f"{type(exc).__name__} reading {raw.name}",
                      "effect": "no application list, so nothing to ask about; "
                                "run `project-observatory full heroku` first"}]
+    if not apps and listing.get("degraded"):
+        # THE LIST IS EMPTY BECAUSE THE HEROKU SCAN FAILED, not because nothing runs
+        # (audit A26): comparing against it would report "0 apps" with no reason.
+        first = listing["degraded"][0] or {}
+        return [], [{"source": "heroku", "reason": str(first.get("reason") or "the Heroku scan read nothing")[:200],
+                     "effect": "production configuration is unknown, not empty; "
+                               "run `project-observatory full heroku`, then `full env`"}]
     if len(apps) > MAX_APPS:
         return [], [{"source": "heroku", "reason": f"{len(apps)} applications is past "
                                                    f"the {MAX_APPS} this scan will walk",

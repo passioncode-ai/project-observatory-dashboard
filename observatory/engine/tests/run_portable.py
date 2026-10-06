@@ -47,7 +47,7 @@ BOUNDARY = (
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'handed_commands', 'dashboard_portability',
     'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'machine', 'local_folders', 'config_locations', 'dashboard_stop',
-    'engine_update', 'workspace_profile',
+    'engine_update', 'workspace_profile', 'release_signature',
     # Ported suites, first batch: each builds its own temporary workspace.
     'delta_fold', 'mcp_inventory', 'openrouter_keys', 'scan_ids', 'secrets', 'signature',
     'skill_check', 'use_secret', 'validator_rules',
@@ -151,7 +151,7 @@ BOUNDARY += ('facts_learning',)
 # Updates that arrive by themselves; data that survives a reinstall (docs/runs/2026-10-05-auto-update).
 BOUNDARY += ('maintenance',)
 SUITES = LEGACY + BOUNDARY
-HELPERS = ('tmp.py', 'source_reader.py', 'live_estate.py',
+HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
            'dashboard_fixture.py', 'emitter_fixture.py', 'session_fixture.py', 'surface_fixture.py',
            'env_tab_check.js', 'action_outcome_check.mjs', 'focus_check.js',
@@ -179,6 +179,8 @@ ROOT_FILES = (
     'memory_access.py', 'retrieval_audit.py',
     # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).
     'maintenance.py', 'app_update.py',
+    # The organization's signature on a release, checked before any update (audit A04).
+    'release_signature.py',
     'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
@@ -268,6 +270,9 @@ def clean_env(base: Path) -> dict[str, str]:
         'OBSERVATORY_STATE': str(runtime / 'store'),
         'OBSERVATORY_SCRATCH': str(runtime / 'store/raw'),
         'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull,
+        # No suite may schedule a launchd/systemd job or write a Keychain item on the machine
+        # running it (audit A07). HOME is temporary, so the backups root is too.
+        'OBSERVATORY_SYSTEM_SETUP': '0',
     }
 
 
@@ -283,13 +288,26 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 '''
 
 
+#: Suites whose honest run takes longer than the default per-suite timeout, with the
+#: seconds they are given at least (measured 2026-10-06 at --jobs 4: maintenance 217 s
+#: with its pty and planted-writer cases, conformance_receipt 129 s for its full check;
+#: backup_vault 52–104 s alone, past 120 s under the gate's --jobs 6).
+#: A larger --timeout still wins; a smaller one never cuts these short.
+SUITE_SECONDS = {'maintenance': 480, 'conformance_receipt': 360, 'backup_vault': 300}
+
+
+def suite_timeout(name: str, timeout: int) -> int:
+    return max(timeout, SUITE_SECONDS.get(name, 0))
+
+
 def run_suite(name: str, base: Path, template: Path, timeout: int) -> dict:
+    timeout = suite_timeout(name, timeout)
     started = time.monotonic(); work = base / name; work.mkdir()
     checkout = work / 'source'; shutil.copytree(template, checkout)
     env = clean_env(work)
     command = ([sys.executable, '-c', LEGACY_BOOTSTRAP, name] if name in LEGACY else
                [sys.executable, 'tests/test_' + name + '.py'])
-    process = subprocess.Popen(command, cwd=checkout, env=env,
+    process = subprocess.Popen(command, cwd=checkout, env=env, stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                text=True, start_new_session=True)
     try:
@@ -304,12 +322,49 @@ def run_suite(name: str, base: Path, template: Path, timeout: int) -> dict:
               'pass_assertions': len(re.findall(r'^\s*PASS\b',output,re.M)),
               'fail_assertions': len(re.findall(r'^\s*FAIL\b',output,re.M)),
               'skip_assertions': len(re.findall(r'^\s*SKIP\b',output,re.M)),
-              'unittest_cases': sum(map(int,re.findall(r'Ran (\d+) tests? in',output)))}
+              'unittest_cases': sum(map(int,re.findall(r'Ran (\d+) tests? in',output))),
+              'unittest_skipped': sum(map(int,re.findall(r'\bskipped=(\d+)',output)))}
+    if code == 0 and nothing_ran(result):
+        # A suite that exits 0 having run nothing — every check printed SKIP, or every
+        # unittest case was skipped (no `node` on PATH, audit A46) — did not pass.
+        result['status'] = 'SKIP'
+        reasons = re.findall(r'^\s*SKIP\s+(.+)$', output, re.M)
+        result['skip_reason'] = reasons[0].strip() if reasons else 'every test case was skipped'
     if code != 0:
         result['failure_tail'] = output[-6000:]
     result['log'] = name + '/run.log'
     print(result['status'] + ' ' + result['file'],file=sys.stderr,flush=True)
     return result
+
+
+def nothing_ran(result: dict) -> bool:
+    """No check executed, and at least one said it was skipped."""
+    executed = result['pass_assertions'] + result['fail_assertions'] \
+        + result['unittest_cases'] - result['unittest_skipped']
+    return executed <= 0 and (result['skip_assertions'] + result['unittest_skipped']) > 0
+
+
+def overall(results: list[dict]) -> str:
+    """FAIL when any suite failed or timed out; SKIP when no suite ran anything; else PASS.
+
+    A SKIP row is not a pass: it is named in `not_run` with its reason, and a selection
+    in which nothing ran is never reported as PASS."""
+    if any(row['status'] not in ('PASS', 'SKIP') for row in results):
+        return 'FAIL'
+    return 'PASS' if any(row['status'] == 'PASS' for row in results) else 'SKIP'
+
+
+def not_run(results: list[dict], node: str | None) -> list[dict]:
+    """The fixed out-of-scope list, every skipped suite, and the dashboard execution checks
+    when `node` is missing (several suites then skip those checks and still run the rest)."""
+    rows = list(NOT_RUN)
+    rows += [{'scope': 'suite:' + row['file'], 'status': 'NOT_RUN', 'reason': row['skip_reason']}
+             for row in results if row['status'] == 'SKIP']
+    if node is None:
+        rows.append({'scope': 'dashboard-execution', 'status': 'NOT_RUN',
+                     'reason': 'node is not on PATH: checks that execute the built dashboard '
+                               'pages printed SKIP (see each suite\'s skip_assertions)'})
+    return rows
 
 
 def parser(prog: str | None = None) -> argparse.ArgumentParser:
@@ -337,8 +392,8 @@ def main() -> int:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
             results=list(pool.map(lambda name:run_suite(name,base,template,args.timeout),names))
         report={'schema_version':1,'coverage':'synthetic-offline',
-                'status':'PASS' if all(row['status']=='PASS' for row in results) else 'FAIL',
-                'suites':results,'not_run':list(NOT_RUN),
+                'status':overall(results),
+                'suites':results,'not_run':not_run(results, shutil.which('node')),
                 'suite_count':len(results),'python':sys.version.split()[0]}
         if args.report_dir:
             args.report_dir.mkdir(mode=0o700, parents=True, exist_ok=False)

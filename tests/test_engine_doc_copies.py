@@ -40,6 +40,25 @@ class EngineDocCopies(unittest.TestCase):
                 self.assertEqual((ENGINE_DOCS / name).read_text(encoding="utf-8"), derived(name),
                                  f"observatory/engine/docs/{name} drifted from docs/{name}")
 
+    def test_every_relative_link_in_the_engine_docs_resolves_inside_the_engine(self):
+        # The wheel ships observatory/engine/ and nothing above it. The full-engine
+        # scenarios once linked `../../../../docs/design/*.md`, which resolved in a
+        # checkout and pointed at nothing in an installed package (audit A44). A
+        # document outside the engine is linked by its repository URL instead.
+        engine = ROOT / "observatory/engine"
+        broken = []
+        for doc in sorted(engine.rglob("*.md")):
+            if "node_modules" in doc.parts:
+                continue
+            for m in LINK.finditer(doc.read_text(encoding="utf-8")):
+                target = m.group(1)
+                if re.match(r"[a-z]+:", target):
+                    continue
+                resolved = (doc.parent / target).resolve()
+                if not resolved.exists() or engine.resolve() not in (resolved, *resolved.parents):
+                    broken.append(f"{doc.relative_to(ROOT)} -> {target}")
+        self.assertEqual(broken, [], "link these by " + REPO_DOCS + "… instead")
+
     def test_the_sync_tool_parses_its_arguments_and_help_writes_nothing(self):
         # `--help` used to be ignored: the tool ran in write mode and printed
         # "written: none". Help must print usage and touch no copy; an unknown

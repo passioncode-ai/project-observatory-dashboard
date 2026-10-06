@@ -168,6 +168,73 @@ class AssistantTests(unittest.TestCase):
         with self.enabled(),patch.object(self.a,'write',side_effect=full),patch.object(self.a.jobs,'_spawn') as spawn:
             with self.assertRaises(OSError):self.a.ask(self.request())
             spawn.assert_not_called()
+    def test_a_full_disk_refuses_as_disk_full_before_any_job_or_spend(self):
+        # SCN-003: "full disk refuses before spending". Driven through the protocol the app
+        # speaks (`main ask`, JSON on stdin) and through the MCP tool, with the OS's own
+        # ENOSPC: the answer is the distinct code `disk-full`, no runner starts, no
+        # provider is called, and no job record exists afterwards.
+        import asyncio, errno, io
+        def full(p,d):raise OSError(errno.ENOSPC,'No space left on device',str(p))
+        with self.enabled(),patch.object(self.a,'write',side_effect=full), \
+             patch.object(self.a.jobs,'_spawn') as spawn,patch.object(self.a.providers,'complete') as complete:
+            out=io.StringIO()
+            with patch('sys.stdin',io.TextIOWrapper(io.BytesIO(json.dumps(self.request()).encode()))), \
+                 patch('sys.stdout',out):
+                self.assertEqual(self.a.main(['ask']),1)
+            self.assertEqual(json.loads(out.getvalue()),{'error':'disk-full'})
+            sys.path.insert(0,str(ROOT/'mcp'))
+            import capability_tools, memory_access
+            memory_access.serve_stdio()
+            server=capability_tools.InteropServer(name='observatory-test')
+            with patch.object(capability_tools,'stale_answer',return_value=None):
+                res=asyncio.run(server.call_tool('observatory_assistant_ask',self.request(request_id='request-mcp-0001')))
+            self.assertTrue(res.is_error)
+            self.assertEqual(json.loads(res.content[0].text)['error'],'disk-full')
+            spawn.assert_not_called();complete.assert_not_called()
+        jobs_dir=self.a.jobs.jobs_dir()
+        self.assertEqual(sorted(p.name for p in jobs_dir.glob('*.json')) if jobs_dir.exists() else [],[])
+    def test_a_provider_failure_never_carries_the_providers_text(self):
+        # SCN-003: "errors do not expose raw provider text". The real detached runner
+        # (tools/run_job.py) runs the question; the provider raises with text that names a
+        # key. The job ends `provider-failed`, and that text is nowhere a person or the app
+        # can read it: the job record, the conversation, the `job`/`get` answers, any file
+        # the workspace holds.
+        import io, time
+        leak='SECRET-PROVIDER-TEXT sk-or-v1-'+'Q'*40
+        real_spawn=self.a.jobs._spawn
+        code=("import sys,runpy\nsys.path.insert(0,"+repr(str(ROOT))+")\n"
+              "from agent import assistant\n"
+              "def boom(*a,**k):raise assistant.providers.Fatal("+repr(leak)+")\n"
+              "assistant.providers.complete=boom\n"
+              "runpy.run_path("+repr(str(ROOT/'tools/run_job.py'))+",run_name='__main__')\n")
+        children=[]
+        def spawn(argv,env):
+            child=real_spawn([sys.executable,'-c',code,argv[-1]],env);children.append(child);return child
+        with self.enabled(),patch.object(self.a.jobs,'_spawn',side_effect=spawn):
+            first=self.a.ask(self.request())
+            deadline=time.monotonic()+15
+            while time.monotonic()<deadline:
+                doc=self.a.jobs.get(first['job']['id'])
+                if doc['status'] in self.a.jobs.TERMINAL:break
+                time.sleep(.05)
+            if doc['status'] not in self.a.jobs.TERMINAL:self.a.jobs.cancel(doc['id'])
+            for child in children:child.wait(timeout=5)
+        self.assertEqual((doc['status'],doc['error']['code']),('failed','provider-failed'),doc.get('error'))
+        answers=[]
+        for action,body in (('job',{'id':doc['id']}),('get',{'id':first['conversation_id']})):
+            out=io.StringIO()
+            with patch('sys.stdin',io.TextIOWrapper(io.BytesIO(json.dumps(body).encode()))),patch('sys.stdout',out):
+                self.a.main([action])
+            answers.append(out.getvalue())
+        self.assertEqual(json.loads(answers[0])['job']['status'],'failed')
+        turn=json.loads(answers[1])['turns'][0]
+        self.assertEqual((turn['status'],turn.get('error')),('failed','provider-failed'))
+        self.assertNotIn('answer',turn)
+        for text in answers:
+            self.assertNotIn('SECRET-PROVIDER-TEXT',text);self.assertNotIn('sk-or-v1-',text)
+        exposed=[str(p) for p in self.home.rglob('*') if p.is_file() and not p.is_symlink()
+                 and b'SECRET-PROVIDER-TEXT' in p.read_bytes()]
+        self.assertEqual(exposed,[],'the provider text reached a file')
     def test_completed_answer_archives_and_cancel_is_terminal(self):
         reply={'parsed':{'answer':'Demo exists','evidence_ids':['E1'],'next_steps':[]},'model':'fixture','cost':0}
         with self.enabled(),patch.object(self.a.providers,'complete',return_value=reply):

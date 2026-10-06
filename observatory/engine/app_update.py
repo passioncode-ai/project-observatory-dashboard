@@ -4,8 +4,9 @@ When the installed `Project Observatory.app` is older than the engine running th
 the release of the engine's version is fetched and the app zip is accepted only when
 every one of these holds:
 
-- its bytes match BOTH the GitHub asset digest and the line in that release's SHA256SUMS
-  (the same double check `full update` gives the wheel);
+- its bytes match BOTH the GitHub asset digest and the line in that release's SHA256SUMS,
+  and that SHA256SUMS carries the organization's signature (`SHA256SUMS.asc`, checked
+  against the pinned release key; the same checks `full update` gives the wheel);
 - the bundle inside names `ai.passioncode.observatory` and exactly the engine's version;
 - `codesign --verify --strict --deep` passes, and the signing team is the one that signed
   the installed app — a bundle signed by anyone else never replaces it;
@@ -86,7 +87,8 @@ class System:
         return ""
 
     def running(self) -> bool:
-        return self.run("pgrep", "-x", PROCESS)[0] == 0
+        # This user's copy only: another account's running app is not ours to wait for (A22).
+        return self.run("pgrep", "-u", str(os.getuid()), "-x", PROCESS)[0] == 0
 
     def extract(self, zipped: Path, into: Path) -> None:
         code, out = self.run("ditto", "-x", "-k", str(zipped), str(into), timeout=600)
@@ -212,6 +214,7 @@ class AppUpdater:
         if not zipped_row or not sums_row:
             raise AppUpdateError(f"release v{self.version} has no {name} or {eu.SUMS}")
         zipped_asset, sums_asset = eu._asset(zipped_row), eu._asset(sums_row)
+        signature_row = assets.get(eu.SUMS + ".asc")
         if not zipped_asset or not sums_asset or not zipped_asset.digest or not sums_asset.digest:
             raise AppUpdateError(f"GitHub publishes no sha256 digest for {name} or {eu.SUMS}")
         shutil.rmtree(self.staged, ignore_errors=True)
@@ -222,6 +225,9 @@ class AppUpdater:
             digest, _ = fetcher.fetch_file(sums_asset.url, sums_file, eu.MAX_SUMS)
             if digest != sums_asset.digest:
                 raise AppUpdateError(f"{eu.SUMS} does not match its GitHub asset digest")
+            release = eu.Release(self.version, f"v{self.version}", None, None, sums_asset,
+                                 eu._asset(signature_row) if signature_row else None)
+            eu.verify_signature(fetcher, release, sums_file, work, required=True)
             listed = eu.parse_sums(sums_file.read_text(encoding="utf-8", errors="replace")).get(name)
             zipped = work / name
             digest, size = fetcher.fetch_file(zipped_asset.url, zipped, MAX_ZIP)
@@ -239,6 +245,8 @@ class AppUpdater:
             shutil.rmtree(unpacked, ignore_errors=True)
             zipped.unlink(missing_ok=True)
             sums_file.unlink(missing_ok=True)
+            for leftover in work.glob(f"*{eu.SUMS}.asc"):
+                leftover.unlink(missing_ok=True)
             self._check(bundle)
             return bundle
         except eu.UpdateError as exc:

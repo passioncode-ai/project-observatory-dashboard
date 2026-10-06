@@ -25,7 +25,9 @@ The receipt names each backend and what happened there:
 | `idempotency` | cached answers that quote the record dropped (a retry then runs again rather than replaying) |
 | `file` | WAL checkpointed and the file vacuumed, so no freed page holds the text (`retention.scrub`) |
 | `export` | `registry/ledger.jsonl` rewritten now and checked to hold no erased text |
-| `backups`, `migration-backups` | **retained, unverified**: encrypted or plain copies taken before the erasure keep the text until they rotate out |
+| `backups`, `encrypted-backups`, `migration-backups` | **retained, unverified**: encrypted or plain copies taken before the erasure keep the text until they rotate out |
+| `workspace-snapshots` | **retained**: plaintext snapshot folders under `<home>/backups/` (taken without a passphrase) keep it until they rotate or `full backups migrate` moves them |
+| `failed-update-copies` | **retained**: the whole workspace a rolled-back update kept beside this one (`<home>.failed-update-*`) keeps it until a person deletes that copy |
 | `git-history` | **retained, unverified**: earlier commits of the export keep it |
 
 `complete` is true only when nothing is retained or unverified, so a receipt never
@@ -403,6 +405,23 @@ def _backups() -> list[dict]:
     except Exception as exc:                                                       # noqa: BLE001
         out.append({"backend": "encrypted-backups", "status": "unverified",
                     "detail": f"the backups root could not be read ({type(exc).__name__})"})
+    try:
+        import backup_vault
+        home = pathlib.Path(paths.HOME)
+        snaps = [p for kind in ("snapshot", "before-upgrade", "before-update", "daily")
+                 for p in backup_vault.local_snapshots(home, kind)]
+        out.append({"backend": "workspace-snapshots", "status": "retained" if snaps else "absent",
+                    "detail": f"{len(snaps)} plaintext snapshot folder(s) under backups/ keep the text "
+                              "until they rotate or `full backups migrate` moves them" if snaps
+                              else "no plaintext snapshot folders"})
+        failed = [p for p in home.parent.glob(f"{home.name}.failed-update-*") if p.is_dir()]
+        out.append({"backend": "failed-update-copies", "status": "retained" if failed else "absent",
+                    "detail": f"{len(failed)} workspace cop(ies) kept by a rolled-back update keep the "
+                              f"text until a person deletes them ({failed[0].name}…)" if failed
+                              else "no copies from a rolled-back update"})
+    except Exception as exc:                                                       # noqa: BLE001
+        out.append({"backend": "workspace-snapshots", "status": "unverified",
+                    "detail": f"snapshot folders could not be listed ({type(exc).__name__})"})
     try:
         from store import retention
         mig = retention.migration_backup_dir()

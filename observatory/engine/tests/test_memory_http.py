@@ -147,6 +147,71 @@ class ABoundAgentOverHttp(Base):
         self.assertEqual(local.get("code"), "local-only", local)
 
 
+class ContractNamesOverHttp(Base):
+    """OSS-35: a memory/0.1 client calls the contract's names over the real HTTP service
+    and gets the same answers as the `observatory_*` tools, in the same session.
+
+    What is left out of each comparison, and why:
+    * `receipt` on a search: every search writes its own retrieval receipt, so two
+      searches never share a `receiptId` or time. Both are asserted to carry one.
+    * `_isError` is compared, not excluded: a refusal must be a refusal under both names.
+    Everything else in each answer is compared whole."""
+
+    def same(self, capability: str, contract_args: dict, tool: str, tool_args: dict,
+             volatile: tuple[str, ...] = ()) -> tuple[dict, dict]:
+        mine = self.call("tok-alpha", capability, contract_args)
+        theirs = self.call("tok-alpha", tool, tool_args)
+        strip = lambda d: {k: v for k, v in d.items() if k not in volatile}  # noqa: E731
+        self.assertEqual(strip(mine), strip(theirs),
+                         f"{capability} over HTTP answers differently from {tool}")
+        return mine, theirs
+
+    def test_the_contract_names_answer_as_the_observatory_tools_do(self) -> None:
+        wf = self.call("tok-alpha", "memory.checkpoint.write", {
+            "owner": "agent:alpha-bot", "idempotencyKey": "key-http-0101", "stepId": "S1",
+            "status": "in_progress", "body": {"goal": "contract names over http"},
+            "projectId": ALPHA})
+        self.assertFalse(wf["_isError"], wf)
+        self.assertTrue(wf["workflowId"].startswith("wf_") and wf["leaseId"], wf)
+        latest, _ = self.same("memory.checkpoint.latest", {"workflowId": wf["workflowId"]},
+                              "observatory_checkpoint_latest", {"workflowId": wf["workflowId"]})
+        self.assertEqual(latest["checkpoint"]["body"]["goal"], "contract names over http")
+        self.assertNotIn(wf["leaseId"], json.dumps(latest), "a read never carries the lease")
+
+        note = self.call("tok-alpha", "memory.record", {
+            "owner": "agent:alpha-bot", "statement": "the contract exporter runs hourly",
+            "projectId": ALPHA})
+        self.assertFalse(note["_isError"], note)
+        self.assertEqual(note["state"], "proposed")
+        found, theirs = self.same("memory.search", {"query": "contract exporter hourly", "projectId": ALPHA},
+                                  "observatory_search", {"query": "contract exporter hourly",
+                                                         "project_id": ALPHA},
+                                  volatile=("receipt",))
+        self.assertEqual([r["memoryId"] for r in found["results"]][:1], [note["memoryId"]], found)
+        self.assertTrue(found["receipt"]["receiptId"] and theirs["receipt"]["receiptId"])
+        self.assertNotEqual(found["receipt"]["receiptId"], theirs["receipt"]["receiptId"],
+                            "each search is its own receipt")
+
+        recalled, _ = self.same("memory.recall", {"projectId": ALPHA},
+                                "observatory_recall", {"projectId": ALPHA})
+        self.assertIn(note["memoryId"], [r["memory_id"] for r in recalled["records"]], recalled)
+
+    def test_a_refusal_is_the_same_typed_answer_under_both_names(self) -> None:
+        out, _ = self.same("memory.recall", {"projectId": BETA}, "observatory_recall", {"projectId": BETA})
+        self.assertEqual(out.get("code"), "project-not-bound", out)
+
+    def test_a_field_the_contract_does_not_define_is_refused_by_path_over_http(self) -> None:
+        secret = "zebra-orchard-" + "5521"
+        out = self.call("tok-alpha", "memory.recall", {"projectId": ALPHA, "sneaky": secret})
+        self.assertTrue(out["_isError"], out)
+        self.assertEqual(out.get("error"), "invalid-input", out)
+        # By path: the schema location that refused it, here the closed root object.
+        self.assertEqual(out.get("detail"), "(root): fails `additionalProperties`", out)
+        self.assertNotIn(secret, json.dumps(out))
+        out = self.call("tok-alpha", "memory.search", {"query": "x", "project_id": ALPHA})
+        self.assertEqual(out.get("error"), "invalid-input", "the tool's spelling is not the contract's")
+
+
 class TheDoor(Base):
     def test_no_or_unknown_bearer_is_refused_before_the_body(self) -> None:
         status, headers, body = self.raw(MODERN)
@@ -255,6 +320,32 @@ class UnauthenticatedFloods(Base):
         self.assertEqual(codes[4:], [429, 429], "past twice the binding rate, refused unread")
         self.assertLessEqual(len(self.ws.journal()), 4, "the journal stops growing")
 
+
+    def test_a_flood_of_bad_bearers_does_not_lock_out_a_client_already_working(self) -> None:
+        # Audit A17: every local client is 127.0.0.1, so the peer's refusal budget is shared.
+        self.svc.stop()
+        self.svc = Service(free_port(), rate=2)
+        good = {**MODERN, "Authorization": "Bearer tok-alpha"}
+        self.assertEqual(self.raw(good)[0], 200)
+        codes = [self.raw({**MODERN, "Authorization": f"Bearer guess-{i}"})[0] for i in range(6)]
+        self.assertEqual(codes[4:], [429, 429], "guessing stays bounded across different bearers")
+        self.assertEqual(self.raw(good)[0], 200, "a bearer seen to work still gets through")
+        self.assertEqual(self.raw({**MODERN, "Authorization": "Bearer tok-beta"})[0], 429,
+                         "a client new during the flood waits; the flood cannot buy it a bucket")
+
+    def test_a_revoked_bearer_loses_its_pass(self) -> None:
+        self.svc.stop()
+        self.svc = Service(free_port(), rate=2)
+        good = {**MODERN, "Authorization": "Bearer tok-alpha"}
+        self.assertEqual(self.raw(good)[0], 200)
+        for i in range(4):
+            self.raw({**MODERN, "Authorization": f"Bearer guess-{i}"})
+        for b in self.ws.bindings:
+            if b["principal"] == "agent:alpha-bot":
+                b["revokedAt"] = b["issuedAt"]
+        self.ws.save()
+        self.assertEqual(self.raw(good)[0], 401, "verified in full, not waved through")
+        self.assertEqual(self.raw(good)[0], 429, "and then it counts as any other refusal")
 
 class ConcurrencyAndRestart(Base):
     def test_two_bindings_at_once_each_see_their_own_project(self) -> None:

@@ -50,6 +50,9 @@ import observatory as cli                                              # noqa: E
 from run_portable import runtime_environment                           # noqa: E402
 
 COMMAND = "project-observatory full "
+#: Where a handed-over command starts: `full`, optionally after the launcher's own
+#: `--home DIR` (the restore hint names a new empty home that way).
+COMMAND_START = re.compile(r"project-observatory (?:--home \S+ )?full ")
 #: Characters that end a command inside prose: quoting, punctuation, a comment.
 STOP_CHARS = set("`\"'(),;|#[]<\\\n…*")
 #: Words that end a command inside prose ("run X, then Y", "X if the ceiling…").
@@ -73,6 +76,10 @@ SAMPLES = {
     "PROJECT": "project:alpha", "TEXT": "texts of alpha are sent to OpenAI",
     "MEMORY_ID": "mem:0123456789abcdef",
     "PRINCIPAL": "agent:example-bot", "BINDING_ID": "bnd_0123456789ab",
+    "LABEL": "example-ws-0badc0de",
+    "{newest['snapshot']}": "/srv/example-ws/backups/example-ws-0badc0de/snapshot.obsnap",
+    # machine_view._load's survey command: `machine` or `cleanup` (audit A42).
+    "{command}": "cleanup",
     'shellArg(RUNTIME.user_home || "$HOME")': "/srv/example-ws/home",
 }
 PLACEHOLDER = re.compile(r"[A-Z][A-Z0-9_./,]*[A-Z]|[A-Z]{2,}")
@@ -114,6 +121,22 @@ def tokens(rest: str) -> list[str]:
             out.append(rest[i + 1:j])
             i = j + 1
             continue
+        if rest[i] == "'":
+            # A single-quoted value, as a shell takes it: `restore '{snapshot}'`. Read
+            # whole, so the argument is checked and not silently dropped (audit A24: the
+            # scanner stopped at the quote and checked a bare `restore`). A placeholder
+            # inside may carry its own quotes, so it is matched by its braces.
+            if rest.startswith(("'{", "'${"), i):
+                j = _bracketed(rest, i + 1 + (rest[i + 1] == "$"), "{", "}")
+            else:
+                j = rest.find("'", i + 1)
+                if j < 0 or " " in rest[i + 1:j]:
+                    break
+            if j >= len(rest) or rest[j] != "'":
+                break
+            out.append(rest[i + 1:j])
+            i = j + 1
+            continue
         if rest[i] == "<":
             j = rest.find(">", i)
             if j < 0:
@@ -138,7 +161,7 @@ def tokens(rest: str) -> list[str]:
 
 def commands_in(text: str) -> list[list[str]]:
     found = []
-    for m in re.finditer(re.escape(COMMAND), text):
+    for m in COMMAND_START.finditer(text):
         words = tokens(text[m.end():])
         if words:
             found.append(words)
@@ -256,7 +279,9 @@ class HandedCommands(unittest.TestCase):
         # the reader must not turn this into a vacuous pass.
         self.assertGreater(len(found), 60, f"only {len(found)} distinct commands were found")
         for expected in [("google", "--force"), ("plugins", "--only", "{p['id']}", "--force"),
-                         ("local",), ("machine", "--explain", "PID"), ("configure", "sources", "projects", "PATH")]:
+                         ("local",), ("machine", "--explain", "PID"), ("configure", "sources", "projects", "PATH"),
+                         # Quoted, after `--home`: the restore hint is checked with its argument.
+                         ("restore", "{newest['snapshot']}")]:
             self.assertIn(expected, found, f"the scanner no longer sees {expected}")
 
     def test_the_check_refuses_what_the_dispatcher_refuses(self):
@@ -281,6 +306,12 @@ class HandedCommands(unittest.TestCase):
         self.assertEqual(commands_in(text), [["scan-vault"], ["local"], ["wallet"], ["heroku"], ["open"]])
         self.assertEqual(commands_in('fullCommand("configure sources projects", "PATH")'),
                          [["configure", "sources", "projects", "PATH"]])
+        # A single-quoted argument is an argument, also behind the launcher's `--home`.
+        self.assertEqual(commands_in("project-observatory --home NEW full restore '{newest['snapshot']}'"),
+                         [["restore", "{newest['snapshot']}"]])
+        self.assertEqual(commands_in("run project-observatory full restore '/srv/a.obsnap' then wait"),
+                         [["restore", "/srv/a.obsnap"]])
+        self.assertEqual(commands_in("project-observatory full doctor's answer"), [["doctor"]])
 
     def test_forwarded_options_reach_the_tool_and_only_a_single_step(self):
         def invoke(*args):
@@ -311,6 +342,25 @@ class HandedCommands(unittest.TestCase):
              contextlib.redirect_stdout(io.StringIO()):
             cli.run("google", extra=["--force"])
         self.assertEqual(spawn.call_args.args[0], [*cli.STEPS["google"], "--force"])
+
+
+def dispatched_families() -> set[str]:
+    """Every command `observatory.main` dispatches by name before the workspace commands
+    (`if len(argv) > 1 and argv[1] == "workflow"`), read from its syntax tree.
+
+    Audit A24: the `--help` sweep listed WORKSPACE_COMMANDS, the steps and groups, and
+    missed workflow, embedding-policy, access-binding, memory-http and forget, which
+    `main` reaches first. Reading the dispatcher itself means a sixth family added the
+    same way is swept without anyone remembering to list it."""
+    tree = ast.parse((ROOT / "observatory.py").read_text(encoding="utf-8"))
+    main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+    names = set()
+    for node in ast.walk(main):
+        if isinstance(node, ast.Compare) and len(node.ops) == 1 and isinstance(node.ops[0], ast.Eq) \
+                and isinstance(node.left, ast.Subscript) and ast.unparse(node.left) == "argv[1]" \
+                and isinstance(node.comparators[0], ast.Constant) and isinstance(node.comparators[0].value, str):
+            names.add(node.comparators[0].value)
+    return names
 
 
 def _tree(base: Path) -> dict[str, str]:
@@ -345,7 +395,7 @@ class SubcommandHelp(unittest.TestCase):
 
     def subcommands(self) -> list[str]:
         public = cli.public_profile()
-        names = set(cli.WORKSPACE_COMMANDS) | {"assistant", "check", "check-portable"}
+        names = set(cli.WORKSPACE_COMMANDS) | {"assistant", "check", "check-portable"} | dispatched_families()
         names |= {n for n in cli.STEPS if not cli.unavailable_step(n, public)}
         names |= {n for n in cli.GROUPS if not cli.unavailable_step(n, public)}
         return sorted(names)
@@ -363,12 +413,24 @@ class SubcommandHelp(unittest.TestCase):
         self.assertEqual(wrong, [], "subcommands whose --help is not help:\n  " + "\n  ".join(wrong))
         self.assertEqual(_tree(self.home), before, "a --help wrote into the workspace")
         self.assertGreater(len(names), 200)
+        # The families `main` dispatches before WORKSPACE_COMMANDS are in the sweep.
+        self.assertLessEqual({"assistant", "workflow", "embedding-policy", "access-binding",
+                              "memory-http", "forget"}, set(names))
+
+    def test_the_family_reader_sees_every_family_main_dispatches(self):
+        families = dispatched_families()
+        self.assertLessEqual({"assistant", "workflow", "embedding-policy", "access-binding",
+                              "memory-http", "forget"}, families)
+        # Each one is something refusal() parses, not a name it rejects as unknown.
+        for name in sorted(families):
+            with self.subTest(name):
+                self.assertEqual(cli.refusal([name, "--help"]), "")
 
     def test_full_help_lists_every_workspace_command(self):
         p = self.run_cli("--help")
         self.assertEqual(p.returncode, 0)
         words = set(re.findall(r"[a-z][a-z-]+", p.stdout))
-        self.assertEqual(sorted(set(cli.WORKSPACE_COMMANDS) - words), [])
+        self.assertEqual(sorted((set(cli.WORKSPACE_COMMANDS) | dispatched_families()) - words), [])
         self.assertIn("migrate-local", p.stdout)
 
     def test_help_names_documents_by_a_path_an_installed_user_has(self):

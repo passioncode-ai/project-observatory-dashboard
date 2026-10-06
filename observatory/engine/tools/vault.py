@@ -724,6 +724,8 @@ def cmd_list(a) -> int:
         print(f"empty store ({STORE})")
         return 0
     found = 0
+    # Every folder of the project, not only the one named (vault_project.folders_of).
+    folders = set(vault_project.folders_of(a.project, STORE)) | {a.project} if a.project else None
     for slot in sorted(STORE.rglob("*")):
         if not slot.is_file() or slot.name.endswith((".meta.json", ".tmp")) \
                 or ".retired-" in slot.name or slot.name == "leaks.jsonl":
@@ -733,7 +735,7 @@ def cmd_list(a) -> int:
         if len(parts) != 3:
             continue
         project, env, name = parts
-        if a.project and project != a.project:
+        if folders is not None and project not in folders:
             continue
         if a.env and env != a.env:
             continue
