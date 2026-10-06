@@ -377,9 +377,13 @@ def test_the_health_page_names_versions_kinds_and_dollars() -> None:
     check("the health page builds with updates off", p.returncode == 0, p.stderr[-300:])
     page = page_with_its_script(pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"]), "health", d)
     words = ("движок", "automatic updates are off", "the last daily backup failed", "synthetic disk full",
-             "От вас здесь ничего не требуется", "Команда: принять", "ждут решения")
+             "От вас здесь ничего не требуется", "Команда: принять", "ждут решения",
+             "Устанавливать обновления автоматически")
     n = {w: sum((render(page, count=w).get("counts") or {}).values()) for w in words}
     check("the installed versions show on every path", n["движок"] >= 1, str(n))
+    # LC-16: the switch carries the organisation's label, in the reader's language.
+    check("the switch row reads «Устанавливать обновления автоматически»",
+          n["Устанавливать обновления автоматически"] >= 1, str(n))
     check("a warning a row already says is not repeated in English",
           n["automatic updates are off"] == 0, str(n))
     check("the rest read in Russian", n["the last daily backup failed"] == 0 and n["synthetic disk full"] >= 1, str(n))

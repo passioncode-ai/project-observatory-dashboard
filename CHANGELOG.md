@@ -5,6 +5,35 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Changed
+
+- **Updates behave as in every other product of the organization** (lifecycle LC-16). This
+  changes behaviour:
+  - **The switch is a file.** "Install updates automatically" is the file `auto-update` in the
+    workspace folder: without it updates are on, and only the word `off` in it turns them off.
+    `full auto-update on|off` writes it. An update, a reinstall or an uninstall never writes it.
+    If you turned updates off in 0.17 or 0.18 (`updates.auto: false` in `settings.json`), they
+    stay off, and the next `full auto-update` command moves that choice into the file and says
+    so. Off now also stops the Mac app's update.
+  - **A check every six hours** instead of once a day. The first check comes 90 seconds after
+    the job starts at login. A check that could not reach GitHub is tried once more within the
+    hour, then every six hours again.
+  - **A new release starts running only when nobody is using it.** The job installs an update
+    when the local server has served no page or agent, and no memory-over-HTTP client has
+    called, for five minutes. Otherwise the release waits as "ready" and the next hourly pass
+    tries again. `full update --apply` by hand still installs at once. A running Claude Code
+    session is never stopped by an update.
+  - **A release that needs a person waits for one.** When a release declares a step to do by
+    hand (`RELEASE.json` inside its signed wheel), the job downloads and verifies it, and
+    `doctor`, the Health page and `auto-update status` show the step. It is not installed until
+    you run `full update --apply`, which shows the step first.
+  - **The Mac app is installed only when signed by the organization's team** (`KJ35UYYL22`),
+    whoever signed the copy already installed. An installed app with no team is still left
+    alone.
+- **Every update stage is logged by code** in `~/Library/Logs/Project Observatory/updates.jsonl`
+  (`~/.local/state/project-observatory/logs/` on Linux): checks, downloads, installs, restarts
+  and the switch. Codes only, with no version, path or message.
+
 ## 0.18.0 — 2026-10-06
 
 A minor release, and it **changes behaviour**: an automatic or manual update installs only a

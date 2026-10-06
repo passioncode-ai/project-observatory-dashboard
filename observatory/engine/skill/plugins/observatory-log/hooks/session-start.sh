@@ -88,7 +88,8 @@ if [ -f "$root/tools/maintain.py" ]; then
 else
   # The bridge for engines from before 0.17.0, which carry no updater of their own:
   # once a day, check; when a newer stable release exists and the person has not turned
-  # automatic updates off (`updates.auto` false), install it with `full update --apply`.
+  # automatic updates off (the `auto-update` file says `off`, or `updates.auto` is false),
+  # install it with `full update --apply`.
   po=""
   [ -n "$venv" ] && [ -x "$venv/bin/project-observatory" ] && po="$venv/bin/project-observatory"
   [ -n "$po" ] || po="$(command -v project-observatory 2>/dev/null)"
@@ -96,10 +97,15 @@ else
     detach "$stamps/update-bridge.log" /bin/bash -c '
       po="$1"; py="$2"
       home="${OBSERVATORY_FULL_HOME:-${OBSERVATORY_HOME:-$HOME/.local/share/project-observatory-full}}"
-      off="$("$py" -c "import json,sys
-try: d=json.load(open(sys.argv[1]))
+      # The switch (LC-16): the file `auto-update` in the home, where only `off` is off;
+      # without one, `updates.auto: false` in settings.json, as those releases wrote it.
+      off="$("$py" -c "import json,os,sys
+f=os.path.join(sys.argv[1], \"auto-update\")
+if os.path.isfile(f) and not os.path.islink(f):
+    print(1 if open(f, errors=\"replace\").read(64).strip().lower() == \"off\" else 0); sys.exit()
+try: d=json.load(open(os.path.join(sys.argv[1], \"config\", \"settings.json\")))
 except Exception: d={}
-print(1 if (d.get(\"updates\") or {}).get(\"auto\") is False else 0)" "$home/config/settings.json" 2>/dev/null)"
+print(1 if (d.get(\"updates\") or {}).get(\"auto\") is False else 0)" "$home" 2>/dev/null)"
       [ "$off" = "1" ] && { echo "$(date -u +%FT%TZ) automatic updates are off"; exit 0; }
       "$po" full update --check >/dev/null 2>&1; rc=$?
       echo "$(date -u +%FT%TZ) check exit $rc"

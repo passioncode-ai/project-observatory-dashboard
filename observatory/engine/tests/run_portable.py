@@ -178,7 +178,7 @@ ROOT_FILES = (
     'log_policy.py', 'code_freshness.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
     # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).
-    'maintenance.py', 'app_update.py',
+    'maintenance.py', 'app_update.py', 'update_events.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
     'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
@@ -273,6 +273,9 @@ def clean_env(base: Path) -> dict[str, str]:
         # No suite may schedule a launchd/systemd job or write a Keychain item on the machine
         # running it (audit A07). HOME is temporary, so the backups root is too.
         'OBSERVATORY_SYSTEM_SETUP': '0',
+        # The shared update log (update_events.py, LC-16) goes beside the suite, never into
+        # ~/Library/Logs or ~/.local/state of the machine running it.
+        'OBSERVATORY_PRODUCT_LOG_DIR': str(base / 'product-logs'),
     }
 
 

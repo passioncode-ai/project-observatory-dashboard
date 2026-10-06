@@ -250,6 +250,22 @@ class ReleaseBoundaryTests(unittest.TestCase):
         result=self.checked(self.wheel(original))
         self.assertFalse(result['passed'])
         self.assertIn('tested dependency lock',' '.join(result['failures']))
+    def with_marker(self,marker):
+        files=self.package_files();name='observatory/engine/RELEASE.json';data=json.dumps(marker).encode()
+        manifest=json.loads(files['observatory/engine/SOURCE-INVENTORY.json'])
+        manifest['files'].append({'path':'RELEASE.json','export_sha256':hashlib.sha256(data).hexdigest()})
+        files['observatory/engine/SOURCE-INVENTORY.json']=json.dumps(manifest).encode();files[name]=data
+        for path in (name,'observatory/engine/SOURCE-INVENTORY.json'):self.put(path,files[path])
+        return self.checked(self.wheel(files))
+    def test_a_held_release_marker_must_name_this_very_version(self):
+        # LC-16: a marker written for an earlier release and left in the tree would be
+        # ignored by the updater in silence; the build refuses it instead.
+        self.assertTrue(self.with_marker({'version':'0.2.0','needs_person':'run the migration first'})['passed'])
+        for stale in ({'version':'0.1.9','needs_person':'run the migration first'},{'version':'0.2.0'},
+                      {'version':'0.2.0','needs_person':'  '},['0.2.0']):
+            result=self.with_marker(stale)
+            self.assertFalse(result['passed'],stale)
+            self.assertIn('RELEASE.json',' '.join(result['failures']))
     def test_wheel_rejects_symlink_even_when_content_matches_source(self):
         self.assertFalse(self.checked(self.wheel(self.package_files(),symlink='observatory/engine/example.py'))['passed'])
     def test_wheel_rejects_unreviewed_dist_info_payload(self):

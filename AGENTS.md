@@ -172,13 +172,13 @@ reserved yet; a register that gains one is declared under `idRegisters` and take
 ## Lifecycle
 
 The organisation's [lifecycle contract](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/lifecycle.md)
-(LC-01…LC-15) holds here. What this product leaves running, and who stops it (LC-09):
+(LC-01…LC-16) holds here. What this product leaves running, and who stops it (LC-09):
 
 | Process | Started by | Cadence | With no window | Stopped by | Idle budget |
 |---|---|---|---|---|---|
 | tick: `tools/tick_lease.py run -- bash tools/tick.sh`, launchd `org.project-observatory.<sha16 of the workspace path>.tick` | `python "$(project-observatory full-path)/tools/install_launchd.py" install` | `StartInterval 1800`, `RunAtLoad false`, Background, Nice 5 | runs every 30 min after the last one ended | `install_launchd.py uninstall`; `full update` stops and restarts it | none between ticks; each step under a watchdog (`DEFAULT_STEP_SECONDS` 900 s), the whole tick under a 1500 s ceiling below the interval, `ExitTimeOut` 30 s above the supervisor's 10 s + 5 s grace |
 | server: `tools/serverd.py --run`, launchd `org.project-observatory.<sha16>.server`, HTTP on `127.0.0.1:47311` (`OBSERVATORY_SERVER_PORT`) | `serverd.py --install` | `RunAtLoad` + `KeepAlive`, `ExitTimeOut` 40 s above its 30 s drain | always up; beat 20 s while a client asked within 5 min, else 120 s; receipt written on change, at least every 300 s | `serverd.py --uninstall` (stays off); `full update` restarts it | ~0.2 CPU-s/min measured before the change, ~40 MB RSS; no subprocess on a timer |
-| maintenance: `tools/maintain.py run`, launchd `org.project-observatory.<sha16>.maintain` (macOS) or systemd user timer `project-observatory-<sha16>-maintain.timer` (Linux) | `full maintain ensure`, `install_launchd.py install`, `full init` in a terminal, `full update --apply` (the new release), the `observatory-log` SessionStart hook | `StartInterval 3600`, `RunAtLoad true`, Standard (not Background: its throttling timed the pass out on a loaded machine), Nice 10; systemd `OnUnitActiveSec=60min`, `Persistent=true` | hourly; a network check at most once a day, a full snapshot once a day (tick and server stopped for the copy, then started again), the app swapped only while it is not running | `full maintain uninstall` (stays off until `maintain ensure`); `full auto-update off` stops only the updates | one short process an hour when nothing is due; never one of `managed_jobs()`, so `full update` does not stop it (docs/runs/2026-10-05-auto-update, D3) |
+| maintenance: `tools/maintain.py run`, launchd `org.project-observatory.<sha16>.maintain` (macOS) or systemd user timer `project-observatory-<sha16>-maintain.timer` (Linux) | `full maintain ensure`, `install_launchd.py install`, `full init` in a terminal, `full update --apply` (the new release), the `observatory-log` SessionStart hook | `StartInterval 3600`, `RunAtLoad true` with `--first-check-delay 90`, Standard (not Background: its throttling timed the pass out on a loaded machine), Nice 10; systemd `OnStartupSec=90s`, `OnUnitActiveSec=60min`, `Persistent=true` | hourly; a network check every 6 h (the first 90 s after the job starts, one retry within the hour after a failed check), an update activated only when the local server and memory-http have had no client for 5 min, a full snapshot once a day (tick and server stopped for the copy, then started again), the app swapped only while it is not running | `full maintain uninstall` (stays off until `maintain ensure`); `full auto-update off` (the file `<home>/auto-update`) stops only the updates | one short process an hour when nothing is due; never one of `managed_jobs()`, so `full update` does not stop it (docs/runs/2026-10-05-auto-update, D3) |
 | per-session MCP server `mcp/server.py` | each agent session that declares it (`claude mcp add observatory …`) | one per session | lives as long as its session | the session (stdin EOF); answers `stale-server` once an update replaced its code | ~18 MB idle; no timer |
 | job runner `tools/run_job.py <id>` (`machine.mcp.refresh`, `agent.ask`) | the MCP server or the app, on a request | per request | until the job ends | the job ends; `fabric.job.cancel` stops its process group | — |
 | on-demand MCP probe (`claude mcp list` and the servers it starts) | `full scan-mcp` or `machine.mcp.refresh` only — never the tick | per request | until the CLI answers or 180 s | its own process group is killed on exit or timeout | — |
@@ -194,9 +194,25 @@ The organisation's [lifecycle contract](https://github.com/passioncode-ai/fabric
   0600, launchd-held files copied and truncated — applied by the tick's `logs` step and by the
   server to its own `serverd.err`/`.out`. The logs live in the workspace's `store/logs/`, not
   `~/Library/Logs/<Product>/`: one account can hold several workspaces, and each keeps its own.
+  The one exception is the shared update log LC-16 asks for (`update_events.py`):
+  `~/Library/Logs/Project Observatory/updates.jsonl` (macOS) or
+  `$XDG_STATE_HOME/project-observatory/logs/updates.jsonl`, codes only, each line carrying the
+  workspace's instance id; `OBSERVATORY_PRODUCT_LOG_DIR` moves it, and the test runner sets it.
 - **Plists** (LC-05): a minimal `PATH` (the directories holding the engine's tools, then the
   system ones) and the interpreter by its virtual-environment or Homebrew `opt` path; the
   installers refuse a plist naming a Cellar path (`install_launchd.lint_plist`).
+- **Automatic updates (LC-16)**, row by row:
+
+  | LC-16 part | Here | Deviation, and why |
+  |---|---|---|
+  | Switch | the file `<home>/auto-update`; absent = on, only `off` is off; `full auto-update on\|off` writes it; label "Install updates automatically" / «Устанавливать обновления автоматически» on Health, in `doctor` and `auto-update status` (`switch.label`) | the folder is the workspace home, one per workspace, not one per account. `updates.auto: false` from 0.17/0.18 still reads as off while the file is absent, and the next `auto-update` command moves it into the file and says so |
+  | Cadence | `CHECK_EVERY` 6 h; `--first-check-delay 90` from launchd's `RunAtLoad`, `OnStartupSec=90s` on systemd; one retry within the hour after a failed check | the job is a scheduled pass, not a resident process: it runs hourly and checks when due. The plugin hook schedules it at most every 6 h; where no scheduler exists the hook's pass is the check |
+  | Verification | wheel: GitHub digest + `SHA256SUMS` line + `SHA256SUMS.asc` by the pinned release key + wheel metadata version; app: the same, plus `codesign`, the pinned team `KJ35UYYL22` (`app_update.TEAM_ID`), Gatekeeper; never older | `OBSERVATORY_RELEASE_REPOSITORY`/`OBSERVATORY_RELEASE_API` can point the feed at a fork or mirror. Kept for mirrors and tests: the signature is still checked against the key pinned in the engine, so an overridden feed cannot install anything the organization did not sign |
+  | Install vs activation | the job runs `full update --apply --unattended` only when `maintenance.live_clients` finds no client of the local server (its receipt's `clients.recent`, set by any request but `/health`, the service document and the events feed) and no allowed memory-http call in 5 min; otherwise `deferred`, retried next pass. A person's `full update --apply` applies at once | install and activation are one transaction here: `pip` replaces the package in place, so the tick and server must be stopped before the files change, not only before they restart. The whole update therefore waits for the safe point; nothing is staged ahead of it. A Claude Code session's stdio MCP server is never stopped: it keeps the code it loaded, answers `stale-server` from its next call (`code_freshness.py`) and picks up the release when the session reconnects it |
+  | Held releases | `observatory/engine/RELEASE.json` in the verified wheel, `{"version", "needs_person"}`: `--unattended` verifies and exits 6 (`held`), nothing stopped or installed; status, `doctor` and Health show the step; not downloaded again for the same version; a person's `--apply` shows it and installs | the marker travels inside the wheel rather than as a separate release asset, so the existing digest and signature chain covers it with no new asset to verify. Engines before 0.19.0 do not read it: a held release must also refuse its own `upgrade --apply` until the step is done |
+  | Log events | `update_events.py`; `update_check`, `update_download`, `update_install`, `update_restart`, `auto_update` with LC-16's codes; subject `engine` or `app` | the line adds the workspace's instance id (sha16 of its path, as in the launchd labels) so two workspaces on one account can be told apart; no path, version or message |
+  | Tests | `tests/test_engine_update.py` (tampered, unsigned, another key, older, held, log codes), `tests/test_maintenance.py` Switch, UpdateLog, Pass (cadence, first-check delay, deferral, held, switch off), App (another team, the pinned team, staged while running); `tests/test_release_boundaries.py` (a marker for another version is refused at build) | the release gate's "feed names only files of its own release" is not tested in this repository: the release is assembled and summed by the organization's shared publish workflow |
+
 - **The lifecycle watch** (`collectors/scan_lifecycle.py`, findings `lifecycle.*`) reports, per
   owning product, orphaned processes, session servers on replaced code, jobs past their interval
   and logs past their cap or readable by others.
@@ -256,6 +272,13 @@ tasks are the operator's and which a contributor can take.
      (the shared `release-publish` workflow signs the attestation; without `--signer-repo` the
      check fails with "verifying with issuer sigstore.dev"), and `gpg --verify SHA256SUMS.asc
      SHA256SUMS` after importing the organization's release key.
+   - A release that needs a person before it may be installed (a data or schema migration
+     to run or confirm by hand) carries `observatory/engine/RELEASE.json`:
+     `{"version": "X.Y.Z", "needs_person": "<the step, or its runbook URL>"}`. The automatic
+     update verifies such a release and holds it; a person's `full update --apply` shows the
+     step and installs. `tools/check_package.py` refuses a marker naming another version, so
+     delete it in the next release. Engines before 0.19.0 do not read it: make the release's
+     own `upgrade --apply` refuse until the step is done as well.
    - To rehearse first, push `vX.Y.Z-rc.N` and run
      `gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false`.
    - A locally signed build (`build-app.sh` + `notarize.sh`) is for debugging and is never attached.
