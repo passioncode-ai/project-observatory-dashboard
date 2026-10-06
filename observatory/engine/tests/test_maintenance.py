@@ -872,6 +872,23 @@ class Pass(Base):
         self.assertEqual(later["update"]["result"], "updated")
         self.assertEqual(commands.calls[-1][0], ("update", "--apply", "--unattended"))
 
+    def test_a_running_tick_defers_the_update_and_is_never_stopped(self):
+        # Seen live on 2026-10-06: an automatic update booted out a tick 57 s into its run.
+        import fcntl
+        lock = self.home / "store" / "tick.lock"
+        fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)      # a tick is running
+            commands = FakeCommands(check=10, apply=0)
+            report = self.run_pass(commands)
+            self.assertEqual(report["update"]["result"], "deferred")
+            self.assertIn("tick", report["update"]["detail"])
+            self.assertEqual([c[0] for c in commands.calls], [("update", "--check")], "no apply, nothing stopped")
+        finally:
+            os.close(fd)
+        later = self.run_pass(commands, at=AT + datetime.timedelta(hours=1))
+        self.assertEqual(later["update"]["result"], "updated", "the next pass, the tick done, installs")
+
     def test_a_silent_server_and_a_probe_are_no_clients(self):
         self.receipt(AT - datetime.timedelta(hours=1), recent=True)      # the server stopped an hour ago
         self.assertEqual(M.live_clients(self.home, AT), [])

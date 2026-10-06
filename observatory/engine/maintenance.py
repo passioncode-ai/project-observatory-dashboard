@@ -619,10 +619,15 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
         state["update"] = {"at": iso(at), "result": "another-update-running", "from": config.VERSION,
                            "detail": "another update was running"}
         return {"result": "another-update-running"}
-    busy = live_clients(base, at)
+    # A tick (or another workspace operation) in progress is a writer the update would
+    # stop half-way: `full update` boots the tick job out before installing. Seen live on
+    # 2026-10-06: an automatic update stopped a tick 57 seconds into its run. The daily
+    # snapshot already waits for it (`_tick_busy`); the update waits too.
+    busy = (["a tick or another workspace operation is running"] if _tick_busy(base) else []) \
+        + live_clients(base, at)
     if busy:
         # Activation restarts the tick and the server on the new code: never under a live
-        # client (LC-16). The release stays `ready`; the next pass tries again.
+        # client or a running tick (LC-16). The release stays `ready`; the next pass tries again.
         state["update"] = {"at": iso(at), "result": "deferred", "from": config.VERSION,
                            "to": check.get("latest"), "detail": "; ".join(busy)}
         update_events.emit("update_restart", "refused", base=base)

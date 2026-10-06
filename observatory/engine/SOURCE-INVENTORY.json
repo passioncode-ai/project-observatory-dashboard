@@ -772,15 +772,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "8f101957b2a1dec11e47cab59fbeab2215a3e94c670ac207221392a5f8886446",
-      "bytes": 67237,
+      "export_sha256": "4a96d7983515903d757ead492b54e895b1e93ee62ff6d079b3c7a0cf9beb1beb",
+      "bytes": 67632,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "3d69ef819fbe4d238737f78b693c75c3eaf8803c422dded77c2986ecf33ffcf4",
-      "bytes": 59277,
+      "export_sha256": "d3e341e194aeac245abe637b26c1986dbbe7626a481610b07c25b5fa6ea53d59",
+      "bytes": 59615,
       "upstream_modified": true
     },
     {
@@ -794,8 +794,8 @@
       "path": "engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "41807247c318225668ceb5ba19bef417d22dea31dc2c716f7a0aaee336993b79",
-      "bytes": 68322
+      "export_sha256": "349aabf57b927320e6c98d2befeade21e5041463b0fa4d41fdfb2128bee3477f",
+      "bytes": 70425
     },
     {
       "path": "estate.py",
@@ -1150,8 +1150,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a16e5a79c972047b9ee25d84d12fc796f5df5ff98931699c2f844eedac149244",
-      "bytes": 66582
+      "export_sha256": "64f9bb8bc5e33a93188c46a6e349cc090a520fe7ad27a7837d59a3b4788faf26",
+      "bytes": 67034
     },
     {
       "path": "mcp/capability_tools.py",
@@ -2265,8 +2265,8 @@
       "path": "tests/test_engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d959a9252a4c4a731721d4c80be4ea78c4a0dbe01069108efab6cc25cddeb938",
-      "bytes": 53595
+      "export_sha256": "1da6f3b5e180d034d997869196698307c8475bd6e209d1694242ee0e78b1f0c2",
+      "bytes": 56276
     },
     {
       "path": "tests/test_env_inventory.py",
@@ -2669,8 +2669,8 @@
       "path": "tests/test_maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4958b0894e1841d70f7ac66932d267514615038468cab15536e7860a20bef87c",
-      "bytes": 108252
+      "export_sha256": "fb1831ece1211b9793ffb6d92057781623040c7df6150ef069ed7d801d899a37",
+      "bytes": 109214
     },
     {
       "path": "tests/test_mcp_inventory.py",

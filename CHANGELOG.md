@@ -21,12 +21,16 @@ while the major version is 0, a minor release may change behaviour and says so h
   - **A new release starts running only when nobody is using it.** The job installs an update
     when the local server has served no page or agent, and no memory-over-HTTP client has
     called, for five minutes. Otherwise the release waits as "ready" and the next hourly pass
-    tries again. `full update --apply` by hand still installs at once. A running Claude Code
+    tries again. It also waits while a tick is running, which an automatic update used to stop
+    half-way. `full update --apply` by hand still installs at once. A running Claude Code
     session is never stopped by an update.
   - **A release that needs a person waits for one.** When a release declares a step to do by
     hand (`RELEASE.json` inside its signed wheel), the job downloads and verifies it, and
     `doctor`, the Health page and `auto-update status` show the step. It is not installed until
     you run `full update --apply`, which shows the step first.
+  - **An installed release reads only the organization's feed.** `OBSERVATORY_RELEASE_REPOSITORY`
+    and `OBSERVATORY_RELEASE_API` now work only from a source checkout; an installed release
+    ignores them and says so. `--repository` and `--api-url` still choose a fork or a mirror.
   - **The Mac app is installed only when signed by the organization's team** (`KJ35UYYL22`),
     whoever signed the copy already installed. An installed app with no team is still left
     alone.
