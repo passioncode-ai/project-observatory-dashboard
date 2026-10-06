@@ -34,8 +34,6 @@
  "Apps, state, deployments and cost.": "Приложения, состояние, развёртывания и стоимость.",
  "Audience / 30 days": "Аудитория / 30 дней",
  "Automatic cleanup ran": "Прошла автоматическая очистка",
- "Awaiting a person's decision": "Ждёт решения человека",
- "Awaiting a person's decision — {shown} of {total}": "Ждёт решения человека — {shown} из {total}",
  "B": "Б",
  "Branch": "Ветка",
  "Branch only on this disk": "Ветка только на этом диске",
@@ -319,7 +317,6 @@
  "Technology and documentation": "Технологии и документация",
  "Test fixtures left on disk": "Тестовые фикстуры остались на диске",
  "The auto tier loses nothing and runs on the tick when features.auto_cleanup is on; the manual tier archives first: project-observatory full cleanup --apply --include manual": "Автоматический уровень ничего не теряет и работает при каждом плановом запуске, если включён features.auto_cleanup; ручной уровень сначала архивирует: project-observatory full cleanup --apply --include manual",
- "The button puts the command on the clipboard — the decision is taken in a terminal ({list} for the list): a write without a terminal is refused on purpose, and there is no {flag} flag.": "Кнопка кладёт команду в буфер — решение принимается в терминале ({list} для списка): запись без терминала отклоняется намеренно, и флага {flag} нет.",
  "The buttons copy commands for a terminal.": "Кнопки копируют команды для терминала.",
  "The buttons copy commands for a terminal; no values are shown here.": "Кнопки копируют команды для терминала; значения здесь не показаны.",
  "The buttons perform the stated action.": "Кнопки выполняют указанное действие.",
@@ -350,7 +347,6 @@
  "What needs attention and what changed across your projects.": "Что требует внимания и что изменилось в проектах.",
  "What runs on this machine, where memory and disk go, and what was cleaned.": "Что запущено на этой машине, куда уходят память и диск и что было очищено.",
  "What the observatory concluded": "Что заключила обсерватория",
- "What the observatory knows about itself: when it last looked, how much it has collected and how many conclusions wait for a person's decision. Empty here means there is no local store — the registry still reads as before.": "Что обсерватория знает о себе: когда она смотрела в последний раз, сколько собрала и сколько выводов ждёт решения человека. Пусто здесь означает, что локального хранилища нет — реестр при этом читается по-прежнему.",
  "What the plugins measured": "Что измерили плагины",
  "What to show": "Что показывать",
  "When": "Когда",
@@ -377,7 +373,6 @@
  "a session is following {skill} {version} — a MAJOR version behind": "сессия работает по {skill} {version} — отстаёт на МАЖОРНУЮ версию",
  "a session is following {skill} {version} — behind the shipped text": "сессия работает по {skill} {version} — отстаёт от поставляемого текста",
  "a sum across properties does not mean unique people across them": "сумма по ресурсам не означает уникальных людей между ними",
- "accept": "принять",
  "account": "аккаунт",
  "account not stated": "аккаунт не указан",
  "active": "активен",
@@ -411,9 +406,7 @@
  "auto": "авто",
  "auto cleanup off": "автоочистка выключена",
  "auto cleanup on": "автоочистка включена",
- "awaiting a decision: {n}": "ждут решения: {n}",
  "awaiting a word": "ждёт слова",
- "awaiting the operator's decision": "ждут решения оператора",
  "behind": "отстаёт",
  "behind or diverged": "отстаёт или разошёлся",
  "branch only here": "ветка только здесь",
@@ -471,11 +464,9 @@
  "copied": "скопировано",
  "copied: {what}": "скопировано: {what}",
  "copy": "копировать",
- "copy the accept command": "скопировать команду принятия",
  "copy the command": "скопировать команду",
  "copy the diagnostic command": "скопировать диагностическую команду",
  "copy the movement record": "скопировать запись перемещения",
- "copy the reject command": "скопировать команду отклонения",
  "copy the silence command": "скопировать команду заглушения",
  "crashed@@app": "упало",
  "create the slot from a file…": "завести слот из файла…",
@@ -654,8 +645,6 @@
  "not signed": "не подписан",
  "not signed — nobody said what it is for": "не подписан — для чего он, никто не сказал",
  "nothing exclusive": "ничего исключительного",
- "nothing goes this week": "на этой неделе ничего не уйдёт",
- "nothing proposed — the queue is empty": "ничего не предложено — очередь пуста",
  "nothing to lose": "нечего терять",
  "observer": "наблюдатель",
  "observer not measured": "наблюдатель не измерен",
@@ -735,7 +724,6 @@
  "property settings": "настройки ресурса",
  "pruned": "запись удалена",
  "put": "положен",
- "queue digest": "сводка очереди",
  "re-read from Google and rebuild the pages": "перечитать у Google и пересобрать страницы",
  "readable beyond the owner": "читает не только владелец",
  "reads it": "читает его",
@@ -747,7 +735,6 @@
  "regenerable": "пересоздаётся",
  "registrar not stated": "регистратор не указан",
  "registry edits proposed": "правок реестра предложено",
- "reject": "отклонить",
  "release tags": "тегов",
  "remote at risk": "работа без копии",
  "remote unreachable": "remote недоступен",
@@ -763,7 +750,6 @@
  "restart": "перезапуск",
  "restore": "вернуть",
  "retention did not complete, so nothing was erased": "очистка по сроку хранения не завершилась — ничего не стёрто",
- "retention erases a proposal after {n} d": "ретеншен стирает предложение через {n} дн",
  "review": "ревью",
  "revoke": "отозвать",
  "revoked": "отозван",
@@ -930,7 +916,6 @@
   "other": "плановый запуск пропустил {n} цикла подряд"
  },
  "the value is set in:": "значение есть в:",
- "the whole queue": "вся очередь",
  "the wiki's copy of the registry has not been committed for {hours}h": "копия реестра в вики не коммитится уже {hours} ч",
  "the wiki's copy of the registry is not being committed": "копия реестра в вики не коммитится",
  "the wiki's link check has never completed": "проверка ссылок вики ни разу не завершилась",
@@ -1358,7 +1343,6 @@
   "one": "{n} замороженная неделя без данных о сессиях — и их уже не будет",
   "other": "{n} замороженные недели без данных о сессиях — и их уже не будет"
  },
- "{n} go before {date}": "до {date} уйдут: {n}",
  "{n} h": "{n} ч",
  "{n} hosts could not be probed, so their liveness is unknown": {
   "few": "{n} хоста не удалось проверить — их доступность неизвестна",
@@ -1411,12 +1395,6 @@
   "other": "{n} живых файла"
  },
  "{n} min": "{n} мин",
- "{n} more are waiting; the page shows the newest. The whole queue:": {
-  "few": "Ждут ещё {n}; на странице самые новые. Вся очередь:",
-  "many": "Ждут ещё {n}; на странице самые новые. Вся очередь:",
-  "one": "Ждёт ещё {n}; на странице самые новые. Вся очередь:",
-  "other": "Ждут ещё {n}; на странице самые новые. Вся очередь:"
- },
  "{n} more of type {type}": "ещё {n} типа {type}",
  "{n} names": {
   "few": "{n} имени",
@@ -1685,7 +1663,6 @@
   "one": "{n} переменная",
   "other": "{n} переменные"
  },
- "{n} waiting:": "ожидают ({n}):",
  "{n} wikilinks in the wiki resolve to nothing": {
   "few": "{n} вики-ссылки никуда не ведут",
   "many": "{n} вики-ссылок никуда не ведут",
@@ -2047,5 +2024,22 @@
  "the last automatic update did not complete ({result}: {detail}); tried again within the hour": "последнее автоматическое обновление не завершилось ({result}: {detail}); повтор в течение часа",
  "the last automatic update did not complete ({result}: {detail}); tried again tomorrow": "последнее автоматическое обновление не завершилось ({result}: {detail}); повтор завтра",
  "the last daily backup failed: {detail}; tried again within the hour": "последний ежедневный бэкап не удался: {detail}; повтор в течение часа",
- "project {path}": "проект {path}"
+ "project {path}": "проект {path}",
+ "Agents' records": "Записи агентов",
+ "agents' records not yet confirmed": "записей агентов ещё не подтверждено",
+ "nothing proposed": "предложений нет",
+ "{n} records agents wrote are not yet confirmed. An independent source confirms a record, or it is retired after {days} d. Nothing here needs you.": {
+  "one": "{n} запись агентов ещё не подтверждена. Независимый источник подтверждает запись, иначе через {days} дн она уходит в архив. От вас здесь ничего не требуется.",
+  "few": "{n} записи агентов ещё не подтверждены. Независимый источник подтверждает запись, иначе через {days} дн она уходит в архив. От вас здесь ничего не требуется.",
+  "many": "{n} записей агентов ещё не подтверждены. Независимый источник подтверждает запись, иначе через {days} дн она уходит в архив. От вас здесь ничего не требуется.",
+  "other": "{n} записи агентов ещё не подтверждены. Независимый источник подтверждает запись, иначе через {days} дн она уходит в архив. От вас здесь ничего не требуется."
+ },
+ "Show the newest {n}": {
+  "one": "Показать последнюю {n}",
+  "few": "Показать последние {n}",
+  "many": "Показать последние {n}",
+  "other": "Показать последние {n}"
+ },
+ "The whole list, and deciding by hand if you ever want to, are in a terminal:": "Весь список и ручное решение, если когда-нибудь понадобится, — в терминале:",
+ "What the observatory knows about itself: when it last looked, how much it has collected and how many of the agents' records are still unconfirmed. Empty here means there is no local store — the registry still reads as before.": "Что обсерватория знает о себе: когда она смотрела в последний раз, сколько собрала и сколько записей агентов ещё не подтверждено. Пусто — значит, локального хранилища нет; реестр читается как прежде."
 }

@@ -123,8 +123,9 @@ class DashboardShellTests(unittest.TestCase):
         self.assertEqual(counts["index"], "")
         self.assertEqual(counts["health"], "")
         self.assertEqual(counts["findings"], 132)
-        self.assertIn("awaiting a decision: 304", text(shell.cards_html(payload, counts)))
-        self.assertIn("ждут решения: 304", text(shell.cards_html(payload, counts, RU)))
+        # The agents' unconfirmed records are no reason to open the page (operator, 2026-10-06).
+        self.assertNotIn("awaiting a decision", text(shell.cards_html(payload, counts)))
+        self.assertNotIn("ждут решения", text(shell.cards_html(payload, counts, RU)))
 
     def test_traffic_summary_distinguishes_unknown_zero_and_partial_resource_sum(self):
         # In Russian, which has the plural and grouping rules worth checking.

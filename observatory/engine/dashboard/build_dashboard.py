@@ -1819,12 +1819,12 @@ __AGENTS__
   <section id="observer">
     <h3 data-t>Observer state</h3>
     <p data-t>What the observatory knows about itself: when it last looked, how much
-    it has collected and how many conclusions wait for a person's decision. Empty here
+    it has collected and how many of the agents' records are still unconfirmed. Empty here
     means there is no local store — the registry still reads as before.</p>
     <div id="health" class="health"></div>
   </section>
   <section id="queue-s">
-    <h3 id="queue-h" data-t>Awaiting a person's decision</h3>
+    <h3 id="queue-h" data-t>Agents' records</h3>
     <div id="queue"></div>
   </section>
   <section id="dups-s">
@@ -2126,7 +2126,7 @@ const SERVERD_FIX = {
   silent: [T("the observer is silent — check it"), toolCommand("serverd.py", ["--status"])],
 };
 if (H.leaks_open > 0) hb.push([T("secret leaks"), T("{n} not rotated — vault.py leaks", {n: H.leaks_open})]);
-if (H.proposed != null) hb.push([T("awaiting the operator's decision"), H.proposed]);
+if (H.proposed != null) hb.push([T("agents' records not yet confirmed"), NUM(H.proposed)]);
 if (H.registry_proposals) hb.push([T("registry edits proposed"), H.registry_proposals]);
 // Whether memory text may leave this machine (OBS-33): the state in words and the
 // command that shows the consents, ready to copy.
@@ -4138,51 +4138,32 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
 // THE REVIEW QUEUE, read-only: the newest proposals, each with the commands
 // that accept or reject it. The decision itself is taken in a terminal.
 (function renderQueue() {
+  // AGENTS' RECORDS ARE NOT A PERSON'S WORK (operator, 2026-10-06: "I cannot decide
+  // anything there"). Observations, notes and sessions are the agents' working memory:
+  // an independent source confirms one, or retention retires it. The section says so,
+  // keeps the newest few folded for the curious, and asks nothing; deciding by hand
+  // stays possible from a terminal (`review.py`), never as a call to action here.
   const host = document.getElementById("queue"), head = document.getElementById("queue-h");
   const q = D.queue || [];
+  head.textContent = T("Agents' records");
   if (!q.length) {
-    head.textContent = T("Awaiting a person's decision");
     host.innerHTML = `<p class="none">${D.store_degraded
-      ? E(T(D.store_degraded.text || D.store_degraded, D.store_degraded.args)) : T("nothing proposed — the queue is empty")}</p>`;
+      ? E(T(D.store_degraded.text || D.store_degraded, D.store_degraded.args)) : T("nothing proposed")}</p>`;
     return;
   }
-  // The header says how many are shown of how many wait in total.
   const total = (D.health && D.health.proposed) || q.length;
-  head.textContent = T("Awaiting a person's decision — {shown} of {total}", {shown: q.length, total});
-  // One line above the rows: what waits, of which kinds, and what
-  // retention erases first.
-  const dg = D.digest || null;
-  const digestLine = dg ? `<p class="dmeta" id="queue-digest">${T("{n} waiting:", {n: dg.waiting})} ` +
-    // "kind: n", not "n kind": the kinds are nouns in the singular, and a count
-    // before a singular noun broke the grammar of every language with plurals (A34 review).
-    Object.entries(dg.by_kind || {}).map(([k, n]) => `${E(T(`kind@@${k}`))}: ${NUM(n)}`).join(", ") +
-    " · " + T("retention erases a proposal after {n} d", {n: dg.horizon_days}) +
-    (dg.erases_within_7d ? " — " + T("{n} go before {date}", {n: `<b>${dg.erases_within_7d}</b>`, date: E(dg.first_erase_on || "")}) : " — " + T("nothing goes this week")) +
-    ` · <button class="chip-btn" type="button" data-copy="${E(toolCommand("review.py", ["digest"]))}" title="${T("copy the command")}">${T("Command: {label}", {label: T("queue digest")})}</button></p>` : "";
-  host.innerHTML = digestLine + q.map(r => {
-    // A visible placeholder, never an empty reason the tool refuses (audit A32).
-    const ok = toolCommand("review.py", ["promote", r.id, "--why", "REASON"]);
-    const no = toolCommand("review.py", ["reject", r.id, "--why", "REASON"]);
-    return `<div class="qrow" id="q-${E(r.id)}">
+  const days = (D.digest && D.digest.horizon_days) || 90;
+  const rows = q.map(r => `<div class="qrow" id="q-${E(r.id)}">
       <span class="qm">${E(r.at)}<br>${E(T(`kind@@${r.kind}`))}</span>
       <span>${E(r.statement)}${r.project
-        ? ` <a class="plink" href="projects.html#${E(r.project)}">${E(projLabel(r.project))}</a>` : ""}
-        <div class="anchor mono">${E(r.id)} r${E(r.rev)}</div>
-        <div class="qacts"><button class="chip-btn" type="button" data-copy="${E(ok)}"
-             title="${T("copy the accept command")}">${T("Command: {label}", {label: T("accept")})}</button>
-          <button class="chip-btn" type="button" data-copy="${E(no)}"
-             title="${T("copy the reject command")}">${T("Command: {label}", {label: T("reject")})}</button></div></span>
-    </div>`;
-  }).join("") +
-    // The page carries the newest rows only; the rest are one command away,
-    // and the command is handed over rather than left for the reader to find.
-    (total > q.length ? (() => {
-      const all = toolCommand("review.py", ["list"]);
-      return `<p class="dmeta" id="queue-rest">${T("{n} more are waiting; the page shows the newest. The whole queue:", {n: total - q.length})} ` +
-        `<span class="mono">${E(all)}</span> <button class="chip-btn" type="button" data-copy="${E(all)}" title="${T("copy the command")}">${T("Command: {label}", {label: T("the whole queue")})}</button></p>`;
-    })() : "") +
-    `<p class="none">${T("The button puts the command on the clipboard — the decision is taken in a terminal ({list} for the list): a write without a terminal is refused on purpose, and there is no {flag} flag.",
-      {list: `<span class="mono">${E(cliCommand("review"))}</span>`, flag: '<span class="mono">--yes</span>'})}</p>`;
+        ? ` <a class="plink" href="projects.html#${E(r.project)}">${E(projLabel(r.project))}</a>` : ""}</span>
+    </div>`).join("");
+  const all = toolCommand("review.py", ["list"]);
+  host.innerHTML =
+    `<p class="dmeta" id="queue-why">${T("{n} records agents wrote are not yet confirmed. An independent source confirms a record, or it is retired after {days} d. Nothing here needs you.", {n: total, days})}</p>` +
+    `<details id="queue-fold"><summary>${T("Show the newest {n}", {n: q.length})}</summary>${rows}` +
+    `<p class="dmeta" id="queue-rest">${T("The whole list, and deciding by hand if you ever want to, are in a terminal:")} ` +
+    `<span class="mono">${E(all)}</span></p></details>`;
 })();
 
 (function renderFindings() {

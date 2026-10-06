@@ -230,15 +230,15 @@ def test_every_bridge_leads_somewhere_that_exists() -> None:
     check("the observer actions use workspace-aware tools instead of another installation's launchd label",
           bool(label) and "launchctl kickstart" not in src and "OBSERVATORY_HOME=" in src,
           "the public dashboard must not restart a historical personal job")
-    check("a queued row carries promote and reject with its own id",
-          'toolCommand("review.py", ["promote", r.id' in src
-          and 'toolCommand("review.py", ["reject", r.id' in src,
-          "F9 meant retyping a memory id by hand, which nobody did 127 times")
-    for verb in ("promote", "reject"):
-        check(f"and `{verb}` is a verb review.py takes", f'"{verb}"' in review, "")
-    check("the page never claims to decide anything itself",
-          "--yes" in src and "the decision is taken in a terminal" in src,
-          "the TTY rule is the point; a button that looked like a decision would undo it")
+    # Operator, 2026-10-06: the agents' records are not a person's work. No row offers a
+    # decision; the page says nothing is needed and names the terminal command for anyone
+    # who wants the whole list.
+    check("a queued row offers no promote or reject",
+          'toolCommand("review.py", ["promote", r.id' not in src
+          and 'toolCommand("review.py", ["reject", r.id' not in src, "")
+    check("and the page says nothing here needs the person, with the list one command away",
+          "Nothing here needs you." in src and 'toolCommand("review.py", ["list"])' in src
+          and '"list"' in review, "")
     check("the drift tile links to the table with its own filter on",
           'href="projects.html?f=drift"' in src and 'data-f="drift"' in src, "")
     check("and a chip named in the address is pressed at load",
@@ -497,8 +497,8 @@ def test_the_findings_page_is_a_working_surface() -> None:
           "import movements as _movements" in src
           and "import movements as _movements" in (ROOT / "tools/build_findings.py").read_text(encoding="utf-8"), "")
     # D-16: the queue's shape in one line above the rows.
-    check("the health page carries the queue digest above the rows",
-          'id="queue-digest"' in src and "digestLine + q.map" in src and "def _digest(conn)" in src, "")
+    check("the agents' records fold their newest rows under one sentence",
+          'id="queue-why"' in src and 'id="queue-fold"' in src and "def _digest(conn)" in src, "")
     # P3. D-20: the single page's tab strip is stripped from split
     # pages at build and the counters are written only where they exist.
     shell_src = (ROOT / "dashboard/shell.py").read_text(encoding="utf-8")

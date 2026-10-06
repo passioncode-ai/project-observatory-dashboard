@@ -283,10 +283,9 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
         "traffic": _traffic_line(payload, t),
         "machine": _machine_line(payload, t),
         "agents": _agents_line(payload, t),
-        # TWO NUMBERS, because one of them is the reason to open the page: the
-        # observer's state, and how many rows are waiting for a person (S4/F9).
-        "health": (_observer(health, t) + " · "
-                   + t.mark("awaiting a decision: {n}", n=health.get("proposed", 0))),
+        # The observer's state alone: the agents' unconfirmed records ask nothing of a
+        # person (operator, 2026-10-06), so they are no reason to open the page.
+        "health": _observer(health, t),
     }
     # A page nobody scanned says so on its card, instead of "0 apps".
     for name, key in (("heroku", "heroku"), ("creds", "creds"), ("env", "env"), ("mcp", "mcp")):
