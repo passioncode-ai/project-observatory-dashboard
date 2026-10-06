@@ -104,6 +104,14 @@ class System:
         if os.path.exists(LSREGISTER):
             self.run(LSREGISTER, "-f", str(app))
 
+    def unregister(self, app: Path) -> None:
+        """Forget a bundle that is about to be deleted. macOS registers every bundle it
+        sees, a staged copy included; deleted unregistered, a NEWER staged version stayed
+        the app's record and the Dock drew a blank icon for the installed one
+        (2026-10-06)."""
+        if os.path.exists(LSREGISTER):
+            self.run(LSREGISTER, "-u", str(app))
+
 
 def installed_app(home: Path | None = None) -> Path | None:
     """The installed bundle install-app.sh puts in /Applications, else ~/Applications."""
@@ -156,7 +164,7 @@ class AppUpdater:
         except (ValueError, config.ConfigurationError):
             behind = True
         if not behind:
-            shutil.rmtree(self.staged, ignore_errors=True)
+            self._discard(self.staged)
             return {"result": "current", "version": have}
         if not os.access(self.app.parent, os.W_OK):
             return {"result": "not-writable", "version": have,
@@ -170,11 +178,11 @@ class AppUpdater:
         try:
             bundle = self._staged_bundle() or self._download()
         except AppUpdateError as exc:
-            shutil.rmtree(self.staged, ignore_errors=True)
+            self._discard(self.staged)
             return {"result": "refused", "version": have, "detail": str(exc)[:300]}
         if self.system.running() or not self._swap(bundle):
             return {"result": "waiting-for-quit", "version": have, "pending": self.version}
-        shutil.rmtree(self.staged, ignore_errors=True)
+        self._discard(self.staged)
         return {"result": "updated", "from": have, "version": self.version}
 
     # --- verification ----------------------------------------------------------------
@@ -217,7 +225,7 @@ class AppUpdater:
         signature_row = assets.get(eu.SUMS + ".asc")
         if not zipped_asset or not sums_asset or not zipped_asset.digest or not sums_asset.digest:
             raise AppUpdateError(f"GitHub publishes no sha256 digest for {name} or {eu.SUMS}")
-        shutil.rmtree(self.staged, ignore_errors=True)
+        self._discard(self.staged)
         work = self.staged / self.version
         work.mkdir(parents=True, mode=0o700)
         try:
@@ -254,18 +262,34 @@ class AppUpdater:
 
     # --- the swap --------------------------------------------------------------------
 
+    def _discard(self, folder: Path) -> None:
+        """Delete a folder that may hold app bundles, unregistering each first: a bundle
+        removed while still registered stays macOS's record of the app."""
+        if folder.is_symlink() or not folder.exists():
+            return
+        # A bundle is a folder with Contents/Info.plist, whatever its name says: the copy
+        # being installed and the retired one are `.<name>.app.installing` / `.previous`.
+        if (folder / "Contents" / "Info.plist").is_file():
+            bundles = [folder]
+        else:
+            bundles = [p for p in folder.rglob("*.app") if p.is_dir() and not p.is_symlink()
+                       and len(p.relative_to(folder).parts) <= 3]
+        for bundle in bundles:
+            self.system.unregister(bundle)
+        shutil.rmtree(folder, ignore_errors=True)
+
     def _swap(self, bundle: Path) -> bool:
         """Copy beside the installed app, then two renames; the old bundle is kept.
         False when the app was opened during the copy: nothing is replaced then."""
         dest = self.app
         installing = dest.parent / f".{APP_NAME}.installing"
         retired = dest.parent / f".{APP_NAME}.previous"
-        shutil.rmtree(installing, ignore_errors=True)
-        shutil.rmtree(retired, ignore_errors=True)
+        self._discard(installing)
+        self._discard(retired)
         self.system.copy(bundle, installing)
         self._check(installing)
         if self.system.running():
-            shutil.rmtree(installing, ignore_errors=True)
+            self._discard(installing)
             return False
         os.rename(dest, retired)
         try:
@@ -273,11 +297,11 @@ class AppUpdater:
         except OSError:
             os.rename(retired, dest)
             raise
-        shutil.rmtree(self.previous, ignore_errors=True)
+        self._discard(self.previous)
         self.previous.mkdir(parents=True, mode=0o700)
         try:
             self.system.copy(retired, self.previous / APP_NAME)
         finally:
-            shutil.rmtree(retired, ignore_errors=True)
+            self._discard(retired)
         self.system.register(dest)
         return True

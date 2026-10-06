@@ -1396,6 +1396,11 @@ class FakeAppSystem:
     def register(self, app):
         self.calls.append(("register", app.name))
 
+    def unregister(self, app):
+        # Recorded with the path, and only while the bundle still exists: forgetting a
+        # bundle after its folder is gone is what left a stale record (2026-10-06).
+        self.calls.append(("unregister", str(app), app.is_dir()))
+
 
 class FakeFetcher:
     def __init__(self, version, zipped=b"synthetic zip bytes", digest_ok=True, signer=SIGNER):
@@ -1463,6 +1468,25 @@ class App(Base):
         self.assertFalse((self.home / "store/app-update").exists())
         self.assertIn(("register", A.APP_NAME), updater.system.calls)
         self.assertEqual(self.step(updater)["result"], "current")
+
+    def test_every_bundle_is_forgotten_before_its_folder_is_deleted(self):
+        # 2026-10-06: a staged NEWER bundle, deleted while still registered, stayed macOS's
+        # record of the app, and the Dock drew a blank icon for the installed one.
+        system = FakeAppSystem(running=True)
+        updater, app = self.updater(system=system)
+        self.step(updater)                       # staged, waiting for the app to quit
+        staged = self.home / "store/app-update/9.9.9" / A.APP_NAME
+        self.assertTrue(staged.is_dir())
+        system.is_running = False
+        updater.fetcher = None
+        self.assertEqual(self.step(updater)["result"], "updated")
+        gone = [(path, existed) for kind, path, existed in
+                (c for c in system.calls if c[0] == "unregister")]
+        self.assertIn((str(staged), True), gone, "the staged bundle is forgotten, while it still exists")
+        self.assertTrue(any(path.endswith(f".{A.APP_NAME}.previous") and existed for path, existed in gone),
+                        "and the retired one beside /Applications")
+        self.assertFalse(any(not existed for _, existed in gone), gone)
+        self.assertFalse((self.home / "store/app-update").exists())
 
     def test_a_running_app_waits_and_is_updated_after_it_quits(self):
         system = FakeAppSystem(running=True)
