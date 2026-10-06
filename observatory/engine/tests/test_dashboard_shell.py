@@ -310,7 +310,7 @@ class AuditFixes(unittest.TestCase):
         src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
         # UX-12: no space between the label and an empty value ("yet ;").
         self.assertIn('<span id="upd-label" data-t>Measured</span><span class="mono" id="upd"></span>', src)
-        self.assertIn('textContent = " " + D.measured', src)
+        self.assertIn('textContent = " " + DATE(D.measured', src)
         # UX-8: a port is an identifier, not a number to group ("47,391").
         self.assertIn("{port: String(H.server_port)", src)
         # UX-9: a lowercase title id reads as a sentence; a {name} first keeps its case.

@@ -397,6 +397,18 @@ class Page(Base):
         self.assertIn("кэш", ru)
         self.assertIn("Nothing was cleaned in the last 7 days.", en)   # empty state, not a blank card
         self.assertIn("git-hygiene.json", json.dumps(summary["degraded"]))
+        # L10N-05: the decimal comma and the unit follow the reader's language.
+        self.assertIn(">1,5 ГБ<", ru)
+        self.assertIn(">1.5 GB<", en)
+        # L10N-01: a page built in one language and read in the other says what
+        # the page built in the reader's language says — every word, size and
+        # date is marked for the page script.
+        sys.path.insert(0, str(ROOT / "tests"))
+        import relocalize
+        for built, reader in (("en", "ru"), ("ru", "en")):
+            got = relocalize.relocalize({"en": en, "ru": ru}[built], reader)
+            want = {"en": en, "ru": ru}[reader]
+            self.assertTrue(got == want, f"{built}→{reader}: " + relocalize.first_difference(got, want))
 
 
 class Unmeasured(Base):

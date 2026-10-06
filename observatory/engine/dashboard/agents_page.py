@@ -61,6 +61,13 @@ def _who(executor: dict | None) -> str:
     return " · ".join(str(p) for p in parts if p) or "—"
 
 
+#: A checkpoint dot's tooltip, one sentence per step status so each language
+#: can agree its own words; a status no sentence knows reads the bare one.
+DOT_TITLE = "step {step}, {at}"
+DOT_TITLES = {"in_progress": "step {step} in progress, {at}", "done": "step {step} done, {at}",
+              "blocked": "step {step} blocked, {at}"}
+
+
 #: Words this page shows that other pages use in another sense ("missing" is a
 #: deleted worktree on the Machine page), so each carries its context in its id.
 def _m(t: Translator, prefix: str, value) -> str:
@@ -83,7 +90,7 @@ def _counters(c: dict, t: Translator) -> str:
              ("Handoffs waiting", c.get("handoffsWaiting", 0), "to be accepted"),
              ("Stalled", c.get("stalled", 0), "silent 30 min"),
              ("Steps kept", c.get("keptSteps", 0), "for review")]
-    cells = "".join(f'<div class="tile">{t.mark(k)}<b>{_e(v)}</b>{t.mark(sub, tag="span")}</div>'
+    cells = "".join(f'<div class="tile">{t.mark(k)}<b>{t.number(v)}</b>{t.mark(sub, tag="span")}</div>'
                     for k, v, sub in tiles)
     return f'<div class="tiles agents-tiles">{cells}</div>'
 
@@ -118,8 +125,8 @@ def _lanes(w: dict, t: Translator) -> str:
             segs.append(f'<span class="agents-arrow" aria-hidden="true">→ '
                         f'{_m(t, "handoff", reason) if reason != "—" else "—"}</span>')
         dots = "".join(
-            f'<span class="agents-dot st-{_e(c.get("status") or "unknown")}" '
-            f'title="{_e(c["stepId"])} {_e(t("step@@" + c["status"]) if c.get("status") else "")} {_e(_stamp(c["at"]))}">'
+            f'<span class="agents-dot st-{_e(c.get("status") or "unknown")}"'
+            f'{t.attr("title", DOT_TITLES.get(c.get("status"), DOT_TITLE), step=c["stepId"], at=_stamp(c["at"]))}>'
             f'{_e(c["stepId"])}</span>' for c in s.get("checkpoints") or [])
         ended = ""
         if s.get("state") == "ended" and s.get("endedReason"):
@@ -142,15 +149,15 @@ def _events(w: dict, t: Translator) -> str:
     items = []
     for s in w.get("segments") or []:
         arrived = (s.get("arrivedBy") or {}).get("reason")
-        items.append(f'<li>{_e(_stamp(s.get("from")))}: {_e(_who(s.get("executor")))} '
+        items.append(f'<li>{t.date(_stamp(s.get("from")))}: {_e(_who(s.get("executor")))} '
                      f'{t.mark("took the workflow")} '
                      f'({_m(t, "handoff", arrived) if arrived else t.mark("started it")})</li>')
         for c in s.get("checkpoints") or []:
-            items.append(f'<li>{_e(_stamp(c["at"]))}: {t.mark("step {step}", step=c["stepId"])} '
+            items.append(f'<li>{t.date(_stamp(c["at"]))}: {t.mark("step {step}", step=c["stepId"])} '
                          f'{_m(t, "step", c.get("status"))}</li>')
     for o in w.get("offers") or []:
         state = t.mark("offered") if o["state"] == "offered" else _m(t, "lease-end", o["state"])
-        items.append(f'<li>{_e(_stamp(o.get("at")))}: {t.mark("handoff to")} {_e(_who(o.get("to")))} '
+        items.append(f'<li>{t.date(_stamp(o.get("at")))}: {t.mark("handoff to")} {_e(_who(o.get("to")))} '
                      f'({_m(t, "handoff", o.get("reason"))}) — {state}</li>')
     return f'<ol class="agents-events visually-hidden-list">{"".join(items)}</ol>'
 
@@ -204,8 +211,8 @@ def _sessions(sessions: list[dict], t: Translator, names: dict | None = None) ->
             "<tr>"
             f'<td{t.attr("data-label", "Session")}><span class="mono">{_e((s.get("sessionId") or "")[:8])}</span> {live}</td>'
             f'<td{t.attr("data-label", "Project")}>{_project(s.get("projectId"), names)}</td>'
-            f'<td{t.attr("data-label", "Last turn")}>{_e(_stamp(s.get("lastTurnAt")))}</td>'
-            f'<td{t.attr("data-label", "Turns")} class="num">{_e(s.get("turns"))}</td>'
+            f'<td{t.attr("data-label", "Last turn")}>{t.date(_stamp(s.get("lastTurnAt")))}</td>'
+            f'<td{t.attr("data-label", "Turns")} class="num">{t.number(s.get("turns"))}</td>'
             f'<td{t.attr("data-label", "Workflow")}><span class="mono">{_e(s.get("workflowId") or "—")}</span></td>'
             "</tr>")
     return (f'<section class="card panel">{t.mark("Sessions", tag="h2", attrs=HEADING)}'
@@ -270,7 +277,7 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
                 return t.mark("the store predates agent memory; the next engine start migrates it")
             if code == "unreadable":
                 return t.mark("unreadable: {error}", error=d.get("reason", ""))
-            return _e(d.get("reason"))
+            return t.known(d.get("reason"))
         items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span> — {reason(d)}</li>'
                         for d in degraded)
         parts.append(f'<section class="card panel">{t.mark("Not read", tag="h2", attrs=HEADING)}<ul>{items}</ul></section>')
@@ -283,7 +290,7 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
 
 #: Values translated through `t(...)` with a variable argument (see DYNAMIC_IDS in
 #: tests/test_i18n.py).
-DYNAMIC = ("Sessions working", "turn in the last hour", "Workflows open",
+DYNAMIC = (DOT_TITLE, *DOT_TITLES.values(), "Sessions working", "turn in the last hour", "Workflows open",
            "held by an executor", "Handoffs waiting", "to be accepted", "Stalled",
            "silent 30 min", "Steps kept", "for review", "Session", "Project", "Last turn",
            "Turns", "Workflow", "{n} s", "{n} min", "{n} h", "{n} d",

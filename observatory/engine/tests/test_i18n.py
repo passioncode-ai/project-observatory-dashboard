@@ -10,8 +10,20 @@ What this proves, offline:
   (`Intl.PluralRules`, run in Node when it is installed);
 * the workspace setting `interface.locale` accepts `en`/`ru` only, defaults to
   English, and is written by `configure interface locale`;
+* the reader's language is resolved as the organisation's standard says
+  (L10N-01): the switch's choice, else the system's first language (`ru`,
+  `ru-*` → Russian, anything else English), else the build's — for `ru-RU`,
+  `ru`, `en-US`, an empty list and an unknown stored value;
+* the Russian catalog uses the organisation's glossary (L10N-06): «задача» for
+  a workflow, «резервная копия» for a backup, «хранилище» for the vault,
+  «аккаунт» for an account — never «процесс», «бэкап» or «учётная запись»;
+* text the engine writes in English (a refusal, a degraded reason) reads in
+  Russian where the catalog holds it and as written otherwise (L10N-04), and
+  dates and numbers follow the language (L10N-05);
 * pages built in each language say so in `lang`, carry the reader's switch, and
   an English page holds no Russian except the switch's own name for Russian;
+  a page built in one language and re-translated by the page script reads as
+  the page built in the other;
 * the PassionCode design tokens are the vendored bytes the manifest pins.
 """
 from __future__ import annotations
@@ -36,6 +48,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 import i18n  # noqa: E402
 import tmp  # noqa: E402
 import shell  # noqa: E402
+import relocalize  # noqa: E402
 
 CYRILLIC = re.compile(r"[Ѐ-ӿ]")
 PLACEHOLDER = re.compile(r"\{([a-z_][a-z0-9_]*)\}")
@@ -424,6 +437,211 @@ class StaticMarkup(unittest.TestCase):
         self.assertIn('x.title = "Findings";', out)
 
 
+def _template_source() -> str:
+    """The template as written, before any build substitutes into it."""
+    tree = ast.parse((DASH / "build_dashboard.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "TEMPLATE" for t in node.targets):
+            return node.value.value
+    raise AssertionError("no TEMPLATE")
+
+
+def _resolver_source() -> str:
+    """`LOCALE_RESOLVER` as the builder substitutes it into both scripts."""
+    tree = ast.parse((DASH / "build_dashboard.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "LOCALE_RESOLVER" for t in node.targets):
+            template = node.value.func.value.value  # r"""…""".replace("__LOCALES__", …)
+            return template.replace("__LOCALES__", json.dumps(list(i18n.LOCALES)))
+    raise AssertionError("no LOCALE_RESOLVER")
+
+
+def _node(script: str):
+    node = shutil.which("node")
+    if not node:
+        raise unittest.SkipTest("node is not installed; the page's resolver cannot be run")
+    done = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=60)
+    if done.returncode:
+        raise AssertionError(done.stderr[-500:])
+    return json.loads(done.stdout)
+
+
+class ReaderLanguage(unittest.TestCase):
+    """L10N-01: the system language decides, a switch overrides."""
+
+    #: (stored choice, navigator.languages, build locale) → the page's language.
+    CASES = (
+        (None, ["ru-RU"], "en", "ru"),
+        (None, ["ru"], "en", "ru"),
+        (None, ["en-US"], "ru", "en"),
+        (None, ["en-US", "ru-RU"], "ru", "en"),        # the FIRST language decides
+        (None, ["de-DE", "ru"], "ru", "en"),           # a language we lack reads English
+        (None, ["RU_ru"], "en", "ru"),                 # case and separator do not matter
+        (None, [], "en", "en"),                        # no system language: the build's
+        (None, [], "ru", "ru"),
+        ("system", ["ru-RU"], "en", "ru"),             # "System" follows the system
+        ("de", ["ru-RU"], "en", "ru"),                 # an unknown stored value falls through
+        ("", ["en-US"], "ru", "en"),
+        ("en", ["ru-RU"], "ru", "en"),                 # the reader's choice wins
+        ("ru", ["en-US"], "en", "ru"),
+        ("ru", [], "en", "ru"),
+        (None, [], "fr", "en"),                        # a build locale we lack: English
+    )
+
+    def test_the_resolver_follows_the_standard(self):
+        cases = json.dumps([list(c[:3]) for c in self.CASES])
+        got = _node(_resolver_source() + f";console.log(JSON.stringify({cases}.map(c => observatoryLocale(...c))))")
+        for case, answer in zip(self.CASES, got):
+            self.assertEqual(answer, case[3], f"stored={case[0]!r} languages={case[1]} build={case[2]}")
+
+    def test_the_system_languages_come_from_the_navigator(self):
+        got = _node(_resolver_source() + ";console.log(JSON.stringify(["
+                    "observatorySystemLanguages({languages: ['ru-RU', 'en']}),"
+                    "observatorySystemLanguages({languages: [], language: 'ru'}),"
+                    "observatorySystemLanguages({}),"
+                    "observatorySystemLanguages(null)]))")
+        self.assertEqual(got, [["ru-RU", "en"], ["ru"], [], []])
+
+    def test_the_switch_offers_system_english_russian(self):
+        for locale, system in (("en", "System"), ("ru", "Системный")):
+            markup = shell.locale_switch_html(i18n.Translator(locale))
+            self.assertEqual(re.findall(r'data-locale="([a-z]+)"', markup), ["system", "en", "ru"])
+            self.assertIn(f">{system}</button>", markup)
+            # Each language names itself in itself, in every language.
+            self.assertIn('lang="en" aria-pressed="false">English</button>', markup)
+            self.assertIn('lang="ru" aria-pressed="false">Русский</button>', markup)
+
+    def test_the_choice_is_kept_by_the_reader_and_system_forgets_it(self):
+        template = _template_source()
+        self.assertIn('if (choice === "system") localStorage.removeItem(LOCALE_KEY);', template)
+        self.assertIn("else localStorage.setItem(LOCALE_KEY, choice);", template)
+        self.assertIn("observatoryLocale(choice, observatorySystemLanguages(), BUILD_LOCALE)", template)
+
+
+#: L10N-06: an English term in a message id, the Russian stem its translation
+#: must use, and the stems it must not. The English is matched in the id with its
+#: placeholders removed; `vault.py` and `vault:` are code, "accounts for" a verb.
+GLOSSARY = (
+    (re.compile(r"\bworkflows?\b", re.I), "задач", ("процесс",)),
+    (re.compile(r"\bbackups?\b", re.I), "резервн", ("бэкап", "бекап")),
+    (re.compile(r"\bvault\b(?![.:])", re.I), "хранилищ", ()),
+    (re.compile(r"\baccounts?\b(?! for)", re.I), "аккаунт", ("учётн", "учетн")),
+    (re.compile(r"\bKeychain\b"), "Связк", ("keychain",)),
+    (re.compile(r"\bTerminal\b"), "Терминал", ()),
+    (re.compile(r"\bRestart to update\b"), "Перезапустить для обновления", ()),
+    (re.compile(r"\bInstall updates automatically\b"), "Устанавливать обновления автоматически", ()),
+)
+#: Variants the glossary replaced, wherever they appear.
+BANNED_ANYWHERE = re.compile(r"бэкап|бекап|учётн\w* запис|учетн\w* запис|воркфло", re.I)
+
+
+class Glossary(unittest.TestCase):
+    def forms(self, entry):
+        return list(entry.values()) if isinstance(entry, dict) else [entry]
+
+    def test_every_glossary_term_reads_as_the_organisation_says(self):
+        for msgid, entry in i18n.catalog("ru").items():
+            english = PLACEHOLDER.sub("", i18n.english(msgid))
+            for term, stem, banned in GLOSSARY:
+                if not term.search(english):
+                    continue
+                for form in self.forms(entry):
+                    text = PLACEHOLDER.sub("", form).lower()
+                    with self.subTest(msgid=msgid, term=term.pattern):
+                        self.assertIn(stem.lower(), text, f"{msgid!r} → {form!r}")
+                        for word in banned:
+                            self.assertNotIn(word.lower(), text, f"{msgid!r} → {form!r}")
+
+    def test_no_replaced_variant_is_left(self):
+        for msgid, entry in i18n.catalog("ru").items():
+            for form in self.forms(entry):
+                self.assertIsNone(BANNED_ANYWHERE.search(form), f"{msgid!r} → {form!r}")
+
+    def test_the_workflows_word_is_reserved_for_workflows(self):
+        # «задача» is a workflow; a background job is «задание», so one Russian
+        # word never names two things on one screen.
+        for msgid, entry in i18n.catalog("ru").items():
+            if any("задач" in form.lower() for form in self.forms(entry)):
+                self.assertRegex(i18n.english(msgid), re.compile(r"workflow", re.I), msgid)
+
+    def test_the_glossary_test_catches_a_banned_variant(self):
+        # The check above, watched failing: a catalog that says «процесс» for a
+        # workflow and «бэкап» for a backup is refused.
+        planted = {"Workflows": "Процессы", "full backup": "полный бэкап"}
+        for msgid, form in planted.items():
+            english = PLACEHOLDER.sub("", i18n.english(msgid))
+            hit = [stem for term, stem, banned in GLOSSARY if term.search(english)
+                   and (stem not in form.lower() or any(b in form.lower() for b in banned))]
+            self.assertTrue(hit, msgid)
+            self.assertIsNotNone(BANNED_ANYWHERE.search("полный бэкап"))
+
+
+class Formats(unittest.TestCase):
+    """L10N-05: dates and numbers in the reader's format, the same in the
+    builder and in the page script."""
+
+    DATES = ("2026-01-02", "2026-01-02T03:04:05Z", "2026-01-02 03:04 UTC", "2026-01-02T03:04:05.123+00:00",
+             "2026-01-02 03:04", "not a date", "—", "")
+    NUMBERS = (0, 7, 1200, 1234567, 1.5, 2.0, 1234.5)
+
+    def test_python(self):
+        self.assertEqual(i18n.format_date("2026-01-02", "ru"), "02.01.2026")
+        self.assertEqual(i18n.format_date("2026-01-02T03:04:05Z", "ru"), "02.01.2026 03:04:05 UTC")
+        self.assertEqual(i18n.format_date("2026-01-02 03:04 UTC", "en"), "2026-01-02 03:04 UTC")
+        self.assertEqual(i18n.format_date("—", "ru"), "—")
+        self.assertEqual(i18n.format_number(1234.5, "ru"), "1\u00a0234,5")
+        self.assertEqual(i18n.format_number(2.0, "en"), "2")
+        self.assertEqual(i18n.translate("newest {date}, taken before the last update", "ru", date="2026-01-02"),
+                         "последняя 02.01.2026, сделана перед последним обновлением")
+
+    def test_the_page_script_formats_as_the_builder_does(self):
+        template = _template_source()
+        date_js = template[template.index("const DATE_RE"):template.index("// A number argument")]
+        argnum_js = template[template.index("const ARGNUM"):template.index("// TEXT THE ENGINE WROTE")]
+        for locale in i18n.LOCALES:
+            script = (f"const LOCALE = {json.dumps(locale)}; const NUM = v => Number(v).toLocaleString(LOCALE);"
+                      + date_js + argnum_js
+                      + f";console.log(JSON.stringify([{json.dumps(self.DATES)}.map(DATE),"
+                        f" {json.dumps(self.NUMBERS)}.map(ARGNUM)]))")
+            dates, numbers = _node(script)
+            self.assertEqual(dates, [i18n.format_date(d, locale) for d in self.DATES], locale)
+            self.assertEqual(numbers, [i18n.format_number(n, locale) for n in self.NUMBERS], locale)
+
+
+class EngineText(unittest.TestCase):
+    """L10N-04: errors are translated where they are shown, not where they are made."""
+
+    def test_a_known_refusal_reads_in_russian_and_an_unknown_one_as_written(self):
+        ru = i18n.Translator("ru")
+        known = ru.known("the store does not exist yet")
+        self.assertIn(">хранилище ещё не создано<", known)
+        self.assertIn('data-t="the store does not exist yet"', known, "the English stays the identity")
+        self.assertIn(">a refusal nobody translated<", ru.known("a refusal nobody translated"))
+        # Never a key, never an object: a plural id or a context id is not a
+        # translation of the text that happens to equal it.
+        self.assertEqual(ru.known("{n} projects"), "{n} projects")
+        self.assertEqual(ru.known("unreadable: {error}"), "unreadable: {error}")
+        self.assertEqual(ru.known("domain@@not measured"), "domain@@not measured")
+        self.assertEqual(ru.known(None), "")
+
+    def test_the_page_translates_what_the_server_refused(self):
+        template = _template_source()
+        self.assertIn("const refused = Kind => Object.assign(new Kind(KNOWN(said)), {refusal: said});", template)
+        for shown in ("E(KNOWN(g.reason))", "E(KNOWN(d.reason))"):
+            self.assertIn(shown, template)
+        known_js = template[template.index("function KNOWN(text)"):template.index("// T(\"{n} projects\"")]
+        catalog = json.dumps({"ru": {"the store does not exist yet": "хранилище ещё не создано",
+                                     "unreadable: {error}": "нечитаемо: {error}",
+                                     "{n} projects": {"one": "{n} проект", "other": "{n} проекта"}}},
+                             ensure_ascii=False)
+        got = _node(f"const I18N = {catalog}; const LOCALE = 'ru';" + known_js
+                    + ";console.log(JSON.stringify([KNOWN('the store does not exist yet'),"
+                      " KNOWN('GET only — this server changes nothing'), KNOWN('{n} projects'),"
+                      " KNOWN('unreadable: {error}'), KNOWN(null)]))")
+        self.assertEqual(got, ["хранилище ещё не создано", "GET only — this server changes nothing", "{n} projects",
+                               "unreadable: {error}", ""])
+
+
 class WorkspaceSetting(unittest.TestCase):
     def setUp(self):
         self.home = Path(tmp.mkdtemp(prefix="observatory-locale-")).resolve()
@@ -495,18 +713,43 @@ class BuiltPages(unittest.TestCase):
         for locale in i18n.LOCALES:
             text = self.page(locale)
             self.assertIn(f'<html lang="{locale}" data-theme="dark" data-build-locale="{locale}">', text)
-            self.assertEqual(text.count('data-locale="'), len(i18n.LOCALES))
+            # System, then each language by its own name (L10N-01).
+            self.assertEqual(text.count('data-locale="'), len(i18n.LOCALES) + 1)
+            self.assertIn('data-locale="system"', text)
             self.assertIn('class="locale-switch"', text)
+            self.assertIn('lang="ru" aria-pressed="false">Русский</button>', text)
+            self.assertIn('lang="en" aria-pressed="false">English</button>', text)
 
     def test_english_pages_hold_no_russian(self):
         for name, _title, _kind in shell.PAGES:
-            text = self.page("en", name).replace('title="Русский"', "")
+            text = self.page("en", name).replace('lang="ru" aria-pressed="false">Русский<', "")
             self.assertIsNone(CYRILLIC.search(text), f"{name}.html: {CYRILLIC.search(text) and text[CYRILLIC.search(text).start()-60:][:120]!r}")
 
     def test_russian_pages_are_russian(self):
         text = self.page("ru")
         for words in ("<title>Обзор — Project Observatory</title>", ">Обзор</h1>", ">Находки<", "Часть набора инструментов PassionCode"):
             self.assertIn(words, text)
+
+    def test_a_page_built_in_one_language_reads_in_the_other(self):
+        """L10N-01 makes a build in one language and a reader in the other the
+        common case: the workspace builds in English, a Russian system reads
+        it. Re-translated as the page script does it, every page must say what
+        the page built in the reader's language says — a string rendered
+        without a mark would survive in the build's language."""
+        for name, _title, _kind in shell.PAGES:
+            for built, reader in (("en", "ru"), ("ru", "en")):
+                with self.subTest(page=name, built=built, reader=reader):
+                    got = relocalize.comparable(relocalize.relocalize(self.page(built, name), reader))
+                    want = relocalize.comparable(self.page(reader, name))
+                    self.assertTrue(got == want, relocalize.first_difference(got, want))
+
+    def test_both_scripts_resolve_with_one_function(self):
+        head = self.page("en")
+        js = (self.dirs["en"] / shell.ASSET_JS).read_text(encoding="utf-8")
+        for text in (head[:head.index("<link rel=\"stylesheet\"")], js):
+            self.assertIn("function observatoryLocale(stored, languages, fallback)", text)
+            self.assertNotIn("__LOCALE_RESOLVER__", text)
+        self.assertIn('localStorage.getItem("observatory.locale")', head[:head.index("<link rel=\"stylesheet\"")])
 
     def test_the_script_carries_both_catalogs(self):
         js = (self.dirs["en"] / shell.ASSET_JS).read_text(encoding="utf-8")

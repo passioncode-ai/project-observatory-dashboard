@@ -182,7 +182,8 @@ def known_names(section: str) -> frozenset:
     return frozenset(names)
 
 def interface_locale(base: Path | None = None) -> str:
-    """The dashboard's language for this workspace: `interface.locale`, else English."""
+    """The language this workspace builds its pages in: `interface.locale`, else English.
+    A reader's browser decides its own (dashboard/i18n.py, L10N-01)."""
     return load(base).get("interface", {}).get("locale", "en")
 
 def load(base: Path | None = None) -> dict:
