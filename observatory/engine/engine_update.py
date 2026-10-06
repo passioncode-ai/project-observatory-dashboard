@@ -195,9 +195,33 @@ def plugin_advice() -> str:
         return generic
 
 
-def release_source(repository: str | None = None, api: str | None = None) -> tuple[str, str]:
-    repo = repository or os.environ.get(REPOSITORY_ENV) or default_repository()
-    base = (api or os.environ.get(API_ENV) or DEFAULT_API).rstrip("/")
+def development_build(origin: Callable[[], dict] | None = None) -> bool:
+    """A checkout or an editable install — anything but the installed release wheel."""
+    try:
+        return (origin or install_origin)().get("kind") != "wheel"
+    except Exception:  # noqa: BLE001 — undecidable is treated as a release: overrides ignored
+        return False
+
+
+def release_source(repository: str | None = None, api: str | None = None,
+                   origin: Callable[[], dict] | None = None) -> tuple[str, str]:
+    """The release feed: the organization's repository on GitHub's API.
+
+    LC-16: a feed the environment can redirect belongs to a development build, never to
+    a release. OBSERVATORY_RELEASE_REPOSITORY and OBSERVATORY_RELEASE_API are therefore
+    honoured only when this engine runs from a checkout or an editable install; an
+    installed wheel ignores them and says so on stderr. `--repository` and `--api-url`
+    on the command line stay a person's explicit choice (a fork, a mirror); the automatic
+    job never passes them. Whatever the feed, the signature is checked against the key
+    pinned in the engine."""
+    env_repo, env_api = os.environ.get(REPOSITORY_ENV), os.environ.get(API_ENV)
+    if (env_repo or env_api) and not development_build(origin):
+        print(f"Observatory: {REPOSITORY_ENV} and {API_ENV} are ignored: an installed release reads "
+              "only the organization's feed (use --repository / --api-url to choose another)",
+              file=sys.stderr)
+        env_repo = env_api = None
+    repo = repository or env_repo or default_repository()
+    base = (api or env_api or DEFAULT_API).rstrip("/")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}", repo):
         raise UpdateError("Release repository must be OWNER/NAME")
     return check_url(base), repo
@@ -984,7 +1008,7 @@ class Transaction:
             if cached:
                 return cached
         try:
-            api, repo = release_source(self.args.repository, self.args.api_url)
+            api, repo = release_source(self.args.repository, self.args.api_url, self.deps.origin)
             release = resolve_release(self.deps.fetcher, api, repo, self.current)
             folder = work / "rollback"
             folder.mkdir(mode=0o700)
@@ -1015,6 +1039,15 @@ class Transaction:
         if services is None or not services.available():
             raise UpdateError("launchd is not available here, so this command cannot stop the scheduler it did not "
                               "install; stop your own tick and server, then pass --writers-stopped")
+        if getattr(self.args, "unattended", False):
+            # The automatic pass never stops a tick mid-run (it checked before starting this
+            # update; this closes the window since). A person's --apply stops it as before.
+            try:
+                with workspace_upgrade.operation_lock(self.base):
+                    pass
+            except config.ConfigurationError:
+                raise UpdateError("A tick or another workspace operation is running, so the workspace is busy; "
+                                  "the automatic update waits for it and nothing was changed") from None
         jobs = [j for j in services.managed() if services.loaded(j["label"])]
         for job in jobs:
             if not Path(job["plist"]).is_file():
@@ -1261,8 +1294,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--unattended", action="store_true",
                     help="the automatic pass: a release that declares a step needing a person is verified, "
                          f"not installed (exit {EXIT_HELD})")
-    ap.add_argument("--repository", help=f"OWNER/NAME of the release source (default: the plugin's repository, or ${REPOSITORY_ENV})")
-    ap.add_argument("--api-url", help=f"GitHub API base (default {DEFAULT_API}, or ${API_ENV})")
+    ap.add_argument("--repository", help=f"OWNER/NAME of the release source (default: the plugin's repository; ${REPOSITORY_ENV} only in a development build)")
+    ap.add_argument("--api-url", help=f"GitHub API base (default {DEFAULT_API}; ${API_ENV} only in a development build)")
     return ap
 
 
@@ -1321,7 +1354,7 @@ def main(argv: list[str], deps: Dependencies | None = None) -> int:
         base = config.home()
         if args.version:
             config.version_tuple(args.version)
-        api, repo = release_source(args.repository, args.api_url)
+        api, repo = release_source(args.repository, args.api_url, deps.origin)
         release = resolve_release(deps.fetcher, api, repo, args.version)
         if args.check:
             code, result = check_result(current, release)

@@ -874,7 +874,8 @@ Writing a verified release to disk and starting to run it are two moments. The u
 restarts this workspace's tick and local server on the new code, and the job does that only
 at a safe point: when the local server has answered no page and no agent in the last five
 minutes (a host's `/health` probe, the service document and the events feed do not count),
-and no memory-http client has called in that time. Otherwise the release is recorded as
+no memory-http client has called in that time, and no tick or other workspace operation is
+running (the update would stop the tick half-way). Otherwise the release is recorded as
 `deferred`, `auto-update status` and Health show it as ready, and the next hourly pass tries
 again. A `full update --apply` you run yourself installs at once.
 
@@ -950,9 +951,12 @@ copy is kept beside it as `<home>.failed-update-…`. Every step is a line in
 
 It refuses a downgrade, the same version without `--reinstall`, and a source checkout or
 editable install (update those with Git). `--version X.Y.Z` pins the target; `--repository
-OWNER/NAME` and `--api-url URL` (or `OBSERVATORY_RELEASE_REPOSITORY`,
-`OBSERVATORY_RELEASE_API`) select a fork or a mirror. Only HTTPS is accepted, except to
-this machine.
+OWNER/NAME` and `--api-url URL` select a fork or a mirror; the signature is still checked
+against the organization's key pinned in the engine. The environment variables
+`OBSERVATORY_RELEASE_REPOSITORY` and `OBSERVATORY_RELEASE_API` do the same only in a
+development build (a checkout or an editable install): an installed release ignores them
+and says so, because a feed the environment can redirect is not a release's (LC-16). Only
+HTTPS is accepted, except to this machine.
 
 | Exit | `--check` | `--apply` |
 |---|---|---|

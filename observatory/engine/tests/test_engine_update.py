@@ -647,6 +647,47 @@ class UpdateTest(unittest.TestCase):
         self.run_cli("--check")
         self.assertEqual(self.events()[-1], ("update_check", "check_failed"))
 
+    def test_an_unattended_update_never_stops_a_running_tick(self):
+        import fcntl
+        self.gh.publish(NEWER)
+        before = self.tree()
+        fd = os.open(self.home / "store" / "tick.lock", os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            code, doc = self.run_cli("--apply", "--unattended")
+        finally:
+            os.close(fd)
+        self.assertEqual(code, self.mod.EXIT_REFUSED, doc)
+        self.assertIn("is busy", doc["error"], "a momentary refusal: the job retries the next hour")
+        self.assertFalse([c for c in self.services.calls if c[0] in ("stop", "start")], "the tick was not stopped")
+        self.assertEqual(self.installer.calls, [])
+        self.assertEqual(self.tree(), before)
+
+    def test_the_feed_cannot_be_redirected_from_the_environment_of_a_release(self):
+        # LC-16: a feed the environment can override is a development build's, never a release's.
+        wheel = lambda: {"kind": "wheel", "version": CURRENT}       # noqa: E731
+        checkout = lambda: {"kind": "source", "why": "a checkout"}  # noqa: E731
+        from tools import agent_plugin
+        env = {self.mod.REPOSITORY_ENV: "someone/else", self.mod.API_ENV: "https://mirror.example.com"}
+        err = io.StringIO()
+        with patch.dict(os.environ, env), contextlib.redirect_stderr(err):
+            self.assertEqual(self.mod.release_source(origin=wheel), (self.mod.DEFAULT_API, agent_plugin.REPOSITORY))
+            self.assertIn("ignored", err.getvalue())
+            self.assertEqual(self.mod.release_source(origin=checkout), ("https://mirror.example.com", "someone/else"))
+            # A person's explicit flags still choose a fork or a mirror; the key stays pinned.
+            self.assertEqual(self.mod.release_source("fork/name", "https://api.github.com", origin=wheel),
+                             ("https://api.github.com", "fork/name"))
+        # Through the command: an installed release with the variables set reads the
+        # organization's feed, so the fake server named only by the variable is never asked.
+        self.gh.publish(NEWER)
+        out = io.StringIO()
+        with patch.dict(os.environ, {self.mod.REPOSITORY_ENV: REPO, self.mod.API_ENV: self.gh.api}), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()), \
+                patch.object(self.mod.Fetcher, "get_json", side_effect=self.mod.Undetermined("offline")):
+            code = self.mod.main(["--check"], self.deps())
+        self.assertEqual(code, self.mod.EXIT_UNDETERMINED)
+        self.assertEqual(self.gh.requests, [], "the redirected feed was not read")
+
     def test_a_tampered_package_and_a_failed_install_are_logged_by_code(self):
         self.gh.publish(NEWER, digest="0" * 64)
         self.assertEqual(self.run_cli("--apply")[0], self.mod.EXIT_REFUSED)

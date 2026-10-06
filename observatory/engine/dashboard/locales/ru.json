@@ -1925,7 +1925,6 @@
  "bindings refused, only the local agent is served: {reason}": "привязки отклонены, обслуживается только локальный агент: {reason}",
  "updates and backups": "обновления и резервные копии",
  "not scheduled on this machine — new releases and daily backups wait for a person": "не запланированы на этой машине — новые версии и ежедневные резервные копии ждут человека",
- "updates": "обновления",
  "Install updates automatically": "Устанавливать обновления автоматически",
  "off — new releases are not installed by themselves": "выключены — новые версии сами не ставятся",
  "installed by themselves; last check {date}: {result}": "ставятся сами; последняя проверка {date}: {result}",

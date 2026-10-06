@@ -119,13 +119,17 @@ def test_every_route_answers_and_none_serves_a_value() -> None:
               "the heartbeat must go through OBSERVATORY_SCRATCH or tests write the live one")
         # LC-16: a host's probe is not a client an update would interrupt; a page or an
         # agent asking anything else is.
-        check("a probe alone is no client", (health.get("clients") or {}).get("recent") is False,
-              str(health.get("clients")))
+        # Read from the receipt, which the update job reads; the published /health keeps
+        # its shape (fabric-service/0.1) and does not carry `clients`.
+        receipt = lambda: json.loads((work / "scratch/serverd.json").read_text(encoding="utf-8"))  # noqa: E731
+        check("/health keeps its published shape", "clients" not in health, str(sorted(health)))
+        check("a probe alone is no client", (receipt().get("clients") or {}).get("recent") is False,
+              str(receipt().get("clients")))
         code, remote = get("/remote")
         code2, health = get("/health")
+        clients = receipt().get("clients") or {}
         check("a request other than a probe makes the server's clients recent",
-              (health.get("clients") or {}).get("recent") is True
-              and (health.get("clients") or {}).get("window_s") == 300, str(health.get("clients")))
+              clients.get("recent") is True and clients.get("window_s") == 300, str(clients))
         check("/remote summarises the sync states", code == 200 and "states" in remote,
               str(remote)[:120])
         check("and counts what is at risk", isinstance(remote.get("at_risk_total"), int))

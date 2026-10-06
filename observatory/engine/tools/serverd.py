@@ -641,7 +641,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif route == "/fabric/v1/events":
             self._events()
         elif route == "/health":
-            self._json(heartbeat())
+            # The published health document keeps its shape (fabric-service/0.1): the
+            # `clients` field is the update job's input and stays in the receipt file.
+            self._json({k: v for k, v in heartbeat().items() if k != "clients"})
         elif route == "/remote":
             self._json(refresh_remote())
         elif route == "/leaks":
