@@ -513,6 +513,11 @@ def live_clients(base: Path, at: datetime.datetime) -> list[str]:
     store/logs/access.jsonl. A receipt older than the age the server itself calls silent
     is a server that is not running, and so has no client to interrupt."""
     reasons = []
+    # A tick or another workspace operation in progress: the update would stop it halfway
+    # (2026-10-06 21:37:05Z, an automatic update stopped the tick that began at 21:36:08Z
+    # and it never finished). The daily snapshot already waits for the same lock.
+    if _tick_busy(base):
+        reasons.append("a tick or another workspace operation is running")
     receipt = base / "store" / "raw" / "serverd.json"
     try:
         doc = json.loads(receipt.read_text(encoding="utf-8")) if receipt.is_file() and not receipt.is_symlink() else {}

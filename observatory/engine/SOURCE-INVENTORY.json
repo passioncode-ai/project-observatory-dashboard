@@ -1150,8 +1150,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fd5012d110e640dd496b7b6518560eb9d99f9588200c2477e462f0de69640ab4",
-      "bytes": 68111
+      "export_sha256": "f0c57c2b2143496b90958a6feb1afa857ac5e92cc6b39c11896b87db2588dd3d",
+      "bytes": 68473
     },
     {
       "path": "mcp/capability_tools.py",
@@ -2683,8 +2683,8 @@
       "path": "tests/test_maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4958b0894e1841d70f7ac66932d267514615038468cab15536e7860a20bef87c",
-      "bytes": 108252
+      "export_sha256": "ab8ea1bb61e5bcc915a4e497ef6315f691bcb0a11dcf02451143bc7e1d9a2f48",
+      "bytes": 109048
     },
     {
       "path": "tests/test_mcp_inventory.py",

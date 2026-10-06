@@ -872,6 +872,18 @@ class Pass(Base):
         self.assertEqual(later["update"]["result"], "updated")
         self.assertEqual(commands.calls[-1][0], ("update", "--apply", "--unattended"))
 
+    def test_a_running_tick_defers_the_update_instead_of_stopping_it(self):
+        # 2026-10-06: an automatic update stopped the tick that had started a minute
+        # earlier, and it never finished. The real lock, held as a tick holds it.
+        commands = FakeCommands(check=10, apply=0)
+        with workspace_upgrade.operation_lock(self.home):
+            report = self.run_pass(commands)
+        self.assertEqual(report["update"]["result"], "deferred")
+        self.assertIn("tick", report["update"]["detail"])
+        self.assertEqual([c[0] for c in commands.calls], [("update", "--check")], "nothing installed")
+        later = self.run_pass(commands, at=AT + datetime.timedelta(hours=1))
+        self.assertEqual(later["update"]["result"], "updated", "the next pass, the tick done")
+
     def test_a_silent_server_and_a_probe_are_no_clients(self):
         self.receipt(AT - datetime.timedelta(hours=1), recent=True)      # the server stopped an hour ago
         self.assertEqual(M.live_clients(self.home, AT), [])
