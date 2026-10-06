@@ -224,8 +224,12 @@ class Fetcher:
     def __init__(self, timeout: float = 20.0, attempts: int = 3, sleep: Callable[[float], None] = time.sleep):
         self.timeout, self.attempts, self.sleep = timeout, max(1, attempts), sleep
         self.opener = urllib.request.build_opener(_Redirects())
+        # A token GitHub refused once is not offered again by this fetcher: one notice,
+        # then anonymous reads for the rest of the run (A13 review: it used to be retried,
+        # and announced, on every request).
+        self.token_refused = False
 
-    def _open(self, url: str, accept: str):
+    def _open(self, url: str, accept: str, anonymous: bool = False):
         check_url(url)
         headers = {"Accept": accept, "User-Agent": f"project-observatory/{config.VERSION} (update)",
                    "X-GitHub-Api-Version": "2022-11-28"}
@@ -233,7 +237,8 @@ class Fetcher:
         # 0.14.0's update for about an hour on a busy machine. The token goes only in a
         # header, only to api.github.com — `_Redirects` drops it before any other host —
         # and is never logged, printed or stored.
-        token = github_token() if urllib.parse.urlsplit(url).hostname == API_HOST else None
+        token = None if anonymous or self.token_refused else (
+            github_token() if urllib.parse.urlsplit(url).hostname == API_HOST else None)
         if token:
             headers["Authorization"] = f"Bearer {token}"
         request = urllib.request.Request(url, headers=headers)
@@ -243,6 +248,13 @@ class Fetcher:
                 return self.opener.open(request, timeout=self.timeout)
             except urllib.error.HTTPError as exc:
                 exc.close()
+                if exc.code == 401 and token:
+                    # A token that expired or was revoked: read anonymously instead of failing
+                    # every check until a person notices (audit A13). Said once, never the token.
+                    self.token_refused = True
+                    print("Observatory: the GitHub token was refused (HTTP 401); reading anonymously "
+                          "for the rest of this run", file=sys.stderr)
+                    return self._open(url, accept, anonymous=True)
                 if exc.code == 404:
                     raise UpdateError(f"{urllib.parse.urlsplit(url).path} was not found", EXIT_REFUSED) from None
                 if exc.code == 403 and (exc.headers.get("X-RateLimit-Remaining") == "0"):
@@ -312,6 +324,7 @@ class Release:
     page: str | None
     wheel: Asset | None
     sums: Asset | None
+    signature: Asset | None = None
 
     def installable(self) -> str:
         """Empty when installable; otherwise why not."""
@@ -345,8 +358,10 @@ def parse_release(doc: dict, expected: str | None = None) -> Release:
               if isinstance(row, dict) and isinstance(row.get("name"), str)}
     wheel = assets.get(WHEEL.format(version=version))
     sums = assets.get(SUMS)
+    signature = assets.get(SUMS + ".asc")
     return Release(version, tag, doc.get("html_url") if isinstance(doc.get("html_url"), str) else None,
-                   _asset(wheel) if wheel else None, _asset(sums) if sums else None)
+                   _asset(wheel) if wheel else None, _asset(sums) if sums else None,
+                   _asset(signature) if signature else None)
 
 
 def resolve_release(fetcher: Fetcher, api: str, repo: str, version: str | None) -> Release:
@@ -428,8 +443,52 @@ def wheel_lock(wheel: Path, folder: Path) -> Path | None:
     return target
 
 
-def fetch_verified(fetcher: Fetcher, release: Release, work: Path) -> tuple[Path, dict]:
-    """The wheel, proven by the GitHub digest AND by SHA256SUMS, or a refusal."""
+MAX_SIGNATURE = 16 * 1024
+#: The first release published with SHA256SUMS.asc (measured on the release pages,
+#: 2026-10-06: v0.13.0 has none, v0.14.0 and every later one do). A rollback wheel
+#: of this version or later must be signed like any other: deleting the .asc from a
+#: release must not open a door the forward path keeps shut (audit A04 review).
+FIRST_SIGNED_RELEASE = "0.14.0"
+
+
+def signature_required_for(version: str) -> bool:
+    """Whether a release of `version` is installed only with a valid signature."""
+    try:
+        return relation(FIRST_SIGNED_RELEASE, version) >= 0
+    except (ValueError, TypeError, config.ConfigurationError):
+        return True
+
+
+def verify_signature(fetcher: Fetcher, release: Release, sums_file: Path, work: Path,
+                     required: bool = True) -> str | None:
+    """SHA256SUMS signed by the organization's pinned release key (audit A04).
+
+    The digests prove the files match what the release lists; this proves the list is the
+    organization's. `required=False` is only for the rollback wheel of a release published
+    before signatures existed (older than FIRST_SIGNED_RELEASE): checked when present,
+    accepted on its digests when not."""
+    import release_signature
+    if release.signature is None:
+        if required:
+            raise UpdateError(f"release {release.tag} carries no {SUMS}.asc; an unsigned release is "
+                              "not installed")
+        return None
+    sig_file = work / f"{release.version}-{SUMS}.asc"
+    fetcher.fetch_file(release.signature.url, sig_file, MAX_SIGNATURE)
+    try:
+        return release_signature.verify(sums_file.read_bytes(), sig_file.read_text(encoding="ascii",
+                                                                                   errors="replace"))
+    except release_signature.SignatureError as exc:
+        raise UpdateError(f"{SUMS} of {release.tag} is not signed by the organization's release key: {exc}") from None
+    except Exception as exc:  # noqa: BLE001 — a malformed signature is a refusal, never a traceback
+        raise UpdateError(f"{SUMS}.asc of {release.tag} could not be read as a signature "
+                          f"({type(exc).__name__}); the release is not installed") from None
+
+
+def fetch_verified(fetcher: Fetcher, release: Release, work: Path,
+                   require_signature: bool = True) -> tuple[Path, dict]:
+    """The wheel, proven by the GitHub digest AND by SHA256SUMS, whose signature by the
+    organization's release key is checked first — or a refusal."""
     why = release.installable()
     if why:
         raise UpdateError(why)
@@ -441,6 +500,7 @@ def fetch_verified(fetcher: Fetcher, release: Release, work: Path) -> tuple[Path
     digest, _ = fetcher.fetch_file(release.sums.url, sums_file, MAX_SUMS)
     if digest != release.sums.digest:
         raise UpdateError(f"{SUMS} of {release.tag} does not match its GitHub asset digest")
+    signer = verify_signature(fetcher, release, sums_file, work, required=require_signature)
     listed = parse_sums(sums_file.read_text(encoding="utf-8", errors="replace")).get(release.wheel.name)
     if not listed:
         raise UpdateError(f"{SUMS} of {release.tag} lists no digest for {release.wheel.name}")
@@ -457,6 +517,7 @@ def fetch_verified(fetcher: Fetcher, release: Release, work: Path) -> tuple[Path
         raise UpdateError(f"{release.wheel.name} metadata names {meta['name']} {meta['version']}, "
                           f"not {DISTRIBUTION} {release.version}")
     meta["sha256"] = digest
+    meta["signed_by"] = signer
     return wheel, meta
 
 
@@ -869,7 +930,8 @@ class Transaction:
             release = resolve_release(self.deps.fetcher, api, repo, self.current)
             folder = work / "rollback"
             folder.mkdir(mode=0o700)
-            wheel, _ = fetch_verified(self.deps.fetcher, release, folder)
+            wheel, _ = fetch_verified(self.deps.fetcher, release, folder,
+                                      require_signature=signature_required_for(self.current))
         except UpdateError as exc:
             if self.args.no_rollback:
                 self.report["degraded"].append(f"no rollback wheel: {exc}")
@@ -969,6 +1031,10 @@ class Transaction:
             human.extend(f["fix"] for f in failed)
         report["human_steps"] = human
         report["status"] = "rolled-back" if not human else "needs-attention"
+        # The last line, written into the home as it now is: a `rolled-back` written
+        # before a workspace swap went with the changed copy into `.failed-update-*`, and
+        # a pass reading the restored journal found no final event at all (A03 review).
+        self.step("undo-ended", outcome="needs-person" if human else "rolled-back", error=str(error)[:300])
         return (EXIT_NEEDS_PERSON if human else EXIT_FAILED), report
 
     def verify(self, meta: dict) -> str:
@@ -999,7 +1065,8 @@ class Transaction:
         try:
             self.work = work
             wheel, meta = fetch_verified(self.deps.fetcher, self.release, work)
-            self.step("verified", wheel=wheel.name, sha256=meta["sha256"], checks=["github-digest", SUMS])
+            self.step("verified", wheel=wheel.name, sha256=meta["sha256"],
+                      checks=["github-digest", SUMS, f"{SUMS}.asc"], signed_by=meta.get("signed_by"))
             self.report["constraints"] = LOCK_MEMBER if meta["constraints"] else None
             if not meta["constraints"]:
                 self.report["degraded"].append(
@@ -1118,8 +1185,9 @@ def update_lock(base: Path):
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise UpdateError("Another `full update --apply` is running for this workspace; "
-                              "nothing was changed") from None
+            raise UpdateError("Another `full update --apply` is running for this workspace, or the daily "
+                              "backup holds the jobs stopped; nothing was changed — try again in a few "
+                              "minutes") from None
         yield
     finally:
         os.close(fd)

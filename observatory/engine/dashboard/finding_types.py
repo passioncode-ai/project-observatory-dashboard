@@ -49,7 +49,9 @@ LABELS: dict[str, str] = {
     "clone.behind-or-diverged": "Clone may be behind its remote",
     "clone.diverged": "Clone diverged from its remote",
     "clone.local-only-branch": "Branch only on this disk",
-    "clone.stale": "Clones behind their remotes",
+    # Named apart from `clone.behind` (one clone, its own row): this is the one
+    # summary row of clones that are merely behind, with nothing at risk (A33).
+    "clone.stale": "Clones behind, nothing at risk (summary)",
     "clone.unknown": "Clone state undetermined",
     "clone.unknown-state": "Clone state not understood",
     "clone.unpushed-and-remote-moved": "Unpushed commits, remote moved on",

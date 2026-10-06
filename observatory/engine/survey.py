@@ -776,10 +776,17 @@ def credentials(project_id: str) -> dict:
                     row["available_in"] = v["available_in"]
                 out["env"].append(row)
 
+    default_root = paths.SECRETS / "projects"
     root = Path(os.environ.get(
         "OBSERVATORY_VAULT_DIR",
         paths.source_path("secret_store", paths.SECRETS) / "projects"))
-    if not root.is_dir():
+    if not root.is_dir() and root == default_root and root.parent.is_dir():
+        # THE WORKSPACE'S OWN VAULT, NOT CREATED YET: `vault.py put` makes it on first use,
+        # so a fresh workspace has none. That is an empty vault — every key in it is
+        # `missing`, with the command that puts it — not an unreadable one (audit A10:
+        # a declared key read `unknown`, blocked the workflow, and Needs you said nothing).
+        pass
+    elif not root.is_dir():
         out["degraded"].append({
             "source": "vault",
             "reason": f"{root} does not exist on this machine",

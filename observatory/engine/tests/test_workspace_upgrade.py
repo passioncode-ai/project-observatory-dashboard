@@ -308,20 +308,52 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertTrue((dest/'store/empty-runtime').is_dir())
         self.assertTrue((dest/'docs/dashboard').is_dir())
 
-    def test_source_movement_aborts_snapshot(self):
+    def moving_copy(self, change):
         original=workspace.copy_private
         mutated=[]
         def moving(source,destination):
             result=original(source,destination)
             if not mutated:
                 mutated.append(True)
-                (self.home/'store/logs/test.log').write_text('a writer moved this')
+                change()
             return result
-        with patch.object(workspace,'copy_private',side_effect=moving):
+        return mutated, patch.object(workspace,'copy_private',side_effect=moving)
+
+    def test_source_movement_aborts_snapshot(self):
+        mutated, copying = self.moving_copy(lambda: (self.home/'secrets'/'demo-slot').write_text('a writer moved this'))
+        with copying:
             with self.assertRaises(config.ConfigurationError):
                 self.snapshot()
         self.assertTrue(mutated)
         self.assertEqual(list((self.home/'backups').iterdir()),[])
+
+    def test_logs_and_databases_written_during_a_snapshot_do_not_abort_it(self):
+        # Audit A11: session MCP servers and the Stop hook append to logs and write the
+        # store while the tick and server are stopped. Both are copied safely (the store
+        # through the backup API, a log up to the line being written), so they need not hold still.
+        def writers():
+            with open(self.home/'store/logs/test.log','a') as f:
+                f.write('\nappended by a session')
+            (self.home/'store/logs/test.log.1').write_text('a rotated generation')
+            conn=self.db.connect()
+            conn.execute("INSERT INTO events(id,kind,occurred_at,actor) VALUES ('during','session','2026-01-01T00:00:01Z','fixture')")
+            conn.commit()
+            conn.close()
+        mutated, copying = self.moving_copy(writers)
+        with copying:
+            snap=self.snapshot()
+        self.assertTrue(mutated)
+        self.assertTrue(snap.exists())
+
+    def test_what_counts_as_volatile(self):
+        dbs={'store/observatory.db'}
+        for name, expected in (('store/observatory.db', True), ('store/observatory.db-wal', True),
+                               ('store/observatory.db-shm', True), ('store/logs/update.jsonl', True),
+                               ('store/logs/tick.log.3', True), ('store/logs/update-apply.err', True),
+                               ('store/other.db-wal', False), ('config/settings.json', False),
+                               ('store/logs/notes.txt', False), ('store/logs.log', False),
+                               ('secrets/demo-slot', False)):
+            self.assertEqual(upgrade.volatile(name, dbs), expected, name)
 
     def test_vector_database_integrity_when_extension_installed(self):
         try:

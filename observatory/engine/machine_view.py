@@ -12,13 +12,16 @@ from datetime import datetime, timedelta, timezone
 import paths
 
 
-def _load(name: str) -> tuple[dict | None, dict | None]:
+def _load(name: str, command: str) -> tuple[dict | None, dict | None]:
     try:
         return json.loads((paths.SCRATCH / name).read_text(encoding="utf-8")), None
     except FileNotFoundError:
+        # Each survey names the command that runs it: the git-hygiene and
+        # cleanup files are refreshed by `full cleanup`, not `full machine`
+        # (audit A42 — one hint used to name `full machine` for all three).
         return None, {"source": name, "code": "not-surveyed",
-                      "reason": "not surveyed yet — enable features.machine_watch, "
-                                "or run `project-observatory full machine`"}
+                      "reason": f"not surveyed yet — enable features.machine_watch, "
+                                f"or run `project-observatory full {command}`"}
     except (OSError, ValueError) as exc:
         return None, {"source": name, "code": "unreadable", "error": type(exc).__name__,
                       "reason": f"unreadable: {type(exc).__name__}"}
@@ -46,9 +49,9 @@ def journal(days: int = 7, limit: int = 200) -> list[dict]:
 
 def summary(explain_pid: int | None = None) -> dict:
     degraded = []
-    machine, d1 = _load("machine.json")
-    hygiene, d2 = _load("git-hygiene.json")
-    plan, d3 = _load("cleanup-plan.json")
+    machine, d1 = _load("machine.json", "machine")
+    hygiene, d2 = _load("git-hygiene.json", "cleanup")
+    plan, d3 = _load("cleanup-plan.json", "cleanup")
     degraded += [d for d in (d1, d2, d3) if d]
     out: dict = {"degraded": degraded}
     if machine:
@@ -58,6 +61,7 @@ def summary(explain_pid: int | None = None) -> dict:
         out["disk"] = machine.get("disk")
         out["witr"] = machine.get("witr", False)
         degraded += (machine.get("processes") or {}).get("degraded") or []
+        degraded += (machine.get("memory") or {}).get("degraded") or []
         degraded += (machine.get("disk") or {}).get("degraded") or []
     if hygiene:
         rows = hygiene.get("checkouts") or []

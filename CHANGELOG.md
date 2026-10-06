@@ -5,6 +5,97 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.18.0 — 2026-10-06
+
+A minor release, and it **changes behaviour**: an automatic or manual update installs only a
+release whose `SHA256SUMS` is signed by the organization's release key. It carries the fixes
+from a full audit of 0.17.3 — code, interface and every documented scenario — and from two
+independent reviews of those fixes ([run record](docs/runs/2026-10-05-audit/README.md)). The
+companion plugin `observatory-log` moves to 0.18.0.
+
+### Changed
+
+- **Updates are signed** (A04). `full update --apply` and the Mac app's swap check
+  `SHA256SUMS.asc` against the release key pinned in the engine (`release_signature.py`)
+  before anything changes. An unsigned release, a signature by another key, a signature over
+  other bytes or a malformed one is refused. The rollback wheel of the running release must
+  be signed too, for every release from 0.14.0 (the first one published with a signature).
+  Without `cryptography`, a plain-Python Ed25519 check, tested against RFC 8032, does the work.
+- **The backup passphrase is never replaced by a guess** (A01). A store outside the workspace
+  that does not answer (a Keychain timeout, a locked keychain, no keyring) is no longer read as
+  "no passphrase": nothing is generated, and Health says the backups wait. A first copy never
+  overwrites an existing one. Every earlier passphrase is kept, and a restore tries each.
+- **OpenRouter keys can reset daily or weekly** (#175). `openrouter.py issue --reset
+  daily|weekly|monthly` and `limit <name> --set N [--reset …]`; the dashboard's mint takes
+  `limit_reset`. A per-day ceiling is what paid fallback agents run under.
+- **Cloudflare tokens get about 80 seconds to be honoured** before their proof fails, instead
+  of 10. The waits double from 2 s. A new R2 pair was refused twice for a slow edge.
+
+### Fixed
+
+- **Automatic updates on Linux** no longer refuse every day (A02). The update runs in its own
+  session, so a stopped pass, a SIGTERM or `maintain uninstall` no longer kills it halfway
+  (A03). On Linux the unit uses `KillMode=process` for the same reason.
+- **A rolled-back update is recorded as rolled back.** Its output and its last journal line no
+  longer go into the copy the rollback moves aside.
+- **The daily snapshot and a person's update never run at once** (A12): the snapshot holds the
+  update lock while the jobs are down.
+- **Restore** names a command that works and keeps the passphrase off the command line (A05).
+  With backups from several workspaces it lists them instead of picking one (A06).
+- **Stale state is cleared** (A13). A GitHub token that GitHub refuses is dropped for the rest
+  of the run, said once.
+- **Tests never touch the machine or the live workspace** (A07, A08, A25). They inherited
+  `OBSERVATORY_HOME` from an agent's shell and could read the live workspace. `maintain run` and
+  `maintain hook` now ask the same consent as `maintain ensure`.
+- **Fresh workspaces:** a declared key in an empty vault reads `missing`, with the command that
+  fills it, and an `unknown` one appears in "Needs you" (A10).
+- **Snapshots, memory over HTTP, the hook, backups** (A11, A15, A17–A22). Snapshots tolerate
+  session servers writing. A flood without a bearer no longer locks every client out of
+  `memory-http`. The hook's claim is race-free. `forget` names plaintext copies that hold the
+  erased text. `.failed-update-*` copies are reported. The pass rotates its own logs. Another
+  user's running app no longer blocks the swap.
+- **OpenRouter door:** `issue` works on an account with more than 20 000 keys (#167). A ceiling
+  move is recorded in the movements journal. After `rotate --leaked`, both doors name
+  `vault.py settle`, which closes the leak, not `vault.py rotate`.
+- **`use_secret.py names`** lists every vault folder of a project, not only the one typed.
+- **Moving a ceiling no longer changes its period** (#175). `limit --set` and the dashboard's
+  limit button sent `monthly` whatever the key had; without `--reset` a key now keeps its own.
+- **A key put under one name is read under the other.** `vault.py put` files a new slot under
+  the project's own folder; `use_secret.py run`, `names` and `vault.py list` now read every
+  folder that belongs to the project, so older slots and new ones are both found.
+- **`vault.py bind --header-for`** accepts an R2 account endpoint (#174).
+- **The Mac app:** a Dock click brings the dashboard back when only the Assistant is open (A47).
+
+### Dashboard
+
+- **A Heroku scan that read nothing** says so, with the reason and the re-scan command, instead
+  of "0 apps" (A09). The ENV page says why the "Prod" column is empty (A26).
+- **Agents:** project names instead of ids, a fetch at once, one clock (UTC), and screen readers
+  hear only changes and the pause (A27).
+- **Findings:** copied commands run as copied, with this engine's interpreter and a visible
+  `REASON`. Titles name the repository. Times are readable. The filter fits at 390 px (A28–A33).
+- **Health:** the installed engine and app versions on every path, maintenance warnings once and
+  in the reader's language, where the backup passphrase is kept, `backups status`, queue kinds
+  as "kind: n", spend in dollars (A14, A34). Long commands wrap (A35).
+- **MCP:** when servers were last probed and the command that probes them; a stdio command shown
+  once; a missing binary said on its own line (A36, A37).
+- **Projects, Domains, Overview, Keys, Machine, Traffic** (A38–A43): a labelled sparkline; one
+  group per registrar; a DNS command that asks every record type; translated Cloudflare states;
+  one population in the ENV card; locale numbers; the issued-keys ledger shown as a ledger;
+  translated disk locations, one size unit and project names on Machine; "owner/.github"
+  instead of an id's slug.
+
+### Documentation
+
+- Scenarios: OSS-13's duplicate is OSS-40, stale rows are corrected, every row names its test
+  or says it has none, and OSS-41–55 describe fifteen paths that had no scenario (A44, A45).
+- ONBOARDING, FORGET, COMPATIBILITY and AGENTS match the code (A23). A receipt for 0.17.0–0.17.3
+  (A49). The site says an installation keeps itself current, from signed releases only (A50).
+  OBS-19/20 are raised (A51).
+
+Installs at 0.17.x update to 0.18.0 by themselves: their own code checks digests, and from
+0.18.0 on every update is also checked for its signature.
+
 ## 0.17.3 — 2026-10-05
 
 A patch release. It fixes the root cause behind the torn database copies of 0.17.0–0.17.2,

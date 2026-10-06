@@ -201,9 +201,28 @@ def summary(db: pathlib.Path | None = None,
             needs.append({"kind": "kept-steps", "workflowId": wid, "projectId": w["projectId"],
                           "count": w["keptSteps"], "command": "project-observatory full review"})
         for c in w["credentials"]:
-            if c["state"] in ("missing", "env-only"):
+            # `unknown` blocks a workflow exactly as `missing` does (store/workflow._blocking),
+            # so it waits for a person too (audit A10).
+            if c["state"] in ("missing", "env-only", "unknown"):
                 needs.append({"kind": f"credential-{c['state']}", "workflowId": wid,
                               "projectId": w["projectId"], "name": c["name"], "env": c["env"],
                               "project": c["project"], "command": c.get("put", "")})
     out["needsYou"] = needs
+    ids = {x.get("projectId") for x in [*workflows, *out["sessions"], *needs] if x.get("projectId")}
+    out["projectNames"] = project_names(ids)
     return out
+
+
+def project_names(ids: set[str]) -> dict[str, str]:
+    """`project:…` id → the name the registry gives it (audit A27: the page showed raw
+    ids). An id the registry does not know, or a registry that cannot be read, keeps
+    its id: a name is a convenience, never a reason for the page to fail."""
+    if not ids:
+        return {}
+    try:
+        import json
+        doc = json.loads((pathlib.Path(paths.REGISTRY) / "projects.json").read_text(encoding="utf-8"))
+        known = {p.get("id"): p.get("name") for p in doc.get("projects") or [] if isinstance(p, dict)}
+    except (OSError, ValueError, AttributeError):
+        known = {}
+    return {pid: str(known.get(pid) or pid) for pid in sorted(ids)}

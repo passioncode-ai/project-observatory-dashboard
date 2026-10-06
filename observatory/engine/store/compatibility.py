@@ -25,8 +25,19 @@ def readonly_uri(target: Path) -> str:
     # tore 12 copies out of 12 in an experiment, against 0 out of 12 with locks (seen live
     # on 2026-10-05; OBS-37). With a `-shm` present the reader takes the locks, and creates
     # no file: `-shm` already exists, and a read-only connection never creates a WAL.
-    immutable = (not wal.exists() or wal.stat().st_size == 0) and not shm.exists()
+    immutable = _wal_bytes(wal) == 0 and not shm.exists()
     return target.resolve().as_uri() + "?mode=ro" + ("&immutable=1" if immutable else "")
+
+
+def _wal_bytes(wal: Path) -> int:
+    """The WAL's size, 0 when there is none. One `stat`, never `exists()` then `stat()`:
+    the last connection to close deletes the WAL, and in between the two calls it
+    vanished — a first open raced by three others failed with FileNotFoundError
+    (1 open in 360 under load, the 0.18.0 release gate, 2026-10-06)."""
+    try:
+        return wal.stat().st_size
+    except FileNotFoundError:
+        return 0
 
 
 def preflight(target: Path) -> None:

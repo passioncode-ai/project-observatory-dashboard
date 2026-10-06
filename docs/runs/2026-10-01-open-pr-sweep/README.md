@@ -51,5 +51,5 @@ Commits are on `main`; each pull request's merge records its exact base.
 ## Next task
 
 The next release describes #62 (from `docs/COMPATIBILITY.md` "Unreleased: suppression
-identity" and OSS-13), the new Cloudflare presets and the reset-date fix in `CHANGELOG.md`.
+identity" and OSS-40, then numbered OSS-13), the new Cloudflare presets and the reset-date fix in `CHANGELOG.md`.
 After that, #95 is the next contributor task.

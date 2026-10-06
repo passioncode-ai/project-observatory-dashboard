@@ -88,6 +88,9 @@ git diff --exit-code                                   # the checks left no trac
 - A new engine suite is listed in `SUITES` of `observatory/engine/tests/run_portable.py`:
   `LEGACY` for scripts that print `PASS`/`FAIL` and get a synthetic workspace from the runner,
   `BOUNDARY` for self-contained unittest files. A suite not listed there does not run.
+- The runner's receipt marks a suite that exited 0 having run nothing (every check printed
+  `SKIP`, or every unittest case skipped, as without `node`) as `SKIP`, names it in `not_run`,
+  and never reports a selection in which nothing ran as `PASS`.
 - After changing any engine file run `python tools/update_inventory.py` and commit the
   inventory with the change.
 - Behaviour changes are test-first: the failing test, then the change, then green.
@@ -123,7 +126,7 @@ A change that alters what the engine does, refuses or sends updates every surfac
 readers use, in the same pull request:
 
 - **Agents:** the MCP server `instructions` (at most 1,800 characters, pinned by
-  `tests/test_mcp_wire.py`), each tool's description, the reason codes in `degraded`, and
+  `observatory/engine/tests/test_mcp_wire.py`), each tool's description, the reason codes in `degraded`, and
   `docs/AGENT-ONBOARDING.md`, which `full onboard` prints. Edit `docs/ONBOARDING.md` and
   `docs/AGENT-ONBOARDING.md` only: the copies under `observatory/engine/docs/` are generated
   by `python tools/sync_engine_docs.py`.
@@ -180,6 +183,7 @@ The organisation's [lifecycle contract](https://github.com/passioncode-ai/fabric
 | job runner `tools/run_job.py <id>` (`machine.mcp.refresh`, `agent.ask`) | the MCP server or the app, on a request | per request | until the job ends | the job ends; `fabric.job.cancel` stops its process group | — |
 | on-demand MCP probe (`claude mcp list` and the servers it starts) | `full scan-mcp` or `machine.mcp.refresh` only — never the tick | per request | until the CLI answers or 180 s | its own process group is killed on exit or timeout | — |
 | keyserver `tools/keyserver.py` on `127.0.0.1:7717` | a person, by hand | — | while the terminal runs it | Ctrl-C | — |
+| memory over HTTP: `mcp/http_service.py`, Streamable HTTP on `127.0.0.1:47313` (`--port`) | `full memory-http`, by a person or the caller's own supervisor; no job is ever installed for it | — | while the process runs | Ctrl-C or its supervisor; nothing to clean up, it keeps no state | stateless; per-binding rate `--rate` (default 120/min); bodies over 4 MiB refused 413 by the MCP SDK's session manager (`DEFAULT_MAX_REQUEST_BODY_SIZE`) |
 | plugin `observatory-log` hooks | Claude Code: `SessionStart` (15 s), `Stop` (20 s) | per session start and per agent turn | nothing resident | the hook's own timeout | — |
 | `Project Observatory.app` | the person (not a login item) | — | stays in the Dock after its window closes; no polling at idle | Quit; `install-app.sh` quits it before replacing it | ~80 MB, 0% CPU |
 

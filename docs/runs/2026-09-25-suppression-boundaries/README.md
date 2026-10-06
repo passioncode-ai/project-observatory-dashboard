@@ -8,7 +8,7 @@ Reproduced: a rule matched only secret name and a path substring; replacing the 
 
 Implemented: exact location and workspace-keyed version identity; validation of rule structure; distinct same-name versions in files and SQLite; replay of previous content when known values or effective rules change, including expiry. No-salt sightings remain active. Legacy rules are refused with a warning; the operator must review and pin a current sighting, with no automatic migration.
 
-Contracts: [onboarding](../../ONBOARDING.md), [compatibility](../../COMPATIBILITY.md), scenario OSS-13 in [portable scenarios](../../../observatory/engine/docs/ux/portable-scenarios.md). The new private scan-state fields cause a full initial scan when upgrading. This does not rotate credentials or write the incident register.
+Contracts: [onboarding](../../ONBOARDING.md), [compatibility](../../COMPATIBILITY.md), scenario OSS-40 (numbered OSS-13 until 2026-10-06, when the dashboard row kept that id) in [portable scenarios](../../../observatory/engine/docs/ux/portable-scenarios.md). The new private scan-state fields cause a full initial scan when upgrading. This does not rotate credentials or write the incident register.
 
 Validation: `test_leak_coverage.py` (12 tests) and `test_leak_scan_incremental.py` (6 tests), synthetic inputs only. Full local gate: 55 portable suites, 59 top-level tests, private-denylist privacy check; all passed on the final source (gate exit 0, final line GREEN). CI validates the pushed revision.
 
@@ -25,7 +25,7 @@ on 2026-10-01 (the pull request's merge records the exact base); the one test
 overlap, the UTC `TODAY` fixture from `99aab1d`, merged cleanly. Two
 corrections made on landing: the `## Unreleased` section in `CHANGELOG.md` was dropped,
 since this repository edits the changelog only in the release itself (AGENTS.md); the
-release that ships this must describe it from the compatibility note and OSS-13. This
+release that ships this must describe it from the compatibility note and OSS-40. This
 record moved into the `docs/runs/<date>-<slug>/README.md` shape, and it no longer cites
 records kept outside this repository. Checks: `project-observatory full check --suite
 leak_coverage --suite leak_scan_incremental` exit 0 on the rebased tree, and the three

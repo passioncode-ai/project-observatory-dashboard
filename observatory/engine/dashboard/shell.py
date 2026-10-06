@@ -169,6 +169,21 @@ def env_default_count(env: dict) -> int:
                if v.get("class") == "secret" or v.get("available_in"))
 
 
+def env_default_secrets(env: dict) -> int:
+    """Secrets inside that same default view. The overview card once printed
+    the view's size beside `totals.secrets`, which counts templates too — two
+    populations in one sentence, and the second number could exceed the first
+    (audit A40)."""
+    return sum(1 for f in env.get("files") or [] if f.get("kind") != "template"
+               for v in f.get("variables") or []
+               if v.get("class") == "secret")
+
+
+def _unread(doc: dict) -> bool:
+    """A scan that read no application and recorded why (`degraded`)."""
+    return not doc.get("apps") and bool(doc.get("degraded"))
+
+
 def counts_of(payload: dict) -> dict[str, int | str]:
     """The badge beside each page name — computed once, carried by every page,
     so a page that holds no rows of a kind still says how many exist."""
@@ -190,7 +205,8 @@ def counts_of(payload: dict) -> dict[str, int | str]:
         "findings": open_findings or "",
         "projects": len(payload.get("rows") or []),
         "domains": domain_totals(payload.get("domains") or [], payload.get("zones") or [])[0],
-        "heroku": len(heroku.get("apps") or []) if heroku else "",
+        # A scan that read no application is not a count of zero (audit A09).
+        "heroku": len(heroku.get("apps") or []) if heroku and not _unread(heroku) else "",
         "creds": len(creds.get("credentials") or []) if creds else "",
         "env": (env_default_count(env) if env else "") or "",
         # Declarations, as the MCP page lists them (one row per agent's entry).
@@ -261,7 +277,7 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
         "creds": t.mark("{n} entries", n=counts["creds"] or 0),
         # The badge's number with its unit, then the population it is drawn from.
         "env": t.mark("{n} variables", n=counts["env"] or 0) + " · "
-               + t.mark("{n} read as a secret", n=((payload.get("env") or {}).get("totals") or {}).get("secrets", 0)),
+               + t.mark("{n} read as a secret", n=env_default_secrets(payload.get("env") or {})),
         "mcp": t.mark("{n} declarations", n=counts["mcp"] or 0) + " · "
                + t.mark("{n} servers", n=((payload.get("mcp") or {}).get("totals") or {}).get("distinct_servers", 0)),
         "traffic": _traffic_line(payload, t),
@@ -276,6 +292,8 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
     for name, key in (("heroku", "heroku"), ("creds", "creds"), ("env", "env"), ("mcp", "mcp")):
         if payload.get(key) is None:
             lines[name] = t.mark("not scanned")
+    if payload.get("heroku") is not None and _unread(payload["heroku"]):
+        lines["heroku"] = t.mark("not read")
     cards = []
     for name, title, _kind in PAGES:
         if name == "index":

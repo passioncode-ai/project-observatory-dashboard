@@ -248,23 +248,40 @@ class SecretStore:
         root = Path(base) if base and Path(base).is_absolute() else Path.home() / ".config"
         return root / "project-observatory" / "backup-passphrases" / label
 
+    #: `security find-generic-password` exits 44 when no such item exists; every other
+    #: failure (a locked Keychain, interaction not allowed, a timeout) is NOT absence.
+    KEYCHAIN_NOT_FOUND = 44
+
     def _run(self, argv: list[str], data: str | None = None) -> tuple[int, str]:
+        code, out, _ = self._run_full(argv, data)
+        return code, out
+
+    def _run_full(self, argv: list[str], data: str | None = None) -> tuple[int, str, str]:
         try:
             p = self.runner(argv, input=data, capture_output=True, text=True, timeout=30)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            return 125, type(exc).__name__
-        return p.returncode, p.stdout
+            return 125, "", type(exc).__name__
+        return p.returncode, p.stdout or "", p.stderr or ""
 
-    def put(self, label: str, value: str) -> str:
+    def put(self, label: str, value: str, *, replace: bool = False) -> str:
+        """Store `value` under `label`. Without `replace` an existing item makes the
+        write FAIL rather than be overwritten (audit A01 review): the only path that
+        replaces a stored passphrase is one that has just read it and kept it."""
         label, kind = self._safe(label), self.kind()
         if kind == "keychain":
             encoded = "hex:" + value.encode("utf-8").hex()
             code, _ = self._run(["security", "-i"],
-                                f'add-generic-password -a "{label}" -s "{self.SERVICE}" -w {encoded} -U\n')
+                                f'add-generic-password -a "{label}" -s "{self.SERVICE}" -w {encoded}'
+                                + (" -U" if replace else "") + "\n")
             if code != 0:
                 raise BackupError("the login Keychain refused the backup passphrase")
             return kind
         if kind == "secret-service":
+            if not replace:
+                code, out, err = self._run_full(["secret-tool", "lookup", "service", self.TOOL_SERVICE,
+                                                 "account", label])
+                if code == 0 and out.rstrip("\n"):
+                    raise BackupError(f"the Secret Service already holds a passphrase for {label}")
             code, _ = self._run(["secret-tool", "store", f"--label={self.SERVICE} ({label})",
                                  "service", self.TOOL_SERVICE, "account", label], value)
             if code == 0:
@@ -273,6 +290,8 @@ class SecretStore:
             # owner-only file keeps the copy outside the workspace instead (review F7).
             kind = "file"
         file = self._file(label)
+        if not replace and (file.exists() or file.is_symlink()):
+            raise BackupError(f"{file} already exists")
         file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(file.parent, 0o700)
         fd, tmp = tempfile.mkstemp(dir=file.parent, prefix=".passphrase-")
@@ -287,26 +306,51 @@ class SecretStore:
         return kind
 
     def get(self, label: str) -> str | None:
+        """The stored value, or None when the store holds NO item for `label`.
+
+        A store that could not answer raises `BackupError` instead (audit A01 review):
+        a Keychain that timed out or is locked looked exactly like "no item", and the
+        caller then generated a new passphrase and wrote it over the only copy every
+        existing backup opens with."""
         label, kind = self._safe(label), self.kind()
         if kind == "keychain":
-            code, out = self._run(["security", "find-generic-password", "-a", label, "-s", self.SERVICE, "-w"])
+            code, out, err = self._run_full(["security", "find-generic-password", "-a", label,
+                                             "-s", self.SERVICE, "-w"])
+            if code == self.KEYCHAIN_NOT_FOUND:
+                return None
             text = out.strip()
             if code != 0 or not text:
-                return None
+                raise BackupError(f"the login Keychain did not answer (exit {code}"
+                                  + (f", {err.strip()[:120]}" if err.strip() else "") + ")")
             if text.startswith("hex:"):
                 try:
                     return bytes.fromhex(text[4:]).decode("utf-8")
                 except ValueError:
-                    return None
+                    raise BackupError(f"the Keychain item for {label} is not a passphrase this engine wrote") from None
             return text
+        keyring_error = None
         if kind == "secret-service":
-            code, out = self._run(["secret-tool", "lookup", "service", self.TOOL_SERVICE, "account", label])
+            code, out, err = self._run_full(["secret-tool", "lookup", "service", self.TOOL_SERVICE,
+                                             "account", label])
             if code == 0 and out.rstrip("\n"):
                 return out.rstrip("\n")
+            # `secret-tool lookup` exits 1 with nothing on stderr when the item is absent;
+            # a message means no keyring answered. `put` then fell back to the owner-only
+            # file, so the file is read before that silence is called an error.
+            if code != 0 and err.strip():
+                keyring_error = f"the Secret Service did not answer: {err.strip()[:120]}"
         file = self._file(label)
-        if not file.is_file() or file.is_symlink() or file.stat().st_mode & 0o077:
-            return None
-        return file.read_text(encoding="utf-8").rstrip("\n") or None
+        if file.is_symlink() or (file.exists() and not file.is_file()):
+            raise BackupError(f"{file} is not a plain file; refusing to read it")
+        if file.is_file():
+            if file.stat().st_mode & 0o077:
+                raise BackupError(f"{file} is readable by others; refusing to read it")
+            value = file.read_text(encoding="utf-8").rstrip("\n")
+            if value:
+                return value
+        if keyring_error:
+            raise BackupError(keyring_error)
+        return None
 
 
 @contextlib.contextmanager
@@ -321,35 +365,107 @@ def _passphrase_lock(base: Path):
         os.close(fd)
 
 
+PREVIOUS = "-previous"
+#: How many earlier passphrases a label keeps. A person changing it more often than
+#: this inside the retention window is far outside any measured use; past it the
+#: change is refused rather than an old passphrase dropped.
+PREVIOUS_LIMIT = 64
+
+
+def _previous_labels(label: str):
+    """`<label>-previous`, then `<label>-previous-2`, `-3`… — append-only, one per change."""
+    yield label + PREVIOUS
+    for n in range(2, PREVIOUS_LIMIT + 1):
+        yield f"{label}{PREVIOUS}-{n}"
+
+
+def _keep_previous(store: "SecretStore", label: str, value: str) -> None:
+    """Append `value` to the label's earlier passphrases unless it is already there.
+    Never overwrites one: two changes inside the retention window once left only the
+    most recent earlier passphrase, and backups taken under the first stopped opening
+    (audit A01 review)."""
+    for name in _previous_labels(label):
+        held = store.get(name)
+        if held == value:
+            return
+        if held is None:
+            store.put(name, value)
+            return
+    raise BackupError(f"{PREVIOUS_LIMIT} earlier passphrases are already kept for {label}; "
+                      "refusing to drop one")
+
+
 def ensure_passphrase(base: Path, store: SecretStore | None = None) -> dict:
     """A passphrase exists, and a copy of it lives outside the workspace.
 
     With none configured one is generated, so backups are encrypted and leave the
     workspace by default. An existing one — typed by a person or generated earlier — is
-    mirrored to the store when the store does not already hold it. A passphrase given
-    through OBSERVATORY_BACKUP_PASSPHRASE is the person's to keep and is not copied.
-    The result names where it is kept, never the value."""
+    mirrored to the store. A passphrase given through OBSERVATORY_BACKUP_PASSPHRASE is the
+    person's to keep and is not copied. The result names where it is kept, never the value.
+
+    THE STORE IS NEVER OVERWRITTEN WITH A VALUE THAT COULD LOCK BACKUPS OUT (audit A01):
+    - the file is gone but the store remembers this workspace's passphrase: the file is
+      restored from the store, instead of a new one being generated over it;
+    - the file is gone and the store cannot answer (locked, timed out): nothing is
+      generated — a new passphrase now could not be told from the old one later — and
+      the result carries a warning; backups wait until the store answers;
+    - the file and the store disagree (a person ran `backup-passphrase set`): the stored
+      value is appended to the earlier passphrases (`<label>-previous`, `-previous-2`…)
+      before the new one replaces it, because backups taken before the change open only
+      with it. `restore_latest` tries every one."""
     store = store or SecretStore()
     if os.environ.get(PASS_ENV):
         return {"passphrase": "environment", "kept_outside": None}
-    with _passphrase_lock(base):
-        # Two first runs at once (the job and `init`) must not each generate one: the copy
-        # in the store and the file would then differ (review F10).
-        current = passphrase(base)
-        generated = current is None
-        if generated:
-            current = secrets.token_urlsafe(32)
-            set_passphrase(base, current)
     label = _workspace_label(base)
+    with _passphrase_lock(base):
+        current = passphrase(base)
+        try:
+            stored, store_error = store.get(label), None
+        except (BackupError, OSError) as exc:
+            stored, store_error = None, exc
+        state = "configured"
+        if current is None and stored:
+            set_passphrase(base, stored)
+            current, state = stored, "recovered"
+        elif current is None and store_error is not None:
+            return {"passphrase": "missing", "kept_outside": None,
+                    "warning": f"no passphrase in {passphrase_file(base)} and the store outside the "
+                               f"workspace could not be read ({store_error}); none was generated, so "
+                               "no backup can be locked out — backups resume once the store answers"}
+        elif current is None:
+            current, state = secrets.token_urlsafe(32), "generated"
+            set_passphrase(base, current)
+    if store_error is not None:
+        return {"passphrase": state, "kept_outside": None,
+                "warning": f"the passphrase is only in {passphrase_file(base)}: {store_error}"}
     try:
-        if store.get(label) != current:
+        if stored is None:
             kind = store.put(label, current)
+        elif stored != current:
+            _keep_previous(store, label, stored)
+            kind = store.put(label, current, replace=True)
         else:
             kind = store.kind()
     except (BackupError, OSError) as exc:
-        return {"passphrase": "generated" if generated else "configured", "kept_outside": None,
+        return {"passphrase": state, "kept_outside": None,
                 "warning": f"the passphrase is only in {passphrase_file(base)}: {exc}"}
-    return {"passphrase": "generated" if generated else "configured", "kept_outside": kind, "label": label}
+    return {"passphrase": state, "kept_outside": kind, "label": label}
+
+
+def stored_passphrases(store: "SecretStore", label: str) -> list[str]:
+    """Every passphrase the store keeps for a label: the current one, then each earlier
+    one in the order it was replaced. A store that cannot answer contributes nothing."""
+    out = []
+    for name in (label, *_previous_labels(label)):
+        try:
+            value = store.get(name)
+        except (BackupError, OSError):
+            value = None
+        if value is None and name != label:
+            break
+        if value and value not in out:
+            out.append(value)
+    return out
 
 
 def require_passphrase(base: Path | None = None, *, prompt: bool = False) -> str:
@@ -759,12 +875,19 @@ def status(base: Path) -> dict:
                         "folder: `project-observatory full configure storage backups /absolute/path` "
                         f"(or {ROOT_ENV}); new copies go there, and the ones already here stay until moved by hand")
     legacy = local_snapshots(base, "snapshot") + local_snapshots(base, "before-upgrade") + local_snapshots(base, "daily")
+    # A rolled-back update keeps the changed workspace beside the restored one: a full,
+    # UNENCRYPTED copy, secrets/ included, that nothing removes (audit A18).
+    failed = sorted(p for p in base.parent.glob(f"{base.name}.failed-update-*") if p.is_dir())
+    if failed:
+        warnings.append(f"{len(failed)} unencrypted copy(ies) of this workspace from a rolled-back update "
+                        f"remain beside it ({failed[0].name}…); they hold secrets/. Delete them once the "
+                        "restored workspace is confirmed")
     if configured and legacy:
         warnings.append(f"{len(legacy)} unencrypted snapshot(s) remain in {base / 'backups'}; "
                         "run `project-observatory full backups migrate`")
     latest = {}
     for kind, suffix in ((DB_KIND, DB_SUFFIX), ("snapshot", SNAPSHOT_SUFFIX), ("before-upgrade", SNAPSHOT_SUFFIX),
-                         ("daily", SNAPSHOT_SUFFIX)):
+                         ("before-update", SNAPSHOT_SUFFIX), ("daily", SNAPSHOT_SUFFIX)):
         found = artifacts(root, kind, suffix)
         latest[kind] = {"count": len(found), "newest": found[-1].name if found else None}
     return {"root": str(root), "root_source": info["source"], "inside_workspace": info["inside_workspace"],

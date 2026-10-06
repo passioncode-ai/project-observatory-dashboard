@@ -89,7 +89,9 @@ def test_a_sparkline_never_stands_alone() -> None:
     the pack applies to a coloured chip carrying no word."""
     src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
     check("the sparkline is drawn", "function spark(" in src)
-    check("and the total is printed beside it", "<span>${total}</span>" in src,
+    # Labelled and kept on one line since A38: an unlabelled "881" wrapped as "88" over "1".
+    check("and the total is printed beside it, with its unit",
+          '<span class="spark-n">${T("{n} commits", {n: total})}</span>' in src,
           "a sparkline alone is decoration")
     check("it uses a token colour, not a literal", "currentColor" in src)
     # ASSERTED ON THE BUILT PAGE, not on the expression that builds it. This

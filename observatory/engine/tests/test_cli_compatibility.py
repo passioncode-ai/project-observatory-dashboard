@@ -186,5 +186,58 @@ class PortableRunnerTests(unittest.TestCase):
             self.assertEqual(result['log'], 'fixture/run.log')
             self.assertGreater((base / result['log']).stat().st_size, 7000)
 
+    def run_fixture(self, name, source):
+        import run_portable as runner
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            template = base / 'template'; (template / 'tests').mkdir(parents=True)
+            (template / f'tests/test_{name}.py').write_text(source)
+            with contextlib.redirect_stderr(io.StringIO()):
+                return runner.run_suite(name, base, template, 30)
+
+    def test_a_long_suite_is_given_its_measured_time(self):
+        # The default 120 s timed test_maintenance out in the 0.18.0 gate (it runs 217 s);
+        # a named allowance raises it, a larger --timeout still wins, others are unchanged.
+        import run_portable as runner
+        self.assertGreaterEqual(runner.suite_timeout("maintenance", 120), 300)
+        self.assertEqual(runner.suite_timeout("maintenance", 900), 900)
+        self.assertEqual(runner.suite_timeout("pages", 120), 120)
+        for name in runner.SUITE_SECONDS:
+            self.assertIn(name, runner.SUITES, f"{name} is not a suite the runner knows")
+
+    def test_a_suite_that_ran_nothing_is_a_skip_not_a_pass(self):
+        # Audit A46: without `node`, test_action_outcomes printed SKIP and exited 0, and
+        # test_dashboard_portability skipped all nine cases; both were receipted PASS.
+        import run_portable as runner
+        printed = self.run_fixture('printed', 'print("  SKIP  node is not installed here")\n')
+        self.assertEqual((printed['status'], printed['skip_reason']), ('SKIP', 'node is not installed here'))
+        skipped = self.run_fixture('cases', (
+            'import unittest\n'
+            '@unittest.skipUnless(False, "no node")\n'
+            'class T(unittest.TestCase):\n'
+            '    def test_a(self): pass\n'
+            '    def test_b(self): pass\n'
+            'unittest.main()\n'))
+        self.assertEqual((skipped['status'], skipped['unittest_cases'], skipped['unittest_skipped']), ('SKIP', 2, 2))
+        partly = self.run_fixture('partly', 'print("  PASS  built")\nprint("  SKIP  node missing")\n')
+        self.assertEqual((partly['status'], partly['skip_assertions']), ('PASS', 1))
+        some = self.run_fixture('some', (
+            'import unittest\n'
+            'class T(unittest.TestCase):\n'
+            '    def test_a(self): pass\n'
+            '    @unittest.skip("no node")\n'
+            '    def test_b(self): pass\n'
+            'unittest.main()\n'))
+        self.assertEqual(some['status'], 'PASS')
+        # The receipt: a skipped suite is named in not_run, nothing-ran is never PASS, and a
+        # missing node is said even when every suite ran something.
+        self.assertEqual(runner.overall([partly, printed]), 'PASS')
+        self.assertEqual(runner.overall([printed, skipped]), 'SKIP')
+        self.assertEqual(runner.overall([printed, {'status': 'FAIL'}]), 'FAIL')
+        scopes = {row['scope']: row['reason'] for row in runner.not_run([partly, printed], None)}
+        self.assertEqual(scopes['suite:tests/test_printed.py'], 'node is not installed here')
+        self.assertIn('node is not on PATH', scopes['dashboard-execution'])
+        self.assertNotIn('dashboard-execution', {row['scope'] for row in runner.not_run([partly], '/usr/bin/node')})
+
 if __name__ == "__main__":
     unittest.main()

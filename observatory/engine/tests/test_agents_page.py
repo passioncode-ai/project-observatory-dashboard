@@ -132,6 +132,57 @@ class AgentsPage(unittest.TestCase):
         self.assertEqual([c["stepId"] for c in segs[0]["checkpoints"]], ["S1"])
         self.assertEqual([c["stepId"] for c in segs[1]["checkpoints"]], ["S2"])
 
+    def test_a_key_that_could_not_be_checked_waits_for_a_person_too(self) -> None:
+        # Audit A10: `unknown` blocks the workflow as `missing` does, so it is named.
+        def blind(project: str) -> dict:
+            return {"project": project.split(":", 1)[-1], "vault": [], "env": [],
+                    "degraded": [{"source": "vault", "reason": "synthetic: not listable"}]}
+        view = agents_view.summary(self.estate.db, credential_reader=blind)
+        need = next(n for n in view["needsYou"] if n["kind"].startswith("credential-"))
+        self.assertEqual((need["kind"], need["name"]), ("credential-unknown", "STRIPE_KEY"))
+        en = agents_page.agents_html({"agents": view}, Translator("en"))
+        self.assertIn("could not be checked", en)
+        ru = agents_page.agents_html({"agents": view}, Translator("ru"))
+        self.assertIn("не удалось проверить", ru)
+
+    def test_projects_read_as_names_and_link_to_their_panel(self) -> None:
+        # Audit A27: the page showed raw `project:…` ids.
+        view = dict(self.view, projectNames={"project:alpha-web": "Alpha Web"})
+        page = agents_page.agents_html({"agents": view}, Translator("en"))
+        self.assertIn('<a href="projects.html#project:alpha-web">Alpha Web</a>', page)
+        self.assertIn("project:beta-api", page, "an id the registry does not name stays an id")
+
+    def test_the_names_come_from_the_registry_and_never_fail_the_page(self) -> None:
+        import paths
+        reg = pathlib.Path(self.estate.dir.name) / "registry"
+        reg.mkdir()
+        (reg / "projects.json").write_text(json.dumps({"projects": [
+            {"id": "project:alpha-web", "name": "Alpha Web"}]}), encoding="utf-8")
+        old = paths.REGISTRY
+        try:
+            paths.REGISTRY = reg
+            self.assertEqual(agents_view.project_names({"project:alpha-web", "project:x"}),
+                             {"project:alpha-web": "Alpha Web", "project:x": "project:x"})
+            (reg / "projects.json").write_text("{not json", encoding="utf-8")
+            self.assertEqual(agents_view.project_names({"project:x"}), {"project:x": "project:x"})
+        finally:
+            paths.REGISTRY = old
+
+    def test_the_signature_ignores_clocks_and_moves_with_what_the_page_says(self) -> None:
+        # Audit A27: every 15-second refresh was announced to a screen reader.
+        later = agents_view.summary(self.estate.db, credential_reader=no_keys,
+                                    now=datetime.now(timezone.utc) + timedelta(seconds=40))
+        self.assertEqual(agents_page.signature(self.view), agents_page.signature(later))
+        fewer = dict(self.view, needsYou=self.view["needsYou"][:1])
+        self.assertNotEqual(agents_page.signature(self.view), agents_page.signature(fewer))
+        page = agents_page.agents_html({"agents": self.view}, Translator("en"))
+        self.assertIn(f'data-signature="{agents_page.signature(self.view)}"', page)
+
+    def test_workflow_reads_as_a_russian_word(self) -> None:
+        ru = agents_page.agents_html({"agents": self.view}, Translator("ru"))
+        self.assertIn("Процессы", ru)
+        self.assertNotIn(">Workflow", ru)
+
     def test_no_token_and_no_value_reaches_the_page(self) -> None:
         dump = json.dumps(self.view)
         self.assertNotIn("wl_", dump)

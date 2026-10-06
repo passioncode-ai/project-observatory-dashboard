@@ -9,6 +9,8 @@ dashboard's own table, card and narrow-screen rules; nothing here adds a style.
 from __future__ import annotations
 
 import html
+import json
+import pathlib
 import re
 
 from i18n import Translator
@@ -20,8 +22,11 @@ NUM = ' class="num"'
 EMPTY = ' class="empty"'
 HEADING = ' class="machine-h"'
 #: What an empty table says when its survey has not run. "Every worktree is
-#: clean" over checkouts nobody looked at is a claim, not an empty state.
+#: clean" over checkouts nobody looked at is a claim, not an empty state — and
+#: each survey names the command that runs it: the git tables are refreshed by
+#: `full cleanup`, not `full machine` (audit A42).
 UNMEASURED = "Not measured yet — run project-observatory full machine"
+UNMEASURED_GIT = "Not measured yet — run project-observatory full cleanup"
 
 
 def _e(v) -> str:
@@ -39,7 +44,26 @@ def stamp(value) -> str:
 
 
 def _gb(mb) -> str:
-    return "—" if mb is None else f"{mb / 1024:.1f} GB"
+    return "—" if mb is None else f"{mb / 1024:.1f}"
+
+
+def _unit(t: Translator) -> str:
+    """The one size unit this page prints, in the reader's language: a Russian
+    build that mixed the English and the Russian unit on one screen was the
+    audit's A42."""
+    return t("GB")
+
+
+def _size(mb, t: Translator) -> str:
+    return "—" if mb is None else f"{_gb(mb)} {_unit(t)}"
+
+
+def _project(pid, names: dict) -> str:
+    """A project as its registry name, linked to its panel — never the raw
+    `project:` id the survey records (audit A42; the Agents page does the same)."""
+    if not pid:
+        return ""
+    return f'<a href="projects.html#{_e(pid)}">{_e(names.get(pid) or str(pid).removeprefix("project:"))}</a>'
 
 
 def _table(t: Translator, caption: str, heads: list[tuple[str, bool]], rows: list[list[str]], empty: str) -> str:
@@ -68,14 +92,16 @@ def summary_html(m: dict, t: Translator) -> str:
     if mem.get("total_mb") is not None and mem.get("free_mb") is not None:
         used = mem["total_mb"] - mem["free_mb"] - (mem.get("inactive_mb") or 0)
     auto = t.mark("auto cleanup on") if cleanup.get("autoEnabled") else t.mark("auto cleanup off")
+    unit = _unit(t)
     tiles = [
-        (t.mark("Memory in use"), f"{_gb(used)} / {_gb(mem.get('total_mb'))}",
-         t.mark("swap {size}", size=_gb(mem.get("swap_used_mb")))),
-        (t.mark("Free disk"), f"{disk.get('free_gb', '—')} GB",
-         t.mark("{percent}% of {total} GB", percent=disk.get("free_percent", "—"), total=disk.get("total_gb", "—"))),
+        (t.mark("Memory in use"), f"{_gb(used)} / {_gb(mem.get('total_mb'))} {unit}" if used is not None else "—",
+         t.mark("swap {size}", size=_size(mem.get("swap_used_mb"), t))),
+        (t.mark("Free disk"), f"{disk.get('free_gb', '—')} {unit}",
+         t.mark("{percent}% of {total}", percent=disk.get("free_percent", "—"),
+                total=f"{disk.get('total_gb', '—')} {unit}")),
         (t.mark("Processes"), _e(procs.get("count", "—")),
          t.mark("{n} origins", n=len(procs.get("groups") or []))),
-        (t.mark("Cleaned in 7 days"), _e(len(done)), auto + (f" · {freed:.1f} GB" if freed else "")),
+        (t.mark("Cleaned in 7 days"), _e(len(done)), auto + (f" · {freed:.1f} {unit}" if freed else "")),
     ]
     cells = "".join(f'<div class="tile">{k}<b>{_e(v)}</b>{sub}</div>' for k, v, sub in tiles)
     return f'<div class="tiles machine-tiles">{cells}</div>'
@@ -89,28 +115,29 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
         parts.append(t.mark("Machine surveyed {at}", tag="p", attrs=' class="machine-at"', at=stamp(m["measuredAt"])))
     parts.append(summary_html(m, t))
     procs = m.get("processes") or {}
+    names = {r.get("id"): r.get("name") for r in payload.get("rows") or [] if isinstance(r, dict) and r.get("id")}
     parts.append(_table(t, "Memory by origin",
                         [("Origin", False), ("Processes", True), ("Sessions", True), ("Memory", True), ("CPU %", True)],
-                        [[_e(g["origin"]), _e(g["processes"]), _e(g["sessions"]), _gb(g["rss_mb"]), _e(g["cpu"])]
+                        [[_e(g["origin"]), _e(g["processes"]), _e(g["sessions"]), _size(g["rss_mb"], t), _e(g["cpu"])]
                          for g in (procs.get("groups") or [])[:ROWS]],
                         "No process survey yet."))
     parts.append(_table(t, "Largest processes",
                         [("Process", False), ("Origin", False), ("Project", False), ("Memory", True), ("PID", True)],
                         [[_e(p["name"]) + (f'<br><span class="mono">{_e(p["script"])}</span>' if p.get("script") else ""),
-                          _e(p["origin"]), _e(p.get("project", "")), _gb(p["rss_mb"]), _e(p["pid"])]
+                          _e(p["origin"]), _project(p.get("project"), names), _size(p["rss_mb"], t), _e(p["pid"])]
                          for p in (procs.get("top") or [])[:ROWS]],
                         "No process survey yet."))
     parts.append(t.mark("Why one of them runs: project-observatory full machine --explain PID",
                         tag="p", attrs=' class="machine-hint"'))
     parts.append(_table(t, "Memory by project",
                         [("Project", False), ("Processes", True), ("Memory", True)],
-                        [[_e(p["project"]), _e(p["processes"]), _gb(p["rss_mb"])] for p in (procs.get("projects") or [])[:ROWS]],
+                        [[_project(p["project"], names), _e(p["processes"]), _size(p["rss_mb"], t)] for p in (procs.get("projects") or [])[:ROWS]],
                         "No process runs inside a project folder." if m.get("processes") else UNMEASURED))
     disk = m.get("disk") or {}
     parts.append(_table(t, "Where the disk goes",
                         [("Place", False), ("Kind", False), ("Size", True), ("How it comes back", False)],
-                        [[_e(l["label"]) + f'<br><span class="mono">{_e(l["path"])}</span>', _e(t(l["kind"])),
-                          f"{l['gb']:.1f} GB",
+                        [[_e(t(l["label"])) + f'<br><span class="mono">{_e(l["path"])}</span>', _e(t(l["kind"])),
+                          f"{l['gb']:.1f} {_unit(t)}",
                           _e(t(l.get("reclaim", "")) if l.get("reclaim") else "")
                           + (f'<br><span class="mono">{_e(l["command"])}</span>' if l.get("command") else "")]
                          for l in disk.get("locations") or []],
@@ -126,12 +153,12 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                           _e(w.get("branch") or ""), _e(t(w["state"])) + (" · " + _e(t("in use")) if w.get("busy") else ""),
                           _e(w.get("idle_days", ""))]
                          for w in sorted(idle, key=lambda w: -(w.get("idle_days") or 0))[:ROWS]],
-                        "Every worktree is clean and in recent use." if git else UNMEASURED))
+                        "Every worktree is clean and in recent use." if git else UNMEASURED_GIT))
     parts.append(_table(t, "Branches holding the only copy",
                         [("Repository", False), ("Branch", False), ("Commits", True), ("Idle days", True)],
                         [[_e(b["repository"].split(":", 1)[-1]), _e(b["name"]), _e(b.get("ahead")), _e(b.get("idle_days"))]
                          for b in sorted(git.get("uniqueBranches") or [], key=lambda b: -(b.get("idle_days") or 0))[:ROWS]],
-                        "No branch holds commits found nowhere else." if git else UNMEASURED))
+                        "No branch holds commits found nowhere else." if git else UNMEASURED_GIT))
     cleanup = m.get("cleanup") or {}
     counts = cleanup.get("counts") or {}
     parts.append(_table(t, "Cleanup plan",
@@ -139,13 +166,13 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                         [[_e(t(k)), _e(t("auto") if k in ("branch-merged", "branch-pushed", "worktree-missing",
                                                           "worktree-clean", "build-artifacts") else t("manual")), _e(v)]
                          for k, v in counts.items() if v],
-                        "Nothing to clean." if cleanup else UNMEASURED))
+                        "Nothing to clean." if cleanup else UNMEASURED_GIT))
     parts.append(t.mark("The auto tier loses nothing and runs on the tick when features.auto_cleanup is on; "
                         "the manual tier archives first: project-observatory full cleanup --apply --include manual",
                         tag="p", attrs=' class="machine-hint"'))
     parts.append(_table(t, "Cleaned in the last 7 days",
                         [("When", False), ("What", False), ("Item", False), ("Result", False)],
-                        [[_e(r.get("at")), _e(t(r.get("class", ""))), f'<span class="mono">{_e(r.get("target"))}</span>',
+                        [[_e(stamp(r.get("at"))), _e(t(r.get("class", ""))), f'<span class="mono">{_e(r.get("target"))}</span>',
                           _e(t(r.get("result", ""))) + (f' — {_e(r["reason"])}' if r.get("reason") else "")]
                          for r in (cleanup.get("journal") or [])[:ROWS]],
                         "Nothing was cleaned in the last 7 days."))
@@ -155,6 +182,9 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
         # one without (a collector's own words) is shown as written.
         def reason(d: dict) -> str:
             if d.get("code") == "not-surveyed":
+                # Each survey names the command that runs it (machine_view._load).
+                if "full cleanup" in str(d.get("reason") or ""):
+                    return t.mark("not surveyed yet — enable features.machine_watch, or run project-observatory full cleanup")
                 return t.mark("not surveyed yet — enable features.machine_watch, or run project-observatory full machine")
             if d.get("code") == "unreadable":
                 return t.mark("unreadable: {error}", error=d.get("error", ""))
@@ -172,5 +202,33 @@ DYNAMIC = ("cache", "toolchain", "build", "simulator", "vm", "worktrees", "user"
            "branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts",
            "branch-unique", "worktree-dirty", "removed", "pruned", "skipped", "failed",
            # Empty states chosen by whether their survey ran (see UNMEASURED).
-           UNMEASURED, "Every worktree is clean and in recent use.", "No branch holds commits found nowhere else.",
+           UNMEASURED, UNMEASURED_GIT, "Every worktree is clean and in recent use.", "No branch holds commits found nowhere else.",
            "Nothing to clean.", "No process runs inside a project folder.")
+
+
+def _location_labels() -> tuple[str, ...]:
+    """The disk locations' names, from the shipped defaults, so the Russian page
+    reads them in Russian (audit A42). A label a person added to their own
+    configuration is not in the catalog and is shown as written."""
+    try:
+        doc = json.loads((pathlib.Path(__file__).resolve().parent.parent / "defaults" / "machine.json")
+                         .read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    found = []
+    def walk(x):
+        if isinstance(x, dict):
+            if isinstance(x.get("label"), str):
+                found.append(x["label"])
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+    walk(doc)
+    return tuple(found)
+
+
+#: The swap row's label, written by collectors/scan_machine.py itself.
+SWAP_LABEL = "Swap files (memory written to disk)"
+DYNAMIC = DYNAMIC + (SWAP_LABEL, "GB") + _location_labels()

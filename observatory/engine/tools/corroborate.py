@@ -100,6 +100,17 @@ def branch_forms(path, branch: str) -> list[str]:
     return forms
 
 
+def repository_of(row) -> str | None:
+    """OWNER/NAME of the repository a session row's evidence names, if any."""
+    try:
+        ev = json.loads(row["evidence_json"] or "[]")
+    except (ValueError, TypeError):
+        return None
+    repo = next((e for e in ev if isinstance(e, dict)
+                 and str(e.get("uri", "")).startswith("repo:repository:")), None)
+    return repo["uri"].split("repo:repository:", 1)[1] if repo else None
+
+
 def check_session(row) -> tuple[bool | None, str]:
     """Did the work this row describes survive? Ask git, not the row.
 
@@ -213,7 +224,7 @@ def main(argv: list[str]) -> int:
         ok, why = check_session(row)
         if ok is None:
             unaskable.append((row["memory_id"], why, row["created_at"],
-                              row["owner"], row["state"]))
+                              row["owner"], row["state"], repository_of(row)))
             continue
         if not ok:
             refused.append((row["memory_id"], why, row["created_at"],
@@ -253,9 +264,11 @@ def main(argv: list[str]) -> int:
             # is erased by retention at ninety days, and the receipt named it
             # without saying how long it had — sending every reader back to the
             # store for the one number the decision turns on.
+            # AND WHICH REPOSITORY: five rows shared one title on the board, told
+            # apart only by opening each (audit A30).
             "unaskable": [{"memory_id": mid, "why": why, "created_at": at,
-                           "owner": owner, "state": state}
-                          for mid, why, at, owner, state in unaskable],
+                           "owner": owner, "state": state, "repository": repo}
+                          for mid, why, at, owner, state, repo in unaskable],
         })
 
     tag = "[dry-run] " if dry else ""

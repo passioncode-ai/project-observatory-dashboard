@@ -20,20 +20,71 @@ import AppKit
         // A launch from Finder, the Dock or `open` brings the window forward: the
         // macOS 14 cooperative call, which the system honours for a user-started app.
         NSApp.activate()
-        // A launch must always end with the dashboard on screen.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { Self.showDashboardIfNone() }
+        // A launch must always end with the dashboard on screen — also when the
+        // system restored only the Assistant window.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { Self.showDashboard() }
     }
-    /// Clicking the Dock icon with no window open brings the dashboard back.
+    /// Clicking the Dock icon brings the dashboard back whenever it is not on screen,
+    /// whatever else is open. AppKit's `hasVisibleWindows` counts the Assistant too, so
+    /// with only the Assistant open a Dock click used to bring nothing back (A47); the
+    /// decision is the dashboard's own window now, not "any window". Returns false:
+    /// the dashboard is handled here, and AppKit's default (un-minimising some other
+    /// window when none is visible) must not add a window beside it.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { Self.showDashboardIfNone() }
-        return true
+        Self.showDashboard()
+        return false
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
-    static func showDashboardIfNone() {
-        let visible = NSApp.windows.contains { $0.isVisible && $0.canBecomeMain }
-        if !visible { openWindow?(id: WindowID.dashboard) }
+    static func showDashboard() {
+        switch DashboardReopen.decide(NSApp.windows.map(DashboardReopen.Seen.init)) {
+        case .nothing: break
+        case .restore:
+            if let w = NSApp.windows.first(where: { DashboardReopen.isDashboard($0.identifier?.rawValue) && $0.isMiniaturized }) {
+                w.deminiaturize(nil)
+            }
+        case .open: openWindow?(id: WindowID.dashboard)
+        }
         NSApp.activate()
+    }
+}
+
+/// What a Dock click or a launch must do to put the dashboard on screen, decided from
+/// the app's windows alone so it can be tested without AppKit's event loop.
+enum DashboardReopen: Equatable {
+    /// The dashboard is already on screen: other windows (the Assistant) stay as they are.
+    case nothing
+    /// The dashboard is minimised into the Dock: un-minimise it.
+    case restore
+    /// No dashboard window: SwiftUI's openWindow creates it — or, for the single
+    /// `Window` scene, brings the existing one forward, so a window this test cannot
+    /// recognise costs a bring-forward, never a second dashboard.
+    case open
+
+    struct Seen: Equatable {
+        var identifier: String?
+        var visible: Bool
+        var miniaturized: Bool
+    }
+
+    /// SwiftUI names a `Window(id:)` scene's NSWindow by its id; a WindowGroup's by
+    /// `<id>-AppWindow-<n>`. Both spellings are the dashboard.
+    static func isDashboard(_ identifier: String?) -> Bool {
+        guard let id = identifier else { return false }
+        return id == WindowID.dashboard || id.hasPrefix(WindowID.dashboard + "-")
+    }
+
+    static func decide(_ windows: [Seen]) -> DashboardReopen {
+        let dashboards = windows.filter { isDashboard($0.identifier) }
+        if dashboards.contains(where: { $0.visible }) { return .nothing }
+        if dashboards.contains(where: { $0.miniaturized }) { return .restore }
+        return .open
+    }
+}
+
+extension DashboardReopen.Seen {
+    init(_ window: NSWindow) {
+        self.init(identifier: window.identifier?.rawValue, visible: window.isVisible, miniaturized: window.isMiniaturized)
     }
 }
 

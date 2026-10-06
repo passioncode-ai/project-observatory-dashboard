@@ -33,6 +33,8 @@ engine's `store/logs/access.jsonl` and `retrieval.jsonl` — so a restart loses 
 from __future__ import annotations
 
 import argparse
+import collections
+import hashlib
 import json
 import pathlib
 import sys
@@ -45,6 +47,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 DEFAULT_PORT = 47313
 DEFAULT_RATE = 120          # requests per minute per binding
+KNOWN_BEARERS = 256        # bearers remembered as having authenticated (fingerprints only)
 HOST = "127.0.0.1"
 
 
@@ -102,6 +105,12 @@ class BindingGate:
         #: bearer is refused: an unauthenticated flood would otherwise write one journal line per
         #: request (pre-release review, L2), while bindings sharing a peer keep their own rate.
         self.refusals = RateLimiter(rate * 2)
+        #: Fingerprints (sha256 of the Authorization header, never the header) of bearers that
+        #: authenticated since this process started. Every local client shares 127.0.0.1, so a
+        #: process flooding with bad bearers spends the peer's refusal budget for everyone; a
+        #: bearer already seen to work passes that check and is still verified in full
+        #: (audit A17). A new client during a flood waits, and guessing stays bounded.
+        self.known: collections.OrderedDict[str, None] = collections.OrderedDict()
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
@@ -117,8 +126,11 @@ class BindingGate:
                                              "detail": "a browser page of another origin may "
                                                        "not call the memory service"})
         peer = f"peer:{(scope.get('client') or ('?', 0))[0]}"
+        raw = headers.get("authorization", "")
+        presented = hashlib.sha256(raw.encode("latin-1")).hexdigest() if raw else None
+        del raw
         allowed, wait = self.refusals.peek(peer)
-        if not allowed:
+        if not allowed and presented not in self.known:
             return await _answer(send, 429, {"error": "rate-limited",
                                              "detail": "too many refused requests from this peer"},
                                  [(b"retry-after", str(wait).encode())])
@@ -131,9 +143,15 @@ class BindingGate:
             try:
                 binding = self.MA.caller()
             except self.MA.Refused as exc:
+                self.known.pop(presented, None)
                 self.refusals.allow(peer)
                 return await _answer(send, 401, exc.envelope,
                                      [(b"www-authenticate", b'Bearer realm="observatory-memory"')])
+            if presented is not None:
+                self.known[presented] = None
+                self.known.move_to_end(presented)
+                while len(self.known) > KNOWN_BEARERS:
+                    self.known.popitem(last=False)
             allowed, wait = self.limiter.allow(binding.binding_id)
             if not allowed:
                 return await _answer(send, 429, {

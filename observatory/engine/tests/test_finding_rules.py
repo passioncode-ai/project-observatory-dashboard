@@ -145,6 +145,18 @@ def builder():
 
 # ───────────────────────── the pure functions ────────────────────────────────
 
+def test_a_sighting_reads_as_a_date_and_a_sentence() -> None:
+    """Audit A28: "Recorded 2026-09-14T14:18:55Z: the value was seen at echoed by…"."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import build_findings as B
+    src = (ROOT / "tools/build_findings.py").read_text(encoding="utf-8")
+    check("no sighting is written as `seen at {where}`", "the value was seen at " not in src)
+    check("an ISO stamp reads as a date and a minute",
+          B.readable_time("2026-09-14T14:18:55Z") == "2026-09-14 14:18 UTC",
+          B.readable_time("2026-09-14T14:18:55Z"))
+    check("an absent one says so", B.readable_time(None) == "at an unrecorded time")
+
+
 def test_a_blank_page_is_reported() -> None:
     """`dashboard.blank` — the page renders, and shows nothing."""
     bf = builder()
@@ -520,7 +532,7 @@ def test_a_key_moved_at_heroku_with_no_journal_entry_is_a_row() -> None:
     now = _dt.datetime.now(_dt.timezone.utc)
     at = (now - _dt.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
     heroku = {"scanned_at": OLD, "apps": [{"name": "some-app", "config_releases": [
-        {"version": 42, "at": at, "vars": ["DATABASE_URL", "PL_DASH_ENABLED"], "by": "config:set"}]}]}
+        {"version": 42, "at": at, "vars": ["DATABASE_URL", "SYNTHETIC_FLAG_ENABLED"], "by": "config:set"}]}]}
     vault_dir = pathlib.Path(tmpdir.mkdtemp()) / "projects"
     vault_dir.mkdir()
     prev = os.environ.get("OBSERVATORY_VAULT_DIR")
@@ -530,7 +542,7 @@ def test_a_key_moved_at_heroku_with_no_journal_entry_is_a_row() -> None:
         r = rows(board, "secret.moved_unrecorded")
         check("a secret-shaped variable changed at Heroku with an empty journal is a warning",
               len(r) == 1 and r[0]["severity"] == "warning" and "DATABASE_URL" in r[0]["detail"]
-              and "PL_DASH_ENABLED" not in r[0]["detail"], str(r)[:300])
+              and "SYNTHETIC_FLAG_ENABLED" not in r[0]["detail"], str(r)[:300])
         (vault_dir / "movements.jsonl").write_text(json.dumps(
             {"at": at, "event": "moved", "secret": "some-app/prod/DATABASE_URL",
              "how": "set on heroku", "tool": "vault.py"}) + "\n", encoding="utf-8")
@@ -886,7 +898,8 @@ def test_no_message_names_a_command_a_user_cannot_run() -> None:
 
 if __name__ == "__main__":
     print("the board's rules — eleven that had never been seen firing\n")
-    for fn in (test_a_blank_page_is_reported,
+    for fn in (test_a_sighting_reads_as_a_date_and_a_sentence,
+               test_a_blank_page_is_reported,
                test_an_unreadable_health_file_is_not_read_as_healthy,
                test_a_quarantined_model_is_named,
                test_an_empty_quarantine_list_after_silence_says_so,

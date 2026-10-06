@@ -269,6 +269,25 @@ def test_the_receipt_dates_the_rows_it_asks_a_person_to_decide() -> None:
               "the finding would have to go back to the store for it")
 
 
+def test_an_unwitnessed_row_names_its_repository() -> None:
+    """Audit A30: five rows read "recorded work no clone here can witness", told
+    apart only by opening each."""
+    import corroborate as C
+    check("the repository is read from the row's evidence",
+          C.repository_of(row(pathlib.Path("/x/acme-web"), "0" * 40, "main")) == "acme-web")
+    check("a row without one gives none, not an error",
+          C.repository_of({"evidence_json": "not json"}) is None
+          and C.repository_of({"evidence_json": "[]"}) is None)
+    src = (ROOT / "tools/corroborate.py").read_text(encoding="utf-8")
+    check("the receipt carries `repository`", '"repository": ' in src.split('"unaskable": [')[1][:400])
+    sys.path.insert(0, str(ROOT / "dashboard"))
+    from finding_types import titled
+    got = titled("recorded work in {repo} that no clone here can witness", repo="acme/web")
+    check("the board's title names it", "acme/web" in got["title"], got["title"])
+    fsrc = (ROOT / "tools/build_findings.py").read_text(encoding="utf-8")
+    check("and the rule uses that title", "recorded work in {repo} that no clone here can witness" in fsrc)
+
+
 if __name__ == "__main__":
     print("the witness — a tidied branch is not vanished work\n")
     for fn in (test_a_branch_tidied_up_after_a_push_is_confirmed,
@@ -280,7 +299,8 @@ if __name__ == "__main__":
                test_the_board_reports_the_two_classes_differently,
                test_the_receipt_carries_all_four_counts,
                test_the_row_says_how_long_it_has_before_retention_erases_it,
-               test_the_receipt_dates_the_rows_it_asks_a_person_to_decide):
+               test_the_receipt_dates_the_rows_it_asks_a_person_to_decide,
+               test_an_unwitnessed_row_names_its_repository):
         fn()
     print()
     if FAILURES:

@@ -272,14 +272,23 @@ def survey_processes() -> dict:
 
 # --- memory -------------------------------------------------------------------
 
+#: `sysctl` sits in /usr/sbin, which a launchd plist's minimal PATH does not
+#: hold; called by bare name the lookup failed and memory simply went missing
+#: from the survey, with nothing degraded to say why (audit A42).
+SYSCTL = "/usr/sbin/sysctl" if sys.platform == "darwin" and pathlib.Path("/usr/sbin/sysctl").exists() else "sysctl"
+
+
 def survey_memory() -> dict:
     if sys.platform == "darwin":
-        total = run(["sysctl", "-n", "hw.memsize"])
+        total = run([SYSCTL, "-n", "hw.memsize"])
         vm = run(["vm_stat"]) or ""
+        swap = run([SYSCTL, "-n", "vm.swapusage"]) or ""
+        if total is None or not vm:
+            return {"degraded": [{"source": "memory",
+                                  "reason": f"{SYSCTL} or vm_stat did not answer; memory not measured"}]}
         page = int(re.search(r"page size of (\d+)", vm).group(1)) if "page size of" in vm else 16384
         pages = {k.strip().lower(): int(v.strip().rstrip(".")) for k, v in re.findall(r"^([^:]+):\s+(\d+)\.?$", vm, re.M)}
         mb = lambda n: round(n * page / 1048576, 1)  # noqa: E731
-        swap = run(["sysctl", "-n", "vm.swapusage"]) or ""
         used = re.search(r"used = ([\d.]+)M", swap)
         return {"total_mb": round(int(total) / 1048576, 1) if total else None,
                 "free_mb": mb(pages.get("pages free", 0)),

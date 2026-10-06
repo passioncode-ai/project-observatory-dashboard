@@ -108,6 +108,11 @@ def test_the_projection_ids_rows_and_keeps_other_agents_unprobed() -> None:
     check("the document carries a DATE, not a clock", doc["scanned_on"] == "2026-09-14")
     check("and says whether the observatory's own server is declared anywhere",
           doc["own_declared"] is False)
+    probed = es.mcp_document(dict(scan, probe={"state": "probed", "probed_at": "2026-09-14T10:00:00Z",
+                                               "complete": True, "servers": {"x": {}}}), rows, "2026-09-14")
+    check("the document says when liveness was last asked (A36), without the probe's rows",
+          probed["probe"] == {"state": "probed", "probed_at": "2026-09-14T10:00:00Z", "complete": True},
+          str(probed.get("probe")))
 
 
 STUB = """#!{py}

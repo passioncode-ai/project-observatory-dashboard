@@ -69,7 +69,7 @@ health. Long metadata may be disclosed; primary identities may not be concealed.
 | ID | Requirement | Check |
 |---|---|---|
 | UI-01 | Visible defaults on all seven lists | Built-page fixtures and browser Projects/ENV |
-| UI-02 | Ten-screen structure/navigation | Browser walk plus screen contract above |
+| UI-02 | Ten-screen structure/navigation (twelve since the Machine and Agents pages; `PAGES` in `observatory/engine/dashboard/shell.py`) | Browser walk plus screen contract above; `observatory/engine/tests/test_workspace.py` `test_complete_local_workflow_and_twelve_pages` |
 | UI-03 | Compact project summary/full detail | Multi-resource fixture, links/focus in browser |
 | UI-04 | Honest findings and acknowledged history | Warning-only, acknowledged-only, >8/type fixtures |
 | UI-05 | Explicit safe action modes | Copy/live labels plus existing outcome/portability suites |

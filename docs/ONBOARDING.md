@@ -435,9 +435,10 @@ missing, the key step included; `project-observatory full assistant status` says
 without spending. An `OPENROUTER_API_KEY` in the environment of the process counts as the
 assistant's key and is used ahead of the key file (`key_source` then says `environment`):
 a personal key exported in your shell profile is spent by the assistant and the agent. On macOS the
-two launchd installers write workspace-specific jobs only after the scheduler
+tick and server installers write workspace-specific jobs only after the scheduler
 is explicitly enabled; Linux can run `project-observatory full tick` under a
-supervisor chosen by the user. Do not create duplicate writers for one home.
+supervisor chosen by the user. The hourly maintenance job (updates and the daily backup) is
+separate and scheduled by default: see [Staying in step](#staying-in-step). Do not create duplicate writers for one home.
 On macOS, `tools/serverd.py --install` also writes a `fabric-service/0.1`
 descriptor (`project-observatory.<instance>.json`, in
 `~/Library/Application Support/ai.passioncode.fabric/services/` or
@@ -710,18 +711,31 @@ never as an argument. A passphrase you set yourself is copied there too. One sup
 restoring on another machine needs it unless iCloud Keychain carries it there, and nothing
 can recover it.
 
+**The kept copy is never written over.** If `secrets/backup-passphrase` is lost while the
+kept copy exists, the job restores the file from it instead of generating a new passphrase.
+When you set a new passphrase, the one kept before moves to `<label>-previous`, because
+backups taken before the change open only with it; a restore tries both.
+
 **A reinstall restores.** A full snapshot is taken every day. Run `full init` in a terminal
 on an empty home, or `full restore --latest` anywhere. It finds the newest backup a workspace
 at the same path left, in every backups root this machine knows, opens it with the kept
-passphrase and restores it. `init --fresh` starts empty instead. When no kept passphrase
-opens the backup, `init` creates the workspace and prints the backup it found and the
-restore command.
+passphrase and restores it. `init --fresh` starts empty instead. When backups of more than
+one workspace with this name exist (a reinstall that could not open its backups starts a
+second, empty workspace with daily backups of its own), nothing is chosen: the answer lists
+them and `full restore --latest --label LABEL` picks one. When no kept passphrase opens the
+backup, `init` creates the workspace and prints the backup it found and a command to restore
+it into another, empty home.
 
 ```sh
-# On another machine: the passphrase from the environment or a prompt
-OBSERVATORY_BACKUP_PASSPHRASE=… project-observatory --home NEW_EMPTY_HOME full restore snapshot-….obsnap
+# On another machine: restore asks for the passphrase at a terminal
+project-observatory --home NEW_EMPTY_HOME full restore snapshot-….obsnap
 project-observatory full backups decrypt observatory-db-….obsdb ./copy.db
 ```
+
+A rolled-back update keeps the changed workspace beside the restored one as
+`<home>.failed-update-…`: a full, unencrypted copy with `secrets/`. Nothing removes it;
+`backups status` and `doctor` name it, and you delete it once the restored workspace is
+confirmed.
 
 `workspace-backup --output DIR` still writes a plaintext snapshot directory
 where you name it; that is an explicit choice and it is not encrypted.
@@ -792,11 +806,12 @@ Nothing needs to be run after a release. One job per workspace runs every hour: 
 - Once a day it runs `full update --check`. When a newer **stable** release exists, it runs
   `full update --apply`, the verified, reversible transaction described below.
 - On macOS, when the installed app is older than the engine, it replaces the app with that
-  release's app. The new app must pass the GitHub digest, `SHA256SUMS`, `codesign`, the same
-  signing team and Gatekeeper. It is never replaced while it runs.
+  release's app. The new app must pass the GitHub digest, `SHA256SUMS` and its signature by
+  the organization's release key, `codesign`, the same signing team and Gatekeeper. It is
+  never replaced while this user has it open.
 - Once a day it takes a full encrypted backup, `daily-*.obsnap`, the newest three kept. It
   briefly stops this workspace's tick and server for the copy and starts them again. When a
-  tick is running, the backup waits for the next hour. Snapshots you take yourself
+  tick or an update is running, the backup waits for the next hour. Snapshots you take yourself
   (`snapshot-*`) rotate separately and are never removed by the daily ones. See
   [Encrypted backups off this disk](#encrypted-backups-off-this-disk).
 
@@ -823,11 +838,21 @@ How the job gets scheduled:
   without a systemd user manager, the hook runs the pass itself.
 
 Only one `full update --apply` runs at a time per workspace. A second one, from the job, the
-plugin or a person, is refused before it changes anything. A failed update is rolled back
-and retried the next day. An update whose rollback needs a person stops the automatic
-attempts. Once you have run `full update` successfully, they resume. Until then, `doctor`, the Health page
-and `auto-update status` say so. `doctor` and the Health page also show when automatic
-updates are off or the job is not scheduled.
+plugin or a person, is refused before it changes anything; the job then tries again the next
+hour. The job runs the update in a process of its own and never stops it: a pass that is
+itself stopped (`maintain uninstall`, launchd, systemd stopping the unit) leaves the update
+running to its end, and the next pass reads the outcome from `store/logs/update.jsonl`. A
+reboot or a power loss is different: it ends the update too, and the next pass records it as
+`failed` ("the update ended without a final journal entry"). Health and `doctor` then show
+the failure; `doctor` also says whether the engine and its jobs run. Where there are no launchd
+jobs (Linux), the job and the plugin pass `--writers-stopped`, because there is nothing for the
+update to stop. A failed update is rolled back and retried the next day, or the next hour when
+the reason was momentary (a copy changed while it was taken, a busy lock). An update whose
+rollback needs a person stops the automatic attempts. Once you have run `full update`
+successfully, they resume. Until then, `doctor`, the Health page and `auto-update status` say
+so. `doctor` and the Health page also show when automatic updates are off, when the job is
+installed but not loaded, the engine and app versions, where the backup passphrase is kept,
+and a daily backup that failed.
 
 **Installs from 0.7.0 to 0.16.0** have no job of their own. The `observatory-log` plugin,
 which the PassionCode launcher keeps current, checks such an engine once a day. When a
@@ -845,8 +870,14 @@ project-observatory full update             # preview: current, target, what --a
 project-observatory full update --apply
 ```
 
-`--apply` downloads the wheel and `SHA256SUMS` from the GitHub release and installs only
-when the wheel matches both GitHub's published asset digest and its `SHA256SUMS` line.
+`--apply` downloads the wheel, `SHA256SUMS` and `SHA256SUMS.asc` from the GitHub release and
+installs only when `SHA256SUMS` carries a valid signature by the organization's release key
+(pinned in the engine, `release_signature.py`; never a key the release brings) and the wheel
+matches both GitHub's published asset digest and its `SHA256SUMS` line. An unsigned release
+is refused. The rollback wheel of a release published before signatures existed is checked
+on its digests alone; one that carries a signature must verify. A `GH_TOKEN` or `GITHUB_TOKEN`
+that GitHub refuses (HTTP 401) is dropped for the rest of that run, said once on stderr, and
+the release is read anonymously.
 It keeps a verified wheel of the running release for rollback (under
 `backups/engine-releases/`, cached by every update, or downloaded from that release) and
 refuses without one unless `--no-rollback` is given. It stops this workspace's launchd
@@ -873,7 +904,7 @@ this machine.
 |---|---|---|
 | 0 | up to date, or this machine is ahead of the target | updated |
 | 1 | — | failed after the install began; rolled back (`rolled_back`, `workspace_restored`) |
-| 2 | refused: no such release, bad arguments | refused before any change: verification, downgrade, unsafe state |
+| 2 | refused: no such release, bad arguments | refused before any change: verification (digest, signature), downgrade, unsafe state |
 | 3 | could not look: network, rate limit, a release without its assets (`degraded`) | could not look (network, rate limit), before any change |
 | 4 | — | rollback incomplete; `human_steps` says what to run |
 | 5 | — | updated, but a stopped job did not start; `services_not_restarted` has the command |

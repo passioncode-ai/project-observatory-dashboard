@@ -301,8 +301,10 @@ class WorkspaceRedesignTests(unittest.TestCase):
         data = {"health": {"spend_month": 1.25, "spend_today": 0.0051, "spend_denomination": "credits", "proposed": 30},
                 "queue": [{"id": "mem-1", "rev": 1, "kind": "fact", "at": "2026-01-01", "statement": "Fixture"}]}
         out = self.render("health", data)
-        self.assertIn("0.0051 credits", out["health"])
-        self.assertIn("1.2500 credits", out["health"])
+        # OpenRouter credits are dollars: the unit is "$", not an ambiguous "credits" (A34).
+        self.assertIn("$0.0051", out["health"])
+        self.assertIn("$1.2500", out["health"])
+        self.assertNotIn("credits", out["health"])
         self.assertIn('id="queue-rest"', out["queue"])
         self.assertIn("review.py&#39; &#39;list", out["queue"])
 

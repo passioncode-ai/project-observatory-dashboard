@@ -424,14 +424,22 @@ def from_store() -> dict:
             ms = maintenance.status(Path(paths.HOME))
             out["health"]["maintenance"] = {
                 "auto": ms["auto_update"], "wanted": ms["schedule_wanted"],
-                "scheduled": bool((ms.get("schedule") or {}).get("installed")),
+                # Installed AND loaded, as `maintain status` says it (A14); None where this
+                # process may not ask launchd (a sandbox or a test), never a guessed "no".
+                "scheduled": None if (ms.get("schedule") or {}).get("probed") is False else bool(ms.get("scheduled")),
+                "versions": ms.get("versions") or {},
+                "update_from": (ms.get("update") or {}).get("from"),
+                "update_to": (ms.get("update") or {}).get("to"),
+                "passphrase_kept": ((ms.get("passphrase") or {}).get("kept_outside")),
+                "passphrase_state": ((ms.get("passphrase") or {}).get("passphrase")),
                 "check": (ms.get("check") or {}).get("result"), "checked": (ms.get("check") or {}).get("at"),
                 # The update's result belongs to the check that found it, never to a later one.
                 "update": (ms.get("update") or {}).get("result")
                 if (ms.get("update") or {}).get("at") == (ms.get("check") or {}).get("at") else None,
                 "snapshot": (ms.get("snapshot") or {}).get("at"),
                 "snapshot_kind": (ms.get("snapshot") or {}).get("result"),
-                "encrypted": (ms.get("snapshot") or {}).get("encrypted"), "warnings": ms.get("warnings") or []}
+                "encrypted": (ms.get("snapshot") or {}).get("encrypted"), "warnings": ms.get("warnings") or [],
+                "warning_items": ms.get("warning_items") or []}
         except Exception as exc:                                                     # noqa: BLE001
             out["health"]["maintenance"] = {"state": "unknown", "reason": f"{type(exc).__name__}"}
         # MEMORY ACCESS (PB-137 N-008): who besides the local stdio agent may reach
@@ -539,6 +547,14 @@ def from_store() -> dict:
 #: `project.unobservable`, `work.unwitnessed` and seven more. Dropping more of a
 #: kind the reader can already see is a cap. Dropping the only instance of a
 #: kind is a silence, and it is the one this repository refuses everywhere else.
+def heroku_state(doc) -> str:
+    """`unscanned` (no document), `unread` (a scan that read no application and said
+    why) or `read` — the three things a Heroku number can mean."""
+    if doc is None:
+        return "unscanned"
+    return "unread" if not doc.get("apps") and doc.get("degraded") else "read"
+
+
 def scanned(doc):
     """A registry document that a scan wrote, or None. `init` writes empty
     documents with `scanned_on: null` so every reader finds a file; the pages
@@ -989,6 +1005,10 @@ def build():
         # application nothing claims is the same omission as a domain nothing
         # claims, one provider over, and it is the reason this tile is a pair.
         "heroku_apps": len(HEROKU["apps"]) if HEROKU else 0,
+        # A SCAN THAT READ NOTHING IS NOT "0 APPS" (audit A09): the collector writes
+        # the document with `apps: []` and its reason in `degraded`, and the tiles
+        # then say "not read" instead of counting a failure as an empty estate.
+        "heroku_state": heroku_state(HEROKU),
         "heroku_unlinked": (HEROKU.get("totals", {}).get("unlinked", 0) if HEROKU else 0),
         "heroku_cost": (HEROKU.get("totals", {}).get("monthly_cost", 0) if HEROKU else 0),
         "creds": len(CREDS["credentials"]) if CREDS else 0,
@@ -1268,15 +1288,17 @@ h1 { margin: 0 0 var(--space-1); font: 700 var(--t-page)/1.2 var(--font-ui); let
   padding: var(--space-2) 0; border-bottom: 1px solid var(--border);
   font-size: var(--t-body); }
 .qrow:last-child { border-bottom: 0; }
-.qrow .qacts { margin-top: var(--space-2); display: flex; gap: var(--space-2); }
+/* Statements carry branch names and ids with no break point (browser pass, 2026-10-06). */
+.qrow > * { min-width: 0; overflow-wrap: anywhere; }
+.qrow .qacts { margin-top: var(--space-2); display: flex; flex-wrap: wrap; gap: var(--space-2); }
 /* Filter bar above a list: type selector, free-text query, shown count. */
 .verbs { display: flex; flex-wrap: wrap; gap: 4px; }
 .fbar { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center;
   margin: var(--space-2) 0 var(--space-3); }
 .fbar .ftype, .fbar .fq { font: 400 var(--t-body) var(--font-ui); color: var(--ink);
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-control);
-  padding: 4px 8px; }
-.fbar .fq { min-width: 220px; }
+  padding: 4px 8px; max-width: 100%; min-width: 0; }
+.fbar .fq { min-width: min(220px, 100%); }
 .fbar .fshown { font: 400 var(--t-chip) var(--font-data); color: var(--muted); margin-left: auto; }
 .f.fhide { display: none !important; }
 .f:target { background: var(--accent-weak); }
@@ -1302,6 +1324,9 @@ th[aria-sort="ascending"] .sort::after { content: " ▴"; color: var(--muted); }
 th[aria-sort="descending"] .sort::after { content: " ▾"; color: var(--muted); }
 /* Long identifiers in cells wrap anywhere rather than widening the table. */
 td .mono { overflow-wrap: anywhere; }
+/* A long command (an absolute workspace path) wraps instead of widening the page
+   past a phone's 390 px (audit A35): health rows, the keys page, empty states. */
+.hrow .mono, .hrow b, .not-scanned .mono, .machine-hint .mono, .act, .d { overflow-wrap: anywhere; min-width: 0; }
 .qrow .qm { color: var(--muted); font-family: var(--font-data); font-size: var(--t-chip); }
 .tile.more-tiles { cursor: pointer; border-style: dashed; font: inherit; text-align: left;
   color: var(--muted); }
@@ -1322,7 +1347,8 @@ td .mono { overflow-wrap: anywhere; }
 .f { display: flex; gap: var(--space-3); align-items: baseline; flex-wrap: wrap;
   padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); }
 .f:last-child { border-bottom: 0; }
-.f .t { font-weight: 600; }
+/* A subject such as `agent/prod/A_LONG_SECRET_NAME` has no break point: 390 px scrolled (browser pass, 2026-10-06). */
+.f .t { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .f .d { color: var(--muted); flex: 1 1 24ch; }
 .f .due { font-family: var(--font-data); font-size: var(--t-chip); color: var(--muted);
   white-space: nowrap; }
@@ -1338,6 +1364,7 @@ button.fold { margin: var(--space-2) 0 0 var(--space-3); }
 .not-scanned p { margin: 0 0 var(--space-2); }
 .not-scanned .chip-btn { text-transform: none; letter-spacing: 0; white-space: normal; text-align: left; overflow-wrap: anywhere; }
 .empty-estate { flex: 1 1 100%; }
+.spark .spark-n, .spark .spark-sess { white-space: nowrap; }
 .spark { display: flex; align-items: center; gap: 4px; color: var(--muted);
          font-size: var(--t-chip); font-family: var(--font-data); }
 .spark svg { display: block; }
@@ -1825,6 +1852,13 @@ const engineCommand = (file, args = []) =>
   shellArg(String(RUNTIME.engine || ".").replace(/\/$/, "") + "/" + file) +
   args.map(value => " " + shellArg(value)).join("");
 const toolCommand = (name, args = []) => engineCommand("tools/" + name, args);
+// A rule's text names a tool as `python "$(project-observatory full-path)/tools/…"`,
+// portable but not runnable where `python` is absent (macOS has none) or is another
+// interpreter. On the page it becomes this engine's own interpreter and path, as the
+// Keys page builds them (audit A29).
+const runnable = text => !RUNTIME.python ? String(text == null ? "" : text) :
+  String(text == null ? "" : text).replace(/\bpython "\$\(project-observatory full-path\)\/([^"]+)"/g,
+    (_, rel) => shellArg(RUNTIME.python) + " " + shellArg(String(RUNTIME.engine || ".").replace(/\/$/, "") + "/" + rel));
 const cliCommand = (...args) => engineCommand("observatory.py", args);
 const privateInput = command => command + " < " + shellArg("/absolute/path/to/private-input");
 // The command a person types, as the docs spell it: `project-observatory full …`,
@@ -1966,18 +2000,21 @@ function pluralCaption(id, value) {
 const tile = (id, value) => [id.includes("{n}") ? pluralCaption(id, value) : T(id), value];
 // INVENTORY TILES. The primary set is always visible; the rest sit behind a
 // "more" control so the header stays short.
+// A Heroku number is a count only when the scan read the applications (audit A09).
+const HK = n => S.heroku_state === "unread" ? T("not read")
+  : S.heroku_state === "unscanned" ? T("not scanned") : n;
 const TILES_PRIMARY = [
   tile("tile@@{n} projects", S.projects), tile("tile@@{n} repositories", S.repositories),
-  tile("tile@@{n} Heroku apps", S.heroku_apps), tile("tile@@{n} apps down", S.heroku_down),
+  tile("tile@@{n} Heroku apps", HK(S.heroku_apps)), tile("tile@@{n} apps down", HK(S.heroku_down)),
   tile("tile@@{n} domains", S.domains), tile("tile@@{n} sites do not resolve", S.dead_site),
-  tile("tile@@{n} clones out of sync", S.unsynced), tile("Heroku $/mo", Math.round(S.heroku_cost)),
+  tile("tile@@{n} clones out of sync", S.unsynced), tile("Heroku $/mo", HK(Math.round(S.heroku_cost))),
 ];
 const TILES_REST = [
   tile("tile@@{n} owners", S.owners), tile("with a site", S.with_site), tile("with a folder", S.with_folder),
   tile("with a note", S.with_note), tile("without a note", S.no_note),
   tile("tile@@{n} archived projects", S.archived), tile("tile@@{n} archived repos", S.archived_repos),
   tile("tile@@{n} inactive repos", S.inactive_repos), tile("tile@@{n} domains without a project", S.domains_no_row),
-  tile("tile@@{n} Heroku apps without a project", S.heroku_unlinked),
+  tile("tile@@{n} Heroku apps without a project", HK(S.heroku_unlinked)),
   // Local state of the working copies, and the credential counts.
   tile("tile@@{n} dirty working copies", S.dirty), tile("tile@@{n} keys in the registry", S.creds),
   tile("tile@@{n} keys leaked", S.creds_leaked), tile("tile@@{n} keys without a project", S.creds_unclaimed),
@@ -1988,6 +2025,17 @@ const DRIFT = D.rows.filter(r => r.lifecycle === "active"
                             && (r.tier === "dormant" || r.tier === "cold")).length;
 // WORK TILES: what happened, over the rolling windows the builder computes.
 // A key absent from the stats (no store) is simply not shown.
+// Where a site came from, in words; the rule token stays on hover (A38). The four
+// forms are the ones collectors/merge.py writes.
+function siteSource(token) {
+  const s = String(token || "");
+  let m;
+  if ((m = s.match(/^github:(.+):homepageUrl$/))) return T("from the homepage field of {repo}", {repo: m[1]});
+  if ((m = s.match(/^repo-config:(.+)$/))) return T("from {file}", {file: m[1]});
+  if ((m = s.match(/^vault-overview:(.+)$/))) return T("from the wiki note {file}", {file: m[1]});
+  if (s.startsWith("operator-claim:")) return T("stated by the operator");
+  return s;
+}
 // Stable ids in the data, words from the catalog: the label is the reader's
 // language, the key is the builder's contract.
 const WORK_KEYS = [["commits_7d", "tile@@{n} commits, 7 d"], ["projects_active_7d", "tile@@{n} projects in progress, 7 d"],
@@ -2000,8 +2048,10 @@ const WORK_VALUE = k => k === "unpushed_commits" && typeof S[k] === "string" && 
 // The caption agrees with the counted number, not with the decorated value.
 const TILES_WORK = WORK_KEYS.filter(([k]) => S[k] != null)
   .map(([k, id]) => [pluralCaption(id, S[k]), WORK_VALUE(k)]);
+// Locale separators in every tile: 12 345 reads, 12345 does not (audit A40).
+// A string value ("12+", "not read", a name) is already final.
 const tileHTML = ts => ts.map(([k, v]) =>
-  `<div class="tile"><b>${v}</b><span>${k}</span></div>`).join("");
+  `<div class="tile"><b>${typeof v === "number" ? NUM(v) : v}</b><span>${k}</span></div>`).join("");
 {
   const host = document.getElementById("work");
   const top = S.busiest_28d;
@@ -2027,7 +2077,7 @@ document.getElementById("tiles").innerHTML = !D.rows.length
        (RUNTIME.projects_configured === false ? [fullCommand("configure sources projects", "PATH")] : [])
          .concat([fullCommand("local")]))}</div>`
   : tileHTML(TILES_PRIMARY) +
-  (DRIFT ? `<a class="tile" href="projects.html?f=drift"><b>${DRIFT}</b>` +
+  (DRIFT ? `<a class="tile" href="projects.html?f=drift"><b>${NUM(DRIFT)}</b>` +
            `<span>${pluralCaption("tile@@{n} declared active, measured dormant", DRIFT)}</span></a>` : "") +
   `<button class="tile more-tiles" id="more-tiles" type="button" aria-expanded="false"
      ><b>+${TILES_REST.length}</b><span>${T("more counters")}</span></button>`;
@@ -2094,27 +2144,64 @@ if (H.embedding_policy) {
 // full backup was taken, with the command that turns the missing part on.
 if (H.maintenance && H.maintenance.state !== "unknown") {
   const MT = H.maintenance, status = fullCommand("maintain status");
-  if (!MT.wanted || !MT.scheduled)
+  // Each result the job records, in words; an unknown one is shown as recorded.
+  const RESULT = {"up-to-date": T("up to date"), "update-available": T("a newer release exists"),
+    "undetermined": T("could not check"), "updated": T("updated"),
+    "updated-services-not-restarted": T("updated, a background job did not start"),
+    "failed-rolled-back": T("failed and rolled back"), "refused": T("refused"),
+    "needs-person": T("needs a person"), "another-update-running": T("another update was running")};
+  const RESULT_WORD = r => RESULT[r] || r || "?";
+  if (!MT.wanted || MT.scheduled === false)
     hb.push([T("updates and backups"), T("not scheduled on this machine — new releases and daily backups wait for a person"),
       fullCommand("maintain ensure")]);
   else if (!MT.auto)
     hb.push([T("updates"), T("off — new releases are not installed by themselves"), fullCommand("auto-update on")]);
   else {
-    // Each result the job records, in words; an unknown one is shown as recorded.
-    const RESULT = {"up-to-date": T("up to date"), "update-available": T("a newer release exists"),
-      "undetermined": T("could not check"), "updated": T("updated"),
-      "updated-services-not-restarted": T("updated, a background job did not start"),
-      "failed-rolled-back": T("failed and rolled back"), "refused": T("refused"),
-      "needs-person": T("needs a person"), "another-update-running": T("another update was running")};
     const last = MT.update || MT.check;
+    // What the last update moved (A14).
+    const moved = MT.update === "updated" && MT.update_from && MT.update_to
+      ? " (" + MT.update_from + " → " + MT.update_to + ")" : "";
     hb.push([T("updates"), MT.checked ? T("installed by themselves; last check {date}: {result}",
-      {date: MT.checked.slice(0, 10), result: RESULT[last] || last || "?"}) : T("installed by themselves; not checked yet"), status]);
+      {date: MT.checked.slice(0, 10), result: (RESULT[last] || last || "?") + moved}) : T("installed by themselves; not checked yet"), status]);
   }
+  // What is installed, on every path (A14 review: the versions showed only when updates
+  // were on and scheduled — the row could not show that the Mac app lagged the engine).
+  const V = MT.versions || {};
+  if (V.engine)
+    hb.push([T("installed"), T("engine {v}", {v: V.engine}) + (V.app ? ", " + T("app {v}", {v: V.app}) : ""), status]);
+  // Every warning the job raised, in the reader's language, each its own row (A14) —
+  // except what a row above or below already says (A14 review: every problem twice).
+  const SAID = new Set(["schedule-off", "not-scheduled", "auto-off", "no-backup", "not-encrypted", "passphrase"]);
+  const WARN = {
+    "services-not-restarted": () => [T("a background job did not start again after the last backup or update"),
+                                     toolCommand("serverd.py", ["--install"])],
+    "app-refused": w => [T("the Mac app update was refused: {detail}", {detail: w.detail || ""}), status],
+    "needs-person": () => [T("the last automatic update needs a person"), fullCommand("update")],
+    "update-incomplete": w => [w.soon
+      ? T("the last automatic update did not complete ({result}: {detail}); tried again within the hour",
+          {result: RESULT_WORD(w.result), detail: w.detail || ""})
+      : T("the last automatic update did not complete ({result}: {detail}); tried again tomorrow",
+          {result: RESULT_WORD(w.result), detail: w.detail || ""}), status],
+    "snapshot-failed": w => [T("the last daily backup failed: {detail}; tried again within the hour", {detail: w.detail || ""}),
+                             fullCommand("backups status")],
+  };
+  const items = (MT.warning_items || []).length ? MT.warning_items : (MT.warnings || []).map(text => ({text}));
+  items.filter(w => !SAID.has(w.code)).forEach(w => {
+    const [text, cmd] = WARN[w.code] ? WARN[w.code](w) : [w.text, status];
+    hb.push([T("maintenance"), text, cmd]);
+  });
   const day = (MT.snapshot || "").slice(0, 10);
   hb.push([T("full backup"), !MT.snapshot ? T("none yet — the hourly job takes one a day")
     : MT.snapshot_kind === "before-upgrade" ? T("newest {date}, taken before the last update", {date: day})
     : MT.encrypted === false ? T("newest {date}, NOT encrypted, inside the workspace — set a passphrase", {date: day})
-    : T("newest {date}, encrypted outside the workspace", {date: day}), status]);
+    : T("newest {date}, encrypted outside the workspace", {date: day}), fullCommand("backups status")]);
+  // Where the passphrase that opens those backups is kept besides the workspace (A14).
+  if (MT.passphrase_state && MT.passphrase_state !== "environment")
+    hb.push([T("backup passphrase"), MT.passphrase_state === "missing"
+      ? T("none yet: the store outside the workspace did not answer, so none was generated; backups wait")
+      : MT.passphrase_kept
+      ? T("also kept outside the workspace ({where})", {where: MT.passphrase_kept})
+      : T("only inside the workspace — a deleted workspace cannot open its backups"), fullCommand("backups status")]);
 }
 // Who may reach memory besides the local agent (N-008), with the command that lists them.
 if (H.access_bindings) {
@@ -2137,12 +2224,15 @@ if (H.degraded_sources) hb.push([T("sources degraded"), H.degraded_sources]);
 // the page does no date arithmetic of its own.
 // Both figures carry the wallet's unit: a bare "0.0051" beside a month in
 // credits read as a different currency, or as none.
-const DENOMINATION = {credits: T("unit@@credits"), usd: "USD", USD: "USD"};
-const spendUnit = DENOMINATION[H.spend_denomination] || String(H.spend_denomination || "");
+// OpenRouter's credits ARE US dollars (one credit, one dollar), so both read as "$"
+// rather than an abbreviation nobody could place (audit A34).
+const DOLLARS = new Set(["credits", "usd", "USD"]);
+const spend = n => DOLLARS.has(H.spend_denomination || "credits") ? "$" + (+n).toFixed(4)
+  : `${(+n).toFixed(4)} ${String(H.spend_denomination || "")}`.trim();
 if (H.spend_month != null)
-  hb.push([T("spent by this project this month"), `${(+H.spend_month).toFixed(4)} ${spendUnit}`.trim()]);
+  hb.push([T("spent by this project this month"), spend(H.spend_month)]);
 if (H.spend_today != null)
-  hb.push([T("of which today"), `${(+H.spend_today).toFixed(4)} ${spendUnit}`.trim()]);
+  hb.push([T("of which today"), spend(H.spend_today)]);
 // Models the provider-health file holds in quarantine, named up to three.
 {
   const q = Object.keys(H.provider || {});
@@ -2182,7 +2272,7 @@ const SEL_BY_TAB = {
   // the same rows the table groups, so each option selects something.
   domains:  [T("all registrars"), T("Registrar"),
              () => { const rows = domainRows();
-                     return [...new Set(rows.map(d => d.registrar).filter(Boolean))].sort()
+                     return [...new Set(rows.map(d => registrarName(d.registrar)).filter(Boolean))].sort()
                        .concat(rows.some(d => !d.registrar) ? [[NO_REGISTRAR, "—"]] : []); }],
   creds:    [T("all sections"), T("Section"),
              () => CRED_SECTIONS.map(s => s[1])],
@@ -2289,6 +2379,20 @@ const ENVV = ENVF.flatMap(f => f.variables.map(v => ({
   available: v.available_in || [],
 })));
 const PROJ_NAME = new Map(D.rows.map(r => [r.id, r.name]));
+// A PROJECT AS A READER NAMES IT (A43): the registry's name, not the id's slug
+// ("acme-.github" for the acme/.github repository). Where two projects
+// share a name (".github" in two organizations) and the id is exactly
+// `project:<owner>-<name>`, the owner is put back in front: "acme/.github".
+const NAME_COUNT = new Map();
+D.rows.forEach(r => NAME_COUNT.set(r.name, (NAME_COUNT.get(r.name) || 0) + 1));
+function projLabel(id) {
+  const slug = String(id || "").replace(/^project:/, "");
+  const name = PROJ_NAME.get(id);
+  if (!name) return slug;
+  if (NAME_COUNT.get(name) > 1 && slug.endsWith("-" + name) && slug.length > name.length + 1)
+    return slug.slice(0, -(name.length + 1)) + "/" + name;
+  return name;
+}
 function selectTab(next) {
   tab = next;
   active = activeBy[tab];
@@ -2464,7 +2568,8 @@ function spark(weeks) {
     `<polyline points="${line(vals)}" fill="none" stroke="currentColor" stroke-width="1"/>` +
     (stotal ? `<polyline points="${line(sess)}" fill="none" stroke="currentColor"` +
               ` stroke-width="1" stroke-dasharray="2 2" opacity="0.55"/>` : "") +
-    `</svg><span>${total}</span>` +
+    // Labelled and kept on one line: an unlabelled "881" wrapped as "88" over "1" (A38).
+    `</svg><span class="spark-n">${T("{n} commits", {n: total})}</span>` +
     (stotal ? `<span class="spark-sess">· ${T("{n} sessions", {n: stotal})}</span>` : "") +
     `</div>`;
 }
@@ -2589,7 +2694,7 @@ function detail(id) {
       list(r.repos, T("no repositories"), x => `<li>${repoLine(x, r.rules || [])}</li>`)}
     ${list(r.folders, T("no local folders"), f => `<li class="mono">${E(f)}</li>`)}
     ${list(r.sites, T("no sites declared"), s => `<li class="mono"><a href="https://${E(s.host)}" target="_blank" rel="noopener">${E(s.host)}</a>` +
-        `<span class="anchor"> ${E((s.evidence || [])[0] || "")}</span></li>`)}
+        `<span class="anchor" title="${E((s.evidence || [])[0] || "")}"> ${E(siteSource((s.evidence || [])[0]))}</span></li>`)}
     <h3>${T("Hosting and environments")}</h3>
     ${(r.heroku || []).length ? hostingGroups(r.heroku) : `<p class="none">${T("No linked apps")}</p>`}
     <h3>${T("Technology and documentation")}</h3>
@@ -3126,6 +3231,12 @@ const doorOf = c => {
   const m = /^tools\/(openrouter|cloudflare)\.py$/.exec(c.read_by || "");
   return m ? m[1] : null;
 };
+// The door's LEDGER of minted keys sits in the same store and names the same
+// reader, but it is not a door — nothing is minted from a ledger (audit A41).
+const ledgerOf = c => {
+  const m = /^(openrouter|cloudflare)-issued\.json$/.exec(String(c.name || ""));
+  return m && doorOf(c) === m[1] ? m[1] : null;
+};
 
 // THE VERBS OF A CREDENTIAL: label, command, and the live action when the
 // server can perform it (null means copy-only). Every verb is a command a
@@ -3137,8 +3248,13 @@ const ISSUE_CMD = {
 };
 function credVerbs(c) {
   const door = doorOf(c);
+  const ledger = ledgerOf(c);
   const n = c.name || c.label || "";
   const sign = [T("sign…"), toolCommand("sign_credential.py", ["set", c.id, "--purpose", "…", "--evidence", "…"]), "annotate"];
+  if (ledger)
+    return [sign,
+      [T("what was minted"), toolCommand(ledger + ".py", ["list"]), null],
+      [T("what is it"), "ls -l -- " + shellArg(secretFile(n)), null]];
   if (c.kind === "llm-api-key")
     return [
       sign,
@@ -3235,7 +3351,7 @@ function renderCreds() {
       `</div><div class="anchor">${T("spent {value}", {value: "$" + (+c.usage || 0).toFixed(3)})}</div>`;
   const who = c => (c.used_by || []).length
     ? (c.used_by || []).map(p =>
-        `<a class="plink" href="#${E(p)}">${E(p.split(":")[1])}</a>`).join(", ") +
+        `<a class="plink" href="#${E(p)}">${E(projLabel(p))}</a>`).join(", ") +
       ((c.used_by || []).length > 1
         ? `<div class="tier">${chip(T("shared · a rotation touches every one"), "warn")}</div>` : "")
     // No project uses it: name the tool that reads it, or say it is nobody's.
@@ -3270,6 +3386,7 @@ function renderCreds() {
       <div class="anchor mono" title="${E(c.id)}">${E(c.label
         || [c.vault_project, c.env].filter(Boolean).join("/") || c.id)}</div>
       ${c.provider ? `<div class="anchor">${E(c.provider)}${c.serves ? " · " + E(c.serves) : ""}</div>` : ""}
+      ${ledgerOf(c) ? `<div class="tier">${T("the door's ledger")}</div>` : ""}
       ${c.identity ? `<div class="anchor mono">${E(c.identity)}</div>` : ""}
       ${                                                                        
                                                                      ""}
@@ -3546,7 +3663,13 @@ function renderEnv() {
         {server: '<span class="mono">tools/keyserver.py</span>', log: '<span class="mono">store/logs/keyserver.jsonl</span>'})
     : T("command mode: the button copies a command to the clipboard; run it in a terminal. Start {server} to reveal and copy right here",
         {server: '<span class="mono">' + E(toolCommand('keyserver.py')) + '</span>'});
-  out.innerHTML = filterLine(rows.length, ENVV.length, "of@@{n} variables") + '<div class="action-mode"><b>' + (LIVE ? T("Actions connected") : T("Command mode")) + '</b> · ' + (LIVE ? T("A value opens only on request and is hidden again.") : T("The buttons copy commands for a terminal; no values are shown here.")) + '<details><summary>' + T("How to use the actions") + '</summary>' + howto + '</details></div><div class="card"><table>' +
+  // WHY THE "PROD" COLUMN IS EMPTY, when production could not be read (audit A26).
+  const prodGaps = ((D.remote && D.remote.degraded) || []).filter(g => g && g.reason);
+  const prodNote = prodGaps.length ? '<div class="empty not-scanned degraded-note"><p>' +
+    T("Production could not be read in full, so the Prod column is incomplete:") + '</p><ul>' +
+    prodGaps.map(g => '<li><span class="mono">' + E(g.source || "") + '</span> — ' + E(g.reason) +
+      (g.effect ? '<div class="anchor">' + E(g.effect) + '</div>' : '') + '</li>').join("") + '</ul></div>' : "";
+  out.innerHTML = prodNote + filterLine(rows.length, ENVV.length, "of@@{n} variables") + '<div class="action-mode"><b>' + (LIVE ? T("Actions connected") : T("Command mode")) + '</b> · ' + (LIVE ? T("A value opens only on request and is hidden again.") : T("The buttons copy commands for a terminal; no values are shown here.")) + '<details><summary>' + T("How to use the actions") + '</summary>' + howto + '</details></div><div class="card"><table>' +
     '<colgroup><col style="width:26%"><col style="width:17%"><col style="width:20%">' +
     '<col style="width:9%"><col style="width:14%"><col style="width:14%"></colgroup>' +
     '<thead><tr>' + sortTh(T("Variable"), "name") + '<th>' + T("What it is") + '</th><th>' + T("Links") + '</th>' + sortTh(T("Changed"), "modified") +
@@ -3574,6 +3697,20 @@ function renderEnv() {
 // measured liveness and expiry.
 const DAY = 864e5;
 const daysUntil = iso => iso ? Math.round((Date.parse(iso) - Date.now()) / DAY) : null;
+// ONE REGISTRAR, ONE GROUP (A39): exports spell a registrar several ways —
+// "godaddy (id: 146)" and "godaddy.com, llc (id: 146)" — and only the IANA id is
+// stable, so every spelling of an id reads as its shortest one.
+const REGISTRAR_BY_ID = new Map();
+for (const d of DOMS || []) {
+  const m = String(d.registrar || "").match(/\(id:\s*(\d+)\)/);
+  if (!m) continue;
+  const prev = REGISTRAR_BY_ID.get(m[1]);
+  if (!prev || d.registrar.length < prev.length) REGISTRAR_BY_ID.set(m[1], d.registrar);
+}
+const registrarName = name => {
+  const m = String(name || "").match(/\(id:\s*(\d+)\)/);
+  return m ? REGISTRAR_BY_ID.get(m[1]) || name : name;
+};
 const hayDom = d => [d.name, d.registrar || "", d.status || "",
   (d.projects || []).join(" ")].join(" ").toLowerCase();
 
@@ -3586,14 +3723,15 @@ function domainRows() {
   const rows = DOMS.map(d => ({ ...d, zone: zoneBy.get(d.name) || null, source: zoneBy.has(d.name) ? "both" : "registrar" }));
   (D.zones || []).forEach(z => { if (!DOMS.some(d => d.name === z.name))
     rows.push({ name: z.name, registrar: z.registrar ? z.registrar + " " + T("(according to Cloudflare)") : null,
-      status: z.status, live: LIVE_BY_HOST(z.name), projects: z.project ? [z.project] : [],
+      // The zone's own state, in words, as the Cloudflare column says it (A39 review).
+      status: z.status ? T(`zone@@${z.status}`) : "", live: LIVE_BY_HOST(z.name), projects: z.project ? [z.project] : [],
       zone: z, source: "cloudflare" }); });
   return rows;
 }
 function keepDom(d, q, registrar) {
   if (q && !hayDom(d).includes(q)) return false;
   // "—" selects the names that carry no registrar at all.
-  if (registrar === NO_REGISTRAR ? !!d.registrar : (registrar && d.registrar !== registrar)) return false;
+  if (registrar === NO_REGISTRAR ? !!d.registrar : (registrar && registrarName(d.registrar) !== registrar)) return false;
   if (active.has("d-noproject") && (d.projects || []).length) return false;
   // Liveness filters: not resolving, not measured, or answering with an
   // HTTP error.
@@ -3607,6 +3745,10 @@ function keepDom(d, q, registrar) {
 
 // MCP SERVERS, as each agent declares them: where the key sits and whether
 // the server answered the last probe.
+// Claude Code's scope of a declaration: `user`, `local`, or `project:<folder>` —
+// the folder whose .mcp.json declares it, not a registry id (browser pass, 2026-10-06).
+const mcpScope = scope => String(scope || "").startsWith("project:")
+  ? T("project {path}", {path: String(scope).slice("project:".length)}) : String(scope || "");
 function renderMcp() {
   const out = document.getElementById("out");
   if (!D.mcp) {
@@ -3637,13 +3779,24 @@ function renderMcp() {
   const groups = new Map();
   rows.forEach(s => { const k = SORT.key ? T("Selected entries") : s.agent; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(s); });
   const row = s => `<tr id="m-${E(anchorSlug(s.agent + "/" + s.name))}">
-    <td data-label="${T("Server")}"><div class="name mono">${E(s.name)}</div><div class="anchor">${E(s.agent)} · ${E(s.scope)}</div></td>
-    <td data-label="${T("Transport")}">${E(s.transport || "—")}${s.command ? `<div class="anchor mono">${E(s.command)}${s.command_present === false ? " · " + T("not on disk") : ""}</div>` : ""}</td>
+    <td data-label="${T("Server")}"><div class="name mono">${E(s.name)}</div><div class="anchor">${E(s.agent)} · ${E(mcpScope(s.scope))}</div></td>
+    <td data-label="${T("Transport")}">${E(s.transport || "—")}${s.command && s.command !== s.target ? `<div class="anchor mono">${E(s.command)}</div>` : ""}${
+      // On its own line, whatever else is shown: a stdio row's command is its target and
+      // is printed once (A37), and the missing binary went with it (A37 review).
+      s.command_present === false ? `<div class="anchor">${chip(T("not on disk"), "warn")}</div>` : ""}</td>
     <td data-label="${T("Target")}"><span class="mono">${E(s.target || "")}</span></td>
     <td data-label="${T("Key")}">${keyPlace(s)}</td>
     <td data-label="${T("Connection")}">${live(s)}${s.liveness_detail ? `<div class="anchor" title="${E(s.liveness_detail)}">${E(labelOf(PROBE_SAID, s.liveness_detail))}</div>` : ""}</td></tr>`;
   const t = D.mcp.totals || {};
-  out.innerHTML = filterLine(rows.length, ALL.length, "of@@{n} declarations") + `<div class="card"><table>
+  // A PAGE OF "NOT PROBED" SAYS HOW TO PROBE (A36): the filters "not answering" and
+  // "sign-in needed" can only match after one, and nothing said that one exists.
+  const pr = D.mcp.probe || {};
+  const probed = ALL.some(s => s.liveness && s.liveness !== "not-probed");
+  const probeLine = probed && !pr.probed_at ? "" : `<p class="dmeta" id="mcp-probe">${
+    pr.probed_at ? T("Liveness was last asked {date}; it is asked only on request, never on a schedule:", {date: E(String(pr.probed_at).slice(0, 16).replace("T", " "))})
+                 : T("No server has been asked whether it answers yet. That is asked only on request, because it starts every declared server once:")} ` +
+    `<button class="chip-btn mono" type="button" data-copy="${E(fullCommand("scan-mcp"))}" title="${T("copy the command")}">${E(fullCommand("scan-mcp"))}</button></p>`;
+  out.innerHTML = probeLine + filterLine(rows.length, ALL.length, "of@@{n} declarations") + `<div class="card"><table>
     <colgroup><col style="width:22%"><col style="width:16%"><col style="width:26%"><col style="width:14%"><col style="width:22%"></colgroup>
     <thead><tr>${sortTh(T("Server"), "name")}<th>${T("Transport")}</th><th>${T("Target")}</th><th>${T("Key")}</th><th>${T("Connection")}</th></tr></thead>
     ${[...groups].map(([agent, ss]) =>
@@ -3696,7 +3849,7 @@ function renderTraffic() {
     ${cell(T("Sessions/30 d"), num(p.sessions_30d), "num")}
     ${cell(T("Views"), num(p.views_30d), "num")}
     ${cell(T("Project"), p.project
-      ? `<a class="plink" href="#${E(p.project)}">${E(String(p.project).split(":")[1] || p.project)}</a>` +
+      ? `<a class="plink" href="#${E(p.project)}">${E(projLabel(p.project))}</a>` +
         `<div class="anchor" title="${E(p.link_evidence || "")}">${E(RULE_LABEL[p.link_rule] || p.link_rule || "")}</div>`
       : `<span class="unlinked" title="${E(p.unlinked_reason || p.boundary_why || "")}">${
           p.standing === "outside" ? T("outside the estate") : T("no project")}</span>`)}
@@ -3751,10 +3904,11 @@ function renderDomains() {
     if (s === "pending") return chip(T("awaiting a word"), "warn");
     if (s === "dormant") return `<span title="${T("DNS read: the apex and www point nowhere")}">${chip(T("dormant@@domain"))}</span>`;
     if (s === "product") return chip(T("product"), "ok");
-    return chip(T("no word"), "warn");
+    // Nobody has said whose this zone is yet; "no word" read as a missing label (A39).
+    return chip(T("no decision yet"), "warn");
   };
   const cfCell = d => d.zone
-    ? `<span class="mono">${E(d.zone.account_label || "")}</span><div class="anchor">${E(d.zone.status || "")}${d.zone.paused ? " · paused" : ""} · ${E(d.zone.plan || "")}</div>`
+    ? `<span class="mono">${E(d.zone.account_label || "")}</span><div class="anchor">${E(d.zone.status ? T(`zone@@${d.zone.status}`) : "")}${d.zone.paused ? " · " + T("zone@@paused") : ""}${d.zone.plan ? " · " + T("plan {name}", {name: E(d.zone.plan)}) : ""}</div>`
     : NONE;
   const PROD_NAME = new Map((D.products || []).map(p => [p.id, p.name]));
   const prodCell = d => { const ps = (d.projects || []).flatMap(p => PROD_BY_PROJECT.get(p) || []);
@@ -3781,16 +3935,16 @@ function renderDomains() {
   };
   sortInPlace(doms, {name: d => lower(d.name), expiry: d => dateOr(d.expires_on)});
   const groups = new Map();
-  doms.forEach(d => { const k = SORT.key ? T("Selected entries") : d.registrar || "—";
+  doms.forEach(d => { const k = SORT.key ? T("Selected entries") : registrarName(d.registrar) || "—";
     if (!groups.has(k)) groups.set(k, []); groups.get(k).push(d); });
   const row = d => `<tr id="d-${E(d.name)}">
     <td data-label="${T("Domain")}"><div class="name"><a href="https://${E(d.name)}"
       target="_blank" rel="noopener">${E(d.name)}</a></div>
-      <div class="anchor">${E(d.registrar || T("registrar not stated"))} · ${E(d.status || "")}</div></td>
+      <div class="anchor" title="${E(d.registrar || "")}">${E(registrarName(d.registrar) || T("registrar not stated"))} · ${E(d.status || "")}</div></td>
     ${cell(T("Answers"), liveCell(d) + (d.live ? `<div class="anchor">${E(d.live.on)}</div>` : ""))}
     ${cell(T("Expires"), expiry(d), "num")}
     ${cell(T("Project"), (d.projects || []).length
-      ? (d.projects || []).map(p => `<a class="plink" href="#${E(p)}">${E(p.split(":")[1])}</a>`).join(", ")
+      ? (d.projects || []).map(p => `<a class="plink" href="#${E(p)}">${E(projLabel(p))}</a>`).join(", ")
       : `<span class="unlinked">${T("no project")}</span>`)}
     ${cell(T("Link"), standing(d))}
     ${cell("Cloudflare", cfCell(d))}
@@ -3800,7 +3954,7 @@ function renderDomains() {
     ${cell(T("Where to look"), `<div class="verbs">` +
       `<a class="chip-btn" href="https://rdap.org/domain/${E(d.name)}"
          target="_blank" rel="noopener" title="${T("what the registrar says")}">RDAP</a>` +
-      `<button class="chip-btn" type="button" data-copy="${E("dig +short " + shellArg(d.name) + " A AAAA CNAME")}"
+      `<button class="chip-btn" type="button" data-copy="${E("for t in A AAAA CNAME; do echo \"$t: $(dig +short " + shellArg(d.name) + " $t | tr '\\n' ' ')\"; done")}"
          title="${T("copy the diagnostic command")}">${T("Command: {label}", {label: "DNS"})}</button>` +
       (d.zone ? `<a class="chip-btn" href="https://dash.cloudflare.com/?to=/:account/${E(d.name)}"
          target="_blank" rel="noopener" title="${T("the zone in Cloudflare")}">${T("zone")}</a>` : "") +
@@ -3853,10 +4007,19 @@ function renderHeroku() {
       [fullCommand("configure integrations heroku true"), fullCommand("heroku")]);
     return;
   }
+  // WHAT THE SCAN COULD NOT READ is said above whatever it did read, with the
+  // command that scans again; a scan that read nothing is never "empty here" (A09).
+  const gaps = (D.heroku.degraded || []).filter(d => d && d.reason);
+  const gapsHtml = gaps.length ? `<div class="empty not-scanned degraded-note"><p>${
+    APPS.length ? T("Part of Heroku could not be read:") : T("Heroku could not be read:")}</p><ul>${
+    gaps.map(d => `<li><span class="mono">${E(d.source || "heroku")}</span> — ${E(d.reason)}</li>`).join("")}</ul><p>${
+    T("Scan again once the Heroku CLI answers:")}</p><p><button class="chip-btn mono" type="button" data-copy="${
+    E(fullCommand("heroku"))}" title="${T("copy the command")}">${E(fullCommand("heroku"))}</button></p></div>` : "";
+  if (!APPS.length && gaps.length) { out.innerHTML = gapsHtml; return; }
   const q = document.getElementById("q").value.trim().toLowerCase();
   const team = sel.value;
   const apps = APPS.filter(a => keepApp(a, q, team));
-  if (!apps.length) { out.innerHTML = nothingFound(APPS.length); return; }
+  if (!apps.length) { out.innerHTML = gapsHtml + nothingFound(APPS.length); return; }
   const money = n => n == null || !Number.isFinite(Number(n)) ? "—" : "$" + Number(n).toLocaleString("en", {maximumFractionDigits: 2});
   sortInPlace(apps, {name: a => lower(a.name), cost: a => numOr(a.monthly_cost)});
   const groups = new Map();
@@ -3890,7 +4053,7 @@ function renderHeroku() {
                         "folder-unclaimed": T("no project claims the folder"),
                         "no-source": T("the source is unknown") };
     const project = a.project
-      ? `<a class="plink" href="#${E(a.project)}">${E(PROJ_NAME.get(a.project) || a.project)}</a>` +
+      ? `<a class="plink" href="#${E(a.project)}">${E(projLabel(a.project))}</a>` +
         `<div class="anchor">${E(a.link_rule)}</div>`
       : `<span class="unlinked" title="${E(a.unlinked_reason || "")}">${T("no project")}</span>` +
         `<div class="anchor">${E(WHY_LABEL[a.unlinked_kind] || a.unlinked_kind || "")}</div>`;
@@ -3935,7 +4098,7 @@ function renderHeroku() {
         + `</div>`)}</tr>`;
   };
   const total = apps.reduce((n, a) => n + (Number(a.monthly_cost) || 0), 0);
-  out.innerHTML = filterLine(apps.length, APPS.length, "of@@{n} apps") +
+  out.innerHTML = gapsHtml + filterLine(apps.length, APPS.length, "of@@{n} apps") +
     `<div class="list-summary"><b>${T("{money}/mo", {money: money(total)})}</b> · ${T("an estimate for the selected apps from the price list, not a bill")} · ${T("measured {date}", {date: E(D.heroku.scanned_on || "—")})}</div><div class="card"><table>
     <colgroup><col style="width:20%"><col style="width:10%"><col style="width:8%"><col style="width:12%"><col style="width:16%"><col style="width:22%"><col style="width:12%"></colgroup>
     <thead><tr>
@@ -3990,17 +4153,20 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
   // retention erases first.
   const dg = D.digest || null;
   const digestLine = dg ? `<p class="dmeta" id="queue-digest">${T("{n} waiting:", {n: dg.waiting})} ` +
-    Object.entries(dg.by_kind || {}).map(([k, n]) => `${n} ${E(k)}`).join(", ") +
+    // "kind: n", not "n kind": the kinds are nouns in the singular, and a count
+    // before a singular noun broke the grammar of every language with plurals (A34 review).
+    Object.entries(dg.by_kind || {}).map(([k, n]) => `${E(T(`kind@@${k}`))}: ${NUM(n)}`).join(", ") +
     " · " + T("retention erases a proposal after {n} d", {n: dg.horizon_days}) +
     (dg.erases_within_7d ? " — " + T("{n} go before {date}", {n: `<b>${dg.erases_within_7d}</b>`, date: E(dg.first_erase_on || "")}) : " — " + T("nothing goes this week")) +
     ` · <button class="chip-btn" type="button" data-copy="${E(toolCommand("review.py", ["digest"]))}" title="${T("copy the command")}">${T("Command: {label}", {label: T("queue digest")})}</button></p>` : "";
   host.innerHTML = digestLine + q.map(r => {
-    const ok = toolCommand("review.py", ["promote", r.id, "--why", ""]);
-    const no = toolCommand("review.py", ["reject", r.id, "--why", ""]);
+    // A visible placeholder, never an empty reason the tool refuses (audit A32).
+    const ok = toolCommand("review.py", ["promote", r.id, "--why", "REASON"]);
+    const no = toolCommand("review.py", ["reject", r.id, "--why", "REASON"]);
     return `<div class="qrow" id="q-${E(r.id)}">
-      <span class="qm">${E(r.at)}<br>${E(r.kind)}</span>
+      <span class="qm">${E(r.at)}<br>${E(T(`kind@@${r.kind}`))}</span>
       <span>${E(r.statement)}${r.project
-        ? ` <a class="plink" href="projects.html#${E(r.project)}">${E(String(r.project).split(":")[1])}</a>` : ""}
+        ? ` <a class="plink" href="projects.html#${E(r.project)}">${E(projLabel(r.project))}</a>` : ""}
         <div class="anchor mono">${E(r.id)} r${E(r.rev)}</div>
         <div class="qacts"><button class="chip-btn" type="button" data-copy="${E(ok)}"
              title="${T("copy the accept command")}">${T("Command: {label}", {label: T("accept")})}</button>
@@ -4061,7 +4227,7 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
     `<div class="flist">` + F.items.map(f => {
       const [word, kind] = SEV[f.severity] || [f.severity, ""];
       // Acknowledging is done in a terminal; the button copies that command.
-      const cmd = toolCommand("ack.py", [f.id, "--why", ""]);
+      const cmd = toolCommand("ack.py", [f.id, "--why", "REASON"]);
       const foldCls = ""; // Every selected finding is visible.
       // Each row has a stable anchor, so a link can point at one finding.
       const fid = "f-" + String(f.id).replace(/[^A-Za-z0-9_.:-]+/g, "-");
@@ -4075,8 +4241,8 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
         `</span>` +
         (f.deadline ? `<span class="due">${T("by {date}", {date: E(f.deadline)})}</span>` : "") +
         (PAGE === "index" ? `<a class="fdetail" href="findings.html#${E(fid)}">${T("Review →")}</a>` :
-          `<details class="finding-body"><summary aria-label="${E(T("Evidence and action: {title}", {title: findingTitle(f)}))}">${T("Evidence and action")}</summary><p class="d">${E(f.detail)}</p>` +
-          `<p class="act">${E(f.action)}</p>` +
+          `<details class="finding-body"><summary aria-label="${E(T("Evidence and action: {title}", {title: findingTitle(f)}))}">${T("Evidence and action")}</summary><p class="d">${E(runnable(f.detail))}</p>` +
+          `<p class="act">${E(runnable(f.action))}</p>` +
           ` <button class="chip-btn ack" type="button" data-cmd="${E(cmd)}" title="${T("copy the silence command")}">${T("Command: {label}", {label: T("silence")})}</button></details>`) + '</div>';
     }).join("") +
     `</div>` +
@@ -4203,11 +4369,23 @@ fromHash();
 // is no server to ask, and the page says it is the snapshot of its build.
 (function agentsLive() {
   if (PAGE !== "agents" || typeof fetch !== "function") return;
-  const say = text => { const el = document.getElementById("agents-live"); if (el) el.textContent = text; };
+  // Spoken: the region is made polite again first — an unchanged refresh turns it off,
+  // and a failure after one went unheard (A27 review). The same words twice are not
+  // written again, so a server that stays down is announced once, not every 15 s.
+  const say = text => {
+    const el = document.getElementById("agents-live");
+    if (!el) return;
+    el.setAttribute("aria-live", "polite");
+    el.removeAttribute("title");
+    if (el.textContent !== text) el.textContent = text;
+  };
   if (!String(location.protocol || "").startsWith("http")) {
     say(T("A snapshot of the last build. Open it through the local server for live updates."));
     return;
   }
+  // One clock on the page: the build stamp is UTC, so the live stamp is too (A27).
+  const utc = () => new Date().toISOString().slice(11, 19) + " UTC";
+  let last = null;
   const keep = box => new Set([...box.querySelectorAll("details[open]")]
     .map(d => (d.querySelector("summary .mono") || {}).textContent));
   const refresh = () => fetch("/agents?locale=" + encodeURIComponent(LOCALE), {cache: "no-store"})
@@ -4215,6 +4393,7 @@ fromHash();
     .then(markup => {
       const box = document.getElementById("agents");
       if (!box) return;
+
       const open = keep(box);
       const within = document.activeElement && box.contains(document.activeElement)
         ? document.activeElement.closest("details") : null;
@@ -4227,16 +4406,31 @@ fromHash();
         const id = (d.querySelector("summary .mono") || {}).textContent;
         if (open.has(id)) d.open = true;
       });
+      // A screen reader hears a change, not a clock (A27): the section carries a
+      // signature of what it says — workflows, their steps, what needs a person,
+      // the sessions' turns — and only a new signature is announced. Ages still
+      // move on screen; an unchanged answer moves only the silent title.
+      const sig = fresh.getAttribute("data-signature");
+      const changed = sig !== last;
+      last = sig;
       box.replaceWith(fresh);
       if (focused) {
         const again = [...fresh.querySelectorAll("details summary")].find(
           s => (s.querySelector(".mono") || {}).textContent === focused);
         if (again) again.focus();
       }
-      say(T("Live — refreshed {at}", {at: new Date().toLocaleTimeString(LOCALE)}));
+      if (changed) say(T("Live — refreshed {at}", {at: utc()}));
+      else {
+        const el = document.getElementById("agents-live");
+        if (el) { el.setAttribute("aria-live", "off"); el.textContent = T("Live — refreshed {at}", {at: utc()});
+                  el.title = T("Live — checked {at}, nothing changed", {at: utc()}); }
+      }
     })
     .catch(() => say(T("Live updates are paused — this is the last data the page read.")));
-  say(T("Live — refreshed {at}", {at: new Date().toLocaleTimeString(LOCALE)}));
+  // Nothing on the page is live until the first answer arrives (A27): it said
+  // "refreshed" over the build's snapshot for the first 15 seconds.
+  say(T("Reading the store…"));
+  refresh();
   setInterval(refresh, 15000);
 })();
 </script>

@@ -60,6 +60,12 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
+**2026-10-05, releases 0.17.0–0.17.3 (published; the engine installed itself at 0.17.3):**
+updates that install themselves, data that survives a reinstall, then three patches from the
+live verification. The Mac app's swap to 0.17.3 waits for the app to be quit. Receipt:
+[runs/2026-10-05-releases-0.17](runs/2026-10-05-releases-0.17/README.md). The audit of 0.17.3
+and its fixes, which become 0.18.0: [runs/2026-10-05-audit](runs/2026-10-05-audit/README.md).
+
 **2026-10-05, release 0.16.0 (published, installed on the maintainer's machine):** agent
 memory with access bindings, embedding consent, scoped search with receipts, a loopback HTTP
 service and memory/0.1, forgetting with a receipt, and facts that expire, plus the fixes from a

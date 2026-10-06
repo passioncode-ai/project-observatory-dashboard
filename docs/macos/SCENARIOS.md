@@ -65,7 +65,8 @@ Trigger: attempt Send.
 Steps: preflight → distinct error and next action; repair configuration → deliberate retry.
 Expected result: no fake response, no automatic spend loop, input/history preserved.
 Errors & recovery: full disk refuses before spending; errors do not expose raw provider text.
-Coverage: core/bridge/model regression tests; native walkthrough run 2026-10-02 against a workspace copy ([receipt](../runs/2026-10-02-app-agent-audit/README.md)).
+Coverage: core/bridge/model regression tests; engine tests `test_a_full_disk_refuses_as_disk_full_before_any_job_or_spend`
+and `test_a_provider_failure_never_carries_the_providers_text` (`observatory/engine/tests/test_assistant.py`); native walkthrough run 2026-10-02 against a workspace copy ([receipt](../runs/2026-10-02-app-agent-audit/README.md)).
 
 ## SCN-004 — Stop, close and resume
 Status: draft
@@ -153,12 +154,20 @@ Status: draft
 Product: unobserved
 Persona: P-01
 Traces: ST-02, JTBD-01, FLW-05
-Preconditions: the app runs with no window open.
+Preconditions: the app runs and the dashboard window is not on screen — no window open, or only the
+Assistant open, or the dashboard minimised.
 Trigger: Dock icon click, or launching the app again.
-Steps: reopen → the dashboard window is created and comes forward.
+Steps: reopen → the dashboard window is created (or un-minimised) and comes forward; an Assistant
+window that is open stays open. A dashboard already on screen is left as it is.
 Expected result: the app is never running without a way back to its window.
 Errors & recovery: none expected; ⌘1 (Window → Dashboard) does the same.
 Coverage: native walkthroughs 2026-10-02 and 2026-10-03 (launch 1 window → closed 0 → reopen 1). Run 2
 found that ⌘1, Window → Dashboard and Dashboard → Overview each ADDED a window (a WindowGroup); the
 dashboard is one `Window` now — Close All → 0, reopen → 1, again → 1 — and the Window menu lists
 Dashboard and Assistant once each ([run 2](../reports/2026-10-03-observatory-audit-run-2/README.md)).
+The decision is the dashboard's own window, not AppKit's `hasVisibleWindows`: that flag counts the
+Assistant, so with only the Assistant open a Dock click brought nothing back (audit 2026-10-05, A47).
+`DashboardReopenTests` (`macos/Tests/ObservatoryCoreTests/DashboardWindowTests.swift`) asserts the
+decision — Assistant only → open, minimised → restore, dashboard visible → nothing; the single-window
+source check is `testTheDashboardIsOneWindowThatEveryCommandBringsForward` (`ModelTests.swift`). The
+reopen itself (SwiftUI creating the window) is verified by the walkthroughs only.

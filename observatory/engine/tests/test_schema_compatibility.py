@@ -26,7 +26,7 @@ def open_worker(target: str, home: str, queue) -> None:
         finally:
             conn.close()
     except Exception as exc:
-        queue.put(type(exc).__name__)
+        queue.put(f"{type(exc).__name__}: {exc}")
 
 
 
@@ -251,6 +251,25 @@ class SchemaCompatibility(unittest.TestCase):
                 conn.close()
         self.assertEqual(len(calls), 2, "the check under the lock still runs")
 
+    def test_a_wal_that_vanishes_between_the_look_and_the_read_is_no_wal(self):
+        # The last connection to close deletes the WAL; a reader that saw it and then
+        # read its size failed with FileNotFoundError (0.18.0 gate, 2026-10-06).
+        from store import compatibility, db
+        conn = db.connect(self.target)
+        conn.close()
+        wal = Path(str(self.target) + "-wal")
+        wal.write_bytes(b"")
+        real_stat = Path.stat
+
+        def vanished(path, *a, **kw):
+            if str(path).endswith("-wal"):
+                raise FileNotFoundError(2, "No such file or directory", str(path))
+            return real_stat(path, *a, **kw)
+        with patch.object(Path, "stat", vanished):
+            uri = compatibility.readonly_uri(self.target)
+        self.assertIn("mode=ro", uri)
+        wal.unlink(missing_ok=True)
+
     def test_many_concurrent_first_opens(self):
         ctx = multiprocessing.get_context('spawn')
         for round_ in range(3):
@@ -262,7 +281,9 @@ class SchemaCompatibility(unittest.TestCase):
             for p in workers:
                 p.join(60)
                 self.assertEqual(p.exitcode, 0)
-            self.assertEqual(sorted(q.get(timeout=5) for _ in workers), [CURRENT_MIGRATIONS] * 4)
+            got = [q.get(timeout=5) for _ in workers]
+            # Each worker answers its count or its error's text, so a failure says which.
+            self.assertEqual(got.count(CURRENT_MIGRATIONS), 4, got)
             q.close()
 
     def test_concurrent_first_open(self):

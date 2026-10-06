@@ -146,3 +146,26 @@ def resolve(text: str, projects: list[dict] | None = None, *, loaded: bool = Fal
             f"{pid} files its keys under {folder!r}",
             *(f"{o} has a folder named {folder!r} too" for o in others)))
     return Resolution(text, folder, pid, how)
+
+
+def folders_of(folder: str, root: pathlib.Path) -> list[str]:
+    """Every vault folder under `root` that holds this project's slots: the one named,
+    then any other the registry resolves to the same project. A project can hold two:
+    slots filed under a registry name before the one-folder rule stay there, and new
+    ones go to the project's own folder. A reader that looked in one missed the other
+    (2026-10-06). An ambiguous or unregistered name is only itself."""
+    out = [folder] if (root / folder).is_dir() else []
+    projects = load_projects()
+    if projects is None or not root.is_dir():
+        return out
+    me = resolve(folder, projects)
+    if not me.project_id or me.how == "ambiguous":
+        return out
+    for d in sorted(root.iterdir()):
+        if d.name in out or d.is_symlink() or not d.is_dir():
+            continue
+        other = resolve(d.name, projects)
+        if other.project_id == me.project_id and other.how != "ambiguous":
+            out.append(d.name)
+    return out
+
