@@ -5,7 +5,21 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.19.0 — 2026-10-07
+
+A minor release, and it **changes behaviour**: updates follow the organization's one update
+behaviour (LC-16) — a check every six hours, a switch file, activation only when nobody is using
+the observatory, held releases — and the Mac app installs its own updates. The dashboard and the
+Mac app follow the reader's system language and the organization's glossary. The companion
+plugin `observatory-log` moves to 0.19.0.
+
 ### Changed
+
+- **The agents' records ask nothing of you.** Observations, notes and sessions agents write
+  are their working memory: an independent source confirms one, or it is retired after 90
+  days. The Health page no longer shows them as "Awaiting a person's decision" with accept and
+  reject buttons on every row; a section "Agents' records" says nothing there needs you and
+  folds the newest rows, and the overview card no longer counts them.
 
 - **The Mac app installs its own updates.** When a new version is ready while the app is
   open, the app menu and the dashboard's toolbar offer **Restart to update**. Choosing it
@@ -36,6 +50,13 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Fixed
 
+- **The Dock no longer draws a blank icon for the app.** The updater stages the new bundle and
+  keeps the retired one; macOS registers every bundle it sees, and one deleted while still
+  registered stayed the app's record. Each bundle is now unregistered before its folder is
+  removed.
+- **An automatic update waits for a running tick** instead of stopping it halfway, as the daily
+  backup already did.
+- **Every line the local server writes to `serverd.err` starts with its time** (UTC).
 - A page built in one language and read in the other no longer keeps words, units, dates or
   tooltips in the build's language on the Machine and Agents pages.
 - **Updates behave as in every other product of the organization** (lifecycle LC-16). This

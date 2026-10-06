@@ -301,7 +301,7 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 #: with its pty and planted-writer cases, conformance_receipt 129 s for its full check;
 #: backup_vault 52–104 s alone, past 120 s under the gate's --jobs 6).
 #: A larger --timeout still wins; a smaller one never cuts these short.
-SUITE_SECONDS = {'maintenance': 480, 'conformance_receipt': 360, 'backup_vault': 300}
+SUITE_SECONDS = {'maintenance': 480, 'conformance_receipt': 360, 'backup_vault': 300, 'dashboard_render': 600}
 
 
 def suite_timeout(name: str, timeout: int) -> int:
