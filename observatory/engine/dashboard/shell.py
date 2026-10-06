@@ -114,13 +114,17 @@ def _machine(payload: dict, t: Translator) -> str:
 
 
 def locale_switch_html(t: Translator) -> str:
-    """EN/RU: the reader's language. Each button names its language in itself,
-    and the page script keeps the choice (see `LOCALE_KEY` in the template)."""
+    """Language: System / English / Russian (L10N-01). "System" follows the
+    system's preferred language; each language names itself in itself and is
+    not translated. The page script presses the reader's choice and keeps it
+    (see `LOCALE_KEY` in the template)."""
+    system = t.mark("language@@System", tag="button",
+                    attrs=' type="button" data-locale="system" aria-pressed="false"')
     buttons = "".join(
-        f'<button type="button" data-locale="{code}" lang="{code}" aria-pressed="false"'
-        f' title="{html.escape(LOCALE_NAMES[code])}">{code.upper()}</button>'
+        f'<button type="button" data-locale="{code}" lang="{code}" aria-pressed="false">'
+        f'{html.escape(LOCALE_NAMES[code])}</button>'
         for code in LOCALES)
-    return f'<div class="locale-switch" role="group"{t.attr("aria-label", "Language")}>{buttons}</div>'
+    return f'<div class="locale-switch" role="group"{t.attr("aria-label", "Language")}>{system}{buttons}</div>'
 
 
 def nav_html(page: str, counts: dict[str, int | str], t: Translator | None = None) -> str:

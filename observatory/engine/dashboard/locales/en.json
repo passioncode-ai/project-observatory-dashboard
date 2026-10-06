@@ -621,5 +621,6 @@
  "Show the newest {n}": {
   "one": "Show the newest {n}",
   "other": "Show the newest {n}"
- }
+ },
+ "language@@System": "System"
 }

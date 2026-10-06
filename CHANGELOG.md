@@ -19,6 +19,25 @@ while the major version is 0, a minor release may change behaviour and says so h
   when Russian is the first language in System Settings. Settings → Language now offers
   System, English and Русский, and the choice is kept across updates. Counts use real Russian
   plural forms.
+- **The dashboard follows the reader's system language.** It opens in Russian when the first
+  preferred system language is Russian and in English otherwise, whatever language the pages
+  were built in. The language switch now offers System, English and Русский; a reader's
+  choice is kept in the browser and survives rebuilds and updates, and System hands the
+  decision back to the system. `interface.locale` is now the language of a build that no
+  browser reads (the CLI, the session hook, the checks) and of a browser that reports no
+  language.
+- **Russian terms follow the organisation's glossary.** A workflow is «задача» (a background
+  job is «задание»), a backup «резервная копия», the vault «хранилище», an account «аккаунт».
+- **Dates and numbers follow the language.** Russian pages write dates as `02.01.2026` and
+  numbers with a decimal comma; sizes on the Machine page carry their unit in the reader's
+  language.
+- **Refusals and degraded reasons are translated where they are shown.** Text the engine
+  writes in English reads in Russian when the catalog has it, and in English otherwise.
+
+### Fixed
+
+- A page built in one language and read in the other no longer keeps words, units, dates or
+  tooltips in the build's language on the Machine and Agents pages.
 
 ## 0.18.0 — 2026-10-06
 

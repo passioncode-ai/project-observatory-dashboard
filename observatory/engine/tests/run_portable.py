@@ -170,6 +170,9 @@ HELPERS += (
     'embedding_policy_cases.json',
     # Grants a synthetic consent so vector-half suites still reach the provider stub.
     'embedding_consent.py',
+    # The page script's re-translation, for the checks that a page built in one
+    # language reads in the other (L10N-01).
+    'relocalize.py',
 )
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', 'tools')
 ROOT_FILES = (

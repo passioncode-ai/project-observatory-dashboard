@@ -178,10 +178,40 @@ class AgentsPage(unittest.TestCase):
         page = agents_page.agents_html({"agents": self.view}, Translator("en"))
         self.assertIn(f'data-signature="{agents_page.signature(self.view)}"', page)
 
-    def test_workflow_reads_as_a_russian_word(self) -> None:
+    def test_workflow_reads_as_the_glossary_word(self) -> None:
+        # L10N-06: a workflow is «задача» in every PassionCode product.
         ru = agents_page.agents_html({"agents": self.view}, Translator("ru"))
-        self.assertIn("Процессы", ru)
+        self.assertIn(">Задачи<", ru)
         self.assertNotIn(">Workflow", ru)
+        self.assertNotIn("Процесс", ru)
+
+    def test_a_page_rendered_in_one_language_reads_in_the_other(self) -> None:
+        # L10N-01: the reader's system language decides, so a page built in
+        # English is read in Russian. Every word, date and number is marked, so
+        # the page script's re-translation says what a Russian render says.
+        sys.path.insert(0, str(ROOT / "tests"))
+        import relocalize
+        for built, reader in (("en", "ru"), ("ru", "en")):
+            page = agents_page.agents_html({"agents": self.view}, Translator(built))
+            want = agents_page.agents_html({"agents": self.view}, Translator(reader))
+            got = relocalize.relocalize(page, reader)
+            self.assertTrue(got == want, f"{built}→{reader}: " + relocalize.first_difference(got, want))
+
+    def test_dates_follow_the_readers_language(self) -> None:
+        # L10N-05: a Russian page writes 02.01.2026, not 2026-01-02.
+        import re
+        ru = agents_page.agents_html({"agents": self.view}, Translator("ru"))
+        self.assertRegex(ru, r'<time data-date="\d{4}-\d{2}-\d{2} [^"]*">\d{2}\.\d{2}\.\d{4} ')
+        shown = re.sub(r'data-[a-z-]+="[^"]*"', "", ru)
+        self.assertNotRegex(shown, r">\d{4}-\d{2}-\d{2}")
+
+    def test_an_uncoded_reason_reads_in_russian_when_the_catalog_has_it(self) -> None:
+        # L10N-04: the engine's English is the identity; the page translates it.
+        view = dict(self.view, degraded=[{"source": "agents", "reason": "the store does not exist yet"},
+                                         {"source": "agents", "reason": "synthetic: nobody translated this"}])
+        ru = agents_page.agents_html({"agents": view}, Translator("ru"))
+        self.assertIn(">хранилище ещё не создано<", ru)
+        self.assertIn(">synthetic: nobody translated this<", ru)
 
     def test_no_token_and_no_value_reaches_the_page(self) -> None:
         dump = json.dumps(self.view)

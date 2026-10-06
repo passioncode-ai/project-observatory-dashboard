@@ -75,7 +75,7 @@ def test_the_built_page_carries_what_only_the_store_knows() -> None:
         if not page.exists():
             return
     text = page.read_text(encoding="utf-8")
-    for label in ("weekly snapshots", "plugin measurements", "awaiting the operator's decision"):
+    for label in ("weekly snapshots", "plugin measurements", "agents' records not yet confirmed"):
         check(f"the health panel names {label!r}", label in text)
     check("rows carry a weekly series", '"weeks"' in text)
     # `"metrics"`, not `"disk"`. The first version carried a field named after

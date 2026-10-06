@@ -918,19 +918,27 @@ scheduler every few hours stays far below it.
 
 ## Choose the dashboard's language
 
-The dashboard is English unless the workspace says otherwise. The setting lives in
-`config/settings.json` as `"interface": {"locale": "ru"}` and is written by
+The dashboard opens in the reader's system language: Russian when the first preferred
+language of the system (the browser's `navigator.languages`) is Russian, English otherwise.
+Each reader can override it with **System / English / Русский** in the navigation rail; the
+choice is stored in that browser, applied before the first paint, kept for pages opened as
+local files and across rebuilds and updates, and **System** forgets it again. An unknown
+stored value reads as System.
+
+The workspace setting is the language the pages are built in — what a reader without a
+browser gets (the CLI, the session hook, the checks) and what a browser that reports no
+language shows. It lives in `config/settings.json` as `"interface": {"locale": "ru"}` and is
+written by
 
 ```sh
 project-observatory full configure interface locale ru   # en | ru
 project-observatory full open --rebuild                  # pages carry the language they were built in
 ```
 
-`full doctor` reports it under `interface`. Only `en` and `ru` are accepted; an unknown
-key or value is refused. Releases before 0.4.0 ignore the section. Each reader can also
-press **EN** or **RU** in the navigation rail: the choice is stored in that browser,
-applied before the first paint and kept for pages opened as local files; choosing the
-workspace's own language forgets it again. The interface and finding titles are
+Precedence, first match wins: the reader's choice, the system's first language, then this
+setting (`OBSERVATORY_LOCALE` overrides it for one build), else English. `full doctor`
+reports it under `interface`. Only `en` and `ru` are accepted; an unknown key or value is
+refused. Releases before 0.4.0 ignore the section. The interface and finding titles are
 translated; a finding's details and suggested action stay in English. An agent asked to set the language runs the
 `configure` command above and never edits other settings to do it.
 
