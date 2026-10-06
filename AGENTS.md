@@ -192,7 +192,7 @@ The organisation's [lifecycle contract](https://github.com/passioncode-ai/fabric
   `full machine --disk` (`collectors/scan_machine.py#protected_place`).
 - **Logs** (LC-12): one policy in `observatory/engine/log_policy.py` — 5 generations of 5 MB, mode
   0600, launchd-held files copied and truncated — applied by the tick's `logs` step and by the
-  server to its own `serverd.err`/`.out`. The logs live in the workspace's `store/logs/`, not
+  server to its own `serverd.err`/`.out`; every line the server writes to `serverd.err` starts with its UTC time (`serverd.StampedLines`). The logs live in the workspace's `store/logs/`, not
   `~/Library/Logs/<Product>/`: one account can hold several workspaces, and each keeps its own.
   The app is one per account, so its own update events (`update_restart`, `update_install`,
   codes only, UTC) go to `~/Library/Logs/Project Observatory/app.log`, 0600, under 1 MB with one

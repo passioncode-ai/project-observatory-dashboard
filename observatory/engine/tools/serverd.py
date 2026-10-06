@@ -883,6 +883,32 @@ def status() -> int:
     return 0 if alive else 1
 
 
+class StampedLines:
+    """A stream that starts every line with a UTC timestamp (LC-12): launchd hands the
+    server's stderr to serverd.err, and its lines — refusals, heartbeat failures,
+    tracebacks — carried no time, so nobody could tell when a fault began."""
+
+    def __init__(self, stream, clock=None):
+        self.stream, self.at_line_start = stream, True
+        self.clock = clock or (lambda: datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+    def write(self, text: str) -> int:
+        out = []
+        for piece in text.splitlines(keepends=True):
+            if self.at_line_start and piece.strip():
+                out.append(self.clock() + " ")
+            out.append(piece)
+            self.at_line_start = piece.endswith("\n")
+        self.stream.write("".join(out))
+        return len(text)
+
+    def flush(self) -> None:
+        self.stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
 def main(argv: list[str]) -> int:  # noqa: PLW0603 — PORT set via globals()
     ap = argparse.ArgumentParser(description=(__doc__ or "Serve the private Project Observatory dashboard.").splitlines()[0])
     g = ap.add_mutually_exclusive_group(required=True)
@@ -900,6 +926,7 @@ def main(argv: list[str]) -> int:  # noqa: PLW0603 — PORT set via globals()
                          ensure_ascii=False))
         return 0
     if a.run:
+        sys.stderr = StampedLines(sys.stderr)
         return serve(a.port)
     if a.install:
         return install()
