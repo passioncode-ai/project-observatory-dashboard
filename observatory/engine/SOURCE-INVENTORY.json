@@ -3117,8 +3117,8 @@
       "path": "tests/test_secret_header.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8aa634d90bba8ea5777f9e7fc20982885327d3e9a5e6dd0bd7d65698440289ef",
-      "bytes": 16480
+      "export_sha256": "7c89e5e0b409a4a067961f226953370316d5ecead37387677bd6a2ce220754d7",
+      "bytes": 18410
     },
     {
       "path": "tests/test_secrets.py",
@@ -4206,8 +4206,8 @@
     {
       "path": "tools/vault.py",
       "source_sha256": "1df9030175654ff330cee02d22de11b3b515188918216509cadbbc4f8a510f49",
-      "export_sha256": "0bce338b4bfd39bf84a4c345b49119caecf3279267e0336968f4f93d9808a938",
-      "bytes": 42919,
+      "export_sha256": "a2aa0bae087aa1ebf9986f88c925931210d46a85dfdfd8114527a41d3ca92e84",
+      "bytes": 43883,
       "python_comments_removed": 19,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
