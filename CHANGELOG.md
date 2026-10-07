@@ -5,6 +5,20 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.19.1 — 2026-10-07
+
+A patch release. 0.19.0 could not be installed over 0.18.0 on a machine where agents are working:
+the update rolled back with "Workspace changed while upgrade was staged".
+
+### Fixed
+
+- **An update no longer fails because agents are writing.** The workspace upgrade replaced the
+  store with a copy it had migrated aside, so one write by any Claude Code session (its Stop
+  hook or MCP server) while the copy was prepared refused the whole update — and had it gone
+  through, that write would have been lost. The copy now only proves the migration runs; the
+  live store is migrated in place in one SQLite transaction, which concurrent writers wait for,
+  and only the configuration files must hold still. A snapshot is still taken first.
+
 ## 0.19.0 — 2026-10-07
 
 A minor release, and it **changes behaviour**: updates follow the organization's one update

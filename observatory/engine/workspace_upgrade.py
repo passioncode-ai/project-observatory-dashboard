@@ -416,9 +416,7 @@ def prepare_upgrade(stage: Path) -> list[str]:
     # must not let migrations touch the source or an external database.
     env = {key:value for key,value in os.environ.items() if not key.startswith('OBSERVATORY_')}
     env['OBSERVATORY_HOME'] = str(stage)
-    command = 'from store import db; c=db.connect(); c.execute("PRAGMA wal_checkpoint(TRUNCATE)"); c.close()'
-    done = subprocess.run([sys.executable,'-c',command],cwd=config.SOURCE,env=env,capture_output=True,text=True)
-    if done.returncode:
+    if _migrate(stage):
         raise config.ConfigurationError('Staged database migration failed; original workspace is unchanged')
     changed.append('store/observatory.db')
     marker = config.read_json(stage / 'workspace.json')
@@ -426,6 +424,22 @@ def prepare_upgrade(stage: Path) -> list[str]:
     workspace.write_json(stage / 'workspace.json',marker)
     changed.append('workspace.json')
     return changed
+
+
+_MIGRATE = 'from store import db; c=db.connect(); c.execute("PRAGMA wal_checkpoint(TRUNCATE)"); c.close()'
+
+
+def _migrate(home: Path) -> str:
+    """Open the store under `home` with this release's code, which migrates it in place
+    (`store.db.connect`: the process lock, then SQLite's own write transaction, so a
+    concurrent writer waits rather than tears). Returns the failure's last line, or ''."""
+    env = {key:value for key,value in os.environ.items() if not key.startswith('OBSERVATORY_')}
+    env['OBSERVATORY_HOME'] = str(home)
+    done = subprocess.run([sys.executable,'-c',_MIGRATE],cwd=config.SOURCE,env=env,capture_output=True,text=True)
+    if done.returncode:
+        tail = (done.stderr or '').strip().splitlines()
+        return (tail[-1] if tail else f'exit {done.returncode}')[:300]
+    return ''
 
 
 def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -> dict:
@@ -440,6 +454,18 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
     with operation_lock(base):
         preflight(base)
         before = inventory(base)
+        # THE STORE IS MIGRATED IN PLACE, NOT SWAPPED (2026-10-07). It was replaced by the
+        # staged copy, so a single write by any of the session MCP servers or Stop hooks
+        # while the copy was migrated refused the whole update ("Workspace changed while
+        # upgrade was staged") — with twenty sessions open it rolled back 0.19.0, though
+        # 0.19.0 carried no migration at all. The staged copy now only proves the migration
+        # runs; the live store is migrated by the same code under SQLite's locks, and the
+        # databases and the append-only logs are left out of the stillness check, as the
+        # snapshot already leaves them (audit A11). The before-upgrade snapshot stays the
+        # way back.
+        databases = {name for name in before if not name.endswith(('-wal', '-journal', '-shm'))
+                     and sqlite_file(base / name)}
+        steady = lambda inv: {k: v for k, v in inv.items() if not volatile(k, databases)}  # noqa: E731
         receipt = _snapshot(base,base / 'backups' / ('before-upgrade-' + uuid.uuid4().hex))
         stage = Path(tempfile.mkdtemp(prefix='.upgrade-',dir=base.parent))
         rollback = base / 'backups' / ('rollback-' + uuid.uuid4().hex)
@@ -447,9 +473,15 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
         committed = False
         try:
             workspace.copy_private(Path(receipt['snapshot']) / 'data',stage)
-            changed = prepare_upgrade(stage)
-            if before != inventory(base):
+            changed = [name for name in prepare_upgrade(stage) if name not in databases]
+            if steady(before) != steady(inventory(base)):
                 raise config.ConfigurationError('Workspace changed while upgrade was staged; stop all writers')
+            # The live store first, before the interrupted-upgrade marker exists (the code
+            # that migrates refuses a workspace mid-upgrade): one SQLite transaction, so a
+            # failure changes nothing and no file has been swapped yet.
+            failure = _migrate(base)
+            if failure:
+                raise config.ConfigurationError(f'Database migration failed; nothing was changed: {failure}')
             rollback.mkdir(mode=0o700,parents=True)
             workspace.write_json(base / JOURNAL,{'application_version':config.VERSION,'snapshot':receipt['snapshot'],
                                                  'recovery':'Restore snapshot into a new home with this compatible release'})
@@ -484,7 +516,8 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
             except Exception as exc:  # noqa: BLE001 — reported, never raised past a commit
                 backup = {'snapshot':receipt['snapshot'],'encrypted':False,'export_error':f'{type(exc).__name__}: {exc}'}
             return {'status':'upgraded','version':config.VERSION,'snapshot':backup['snapshot'],
-                    'files_updated':len(changed),'scheduler_activated':False,'backup':backup}
+                    'files_updated':len(changed),'store_migrated_in_place':True,
+                    'scheduler_activated':False,'backup':backup}
         except BaseException:
             if committed:
                 raise

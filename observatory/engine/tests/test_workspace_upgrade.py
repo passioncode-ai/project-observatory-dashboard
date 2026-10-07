@@ -201,6 +201,66 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertTrue(Path(result['snapshot']).exists())
         self.assertFalse((self.home/upgrade.JOURNAL).exists())
 
+    def test_a_write_while_the_upgrade_is_staged_is_kept_not_refused(self):
+        # 2026-10-07: twenty Claude Code sessions' Stop hooks and MCP servers write to the
+        # store all the time; one write while the staged copy was migrated refused 0.19.0
+        # ("Workspace changed while upgrade was staged") and the store would have been
+        # replaced by the older copy had it gone through. The store is migrated in place.
+        real = upgrade.prepare_upgrade
+
+        def staged_while_a_session_writes(stage):
+            out = real(stage)
+            conn = self.db.connect()
+            conn.execute("INSERT INTO events(id,kind,occurred_at,actor) VALUES "
+                         "('written-during-staging','session','2026-01-02T00:00:00Z','fixture')")
+            conn.commit()
+            conn.close()
+            with open(self.home/'store/logs/test.log','a') as log:
+                log.write('a line appended while staging\n')
+            return out
+        with patch.object(upgrade,'prepare_upgrade',side_effect=staged_while_a_session_writes):
+            result=upgrade.upgrade(self.home,apply=True,writers_stopped=True)
+        self.assertEqual(result['status'],'upgraded')
+        self.assertTrue(result['store_migrated_in_place'])
+        conn=self.db.connect()
+        try:
+            ids={r[0] for r in conn.execute("SELECT id FROM events")}
+        finally:
+            conn.close()
+        self.assertIn('written-during-staging',ids,'a write made while staging survives')
+        self.assertIn('synthetic-event',ids)
+
+    def test_a_settings_file_changed_while_staged_still_refuses(self):
+        # What must hold still still must: only the databases and the logs are exempt.
+        real = upgrade.prepare_upgrade
+
+        def staged_while_settings_change(stage):
+            out = real(stage)
+            (self.home/'secrets'/'demo-slot').write_text('a different synthetic value')
+            return out
+        with patch.object(upgrade,'prepare_upgrade',side_effect=staged_while_settings_change):
+            with self.assertRaises(config.ConfigurationError):
+                upgrade.upgrade(self.home,apply=True,writers_stopped=True)
+        self.assertFalse((self.home/upgrade.JOURNAL).exists())
+
+    def test_a_failed_live_migration_puts_the_files_back(self):
+        setting=config.read_json(self.home/'config/settings.json')
+        setting.pop('must_understand')
+        workspace.write_json(self.home/'config/settings.json',setting)
+        before=config.read_json(self.home/'config/settings.json')
+        calls=[]
+        real=upgrade._migrate
+
+        def fail_live(home):
+            calls.append(home)
+            return real(home) if home != self.home else 'synthetic live migration failure'
+        with patch.object(upgrade,'_migrate',side_effect=fail_live):
+            with self.assertRaises(config.ConfigurationError):
+                upgrade.upgrade(self.home,apply=True,writers_stopped=True)
+        self.assertEqual(calls[-1],self.home)
+        self.assertEqual(config.read_json(self.home/'config/settings.json'),before)
+        self.assertFalse((self.home/upgrade.JOURNAL).exists())
+
     def test_staging_failure_leaves_original_unchanged(self):
         before=upgrade.inventory(self.home)
         with patch.object(upgrade,'prepare_upgrade',side_effect=RuntimeError('synthetic migration failure')):
