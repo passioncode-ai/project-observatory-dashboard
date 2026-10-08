@@ -71,9 +71,9 @@ def undeclared_owner_reason(owners: list[str], repos: int, checked_out: int) -> 
     """
     who = ", ".join(owners)
     head = (f"the GitHub listing returned {repos} repositor"
-            f"{'y' if repos == 1 else 'ies'} under {who}, which OWNED_ORGS in "
-            f"collectors/merge.py does not declare, so their projects are "
-            f"reported as `external`")
+            f"{'y' if repos == 1 else 'ies'} under {who}, which OWNED_ORGS "
+            f"(`organizations` in the workspace's config/ownership.json) does not "
+            f"declare, so their projects are reported as `external`")
     if checked_out:
         cost = (f". {checked_out} of them {'is' if checked_out == 1 else 'are'} "
                 f"cloned on this machine, so work in "

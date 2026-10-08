@@ -755,7 +755,7 @@ def build_plist() -> dict:
     return {
         "Label": LABEL,
         # The venv's interpreter or a keg's `opt` link, never a Cellar path (LC-05).
-        "ProgramArguments": [install_launchd.stable_interpreter(sys.executable),
+        "ProgramArguments": [install_launchd.stable_interpreter(configuration.engine_python()),
                              str(ROOT / "tools/serverd.py"), "--run", "--port", str(PORT)],
         "RunAtLoad": True,
         "KeepAlive": True,

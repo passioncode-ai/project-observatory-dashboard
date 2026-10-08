@@ -60,6 +60,8 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
+**2026-10-08, release 0.19.3:** four defects a tester found on a workspace with every integration off (OBS-46–49): jobs on the engine's own interpreter (and repaired in place), switched-off sources no longer degrade Health, `lost` follows the sessions switch, suggested products validate. 0.19.2 was tagged and not published; 0.19.3 carries it. Receipt: [runs/2026-10-08-releases-0.19](runs/2026-10-08-releases-0.19/README.md).
+
 **2026-10-08, releases 0.18.0–0.19.2:** signed updates (0.18.0), one update behaviour and a Mac
 app that updates itself, in the system language (0.19.0), an update that no longer fails while
 agents write (0.19.1), and four defects found on a working machine plus a documentation pass

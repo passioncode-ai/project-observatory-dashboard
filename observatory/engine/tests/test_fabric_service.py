@@ -263,6 +263,46 @@ class Health(Sandbox):
         self.assertNotIn("collector:bitbucket", sources,
                          "a receipt left by an integration that is off is not a measurement")
 
+    def test_the_merges_switched_off_sources_are_not_a_degraded_service(self):
+        # A tester's card stayed yellow on a workspace with every integration off:
+        # "collector:model: 7 source(s) not fully read" — the five switched-off merge
+        # inputs and two transfer checks GitHub being off could not ask. The merge's
+        # own summary already calls them "not measured, switched off".
+        raw = self.home / "store/raw"
+        off = [{"source": s, "reason": f"{s} not read"} for s in
+               ("wiki", "github", "sessions.json", "remotes.json", "bitbucket.json")]
+        transfers = [{"source": "transfer:someone/app", "reason":
+                      "could not check whether someone/app has moved (GitHub integration disabled; "
+                      "repository transfer not checked), and no earlier run had answered"}]
+        real = [{"source": "ownership", "reason": "an undeclared owner"}]
+        (raw / "model.json").write_text(json.dumps({"degraded": off + transfers + real}))
+        (self.home / "config/settings.json").write_text(json.dumps(
+            {"schema_version": 1, "sources": {}, "integrations": {}, "features": {"scheduler": False}}))
+        rows = {d["source"]: d["reason"] for d in self.snapshot()["degraded"]}
+        self.assertIn("collector:model", rows, "what is on and unread still degrades")
+        self.assertTrue(rows["collector:model"].startswith("1 source(s)"), rows)
+        self.assertIn("ownership", rows["collector:model"])
+        (raw / "model.json").write_text(json.dumps({"degraded": off + transfers}))
+        self.assertEqual(self.snapshot()["degraded"], [], "only switched-off sources: a healthy card")
+        # Switched ON, the same rows are measurements that failed.
+        (self.home / "config/settings.json").write_text(json.dumps(
+            {"schema_version": 1, "sources": {}, "integrations": {"github": True, "wiki": True},
+             "features": {"scheduler": False}}))
+        rows = {d["source"]: d["reason"] for d in self.snapshot()["degraded"]}
+        self.assertTrue(rows["collector:model"].startswith("3 source(s)"), rows)
+
+    def test_a_lost_projects_receipt_follows_the_sessions_switch(self):
+        raw = self.home / "store/raw"
+        (raw / "lost-projects.json").write_text(json.dumps({"ran_at": "2026-10-07T00:00:00Z", "degraded": [
+            {"source": "sessions", "reason": "store/raw/sessions.json does not exist"}]}))
+        (self.home / "config/settings.json").write_text(json.dumps(
+            {"schema_version": 1, "sources": {}, "integrations": {}, "features": {"scheduler": False}}))
+        self.assertNotIn("collector:lost-projects", {d["source"] for d in self.snapshot()["degraded"]},
+                         "left by a step whose integration is off")
+        (self.home / "config/settings.json").write_text(json.dumps(
+            {"schema_version": 1, "sources": {}, "integrations": {"sessions": True}, "features": {"scheduler": False}}))
+        self.assertIn("collector:lost-projects", {d["source"] for d in self.snapshot()["degraded"]})
+
     def test_unreadable_sources_are_degraded_not_zero(self):
         (self.home / "registry/projects.json").write_text("{half a document")
         snap = self.snapshot({"register": True, "readable": False})

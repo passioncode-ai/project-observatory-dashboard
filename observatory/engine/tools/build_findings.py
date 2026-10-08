@@ -1077,8 +1077,8 @@ def merge_findings(deg: list[dict], integrations: dict | None = None) -> list[di
     """
     if integrations is not None:
         deg = [d for d in deg
-               if str(d.get("source") or "") not in MERGE_SOURCE_INTEGRATION
-               or integrations.get(MERGE_SOURCE_INTEGRATION[str(d.get("source") or "")]) is True]
+               if degradations.merge_source_integration(str(d.get("source") or "")) is None
+               or integrations.get(degradations.merge_source_integration(str(d.get("source") or ""))) is True]
     if not deg:
         return []
     # SOURCE AND REASON, deduplicated on the PAIR. This joined

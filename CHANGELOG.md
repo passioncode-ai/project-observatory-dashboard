@@ -5,7 +5,39 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
-## 0.19.2 — 2026-10-08
+## 0.19.3 — 2026-10-08
+
+A patch release: four defects a tester found in 0.19.1 on a workspace with only the projects
+source on and every integration off — the service card stayed yellow and no daily backup was
+ever written. It carries 0.19.2, which was tagged but not published. The companion plugin
+`observatory-log` moves to 0.19.3.
+
+### Fixed
+
+- **The tick and the server run on the engine's own interpreter.** Their launchd jobs were
+  written with the interpreter of whatever process installed them, not the engine's virtual
+  environment; started from another python, the tick ran on Homebrew's bare python and its
+  backup step failed every time with `No module named 'cryptography'` — installing the package
+  into the venv could not help. Both now name the venv's python, as the maintenance job already
+  did. An install whose job files were written before this is repaired by the hourly
+  maintenance pass: it rewrites the interpreter in the tick's and the server's job and reloads
+  them — the tick only while it is not running.
+- **Switched-off integrations no longer make the service look degraded.** Health counted the
+  merge's inputs whose integration is off (wiki, GitHub, sessions, git remotes, Bitbucket) and the
+  repository-transfer checks that GitHub being off cannot ask as sources "not fully read". They
+  are now treated as the merge's own summary already called them — "not measured, switched
+  off" — on the card and on the board alike.
+- **The lost-projects step is skipped while sessions are off.** It reads only what the sessions
+  collector writes, and failed every tick without it.
+- **The registry no longer fails its own validation over a suggested product.** Products the
+  engine suggests from a shared domain give members the role `other`, which the document did
+  not declare unless the operator's roles happened to include it; with GitHub on, the tick
+  stopped at `validate`. The suggested role is now always declared; curated products are still
+  checked against the operator's roles.
+- **The `ownership` row says where to declare an organization**: `organizations` in the
+  workspace's `config/ownership.json`, now described in the onboarding guide.
+
+## 0.19.2 — 2026-10-08 (tagged, not published; included in 0.19.3)
 
 A patch release: four defects found on a working machine, and the documentation brought back in
 line with the code. The companion plugin `observatory-log` moves to 0.19.2 with it.

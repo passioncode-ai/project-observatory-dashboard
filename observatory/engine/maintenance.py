@@ -371,21 +371,8 @@ def probes_allowed() -> bool:
 
 
 def engine_python() -> str:
-    """The interpreter this engine is installed in, whoever started this process.
-
-    The plugin hook may run under any `python3` on PATH; a job or a `full update` started
-    with that one would not find the installed package. The engine's own virtual
-    environment is the ancestor holding `pyvenv.cfg`; a checkout has `.venv`. Its
-    `bin/python` is named as it is — never resolved through the symlink to a versioned
-    Homebrew path (install_launchd.stable_interpreter)."""
-    for parent in config.SOURCE.parents:
-        if (parent / "pyvenv.cfg").is_file():
-            for name in ("python3", "python"):
-                candidate = parent / "bin" / name
-                if candidate.exists():
-                    return str(candidate)
-    checkout = config.SOURCE / ".venv" / "bin" / "python"
-    return str(checkout) if checkout.exists() else sys.executable
+    """The interpreter this engine is installed in (`configuration.engine_python`)."""
+    return config.engine_python()
 
 
 class Commands:
@@ -671,6 +658,39 @@ def _services():
     return engine_update.LaunchdServices()
 
 
+def step_jobs(launch=None) -> dict:
+    """The tick and server jobs run on the engine's interpreter (0.19.3).
+
+    Before 0.19.3 their plists could name the installer's interpreter instead, and an
+    update restarts them from the files as they are, so an install that had it wrong
+    stayed wrong. A plist that names another interpreter is rewritten and reloaded —
+    the tick only while it is not running (otherwise the next pass), the server at
+    once, which costs its clients a reconnect."""
+    if launch is None:
+        if sys.platform != "darwin" or shutil.which("launchctl") is None:
+            return {"result": "not-applicable"}
+        launch = _install_launchd()
+    try:
+        drift = launch.repair_interpreters(write=False)
+        if not drift:
+            return {"result": "ok"}
+        ready = [j for j in drift if not (j["name"] == "tick" and launch.job_running(j["label"]))]
+        if ready:
+            launch.repair_interpreters(write=True, only={j["name"] for j in ready})
+        fixed = []
+        for job in ready:
+            if launch.job_loaded(job["label"]):
+                launch.stop_job(job["label"])
+            ok, detail = launch.start_job(job["plist"])
+            fixed.append({"job": job["name"], "was": job["was"], "now": job["now"],
+                          "reloaded": ok, **({} if ok else {"detail": str(detail)[:200]})})
+        waiting = [j["name"] for j in drift if j not in ready]
+        return {"result": "repaired" if fixed else "waiting", "jobs": fixed,
+                **({"waiting": waiting} if waiting else {})}
+    except Exception as exc:  # noqa: BLE001 — a repair never fails a pass
+        return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+
+
 def step_snapshot(base: Path, state: dict, at: datetime.datetime, services=None,
                   sleep=time.sleep) -> dict:
     """A full encrypted snapshot once a day. An update's before-upgrade snapshot counts."""
@@ -818,6 +838,8 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
                 except Exception as exc:  # noqa: BLE001 — the app never stops a backup
                     report["app"] = {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
             report["snapshot"] = step_snapshot(base, state, at, services, sleep=sleep)
+            if services is not None:
+                report["jobs"] = step_jobs()
         state["pass"] = {"at": iso(at)}
         write_state(base, state)
         _rotate_logs(base)

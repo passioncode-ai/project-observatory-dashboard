@@ -189,6 +189,25 @@ def test_products_are_curated_or_suggested_and_never_confused() -> None:
           str(doc2.get("degraded")))
 
 
+def test_the_document_names_every_role_its_own_suggestions_use() -> None:
+    """A tester's tick stopped at `validate`: "product member role unknown:
+    product:suggested-… other". Suggested rows give members the role `other`, and
+    the document's `roles` came only from the operator's file — the shipped
+    default (primary, supporting, archive) or none at all — so the registry the
+    engine emitted failed the engine's own validator."""
+    m = load()
+    for curated in (None, {"roles": ["primary", "supporting", "archive"], "products": {}}):
+        m.CURATED_PRODUCTS = pathlib.Path(tmpdir.mkdtemp()) / "products.json"
+        if curated is not None:
+            m.CURATED_PRODUCTS.write_text(json.dumps(curated), encoding="utf-8")
+        doc, _edges, errors = m.products_document(PROJECTS, DOMAINS, "2026-09-13")
+        used = {x["role"] for r in doc["products"] for x in r["members"]}
+        check(f"suggestions exist to test ({'no file' if curated is None else 'default roles'})",
+              any(r["kind"] == "suggested" for r in doc["products"]), str(doc["products"]))
+        check("every role a member carries is a declared role", used <= set(doc["roles"]),
+              f"{sorted(used)} not in {doc['roles']}")
+
+
 def test_the_heroku_chain_never_compares_a_name_to_a_name() -> None:
     m = load()
     scan_apps = [{"name": "shiny-web", "domains": ["shop.example", "www.shop.example"]},
@@ -211,6 +230,7 @@ if __name__ == "__main__":
     for fn in (test_the_evidence_order_is_the_operators,
                test_every_zone_gets_one_standing,
                test_products_are_curated_or_suggested_and_never_confused,
+               test_the_document_names_every_role_its_own_suggestions_use,
                test_the_heroku_chain_never_compares_a_name_to_a_name):
         fn()
     print()

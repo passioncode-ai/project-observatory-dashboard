@@ -167,6 +167,15 @@ class WorkspaceScheduler(unittest.TestCase):
         self.assertTrue(self.lease.step_allowed('remotes'))
         self.assertFalse(self.lease.step_allowed('scan-gh'))
 
+    def test_the_lost_projects_step_follows_the_sessions_integration(self):
+        # A tester's tick failed `lost` (EXIT 1, its own row on the card) with sessions
+        # off: the step reads store/raw/sessions.json, which only the sessions
+        # collector writes. It is skipped as every switched-off collector is.
+        self.assertFalse(self.lease.step_allowed('lost'))
+        self.settings['integrations']['sessions'] = True
+        self.save()
+        self.assertTrue(self.lease.step_allowed('lost'))
+
     def test_log_directory_refuses_symlinked_ancestor(self):
         external = self.base / 'external-logs'
         external.mkdir()

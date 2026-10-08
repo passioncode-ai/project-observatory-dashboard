@@ -26,6 +26,7 @@ import pathlib
 import plistlib
 import re
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -668,6 +669,89 @@ class PlistsCarryAStablePath(Workspace):
                          str(self.fake / "opt/homebrew/opt/python@3.99/bin/python3.99"))
         venv = "/some/venv/bin/python3"
         self.assertEqual(self.il.stable_interpreter(venv), venv)
+
+    def _engine_in_a_venv(self):
+        """A fake install: the engine's source inside a venv with its own python."""
+        venv = self.fake / "venv"
+        source = venv / "lib/python3.99/site-packages/observatory/engine"
+        source.mkdir(parents=True)
+        (venv / "pyvenv.cfg").write_text("home = /opt/homebrew/opt/python@3.99/bin\n")
+        (venv / "bin").mkdir()
+        python = venv / "bin/python3"
+        python.write_text("#!/bin/sh\n")
+        python.chmod(0o755)
+        return source, python
+
+    def test_the_tick_runs_on_the_engines_venv_whoever_installs_it(self):
+        # A tester's tick ran its backup step on Homebrew's bare python3.14 and died
+        # on `No module named 'cryptography'`: the tick plist took the INSTALLER's
+        # interpreter (`sys.executable`), and the installer had been started by a
+        # python that was not the engine's venv. The maintenance job already used
+        # the venv; the tick and the server now do too.
+        import configuration
+        source, python = self._engine_in_a_venv()
+        bare = str(self.fake / "opt/homebrew/opt/python@3.99/bin/python3.99")
+        with patch.object(configuration, "SOURCE", source), patch.object(sys, "executable", bare):
+            self.assertEqual(self.il.environment()["OBSERVATORY_PYTHON"], str(python))
+            serverd = self.reload("serverd")
+            self.assertEqual(serverd.build_plist()["ProgramArguments"][0], str(python))
+            maintenance = self.reload("maintenance")
+            self.assertEqual(maintenance.engine_python(), str(python))
+
+    def _plists_with(self, interpreter: str):
+        jobs = {j["name"]: j for j in self.il.managed_jobs()}
+        tick, server = Path(jobs["tick"]["plist"]), Path(jobs["server"]["plist"])
+        tick.parent.mkdir(parents=True, exist_ok=True)
+        tick.write_bytes(plistlib.dumps({"Label": jobs["tick"]["label"], "StartInterval": 1800,
+                                         "ProgramArguments": ["/bin/bash", "tick.sh"],
+                                         "EnvironmentVariables": {"OBSERVATORY_PYTHON": interpreter}}))
+        server.write_bytes(plistlib.dumps({"Label": jobs["server"]["label"],
+                                           "ProgramArguments": [interpreter, "serverd.py", "--run"]}))
+        return jobs, tick, server
+
+    def test_an_installed_plist_on_another_interpreter_is_repaired_in_place(self):
+        # The fix above does nothing for an install whose plists were written before it:
+        # `full update` restarts the jobs from the files as they are.
+        bare = str(self.fake / "opt/homebrew/opt/python@3.99/bin/python3.99")
+        _, python = self._engine_in_a_venv()
+        jobs, tick, server = self._plists_with(bare)
+        found = self.il.repair_interpreters(str(python))
+        self.assertEqual({f["name"] for f in found}, {"tick", "server"})
+        self.assertEqual(plistlib.loads(tick.read_bytes())["EnvironmentVariables"]["OBSERVATORY_PYTHON"], str(python))
+        self.assertEqual(plistlib.loads(tick.read_bytes())["StartInterval"], 1800, "nothing else changes")
+        self.assertEqual(plistlib.loads(server.read_bytes())["ProgramArguments"][0], str(python))
+        self.assertEqual(stat.S_IMODE(tick.stat().st_mode), 0o600)
+        self.assertEqual(self.il.repair_interpreters(str(python)), [], "a second pass finds nothing")
+
+    def test_the_maintenance_pass_reloads_a_repaired_job_but_never_a_running_tick(self):
+        bare = str(self.fake / "opt/homebrew/opt/python@3.99/bin/python3.99")
+        _, python = self._engine_in_a_venv()
+        jobs, tick, server = self._plists_with(bare)
+        il, calls = self.il, []
+
+        class Launch:
+            running = {jobs["tick"]["label"]}
+            def repair_interpreters(self, *, write, only=None):
+                return il.repair_interpreters(str(python), write=write, only=only)
+            def job_running(self, label): return label in self.running
+            def job_loaded(self, label): return True
+            def stop_job(self, label): calls.append(("stop", label)); return True, ""
+            def start_job(self, plist): calls.append(("start", plist)); return True, ""
+
+        maintenance = self.reload("maintenance")
+        launch = Launch()
+        first = maintenance.step_jobs(launch)
+        self.assertEqual(first["result"], "repaired")
+        self.assertEqual(first["waiting"], ["tick"])
+        self.assertEqual([j["job"] for j in first["jobs"]], ["server"])
+        self.assertEqual(plistlib.loads(tick.read_bytes())["EnvironmentVariables"]["OBSERVATORY_PYTHON"], bare,
+                         "a running tick's plist is left for the next pass")
+        self.assertNotIn(("stop", jobs["tick"]["label"]), calls)
+        launch.running = set()
+        second = maintenance.step_jobs(launch)
+        self.assertEqual([j["job"] for j in second["jobs"]], ["tick"])
+        self.assertIn(("start", jobs["tick"]["plist"]), calls)
+        self.assertEqual(maintenance.step_jobs(launch), {"result": "ok"})
 
     def test_the_lint_refuses_a_cellar_path(self):
         bad = {"ProgramArguments": ["/opt/homebrew/Cellar/python@3.99/3.99.1/bin/python3.99", "x.py"],
