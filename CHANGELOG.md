@@ -5,7 +5,25 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
-## 0.19.3 — 2026-10-08
+## 0.19.4 — 2026-10-08
+
+A patch release for two races found while installing 0.19.3 by hand on a working machine: the
+update rolled back safely, and a second try installed it.
+
+### Fixed
+
+- **The hourly pass no longer touches the Mac app while an engine update runs.** A person's
+  `full update` and the maintenance pass ran together; the pass's app step downloaded the new
+  app into `store/app-update` and removed its checksum files while the update was snapshotting
+  the workspace, and the update rolled back on the missing file. The pass, and the step the app
+  starts after it quits, now wait for the next pass while an update holds its lock (the daily
+  snapshot already deferred itself).
+- **A job found running after an update is restarted on the new code.** While the update had
+  the server stopped, something loaded it again; the update's own start was then refused as
+  "already loaded", it asked a person to run `launchctl bootstrap`, and the server kept the code
+  it had started with. A job found loaded is now restarted (`launchctl kickstart -k`).
+
+
 
 A patch release: four defects a tester found in 0.19.1 on a workspace with only the projects
 source on and every integration off — the service card stayed yellow and no daily backup was

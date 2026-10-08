@@ -1,4 +1,4 @@
-# 2026-10-08 — releases 0.19.0, 0.19.1, 0.19.2 and 0.19.3
+# 2026-10-08 — releases 0.19.0 to 0.19.4
 
 The public record of three releases. Changes are in [CHANGELOG.md](../../../CHANGELOG.md); this
 page says what was measured and how each was checked.
@@ -60,3 +60,14 @@ approval) was not published; 0.19.3 carries it.
 - **OBS-48** — `test_workspace_scheduler.py`, `test_fabric_service.py`; red, then green.
 - **OBS-49** — `test_estate_surfaces.py` with no curated file and with the shipped default roles;
   red (`['other'] not in []`), then green.
+
+## 0.19.4 — two races from installing 0.19.3
+
+The first `full update --apply` to 0.19.3 on a maintainer machine rolled back: the hourly
+maintenance pass started three seconds later, its app step downloaded the 0.19.3 app into
+`store/app-update` and deleted the checksum files after unpacking, while the update's workspace
+snapshot was copying them (`No such file or directory: …/store/app-update/0.19.3/0.19.3-SHA256SUMS.asc`).
+The rollback restored the workspace and the previous wheel; the server, loaded again mid-update by
+something else, kept running the newer code, and the update's own start was refused as already
+loaded. A second `full update` installed 0.19.3, and a maintenance pass on it reported `jobs: ok`.
+OBS-50 and OBS-51; tests in `test_maintenance.py` (2) and `test_engine_update.py` (1), red before.

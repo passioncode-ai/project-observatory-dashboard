@@ -613,6 +613,31 @@ class Pass(Base):
         later = self.run_pass(commands, at=AT + datetime.timedelta(hours=1))
         self.assertEqual(later["update"]["result"], "updated")
 
+    def test_while_an_engine_update_runs_the_pass_leaves_the_app_and_the_backup_alone(self):
+        # 2026-10-08: a person's `full update` and the hourly pass ran together. The pass's
+        # app step downloaded the new app into store/app-update and deleted its SHA256SUMS
+        # while the update was snapshotting the workspace, and the update rolled back on
+        # the missing file. Nothing a pass does may run beside an engine update.
+        for check in (10, None):            # an update found, and a check not yet due
+            app = RecordingApp()
+            commands = FakeCommands(check=check if check is not None else 0)
+            import engine_update
+            with engine_update.update_lock(self.home):        # held as a running update holds it
+                report = self.run_pass(commands, app=app,
+                                       at=AT + datetime.timedelta(days=3 if check is None else 0))
+            self.assertEqual(app.calls, [], f"the app step ran beside an update ({check})")
+            self.assertEqual(report.get("app"), {"result": "waiting-for-engine-update"})
+            self.assertIn(report["snapshot"].get("result"), ("deferred", "not-due"),
+                          "no snapshot beside an update")
+
+    def test_the_apps_own_step_waits_for_an_engine_update_too(self):
+        app = RecordingApp()
+        import engine_update
+        with engine_update.update_lock(self.home):
+            out = M.run_app_step(self.home, at=AT, app=app)
+        self.assertEqual(app.calls, [])
+        self.assertEqual(out["app"], {"result": "waiting-for-engine-update"})
+
     def test_failures_are_forgotten_once_the_engine_moved_on(self):
         commands = FakeCommands(check=10, apply=1)
         self.run_pass(commands)

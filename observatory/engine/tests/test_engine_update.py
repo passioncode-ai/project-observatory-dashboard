@@ -218,6 +218,15 @@ class FakeServices:
         self.calls.append(("start", name))
         if name in self.start_fails:
             return False, "synthetic start failure"
+        if self.state[name]:
+            # launchd refuses to bootstrap a job that is already loaded.
+            return False, "Bootstrap failed: 5: Input/output error"
+        self.state[name] = True
+        return True, ""
+
+    def restart(self, label):
+        name = label.rsplit(".", 1)[1]
+        self.calls.append(("restart", name))
         self.state[name] = True
         return True, ""
 
@@ -934,6 +943,23 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(code, self.mod.EXIT_SERVICES, doc)
         self.assertEqual(doc["status"], "updated")
         self.assertIn("server", json.dumps(doc["services_not_restarted"]))
+
+    def test_a_job_someone_loaded_during_the_update_is_restarted_on_the_new_code(self):
+        # 2026-10-08, installing 0.19.3 by hand: while the update had the server
+        # stopped, something loaded it again; the update's own bootstrap then failed
+        # ("already loaded", reported as a human step) and the server kept running the
+        # code it was started with. A job found loaded is restarted instead.
+        real_upgrade = self.engine.upgrade
+        def upgrade_while_someone_starts_the_server():
+            self.services.state["server"] = True
+            return real_upgrade()
+        self.engine.upgrade = upgrade_while_someone_starts_the_server
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0, doc)
+        self.assertNotIn("services_not_restarted", doc)
+        self.assertIn(("restart", "server"), self.services.calls)
+        self.assertIn("restarted", [s.get("step") for s in doc["steps"]])
 
     def test_cached_rollback_wheel_is_reused_without_network(self):
         self.gh.publish(NEWER)

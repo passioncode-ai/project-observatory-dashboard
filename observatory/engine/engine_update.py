@@ -743,6 +743,9 @@ class LaunchdServices:
     def start(self, plist: str) -> tuple[bool, str]:
         return self.launch.start_job(plist)
 
+    def restart(self, label: str) -> tuple[bool, str]:
+        return self.launch.restart_job(label)
+
 
 class NewEngine:
     """The freshly installed release, always in a new process of its own.
@@ -1066,6 +1069,15 @@ class Transaction:
         failed = []
         for job in self.stopped:
             ok, detail = self.deps.services.start(job["plist"])
+            if not ok and self.deps.services.loaded(job["label"]):
+                # SOMETHING LOADED IT WHILE IT WAS STOPPED (2026-10-08: installing 0.19.3 by
+                # hand, the server came back mid-update and kept the code it started with;
+                # launchd then refused this bootstrap as "already loaded"). Restarting it is
+                # what puts the installed code in memory.
+                ok, detail = self.deps.services.restart(job["label"])
+                if ok:
+                    self.step("restarted", service=job["name"])
+                    continue
             if not ok:
                 failed.append({"service": job["name"], "detail": redact_tail(detail, 300),
                                "fix": f"launchctl bootstrap gui/{os.getuid()} {job['plist']}"})
