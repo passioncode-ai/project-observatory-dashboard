@@ -15,11 +15,12 @@ import pathlib
 import shutil
 import sqlite3
 import sys
-import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
+import tmp as tmpdir  # noqa: E402
 
 _MADE: list[pathlib.Path] = []
 _CACHED = ("paths", "store.db", "store.ledger", "store.migrate", "store.namespaces", "store")
@@ -31,10 +32,10 @@ def tearDownModule() -> None:
 
 
 def fresh():
-    home = pathlib.Path(tempfile.mkdtemp(prefix="observatory-ns-")).resolve()
+    home = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-ns-")).resolve()
     _MADE.append(home)
     os.environ["OBSERVATORY_HOME"] = str(home)
-    os.environ["OBSERVATORY_DB"] = str(home / "store" / "observatory.db")
+    os.environ["OBSERVATORY_DB"] = str(home / "store" / "observatory.db")  # paths-check: allow — an isolated workspace's store, handed over as OBSERVATORY_DB; this IS the redirection
     os.environ["OBSERVATORY_STATE"] = str(home / "store")
     (home / "store").mkdir(parents=True, exist_ok=True)
     for m in _CACHED:

@@ -5,7 +5,7 @@ import os
 import re
 from pathlib import Path
 
-VERSION = "0.19.4"
+VERSION = "0.20.0"
 CONFIG_VERSION = 1
 WORKSPACE_VERSION = 1
 SOURCE = Path(__file__).resolve().parent

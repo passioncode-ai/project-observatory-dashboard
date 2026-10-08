@@ -34,6 +34,8 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
+      - name: The lock carries every pin (a Dependabot bump of pyproject.toml alone stops here)
+        run: python tools/refresh_lock.py --check
       - name: Install package
         run: python -m pip install -c requirements-full.lock '.[full]'
       - name: Compile every distributed Python module on the matrix interpreter

@@ -5,6 +5,42 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.20.0 — 2026-10-08
+
+A minor release, and it **changes behaviour**: the Mac app shows a waiting update sooner and
+where it is seen without a window, Health counts the ticks that did not finish, and the full
+engine's dependencies move (`mcp` 2.3.0). The companion plugin `observatory-log` moves to 0.20.0.
+
+### Changed
+
+- **A waiting update is visible.** The Mac app reads the maintenance record every 15 minutes
+  instead of every 6 hours, so **Restart to update** appears within the hour the update is
+  staged, and the Dock icon carries a `↑` badge until it is installed — seen without opening a
+  window. Left alone for 30 minutes with no window on screen, the app still restarts into the
+  update by itself; an app older than 0.19.0 cannot, and is replaced the first time it is quit.
+- **Health says how many recent ticks did not finish.** Each tick's outcome is kept
+  (`store/raw/tick-runs.jsonl`, the last 50); Health and `doctor` summarise the last 10 and
+  report a degradation when 3 or more stopped at the ceiling or failed (OBS-40).
+- **Dependencies:** `mcp` 2.3.0, `google-auth` 2.59.1, `cryptography` 50.0.2, with `pydantic`
+  2.14.0 and their dependencies, through the refreshed `requirements-full.lock`. The memory
+  service's HTTP transport is pinned to the SDK it was measured on, so the move was measured
+  again: every property is unchanged (`docs/runs/2026-10-08-http-transport-repin`).
+
+### Fixed
+
+- **`observatory_credentials` lists every vault folder of a project** — a folder named after the
+  project's name was missing, while `use_secret names` already listed it (OBS-26).
+- **A Dependabot bump no longer fails CI at install with an unnamed cause.** `tools/refresh_lock.py
+  --check` runs first and names the stale pin; `tools/refresh_lock.py` rebuilds the lock (OBS-17).
+- **A failed `backups decrypt` no longer leaves the decrypted copy behind.** When moving the
+  decrypted workspace to its destination failed, its hidden staging folder — plaintext
+  secrets included — stayed on disk; it is now removed and the error reported.
+- **A git call that fails to write its helper file no longer leaks a temporary folder** — on a
+  full disk, the long-running server lost one per call.
+- **Tests that skipped while CI stayed green now run (OBS-42):** the documentation check, the
+  design-pack audit of the projects row, the two identity finding rules and the path rules
+  (`tools/check_paths.py` is clean, and `test_api_listings` asserts it).
+
 ## 0.19.4 — 2026-10-08
 
 A patch release for two races found while installing 0.19.3 by hand on a working machine: the

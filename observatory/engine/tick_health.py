@@ -77,7 +77,8 @@ def health(state: Path, scratch: Path, *, scheduler_enabled: bool = True,
     started = _stamp(scratch / "tick-lease.json", "last_acquired_at")
     finished = _stamp(scratch / "tick.json", "finished_at")
     out = {"last_started": started and started.strftime("%Y-%m-%dT%H:%M:%SZ"),
-           "last_finished": finished and finished.strftime("%Y-%m-%dT%H:%M:%SZ")}
+           "last_finished": finished and finished.strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "recent": recent(scratch)}
     if not scheduler_enabled:
         return {**out, "verdict": "disabled", "why": "features.scheduler is off in this workspace"}
     if lock_held(state / "tick.lock"):
@@ -97,9 +98,56 @@ def health(state: Path, scratch: Path, *, scheduler_enabled: bool = True,
     return {**out, "verdict": "ok", "why": "the last tick finished and none is overdue"}
 
 
+#: One line per tick run (`tools/tick_lease.record_run`), the newest last. The last run
+#: alone hid a pattern: 42 ticks stopped at their ceiling on one machine while Health read
+#: "ok" after every one that happened to finish (OBS-40).
+RUNS_FILE = "tick-runs.jsonl"
+KEEP_RUNS = 50
+#: How many recent runs Health summarises, and how many of them not finishing is a gap.
+RECENT_RUNS = 10
+INCOMPLETE_ALERT = 3
+
+
+def record(scratch: Path, run: dict) -> None:
+    """Append one run's outcome, keeping the newest KEEP_RUNS. Never raises: a run that
+    cannot be recorded is a missing line, not a failed tick."""
+    try:
+        f = scratch / RUNS_FILE
+        lines = f.read_text(encoding="utf-8").splitlines() if f.is_file() else []
+        lines = (lines + [json.dumps(run, sort_keys=True)])[-KEEP_RUNS:]
+        import atomic
+        atomic.write_text(f, "\n".join(lines) + "\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def recent(scratch: Path, last: int = RECENT_RUNS) -> dict:
+    """{"runs", "incomplete", "outcomes"} over the newest `last` recorded runs."""
+    outcomes: dict[str, int] = {}
+    try:
+        lines = (scratch / RUNS_FILE).read_text(encoding="utf-8").splitlines()[-last:]
+    except OSError:
+        lines = []
+    for line in lines:
+        try:
+            outcome = str(json.loads(line).get("outcome") or "unknown")
+        except (ValueError, AttributeError):
+            outcome = "unreadable"
+        outcomes[outcome] = outcomes.get(outcome, 0) + 1
+    runs = sum(outcomes.values())
+    return {"runs": runs, "incomplete": runs - outcomes.get("finished", 0), "outcomes": outcomes}
+
+
 def degraded(state: Path, scratch: Path, *, scheduler_enabled: bool = True) -> list[dict]:
     """A `degraded` entry when the data may be older than it looks, else []."""
     h = health(state, scratch, scheduler_enabled=scheduler_enabled)
+    out = []
     if h["verdict"] in ("interrupted", "stale", "running-long"):
-        return [{"source": "tick", "reason": f"{h['verdict']}: {h['why']}"}]
-    return []
+        out.append({"source": "tick", "reason": f"{h['verdict']}: {h['why']}"})
+    r = h.get("recent") or {}
+    if scheduler_enabled and r.get("incomplete", 0) >= INCOMPLETE_ALERT:
+        how = ", ".join(f"{k}: {v}" for k, v in sorted(r["outcomes"].items()) if k != "finished")
+        out.append({"source": "tick-history", "reason": (
+            f"{r['incomplete']} of the last {r['runs']} ticks did not finish ({how}); the registry, "
+            f"findings and dashboard may lag behind the estate — `store/logs/tick.log` names the slow steps")})
+    return out

@@ -17,12 +17,12 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "tests")); sys.path.insert(0, str(ROOT / "collectors"))
 import dashboard_fixture  # noqa: E402
+import tmp as tmpdir  # noqa: E402
 
 FAILS = []
 
@@ -80,7 +80,7 @@ def groups_in(markup: str) -> list[tuple[str, list[tuple[str, str]]]]:
 
 def main() -> int:
     node = shutil.which("node")
-    root = Path(tempfile.mkdtemp(prefix="observatory-hosting-")).resolve()
+    root = Path(tmpdir.mkdtemp(prefix="observatory-hosting-")).resolve()
     env = dashboard_fixture.seed(root)
     placed = seed_hosting(root)
     check("config/environments.json places fx-web in production, as an override",

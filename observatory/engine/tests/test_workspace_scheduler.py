@@ -15,6 +15,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
+import tmp as tmpdir  # noqa: E402
 
 class WorkspaceScheduler(unittest.TestCase):
     def setUp(self):
@@ -74,7 +76,7 @@ class WorkspaceScheduler(unittest.TestCase):
             self.assertNotEqual(original,self.launch.instance_label('tick'))
 
     def test_launch_path_keeps_safe_user_directories(self):
-        base = Path(tempfile.mkdtemp(prefix='observatory-path-')).resolve()
+        base = Path(tmpdir.mkdtemp(prefix='observatory-path-')).resolve()
         user_bin, writable, missing = base / 'bin', base / 'shared', base / 'absent'
         user_bin.mkdir(mode=0o755); writable.mkdir(); writable.chmod(0o777)
         group_own = base / 'brew'; group_own.mkdir(); group_own.chmod(0o775)

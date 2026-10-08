@@ -87,9 +87,13 @@ PATH_PREFIX_ALLOWLIST = {
     "store/raw/": "collector and tool output; the whole directory is gitignored and "
                   "written by a run, so a fresh clone has none of it",
     "store/logs/": "written by launchd",
+    # The engine ships inside a package; the documents also name files the engine WRITES
+    # into a workspace, which this source tree never holds (OBS-42).
+    "docs/dashboard/": "the dashboard pages a tick builds into the workspace's docs/",
 }
 
 PATH_ALLOWLIST = {
+    "store/scrub-watermark.json": "written into the workspace by tools/scrub_companion.py",
     # Generated or volatile, and gitignored: a fresh clone has none of these.
     "store/observatory.db": "the store is gitignored and rebuilt",
     "store/observatory.db.backup-2026-09-06T2150Z": "a dated backup, gitignored",
@@ -244,6 +248,13 @@ def shape_doc_failures() -> list[str]:
     chore.
     """
     doc = ROOT / "docs/REGISTRY_SHAPE.md"
+    if not doc.is_file() and not (ROOT / "registry").is_dir():  # paths-check: allow — the SOURCE TREE's own registry folder, which decides whether the shipped shape document is owed
+        # THE DISTRIBUTED ENGINE HOLDS NO REGISTRY: it lives in each user's workspace, and
+        # a shape document generated from one person's registry and shipped in the package
+        # would publish that registry's field counts (OBS-42). Its absence binds only a
+        # source tree that carries its own registry; a document that IS there is still
+        # checked against the registry it describes.
+        return []
     if not doc.is_file():
         return [f"docs/REGISTRY_SHAPE.md is missing — the registry calls itself "
                 f"typed facts and nothing publishes the types; "

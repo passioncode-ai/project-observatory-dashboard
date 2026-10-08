@@ -27,7 +27,9 @@ import unittest
 from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-BASE = pathlib.Path(tempfile.mkdtemp(prefix="observatory-vault-project-")).resolve()
+sys.path.insert(0, str(ROOT / "tests"))
+import tmp as tmpdir  # noqa: E402
+BASE = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-vault-project-")).resolve()
 REGISTRY = BASE / "registry"
 STORE = BASE / "secrets" / "projects"
 SCRATCH = BASE / "raw"
@@ -49,6 +51,7 @@ PROJECTS = [
     {"id": "project:local-zeta", "name": "zeta", "local_folders": ["zeta"]},
     {"id": "project:eta", "name": "eta", "local_folders": ["local-zeta"]},
     {"id": "project:remote-only", "name": "remote-only", "local_folders": []},
+    {"id": "project:local-delta", "name": "delta-brand", "local_folders": ["delta"]},
 ]
 
 
@@ -167,6 +170,28 @@ class DoorTests(unittest.TestCase):
                 self.assertIn("vault:local-beta-api/prod", p.stdout)
                 self.assertIn("vault:beta-api/stage", p.stdout)
                 self.assertNotIn("ANOTHER_PROJECTS_KEY", p.stdout)
+
+    def test_the_mcp_answer_lists_every_folder_of_one_project_too(self):
+        # OBS-26: `use_secret names` learned this in 0.18.0; `observatory_credentials`
+        # (survey.credentials) still looked only in the folders the registry names, so a
+        # key under the project's own folder was missing from the agent's answer.
+        plant_slot("local-beta-api", "prod", "OLDER_KEY")
+        plant_slot("beta-api", "stage", "NEWER_KEY")
+        plant_slot("alpha-web", "prod", "ANOTHER_PROJECTS_KEY")
+        import importlib, survey
+        importlib.reload(survey)
+        for typed in ("project:local-beta-api", "beta-api"):
+            with self.subTest(typed=typed):
+                got = {(r["name"], r.get("folder")) for r in survey.credentials(typed)["vault"]}
+                names = {n for n, _ in got}
+                self.assertIn("OLDER_KEY", names)
+                self.assertIn("NEWER_KEY", names, got)
+                self.assertNotIn("ANOTHER_PROJECTS_KEY", names)
+        # A folder named after the project's NAME — neither its slug nor a local folder.
+        plant_slot("delta-brand", "prod", "BRAND_KEY")
+        plant_slot("delta", "prod", "LOCAL_KEY")
+        names = {r["name"] for r in survey.credentials("project:local-delta")["vault"]}
+        self.assertEqual(names & {"BRAND_KEY", "LOCAL_KEY"}, {"BRAND_KEY", "LOCAL_KEY"}, names)
 
     def test_a_key_put_by_one_name_is_read_by_the_other(self):
         # 2026-10-06: `put` filed a key under the project's folder while the older slots

@@ -141,10 +141,11 @@ same placeholders, no stale entries, three Russian plural forms, the language re
 **Updates (2026-10-06, LC-16 "Install vs activation").** The engine's hourly maintenance pass
 verifies and stages a new app and swaps it only while the app is not running, recording
 `app.result = "waiting-for-quit"` with the `pending` version in
-`<workspace>/store/maintenance.json`. The app reads that record at launch and every 6 h (and
-again before acting on it); a pending `X.Y.Z` strictly newer than its own
-`CFBundleShortVersionString` shows **Restart to update** in the app menu and as a toolbar
-button in the dashboard window — never a modal. Activation happens only at a safe point:
+`<workspace>/store/maintenance.json`. The app reads that record at launch and every 15 minutes
+(and again before acting on it; every 6 h before 0.20.0, which put the prompt hours behind the
+staged update); a pending `X.Y.Z` strictly newer than its own `CFBundleShortVersionString` shows
+**Restart to update** in the app menu and as a toolbar button in the dashboard window, and a
+badge (`↑`) on the Dock icon, so it is seen without opening a window — never a modal. Activation happens only at a safe point:
 the person's *Restart to update*, the person's quit (⌘Q), or 30 minutes with no titled window
 on screen, the app not frontmost, no key press, click or scroll, and no question, build or
 start in flight. Each starts one detached helper (`/bin/sh`, its own session, values as

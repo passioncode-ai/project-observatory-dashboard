@@ -187,19 +187,7 @@ def test_the_page_still_passes_its_own_two_gates() -> None:
         return
     p = subprocess.run([PY, "dashboard/audit_pack.py"], cwd=ROOT, capture_output=True,
                        text=True, timeout=300)
-    failed = [l.strip() for l in p.stdout.splitlines() if l.strip().startswith("FAIL")]
-    stale = "FAIL  a long repository list folds instead of stretching its row"
-    if p.returncode != 0 and failed == [stale]:
-        # The row redesign shows one repository and a link to the rest, so there
-        # is no list left to fold; the audit rule still looks for the old
-        # fold markup. Every other rule of the audit is still asserted here.
-        print("  SKIP  KNOWN-GAP: dashboard/audit_pack.py still requires the retired "
-              "`.repos.folded` fold on the projects row, which the redesigned row no "
-              "longer renders; the rule needs rewriting against the current row")
-    else:
-        check("the design pack audit passes", p.returncode == 0, (p.stdout + p.stderr)[-200:])
-    check("and it ran every rule but the stale one",
-          p.returncode == 0 or failed == [stale], str(failed))
+    check("the design pack audit passes", p.returncode == 0, (p.stdout + p.stderr)[-300:])
     if shutil.which("node") is None:
         print("  SKIP  node is not on PATH, so the page's smoke run cannot execute here")
         return

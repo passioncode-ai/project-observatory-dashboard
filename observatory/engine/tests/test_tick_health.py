@@ -88,6 +88,34 @@ class TickHealth(unittest.TestCase):
         self.assertEqual(d["source"], "tick")
         self.assertTrue(d["reason"].startswith("interrupted"))
 
+    # OBS-40: 42 ticks stopped at their ceiling on one machine and Health said nothing,
+    # because it reads only the LAST run. It now says how many of the recent ones finished.
+    def runs(self, *outcomes):
+        for i, outcome in enumerate(outcomes):
+            T.record(self.raw, {"started_at": z(NOW - timedelta(hours=len(outcomes) - i)),
+                                "ended_at": z(NOW - timedelta(hours=len(outcomes) - i, minutes=-25)),
+                                "outcome": outcome, "exit": 0 if outcome == "finished" else 124,
+                                "reason": "" if outcome == "finished" else "the tick reached its 1500 s ceiling"})
+
+    def test_health_counts_the_recent_ticks_that_did_not_finish(self):
+        self.receipts(NOW - timedelta(minutes=40), NOW - timedelta(minutes=10))
+        self.runs(*(["timeout"] * 3 + ["finished"] * 6 + ["failed"]))
+        recent = T.health(self.state, self.raw, now=NOW)["recent"]
+        self.assertEqual(recent, {"runs": 10, "incomplete": 4, "outcomes": {"finished": 6, "timeout": 3, "failed": 1}})
+        [d] = [d for d in T.degraded(self.state, self.raw) if d["source"] == "tick-history"]
+        self.assertTrue(d["reason"].startswith("4 of the last 10 ticks did not finish"), d["reason"])
+
+    def test_an_occasional_incomplete_tick_is_counted_but_not_an_alarm(self):
+        self.receipts(datetime.now(timezone.utc) - timedelta(minutes=40), datetime.now(timezone.utc) - timedelta(minutes=10))
+        self.runs(*(["finished"] * 8 + ["timeout"] * 2))
+        self.assertEqual(T.health(self.state, self.raw)["recent"]["incomplete"], 2)
+        self.assertEqual(T.degraded(self.state, self.raw), [])
+
+    def test_the_history_keeps_the_last_fifty_runs(self):
+        self.runs(*(["finished"] * 60))
+        lines = (self.raw / T.RUNS_FILE).read_text().splitlines()
+        self.assertEqual(len(lines), T.KEEP_RUNS)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -112,7 +112,8 @@ code (`@server.capability` handlers in `mcp/server.py`).
   envelope uses `urn:observatory:subject:machine`, `urn:observatory:job:<id>`,
   `urn:observatory:capability:<name>` and this provider's revision, so a host cannot mistake them
   for its own.
-- **MCP Tasks are not offered.** The SDK in use (`mcp` 2.2.0) implements no Tasks extension, and the
+- **MCP Tasks are not offered.** The SDK in use (`mcp` 2.3.0) ships a mechanism for extensions but no
+  Tasks extension (`tasks/get` appears only as an example in `mcp/server/extension.py`), and the
   contract makes the job handle the default.
 - **No capability elicits input**, so C3.3 and FAC-SEM-018 have nothing to apply to; `input_required`
   is a known state that no job enters.

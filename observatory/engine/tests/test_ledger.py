@@ -4,13 +4,14 @@
 Runs against a throwaway database, never the live store.
 """
 from __future__ import annotations
-import pathlib, sqlite3, sys, tempfile
+import pathlib, sqlite3, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 from test_portable_mcp import setup as portable_setup
 portable_setup()
+import tmp as tmpdir  # noqa: E402
 from store import ledger as L                                                      
 
 FAILURES: list[str] = []
@@ -268,7 +269,7 @@ def test_corroboration_needs_a_second_witness() -> None:
 def test_export_writes_a_registry_outside_the_program() -> None:
     """The workspace registry is not under the engine; the export must still exit 0."""
     import os, subprocess
-    work = pathlib.Path(tempfile.mkdtemp(prefix="observatory-ledger-export-")).resolve()
+    work = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-ledger-export-")).resolve()
     (work / "registry").mkdir()
     env = {**os.environ, "OBSERVATORY_REGISTRY": str(work / "registry"),
            "OBSERVATORY_DB": str(work / "store/observatory.db")}

@@ -904,7 +904,13 @@ def _backups_command(base: Path, a) -> int:
         header = backup_vault.verify_file(a.file, secret)
         if header.get("content") == "tar+gzip":
             stage = backup_vault.extract_tree(a.file, a.output.resolve().parent, secret)
-            os.rename(stage, a.output)
+            try:
+                os.rename(stage, a.output)
+            except BaseException:
+                # The output appeared after the check above: the decrypted copy is a
+                # hidden folder of plaintext secrets and must not be left beside it.
+                shutil.rmtree(stage, ignore_errors=True)
+                raise
         else:
             fd = os.open(a.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "wb") as out:

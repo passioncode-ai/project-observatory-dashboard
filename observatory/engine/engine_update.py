@@ -1171,7 +1171,7 @@ class Transaction:
 
     def run(self) -> tuple[int, dict]:
         self.refuse_early()
-        work = Path(tempfile.mkdtemp(prefix="observatory-update-"))
+        work = Path(tempfile.mkdtemp(prefix="observatory-update-"))  # paths-check: allow — removed by the finally below on every path
         try:
             self.work = work
             self.event("update_download", "started")

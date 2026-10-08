@@ -286,7 +286,7 @@ class AppUpdater:
                 raise AppUpdateError(f"{name} is {size} bytes; the release says {zipped_asset.size}")
             if digest != zipped_asset.digest or digest != listed:
                 raise AppUpdateError(f"{name} does not match its GitHub digest and its line in {eu.SUMS}")
-            unpacked = Path(tempfile.mkdtemp(prefix=".unpack-", dir=work))
+            unpacked = Path(tempfile.mkdtemp(prefix=".unpack-", dir=work))  # paths-check: allow — inside the staged folder; removed below, and _discard(self.staged) removes it on every refusal
             self.system.extract(zipped, unpacked)
             found = [p for p in unpacked.iterdir() if p.suffix == ".app" and p.is_dir() and not p.is_symlink()]
             if len(found) != 1:

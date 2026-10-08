@@ -690,7 +690,7 @@ def extract_tree(path: Path, parent: Path, secret: str) -> Path:
     archive never writes a byte."""
     verify_file(path, secret)
     parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    target = Path(tempfile.mkdtemp(prefix=".decrypted-", dir=parent))
+    target = Path(tempfile.mkdtemp(prefix=".decrypted-", dir=parent))  # paths-check: allow — removed below on any failure; on success the caller renames or removes it
     try:
         with path.open("rb") as stream:
             reader = _Reader(stream, secret)
