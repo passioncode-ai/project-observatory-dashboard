@@ -62,8 +62,9 @@ def scanner():
     sys.path.insert(0, str(ROOT))
     import slow_command  # `sh` asks a timed-out command again through it
     import safe_git      # and composes every git call through the engine's one door
+    import step_budget   # and cuts its attempts to the step's deadline (OBS-40)
     ns: dict = {"subprocess": subprocess, "os": os, "slow_command": slow_command,
-                "safe_git": safe_git}
+                "safe_git": safe_git, "step_budget": step_budget}
     start = src.index("GIT_ENV = ")
     end = src.index("MARKERS = [")
     exec(compile(src[start:end], "scan_filesystem:sh", "exec"), ns)   # noqa: S102

@@ -5,6 +5,45 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.19.2 — 2026-10-08
+
+A patch release: four defects found on a working machine, and the documentation brought back in
+line with the code. The companion plugin `observatory-log` moves to 0.19.2 with it.
+
+### Fixed
+
+- **A slow tick no longer ends without findings or a dashboard (OBS-40).** On a machine short of
+  disk and memory, the folder scan used its whole 900 s limit and was stopped with nothing
+  written; the tick then reached its ceiling before the registry, the findings and the dashboard
+  ran — 42 such stops in one machine's `tick.err`; the folder scan alone reached its 900 s limit
+  14 times between 4 and 7 October. Collectors now stop 300 s before the ceiling (at most a fifth
+  of it) so the steps from `merge` on always get their time, and every step is told its own
+  deadline (`OBSERVATORY_STEP_DEADLINE`). The folder scan uses it: out of time, it writes what it
+  measured and carries each folder it did not reach from the previous scan, marked `carried_from`
+  with the date it was really measured, and says how many in one degradation.
+- **A read-only copy of the store can no longer miss a write made during it (OBS-41).** A reader
+  that found the store idle opened it without locks; a session that wrote while it read was not
+  seen, and the copy was whole but stale. Such a read is now kept only if the store's files are
+  unchanged afterwards, and read again otherwise — for snapshots, backups, the integrity check
+  and the version check before opening.
+- **An update no longer fails because a session hook wrote its receipt.** 0.19.1 let the store
+  and the logs change while an update is staged, but not the receipts the session hooks write on
+  every agent turn (`store/raw/record-turn.json`, `sessions-seen.jsonl`,
+  `companion-faults.jsonl`); any of them still refused the update. They may now change; settings,
+  secrets and registries must still hold still.
+- **`doctor` no longer asks for the claude-mem database.** The `sessions` integration reads the
+  Stop hook's own records first and the companion's database only where it is installed, but
+  `doctor` listed a missing `companion_db` as a coverage gap. It is now optional, and only a
+  configured path that is not a file is reported.
+
+### Documentation
+
+- `SECURITY.md` says the backup passphrase is kept in the login Keychain, and that the maintenance
+  job checks for and installs updates by default, with how to turn it off.
+- The README, onboarding, compatibility, migration and Mac app pages were corrected against the
+  code: the backups location, signed updates, the `full update` exit code 6, the second-machine
+  install, the variables `agent install` writes, and the app's language and update behaviour.
+
 ## 0.19.1 — 2026-10-07
 
 A patch release. 0.19.0 could not be installed over 0.18.0 on a machine where agents are working:

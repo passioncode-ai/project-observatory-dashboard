@@ -40,7 +40,8 @@ Text remains selectable. Failed requests preserve the draft or saved question.
 
 Program and workspace use native pickers and editable absolute paths. Save and
 check is the application boundary: editing text alone cannot redirect a running
-request. Language selects English/Russian. Failure explains the next configuration
+request. Language selects System/English/Русский (since 0.19.0; System follows
+the first preferred system language, see SPEC). Failure explains the next configuration
 action and leaves the input intact. Changing workspace never cancels an old job.
 
 ## Native visual direction

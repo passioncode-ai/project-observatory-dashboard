@@ -1499,6 +1499,46 @@ class ConcurrentWriter(Base):
             conn.execute("SELECT count(*) FROM t").fetchone()
         self.assertEqual(sorted(p.name for p in self.base.iterdir()), before)
 
+    def test_an_immutable_read_a_writer_overtook_is_read_again(self):
+        # OBS-41: the reader chooses `immutable` from a check made BEFORE it connects.
+        # A writer that commits during the read is invisible to it, and the answer is
+        # whole but stale — no integrity check can see that. The read is kept only if
+        # the store's files are as they were when it began.
+        import sqlite3
+        from store import compatibility
+        db = self.base / "overtaken.db"
+        with contextlib.closing(sqlite3.connect(db)) as w:
+            w.execute("PRAGMA journal_mode=WAL")
+            w.execute("CREATE TABLE t (x)")
+            w.execute("INSERT INTO t VALUES (1)")
+            w.commit()
+        self.assertIn("immutable=1", compatibility.readonly_uri(db))
+        calls = []
+
+        def read(conn):
+            n = conn.execute("SELECT count(*) FROM t").fetchone()[0]
+            if not calls:
+                with contextlib.closing(sqlite3.connect(db)) as writer:  # arrives mid-read
+                    writer.execute("INSERT INTO t VALUES (2)")
+                    writer.commit()
+            calls.append(n)
+            return n
+
+        self.assertEqual(compatibility.read_consistently(db, read), 2)
+        self.assertEqual(calls, [1, 2], "the overtaken answer was discarded and read again")
+
+    def test_a_quiet_consistent_read_happens_once(self):
+        import sqlite3
+        from store import compatibility
+        db = self.base / "still.db"
+        with contextlib.closing(sqlite3.connect(db)) as w:
+            w.execute("PRAGMA journal_mode=WAL")
+            w.execute("CREATE TABLE t (x)")
+            w.commit()
+        calls = []
+        compatibility.read_consistently(db, lambda conn: calls.append(conn.execute("SELECT 1").fetchone()))
+        self.assertEqual(len(calls), 1)
+
 
 # --- R8: a reinstall restores ----------------------------------------------------------
 

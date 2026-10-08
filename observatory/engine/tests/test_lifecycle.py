@@ -279,6 +279,49 @@ class EveryStepHasAWatchdog(Workspace):
         self.assertEqual(rc, self.tl.TIMED_OUT)
         self.assertLess(time.monotonic() - started, 8)
 
+    # OBS-40: a collector that used its whole limit left no time for the steps
+    # that turn facts into what a person reads, and was killed with nothing written.
+
+    def test_a_step_is_told_its_own_deadline(self):
+        out = self.base / "deadline"
+        rc = self.tl.bounded("findings", ["/bin/bash", "-c", f"printf %s \"$OBSERVATORY_STEP_DEADLINE\" > '{out}'"],
+                             limit=60)
+        self.assertEqual(rc, 0)
+        self.assertAlmostEqual(float(out.read_text()), time.time() + 60, delta=5)
+
+    def test_a_collector_leaves_the_tail_its_reserve(self):
+        reserve = self.tl.tail_reserve_seconds()
+        os.environ["OBSERVATORY_TICK_DEADLINE"] = str(time.time() + reserve + 2)
+        started = time.monotonic()
+        rc = self.tl.bounded("scan-fs", ["/bin/bash", "-c", "exec sleep 30"], limit=600, grace=1)
+        self.assertEqual(rc, self.tl.TIMED_OUT)
+        self.assertLess(time.monotonic() - started, 10, "a collector ate into the tail's reserve")
+
+    def test_with_only_the_reserve_left_a_collector_waits_and_the_tail_runs(self):
+        reserve = self.tl.tail_reserve_seconds()
+        os.environ["OBSERVATORY_TICK_DEADLINE"] = str(time.time() + reserve - 1)
+        collector, tail = self.base / "collector", self.base / "tail"
+        self.assertEqual(self.tl.bounded("scan-fs", ["/bin/bash", "-c", f"touch '{collector}'"], limit=60),
+                         self.tl.TIMED_OUT)
+        self.assertFalse(collector.exists())
+        self.assertEqual(self.tl.bounded("findings", ["/bin/bash", "-c", f"touch '{tail}'"], limit=60), 0)
+        self.assertTrue(tail.exists())
+
+    def test_the_reserve_fits_a_short_interval(self):
+        os.environ["OBSERVATORY_TICK_CEILING_SECONDS"] = "100"
+        self.assertLessEqual(self.tl.tail_reserve_seconds(), 20)
+
+    def test_every_step_after_the_merge_is_a_tail_step(self):
+        text = (ROOT / "tools/tick.sh").read_text(encoding="utf-8")
+        head, _, tail = text.partition("bounded merge ")
+        self.assertTrue(tail, "tick.sh no longer runs `bounded merge`")
+        names = lambda s: set(re.findall(r'(?:^|[\s(])(?:step|bounded) "?([a-z][a-z0-9-]*)"?\s', s, re.M))
+        after, before = names("bounded merge " + tail), names(head)
+        self.assertIn("findings", after)
+        self.assertIn("scan-fs", before)
+        self.assertEqual(after - set(self.tl.TAIL_STEPS), set(), "a step after the merge would get no time")
+        self.assertEqual(before & set(self.tl.TAIL_STEPS), set(), "a collector is marked as a tail step")
+
     def test_the_whole_tick_has_a_ceiling_and_leaves_a_status_record(self):
         os.environ["OBSERVATORY_TICK_CEILING_SECONDS"] = "2"
         started = time.monotonic()

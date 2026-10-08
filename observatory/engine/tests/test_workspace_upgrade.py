@@ -230,6 +230,39 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertIn('written-during-staging',ids,'a write made while staging survives')
         self.assertIn('synthetic-event',ids)
 
+    def test_the_session_hooks_receipts_may_change_while_staged(self):
+        # The Stop hook rewrites store/raw/record-turn.json on every agent turn, the
+        # SessionStart hook appends to sessions-seen.jsonl, a hook fault to
+        # companion-faults.jsonl — none of them stops for an update. Before 0.19.2
+        # any of these refused the update as "Workspace changed while staged".
+        real = upgrade.prepare_upgrade
+
+        def staged_while_hooks_run(stage):
+            out = real(stage)
+            raw = self.home / 'store/raw'
+            raw.mkdir(parents=True, exist_ok=True)
+            for name in sorted(upgrade.SESSION_RECEIPTS):
+                with open(self.home / name, 'a') as receipt:
+                    receipt.write('{"written": "while staging"}\n')
+            return out
+        with patch.object(upgrade, 'prepare_upgrade', side_effect=staged_while_hooks_run):
+            result = upgrade.upgrade(self.home, apply=True, writers_stopped=True)
+        self.assertEqual(result['status'], 'upgraded')
+        for name in upgrade.SESSION_RECEIPTS:
+            self.assertIn('while staging', (self.home / name).read_text(), f'{name} kept its write')
+
+    def test_every_receipt_a_session_hook_writes_is_exempt(self):
+        import re
+        engine = Path(upgrade.__file__).resolve().parent
+        written = set()
+        for source in ('tools/record_turn.py', 'tools/session_start.py', 'companion_faults.py'):
+            text = (engine / source).read_text(encoding='utf-8')
+            written |= {'store/raw/' + n for n in re.findall(r'paths\.SCRATCH / "([^"]+)"', text)}
+        # record_turn READS vault.json (the tick writes it); everything else named is written.
+        written.discard('store/raw/vault.json')
+        self.assertTrue(written)
+        self.assertEqual(written - set(upgrade.SESSION_RECEIPTS), set())
+
     def test_a_settings_file_changed_while_staged_still_refuses(self):
         # What must hold still still must: only the databases and the logs are exempt.
         real = upgrade.prepare_upgrade

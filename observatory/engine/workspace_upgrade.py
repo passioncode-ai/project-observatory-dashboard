@@ -169,10 +169,10 @@ def copy_database(source: Path, target: Path) -> None:
         fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
         os.close(fd)
         try:
-            with contextlib.closing(sqlite3.connect(compatibility.readonly_uri(source), uri=True)) as src:
-                with contextlib.closing(sqlite3.connect(target)) as dst:
-                    src.backup(dst)
-                    compatibility.verify_database(dst)
+            with contextlib.closing(sqlite3.connect(target)) as dst:
+                # `backup` replaces the whole destination, so a re-read starts clean.
+                compatibility.read_consistently(
+                    source, lambda src: (src.backup(dst), compatibility.verify_database(dst)))
             return
         except (sqlite3.DatabaseError, RuntimeError) as exc:
             target.unlink(missing_ok=True)
@@ -192,12 +192,24 @@ def require_stopped(writers_stopped: bool) -> None:
 
 
 LOG_SUFFIXES = ('.log', '.err', '.out', '.jsonl')
+#: What the session hooks write on every agent turn, whether or not the tick and the
+#: server are stopped: the Stop hook's receipt (`tools/record_turn.py`), the folders a
+#: session opened in (`tools/session_start.py`) and a hook's fault log
+#: (`companion_faults.py`). Before 0.19.2 a write to any of them while an update was
+#: staged refused the update, though no update reads them. They are copied, never
+#: required to hold still; `test_every_receipt_a_session_hook_writes_is_exempt` keeps
+#: this set equal to what those modules write.
+SESSION_RECEIPTS = frozenset({'store/raw/record-turn.json', 'store/raw/sessions-seen.jsonl',
+                              'store/raw/companion-faults.jsonl'})
 
 
 def volatile(name: str, databases: set[str]) -> bool:
     """A path the snapshot copies without requiring it to hold still: a database and its
-    WAL companions, or an append-only log (with its rotated generations) under store/logs."""
+    WAL companions, an append-only log (with its rotated generations) under store/logs,
+    or a receipt the session hooks write (SESSION_RECEIPTS)."""
     if name in databases or (name.endswith(('-wal', '-journal', '-shm')) and name.rsplit('-', 1)[0] in databases):
+        return True
+    if name in SESSION_RECEIPTS:
         return True
     path = PurePosixPath(name)
     if path.parts[:2] != ('store', 'logs'):

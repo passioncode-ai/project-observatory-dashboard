@@ -138,7 +138,7 @@ and token provisioning are different permissions.
 | `google` | Analytics property and search inventory | The user's service account files and resource grants |
 | `domains` | Domain observations | Explicit domain export and network access |
 | `mcp` | The MCP servers the agent configs on this machine declare (Claude Code, Cursor, OpenCode, Codex, Gemini CLI, Kiro), served as `machine.mcp.inventory` | Explicit `sources.mcp_config_root` |
-| `sessions` | Local agent activity | Explicit `sources.sessions` and `sources.companion_db` |
+| `sessions` | Local agent activity | Explicit `sources.sessions`; `sources.companion_db` is optional, set only where a memory companion (claude-mem) is installed |
 | `wiki` | Knowledge-base inventory | Explicit `sources.wiki` |
 | `openrouter` | Key and usage inventory | A locally supplied provider credential |
 | `remote_env` | Compare deployed environment metadata | Explicit opt-in to provider environment reads |
@@ -174,7 +174,7 @@ The `projects` source is the exception: the filesystem scan always runs, so a mi
 | `mcp_config_root` | the home directory whose agent configs declare MCP servers | `mcp` integration |
 | `wiki` | a Markdown knowledge base, e.g. an Obsidian vault | `wiki` integration, `wiki_projection` |
 | `secret_store` | a private directory of provider credentials and project slots (`projects/`) | vault, OpenRouter, Google, Cloudflare analytics |
-| `companion_home`, `companion_db` | a memory companion's home and database file (claude-mem) | `sessions` integration (`companion_db`), `companion_remediation` |
+| `companion_home`, `companion_db` | a memory companion's home and database file (claude-mem); optional, only where one is installed | `sessions` integration (`companion_db`, optional: an absent file is fine, a path that is not a file is a warning), leak scan (`companion_db`, when the file exists), `companion_remediation` (both required) |
 | `gateway_root` | an optional directory holding `backup-secrets.sh`, at its root or in its `bin/` (the root is tried first): a bash script run with no arguments, whose output and exit code are `vault.py backup`'s | `vault.py backup` |
 | `domain_export` | a registrar's domain CSV export | `domains` integration |
 | `cloudflare_snapshot` | a JSON snapshot of your Cloudflare zones, kept as evidence | `validate` (snapshot parity; reported as degraded when unset) |
@@ -316,7 +316,7 @@ known values changes, a week after the last complete pass, when a table was empt
 on `python "$(project-observatory full-path)/tools/scrub_companion.py" --full`. A row edited in place between complete passes is caught by the
 weekly pass, not sooner.
 
-The leak scan reads the companion's database the same way: transcripts from their last offset, the
+The leak scan reads the companion's database the same way, when that file exists (an absent one leaves `coverage.companion_store` at `unread` in `store/raw/leak-scan.json`, with no warning): transcripts from their last offset, the
 database from its last rowid per table (in `store/raw/leak-scan-state.json`), with the same reasons
 for a complete pass. So a sighting is reported once, by the tick that first reads it, and stays on
 record in the leak register until it is settled. `python "$(project-observatory full-path)/tools/scan_leaks.py" --full` reads everything again.
@@ -355,8 +355,8 @@ use the CLI and MCP without those hooks.
 For Claude Code, run `project-observatory full agent install`. It adds the
 GitHub marketplace `passioncode-ai/project-observatory-dashboard`, installs
 `observatory-log@observatory-log`, turns plugin auto-update on (opt out with
-`--no-auto-update`) and writes `OBSERVATORY_ROOT` and `OBSERVATORY_HOME` into
-Claude Code's user settings for the hooks. `full agent status` shows the
+`--no-auto-update`) and writes `OBSERVATORY_ROOT`, `OBSERVATORY_HOME` and
+`OBSERVATORY_PYTHON` into Claude Code's user settings for the hooks. `full agent status` shows the
 installed and shipped versions and anything the hooks would miss; `full agent
 uninstall` reverses it. The hook environment it writes is `OBSERVATORY_ROOT`
 (the engine), `OBSERVATORY_HOME` (the workspace) and `OBSERVATORY_PYTHON` (the
@@ -757,9 +757,16 @@ estate. On the new machine:
    into the Python environment from [SQLite runtime prerequisite](#sqlite-runtime-prerequisite):
 
    ```sh
+   V=X.Y.Z
    shasum -a 256 -c SHA256SUMS --ignore-missing
-   python -m pip install 'project_observatory-X.Y.Z-py3-none-any.whl[full]'
+   python -m pip install --no-deps "project_observatory-$V-py3-none-any.whl"       # the engine, and the lock it carries
+   python -m pip install -c "$(project-observatory full-path)/requirements-full.lock" \
+       "project_observatory-$V-py3-none-any.whl[full]"                             # its [full] extra at the tested versions
    ```
+
+   The second `pip` line installs the `full` extra against the `requirements-full.lock` the
+   wheel carries, the dependency set this release was tested with (as in the
+   [README](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/../README.md#install)).
 
    A machine that already has 0.7.0 or later installed moves to the exact version
    with `project-observatory full update --version X.Y.Z --apply`. Releases before 0.7.0
@@ -966,6 +973,7 @@ HTTPS is accepted, except to this machine.
 | 3 | could not look: network, rate limit, a release without its assets (`degraded`) | could not look (network, rate limit), before any change |
 | 4 | — | rollback incomplete; `human_steps` says what to run |
 | 5 | — | updated, but a stopped job did not start; `services_not_restarted` has the command |
+| 6 | — | `--unattended` only: the release declares a step that needs a person; downloaded and verified, not installed (`status: held`, `needs_person` names the step; do it, then `full update --apply`) |
 | 10 | a newer installable release exists | — |
 
 Anonymous GitHub API requests are limited to 60 an hour per address; a `--check` from a

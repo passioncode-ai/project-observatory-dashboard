@@ -40,16 +40,51 @@ def _wal_bytes(wal: Path) -> int:
         return 0
 
 
+def _footprint(target: Path) -> tuple:
+    """What a writer cannot avoid changing: the database file's size and mtime, the
+    WAL's size and whether a `-shm` exists (an open WAL connection keeps one)."""
+    try:
+        st = target.stat()
+        head = (st.st_mtime_ns, st.st_size)
+    except FileNotFoundError:
+        head = (None, None)
+    return head + (_wal_bytes(Path(str(target) + "-wal")), Path(str(target) + "-shm").exists())
+
+
+#: Reads of one store before a changing store is reported rather than read again.
+CONSISTENT_READ_ATTEMPTS = 3
+
+
+def read_consistently(target: Path, read, *, attempts: int = CONSISTENT_READ_ATTEMPTS):
+    """`read(conn)` on a read-only connection whose view a writer did not overtake.
+
+    `readonly_uri` chooses `immutable` from a check made BEFORE it connects, and an
+    immutable reader takes no locks: a writer that opens after the check commits
+    unseen, and the answer is whole but stale — no integrity check can tell (OBS-41).
+    So an immutable read counts only if the store's footprint is the same after it
+    as before; otherwise it is read again, with locks once that writer keeps its
+    `-shm`. A locked read is kept as it is. `read` must be safe to repeat."""
+    for _ in range(attempts):
+        before = _footprint(target)
+        uri = readonly_uri(target)
+        conn = sqlite3.connect(uri, uri=True, timeout=30)
+        try:
+            result = read(conn)
+        finally:
+            conn.close()
+        if "immutable=1" not in uri or _footprint(target) == before:
+            return result
+    raise sqlite3.OperationalError(
+        f"{target.name} changed during each of {attempts} unlocked reads; "
+        f"a writer kept opening and closing it — try again when it is quieter")
+
+
 def preflight(target: Path) -> None:
     """Reject newer or altered histories before opening the database for writes."""
     if not target.exists():
         return
     from store import migrate
-    conn = sqlite3.connect(readonly_uri(target), uri=True)
-    try:
-        migrate.validate(conn)
-    finally:
-        conn.close()
+    read_consistently(target, migrate.validate)
 
 
 @contextmanager

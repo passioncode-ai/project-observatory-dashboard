@@ -227,10 +227,9 @@ def backup_database(source: Path, target: Path) -> None:
     fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     os.close(fd)
     try:
-        from store.compatibility import readonly_uri, verify_database
-        with contextlib.closing(sqlite3.connect(readonly_uri(source), uri=True)) as src, contextlib.closing(sqlite3.connect(target)) as dst:
-            src.backup(dst)
-            verify_database(dst)
+        from store.compatibility import read_consistently, verify_database
+        with contextlib.closing(sqlite3.connect(target)) as dst:
+            read_consistently(source, lambda src: (src.backup(dst), verify_database(dst)))
     except BaseException:
         target.unlink(missing_ok=True)
         raise
@@ -248,8 +247,7 @@ def validate_data(base: Path, *, integrity: bool = False) -> dict:
         compatibility.preflight(database)
         if integrity and present:
             try:
-                with contextlib.closing(sqlite3.connect(compatibility.readonly_uri(database), uri=True)) as conn:
-                    compatibility.verify_database(conn)
+                compatibility.read_consistently(database, compatibility.verify_database)
             except (sqlite3.Error, RuntimeError):
                 # A reader opened immutable sees a write that lands during the check as
                 # damage. Before calling the store corrupt — which during `full update` would
@@ -395,11 +393,13 @@ def migrate_local(source: Path, target: Path, apply: bool) -> dict:
 # doctor names that instead of letting a quiet collector look healthy.
 # The same table is documented in docs/ONBOARDING.md, "Sources".
 # The `sessions` integration's collector (collectors/scan_sessions.py) reads the
-# companion's database, `companion_db`; the `sessions` transcripts are what the
-# leak scan reads beside it. Without `companion_db` here, a database deleted after
-# configuration made every tick log DEGRADED while doctor reported nothing.
+# Stop hook's own session records first and the claude-mem companion's database,
+# `companion_db`, only where it is still installed ("not installed is not broken");
+# the `sessions` transcripts are what the leak scan reads. So `companion_db` is
+# OPTIONAL_SOURCES, not a need: required here, it sent doctor's reader after a
+# database the companion's retirement had removed for good (0.19.2).
 SOURCE_NEEDS = {
-    ("integrations", "sessions"): ("sessions", "companion_db"),
+    ("integrations", "sessions"): ("sessions",),
     ("integrations", "mcp"): ("mcp_config_root",),
     ("integrations", "wiki"): ("wiki",),
     ("integrations", "openrouter"): ("secret_store",),
@@ -410,6 +410,12 @@ SOURCE_NEEDS = {
     ("features", "companion_remediation"): ("companion_home", "companion_db"),
 }
 
+
+#: Sources a switch reads when they are there: absent is fine, but one that is
+#: configured and present in the wrong shape (SOURCE_FILES) still reads as nothing.
+OPTIONAL_SOURCES = {
+    ("integrations", "sessions"): ("companion_db",),
+}
 
 #: Sources that must be a regular file: the collector opens a database, so a
 #: directory at that path reads as nothing just like a missing file.
@@ -454,6 +460,17 @@ def coverage_warnings(doc: dict) -> list[dict]:
             elif source in SOURCE_FILES and not path.is_file():
                 out.append({section[:-1]: name, "source": source,
                             "problem": f"{value} is not a file; the collector reads nothing from it", **fix})
+    for (section, name), optional in OPTIONAL_SOURCES.items():
+        if doc.get(section, {}).get(name) is not True:
+            continue
+        for source in optional:
+            value = sources.get(source)
+            path = Path(value).expanduser() if value else None
+            if path is not None and path.exists() and source in SOURCE_FILES and not path.is_file():
+                out.append({section[:-1]: name, "source": source,
+                            "problem": f"{value} is not a file; the collector reads nothing from it",
+                            "fix": f"project-observatory full configure sources {source} PATH",
+                            "disable": f"project-observatory full configure {section} {name} false"})
     return out
 
 
@@ -534,9 +551,10 @@ def _vector_namespaces(base: Path) -> list[dict]:
     database = base / "store/observatory.db"
     if not database.exists():
         return []
-    with contextlib.closing(sqlite3.connect(compatibility.readonly_uri(database), uri=True)) as conn:
+    def summary(conn):
         conn.row_factory = sqlite3.Row
         return namespaces.summary(conn)
+    return compatibility.read_consistently(database, summary)
 
 
 def _key_report() -> dict:

@@ -5,6 +5,10 @@ under its existing CLI commands; run `project-observatory full …` for the comp
 engine. A new public repository was used to avoid publishing private operational
 Git history. It is a distribution boundary, not a second reduced product.
 
+This page records the extraction as release 0.2.0 delivered it. Later releases
+changed some of what it describes; the [changelog](../CHANGELOG.md) and the
+[onboarding guide](ONBOARDING.md) describe the current engine.
+
 ## Delivered extraction
 
 | Area | Public implementation | Verification |
@@ -15,10 +19,10 @@ Git history. It is a distribution boundary, not a second reduced product.
 | Original CLI with public command boundary | `observatory.py`, `docs/CLI-COMPATIBILITY.md` | `test_cli_compatibility.py`, old public launcher tests |
 | Inventory, events, findings, metrics and pages | `collectors/`, `store/`, `dashboard/` | offline local pipeline, events/metrics/pages/render suites |
 | Optional provider and analytics sources | collectors and `plugins/` | provider-boundary/health, analytics, private-source suites; live calls not part of release checks |
-| Versioned trusted plugin interface | `tools/plugins.py`, plugin manifests | `test_plugins.py`; manifest API and dependency boundaries |
+| Versioned trusted plugin interface | `collectors/run_plugins.py`, plugin manifests | `test_plugins.py`; manifest API and dependency boundaries |
 | MCP and proposal authority | `mcp/server.py`, `fabric/schemas/` | wire contract/input/MCP/provenance suites; external host admission unverified |
 | Credentials and explicit remediation | `tools/vault.py`, `use_secret.py`, `keyserver.py`, `scrub_companion.py` | vault/keyserver/provider boundary cases; live rotation not executed |
-| Workspace-specific scheduler | `tools/tick.sh`, `install_launchd.py`, `serverd.py` | scheduler isolation/lease/opt-in tests; no automatic service activation |
+| Workspace-specific scheduler | `tools/tick.sh`, `install_launchd.py`, `serverd.py` | scheduler isolation/lease/opt-in tests; the tick and server start only when chosen (in 0.2.0 no service started by itself; since 0.17.0 `full init`, `install_launchd.py` and `full update` schedule the maintenance job, `maintenance.py`) |
 | Agent instructions | `skill/plugins/observatory-log/` | both skill audits and strict plugin validation |
 | Reviewed public distribution | source inventory, public privacy gate, wheel gate | clean source export and installed-wheel test; see [release receipt](RELEASE.md) |
 
@@ -57,7 +61,7 @@ silently converted into one. Keep both homes separate if using both commands.
 
 ## Future work, separately scoped
 
-The current release closes extraction and compatibility. Next UX work is captured
+Release 0.2.0 closed extraction and compatibility. Next UX work is captured
 in [UI-PLAN.md](ux/UI-PLAN.md): coverage-first navigation, clearer empty/error states,
 accessible large tables and visible action consequences. These are design packets,
 not claims that all interface improvements have shipped. Live integration acceptance

@@ -26,7 +26,7 @@ expectation. It changes test evidence and documentation, not the published engin
 - Full engine source and installed-wheel synthetic checks completed; receipt in
   [RELEASE.md](RELEASE.md). CI repeats on Linux 3.11/3.14 and macOS 3.14.
 - Credential/keyserver/provider failure fixes and portable dashboard commands.
-- Public site describes the full release; canonical [article](../site/field-notes/index.html),
+- Public site described the full release (the site has since been retired; see AGENTS.md); canonical [article](../site/field-notes/index.html),
   generated cover and [social drafts](content/README.md). Social accounts were not posted to.
 - Skills remains the family site's primary entry. Harness is its separate section;
   Observatory observes projects.
@@ -59,6 +59,13 @@ CI, asset digests and deployment. The website-only fix did not change the wheel.
 This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
+
+**2026-10-08, releases 0.18.0–0.19.2:** signed updates (0.18.0), one update behaviour and a Mac
+app that updates itself, in the system language (0.19.0), an update that no longer fails while
+agents write (0.19.1), and four defects found on a working machine plus a documentation pass
+against the code (0.19.2). Receipt: [runs/2026-10-08-releases-0.19](runs/2026-10-08-releases-0.19/README.md).
+Open from this run: the rest of OBS-40 (Health naming incomplete ticks; incremental `google` and
+`machine` collectors).
 
 **2026-10-05, releases 0.17.0–0.17.3 (published; the engine installed itself at 0.17.3):**
 updates that install themselves, data that survives a reinstall, then three patches from the
@@ -117,7 +124,7 @@ redaction on `observatory_record` was quadratic and is now linear. Checks on `68
 [reports/2026-10-03-memory-eval-baseline](reports/2026-10-03-memory-eval-baseline/README.md).
 
 **Next:** merge the pull request, then OBS-04: local embeddings chosen on this set, with a
-distance floor per model.
+distance floor per model. *(Superseded: merged and released in 0.14.0; what remains of OBS-04 is the operator's decision OBS-35.)*
 
 **Status 2026-10-03: 0.13.0 — three audit-and-fix runs over 0.12.0.** Run 1 (PR #119), run 2
 (PR #120) and run 3 (PR #121) each re-walked the build, onboarding, keys, the Keychain, the Mac
@@ -220,7 +227,7 @@ no contributor can do them):
 2. Keep the backup passphrase outside the machine (`full backup-passphrase show` in a terminal).
 3. Configure the GA4 account and Figma team of the one organization that has neither.
 4. Decide whether `features.companion_remediation` stays on while the companion's database is
-   absent.
+   absent. *(Settled in 0.19.2: the companion is optional for `sessions`; leave `companion_remediation` off where it is not installed.)*
 5. Review the idle unique branches: `full cleanup --apply --include manual` bundles them first.
 
 **Status 2026-09-26 (evening), history below, newest first:** 0.4.0 — English/Russian dashboard, the PassionCode

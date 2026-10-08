@@ -56,6 +56,19 @@ must not be presented as proof that the old credential was revoked.
 plugin. Other explicitly selected commands can call configured providers.
 Integrations, paid interpretation, embeddings, scheduling, notifications,
 retention, memory remediation and projections require their documented opt-ins.
+One scheduled job is on by default since 0.17.0: the maintenance job, which
+`full init`, `install_launchd` and `full update` schedule (launchd on macOS, a
+systemd user timer on Linux; `maintenance.py`). It runs hourly. Every six hours it
+asks the GitHub releases API for a newer stable release and, when there is one,
+downloads, verifies and installs it (`full update --apply --unattended`; a release
+that declares a step needing a person is verified and held, not installed), and on
+macOS the matching app, never while the app runs. Once a day it writes an encrypted
+snapshot of the workspace to the backups folder. `full auto-update off` stops the
+checks, downloads and installs and keeps the daily backup; `full maintain uninstall`
+removes the schedule, and `full init` and `full update` leave it removed until
+`full maintain ensure` or `full auto-update on`. `full init` schedules the job only
+from a person's terminal or with `OBSERVATORY_SYSTEM_SETUP=1`
+(`maintenance.system_setup_allowed`).
 The assistant and the agent spend through an OpenRouter key, and an
 `OPENROUTER_API_KEY` in the environment of the process that runs them is that key,
 ahead of every key file: a key exported in your shell profile is spent by them.
@@ -128,9 +141,9 @@ per-call overrides above protect against it.
 
 ## macOS Keychain
 
-Observatory keeps no secret in the macOS Keychain and reads none from it. Vault
-slots, provider key files and the backup passphrase (`secrets/backup-passphrase`)
-are files with private modes. Git runs with no credential helper (see
+Observatory keeps one secret in the macOS Keychain: a copy of the backup
+passphrase. Vault slots and provider key files are files with private modes, and so
+is the working copy of the backup passphrase (`secrets/backup-passphrase`). Git runs with no credential helper (see
 [Running git](#running-git)), so `osxkeychain` is never asked; a remote that wants a
 password is reported unreachable, and no git signer (gpg's pinentry, an SSH signer)
 is run unattended. The Mac app's dashboard view cancels every password and
@@ -139,8 +152,20 @@ launch of a Chromium-family browser in a tracked script must pass
 `--use-mock-keychain` and `--password-store=basic`
 (`tests/test_keychain_and_app_scripts.py`).
 
-Two things can still reach the login Keychain, each only when you turn it on:
+Three things can reach the login Keychain; the first is on by default, the other two
+only when you turn them on:
 
+- **The backup passphrase copy** (since 0.17.0). So that a deleted or reinstalled
+  workspace can still open the backups it left, the passphrase is mirrored outside the
+  workspace and read back from there when `secrets/backup-passphrase` is missing or a
+  restore needs an earlier passphrase (`SecretStore` in `backup_vault.py`). On macOS
+  the copy is a generic-password item in the login Keychain, service
+  "Project Observatory backups", account the workspace label, written and read with
+  `security`; the value travels on stdin, never as an argument. A locked keychain can
+  show an unlock dialog when a backup or the maintenance job reaches it. Elsewhere the
+  copy goes to the Secret Service through `secret-tool`, or, without one, to an
+  owner-only file under `~/.config/project-observatory/backup-passphrases/`. A
+  passphrase given through `OBSERVATORY_BACKUP_PASSPHRASE` is not copied anywhere.
 - **Opt-in integrations that run a provider's own CLI** inherit your environment and
   that CLI's login. `gh` (the `github` integration: `collectors/scan_github.py`, and
   `collectors/merge.py` when it resolves transferred repositories) and `claude`

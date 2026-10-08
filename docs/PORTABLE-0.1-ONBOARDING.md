@@ -10,7 +10,8 @@ The first useful result should require no credentials: an isolated demo, a visib
 Set up Project Observatory portable edition from
 https://github.com/passioncode-ai/project-observatory-dashboard
 
-Read README.md, SECURITY.md and docs/ONBOARDING.md first.
+Read README.md, SECURITY.md and docs/PORTABLE-0.1-ONBOARDING.md first
+(docs/ONBOARDING.md is the full engine's guide, not this edition's).
 Use an isolated Python environment and run the synthetic tests/demo.
 Explain the local state directory, the read-only dashboard and the exact
 scope of this edition. Do not scan my home folder or enroll projects

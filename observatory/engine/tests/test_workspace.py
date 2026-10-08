@@ -109,33 +109,44 @@ class WorkspaceTests(unittest.TestCase):
         self.run_cli('configure', 'sources', 'projects', str(projects))
 
     def test_doctor_names_a_configured_source_that_was_deleted_with_its_fix(self):
-        # The sessions collector reads the companion's database: pointed at a file
-        # that is gone, every tick logs DEGRADED, so doctor must not stay silent.
+        # The sessions integration reads the transcripts folder; pointed at a folder
+        # that is gone, the collector reads nothing, so doctor must not stay silent.
         self.run_cli('init')
         self.configure_projects()
-        db = self.base / 'companion.db'
-        db.write_bytes(b'')
         transcripts = self.base / 'transcripts'
         transcripts.mkdir()
         self.run_cli('configure', 'integrations', 'sessions', 'true')
         self.run_cli('configure', 'sources', 'sessions', str(transcripts))
-        self.run_cli('configure', 'sources', 'companion_db', str(db))
         self.assertEqual(json.loads(self.run_cli('doctor').stdout)['coverage_warnings'], [])
-        db.unlink()
+        transcripts.rmdir()
         warnings = json.loads(self.run_cli('doctor').stdout)['coverage_warnings']
-        rows = [w for w in warnings if w['source'] == 'companion_db']
+        rows = [w for w in warnings if w['source'] == 'sessions']
         self.assertEqual(len(rows), 1, warnings)
         row = rows[0]
         self.assertEqual(row['integration'], 'sessions')
         self.assertIn('does not exist', row['problem'])
-        self.assertEqual(row['fix'], 'project-observatory full configure sources companion_db PATH')
+        self.assertEqual(row['fix'], 'project-observatory full configure sources sessions PATH')
         self.assertEqual(row['disable'], 'project-observatory full configure integrations sessions false')
         # Both advertised commands are real: each one clears the warning.
         self.run_cli(*row['disable'].split()[2:])
         self.assertEqual(json.loads(self.run_cli('doctor').stdout)['coverage_warnings'], [])
         self.run_cli('configure', 'integrations', 'sessions', 'true')
-        db.write_bytes(b'')
-        self.run_cli(*row['fix'].replace('PATH', str(db)).split()[2:])
+        transcripts.mkdir()
+        self.run_cli(*row['fix'].replace('PATH', str(transcripts)).split()[2:])
+        self.assertEqual(json.loads(self.run_cli('doctor').stdout)['coverage_warnings'], [])
+
+    def test_a_retired_companion_database_is_not_a_coverage_gap(self):
+        # The sessions collector reads the Stop hook's own records first; the claude-mem
+        # companion is optional (retired on the maintainer's machine 2026-10-01). Its
+        # database being absent is "not installed", and doctor must not send a person
+        # after a file that will never exist again.
+        self.run_cli('init')
+        self.configure_projects()
+        transcripts = self.base / 'transcripts'
+        transcripts.mkdir()
+        self.run_cli('configure', 'integrations', 'sessions', 'true')
+        self.run_cli('configure', 'sources', 'sessions', str(transcripts))
+        self.run_cli('configure', 'sources', 'companion_db', str(self.base / 'gone.db'))
         self.assertEqual(json.loads(self.run_cli('doctor').stdout)['coverage_warnings'], [])
 
     def test_doctor_names_a_directory_where_the_companion_database_file_should_be(self):

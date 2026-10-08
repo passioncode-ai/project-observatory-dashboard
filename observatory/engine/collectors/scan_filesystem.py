@@ -30,6 +30,7 @@ import atomic
 import paths
 import safe_git
 import slow_command
+import step_budget
 import json, os, re, subprocess, sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,6 +72,8 @@ GIT_ENV = {"LC_ALL": "C", "LANGUAGE": ""}
 #: The first is the old fixed limit, so a quiet machine behaves as before.
 SH_TIMEOUTS = (25, 60)
 SH_BACKOFF = 3.0
+#: Seconds kept before the step's limit for writing the scan (OBS-40).
+WRITE_RESERVE = 10
 
 
 def sh(args, cwd=None):
@@ -95,15 +98,25 @@ def sh(args, cwd=None):
     operator's gpg (through `log.showSignature`), fsmonitor and index hooks.
     `args` keep their spelling (`["git", …]`) so the reasons below name the
     command the caller asked for.
+
+    THE STEP'S OWN LIMIT IS RESPECTED (OBS-40). The attempts are cut to the time
+    the tick gave this step, less WRITE_RESERVE, and a command that cannot start
+    or was cut by that budget raises `step_budget.OutOfTime` instead of
+    returning a reason: a remote "unread" because time ran out would send the
+    repository downstream as a folder-anchored project, and the caller carries
+    the folder's last measured row instead.
     """
+    timeouts = step_budget.clip(SH_TIMEOUTS, WRITE_RESERVE, SH_BACKOFF)
     try:
         argv, env = (safe_git.command(args[1:], cwd=cwd, extra_env=GIT_ENV)
                      if args and args[0] == "git" else (args, {**os.environ, **GIT_ENV}))
-        r, slow = slow_command.run(argv, timeouts=SH_TIMEOUTS, backoff=SH_BACKOFF, cwd=cwd,
+        r, slow = slow_command.run(argv, timeouts=timeouts, backoff=SH_BACKOFF, cwd=cwd,
                                    capture_output=True, text=True, env=env)
     except OSError as exc:
         return "", f"`{args[0]}` could not run: {type(exc).__name__}: {exc}"
     if r is None:
+        if timeouts != SH_TIMEOUTS and step_budget.remaining() < WRITE_RESERVE + 1:
+            raise step_budget.OutOfTime(slow)
         return "", slow
     if r.returncode != 0:
         return "", (f"`{' '.join(args[:3])}` exited {r.returncode}: "
@@ -238,6 +251,8 @@ def count_files(p: Path) -> tuple[int, bool]:
                 n += 1
                 if n >= FILE_COUNT_CAP:
                     return n, True
+                if n % 1000 == 0 and step_budget.remaining() < WRITE_RESERVE:
+                    raise step_budget.OutOfTime(f"counting files in {p.name}")
     except OSError:
         # A permission error or a vanished directory mid-walk: the count so far
         # is what was measured, and `capped` is the wrong word for it.
@@ -282,7 +297,12 @@ if not DATA.is_dir():
           f"  project-observatory full configure sources projects PATH",
           file=sys.stderr)
     sys.exit(2)
-_probe, _why = sh(["git", "--version"])
+try:
+    _probe, _why = sh(["git", "--version"])
+except step_budget.OutOfTime:
+    # No time to ask; every folder below is then carried, never measured
+    # without git, so the damage this preflight exists for cannot happen.
+    _probe, _why = "", ""
 if _why:
     _git_folders = [e for e in os.listdir(DATA)
                     if not e.startswith(".") and (DATA/e/".git").exists()]
@@ -295,17 +315,14 @@ if _why:
                  f"become 149.\n"
                  f"  {sys.argv[1] if len(sys.argv) > 1 else 'the previous scan'} is "
                  f"left untouched.")
-for entry in sorted(os.listdir(DATA)):
-    p = DATA/entry
-    if entry.startswith(".") or not p.is_dir(): continue
-    # EXCLUDED HERE, not two modules later. Reported rather than dropped: a
-    # folder absent from the output with no reason is indistinguishable from one
-    # the scan failed to see.
-    if entry.startswith(EXCLUDED_PREFIXES) or entry in EXCLUDED_NAMES:
-        skipped.append({"folder": entry,
-                        "why": EXCLUDED_NAMES.get(entry)
-                        or f"excluded by prefix {[x for x in EXCLUDED_PREFIXES if entry.startswith(x)]}"})
-        continue
+def scan_folder(entry: str, p: Path) -> tuple[dict, list[dict]]:
+    """One folder's row and the degradations it raised.
+
+    Raises `step_budget.OutOfTime` when the step's limit does not cover it;
+    nothing it found is kept then, so a half-read folder never reaches the merge."""
+    if step_budget.remaining() < WRITE_RESERVE + 1:
+        raise step_budget.OutOfTime(f"{max(step_budget.remaining(), 0):.0f} s left before the step's limit")
+    found: list[dict] = []
     is_link = p.is_symlink()
     real = str(p.resolve())
     dotgit = p/".git"
@@ -406,7 +423,7 @@ for entry in sorted(os.listdir(DATA)):
             # because "no origin configured" and "git could not answer" are
             # different facts and only the row itself can carry which.
             rec["unread"] = unread
-            degraded.append({"source": f"folder:{entry}",
+            found.append({"source": f"folder:{entry}",
                              "reason": "; ".join(f"{k}: {v}" for k, v in unread.items())})
     else:
         # `os.stat`, not `subprocess.run(["date", "-r", ...])`. One subprocess
@@ -417,7 +434,7 @@ for entry in sorted(os.listdir(DATA)):
                 p.stat().st_mtime, timezone.utc).strftime("%Y-%m-%d")
         except OSError as exc:
             rec["mtime"] = ""
-            degraded.append({"source": f"folder:{entry}",
+            found.append({"source": f"folder:{entry}",
                              "reason": f"mtime unreadable: {type(exc).__name__}"})
         n, capped = count_files(p)
         rec["file_count"] = n
@@ -426,7 +443,62 @@ for entry in sorted(os.listdir(DATA)):
             # nothing said so; a number a reader cannot tell from a real one is
             # worse than a flag beside it.
             rec["file_count_capped"] = True
-    rows.append(rec)
+    return rec, found
+
+
+def _previous_scan(dest: str) -> tuple[str, dict[str, dict]]:
+    """(scanned_at, rows by folder) of the scan last written to `dest`, or ("", {})."""
+    try:
+        doc = json.loads(Path(dest).read_text(encoding="utf-8"))
+        return (str(doc.get("scanned_at") or ""),
+                {r["folder"]: r for r in doc.get("folders") or []
+                 if isinstance(r, dict) and r.get("folder")})
+    except (OSError, ValueError, TypeError, AttributeError):
+        return "", {}
+
+
+#: OUT OF TIME, THE LAST MEASUREMENT STANDS (OBS-40). A folder the budget did not
+#: reach keeps its row from the previous scan, marked `carried_from` with the
+#: date it was really measured (kept through repeated carries), and a folder never
+#: measured before is left out until a tick has time for it. One degradation names
+#: the counts. Killed by the watchdog instead, the scan wrote nothing at all.
+PREV_AT, PREV_ROWS = _previous_scan(sys.argv[1]) if len(sys.argv) > 1 else ("", {})
+out_of_time = ""
+carried: list[str] = []
+unmeasured: list[str] = []
+for entry in sorted(os.listdir(DATA)):
+    p = DATA/entry
+    if entry.startswith(".") or not p.is_dir(): continue
+    # EXCLUDED HERE, not two modules later. Reported rather than dropped: a
+    # folder absent from the output with no reason is indistinguishable from one
+    # the scan failed to see.
+    if entry.startswith(EXCLUDED_PREFIXES) or entry in EXCLUDED_NAMES:
+        skipped.append({"folder": entry,
+                        "why": EXCLUDED_NAMES.get(entry)
+                        or f"excluded by prefix {[x for x in EXCLUDED_PREFIXES if entry.startswith(x)]}"})
+        continue
+    if not out_of_time:
+        try:
+            rec, found = scan_folder(entry, p)
+            rows.append(rec)
+            degraded.extend(found)
+            continue
+        except step_budget.OutOfTime as exc:
+            out_of_time = str(exc)
+    last = PREV_ROWS.get(entry)
+    if last is None:
+        unmeasured.append(entry)
+        continue
+    rows.append({**last, "carried_from": last.get("carried_from") or PREV_AT or "an undated scan"})
+    carried.append(entry)
+
+if out_of_time:
+    degraded.append({"source": "scan:deadline", "reason": (
+        f"the step's time ran out ({out_of_time[:120]}) after {len(rows) - len(carried)} folder(s) "
+        f"were measured; {len(carried)} carried from the earlier scan"
+        + (f" of {PREV_AT}" if PREV_AT else "")
+        + f", {len(unmeasured)} not yet measured"
+        + (f" ({', '.join(unmeasured[:5])})" if unmeasured else ""))})
 
 atomic.write_json(sys.argv[1], {"scanned_at": now(), "folders": rows,
                                 "skipped": skipped, "degraded": degraded})
