@@ -227,10 +227,9 @@ def backup_database(source: Path, target: Path) -> None:
     fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     os.close(fd)
     try:
-        from store.compatibility import readonly_uri, verify_database
-        with contextlib.closing(sqlite3.connect(readonly_uri(source), uri=True)) as src, contextlib.closing(sqlite3.connect(target)) as dst:
-            src.backup(dst)
-            verify_database(dst)
+        from store.compatibility import read_consistently, verify_database
+        with contextlib.closing(sqlite3.connect(target)) as dst:
+            read_consistently(source, lambda src: (src.backup(dst), verify_database(dst)))
     except BaseException:
         target.unlink(missing_ok=True)
         raise
@@ -248,8 +247,7 @@ def validate_data(base: Path, *, integrity: bool = False) -> dict:
         compatibility.preflight(database)
         if integrity and present:
             try:
-                with contextlib.closing(sqlite3.connect(compatibility.readonly_uri(database), uri=True)) as conn:
-                    compatibility.verify_database(conn)
+                compatibility.read_consistently(database, compatibility.verify_database)
             except (sqlite3.Error, RuntimeError):
                 # A reader opened immutable sees a write that lands during the check as
                 # damage. Before calling the store corrupt — which during `full update` would
@@ -534,9 +532,10 @@ def _vector_namespaces(base: Path) -> list[dict]:
     database = base / "store/observatory.db"
     if not database.exists():
         return []
-    with contextlib.closing(sqlite3.connect(compatibility.readonly_uri(database), uri=True)) as conn:
+    def summary(conn):
         conn.row_factory = sqlite3.Row
         return namespaces.summary(conn)
+    return compatibility.read_consistently(database, summary)
 
 
 def _key_report() -> dict:

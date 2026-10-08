@@ -381,6 +381,28 @@ STEP_SECONDS = {"leaks": 1200}
 DEFAULT_CEILING_SECONDS = 1500
 CEILING_ENV = "OBSERVATORY_TICK_CEILING_SECONDS"
 DEADLINE_ENV = "OBSERVATORY_TICK_DEADLINE"
+#: The wall-clock moment (epoch seconds) a step's own watchdog fires, handed to
+#: the step so it can stop in time and write what it has instead of being killed
+#: with nothing written (OBS-40). `step_budget` reads it.
+STEP_DEADLINE_ENV = "OBSERVATORY_STEP_DEADLINE"
+#: THE TAIL: every step from `merge` on — what turns the collectors' facts into
+#: the registry, the findings, the dashboard and the notice a person reads.
+#: Measured 2026-10-07: 14 ticks in four days spent their whole ceiling on
+#: `integrity` and `scan-fs` under a starved disk, so the tail never ran and the
+#: board stayed as it was without a word. A step NOT named here is a collector
+#: and stops `tail_reserve_seconds()` before the ceiling. An unknown step falls
+#: on the collectors' side on purpose: a forgotten collector would otherwise eat
+#: the tail's time. `test_every_step_after_the_merge_is_a_tail_step` derives the
+#: set from `tick.sh` and fails when the two disagree.
+TAIL_STEPS = frozenset({
+    "merge", "emit", "validate", "events", "snapshot", "diff", "plugins", "rollup",
+    "agent", "index", "retention", "sweep", "corroborate", "ledger", "lost", "findings",
+    "dashboard", "smoke", "findings-recheck", "notify", "registry", "project-into-vault",
+    "projection", "links", "logs",
+})
+#: The tail took 106 s on a quiet machine (2026-10-07, `rollup` to `tick done`);
+#: 300 s leaves it room under load. A fifth of the ceiling for a short interval.
+TAIL_RESERVE_SECONDS = 300
 
 
 def ceiling_seconds() -> float:
@@ -390,6 +412,11 @@ def ceiling_seconds() -> float:
     except ValueError:
         return float(DEFAULT_CEILING_SECONDS)
     return value if 1 <= value <= 3600 else float(DEFAULT_CEILING_SECONDS)
+
+
+def tail_reserve_seconds() -> float:
+    """Seconds before the tick's ceiling that collectors leave to the tail."""
+    return min(float(TAIL_RESERVE_SECONDS), ceiling_seconds() / 5)
 
 
 def _step_marker() -> pathlib.Path:
@@ -423,19 +450,26 @@ def bounded(name: str, command: list[str], *, limit: float | None = None,
     stop, the step's WHOLE group is stopped — a collector's `git` or `du`
     included — and the exit is TIMED_OUT (or 128 + the signal). The group id is
     left in `tick-step.pgid` while the step runs, so a supervisor that had to
-    SIGKILL this runner can still reach the group (`supervised`)."""
+    SIGKILL this runner can still reach the group (`supervised`).
+
+    A collector — any step not in TAIL_STEPS — also leaves the tail its reserve,
+    and every step is told the moment its watchdog fires (`STEP_DEADLINE_ENV`)."""
     limit = float(STEP_SECONDS.get(name, DEFAULT_STEP_SECONDS) if limit is None else limit)
+    reserve = 0.0 if name in TAIL_STEPS else tail_reserve_seconds()
     deadline = os.environ.get(DEADLINE_ENV, "").strip()
     if deadline:
         try:
-            limit = min(limit, float(deadline) - time.time())
+            limit = min(limit, float(deadline) - reserve - time.time())
         except ValueError:
             pass
     if limit <= 0:
-        print("not started — the tick's ceiling has been reached", flush=True)
+        print("not started — the tick's ceiling has been reached" if not reserve else
+              f"not started — the last {reserve:.0f} s before the tick's ceiling are kept for "
+              f"the registry, the findings and the dashboard", flush=True)
         return TIMED_OUT
     marker = _step_marker()
-    child = subprocess.Popen(command, cwd=ROOT, start_new_session=True)
+    env = {**os.environ, STEP_DEADLINE_ENV: f"{time.time() + limit:.0f}"}
+    child = subprocess.Popen(command, cwd=ROOT, env=env, start_new_session=True)
     try:
         marker.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         marker.write_text(str(child.pid), encoding="utf-8")

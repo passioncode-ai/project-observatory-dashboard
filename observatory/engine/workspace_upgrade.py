@@ -169,10 +169,10 @@ def copy_database(source: Path, target: Path) -> None:
         fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
         os.close(fd)
         try:
-            with contextlib.closing(sqlite3.connect(compatibility.readonly_uri(source), uri=True)) as src:
-                with contextlib.closing(sqlite3.connect(target)) as dst:
-                    src.backup(dst)
-                    compatibility.verify_database(dst)
+            with contextlib.closing(sqlite3.connect(target)) as dst:
+                # `backup` replaces the whole destination, so a re-read starts clean.
+                compatibility.read_consistently(
+                    source, lambda src: (src.backup(dst), compatibility.verify_database(dst)))
             return
         except (sqlite3.DatabaseError, RuntimeError) as exc:
             target.unlink(missing_ok=True)

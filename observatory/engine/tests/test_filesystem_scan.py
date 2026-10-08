@@ -50,7 +50,7 @@ line inside the Python heredoc — so the driver was truncated rather than the
 function being broken.
 """
 from __future__ import annotations
-import json, os, pathlib, re, shutil, subprocess, sys, tempfile
+import json, os, pathlib, re, shutil, subprocess, sys, tempfile, time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -213,6 +213,71 @@ def test_an_unconfigured_projects_source_is_a_typed_refusal() -> None:
     p = scan(dest, data=afile)
     check("a file where the folder should be is refused the same way",
           p.returncode == 2 and "Traceback" not in p.stderr and "not a directory" in p.stderr, p.stderr[-300:])
+
+
+def _scan_with_deadline(dest: pathlib.Path, deadline: float) -> subprocess.CompletedProcess:
+    fixture = dest.parent / "fs-inputs"
+    fixture.mkdir(exist_ok=True)
+    data = git_estate(fixture)
+    env = dict(os.environ, OBSERVATORY_DATA=str(data), OBSERVATORY_STEP_DEADLINE=f"{deadline:.0f}")
+    return subprocess.run([PY, "collectors/scan_filesystem.py", str(dest)], cwd=ROOT, env=env,
+                          capture_output=True, text=True, timeout=900)
+
+
+def test_a_scan_out_of_time_carries_the_previous_rows_forward() -> None:
+    """OBS-40: on a starved machine the scan used its whole 900 s, was killed and
+    wrote nothing, 14 times in four days. Out of time, it now writes what it has
+    and carries every unscanned folder's last measured row, marked as carried."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-fsdeadline-"))
+    dest = d / "local.json"
+    dest.write_text(json.dumps({"scanned_at": "2026-01-02T03:04:05Z", "folders": [
+        {"folder": "fixture-local", "is_git": True, "remote": "https://example.invalid/kept.git",
+         "branch": "main", "commits": "7"}], "skipped": [], "degraded": []}), encoding="utf-8")
+    p = _scan_with_deadline(dest, time.time() - 1)
+    check("out of time is not a failed step", p.returncode == 0, p.stderr[-300:])
+    doc = json.loads(dest.read_text(encoding="utf-8"))
+    rows = {r["folder"]: r for r in doc["folders"]}
+    row = rows.get("fixture-local") or {}
+    check("the folder keeps its last measured row", row.get("remote") == "https://example.invalid/kept.git", row)
+    check("and says when it was measured", row.get("carried_from") == "2026-01-02T03:04:05Z", row)
+    check("the scan itself is dated now", doc["scanned_at"] != "2026-01-02T03:04:05Z")
+    reasons = [x for x in doc["degraded"] if x["source"] == "scan:deadline"]
+    check("the shortfall is one degradation that names the count", len(reasons) == 1
+          and "1 carried" in reasons[0]["reason"], doc["degraded"])
+
+
+def test_a_carried_row_keeps_the_date_it_was_measured() -> None:
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-fscarry-"))
+    dest = d / "local.json"
+    dest.write_text(json.dumps({"scanned_at": "2026-01-03T00:00:00Z", "folders": [
+        {"folder": "fixture-local", "is_git": True, "remote": "r",
+         "carried_from": "2026-01-01T00:00:00Z"}], "degraded": []}), encoding="utf-8")
+    _scan_with_deadline(dest, time.time() - 1)
+    row = {r["folder"]: r for r in json.loads(dest.read_text(encoding="utf-8"))["folders"]}["fixture-local"]
+    check("carried twice still names the real measurement", row.get("carried_from") == "2026-01-01T00:00:00Z", row)
+
+
+def test_out_of_time_with_no_earlier_scan_leaves_a_new_folder_out() -> None:
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-fsfirst-"))
+    dest = d / "local.json"
+    p = _scan_with_deadline(dest, time.time() - 1)
+    check("a first scan out of time still writes", p.returncode == 0 and dest.is_file(), p.stderr[-300:])
+    doc = json.loads(dest.read_text(encoding="utf-8"))
+    check("no invented row for a folder never measured",
+          "fixture-local" not in {r["folder"] for r in doc["folders"]}, doc["folders"])
+    reasons = [x["reason"] for x in doc["degraded"] if x["source"] == "scan:deadline"]
+    check("and the absence is said", reasons and "1 not yet measured" in reasons[0], doc["degraded"])
+
+
+def test_a_scan_with_time_carries_nothing() -> None:
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-fsontime-"))
+    dest = d / "local.json"
+    p = _scan_with_deadline(dest, time.time() + 600)
+    doc = json.loads(dest.read_text(encoding="utf-8"))
+    row = {r["folder"]: r for r in doc["folders"]}.get("fixture-local") or {}
+    check("measured, not carried", p.returncode == 0 and row.get("is_git") is True
+          and "carried_from" not in row, row)
+    check("no deadline degradation", not [x for x in doc["degraded"] if x["source"] == "scan:deadline"])
 
 
 def test_a_refused_scan_leaves_the_previous_file_intact() -> None:
@@ -563,6 +628,10 @@ if __name__ == "__main__":
                test_the_probes_return_a_reason_they_could_not_run,
                test_the_scan_refuses_when_git_cannot_run,
                test_a_refused_scan_leaves_the_previous_file_intact,
+               test_a_scan_out_of_time_carries_the_previous_rows_forward,
+               test_a_carried_row_keeps_the_date_it_was_measured,
+               test_out_of_time_with_no_earlier_scan_leaves_a_new_folder_out,
+               test_a_scan_with_time_carries_nothing,
                test_an_unconfigured_projects_source_is_a_typed_refusal,
                test_the_emitter_refuses_a_wholesale_swing,
                test_a_small_estate_grows_without_an_override,
