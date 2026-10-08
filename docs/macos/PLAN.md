@@ -45,5 +45,7 @@ machine. Do not stop other sessions or overwrite their worktrees.
 
 Shipped in 0.12.0 (the app opens on the dashboard); native walkthroughs ran on 2026-10-02 and
 in the 2026-10-03 audits ([run 1](../reports/2026-10-03-observatory-audit-run-1/README.md),
-[run 2](../reports/2026-10-03-observatory-audit-run-2/README.md)). Open: Developer ID signing and
-notarization, which need the maintainer's Apple credentials, and the items run 2 lists for run 3.
+[run 2](../reports/2026-10-03-observatory-audit-run-2/README.md)). Developer ID signing and
+notarization are done: `.github/workflows/release.yml` signs the app with the organization's CI
+Developer ID, notarizes and staples it, and 0.13.0 carried the first notarized download. Open: the
+items run 2 lists for run 3.

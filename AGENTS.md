@@ -195,7 +195,7 @@ The organisation's [lifecycle contract](https://github.com/passioncode-ai/fabric
   server to its own `serverd.err`/`.out`; every line the server writes to `serverd.err` starts with its UTC time (`serverd.StampedLines`). The logs live in the workspace's `store/logs/`, not
   `~/Library/Logs/<Product>/`: one account can hold several workspaces, and each keeps its own.
   The app is one per account, so its own update events (`update_restart`, `update_install`,
-  codes only, UTC) go to `~/Library/Logs/Project Observatory/app.log`, 0600, under 1 MB with one
+  UTC; codes plus the release `version` the event concerns) go to `~/Library/Logs/Project Observatory/app.log`, 0600, under 1 MB with one
   previous generation (`macos/Sources/ObservatoryCore/AppUpdate.swift`, `AppLog`).
   The one exception is the shared update log LC-16 asks for (`update_events.py`):
   `~/Library/Logs/Project Observatory/updates.jsonl` (macOS) or

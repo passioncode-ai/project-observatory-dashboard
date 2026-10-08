@@ -172,7 +172,14 @@ exits 1. When Apple accepts, it staples the ticket, validates it, assesses the a
 stapled bundle. The key's path, id and issuer reach `notarytool`'s arguments and nothing
 else (`tests/test_notarize_script.py`). The release attaches that zip and lists it in
 `SHA256SUMS`. `full update` reads only the wheel's line, so the second line does not affect
-it (`parse_sums` in `observatory/engine/engine_update.py`).
+it (`parse_sums` in `observatory/engine/engine_update.py`). The maintenance job's app step
+reads the zip's line: it installs a downloaded app only when the zip matches both its GitHub
+asset digest and that line, and `SHA256SUMS` carries the organization's signature
+(`observatory/engine/app_update.py`).
+
+Since 0.19.0 the app updates itself: the maintenance job stages the verified app, and the
+running app offers **Restart to update** and swaps it at a safe point, never while it is in
+use ([SPEC, "Updates"](SPEC.md#native-screens-and-lifecycle)).
 
 A downloaded app keeps the browser's quarantine flag; Gatekeeper opens a notarized,
 stapled copy without the "cannot be checked for malicious software" refusal. No signing

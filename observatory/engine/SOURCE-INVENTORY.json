@@ -411,7 +411,7 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "c0733f4757567e5c7bee5bf1ae294cf76c5f4f4b3716ac3600d75c61c53e4332",
+      "export_sha256": "c1fc50580d3092864b29c6b637d47da2e6f3dbac96ec878e55c064814aa759b7",
       "bytes": 14152,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
@@ -765,22 +765,22 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "86525c87f361f91c6b7f7c0bbd12899786e3e7333eee33f15bab7d8a2136e22b",
-      "bytes": 14143,
+      "export_sha256": "7207a7a97b4a1d69470e9e5e979544c569322b7b24f45297d45c0bc96271c39c",
+      "bytes": 14498,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "1a2760545a388d1f6e4f382faeae14daf3b2f77e241cff649b206c996671644a",
-      "bytes": 68396,
+      "export_sha256": "aa48b8a808d657af116de969d7fdaa392c21f5f968bd6511bcb9bf1712a6ca1d",
+      "bytes": 69559,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "681c3e5c94133fdd9f2397aac39817ed49125c0ecbc98b8907adf2e709b4592a",
-      "bytes": 60609,
+      "export_sha256": "15c0d60509d515c43ae9ef76274a2320dc53784eb40d14eb84ffa09af1ebf28d",
+      "bytes": 61478,
       "upstream_modified": true
     },
     {
@@ -1479,14 +1479,14 @@
     {
       "path": "skill/.claude-plugin/marketplace.json",
       "source_sha256": "68a99261f346d399ff411a8bbe6cb46d7b169e6ef030d84f7b92c41a2f797c57",
-      "export_sha256": "e6e0bf1e01e4800369cbb811511b7b4e48b5ee5c6ad642e22be8b02891e2e7ed",
+      "export_sha256": "d9c338d1b2cafeb2b7d471f2b95a40bc9ab5a893cd92afa81d68f8676ba1e799",
       "bytes": 941,
       "upstream_modified": true
     },
     {
       "path": "skill/plugins/observatory-log/.claude-plugin/plugin.json",
       "source_sha256": "1f267b5383edab6b68302df81f1790f73ebf2ef0a5e697bff81778bc0e9b31f2",
-      "export_sha256": "73e00fe2d2fb368932b4a884bc48e17a43cc382bfc426bcb726ae5c3e9099966",
+      "export_sha256": "80b14b20b28e66ea702499cfd5291a942439cb29ad2f55c25b29d7dbee74553d",
       "bytes": 626,
       "upstream_modified": true
     },
@@ -1525,14 +1525,14 @@
     {
       "path": "skill/plugins/observatory-log/skills/explaining-changes/SKILL.md",
       "source_sha256": "1a0b0708fc8a17a9bc1c45d89c59aeb44330147e77bc0e5e2262f197b97d31d4",
-      "export_sha256": "0902c4ff521e123cd89fd03b18987b5a2686afd8c24fc29ec35dbc69762eae23",
+      "export_sha256": "308a734bf0a79ffb06bcd3dc5d6ea0997276472ecdb856e72dbca292fbaf0bfb",
       "bytes": 5451,
       "upstream_modified": true
     },
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "4b68d8ee9004876bbbe3dc14cd4362f879b2f7cb3872671724605011e729e6a2",
+      "export_sha256": "db9f0a6d7d90329f78d731694257ac8e755d6397a08cf4845f5523845bae007a",
       "bytes": 14068,
       "upstream_modified": true
     },
@@ -1540,7 +1540,7 @@
       "path": "skill/plugins/observatory-log/skills/tracking-resources/SKILL.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e1dfcba9815ba8e7d22498b274d1316d008ccf1a537ea8be62319633a39ca276",
+      "export_sha256": "33debb93ba4cc327d3983712e4ae2d8bedc55bab1ae3e1285d145c923251719f",
       "bytes": 4618
     },
     {
@@ -2439,8 +2439,8 @@
       "path": "tests/test_git_locale.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9d68fcdaa363ea2827339763454a38aa40ef5cafcf052ff9500b259f46bd8dfb",
-      "bytes": 8062
+      "export_sha256": "7f813fe77fe36dcb37306ec0f3b91b854dbc74306a678a92e3bac66c971cd139",
+      "bytes": 8171
     },
     {
       "path": "tests/test_google.py",
