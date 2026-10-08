@@ -3488,8 +3488,8 @@
     {
       "path": "tests/test_workspace.py",
       "source_sha256": "80e71bbefcc5361d23e3b1313518f9fa0f953130c8dd5ec108ce75de1841c6eb",
-      "export_sha256": "29513e2a17fef529ef8a73d9c7288cd6513095c5f96a103ee2b6aba9b426df5d",
-      "bytes": 22654,
+      "export_sha256": "23c6cb738aa4a50e71988c5d1460725f1ed6dbe3c57b449f91065e951c21fd80",
+      "bytes": 23381,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -3532,8 +3532,8 @@
     {
       "path": "tests/test_workspace_upgrade.py",
       "source_sha256": "baf6fb326428105e87a6acab67b3f89adc29038c5df488c822ab210c3e65fea3",
-      "export_sha256": "b78956684f47322124470f7d9b73a3f0c6e3433ca4a85b26e978bc085822d5c4",
-      "bytes": 21213,
+      "export_sha256": "e1d357f706fe25d8ac576a3f1ef4581006f8bc319f435c262951b01f0c1eb3d0",
+      "bytes": 23077,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -4279,8 +4279,8 @@
     {
       "path": "workspace.py",
       "source_sha256": "40d5ac9aafad0ab2485f03b86d84a0f192103a284f27309dfc2bf798f18071ef",
-      "export_sha256": "7157993ae3a40ac36cc42f641e6c51eab31d399316484d51b8ad0708df20195f",
-      "bytes": 45868,
+      "export_sha256": "2d1f1cc95b8b69bd92f75f53f9b833056cfe822f59110e67dbd546ee5ee53223",
+      "bytes": 46988,
       "python_comments_removed": 3,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
@@ -4296,8 +4296,8 @@
     {
       "path": "workspace_upgrade.py",
       "source_sha256": "d9816f9711b69badae87382cbae34e5a303e0942823587aecf4361026828277d",
-      "export_sha256": "e329b830d4ffdf2752002eaec734ee7fc88028e345300837b50d8529ec0e6a48",
-      "bytes": 29661,
+      "export_sha256": "b459ab7e8b292651907d0a813a7484986c8e521cce7cce0d2a5342db20d1dd90",
+      "bytes": 30475,
       "python_comments_removed": 5,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
