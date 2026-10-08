@@ -315,6 +315,14 @@ def curated_errors(products: dict, roles: list[str], project_ids: set[str]
     return bad, missing
 
 
+#: The role a SUGGESTED row gives every member: an inference does not know which
+#: project is the site and which the API. The document always declares it beside the
+#: operator's own roles — without it the engine emitted a registry its own validator
+#: refused ("product member role unknown: … other", a tester's tick, 0.19.3). Curated
+#: rows are still checked against the operator's roles alone.
+SUGGESTED_ROLE = "other"
+
+
 def suggested_products(projects: list[dict], domains: list[dict],
                        curated: dict) -> list[dict]:
     """Projects that share a registrable domain are probably one product.
@@ -342,7 +350,7 @@ def suggested_products(projects: list[dict], domains: list[dict],
             continue
         out.append({
             "id": f"product:suggested-{slug(apex)}", "name": apex, "kind": "suggested",
-            "members": [{"project": m, "role": "other"} for m in sorted(members)],
+            "members": [{"project": m, "role": SUGGESTED_ROLE} for m in sorted(members)],
             "domains": sorted({h for hs in members.values() for h in hs}),
             "why": (f"{len(members)} projects claim hosts under {apex}; a shared "
                     f"registrable domain is the cheapest sign of one product — promote "
@@ -379,7 +387,7 @@ def products_document(projects: list[dict], domains: list[dict], obs_date: str
                  f"{paths.config_label('products.json')} and carry `part_of` edges; `kind: suggested` "
                  "rows are derived from a shared registrable domain and carry none — "
                  "an inference labelled as one."),
-        "roles": roles, "products": rows,
+        "roles": roles + ([SUGGESTED_ROLE] if SUGGESTED_ROLE not in roles else []), "products": rows,
         # A curated member this registry does not hold: dropped from the row,
         # named here — absent is not zero, and a silent drop is a member nobody
         # notices vanishing.

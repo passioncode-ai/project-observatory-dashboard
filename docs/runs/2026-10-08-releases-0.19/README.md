@@ -1,4 +1,4 @@
-# 2026-10-08 — releases 0.19.0, 0.19.1 and 0.19.2
+# 2026-10-08 — releases 0.19.0, 0.19.1, 0.19.2 and 0.19.3
 
 The public record of three releases. Changes are in [CHANGELOG.md](../../../CHANGELOG.md); this
 page says what was measured and how each was checked.
@@ -42,3 +42,21 @@ Branch `agent/0.19.2`.
 
 Still open: the rest of OBS-40 — Health saying how many recent ticks were incomplete, and
 incremental `google` and `machine` collectors.
+
+## 0.19.3 — four defects from a tester
+
+A tester on 0.19.1 (macOS, only the projects source on, every integration off, the scheduler on)
+reported a card that stayed yellow and a daily backup never written. Each report was checked
+against the code of 0.19.2 before anything changed; all four held, and one claim did not:
+`OWNED_ORGS` is not hardcoded — it is read from `config/ownership.json` — but the row naming it
+pointed at the code, and the file was not described. 0.19.2 (tagged, its release run waiting for
+approval) was not published; 0.19.3 carries it.
+
+- **OBS-46** — the tick plist took `sys.executable` (the installer's interpreter): reproduced by a
+  test where the installer runs on a bare interpreter and the engine sits in a venv (red, then
+  green); existing job files are repaired by the maintenance pass (`test_lifecycle.py`, 3 tests).
+- **OBS-47** — reproduced the tester's "7 source(s) not fully read" exactly in
+  `test_fabric_service.py`; red, then green.
+- **OBS-48** — `test_workspace_scheduler.py`, `test_fabric_service.py`; red, then green.
+- **OBS-49** — `test_estate_surfaces.py` with no curated file and with the shipped default roles;
+  red (`['other'] not in []`), then green.

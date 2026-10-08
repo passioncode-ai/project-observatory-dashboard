@@ -5,10 +5,33 @@ import os
 import re
 from pathlib import Path
 
-VERSION = "0.19.2"
+VERSION = "0.19.3"
 CONFIG_VERSION = 1
 WORKSPACE_VERSION = 1
 SOURCE = Path(__file__).resolve().parent
+
+
+def engine_python() -> str:
+    """The interpreter this engine is installed in, whoever started this process.
+
+    Every scheduled job — the tick, the server, the maintenance job — names it, so
+    each runs with the packages the engine was installed with. A job started with
+    the INSTALLER's interpreter instead ran the tick's backup on Homebrew's bare
+    python and died on `No module named 'cryptography'` (a tester, 0.19.1): the
+    installer had been started by a python other than the engine's venv (the plugin
+    hook may run under any `python3` on PATH). The engine's own virtual environment
+    is the ancestor holding `pyvenv.cfg`; a checkout has `.venv`. Its `bin/python`
+    is named as it is — never resolved through the symlink to a versioned Homebrew
+    path (install_launchd.stable_interpreter)."""
+    import sys
+    for parent in SOURCE.parents:
+        if (parent / "pyvenv.cfg").is_file():
+            for name in ("python3", "python"):
+                candidate = parent / "bin" / name
+                if candidate.exists():
+                    return str(candidate)
+    checkout = SOURCE / ".venv" / "bin" / "python"
+    return str(checkout) if checkout.exists() else sys.executable
 
 class ConfigurationError(RuntimeError):
     pass

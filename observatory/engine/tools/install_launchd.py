@@ -137,9 +137,9 @@ def _seconds(value: str) -> bool:
 
 
 def environment() -> dict[str, str]:
-    # OBSERVATORY_PYTHON: tick.sh runs every step with the interpreter that
-    # installed this engine, not whatever python3 is first on PATH.
-    env = {"PATH": launch_path(), "OBSERVATORY_PYTHON": stable_interpreter(sys.executable),
+    # OBSERVATORY_PYTHON: tick.sh runs every step with the interpreter the engine
+    # is installed in, not the installer's and not whatever python3 is first on PATH.
+    env = {"PATH": launch_path(), "OBSERVATORY_PYTHON": stable_interpreter(configuration.engine_python()),
            "HOME": str(pathlib.Path.home()), "OBSERVATORY_HOME": str(paths.HOME)}
     for name in TICK_LIMITS:
         value = os.environ.get(name, "").strip()
@@ -244,6 +244,60 @@ def stop_job(label: str) -> tuple[bool, str]:
 def start_job(plist: str) -> tuple[bool, str]:
     code, out = _launchctl("bootstrap", f"gui/{uid()}", plist)
     return code == 0, out
+
+
+def job_running(label: str) -> bool:
+    """launchd reports the job's process as running right now."""
+    code, out = _launchctl("print", f"gui/{uid()}/{label}")
+    return code == 0 and "state = running" in out
+
+
+def _is_python(argument: str) -> bool:
+    return pathlib.PurePath(str(argument)).name.startswith("python")
+
+
+def repair_interpreters(expected: str | None = None, *, write: bool = True,
+                        only: set[str] | None = None) -> list[dict]:
+    """The managed jobs whose plist names an interpreter other than the engine's.
+
+    The tick's plist carries it in `OBSERVATORY_PYTHON`, the server's as its program.
+    Before 0.19.3 both were written with the INSTALLER's interpreter, which is not the
+    engine's when anything other than the engine's venv started the installer; a tick
+    on Homebrew's bare python then failed its backup on `No module named
+    'cryptography'` and nothing ever rewrote the plist — `full update` restarts the
+    jobs from the files as they are. With `write`, each such field is set to
+    `expected` (the engine's interpreter by default) and the file rewritten in place,
+    mode 0600; loading it is the caller's step. `only` names the jobs to look at.
+    A job without a plist is skipped."""
+    expected = expected or stable_interpreter(configuration.engine_python())
+    found = []
+    for job in managed_jobs():
+        path = pathlib.Path(job["plist"])
+        if (only is not None and job["name"] not in only) or path.is_symlink() or not path.is_file():
+            continue
+        try:
+            doc = plistlib.loads(path.read_bytes())
+        except (OSError, plistlib.InvalidFileException, ValueError):
+            continue
+        before = []
+        env = doc.get("EnvironmentVariables") or {}
+        if env.get("OBSERVATORY_PYTHON") not in (None, expected):
+            before.append(env["OBSERVATORY_PYTHON"])
+            env["OBSERVATORY_PYTHON"] = expected
+        args = doc.get("ProgramArguments") or []
+        if args and _is_python(args[0]) and args[0] != expected:
+            before.append(args[0])
+            args[0] = expected
+        if not before:
+            continue
+        found.append({"name": job["name"], "label": job["label"], "plist": str(path),
+                      "was": before[0], "now": expected})
+        if write:
+            fd = os.open(path, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(plistlib.dumps(doc))
+            os.chmod(path, 0o600)
+    return found
 
 
 def main() -> int:

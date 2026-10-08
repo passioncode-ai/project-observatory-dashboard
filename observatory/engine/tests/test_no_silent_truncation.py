@@ -152,6 +152,9 @@ def findings_for(degraded: list[dict]) -> list[dict]:
     importlib.reload(paths)
     import build_findings as B
     importlib.reload(B)
+    # The transfer rows below are GitHub's with the integration ON (`gh` missing);
+    # with it off they are a switched-off source and raise nothing (0.19.3).
+    B._settings = lambda: {"integrations": {"github": True}}
     try:
         return [f for f in B.collect() if f["type"] == "model.degraded"]
     finally:

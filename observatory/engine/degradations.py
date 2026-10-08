@@ -35,6 +35,8 @@ RECEIPT_INTEGRATIONS = {
     "openrouter.json": "openrouter", "cloudflare_zones.json": "cloudflare", "mcp.json": "mcp",
     "remote-env.json": "remote_env", "google.json": "google", "sessions.json": "sessions",
     "remotes.json": "git_remotes", "vault.json": "wiki",
+    # `tools/record_lost_projects.py` reads the sessions collector's output (0.19.3).
+    "lost-projects.json": "sessions",
 }
 
 
@@ -67,11 +69,22 @@ MERGE_SOURCE_INTEGRATION = {
 }
 
 
+def merge_source_integration(source: str) -> str | None:
+    """The integration a merge coverage source belongs to, or None if it is always read.
+
+    `transfer:<owner/name>` rows are GitHub's: the transfer check asks the GitHub API,
+    so with that integration off it cannot be asked at all — a consequence of the
+    switch, not a failure (0.19.3; a tester's card counted two of them as degraded)."""
+    if source.startswith("transfer:"):
+        return "github"
+    return MERGE_SOURCE_INTEGRATION.get(source)
+
+
 def merge_source_off(source: str) -> str | None:
     """The integration a merge coverage source belongs to when the workspace has
     it OFF, else None. Settings are read directly, for the reason `integration_off`
     gives: `local` runs offline, and that run mode is not the user's switch."""
-    integration = MERGE_SOURCE_INTEGRATION.get(source)
+    integration = merge_source_integration(source)
     if integration is None:
         return None
     try:

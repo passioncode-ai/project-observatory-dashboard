@@ -583,6 +583,19 @@ worktree stays and the run reports it as failed with the reason.
 
 ## Organizations and resources
 
+**Which repository owners are yours** is a separate, smaller file,
+`config/ownership.json`, read by the merge (`OWNED_ORGS` in `collectors/merge.py`):
+
+```json
+{"organizations": ["your-github-user", "your-org"], "work_organizations": ["employer-org"]}
+```
+
+A repository whose owner is in neither list is classified `external`. When the
+GitHub listing returns an owner the file does not declare, the merge says so in
+an `ownership` row (on the board and in Health) instead of declaring it itself —
+which owners are yours is your decision. Edit the file and run
+`project-observatory full local`.
+
 An estate that serves more than one owner keeps each owner's analytics, design
 files and clouds in that owner's accounts. `config/organizations.json` says
 which owner a project has and where that owner's accounts are; every project in

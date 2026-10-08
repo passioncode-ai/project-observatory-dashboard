@@ -118,7 +118,10 @@ def _age(stamp: str | None, now: datetime) -> str:
 
 def _collector_rows() -> list[dict]:
     per_file = dict(degradations.every_collector())
-    own = degradations.collector("model.json")
+    # The merge records every input it did not read, switched off or not; an input
+    # whose integration is off was never asked for, and is no gap (0.19.3).
+    own = [d for d in degradations.collector("model.json")
+           if not (isinstance(d, dict) and degradations.merge_source_off(str(d.get("source") or "")))]
     if own:
         per_file["model.json"] = own
     rows = []

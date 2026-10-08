@@ -193,11 +193,26 @@ def test_the_models_degradation_reaches_a_finding() -> None:
         {"source": "transfer:x/y", "reason": "`gh` is not installed, so no "
                                              "transfer could be followed"}]}),
         encoding="utf-8")
-    p = subprocess.run([PY, "tools/build_findings.py", "--json"], cwd=ROOT,
-                       env=dict(os.environ, OBSERVATORY_REGISTRY=str(d / "registry"),
-                                OBSERVATORY_SCRATCH=str(d / "scratch"),
-                                OBSERVATORY_DB=str(d / "absent.db")),
-                       capture_output=True, text=True, timeout=600)
+    # The row is GitHub's with the integration ON (`gh` missing); with it off it is a
+    # switched-off source and raises nothing (0.19.3). The sandbox's settings say so
+    # for this one run, and are put back.
+    import paths
+    settings_file = paths.config_file("settings.json")
+    before = settings_file.read_bytes() if settings_file.is_file() else None
+    doc = json.loads(before) if before else {"schema_version": 1, "sources": {}}
+    doc.setdefault("integrations", {})["github"] = True
+    settings_file.write_text(json.dumps(doc), encoding="utf-8")
+    try:
+        p = subprocess.run([PY, "tools/build_findings.py", "--json"], cwd=ROOT,
+                           env=dict(os.environ, OBSERVATORY_REGISTRY=str(d / "registry"),
+                                    OBSERVATORY_SCRATCH=str(d / "scratch"),
+                                    OBSERVATORY_DB=str(d / "absent.db")),
+                           capture_output=True, text=True, timeout=600)
+    finally:
+        if before is None:
+            settings_file.unlink(missing_ok=True)
+        else:
+            settings_file.write_bytes(before)
     try:
         found = json.loads(p.stdout)["findings"]
     except (ValueError, KeyError):
