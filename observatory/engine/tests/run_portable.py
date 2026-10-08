@@ -300,10 +300,12 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 #: seconds they are given at least (measured 2026-10-06 at --jobs 4: maintenance 217 s
 #: with its pty and planted-writer cases, conformance_receipt 129 s for its full check;
 #: backup_vault 52–104 s alone, past 120 s under the gate's --jobs 6; workspace, interop and
-#: indexer_load passed 120 s under the 0.19.0 gate's load).
+#: indexer_load passed 120 s under the 0.19.0 gate's load; api_listings, which runs the whole
+#: tools/check_paths.py over the tree since 0.20.0, took 14 s alone and passed 120 s at a load
+#: average near 150).
 #: A larger --timeout still wins; a smaller one never cuts these short.
 SUITE_SECONDS = {'maintenance': 480, 'conformance_receipt': 360, 'backup_vault': 300, 'dashboard_render': 600,
-                 'workspace': 300, 'interop': 300, 'indexer_load': 300}
+                 'workspace': 300, 'interop': 300, 'indexer_load': 300, 'api_listings': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:

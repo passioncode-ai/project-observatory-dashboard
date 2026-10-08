@@ -1208,7 +1208,7 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "0118cfa4f0234eea205cb6be5ee3ed53a64e977682f9ac4ea9c05747ba4c4755",
+      "export_sha256": "b1e2716d20d45b1981b334d054a6c30b2fc4ac3a2e3ff9026ded5ecb1a233a41",
       "bytes": 81681,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
@@ -1831,8 +1831,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "1d3e7beb451594c45ab6af491920c0a29918d7829bae53dac418067122a3e588",
-      "bytes": 22576,
+      "export_sha256": "fb87618d54e173481d5666223d8d1586dddbea3e64b8e944601f7f60e2198a90",
+      "bytes": 22748,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
