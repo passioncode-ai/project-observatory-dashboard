@@ -96,7 +96,7 @@ def test_t31_a_folder_on_disk_is_never_silently_absent() -> None:
         {"name": "fixture-excluded", "why": "This fixture is a container rather than a project."})
     exclusions.write_text(json.dumps(rules), encoding="utf-8")
 
-    raw = home / "store" / "raw"
+    raw = home / "store" / "raw"  # paths-check: allow — the synthetic workspace's scratch, which each child resolves as its own paths.SCRATCH from OBSERVATORY_HOME
     for script, argument in (("collectors/scan_filesystem.py", str(raw / "local.json")),
                              ("collectors/merge.py", None),
                              ("collectors/emit_registry.py", None)):

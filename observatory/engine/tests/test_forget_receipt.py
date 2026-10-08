@@ -17,7 +17,6 @@ import pathlib
 import shutil
 import stat
 import sys
-import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -25,6 +24,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "agent"))
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
+import tmp as tmpdir  # noqa: E402
 
 _MADE: list[pathlib.Path] = []
 ALPHA = "project:alpha-web"
@@ -43,7 +44,7 @@ def tearDownModule() -> None:
 
 class Store:
     def __init__(self) -> None:
-        self.home = pathlib.Path(tempfile.mkdtemp(prefix="observatory-forget-")).resolve()
+        self.home = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-forget-")).resolve()
         _MADE.append(self.home)
         for k, v in {"OBSERVATORY_HOME": self.home, "OBSERVATORY_DB": self.home / "store/observatory.db",
                      "OBSERVATORY_STATE": self.home / "store",

@@ -265,12 +265,18 @@ def forward_file(git: str | None = None) -> str:
         if not text:
             _forward[key] = os.devnull
             return os.devnull
-        directory = tempfile.mkdtemp(prefix="observatory-git-")
-        os.chmod(directory, 0o700)
+        directory = tempfile.mkdtemp(prefix="observatory-git-")  # paths-check: allow — removed at exit by _cleanup, and at once if the write fails
         path = os.path.join(directory, "forwarded.gitconfig")
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as fh:
-            fh.write(text)
+        try:
+            os.chmod(directory, 0o700)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as fh:
+                fh.write(text)
+        except BaseException:
+            # A full disk fails the write; without this the folder stayed behind on
+            # every call of a long-running server, since _cleanup was not yet registered.
+            shutil.rmtree(directory, ignore_errors=True)
+            raise
         atexit.register(_cleanup, path)
         _forward[key] = path
         return path

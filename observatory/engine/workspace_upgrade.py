@@ -229,7 +229,7 @@ def _snapshot(base: Path, output: Path) -> dict:
     before = inventory(base)
     before_dirs = directories(base)
     output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    stage = Path(tempfile.mkdtemp(prefix='.snapshot-', dir=output.parent))
+    stage = Path(tempfile.mkdtemp(prefix='.snapshot-', dir=output.parent))  # paths-check: allow — renamed to the snapshot on success, removed on any failure
     try:
         entries = []
         (stage/'data').mkdir(mode=0o700)
@@ -381,7 +381,7 @@ def restore(source: Path, destination: Path, *, secret: str | None = None) -> di
     with operation_lock(destination, existing=False):
         if destination.exists() and any(destination.iterdir()):
             raise config.ConfigurationError('Restore destination changed')
-        stage = Path(tempfile.mkdtemp(prefix='.restore-',dir=destination.parent))
+        stage = Path(tempfile.mkdtemp(prefix='.restore-',dir=destination.parent))  # paths-check: allow — renamed to the destination on success, removed on any failure
         try:
             workspace.copy_private(source / 'data', stage)
             verify_snapshot(source)  # do not publish a copy of a moving snapshot
@@ -479,7 +479,7 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
                      and sqlite_file(base / name)}
         steady = lambda inv: {k: v for k, v in inv.items() if not volatile(k, databases)}  # noqa: E731
         receipt = _snapshot(base,base / 'backups' / ('before-upgrade-' + uuid.uuid4().hex))
-        stage = Path(tempfile.mkdtemp(prefix='.upgrade-',dir=base.parent))
+        stage = Path(tempfile.mkdtemp(prefix='.upgrade-',dir=base.parent))  # paths-check: allow — removed by the finally below on every path
         rollback = base / 'backups' / ('rollback-' + uuid.uuid4().hex)
         replaced = []
         committed = False

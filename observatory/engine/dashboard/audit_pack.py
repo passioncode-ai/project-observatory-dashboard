@@ -109,8 +109,10 @@ def main() -> int:
     check("the widths add up to exactly one table",
           sum(int(m) for m in re.findall(r"col\.c-\w+\s*\{\s*width:\s*(\d+)%", comp)) == 100,
           str(sum(int(m) for m in re.findall(r"col\.c-\w+\s*\{\s*width:\s*(\d+)%", comp))))
-    check("a long repository list folds instead of stretching its row",
-          ".repos.folded" in comp and 'class="more"' in html)
+    # The row redesign (DASH-6) shows ONE repository and a count that links to the rest;
+    # the old rule looked for the `.repos.folded` fold the row no longer renders (OBS-42).
+    check("a long repository list cannot stretch its row: one is shown, the count links to the rest",
+          "r.repos.slice(0, 1)" in html and "{n} repos" in html)
     check("the accent never sits as text on --bg or --panel-2",
           not re.search(r"\.(sub|desc|none|folder)\s*\{[^}]*color:\s*var\(--accent\)", comp))
 

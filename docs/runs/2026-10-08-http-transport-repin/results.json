@@ -1,0 +1,59 @@
+{
+ "sdk": {
+  "mcp": "2.3.0",
+  "mcp_types": "2.3.0",
+  "uvicorn": "0.54.0",
+  "starlette": "1.7.0"
+ },
+ "server": {
+  "json_response": true,
+  "stateless_http": true,
+  "bind": "127.0.0.1"
+ },
+ "workspace": {
+  "init": "exit 0",
+  "estate": "empty, synthetic"
+ },
+ "checks": {
+  "modern_2026_07_28": {
+   "ok": true,
+   "negotiated": "2026-07-28",
+   "tools": 39,
+   "has_search": true,
+   "overview_is_error": false,
+   "overview_text": "{\"surveyedAt\":\"2026-10-08T21:02:17Z\",\"counts\":{\"projects\":0,\"repositories\":0,\"owners\":0},\"activityTiers\":{},\"estateWork\":null,\"recentlyActive\":[],\"next\":{\"projects\":\"observatory_status with limit and detail=summary\",\"oneProject\":\"observatory_project\",\"findings\":\"observatory_findings\",\"machine\":\"obse"
+  },
+  "legacy_handshake": {
+   "ok": true,
+   "negotiated": "2025-11-25",
+   "tools": 39,
+   "has_search": true,
+   "overview_is_error": false,
+   "overview_text": "{\"surveyedAt\":\"2026-10-08T21:02:17Z\",\"counts\":{\"projects\":0,\"repositories\":0,\"owners\":0},\"activityTiers\":{},\"estateWork\":null,\"recentlyActive\":[],\"next\":{\"projects\":\"observatory_status with limit and detail=summary\",\"oneProject\":\"observatory_project\",\"findings\":\"observatory_findings\",\"machine\":\"obse"
+  },
+  "auto": {
+   "ok": true,
+   "negotiated": "2026-07-28",
+   "tools": 39,
+   "has_search": true,
+   "overview_is_error": false,
+   "overview_text": "{\"surveyedAt\":\"2026-10-08T21:02:17Z\",\"counts\":{\"projects\":0,\"repositories\":0,\"owners\":0},\"activityTiers\":{},\"estateWork\":null,\"recentlyActive\":[],\"next\":{\"projects\":\"observatory_status with limit and detail=summary\",\"oneProject\":\"observatory_project\",\"findings\":\"observatory_findings\",\"machine\":\"obse"
+  },
+  "modern_raw_post": {
+   "status": 200,
+   "session_id_header": false,
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"cacheScope\":\"private\",\"resultType\":\"complete\",\"tools\":[{\"description\":\"Local assistant readiness and conversation list. Reads private workspace; no model spend.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"includeProjects\":{\"default\":false,\"description\":\"Also lis"
+  },
+  "foreign_host_refused": {
+   "status": 421
+  },
+  "foreign_origin_refused": {
+   "status": 403
+  },
+  "oversized_body_refused": {
+   "status": 413,
+   "limit_bytes": 4194304,
+   "answered_before_body": true
+  }
+ }
+}

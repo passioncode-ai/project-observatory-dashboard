@@ -396,7 +396,7 @@ def main() -> int:
     args=ap.parse_args()
     if args.jobs < 1 or args.timeout < 1: ap.error('jobs and timeout must be positive')
     names=tuple(dict.fromkeys(args.suite or SUITES))
-    base=Path(tempfile.mkdtemp(prefix='observatory-portable-')).resolve();base.chmod(0o700)
+    base=Path(tempfile.mkdtemp(prefix='observatory-portable-')).resolve();base.chmod(0o700)  # paths-check: allow — removed by the finally below unless --keep asks to keep it
     try:
         template=base/'template';template.mkdir();copy_source(template)
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:

@@ -103,8 +103,9 @@ def test_the_index_maps_old_ids_to_the_project_that_holds_them_now() -> None:
 
 # ─────────── the finding tells the two apart ───────────────────────────
 
-def findings_for(rows: list[tuple[str, str]], projects: list[dict]) -> list[dict]:
-    """`rows` are (project_id, statement) ledger rows."""
+def findings_for(rows: list[tuple[str, str]], projects: list[dict], *, identity: str | None = None,
+                 prefix: str = "memory.", identity_after_load: str | None = None) -> list[dict]:
+    """`rows` are (project_id, statement) ledger rows; `identity` is registry/identity.json's text."""
     d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-ident-"))
     (d / "registry").mkdir()
     (d / "scratch").mkdir()
@@ -112,6 +113,8 @@ def findings_for(rows: list[tuple[str, str]], projects: list[dict]) -> list[dict
     (d / "registry/repositories.json").write_text('{"repositories": []}')
     (d / "registry/relations.json").write_text('{"relations": []}')
     (d / "registry/sources.json").write_text('{"sources": []}')
+    if identity is not None:
+        (d / "registry/identity.json").write_text(identity)
     db = d / "observatory.db"
     env = dict(os.environ, OBSERVATORY_DB=str(db),
                OBSERVATORY_REGISTRY=str(d / "registry"),
@@ -135,8 +138,12 @@ def findings_for(rows: list[tuple[str, str]], projects: list[dict]) -> list[dict
     importlib.reload(paths)
     import build_findings as B
     importlib.reload(B)
+    if identity_after_load is not None:
+        # Loading `paths` validates every registry file, so a map broken BEFORE the run
+        # stops the run; this is the map that breaks between that check and the read.
+        (d / "registry/identity.json").write_text(identity_after_load)
     try:
-        return [f for f in B.collect() if f["type"].startswith("memory.")]
+        return [f for f in B.collect() if f["type"].startswith(prefix)]
     finally:
         for k in ("OBSERVATORY_DB", "OBSERVATORY_REGISTRY", "OBSERVATORY_SCRATCH"):
             os.environ.pop(k, None)
@@ -511,6 +518,21 @@ def test_a_row_without_ownership_is_named_not_fatal() -> None:
               for x in got["degraded"]), str(got["degraded"])[:300])
 
 
+def test_an_ambiguous_identity_reaches_the_board() -> None:
+    """OBS-42: `identity.ambiguous` and `identity.unreadable` were named only by suites
+    outside the portable set, so nothing that runs on every change drove them."""
+    amb = json.dumps({"ambiguities": [{"key": "sample-site", "reason": "two recorded projects share its anchors",
+                                       "candidates": ["project:a", "project:b"]}]})
+    got = findings_for([], [PUBLISHED], identity=amb, prefix="identity.")
+    check("an ambiguity is one finding", [f["type"] for f in got] == ["identity.ambiguous"], str(got))
+    check("naming the key and both candidates",
+          bool(got) and "sample-site" in got[0]["title"] and "project:a, project:b" in got[0]["detail"], str(got))
+    got = findings_for([], [PUBLISHED], identity='{"ambiguities": []}', prefix="identity.",
+                       identity_after_load="{half a document")
+    check("an unreadable map is said, not read as empty", [f["type"] for f in got] == ["identity.unreadable"], str(got))
+    check("and no map at all is silent", findings_for([], [PUBLISHED], prefix="identity.") == [])
+
+
 if __name__ == "__main__":
     print("project identity — publishing a project detached its history\n")
     for fn in (test_a_row_without_ownership_is_named_not_fatal,
@@ -528,7 +550,8 @@ if __name__ == "__main__":
                test_the_rollup_folds_a_former_id_into_the_current_one,
                test_a_former_row_with_no_counterpart_is_kept_and_counted,
                test_ambiguous_aliases_never_choose_by_order,
-               test_ambiguous_history_stays_under_its_original_id):
+               test_ambiguous_history_stays_under_its_original_id,
+               test_an_ambiguous_identity_reaches_the_board):
         fn()
     print()
     if FAILURES:

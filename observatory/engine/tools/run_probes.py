@@ -582,7 +582,7 @@ async def run_write_capability(cap: dict) -> tuple[list[dict], str]:
     # holds a whole store — every probe run left one behind. Measured 2026-09-07:
     # a `check` run consumed 290 MB of temp fixtures on a volume reading 100%
     # full, and the run before it died with `no space left on device`.
-    scratch_dir = tempfile.mkdtemp(prefix="observatory-probe-")                                                                                                   
+    scratch_dir = tempfile.mkdtemp(prefix="observatory-probe-")  # paths-check: allow — removed at exit by the atexit line below
     atexit.register(shutil.rmtree, scratch_dir, ignore_errors=True)
     scratch = pathlib.Path(scratch_dir) / "probe.db"
     out_schema = schema_for(cap)

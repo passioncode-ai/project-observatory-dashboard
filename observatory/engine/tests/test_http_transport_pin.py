@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The SDK properties the HTTP memory service relies on (PB-137 N-015).
 
-docs/design/HTTP-TRANSPORT.md pins mcp 2.2.0: the 2026-07-28 per-request protocol beside
+docs/design/HTTP-TRANSPORT.md pins mcp 2.3.0 (2.2.0 until the re-measurement of 2026-10-08): the 2026-07-28 per-request protocol beside
 the handshake revisions, stateless JSON serving, Host/Origin checks and a 4 MiB body limit.
 An SDK upgrade that changes any of these must fail here, not change the service quietly.
 The measurement itself is docs/runs/2026-10-04-http-transport-pin/experiment.py.
@@ -26,7 +26,7 @@ class SdkPin(unittest.TestCase):
 
     def test_the_lock_pins_the_sdk_the_decision_measured(self):
         lock = (ROOT / "requirements-full.lock").read_text(encoding="utf-8")
-        for line in ("mcp==2.2.0", "mcp-types==2.2.0", "uvicorn==0.53.0", "starlette==1.7.0"):
+        for line in ("mcp==2.3.0", "mcp-types==2.3.0", "uvicorn==0.54.0", "starlette==1.7.0"):
             self.assertIn(line, lock)
 
     def test_both_protocol_eras_are_served(self):

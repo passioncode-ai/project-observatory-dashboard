@@ -213,7 +213,7 @@ final class AppUpdateTests: XCTestCase {
 
 /// The app's update watch, with the spawn and the quit replaced by recorders.
 @MainActor final class UpdatesTests: XCTestCase {
-    private var spawned: [[String]] = [], quits = 0
+    private var spawned: [[String]] = [], quits = 0, badges: [String?] = []
     private func setUp(pending: String?, spawn: (([String], [String: String]) throws -> pid_t)? = nil) throws -> (Updates, AppLog) {
         let ws = URL(fileURLWithPath: Model.resolved(FileManager.default.temporaryDirectory.appendingPathComponent("obs-updates-\(UUID().uuidString)").path))
         try FileManager.default.createDirectory(at: ws.appendingPathComponent("store"), withIntermediateDirectories: true)
@@ -225,13 +225,34 @@ final class AppUpdateTests: XCTestCase {
         let d = scratchDefaults()
         d.set(ws.path, forKey: "workspace"); d.set("/opt/po/bin/project-observatory", forKey: "executable")
         let log = AppLog(file: ws.appendingPathComponent("logs/app.log"))
-        spawned = []; quits = 0
+        spawned = []; quits = 0; badges = []
         let u = Updates(defaults: d, log: log, running: "0.18.0", bundlePath: "/srv/apps/Project Observatory.app",
                         spawn: spawn ?? { [unowned self] argv, env in
                             XCTAssertEqual(env["OBSERVATORY_HOME"], ws.path)
                             self.spawned.append(argv); return 4242 },
-                        terminate: { [unowned self] in self.quits += 1 })
+                        terminate: { [unowned self] in self.quits += 1 },
+                        badge: { [unowned self] in self.badges.append($0) })
+        workspace = ws
         return (u, log)
+    }
+    private var workspace: URL?
+
+    /// The operator, 2026-10-08: a person must SEE that an update is waiting, without
+    /// opening a window. The Dock icon carries a badge while one is staged.
+    func testTheDockShowsAStagedUpdateAndClearsItOnceThereIsNone() throws {
+        let (u, _) = try setUp(pending: "0.19.0")
+        u.check()
+        XCTAssertEqual(badges.last ?? nil, "↑")
+        try JSONSerialization.data(withJSONObject: ["app": ["result": "updated", "version": "0.18.0"]])
+            .write(to: UpdateState.file(workspace: workspace!.path))
+        u.check()
+        XCTAssertNil(badges.last ?? "unset", "no update staged: no badge")
+    }
+
+    /// The engine stages an app hourly; reading its local record every 6 h meant the
+    /// prompt could appear hours after the update was ready.
+    func testTheRecordIsReadOftenEnoughToShowAnUpdateWithinTheHour() {
+        XCTAssertLessThanOrEqual(Updates.checkEvery, 15 * 60)
     }
     private func events(_ log: AppLog) -> [String] {
         ((try? String(contentsOf: log.file, encoding: .utf8)) ?? "").split(separator: "\n").compactMap {

@@ -59,6 +59,9 @@ A change to the complete engine updates its source inventory in the same review:
 run `python tools/update_inventory.py` (CI runs it with `--check`).
 The initial inventory also records the sanitized extraction from its private
 predecessor; never copy that predecessor's Git history or operational documents.
+`requirements-full.lock` must carry every exact pin of `pyproject.toml`: `python tools/refresh_lock.py
+--check` says whether it does (CI runs it before installing), and `python tools/refresh_lock.py`
+rebuilds the lock in a fresh virtual environment — run it on a Dependabot branch that bumped a pin.
 Dependency constraint updates require the Python/OS CI matrix, not just a local
 import check. Build a wheel and run `tools/check_package.py` against it.
 

@@ -11,7 +11,7 @@ engine's real MCP server with the pinned SDK, and its results are in
 
 | Item | Pinned | Why |
 |---|---|---|
-| SDK | `mcp` 2.2.0, `mcp-types` 2.2.0, `uvicorn` 0.53.0, `starlette` 1.7.0, already in `requirements-full.lock` | No new dependency. The SDK serves both protocol eras from one app. |
+| SDK | `mcp` 2.3.0, `mcp-types` 2.3.0, `uvicorn` 0.54.0, `starlette` 1.7.0 in `requirements-full.lock` (re-measured 2026-10-08 against the 2.2.0 pin of 2026-10-04: every property unchanged, [run record](../runs/2026-10-08-http-transport-repin/README.md)) | No new dependency. The SDK serves both protocol eras from one app. |
 | Protocol | **2026-07-28** (modern), plus the handshake revisions 2024-11-05 … 2025-11-25 for existing clients | A modern request is a self-contained POST with no `initialize` and no session. Clients that still handshake keep working. |
 | App | `server.streamable_http_app(json_response=True, stateless_http=True, host="127.0.0.1", transport_security=…)` | Stateless: nothing on the transport carries authority or continuity. |
 | Bind | `127.0.0.1` only | No public ingress. External access goes through Fabric's gateway (plan D-2, N-020). |

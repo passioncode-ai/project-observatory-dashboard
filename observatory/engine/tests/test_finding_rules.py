@@ -718,19 +718,7 @@ DRIVEN = {"dashboard.blank", "fixtures.leaked", "host.disk_unknown",
 #: a larger set only shrinks what is missing. A rule absent from both this list
 #: and every portable suite fails the roster check below; an entry a portable
 #: suite now names is reported so the list can shrink.
-NAMED_OUTSIDE_THE_PORTABLE_SET = {
-    "clone.stale", "collector.degraded", "companion.faults_unlogged", "companion.not_recording",
-    "companion.stale_install", "dashboard.unverified", "deltas.not_diffed", "domain.dark",
-    "domain.expiring", "domain.hold", "domain.hold_unknown", "domain.unmeasured",
-    "erasure.not_scrubbed", "gate.skips_uncovered", "host.reclaimable_lever", "identity.ambiguous",
-    "identity.unreadable", "interpretation.faults", "interpretation.halted", "interpretation.malformed",
-    "interpretation.unreasoned", "ledger.review_backlog", "ledger.review_expiring", "model.degraded",
-    "notify.channel_failing", "plugin.broken", "plugin.refused", "project.declared_alive_measured_dead",
-    "project.unobservable", "projection.lagging", "projection.uncommitted", "rollup.frozen_incomplete",
-    "scan.stale", "server.silent", "site.dead", "skill.stale_session",
-    "tick.step_failed", "wallet.shared_key", "wiki.broken_link", "work.unverifiable",
-    "work.unwitnessed",
-}
+NAMED_OUTSIDE_THE_PORTABLE_SET: set[str] = set()  # emptied in 0.20.0 (OBS-42): every rule is named by a portable suite
 
 
 def declared_types() -> set[str]:
@@ -766,7 +754,8 @@ def test_every_rule_has_evidence_of_some_kind() -> None:
             # The gap list names rules precisely BECAUSE no suite does; read
             # as evidence it would certify every rule it lists.
             start = txt.find("NAMED_OUTSIDE_THE_PORTABLE_SET = {")
-            txt = txt[:start] + txt[txt.find("}\n", start) + 2:]
+            if start >= 0:
+                txt = txt[:start] + txt[txt.find("}\n", start) + 2:]
         named |= {t for t in types if f'"{t}"' in txt or f"'{t}'" in txt}
     unmeasured = sorted(types - named - DRIVEN)
     # PORTED-DIVERGED: the portable runner copies only the registered suites

@@ -506,8 +506,9 @@ class SuiteSandbox(unittest.TestCase):
         self.assertIn("never runs against a real workspace", err)
 
     def test_a_temporary_home_handed_over_is_kept(self):
-        home = os.path.join(tempfile.mkdtemp(prefix="observatory-kept-"), "ws")
-        self.addCleanup(shutil.rmtree, os.path.dirname(home), True)
+        kept = tempfile.TemporaryDirectory(prefix="observatory-kept-", ignore_cleanup_errors=True)
+        self.addCleanup(kept.cleanup)
+        home = os.path.join(kept.name, "ws")
         got, err = self.run_tmp({"OBSERVATORY_HOME": home})
         self.assertEqual(os.path.realpath(got["OBSERVATORY_HOME"]), os.path.realpath(home))
         self.assertEqual(err, "")
@@ -876,7 +877,7 @@ class Pass(Base):
         self.assertEqual(code.first_check_delay, 90)
 
     def receipt(self, at, recent=True, silent=480):
-        raw = self.home / "store" / "raw"
+        raw = self.home / "store" / "raw"  # paths-check: allow — the receipt maintenance.live_clients reads under the workspace it is handed
         raw.mkdir(parents=True, exist_ok=True)
         (raw / "serverd.json").write_text(json.dumps({"at": M.iso(at), "silent_after_s": silent,
                                                       "clients": {"recent": recent, "window_s": 300}}))
@@ -1062,7 +1063,7 @@ class Pass(Base):
     def test_copy_database_makes_a_torn_copy_again_and_stops_at_a_missing_package(self):
         import sqlite3
         from store import compatibility
-        src = self.home / "store" / "observatory.db"
+        src = self.home / "store" / "observatory.db"  # paths-check: allow — the fixture workspace's own store, created by setUp under self.home
         real, calls = compatibility.verify_database, []
 
         def flaky(conn):
@@ -1290,8 +1291,9 @@ class Schedule(Base):
                                   text=True, timeout=30).stdout.strip()
         else:
             root = "/tmp"
-        work = Path(tempfile.mkdtemp(prefix="observatory-guard-", dir=root)).resolve()
-        self.addCleanup(shutil.rmtree, work, True)
+        guard = tempfile.TemporaryDirectory(prefix="observatory-guard-", dir=root, ignore_cleanup_errors=True)
+        self.addCleanup(guard.cleanup)
+        work = Path(guard.name).resolve()
         (work / "tmp").mkdir()
         probe = ("import sys, tempfile, maintenance\nfrom pathlib import Path\n"
                  "print(sys.stdin.isatty(), maintenance._real_home(), tempfile.gettempdir(),"

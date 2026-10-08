@@ -793,7 +793,16 @@ def credentials(project_id: str) -> dict:
             "effect": "managed slots are unknown, so a name absent below may still "
                       "exist"})
     else:
+        # EVERY FOLDER OF THE PROJECT (OBS-26): the registry's names, then any other vault
+        # folder the resolver maps to the same project — a folder named after the project's
+        # name was missing here while `use_secret names` listed it (vault_project.folders_of).
+        import vault_project
+        folders: list[str] = []
         for name in names:
+            for folder in [name, *vault_project.folders_of(name, root)]:
+                if folder not in folders:
+                    folders.append(folder)
+        for name in folders:
             vault = root / name
             if not vault.is_dir():
                 continue

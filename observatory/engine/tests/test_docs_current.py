@@ -112,11 +112,9 @@ def run(root: pathlib.Path) -> tuple[int, str]:
 #: file of the private workspace (`store/…`, `docs/dashboard/…`), which the
 #: checker resolves against the source tree, and the generated registry-shape
 #: document is not shipped. This is why `docs-current` is a source-only step.
-ENGINE_DOC_GAPS = (
-    "docs/COMPATIBILITY.md names store/scrub-watermark.json",
-    "docs/ONBOARDING.md names docs/dashboard/index.html",
-    "docs/REGISTRY_SHAPE.md is missing",
-)
+#: Emptied in 0.20.0 (OBS-42): the two workspace paths are declared as workspace files
+#: in tools/check_docs.py, and the shape rule binds only a tree that holds a registry.
+ENGINE_DOC_GAPS: tuple[str, ...] = ()
 
 
 def test_the_synthetic_documentation_is_current() -> None:
@@ -128,14 +126,9 @@ def test_the_synthetic_documentation_is_current() -> None:
 def test_the_engines_own_documents() -> None:
     code, out = run(ROOT)
     drifts = [line.strip()[2:] for line in out.splitlines() if line.strip().startswith("- ")]
-    unknown = [x for x in drifts if not x.startswith(ENGINE_DOC_GAPS)]
-    check("the engine's documents carry no drift beyond the known gaps", not unknown, str(unknown))
-    if code == 0:
-        check("and the checker passes on them", True)
-    elif not unknown:
-        print("  SKIP  KNOWN-GAP: the engine's shipped docs name workspace files that "
-              "tools/check_docs.py resolves against the source tree, and "
-              "docs/REGISTRY_SHAPE.md is not shipped — " + "; ".join(drifts))
+    unknown = [x for x in drifts if not x.startswith(ENGINE_DOC_GAPS)] if ENGINE_DOC_GAPS else drifts
+    check("the engine's documents carry no drift", not unknown, str(unknown))
+    check("and the checker passes on them", code == 0, out[-400:])
 
 
 def test_rule1_a_help_naming_a_missing_step_fails() -> None:

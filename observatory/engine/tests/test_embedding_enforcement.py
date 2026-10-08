@@ -21,7 +21,6 @@ import json
 import os
 import pathlib
 import sys
-import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -29,6 +28,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "agent"))
 sys.path.insert(0, str(ROOT / "tests"))
+import tmp as tmpdir  # noqa: E402
 
 #: Every temporary workspace this suite made, removed when the module finishes: they
 #: hold a store and a config each, and 279 were once left behind on a nearly full disk.
@@ -49,10 +49,10 @@ def fresh_workspace():
     """A store and a config directory of its own; every path-caching module reloaded."""
     # Resolved: on macOS the temp directory sits behind the /var symlink, and the
     # engine's atomic writer refuses a path through a symbolic link.
-    home = pathlib.Path(tempfile.mkdtemp(prefix="observatory-embed-")).resolve()
+    home = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-embed-")).resolve()
     _MADE.append(home)
     os.environ["OBSERVATORY_HOME"] = str(home)
-    os.environ["OBSERVATORY_DB"] = str(home / "store" / "observatory.db")
+    os.environ["OBSERVATORY_DB"] = str(home / "store" / "observatory.db")  # paths-check: allow — an isolated workspace's store, handed over as OBSERVATORY_DB; this IS the redirection
     # The sandbox may pin OBSERVATORY_STATE; the applied-revision record lives
     # there, and a test must not inherit the previous test's revision.
     os.environ["OBSERVATORY_STATE"] = str(home / "store")

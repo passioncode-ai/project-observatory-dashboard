@@ -500,7 +500,7 @@ def live_clients(base: Path, at: datetime.datetime) -> list[str]:
     store/logs/access.jsonl. A receipt older than the age the server itself calls silent
     is a server that is not running, and so has no client to interrupt."""
     reasons = []
-    receipt = base / "store" / "raw" / "serverd.json"
+    receipt = base / "store" / "raw" / "serverd.json"  # paths-check: allow — the receipt of the workspace `base` passed in, which need not be this process's paths.HOME; a test redirects it through `base`
     try:
         doc = json.loads(receipt.read_text(encoding="utf-8")) if receipt.is_file() and not receipt.is_symlink() else {}
     except (OSError, ValueError):

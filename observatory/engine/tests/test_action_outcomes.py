@@ -16,12 +16,12 @@ import json
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "tests"))
 import dashboard_fixture  # noqa: E402
+import tmp as tmpdir  # noqa: E402
 
 FAILS = []
 
@@ -67,7 +67,7 @@ def main() -> int:
     if node is None:
         print("  SKIP  node is not installed here, so the page cannot be executed")
         return 0
-    page = dashboard_fixture.build(Path(tempfile.mkdtemp(prefix="observatory-actions-")).resolve())
+    page = dashboard_fixture.build(Path(tmpdir.mkdtemp(prefix="observatory-actions-")).resolve())
     p = subprocess.run([node, str(ROOT / "tests/action_outcome_check.mjs"), str(page)],
                        cwd=ROOT, capture_output=True, text=True, timeout=120)
     r = json.loads(p.stdout or "{}")

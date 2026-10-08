@@ -31,7 +31,6 @@ import pathlib
 import shutil
 import stat
 import sys
-import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
@@ -40,6 +39,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "mcp"))
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
+import tmp as tmpdir  # noqa: E402
 
 _MADE: list[pathlib.Path] = []
 _CACHED = ("paths", "configuration", "survey", "store", "memory_access", "access_binding",
@@ -63,10 +64,10 @@ class Workspace:
     """A fresh workspace with its own store and config; the server module loaded on it."""
 
     def __init__(self) -> None:
-        self.home = pathlib.Path(tempfile.mkdtemp(prefix="observatory-access-")).resolve()
+        self.home = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-access-")).resolve()
         _MADE.append(self.home)
         os.environ["OBSERVATORY_HOME"] = str(self.home)
-        os.environ["OBSERVATORY_DB"] = str(self.home / "store" / "observatory.db")
+        os.environ["OBSERVATORY_DB"] = str(self.home / "store" / "observatory.db")  # paths-check: allow — an isolated workspace's store, handed over as OBSERVATORY_DB; this IS the redirection
         os.environ["OBSERVATORY_STATE"] = str(self.home / "store")
         (self.home / "store").mkdir(parents=True, exist_ok=True)
         for name in [k for k in list(sys.modules)

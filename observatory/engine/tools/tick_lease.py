@@ -519,6 +519,8 @@ def record_run(started: str, outcome: str, code: int | None, reason: str) -> Non
         import atomic
         paths.SCRATCH.mkdir(parents=True, exist_ok=True)
         atomic.write_json(paths.SCRATCH / "tick-run.json", doc)
+        import tick_health
+        tick_health.record(paths.SCRATCH, doc)
     except Exception as exc:                                                      # noqa: BLE001
         print(f"the tick-run receipt could not be written: {type(exc).__name__}: {exc}", file=sys.stderr)
 # endregion tick-watchdog

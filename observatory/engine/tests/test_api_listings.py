@@ -451,18 +451,13 @@ def test_the_path_check_catches_a_planted_bypass() -> None:
     """
     code, base, allowed, out = path_check()
     check("the checker ran and counted", base >= 0 and allowed >= 0, out[-300:])
-    if base:
-        # The engine's staging directories (workspace upgrade/restore, backup
-        # decryption, probe scratch) use `tempfile.mkdtemp` and are removed by
-        # their own code; the checker's rule was written for suites that leak
-        # their fixtures. The public profile does not run `paths-current`, so
-        # the tree is not held to zero here.
-        print(f"  SKIP  KNOWN-GAP: the engine tree is not clean under tools/check_paths.py "
-              f"({base} mkdtemp violation(s) outside tests' fixtures, in engine staging "
-              f"code and in suites added after export); paths-current is a source-only "
-              f"gate in the public profile")
-    else:
-        check("the repository is clean today", code == 0, out[-400:])
+    # HELD TO ZERO (OBS-42). The engine's own staging directories (workspace
+    # upgrade/restore, backup decryption, probe scratch, the update download)
+    # remove themselves and say so with a marker on the line; the suites use
+    # tests/tmp.mkdtemp. The public profile does not run `paths-current`, so this
+    # assertion is what keeps the tree clean there.
+    check("the engine tree is clean under tools/check_paths.py", code == 0 and base == 0,
+          out[-600:])
 
     # THE PROBE PAYLOADS BELOW CARRY THE MARKER, and the reason is the same one
     # the checker is built on: it keeps string literals deliberately, because
