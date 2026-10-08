@@ -827,6 +827,12 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
             # wait for the next pass, and the update's before-upgrade snapshot counts.
             state["snapshot"] = {"at": iso(at), "result": "before-upgrade"}
             report["next"] = "the next pass runs the new release"
+        elif update_running(base):
+            # AN ENGINE UPDATE IS RUNNING BESIDE THIS PASS (a person's `full update`, 2026-10-08):
+            # it snapshots the workspace, and the app step rewriting store/app-update under it
+            # rolled that update back. The app waits for the next pass; the snapshot defers itself.
+            report["app"] = {"result": "waiting-for-engine-update"}
+            report["snapshot"] = step_snapshot(base, state, at, services, sleep=sleep)  # defers itself
         else:
             if not auto_enabled(base):
                 # The switch covers the app too: off means no check, download or install.
@@ -860,6 +866,8 @@ def run_app_step(base: Path, *, at: datetime.datetime | None = None, app=None) -
     with pass_lock(base) as held:
         if not held:
             return {"status": "busy", "detail": "another maintenance pass holds the lock"}
+        if update_running(base):
+            return {"status": "ran", "at": iso(at), "app": {"result": "waiting-for-engine-update"}}
         state = read_state(base)
         try:
             import app_update
