@@ -205,4 +205,10 @@ macos/scripts/build-app.sh                 # dist/macos/Project Observatory.app,
 macos/scripts/install-app.sh --open        # into /Applications (or ~/Applications), then opens it
 ```
 
+The installed app keeps itself current. The engine's maintenance job downloads and verifies each
+new app and installs it while the app is not running; the app shows **Restart to update** in its
+menu and toolbar and, since 0.20.0, a `↑` badge on its Dock icon within 15 minutes of the update
+being ready. Left alone for 30 minutes with no window open, it restarts into the update by itself,
+and a quit installs it too ([SPEC, "Updates"](docs/macos/SPEC.md#native-screens-and-lifecycle)).
+
 On first launch it looks for the engine at `~/.local/bin/project-observatory`, then in the virtual environment from [Install](#install) (`~/.local/share/project-observatory-venv/bin/project-observatory`), then in `/opt/homebrew/bin` and `/usr/local/bin`, and uses the default workspace; anything else is chosen in **Settings** (the engine's absolute path and an initialized workspace). Details, the assistant's setup and its limits: [docs/macos/README.md](docs/macos/README.md).
