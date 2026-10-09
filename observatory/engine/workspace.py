@@ -214,6 +214,10 @@ def copy_private(source: Path, target: Path) -> int:
             return h.digest()
         if digest(source) != digest(target):
             raise config.ConfigurationError("Source changed during copy; retry after stopping writers")
+        # The file's own times travel with it: a restore that dated every file "now" moved the
+        # tick's freshness gates (`find -mmin`) by the time since the snapshot (0.20.1).
+        st = source.stat()
+        os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns))
     except BaseException:
         target.unlink(missing_ok=True)
         raise

@@ -16,6 +16,7 @@ import hashlib
 import http.client
 import importlib
 import json
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import plistlib
@@ -290,6 +291,21 @@ class Health(Sandbox):
              "features": {"scheduler": False}}))
         rows = {d["source"]: d["reason"] for d in self.snapshot()["degraded"]}
         self.assertTrue(rows["collector:model"].startswith("3 source(s)"), rows)
+
+    def test_ticks_that_keep_failing_degrade_the_card_too(self):
+        # 0.20.0 raised the 3-of-10 alert only in the MCP survey; the card read the verdict alone.
+        import tick_health
+        raw = self.home / "store/raw"
+        now = datetime.now(timezone.utc)
+        (raw / "tick-lease.json").write_text(json.dumps({"last_acquired_at": (now - timedelta(minutes=40)).strftime("%Y-%m-%dT%H:%M:%SZ")}))
+        (raw / "tick.json").write_text(json.dumps({"finished_at": (now - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")}))
+        for outcome in ["timeout"] * 3 + ["finished"] * 7:
+            tick_health.record(raw, {"outcome": outcome})
+        (self.home / "config/settings.json").write_text(json.dumps(
+            {"schema_version": 1, "sources": {}, "integrations": {}, "features": {"scheduler": True}}))
+        rows = {d["source"]: d["reason"] for d in self.snapshot()["degraded"]}
+        self.assertIn("tick-history", rows)
+        self.assertTrue(rows["tick-history"].startswith("3 of the last 10 ticks did not finish"))
 
     def test_a_lost_projects_receipt_follows_the_sessions_switch(self):
         raw = self.home / "store/raw"

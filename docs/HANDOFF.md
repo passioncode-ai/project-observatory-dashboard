@@ -60,14 +60,15 @@ This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
 
+**2026-10-09, releases 0.19.4, 0.20.0 and 0.20.1:** 0.19.4 closed two races found installing 0.19.3 by hand (the hourly pass's app step beside an engine update; a job loaded again mid-update kept the old code). 0.20.0: the Mac app notices a staged update within 15 minutes and badges its Dock icon; Health and doctor count the recent ticks that did not finish; `observatory_credentials` lists every vault folder (OBS-26); `tools/refresh_lock.py` (OBS-17); `mcp` 2.3.0 with the HTTP transport re-measured; skipped tests run (OBS-42). 0.20.1, from a final audit of the live machine: no tick had finished for 13 hours because the tail's optional steps used the last of the time — they now leave the core (findings to registry) two minutes; Health names a ceiling stop as one and raises the 3-of-10 alert on the card and in doctor; a restore keeps file times; a person's update is recorded; the CHANGELOG's lost 0.19.3 heading is back and a test keeps the headings whole. Receipt: [runs/2026-10-09-releases-0.20](runs/2026-10-09-releases-0.20/README.md).
+
 **2026-10-08, release 0.19.3:** four defects a tester found on a workspace with every integration off (OBS-46–49): jobs on the engine's own interpreter (and repaired in place), switched-off sources no longer degrade Health, `lost` follows the sessions switch, suggested products validate. 0.19.2 was tagged and not published; 0.19.3 carries it. Receipt: [runs/2026-10-08-releases-0.19](runs/2026-10-08-releases-0.19/README.md).
 
 **2026-10-08, releases 0.18.0–0.19.2:** signed updates (0.18.0), one update behaviour and a Mac
 app that updates itself, in the system language (0.19.0), an update that no longer fails while
 agents write (0.19.1), and four defects found on a working machine plus a documentation pass
 against the code (0.19.2). Receipt: [runs/2026-10-08-releases-0.19](runs/2026-10-08-releases-0.19/README.md).
-Open from this run: the rest of OBS-40 (Health naming incomplete ticks; incremental `google` and
-`machine` collectors).
+Open from this run: nothing of OBS-40 is left but OBS-52 (the step deadline in the agent, leak-scan and git-hygiene steps; incremental `google` and `machine` collectors).
 
 **2026-10-05, releases 0.17.0–0.17.3 (published; the engine installed itself at 0.17.3):**
 updates that install themselves, data that survives a reinstall, then three patches from the

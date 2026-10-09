@@ -1008,6 +1008,15 @@ class Pass(Base):
         self.assertEqual(report["update"]["result"], "up-to-date")
         self.assertEqual(M.read_state(self.home)["update"]["result"], "resolved-by-person")
 
+    def test_an_engine_a_person_updated_is_recorded_as_the_current_version(self):
+        # 2026-10-09: after a person's `full update` to 0.20.0, doctor and the record still
+        # said "updated 0.19.3 -> 0.19.4", the last AUTOMATIC update, beside engine 0.20.0.
+        M.write_state(self.home, {"update": {"result": "updated", "from": "0.0.1", "to": "0.0.2",
+                                             "at": "2026-10-01T00:00:00Z", "exit": 0}})
+        self.run_pass(FakeCommands(check=0))
+        rec = M.read_state(self.home)["update"]
+        self.assertEqual((rec["result"], rec["from"], rec["to"]), ("updated-by-person", "0.0.2", M.config.VERSION))
+
     def test_an_update_already_running_is_never_joined(self):
         import engine_update
         with engine_update.update_lock(self.home):

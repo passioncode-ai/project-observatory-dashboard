@@ -79,6 +79,8 @@ def health(state: Path, scratch: Path, *, scheduler_enabled: bool = True,
     out = {"last_started": started and started.strftime("%Y-%m-%dT%H:%M:%SZ"),
            "last_finished": finished and finished.strftime("%Y-%m-%dT%H:%M:%SZ"),
            "recent": recent(scratch)}
+    if scheduler_enabled and out["recent"]["incomplete"] >= INCOMPLETE_ALERT:
+        out["history_warning"] = history_sentence(out["recent"])
     if not scheduler_enabled:
         return {**out, "verdict": "disabled", "why": "features.scheduler is off in this workspace"}
     if lock_held(state / "tick.lock"):
@@ -89,9 +91,16 @@ def health(state: Path, scratch: Path, *, scheduler_enabled: bool = True,
     if not started and not finished:
         return {**out, "verdict": "never", "why": "no tick has run in this workspace"}
     if started and (not finished or finished < started):
-        return {**out, "verdict": "interrupted",
-                "why": f"the tick that started at {out['last_started']} never finished and holds no lock: "
-                       "it was killed (a restart, a sleep, a signal); its report is from the tick before"}
+        # The supervisor outlives the tick and records how it ended (`tick-run.json`): a stop at
+        # the ceiling was reported as "killed (a restart, a sleep, a signal)" until 0.20.1.
+        run = _run_record(scratch)
+        if run and run.get("outcome") in ("timeout", "failed", "interrupted") and _same_tick(run, started):
+            why = (f"the tick that started at {out['last_started']} did not finish: "
+                   f"{run.get('reason') or run['outcome']}; its report is from the tick before")
+        else:
+            why = (f"the tick that started at {out['last_started']} never finished and holds no lock: "
+                   "it was killed (a restart, a sleep, a signal); its report is from the tick before")
+        return {**out, "verdict": "interrupted", "why": why}
     if finished and now - finished > STALE_AFTER:
         return {**out, "verdict": "stale",
                 "why": f"no tick has finished since {out['last_finished']}; is the scheduler installed and loaded?"}
@@ -138,16 +147,37 @@ def recent(scratch: Path, last: int = RECENT_RUNS) -> dict:
     return {"runs": runs, "incomplete": runs - outcomes.get("finished", 0), "outcomes": outcomes}
 
 
+def history_sentence(r: dict) -> str:
+    how = ", ".join(f"{k}: {v}" for k, v in sorted(r["outcomes"].items()) if k != "finished")
+    return (f"{r['incomplete']} of the last {r['runs']} ticks did not finish ({how}); the registry, "
+            f"findings and dashboard may lag behind the estate — `store/logs/tick.log` names the slow steps")
+
+
+def _run_record(scratch: Path) -> dict | None:
+    try:
+        doc = json.loads((scratch / "tick-run.json").read_text(encoding="utf-8"))
+        return doc if isinstance(doc, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _same_tick(run: dict, started: datetime) -> bool:
+    """The supervisor's record is of the tick the lease names: it began at most a minute
+    before the lease was taken (the supervisor starts first) and ended after it."""
+    try:
+        began = datetime.strptime(run["started_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        ended = datetime.strptime(run["ended_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (KeyError, TypeError, ValueError):
+        return False
+    return began <= started + timedelta(seconds=5) and started - began <= timedelta(minutes=2) and ended >= started
+
+
 def degraded(state: Path, scratch: Path, *, scheduler_enabled: bool = True) -> list[dict]:
     """A `degraded` entry when the data may be older than it looks, else []."""
     h = health(state, scratch, scheduler_enabled=scheduler_enabled)
     out = []
     if h["verdict"] in ("interrupted", "stale", "running-long"):
         out.append({"source": "tick", "reason": f"{h['verdict']}: {h['why']}"})
-    r = h.get("recent") or {}
-    if scheduler_enabled and r.get("incomplete", 0) >= INCOMPLETE_ALERT:
-        how = ", ".join(f"{k}: {v}" for k, v in sorted(r["outcomes"].items()) if k != "finished")
-        out.append({"source": "tick-history", "reason": (
-            f"{r['incomplete']} of the last {r['runs']} ticks did not finish ({how}); the registry, "
-            f"findings and dashboard may lag behind the estate — `store/logs/tick.log` names the slow steps")})
+    if h.get("history_warning"):
+        out.append({"source": "tick-history", "reason": h["history_warning"]})
     return out

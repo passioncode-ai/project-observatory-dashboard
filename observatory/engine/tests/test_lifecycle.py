@@ -308,6 +308,33 @@ class EveryStepHasAWatchdog(Workspace):
         self.assertEqual(self.tl.bounded("findings", ["/bin/bash", "-c", f"touch '{tail}'"], limit=60), 0)
         self.assertTrue(tail.exists())
 
+    # 2026-10-08/09: with the collectors held back, `plugins` (142 s) and `agent` (model
+    # calls) still used the last of the time, and findings and the dashboard did not run on
+    # 14 ticks in a row. The tail's optional steps leave the core its own reserve.
+    def test_the_tail_splits_into_optional_steps_and_the_core(self):
+        self.assertEqual(self.tl.SOFT_TAIL_STEPS | self.tl.CORE_TAIL_STEPS, self.tl.TAIL_STEPS)
+        self.assertFalse(self.tl.SOFT_TAIL_STEPS & self.tl.CORE_TAIL_STEPS)
+        for core in ("findings", "dashboard", "notify", "registry", "merge", "emit"):
+            self.assertIn(core, self.tl.CORE_TAIL_STEPS)
+        for soft in ("agent", "plugins", "index"):
+            self.assertIn(soft, self.tl.SOFT_TAIL_STEPS)
+        self.assertLess(self.tl.core_reserve_seconds(), self.tl.tail_reserve_seconds())
+
+    def test_a_slow_optional_step_leaves_findings_and_the_dashboard_their_time(self):
+        core = self.tl.core_reserve_seconds()
+        os.environ["OBSERVATORY_TICK_DEADLINE"] = str(time.time() + core + 2)
+        started = time.monotonic()
+        self.assertEqual(self.tl.bounded("agent", ["/bin/bash", "-c", "exec sleep 30"], limit=600, grace=1),
+                         self.tl.TIMED_OUT)
+        self.assertLess(time.monotonic() - started, 10, "an optional tail step ate the core's reserve")
+        os.environ["OBSERVATORY_TICK_DEADLINE"] = str(time.time() + core - 1)
+        agent, findings = self.base / "agent", self.base / "findings"
+        self.assertEqual(self.tl.bounded("agent", ["/bin/bash", "-c", f"touch '{agent}'"], limit=60),
+                         self.tl.TIMED_OUT)
+        self.assertFalse(agent.exists())
+        self.assertEqual(self.tl.bounded("findings", ["/bin/bash", "-c", f"touch '{findings}'"], limit=60), 0)
+        self.assertTrue(findings.exists())
+
     def test_the_reserve_fits_a_short_interval(self):
         os.environ["OBSERVATORY_TICK_CEILING_SECONDS"] = "100"
         self.assertLessEqual(self.tl.tail_reserve_seconds(), 20)
