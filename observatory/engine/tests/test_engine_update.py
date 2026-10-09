@@ -657,12 +657,12 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(self.events()[-1], ("update_check", "check_failed"))
 
     def test_an_unattended_update_never_stops_a_running_tick(self):
-        import fcntl
+        import oslocks
         self.gh.publish(NEWER)
         before = self.tree()
         fd = os.open(self.home / "store" / "tick.lock", os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
             code, doc = self.run_cli("--apply", "--unattended")
         finally:
             os.close(fd)

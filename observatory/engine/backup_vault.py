@@ -33,7 +33,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import datetime
-import fcntl
+import oslocks
 import hashlib
 import io
 import json
@@ -359,7 +359,7 @@ def _passphrase_lock(base: Path):
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(folder / ".passphrase.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        oslocks.flock(fd, oslocks.LOCK_EX)
         yield
     finally:
         os.close(fd)

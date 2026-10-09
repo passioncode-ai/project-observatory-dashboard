@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime
-import fcntl
+import oslocks
 import hashlib
 import importlib.metadata
 import json
@@ -52,7 +52,7 @@ def lock(base: Path):
     try:
         os.fchmod(fd, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
         except BlockingIOError:
             raise config.ConfigurationError("Another workspace operation is running") from None
         yield

@@ -28,7 +28,7 @@ no credentials are accepted as arguments.
 """
 from __future__ import annotations
 import errno
-import fcntl
+import oslocks
 import json
 import os
 import re
@@ -93,10 +93,10 @@ def _locked(job_id: str) -> Iterator[None]:
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(directory / f"{job_id}.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        oslocks.flock(fd, oslocks.LOCK_EX)
         yield
     finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        oslocks.flock(fd, oslocks.LOCK_UN)
         os.close(fd)
 
 

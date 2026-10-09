@@ -22,7 +22,7 @@ and says so in its log; nothing else is affected.
 """
 from __future__ import annotations
 
-import fcntl
+import oslocks
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -58,13 +58,13 @@ def lock_held(lock: Path) -> bool:
     except OSError:
         return False
     try:
-        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        oslocks.flock(fd, oslocks.LOCK_SH | oslocks.LOCK_NB)
     except BlockingIOError:
         return True
     except OSError:
         return False
     else:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        oslocks.flock(fd, oslocks.LOCK_UN)
         return False
     finally:
         os.close(fd)

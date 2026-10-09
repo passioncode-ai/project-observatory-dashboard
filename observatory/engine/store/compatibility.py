@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-import fcntl
+import oslocks
 import os
 from pathlib import Path
 import sqlite3
@@ -97,7 +97,7 @@ def upgrade_lock(target: Path, timeout: float = 30):
         deadline = time.monotonic() + timeout
         while True:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
@@ -105,7 +105,7 @@ def upgrade_lock(target: Path, timeout: float = 30):
                 time.sleep(0.05)
         yield
     finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        oslocks.flock(fd, oslocks.LOCK_UN)
         os.close(fd)
 
 

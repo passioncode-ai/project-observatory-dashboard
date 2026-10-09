@@ -1,7 +1,7 @@
 """Owner-only atomic credential files and a narrowly validated legacy alias."""
 from __future__ import annotations
 import contextlib
-import fcntl
+import oslocks
 import os
 from pathlib import Path
 import re
@@ -70,6 +70,6 @@ def lock(path: Path):
     fd=os.open(path,os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK,0o600)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):raise RuntimeError('Private lock must be regular')
-        os.fchmod(fd,0o600);fcntl.flock(fd,fcntl.LOCK_EX)
+        os.fchmod(fd,0o600);oslocks.flock(fd,oslocks.LOCK_EX)
         yield
     finally:os.close(fd)

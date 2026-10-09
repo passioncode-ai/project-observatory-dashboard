@@ -384,10 +384,10 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertTrue((self.home/upgrade.JOURNAL).exists())
 
     def test_tick_lock_refuses_backup(self):
-        import fcntl
+        import oslocks
         fd=os.open(self.home/'store/tick.lock',os.O_RDWR|os.O_CREAT,0o600)
         try:
-            fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            oslocks.flock(fd,oslocks.LOCK_EX|oslocks.LOCK_NB)
             with self.assertRaises(config.ConfigurationError):
                 self.snapshot()
         finally:
