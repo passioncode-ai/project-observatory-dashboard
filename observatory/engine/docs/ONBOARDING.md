@@ -99,11 +99,15 @@ for connecting scripts, hooks and MCP.
 
 `full doctor` also reports whether the scheduled tick is alive (`tick.verdict`): `disabled` while
 `features.scheduler` is off (the default), `never` before the first tick, `running` during one and
-`ok` after a recent one. A tick that was killed mid-run, for example by a restart, is `interrupted`.
-When no tick has finished for six hours the verdict is `stale`, and when one has held the lock for
-longer than that it is `running-long`.
-The dashboard server's `/health` and every MCP answer's `degraded` list say the same. Its findings
-cannot: they are built by the tick itself, so a dead tick leaves the last report looking current.
+`ok` after a recent one. A tick that did not finish is `interrupted`, and the reason says how it
+ended — stopped at its ceiling (from the supervisor's record) or killed by a restart, a sleep or a
+signal. When no tick has finished for six hours the verdict is `stale`, and when one has held the
+lock for longer than that it is `running-long`. `tick.recent` counts how the last 10 runs ended
+(`store/raw/tick-runs.jsonl` keeps 50); when 3 or more did not finish, `tick.history_warning` says
+so even if the last one did.
+The dashboard server's `/health`, the service card and every MCP answer's `degraded` list say the
+same (`tick` and `tick-history` rows). Its findings cannot: they are built by the tick itself, so a
+dead tick leaves the last report looking current.
 
 The old 0.1 commands remain available without `full`. They use their previous
 workspace format and previous default home. Do not combine the two formats.
@@ -468,8 +472,17 @@ both installers above again.
 The tick is bounded: every step runs in its own process group under a wall-clock
 limit (15 minutes, 20 for the leak scan), the whole tick stops at a 25-minute
 ceiling below its 30-minute interval, and `store/raw/tick-run.json` records each
-run's start, end, outcome and reason. A stopped step is a failed step in the log
-and on the board, never a hung tick.
+run's start, end, outcome and reason (`store/raw/tick-runs.jsonl` the last 50). A
+stopped step is a failed step in the log and on the board, never a hung tick.
+
+The ceiling is shared out so the tick always ends with fresh findings and a fresh
+dashboard: the collectors stop 5 minutes before it (at most a fifth of the
+ceiling), the tail's optional steps — plugins, rollup, the agent, the vector index,
+retention and review — stop 2 minutes before it (at most a twelfth), and the core
+from `findings` to the registry commit uses what is left. A step that did not run
+leaves the previous run's output in place. Each step is told its own deadline in
+`OBSERVATORY_STEP_DEADLINE` (epoch seconds); the folder scan uses it to write what
+it measured and carry each folder it did not reach, marked `carried_from`.
 
 ### Memory embeddings leave the machine only by your consent
 

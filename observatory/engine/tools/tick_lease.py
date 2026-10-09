@@ -403,9 +403,23 @@ TAIL_STEPS = frozenset({
     "dashboard", "smoke", "findings-recheck", "notify", "registry", "project-into-vault",
     "projection", "links", "logs",
 })
+#: THE TAIL'S OWN SPLIT (0.20.1). Its optional steps — plugins, the agent's model calls,
+#: the vector index, retention and the review machinery — ran before the findings and the
+#: dashboard and could still use the last of the time: 14 ticks in a row on 2026-10-08/09
+#: reached the ceiling inside `plugins` (142 s) and `agent`, and the board stood still for
+#: 13 hours. An optional step leaves the core `core_reserve_seconds()`; skipped, its output
+#: is the previous tick's, which the core reads as it reads any older receipt.
+CORE_TAIL_STEPS = frozenset({
+    "merge", "emit", "validate", "events", "snapshot", "diff", "findings", "dashboard",
+    "smoke", "findings-recheck", "notify", "registry", "project-into-vault", "projection",
+    "links", "logs",
+})
+SOFT_TAIL_STEPS = TAIL_STEPS - CORE_TAIL_STEPS
 #: The tail took 106 s on a quiet machine (2026-10-07, `rollup` to `tick done`);
 #: 300 s leaves it room under load. A fifth of the ceiling for a short interval.
 TAIL_RESERVE_SECONDS = 300
+#: From `findings` to `tick done`: 20 s on a quiet machine (2026-10-07); 120 s under load.
+CORE_RESERVE_SECONDS = 120
 
 
 def ceiling_seconds() -> float:
@@ -420,6 +434,11 @@ def ceiling_seconds() -> float:
 def tail_reserve_seconds() -> float:
     """Seconds before the tick's ceiling that collectors leave to the tail."""
     return min(float(TAIL_RESERVE_SECONDS), ceiling_seconds() / 5)
+
+
+def core_reserve_seconds() -> float:
+    """Seconds before the ceiling that the tail's optional steps leave to its core."""
+    return min(float(CORE_RESERVE_SECONDS), ceiling_seconds() / 12)
 
 
 def _step_marker() -> pathlib.Path:
@@ -458,7 +477,8 @@ def bounded(name: str, command: list[str], *, limit: float | None = None,
     A collector — any step not in TAIL_STEPS — also leaves the tail its reserve,
     and every step is told the moment its watchdog fires (`STEP_DEADLINE_ENV`)."""
     limit = float(STEP_SECONDS.get(name, DEFAULT_STEP_SECONDS) if limit is None else limit)
-    reserve = 0.0 if name in TAIL_STEPS else tail_reserve_seconds()
+    reserve = (0.0 if name in CORE_TAIL_STEPS else core_reserve_seconds() if name in SOFT_TAIL_STEPS
+               else tail_reserve_seconds())
     deadline = os.environ.get(DEADLINE_ENV, "").strip()
     if deadline:
         try:
@@ -468,7 +488,7 @@ def bounded(name: str, command: list[str], *, limit: float | None = None,
     if limit <= 0:
         print("not started — the tick's ceiling has been reached" if not reserve else
               f"not started — the last {reserve:.0f} s before the tick's ceiling are kept for "
-              f"the registry, the findings and the dashboard", flush=True)
+              f"the registry, the findings and the dashboard; the previous run's output stands", flush=True)
         return TIMED_OUT
     marker = _step_marker()
     env = {**os.environ, STEP_DEADLINE_ENV: f"{time.time() + limit:.0f}"}

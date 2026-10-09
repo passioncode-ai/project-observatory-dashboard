@@ -563,6 +563,12 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
         # needed them, so the automatic attempts resume (review F3).
         state["update"] = {**last, "result": "resolved-by-person", "resolved_at": iso(at)}
         last = state["update"]
+    if (str(last.get("result") or "").startswith("updated") and last.get("to")
+            and last.get("to") != config.VERSION and _engine_moved_past(last.get("to"))):
+        # A person's `full update` moved the engine past the last automatic one; the record
+        # said "updated to <that one>" beside the newer engine (0.20.1).
+        state["update"] = last = {"at": iso(at), "result": "updated-by-person",
+                                  "from": last.get("to"), "to": config.VERSION}
     if last.get("result") == "held" and _engine_moved_past(last.get("to")):
         # The person did the step and installed the held release (or a later one).
         state["update"] = {**last, "result": "resolved-by-person", "resolved_at": iso(at)}

@@ -111,6 +111,26 @@ class TickHealth(unittest.TestCase):
         self.assertEqual(T.health(self.state, self.raw)["recent"]["incomplete"], 2)
         self.assertEqual(T.degraded(self.state, self.raw), [])
 
+    def test_an_interrupted_tick_the_supervisor_stopped_says_so(self):
+        # 2026-10-09: Health said "it was killed (a restart, a sleep, a signal)" for ticks the
+        # supervisor had stopped at the ceiling, and recorded so in tick-run.json.
+        self.receipts(NOW - timedelta(minutes=30), NOW - timedelta(hours=12))
+        (self.raw / "tick-run.json").write_text(json.dumps({
+            "started_at": z(NOW - timedelta(minutes=30, seconds=4)), "ended_at": z(NOW - timedelta(minutes=5)),
+            "outcome": "timeout", "exit": 124, "reason": "the tick reached its 1500 s ceiling and was stopped"}))
+        h = T.health(self.state, self.raw, now=NOW)
+        self.assertEqual(h["verdict"], "interrupted")
+        self.assertIn("1500 s ceiling", h["why"])
+        self.assertNotIn("a restart, a sleep", h["why"])
+
+    def test_the_history_warning_travels_with_the_health_answer(self):
+        self.receipts(NOW - timedelta(minutes=40), NOW - timedelta(minutes=10))
+        self.runs(*(["timeout"] * 4 + ["finished"] * 6))
+        h = T.health(self.state, self.raw, now=NOW)
+        self.assertTrue(h["history_warning"].startswith("4 of the last 10 ticks did not finish"))
+        self.runs(*(["finished"] * 10))
+        self.assertNotIn("history_warning", T.health(self.state, self.raw, now=NOW))
+
     def test_the_history_keeps_the_last_fifty_runs(self):
         self.runs(*(["finished"] * 60))
         lines = (self.raw / T.RUNS_FILE).read_text().splitlines()

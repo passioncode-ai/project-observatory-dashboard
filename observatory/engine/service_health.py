@@ -167,6 +167,10 @@ def snapshot(leaks: dict, *, extra_degraded: list[dict] | None = None,
     elif tick.get("verdict") == "unknown":
         degraded.append({"source": "tick", "reason": _clip(f"tick health unknown: {tick.get('why')}",
                                                            REASON_LIMIT)})
+    if tick.get("history_warning"):
+        # Ticks that keep stopping at their ceiling while the last one happened to finish:
+        # the same alert the MCP survey raises, on the card (0.20.1).
+        degraded.append({"source": "tick-history", "reason": _clip(tick["history_warning"], REASON_LIMIT)})
 
     projects, why = CACHE.load(paths.REGISTRY / "projects.json")
     if why:

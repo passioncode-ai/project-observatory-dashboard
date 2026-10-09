@@ -5,6 +5,37 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.20.1 — 2026-10-09
+
+A patch release from a read-only audit of 0.20.0 running on a working machine. The companion plugin
+`observatory-log` moves to 0.20.1.
+
+### Fixed
+
+- **Findings and the dashboard run again on a slow machine.** No tick had finished for 13 hours:
+  with the collectors held back, the tail's optional steps — plugins, rollup, the agent's model
+  calls, the vector index, retention and review — still ran before the findings and the dashboard
+  and used the last of the ceiling (14 ticks in a row ended inside `plugins` and `agent`). They now
+  stop two minutes before the ceiling (at most a twelfth of it), leaving the core — from the merge
+  to the findings, the dashboard, the notice and the registry commit — its time; a step that did
+  not run leaves the previous run's output.
+- **Health says why a tick did not finish.** A tick the supervisor stopped at its ceiling was
+  reported as "killed (a restart, a sleep, a signal)"; the supervisor's own record is read now.
+- **The 3-of-10 unfinished-ticks alert reaches the service card and `doctor`**, not only the MCP
+  survey (`tick.history_warning`).
+- **A restored workspace keeps its files' times.** A rollback dated every file at the restore,
+  and the tick's daily refreshes slipped by the time since the snapshot.
+- **The maintenance record follows a person's update.** After a manual `full update` it still
+  named the last automatic one beside the newer engine; it now records `updated-by-person`.
+- **The changelog's 0.19.3 section has its heading back** — 0.19.4's version bump had overwritten
+  it — and a test now refuses a gap or a repeat among a minor version's headings.
+
+### Documentation
+
+- The README says how the Mac app keeps itself current; the onboarding guide describes how the
+  tick's ceiling is shared out and what `tick.recent` and `tick.history_warning` mean; `AGENTS.md`
+  states the app's 15-minute check.
+
 ## 0.20.0 — 2026-10-08
 
 A minor release, and it **changes behaviour**: the Mac app shows a waiting update sooner and
@@ -60,6 +91,8 @@ update rolled back safely, and a second try installed it.
   it had started with. A job found loaded is now restarted (`launchctl kickstart -k`).
 
 
+
+## 0.19.3 — 2026-10-08
 
 A patch release: four defects a tester found in 0.19.1 on a workspace with only the projects
 source on and every integration off — the service card stayed yellow and no daily backup was

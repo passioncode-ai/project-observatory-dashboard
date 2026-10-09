@@ -34,6 +34,18 @@ class VersionConsistency(unittest.TestCase):
         version = found("pyproject.toml", r'^version = "([\d.]+)"')
         self.assertRegex((ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), rf"(?m)^## {re.escape(version)} ")
 
+    def test_no_release_heading_was_overwritten(self):
+        # 0.19.4's version bump replaced the `## 0.19.3` line instead of adding one above it,
+        # and 0.19.3's notes sat under 0.19.4 unnoticed: within a minor version the patch
+        # headings run without a gap and without a repeat.
+        import collections
+        heads = re.findall(r"(?m)^## (\d+)\.(\d+)\.(\d+) ", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"))
+        by = collections.defaultdict(list)
+        for major, minor, patch in heads:
+            by[(int(major), int(minor))].append(int(patch))
+        for minor, patches in by.items():
+            self.assertEqual(sorted(patches), list(range(min(patches), max(patches) + 1)), minor)
+
 
 if __name__ == "__main__":
     unittest.main()

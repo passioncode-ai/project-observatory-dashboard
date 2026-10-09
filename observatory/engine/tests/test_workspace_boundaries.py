@@ -133,6 +133,18 @@ class WorkspaceBoundaryTests(unittest.TestCase):
         self.assertEqual(list(self.root.glob(".new.migration-*")), [])
         self.assertEqual(connection.execute("SELECT COUNT(*) FROM fixture").fetchone()[0], 2)
 
+    def test_a_copy_keeps_each_files_modification_time(self):
+        # 2026-10-08: a rolled-back update restored the workspace with every file dated at the
+        # restore, and the tick's daily refreshes (`find -mmin` in tick.sh) slipped by half a day.
+        src = self.root / "src" / "store" / "raw"  # paths-check: allow — a synthetic workspace tree the copy is driven over
+        src.mkdir(parents=True)
+        (src / "heroku.json").write_text("{}")
+        old = 1_700_000_000
+        os.utime(src / "heroku.json", (old, old))
+        workspace.copy_private(self.root / "src", self.root / "copied")
+        self.assertEqual(int((self.root / "copied/store/raw/heroku.json").stat().st_mtime), old)
+        self.assertEqual((self.root / "copied/store/raw/heroku.json").stat().st_mode & 0o777, 0o600)
+
     def test_copy_refuses_dangling_symlinks(self):
         linked = self.root / "dangling"
         linked.symlink_to(self.root / "missing")
