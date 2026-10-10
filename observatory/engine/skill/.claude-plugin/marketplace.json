@@ -12,7 +12,7 @@
       "source": "./plugins/observatory-log",
       "displayName": "Observatory Log",
       "description": "Records what changed in a watched project at the end of every turn, and asks for the one thing a diff cannot contain: why.",
-      "version": "0.20.1",
+      "version": "0.21.0",
       "license": "AGPL-3.0-only OR LicenseRef-PassionCode-Commercial",
       "author": {
         "name": "PassionCode.ai",
