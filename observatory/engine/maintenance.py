@@ -1114,8 +1114,50 @@ class SystemdSchedule:
         return {"kind": self.kind, "unit": f"{self.name}.timer", "installed": self.installed(), "active": active}
 
 
+class TaskSchedulerSchedule:
+    """A per-user Windows task: hourly, and 90 seconds after logon (LC-16), never a managed job;
+    the same pass the launchd agent and the systemd timer run, through `osschedule`."""
+
+    kind = "task-scheduler"
+
+    def __init__(self, base: Path, runner=None):
+        import osschedule
+        self.base = base
+        python = _install_launchd().stable_interpreter(engine_python())
+        job = osschedule.Job(
+            name="maintain", workspace=base,
+            argv=(python, str(config.SOURCE / "tools" / "maintain.py"), "run"),
+            env=(("OBSERVATORY_HOME", str(base)), ("OBSERVATORY_PYTHON", python), ("OBSERVATORY_SYSTEM_SETUP", "1")),
+            cwd=config.SOURCE, stdout=base / "store" / "logs" / "maintain.log", stderr=base / "store" / "logs" / "maintain.err",
+            interval_seconds=INTERVAL_SECONDS, at_login=True, first_delay_seconds=FIRST_CHECK_DELAY,
+            # The pass is short; an update it starts runs in a process of its own, which ending
+            # the task does not stop.
+            time_limit_seconds=INTERVAL_SECONDS - 60)
+        self.job = osschedule.TaskSchedulerJob(job, **({"runner": runner} if runner else {}))
+
+    def installed(self) -> bool:
+        return self.job.installed()
+
+    def install(self) -> dict:
+        import osschedule
+        try:
+            return self.job.install()
+        except osschedule.ScheduleError as exc:
+            raise config.ConfigurationError(str(exc)) from None
+
+    def uninstall(self) -> dict:
+        return self.job.uninstall()
+
+    def status(self) -> dict:
+        return self.job.status()
+
+
 def schedule_for(base: Path):
-    return LaunchdSchedule(base) if sys.platform == "darwin" else SystemdSchedule(base)
+    if sys.platform == "darwin":
+        return LaunchdSchedule(base)
+    if sys.platform == "win32":
+        return TaskSchedulerSchedule(base)
+    return SystemdSchedule(base)
 
 
 def ensure(base: Path, *, schedule=None, store=None, explicit: bool = False) -> dict:

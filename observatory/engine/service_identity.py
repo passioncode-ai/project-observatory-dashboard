@@ -259,10 +259,12 @@ def manifest_path() -> Path:
 
 
 def descriptor(port: int, *, label: str | None = None, plist: Path | None = None,
-               installed_by: str | None = None) -> dict:
-    """The installation record a host reads. launchd when a label is given, else `none`."""
-    lifecycle: dict = ({"manager": "launchd", "label": label, "plist": str(plist)}
-                       if label else {"manager": "none"})
+               installed_by: str | None = None, supervisor: dict | None = None) -> dict:
+    """The installation record a host reads. launchd when a label is given; `supervisor` names
+    another system's (`{"manager": "task-scheduler", "task": …}` or `{"manager": "systemd",
+    "unit": …}`, fabric-service DEC-0032); else `none`."""
+    lifecycle: dict = (dict(supervisor) if supervisor else
+                       {"manager": "launchd", "label": label, "plist": str(plist)} if label else {"manager": "none"})
     doc = {
         "protocol": fs.PROTOCOL,
         "id": SERVICE_ID,

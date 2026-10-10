@@ -204,6 +204,21 @@ jobs:
           OBSERVATORY_HOME="$ws" OBSERVATORY_SYSTEM_SETUP=0 python observatory/engine/tools/tick.py | tee "$RUNNER_TEMP/tick.log"
           grep -q " tick done$" "$RUNNER_TEMP/tick.log"
           python -c "import json, sys; d = json.load(open(sys.argv[1], encoding='utf-8')); print(d); sys.exit(1 if d['failed_steps'] else 0)" "$ws/store/raw/tick.json"
+      - id: jobs
+        name: The server and the tick under Task Scheduler (W4b)
+        continue-on-error: true
+        run: |
+          ws="$RUNNER_TEMP/jobs-ws"
+          project-observatory --home "$ws" full init
+          project-observatory --home "$ws" full configure features scheduler true
+          export OBSERVATORY_HOME="$ws"
+          python observatory/engine/tools/serverd.py --install
+          python -c "import json, sys, urllib.request; d = json.load(urllib.request.urlopen('http://127.0.0.1:47311/.well-known/fabric-service', timeout=10)); print(d['id'], d['instance'], d['status'])"
+          python observatory/engine/tools/serverd.py --uninstall
+          python observatory/engine/tools/install_launchd.py install
+          python observatory/engine/tools/install_launchd.py status
+          python observatory/engine/tools/install_launchd.py uninstall
+          schtasks /Query /FO LIST | grep -c ProjectObservatory || true
       - id: tests
         name: Synthetic runtime and privacy tests
         continue-on-error: true
@@ -221,6 +236,7 @@ jobs:
             echo "| osproc | ${{ steps.osproc.outcome }} |"
             echo "| osprivacy | ${{ steps.osprivacy.outcome }} |"
             echo "| osschedule | ${{ steps.osschedule.outcome }} |"
+            echo "| server and tick jobs | ${{ steps.jobs.outcome }} |"
             echo "| CLI | ${{ steps.cli.outcome }} |"
             echo "| A whole tick | ${{ steps.tick.outcome }} |"
             echo "| Top-level tests | ${{ steps.tests.outcome }} |"
