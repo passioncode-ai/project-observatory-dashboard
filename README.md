@@ -198,7 +198,7 @@ Part of [PassionCode.ai](https://passioncode.ai/) — the design system is [Pass
 
 ## Mac app
 
-0.12.0 ships a native macOS app (macOS 14+) that opens on this dashboard: live when the workspace's own server answers, otherwise the saved pages with a **Start server** button, and **Build the dashboard** when there are none yet. An advisory assistant is one window away (⇧⌘A). Each release from 0.13.0 attaches the app signed with a Developer ID and notarized by Apple, `ProjectObservatory-<version>-macos.zip`, listed in `SHA256SUMS`: check it, unzip it and move it to `/Applications`. Or build and install it from a checkout:
+0.12.0 ships a native macOS app (macOS 14+; one universal app for Apple silicon and Intel Macs after 0.21.0) that opens on this dashboard: live when the workspace's own server answers, otherwise the saved pages with a **Start server** button, and **Build the dashboard** when there are none yet. An advisory assistant is one window away (⇧⌘A). Each release from 0.13.0 attaches the app signed with a Developer ID and notarized by Apple, `ProjectObservatory-<version>-macos.zip`, listed in `SHA256SUMS`: check it, unzip it and move it to `/Applications`. Or build and install it from a checkout:
 
 ```sh
 macos/scripts/build-app.sh                 # dist/macos/Project Observatory.app, signed ad hoc for local use

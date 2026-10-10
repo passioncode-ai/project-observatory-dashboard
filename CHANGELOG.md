@@ -5,6 +5,12 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Fixed
+
+- **The Mac app is universal.** `macos/scripts/build-app.sh` builds `arm64` and `x86_64` and refuses an
+  executable missing either slice; up to 0.21.0 the release carried the runner's architecture only, so
+  the app did not open on an Intel Mac (PassionCode.ai platforms rule PL-01).
+
 ## 0.21.0 — 2026-10-10
 
 The engine runs on Windows, and a check of the agent on a heavily loaded machine fixed what it

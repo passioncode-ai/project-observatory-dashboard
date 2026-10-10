@@ -238,5 +238,26 @@ class AppBuildScriptRunsOnTheSystemPython(unittest.TestCase):
         self.assertEqual(doc["NSAppTransportSecurity"], {"NSAllowsLocalNetworking": True})
 
 
+class TheAppIsUniversal(unittest.TestCase):
+    """fabric-workspace platforms.md PL-01: one app for Apple silicon and Intel Macs. Up to 0.21.0
+    the release built the runner's architecture only (arm64), which does not open on an Intel Mac."""
+
+    def script(self) -> str:
+        return (ROOT / "macos/scripts/build-app.sh").read_text(encoding="utf-8")
+
+    def test_both_architectures_are_built_by_default(self):
+        self.assertIn('ARCHS=${OBSERVATORY_SWIFT_ARCHS:-"arm64 x86_64"}', self.script())
+        builds = [line for line in self.script().splitlines() if line.lstrip().startswith(("swift build", "BIN=$(swift build"))]
+        self.assertEqual(len(builds), 2, builds)
+        for line in builds:
+            self.assertIn('"${ARCH_ARGS[@]}"', line)
+
+    def test_a_missing_slice_stops_the_build(self):
+        text = self.script()
+        self.assertIn('lipo -archs "$APP/Contents/MacOS/ProjectObservatory"', text)
+        self.assertIn("missing $arch (PL-01)", text)
+        self.assertLess(text.index("lipo -archs"), text.index("codesign --force"))
+
+
 if __name__ == "__main__":
     unittest.main()
