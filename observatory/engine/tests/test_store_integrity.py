@@ -245,12 +245,13 @@ def test_the_check_stops_at_its_deadline_and_says_it_did_not_measure() -> None:
           json.dumps(r)[:240])
     check("it exits 0 — the store is not known to be damaged", p.returncode == 0, (p.stdout + p.stderr)[-200:])
     check("and the detail says it ran out of time", "deadline" in str(r.get("detail", "")), json.dumps(r)[:240])
-    # The deadline keeps a 5 s margin for the receipt; 5.1 s leaves 0.1 s of checking, so
-    # SQLite is interrupted in the middle of the pragma rather than before it.
-    p = run_check(dict(env, OBSERVATORY_STEP_DEADLINE=f"{time.time() + 5.1:.3f}"))
-    r = receipt(d)
-    check("a check interrupted mid-way is `unmeasured` too", r.get("verdict") == "unmeasured" and p.returncode == 0,
-          json.dumps(r)[:240])
+    # IN-PROCESS, with a budget shorter than the pragma: through a subprocess the interpreter's
+    # start-up ate a 0.1 s budget on a fast runner and the check was never started, so this
+    # case asked a question about start-up time instead of about the interrupt.
+    import check_store
+    importlib.reload(check_store)
+    r = check_store.inspect(d / "observatory.db", check_store.PRAGMA, 0.05)
+    check("a check interrupted mid-way is `unmeasured` too", r.get("verdict") == "unmeasured", json.dumps(r)[:240])
     check("naming the pragma it was in", "PRAGMA" in str(r.get("detail", "")), json.dumps(r)[:240])
 
 

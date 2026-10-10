@@ -3306,8 +3306,8 @@
       "path": "tests/test_store_integrity.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "991814f101c03fcf2455f7d1e9b98f16487112a4210f72c6abcb005c2ba0f377",
-      "bytes": 21128
+      "export_sha256": "faf1591c7ad2e13afe5be9dab99209827a7d4212147ed452d24877fe36a7babf",
+      "bytes": 21226
     },
     {
       "path": "tests/test_store_modes.py",
