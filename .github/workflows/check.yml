@@ -171,6 +171,14 @@ jobs:
         name: One lock API on every OS (W1)
         continue-on-error: true
         run: python observatory/engine/tests/test_oslocks.py
+      - id: osproc
+        name: Process groups on every OS (W2)
+        continue-on-error: true
+        run: python observatory/engine/tests/test_osproc.py
+      - id: osprivacy
+        name: Who the engine runs as (W2b)
+        continue-on-error: true
+        run: python observatory/engine/tests/test_osprivacy.py
       - id: cli
         name: The CLI answers
         continue-on-error: true
@@ -193,6 +201,8 @@ jobs:
             echo "| Compile | ${{ steps.compile.outcome }} |"
             echo "| Engine modules load | ${{ steps.imports.outcome }} |"
             echo "| oslocks | ${{ steps.oslocks.outcome }} |"
+            echo "| osproc | ${{ steps.osproc.outcome }} |"
+            echo "| osprivacy | ${{ steps.osprivacy.outcome }} |"
             echo "| CLI | ${{ steps.cli.outcome }} |"
             echo "| Top-level tests | ${{ steps.tests.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"

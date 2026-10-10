@@ -22,8 +22,8 @@
       "path": "agent/assistant.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "aaf0fca38f6052d995194d0c88ea158c5f9ebec07fc54dfe6e81c81e87f898fa",
-      "bytes": 26590
+      "export_sha256": "f44f3b8639dbb3971ffede2a01459ce95cc338a822951c6c4cd07c25cb256764",
+      "bytes": 26599
     },
     {
       "path": "agent/observe.py",
@@ -341,8 +341,8 @@
     {
       "path": "collectors/scan_mcp.py",
       "source_sha256": "58a2a009691699174de96ef0a878d1679a0d7a0da53d220f5a1fccae52d4678f",
-      "export_sha256": "ff8e4b57143f10f084d3cea5ff6ccd071e6157e4bb9d53f5514b3dcc30a3db08",
-      "bytes": 26948,
+      "export_sha256": "9a6c8543d4f6e6e568c91fa95b6d20d5be695a967cdce0ce665435f70ab0e91e",
+      "bytes": 26518,
       "python_comments_removed": 14,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
@@ -1122,8 +1122,8 @@
       "path": "jobs.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2b76f81d8a8843e5c2ca0ea3a189ef460fa55814a0041396de0a26dd65dfc7f4",
-      "bytes": 12497
+      "export_sha256": "12a537e6729327b671b017e22a56f0dea2291777f3dfd46d5974202e305d55c4",
+      "bytes": 12468
     },
     {
       "path": "leak_register.py",
@@ -1150,8 +1150,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4553717b6f1910b992989826dd836a488b3dbae6d39c3dd033b169e5b3467cf2",
-      "bytes": 70934
+      "export_sha256": "d1e34920901c0c3bf091cec6f5036173b8e4ff576e48cc1c4f484eb406594525",
+      "bytes": 70976
     },
     {
       "path": "mcp/capability_tools.py",
@@ -1228,6 +1228,20 @@
       "upstream_modified": true,
       "export_sha256": "081fd0bca8240d91cc1dc6ed045d1aca9d6f891543fefc54593a436ab05ee933",
       "bytes": 4482
+    },
+    {
+      "path": "osprivacy.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "28481694046e3ae6c5071b77845f31545201b367e726d0f7a759c0b4e8d1915a",
+      "bytes": 2029
+    },
+    {
+      "path": "osproc.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "e9c53d00f0d614bef8c1f70145e1ad57f483277dbff08796185ef61ffcc7958f",
+      "bytes": 8436
     },
     {
       "path": "paths.py",
@@ -1838,8 +1852,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "418a352781fd619dcc53433b2147d5ce4bc9da3141031edea7df71eec77121c3",
-      "bytes": 22848,
+      "export_sha256": "2c86dd7afa06e656e396d2ddf30b67e23ccd407f892a06f43d6829fc4aad57e9",
+      "bytes": 23064,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -1977,8 +1991,8 @@
       "path": "tests/test_assistant.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "630f59a1bc588d104280208f2d088c5254973a140b42d640aed347f852642644",
-      "bytes": 31290
+      "export_sha256": "e1c8670a3abc3811618939bcf541e7bbe9c34b2ec308d7bc92f4e1bbc8561197",
+      "bytes": 31296
     },
     {
       "path": "tests/test_at_stake.py",
@@ -2808,8 +2822,22 @@
       "path": "tests/test_oslocks.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "419ebf53d21af772824e5030475b17e3860a3e5f7981a8b65f5f5b0af6334d46",
-      "bytes": 4635
+      "export_sha256": "06aa59c22d7ef681f1207ef318441da8ed6296a25ea8fbfdc1dba534afef5879",
+      "bytes": 4820
+    },
+    {
+      "path": "tests/test_osprivacy.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "052f09368b3daa6f7167cd89c5a338e0f6a3661d7785d95fd883bf5d9cd10651",
+      "bytes": 1178
+    },
+    {
+      "path": "tests/test_osproc.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "83011349067a17af52d69fb7ca0f36630f4a16f3b54c75d30704bdb2265f1134",
+      "bytes": 5723
     },
     {
       "path": "tests/test_page_omission.py",
@@ -3784,8 +3812,8 @@
       "path": "tools/dashboard_open.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cd3e5e778ad10188f10449c93e4e2c340f31681d83b5d52611e2cb8818996fb2",
-      "bytes": 11781
+      "export_sha256": "b5c5ada62d66e5c630b604d88be9847a8014d1cd76829a17c3634f07c6edf685",
+      "bytes": 11820
     },
     {
       "path": "tools/embedding_policy_cli.py",
@@ -4067,8 +4095,8 @@
       "path": "tools/run_job.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b8f6ba73b856540812ef3a99d0766567c988c51a175b5e8e228273dcc8d94797",
-      "bytes": 7484
+      "export_sha256": "527612de45c7e849300675e52c7cc8e60c3da5d43973d24cf631bd97e608c5fc",
+      "bytes": 7513
     },
     {
       "path": "tools/run_probes.py",
@@ -4110,8 +4138,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "59289be10ecefebe9bee6b1ab8c8cbbefac5a689909884e961164cb1dfd28e46",
-      "bytes": 43071,
+      "export_sha256": "4098f6ef415bfad581652ea6a925f307e5a0d0ce84efb16f0b656cc500364c27",
+      "bytes": 43038,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
@@ -4202,8 +4230,8 @@
     {
       "path": "tools/tick_lease.py",
       "source_sha256": "e77182b3838aba63707e5e182c066b17fed6e195b2f18c67ee938c80236bad84",
-      "export_sha256": "bec7d8fef19ef1a47178da6d7954aeca7c69ce347f5501ed46ee7fa499de4350",
-      "bytes": 31136,
+      "export_sha256": "859dd8452adf1275e62ac2d5b8628a25fea9b7eeadfa30c6e70fe56949ffcd7a",
+      "bytes": 30702,
       "python_comments_removed": 45,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
@@ -4318,7 +4346,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 553,
+  "file_count": 557,
   "excluded": [
     "git-history",
     "operator-registries",

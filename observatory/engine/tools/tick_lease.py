@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import oslocks  # after the path setup: this file also runs as a script
+import osproc
 import paths
 import configuration
 
@@ -448,19 +449,8 @@ def _step_marker() -> pathlib.Path:
 
 
 def _stop_group(pgid: int, grace: float) -> None:
-    """SIGTERM the group, SIGKILL whatever is left after `grace` seconds."""
-    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 1.0)):
-        try:
-            os.killpg(pgid, sig)
-        except (ProcessLookupError, PermissionError):
-            return
-        deadline = time.monotonic() + wait
-        while time.monotonic() < deadline:
-            try:
-                os.killpg(pgid, 0)
-            except (ProcessLookupError, PermissionError):
-                return
-            time.sleep(0.05)
+    """SIGTERM the group, SIGKILL whatever is left after `grace` seconds (osproc)."""
+    osproc.stop_group(pgid, grace)
 
 
 def bounded(name: str, command: list[str], *, limit: float | None = None,
@@ -493,7 +483,7 @@ def bounded(name: str, command: list[str], *, limit: float | None = None,
         return TIMED_OUT
     marker = _step_marker()
     env = {**os.environ, STEP_DEADLINE_ENV: f"{time.time() + limit:.0f}"}
-    child = subprocess.Popen(command, cwd=ROOT, env=env, start_new_session=True)
+    child = subprocess.Popen(command, cwd=ROOT, env=env, **osproc.new_group())
     try:
         marker.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         marker.write_text(str(child.pid), encoding="utf-8")
@@ -504,7 +494,7 @@ def bounded(name: str, command: list[str], *, limit: float | None = None,
     def stop(signum, frame):
         stopped.append(signum)
         raise InterruptedError(signum)
-    previous = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
+    previous = {sig: signal.signal(sig, stop) for sig in osproc.stop_signals()}
     try:
         return child.wait(timeout=limit)
     except subprocess.TimeoutExpired:
@@ -580,12 +570,12 @@ def supervised(command: list[str]) -> int:
                "OBSERVATORY_TICK_SUPERVISOR_PID": str(os.getpid()),
                DEADLINE_ENV: f"{time.time() + ceiling:.0f}"}
         _step_marker().unlink(missing_ok=True)
-        child = subprocess.Popen(command, cwd=ROOT, env=env, start_new_session=True)
+        child = subprocess.Popen(command, cwd=ROOT, env=env, **osproc.new_group())
         interrupted = []
         def stop(signum, frame):
             interrupted.append(signum)
             raise InterruptedError("Tick supervisor received a stop signal")
-        previous = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
+        previous = {sig: signal.signal(sig, stop) for sig in osproc.stop_signals()}
         outcome, code, reason = "failed", None, ""
         try:
             code = child.wait(timeout=ceiling)

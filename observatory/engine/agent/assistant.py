@@ -10,7 +10,6 @@ import os
 from pathlib import Path
 import re
 import secrets
-import signal
 import subprocess
 import sys
 import threading
@@ -20,6 +19,7 @@ from datetime import datetime, timezone
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 import oslocks  # after the path setup: this file also runs as a script
+import osproc
 import configuration
 import paths
 import workspace
@@ -395,7 +395,7 @@ def run_question(job):
     # The runner's deadline is disarmed BEFORE the commit: firing between the
     # dialogue write and the job write left a paid answer stored as completed
     # under a job that read failed.
-    if threading.current_thread() is threading.main_thread():signal.alarm(0)
+    if threading.current_thread() is threading.main_thread():osproc.disarm_deadline()
     # Every path acquires assistant BEFORE job. Cancellation takes only job.
     # Hold both while archiving and committing; cancellation cannot resurrect.
     with locked():

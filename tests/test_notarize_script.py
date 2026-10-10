@@ -83,6 +83,7 @@ class Scenario:
         return path.read_text().splitlines() if path.exists() else []
 
 
+@unittest.skipIf(os.name == "nt", "notarization is macOS release tooling: the script runs on the macOS release runner")
 class NotarizeRefusesBeforeAppleIsAsked(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -136,6 +137,7 @@ class NotarizeRefusesBeforeAppleIsAsked(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
 
 
+@unittest.skipIf(os.name == "nt", "notarization is macOS release tooling: the script runs on the macOS release runner")
 class NotarizeRunsAppleInOrder(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

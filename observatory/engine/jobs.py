@@ -29,6 +29,7 @@ no credentials are accepted as arguments.
 from __future__ import annotations
 import errno
 import oslocks
+import osproc
 import json
 import os
 import re
@@ -127,10 +128,10 @@ def _write(doc: dict) -> None:
 def _alive(pid: Any) -> bool:
     if not isinstance(pid, int) or pid <= 0:
         return False
-    try:
-        os.kill(pid, 0)
-    except OSError as exc:
-        return exc.errno == errno.EPERM
+    if not osproc.alive(pid):
+        return False
+    if osproc.WINDOWS:
+        return True              # Windows keeps no zombies: an exited process is not alive
     # A zombie still answers kill(0); a runner we started and nobody reaped yet
     # is finished, not running. waitpid only works for our own children.
     try:
@@ -276,10 +277,7 @@ def _start(capability: str, span_record: dict, *, arguments: dict | None = None,
             _write(doc)
         elif doc.get("status") == "cancelled":
             # Cancellation can race the spawn before its PID is recorded.
-            try:
-                os.killpg(proc.pid, signal.SIGTERM)
-            except OSError:
-                pass
+            osproc.signal_group(proc.pid, signal.SIGTERM)
     return doc, False
 
 
@@ -290,7 +288,7 @@ def _spawn(argv: list[str], env: dict) -> subprocess.Popen:
     out = open(log, "ab")
     try:
         return subprocess.Popen(argv, cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
-                                stdout=out, stderr=out, start_new_session=True, close_fds=True)
+                                stdout=out, stderr=out, close_fds=True, **osproc.new_group(detached=True))
     finally:
         out.close()
 
@@ -307,10 +305,7 @@ def cancel(job_id: str) -> dict | None:
             return doc
         pid = doc.get("pid")
         if isinstance(pid, int) and pid > 0 and _alive(pid):
-            try:
-                os.killpg(pid, signal.SIGTERM)
-            except OSError:
-                pass
+            osproc.signal_group(pid, signal.SIGTERM)
         doc.update(status="cancelled", statusMessage="cancelled by the caller")
         _write(doc)
         return doc

@@ -15,6 +15,7 @@ environment carrier OpenTelemetry defines for a child process, on a child span
 of the job's (fabric-interop/0.1, C3.4 b).
 """
 from __future__ import annotations
+import contextlib
 import json
 import os
 import signal
@@ -29,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 
 import interop                                                      # noqa: E402
 import jobs                                                         # noqa: E402
+import osproc                                                       # noqa: E402
 import paths                                                        # noqa: E402
 
 #: Upper bound for the whole refresh: the collector's own probe limit plus room to
@@ -114,17 +116,18 @@ def main(argv: list[str]) -> int:
     signal.signal(signal.SIGTERM, stop)
     # Cancellation is SIGTERM to this process group. A mask blocked by whoever
     # started the chain is inherited across exec, and a runner that cannot hear it
-    # keeps spending after Stop; SIGALRM carries the assistant's deadline.
-    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGALRM})
-    def timeout(signum, frame):
+    # keeps spending after Stop; the deadline's alarm is unblocked with it.
+    osproc.unblock_stop_signals()
+
+    def timeout():
         raise assistant.AssistantError("assistant-timeout")
-    if job.get("capability") == "agent.ask":
-        signal.signal(signal.SIGALRM, timeout)
-        signal.alarm(300)
+    deadline = (osproc.deadline(300, timeout) if job.get("capability") == "agent.ask"
+                else contextlib.nullcontext())
     beat = threading.Event()
     threading.Thread(target=_heartbeat, args=(job_id, beat), daemon=True).start()
     try:
-        result = work(job)
+        with deadline:
+            result = work(job)
     except SystemExit:
         # A cancel: the record already says `cancelled`, and `update` leaves it.
         jobs.update(job_id, status="cancelled", statusMessage="stopped")
@@ -138,7 +141,6 @@ def main(argv: list[str]) -> int:
         return 1
     finally:
         beat.set()
-        signal.alarm(0)
     jobs.update(job_id, status="completed", statusMessage="completed", result=result)
     return 0
 
