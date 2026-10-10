@@ -41,27 +41,27 @@ class Privacy(unittest.TestCase):
     def test_a_file_made_private_is_private(self):
         share_with_everyone(self.file)
         osprivacy.make_private(self.file)
-        self.assertTrue(osprivacy.private(self.file))
-        self.assertFalse(osprivacy.others_may_write(self.file))
-        self.assertTrue(osprivacy.owned_by_me(self.file))
+        self.assertTrue(osprivacy.private(self.file), osprivacy.explain(self.file))
+        self.assertFalse(osprivacy.others_may_write(self.file), osprivacy.explain(self.file))
+        self.assertTrue(osprivacy.owned_by_me(self.file), osprivacy.explain(self.file))
         self.assertIn(osprivacy.describe(self.file), ("0600", "owner-only"))
 
     def test_a_file_shared_with_everyone_is_not(self):
         osprivacy.make_private(self.file)
         share_with_everyone(self.file)
-        self.assertFalse(osprivacy.private(self.file))
-        self.assertTrue(osprivacy.others_may_write(self.file))
+        self.assertFalse(osprivacy.private(self.file), osprivacy.explain(self.file))
+        self.assertTrue(osprivacy.others_may_write(self.file), osprivacy.explain(self.file))
         self.assertNotIn(osprivacy.describe(self.file), ("0600", "owner-only"))
 
     def test_a_folder_made_private_passes_it_on(self):
         folder = self.dir / "state"
         folder.mkdir()
         osprivacy.make_private(folder)
-        self.assertTrue(osprivacy.private(folder))
+        self.assertTrue(osprivacy.private(folder), osprivacy.explain(folder))
         inside = folder / "new"
         inside.write_bytes(b"x")
         if os.name == "nt":  # inherited from the protected list
-            self.assertTrue(osprivacy.private(inside))
+            self.assertTrue(osprivacy.private(inside), osprivacy.explain(inside))
 
     def test_a_descriptor_says_what_its_path_says(self):
         for prepare in (osprivacy.make_private, share_with_everyone):
@@ -78,7 +78,7 @@ class Privacy(unittest.TestCase):
         fd = osprivacy.open(self.file, os.O_RDWR)
         try:
             osprivacy.make_private(fd)
-            self.assertTrue(osprivacy.private(fd))
+            self.assertTrue(osprivacy.private(fd), osprivacy.explain(fd))
         finally:
             os.close(fd)
 
