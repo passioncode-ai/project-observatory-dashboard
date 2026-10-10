@@ -1859,8 +1859,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "4ea2b758a72738be3723fa2d4f86c6be251795e37efabc85c85109d1c33e9879",
-      "bytes": 23177,
+      "export_sha256": "34f674895476b3126996886c3818f8a38d6e6d6fcd232b4222175e6112bdf0b3",
+      "bytes": 23222,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2373,8 +2373,8 @@
       "path": "tests/test_fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b8dffe8874ee4f2e3cd65d7507c7840f87df8dcaee6f11966b7a40bfa8ad6ae7",
-      "bytes": 53326
+      "export_sha256": "6e099dc23212e882f1d6bccdfeb8aab18f68fde5e8d2d7e0508c00a90fc05ae4",
+      "bytes": 55104
     },
     {
       "path": "tests/test_facts_learning.py",
@@ -4166,8 +4166,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "bf9b1a36fa7bdc3b96b5eb0d59ca6a2366ded83c19478f1610b72d6c24e3bf1c",
-      "bytes": 46948,
+      "export_sha256": "f1e03e57319a669d2290c58e7b3206ea18998837bd167a17b690290b34aa6f2f",
+      "bytes": 46993,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
