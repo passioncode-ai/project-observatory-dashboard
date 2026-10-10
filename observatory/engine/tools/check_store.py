@@ -45,7 +45,17 @@ thirty-minute cycle for a strictly larger check is still the right trade; the
 evidence for it is now the documentation plus a measurement, rather than a
 reversed benchmark.
 
-FOUR verdicts, because three of them are not `ok` for different reasons and a
+**And its cost is bounded (2026-10-10).** One tick spent 785 s here under a load
+average near 400 — the same 81 MiB store checks in 4–38 s on this machine — and was
+killed with nothing written, after which `scan-fs` never started. So the full
+`integrity_check` runs once a day, and after any verdict that was not `ok`;
+`quick_check`, which catches the FTS5 damage this store has actually had, runs in
+between. The step stops itself before its deadline (`OBSERVATORY_STEP_DEADLINE`,
+`step_budget`) with `sqlite3.Connection.interrupt()` and records `unmeasured`
+instead of being killed silent; `full_checked_at` carries the last full pass from
+receipt to receipt, so the board can say how old it is.
+
+FIVE verdicts, because four of them are not `ok` for different reasons and a
 reader acting on them does different things:
 
     ok           SQLite verified every page and index
@@ -55,18 +65,20 @@ reader acting on them does different things:
                  it as a failed integrity check sends a reader looking for a
                  damaged page in something that has no pages
     absent       there is no store yet, which is a fresh clone rather than a fault
+    unmeasured   the step's deadline came first; nothing is known either way
 
     check_store.py            check and write the receipt
     check_store.py --print    also print the verdict
 """
 from __future__ import annotations
-import argparse, json, pathlib, sqlite3, sys, time
-from datetime import datetime, timezone
+import argparse, json, pathlib, sqlite3, sys, threading, time
+from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import atomic                                                       # noqa: E402
 import paths                                                        # noqa: E402
+import step_budget                                                  # noqa: E402
 
 #: `integrity_check` and not `quick_check`. The extra work is index content
 #: verification, and an index that disagrees with its table gives a reader a
@@ -74,6 +86,13 @@ import paths                                                        # noqa: E402
 #: catch. Measured at 97 ms against 129 ms on 21.7 MiB, so the cheaper pragma is
 #: not even cheaper in practice.
 PRAGMA = "integrity_check"
+#: The cheap pragma for the runs in between: it skips only the ordinary-index content
+#: check, and it names the FTS5 damage this store has actually had (measured above).
+QUICK = "quick_check"
+#: Hours between full checks while every verdict is `ok`.
+FULL_EVERY_HOURS = 24
+#: Seconds kept before the step's deadline to write the receipt.
+MARGIN_SECONDS = 5
 
 #: How many of SQLite's lines to keep. It reports one per problem and a badly
 #: damaged file produces thousands; the finding needs enough to name the shape.
@@ -84,12 +103,30 @@ def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def inspect(db: pathlib.Path) -> dict:
-    """The verdict, the reason, and what it cost to find out."""
+def choose(previous: dict) -> str:
+    """The full check once a day and after any verdict that was not `ok`; the quick one
+    in between."""
+    full_at = str(previous.get("full_checked_at") or "")
+    if previous.get("verdict") != "ok" or not full_at:
+        return PRAGMA
+    try:
+        when = datetime.strptime(full_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return PRAGMA
+    return PRAGMA if datetime.now(timezone.utc) - when >= timedelta(hours=FULL_EVERY_HOURS) else QUICK
+
+
+def inspect(db: pathlib.Path, pragma: str = PRAGMA, budget: float = float("inf")) -> dict:
+    """The verdict, the reason, and what it cost to find out — within `budget` seconds."""
     if not db.is_file():
         return {"verdict": "absent", "detail": f"{db} does not exist",
                 "took_ms": 0, "bytes": 0}
     size = db.stat().st_size
+    if budget <= 0:
+        # An interrupt sent before a statement runs is lost (SQLite clears it when none is
+        # pending), so a check with no time left is not started at all.
+        return {"verdict": "unmeasured", "took_ms": 0, "bytes": size,
+                "detail": "not started: the step's deadline left no time for it"}
     started = time.perf_counter()
     try:
         # READ-ONLY, and that matters twice: a check must not be the thing that
@@ -100,8 +137,31 @@ def inspect(db: pathlib.Path) -> dict:
         return {"verdict": "unopenable", "detail": f"{type(exc).__name__}: {exc}",
                 "took_ms": round((time.perf_counter() - started) * 1000, 1),
                 "bytes": size}
+    # A WATCHDOG, not a one-shot timer: an interrupt sent before the statement starts is
+    # lost, so past the deadline it is sent again every 50 ms until the pragma returns.
+    done = threading.Event()
+
+    def watchdog() -> None:
+        if done.wait(budget):
+            return
+        while not done.is_set():
+            conn.interrupt()
+            done.wait(0.05)
+    timer = None
+    if budget != float("inf"):
+        timer = threading.Thread(target=watchdog, daemon=True)
+        timer.start()
     try:
-        rows = [r[0] for r in conn.execute(f"PRAGMA {PRAGMA}").fetchall()]
+        rows = [r[0] for r in conn.execute(f"PRAGMA {pragma}").fetchall()]
+    except sqlite3.OperationalError as exc:
+        if "interrupted" not in str(exc):
+            return {"verdict": "unopenable", "detail": f"{type(exc).__name__}: {exc}",
+                    "took_ms": round((time.perf_counter() - started) * 1000, 1),
+                    "bytes": size}
+        took = round((time.perf_counter() - started) * 1000, 1)
+        return {"verdict": "unmeasured", "took_ms": took, "bytes": size,
+                "detail": f"stopped at the step's deadline after {took / 1000:.0f} s, before "
+                          f"PRAGMA {pragma} finished; nothing is known either way"}
     except sqlite3.DatabaseError as exc:
         # `file is not a database` arrives HERE, not at connect: SQLite opens
         # lazily, so the header is read on the first statement.
@@ -109,6 +169,9 @@ def inspect(db: pathlib.Path) -> dict:
                 "took_ms": round((time.perf_counter() - started) * 1000, 1),
                 "bytes": size}
     finally:
+        done.set()
+        if timer is not None:
+            timer.join()
         conn.close()
     took = round((time.perf_counter() - started) * 1000, 1)
     if rows == ["ok"]:
@@ -127,8 +190,19 @@ def main(argv: list[str]) -> int:
                     help="print the verdict as well as recording it")
     args = ap.parse_args(argv[1:])
 
-    result = inspect(paths.DB)
-    doc = {"ran_at": now(), "pragma": PRAGMA, **result}
+    target = paths.SCRATCH / "integrity.json"
+    try:
+        previous = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        previous = {}
+    previous = previous if isinstance(previous, dict) else {}
+    pragma = choose(previous)
+    result = inspect(paths.DB, pragma, step_budget.remaining() - MARGIN_SECONDS)
+    ran_at = now()
+    full_at = (ran_at if result["verdict"] == "ok" and pragma == PRAGMA
+               else previous.get("full_checked_at") if result["verdict"] in ("ok", "unmeasured") else None)
+    doc = {"ran_at": ran_at, "pragma": pragma, **result,
+           **({"full_checked_at": full_at} if full_at else {})}
     try:
         paths.SCRATCH.mkdir(parents=True, exist_ok=True)
         atomic.write_json(paths.SCRATCH / "integrity.json", doc)
@@ -141,8 +215,12 @@ def main(argv: list[str]) -> int:
 
     if result["verdict"] == "ok":
         if args.show:
-            print(f"store ok — {PRAGMA} in {result['took_ms']:.0f} ms over "
+            print(f"store ok — {pragma} in {result['took_ms']:.0f} ms over "
                   f"{result['bytes'] / 1024 ** 2:.1f} MiB")
+        return 0
+    if result["verdict"] == "unmeasured":
+        if args.show:
+            print(f"not measured — {result['detail']}")
         return 0
     if result["verdict"] == "absent":
         if args.show:

@@ -159,6 +159,103 @@ def test_a_manifest_declaring_no_metrics_is_refused_outright() -> None:
     check("it skips with the reason", "metrics must be a non-empty list" in out, out[-200:])
 
 
+def run_timed(plugins: pathlib.Path, db: pathlib.Path, seconds: int) -> str:
+    p = subprocess.run([PY, "collectors/run_plugins.py", "--force"], cwd=ROOT,
+                       capture_output=True, text=True, timeout=300,
+                       env={**os.environ, "OBSERVATORY_PLUGINS": str(plugins),
+                            "OBSERVATORY_DB": str(db), "OBSERVATORY_SCRATCH": str(db.parent),
+                            "OBSERVATORY_PLUGIN_TIMEOUT_SECONDS": str(seconds)})
+    return p.stdout + p.stderr
+
+
+def plugin_report(db: pathlib.Path) -> dict:
+    doc = json.loads((db.parent / "plugins.json").read_text(encoding="utf-8"))
+    return next(p for p in doc["plugins"] if p["id"] == "probe")
+
+
+def test_a_plugin_stopped_at_its_limit_keeps_what_it_measured() -> None:
+    """2026-10-09/10: `disk-usage` walked ~100 GB, reached the runner's 300 s limit and
+    lost every row it had printed — so no sample existed for the period, the plugin was
+    due again on the next tick, and spent 300 s of the tail every half hour."""
+    pid = real_project()
+    plugins, db = sandbox(BASE, emitter([
+        {"project_id": pid, "metric": "test.value", "at": "2026-09-07T00:00:00Z", "value": 7}])
+        + "\nimport sys, time\nsys.stdout.flush()\ntime.sleep(60)\n")
+    out = run_timed(plugins, db, 2)
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    rows = conn.execute("SELECT value FROM metrics").fetchall()
+    check("the row printed before the limit is kept", rows == [(7.0,)], f"{rows} {out[-200:]}")
+    r = plugin_report(db)
+    check("and the run is partial, not broken", r.get("classification") != "broken" and r.get("partial"),
+          json.dumps(r)[:300])
+    check("saying so where a person reads it", "partial" in out, out[-200:])
+
+
+def test_a_plugin_that_printed_nothing_by_its_limit_is_still_broken() -> None:
+    plugins, db = sandbox(BASE, "import time\ntime.sleep(60)\n")
+    run_timed(plugins, db, 2)
+    r = plugin_report(db)
+    check("nothing measured is a broken run", r.get("classification") == "broken", json.dumps(r)[:300])
+
+
+def test_a_plugin_is_told_its_deadline() -> None:
+    """So it can stop between units of work instead of being killed in the middle of one."""
+    pid = real_project()
+    script = ("import json, os, time\n"
+              "left = float(os.environ['OBSERVATORY_STEP_DEADLINE']) - time.time()\n"
+              f"print(json.dumps({{'project_id': {pid!r}, 'metric': 'test.value', "
+              "'at': '2026-09-07T00:00:00Z', 'value': left}))\n")
+    plugins, db = sandbox(BASE, script)
+    run_timed(plugins, db, 20)
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    row = conn.execute("SELECT value FROM metrics").fetchone()
+    check("the deadline it is given falls inside its own limit", row is not None and 0 < row[0] <= 20,
+          str(row))
+
+
+def disk_usage_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("disk_usage_under_test", ROOT / "plugins/disk_usage.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_disk_usage_walks_each_folder_once() -> None:
+    """The footprint and the reclaimable bytes came from two full walks of every tree; one
+    walk answers both."""
+    du = disk_usage_module()
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-du-"))
+    (d / "src").mkdir()
+    (d / "src/a.txt").write_bytes(b"x" * 1000)
+    (d / "node_modules/pkg").mkdir(parents=True)
+    (d / "node_modules/pkg/i.js").write_bytes(b"y" * 5000)
+    (d / ".git").mkdir()
+    (d / ".git/HEAD").write_bytes(b"z" * 300)
+    footprint, reclaimable = du.measure(d)
+    check("the working files are the footprint", footprint == 1000, str(footprint))
+    check("the reinstallable directories are the reclaimable part", reclaimable == 5300, str(reclaimable))
+
+
+def test_disk_usage_measures_the_longest_unmeasured_first() -> None:
+    du = disk_usage_module()
+    last = {"a": "2026-10-09T00:00:00Z", "b": "2026-10-01T00:00:00Z"}
+    order = du.oldest_first([{"id": "a"}, {"id": "b"}, {"id": "c"}], last)
+    check("never measured, then the oldest measurement", [p["id"] for p in order] == ["c", "b", "a"],
+          str([p["id"] for p in order]))
+
+
+def test_disk_usage_stops_between_projects_at_its_deadline() -> None:
+    pid = real_project()
+    env = {**os.environ, "OBSERVATORY_STEP_DEADLINE": "1"}   # long past
+    p = subprocess.run([PY, "plugins/disk_usage.py"], cwd=ROOT, env=env,
+                       capture_output=True, text=True, timeout=300)
+    check("it exits cleanly", p.returncode == 0, p.stderr[-200:])
+    check("having measured nothing it had no time for", p.stdout.strip() == "", p.stdout[:200])
+    check("and it says the run was partial", "partial" in p.stderr, p.stderr[-200:])
+    del pid
+
+
 def test_the_seam_needs_no_core_file() -> None:
     """The claim the whole iteration rests on, stated as a check."""
     # ONE READER, in one place, and it is the right one for THIS rule.
@@ -286,6 +383,12 @@ if __name__ == "__main__":
                test_a_missing_requirement_skips_with_a_reason,
                test_a_crashing_plugin_does_not_stop_the_others,
                test_a_manifest_declaring_no_metrics_is_refused_outright,
+               test_a_plugin_stopped_at_its_limit_keeps_what_it_measured,
+               test_a_plugin_that_printed_nothing_by_its_limit_is_still_broken,
+               test_a_plugin_is_told_its_deadline,
+               test_disk_usage_walks_each_folder_once,
+               test_disk_usage_measures_the_longest_unmeasured_first,
+               test_disk_usage_stops_between_projects_at_its_deadline,
                test_the_seam_needs_no_core_file,
                test_the_reference_plugin_measured_the_live_estate,
                test_a_plugin_written_from_the_readme_alone_runs,

@@ -151,6 +151,58 @@ def test_a_planted_defect_produces_a_blank_receipt() -> None:
           len(out) == 1 and out[0]["severity"] == "critical", str(out)[:200])
 
 
+def _smoke_page(script: str, *flags: str):
+    """Run smoke on a minimal page carrying `script`; (process, receipt or None)."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-smoke-time-"))
+    page, receipt = d / "page.html", d / "page.smoke.json"
+    page.write_text(f"<html><body><script>{script}</script></body></html>", encoding="utf-8")
+    p = subprocess.run(["node", "dashboard/smoke.js", str(page), *flags], cwd=ROOT,
+                       capture_output=True, text=True, timeout=300)
+    doc = json.loads(receipt.read_text(encoding="utf-8")) if receipt.is_file() else None
+    return p, doc
+
+
+def test_a_script_that_never_finishes_is_still_a_blank_page() -> None:
+    """A page whose script spins forever freezes a browser too: that is a broken page. It
+    keeps consuming processor, and having used the budget without finishing is how smoke
+    tells it apart — on a loaded machine too, where its SHARE of the processor is small."""
+    import shutil as sh
+    if sh.which("node") is None:
+        print("  NOTE  node is absent [uncoverable: executing JavaScript is what this test is]")
+        return
+    # A small processor budget, reached even on a loaded machine within the patient try.
+    p, doc = _smoke_page("for(;;){}", "--timeout-ms", "300", "--patient-ms", "3000", "--cpu-budget-ms", "150")
+    check("a spinning script fails smoke", p.returncode == 1, f"rc={p.returncode} {p.stderr[-200:]}")
+    check("with the verdict `blank`", (doc or {}).get("verdict") == "blank", str(doc))
+
+
+def test_a_starved_machine_is_not_a_blank_page() -> None:
+    """2026-10-10 00:52: under a load average near 300 the page's script did not finish in
+    10 s, smoke wrote `blank`, and the board raised a CRITICAL `dashboard.blank` about a page
+    that rendered clean the tick before. A script that waits — the processor idle while the
+    clock runs — is a script that has not been given the processor: smoke retries with more
+    time and, if that runs out before the processor budget is spent, says it could not measure."""
+    import shutil as sh
+    if sh.which("node") is None:
+        print("  NOTE  node is absent [uncoverable: executing JavaScript is what this test is]")
+        return
+    waits = "const a=new Int32Array(new SharedArrayBuffer(4)); for(;;){Atomics.wait(a,0,0,20)}"
+    p, doc = _smoke_page(waits, "--timeout-ms", "300", "--patient-ms", "600", "--cpu-budget-ms", "150")
+    check("a starved run is not a failed step", p.returncode == 0, f"rc={p.returncode} {p.stderr[-200:]}")
+    check("its verdict is `unmeasured`, not `blank`", (doc or {}).get("verdict") == "unmeasured", str(doc))
+    check("and the receipt says how much of the time the script actually ran",
+          isinstance((doc or {}).get("cpu_ms"), (int, float)) and isinstance((doc or {}).get("wall_ms"), (int, float)),
+          str(doc))
+    out = rule(doc or {}, (doc or {}).get("page_sha") or "")
+    if out is None:
+        return
+    check("and the board reports it as unverified information, not a critical blank page",
+          len(out) == 1 and out[0]["type"] == "dashboard.unverified" and out[0]["severity"] == "info",
+          str(out)[:300])
+    check("naming the busy machine as the reason",
+          "busy" in json.dumps(out, ensure_ascii=False), str(out)[:300])
+
+
 # ─────────── the board learns ──────────────────────────────────────────
 
 def test_a_blank_verdict_is_critical() -> None:
@@ -350,6 +402,8 @@ if __name__ == "__main__":
     print("blank page — the tick caught it and told a log file\n")
     for fn in (test_smoke_writes_a_receipt_either_way,
                test_a_planted_defect_produces_a_blank_receipt,
+               test_a_script_that_never_finishes_is_still_a_blank_page,
+               test_a_starved_machine_is_not_a_blank_page,
                test_a_blank_verdict_is_critical,
                test_a_clean_verdict_says_nothing,
                test_the_receipt_names_the_build_it_checked,

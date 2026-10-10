@@ -41,6 +41,32 @@ import os
 PLUGINS = pathlib.Path(os.environ.get("OBSERVATORY_PLUGINS") or (ROOT / "plugins"))
 UTC_Z = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 TIMEOUT_SECONDS = 300
+#: Lowered by the tests that plant a plugin that does not finish; bounded so a setting
+#: cannot give one plugin the whole tick.
+TIMEOUT_ENV = "OBSERVATORY_PLUGIN_TIMEOUT_SECONDS"
+#: Seconds of its limit a plugin is told to keep, so it stops before the runner kills it.
+DEADLINE_MARGIN_SECONDS = 15
+DEADLINE_ENV = "OBSERVATORY_STEP_DEADLINE"
+
+
+def timeout_seconds() -> float:
+    try:
+        value = float(os.environ.get(TIMEOUT_ENV, ""))
+    except ValueError:
+        return float(TIMEOUT_SECONDS)
+    return value if 1 <= value <= TIMEOUT_SECONDS else float(TIMEOUT_SECONDS)
+
+
+def plugin_environment(limit: float) -> dict:
+    """The plugin's environment, with the moment it must stop by: the tick step's own
+    deadline or the runner's limit for this plugin, less a margin, whichever is first."""
+    import time
+    own = time.time() + max(limit - DEADLINE_MARGIN_SECONDS, limit / 2)
+    try:
+        step = float(os.environ.get(DEADLINE_ENV, ""))
+    except ValueError:
+        step = own
+    return {**os.environ, DEADLINE_ENV: f"{min(own, step):.0f}"}
 PLUGIN_API_VERSION = 1
 
 
@@ -204,18 +230,26 @@ def run_one(conn, m: dict, known_projects: set[str], force: bool) -> dict:
     if not script.is_file():
         result["skipped"] = f"script {m.get('script')!r} does not exist"
         return result
+    limit = timeout_seconds()
+    stopped = False
     try:
         p = subprocess.run([sys.executable, str(script)], cwd=ROOT, capture_output=True,
-                           text=True, timeout=TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        result["skipped"] = f"took longer than {TIMEOUT_SECONDS}s and was stopped"
-        return result
-    if p.returncode != 0:
+                           text=True, timeout=limit, env=plugin_environment(limit))
+        stdout, stderr = p.stdout, p.stderr
+    except subprocess.TimeoutExpired as exc:
+        # WHAT IT PRINTED BEFORE THE LIMIT IS KEPT. Python hands the captured output
+        # back as bytes on a timeout, even with text=True. Losing it made `disk-usage`
+        # due again on every tick (no sample for the period) and cost the tail 300 s
+        # each half hour on 2026-10-09/10.
+        decode = lambda b: b.decode("utf-8", "replace") if isinstance(b, bytes) else (b or "")
+        stdout, stderr, stopped = decode(exc.stdout), decode(exc.stderr), True
+        p = None
+    if p is not None and p.returncode != 0:
         result["skipped"] = f"exited {p.returncode}: {(p.stderr or '').strip()[:120]}"
         return result
 
     rows = []
-    for line in p.stdout.splitlines():
+    for line in stdout.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -248,6 +282,12 @@ def run_one(conn, m: dict, known_projects: set[str], force: bool) -> dict:
         rows.append((r["project_id"], r["metric"], r["at"], value, unit, pid,
                      json.dumps(r.get("payload") or {}, ensure_ascii=False), now()))
 
+    if stopped and not rows:
+        result["skipped"] = f"took longer than {limit:.0f}s and was stopped"
+        return result
+    if stopped:
+        result["partial"] = (f"stopped at its {limit:.0f}s limit; kept the {len(rows)} "
+                             f"measurement(s) it had printed")
     with conn:
         conn.executemany(
             "INSERT INTO metrics (project_id, metric, at, value, unit, source, payload_json,"
@@ -261,7 +301,7 @@ def run_one(conn, m: dict, known_projects: set[str], force: bool) -> dict:
     # claims is a fact about the REGISTRY, not noise — and dropping it here
     # would hide exactly the gap the operator most wants closed. Kept in the
     # receipt, one line, for `build_findings` to raise.
-    note = (p.stderr or "").strip()
+    note = (stderr or "").strip()
     if note:
         result["note"] = note[:300]
     return result
@@ -438,7 +478,8 @@ def main() -> int:
         if r["skipped"]:
             print(f"  SKIP  {r['id']}: {r['skipped']}")
         else:
-            print(f"  {r['id']}: {r['written']} measurement(s)")
+            print(f"  {r['id']}: {r['written']} measurement(s)"
+                  + (f" — partial: {r['partial']}" if r.get("partial") else ""))
         for bad in r["refused"][:5]:
             print(f"    REFUSED {bad}")
         if len(r["refused"]) > 5:

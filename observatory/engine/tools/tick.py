@@ -203,24 +203,29 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
         t.bail("validate", 1, "VALIDATOR RED — the registry is not projected and the agent is not called")
     if bounded("events", PY, "collectors/scan_events.py")[0] != 0:
         log("events degraded")
-
-    step("plugins", PY, "collectors/run_plugins.py")
-    step("rollup", PY, "store/rollup.py", "refresh")
     if bounded("snapshot", PY, "collectors/compute_deltas.py", "snapshot")[0] != 0:
         log("snapshot degraded")
     _, diff = bounded("diff", PY, "collectors/compute_deltas.py", "diff")
     log(diff.splitlines()[0] if diff.strip() else "")
-    if re.search(r"nothing moved|nothing to compare", diff):
-        log("quiet tick — no model called, 0 tokens")
-    else:
-        step("agent", PY, "agent/observe.py")
 
+    # THE OPTIONAL STEPS, cheap ones first. Measured 2026-10-09/10: `plugins` (92–497 s)
+    # and `agent` (135–244 s) ran first and used the window every tick, so the steps that
+    # take seconds — the index, the erasure, the review machinery — were `not started`
+    # tick after tick. Now they run first and the heavy ones take what is left; what the
+    # agent proposes this tick is indexed and exported on the next.
     step("index", PY, "store/indexer.py", "index")
     step("retention", PY, "store/retention.py", "apply")
     step("sweep", PY, "tools/sweep_fixtures.py")
     step("corroborate", PY, "tools/corroborate.py")
     step("ledger", PY, "tools/export_ledger.py")
     step("lost", PY, "tools/record_lost_projects.py")
+    step("plugins", PY, "collectors/run_plugins.py")
+    step("rollup", PY, "store/rollup.py", "refresh")
+    if re.search(r"nothing moved|nothing to compare", diff):
+        log("quiet tick — no model called, 0 tokens")
+    else:
+        step("agent", PY, "agent/observe.py")
+
     step("findings", PY, "tools/build_findings.py")
     step("dashboard", PY, "dashboard/build_dashboard.py")
 

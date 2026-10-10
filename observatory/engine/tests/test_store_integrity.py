@@ -186,6 +186,82 @@ def test_an_absent_store_is_not_a_fault() -> None:
           json.dumps(r)[:200])
 
 
+# ─────────── the cost, bounded (2026-10-10) ─────────────────────────────
+#
+# One tick on 2026-10-10 spent 785 s in this step under a load average near 400 —
+# `integrity_check` over 81 MiB takes 4–38 s on the same machine — and was killed with
+# nothing written, after which `scan-fs` never started. The full check now runs once a
+# day, `quick_check` in between, and the step stops itself at its deadline and says so.
+
+def write_receipt(d: pathlib.Path, doc: dict) -> None:
+    (d / "scratch/integrity.json").write_text(json.dumps(doc))
+
+
+def migrated() -> tuple[pathlib.Path, dict]:
+    d, env = workspace()
+    subprocess.run([PY, "store/migrate.py"], cwd=ROOT, env=env,
+                   capture_output=True, text=True, timeout=600)
+    return d, env
+
+
+def test_the_full_check_runs_once_a_day_and_the_quick_one_in_between() -> None:
+    d, env = migrated()
+    run_check(env)
+    first = receipt(d)
+    check("the first check is the full one", first.get("pragma") == "integrity_check", json.dumps(first)[:200])
+    check("and it records when the full check last passed", first.get("full_checked_at") == first.get("ran_at"),
+          json.dumps(first)[:200])
+    run_check(env)
+    second = receipt(d)
+    check("within the day the next one is quick", second.get("pragma") == "quick_check", json.dumps(second)[:200])
+    check("and keeps the full check's time", second.get("full_checked_at") == first.get("full_checked_at"),
+          json.dumps(second)[:200])
+    write_receipt(d, {**second, "full_checked_at": stamp(25)})
+    run_check(env)
+    check("a day later the full check runs again", receipt(d).get("pragma") == "integrity_check",
+          json.dumps(receipt(d))[:200])
+    write_receipt(d, {**receipt(d), "verdict": "damaged"})
+    run_check(env)
+    check("and after any verdict that is not ok", receipt(d).get("pragma") == "integrity_check",
+          json.dumps(receipt(d))[:200])
+
+
+def test_the_check_stops_at_its_deadline_and_says_it_did_not_measure() -> None:
+    d, env = workspace()
+    db = sqlite3.connect(d / "observatory.db")
+    db.execute("CREATE TABLE t(a INTEGER, b TEXT)")
+    db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 400000) "
+               "INSERT INTO t SELECT i, hex(randomblob(16)) FROM n")
+    db.execute("CREATE INDEX t_b ON t(b)")
+    db.commit()
+    db.close()
+    import time
+    started = time.time()
+    p = run_check(dict(env, OBSERVATORY_STEP_DEADLINE=f"{time.time() + 0.05:.3f}"))
+    r = receipt(d)
+    check("the step finishes on its own, well inside its watchdog", time.time() - started < 60,
+          f"{time.time() - started:.1f}s")
+    check("its verdict is `unmeasured`, not `ok` and not `damaged`", r.get("verdict") == "unmeasured",
+          json.dumps(r)[:240])
+    check("it exits 0 — the store is not known to be damaged", p.returncode == 0, (p.stdout + p.stderr)[-200:])
+    check("and the detail says it ran out of time", "deadline" in str(r.get("detail", "")), json.dumps(r)[:240])
+    # IN-PROCESS, with a budget shorter than the pragma: through a subprocess the interpreter's
+    # start-up ate a 0.1 s budget on a fast runner and the check was never started, so this
+    # case asked a question about start-up time instead of about the interrupt.
+    import check_store
+    importlib.reload(check_store)
+    r = check_store.inspect(d / "observatory.db", check_store.PRAGMA, 0.05)
+    check("a check interrupted mid-way is `unmeasured` too", r.get("verdict") == "unmeasured", json.dumps(r)[:240])
+    check("naming the pragma it was in", "PRAGMA" in str(r.get("detail", "")), json.dumps(r)[:240])
+
+
+def test_the_step_has_a_limit_of_its_own() -> None:
+    import tick_lease
+    importlib.reload(tick_lease)
+    limit = tick_lease.STEP_SECONDS.get("integrity", tick_lease.DEFAULT_STEP_SECONDS)
+    check("a guard step cannot spend the collectors' window", limit <= 300, str(limit))
+
+
 # ─────────── the finding ───────────────────────────────────────────────
 
 def findings_for(rec: dict | None) -> list[dict]:
@@ -274,6 +350,19 @@ def test_an_absent_receipt_raises_nothing() -> None:
           "the check has not run since it was added; that is not a verdict")
 
 
+def test_an_unmeasured_check_is_information_naming_the_last_full_one() -> None:
+    got = findings_for(rec("unmeasured", detail="stopped at its deadline after 240 s",
+                           full_checked_at=stamp(30)))
+    f = got[0] if len(got) == 1 else None
+    check("it is reported", f is not None, str(got)[:200])
+    if f:
+        check("as its own rule", f["type"] == "store.integrity_unmeasured", f["type"])
+        check("as info — nothing is known to be wrong", f["severity"] == "info", f["severity"])
+        check("and it names when the store last passed the full check",
+              "30h" in f["title"] or "30" in f["detail"] or stamp(30)[:13] in f["detail"],
+              f"{f['title']} / {f['detail'][:200]}")
+
+
 # ─────────── wiring ────────────────────────────────────────────────────
 
 def test_the_check_runs_early_in_the_tick() -> None:
@@ -322,12 +411,16 @@ if __name__ == "__main__":
                test_a_malformed_search_index_is_named_rather_than_missed,
                test_an_unopenable_store_is_a_third_answer,
                test_an_absent_store_is_not_a_fault,
+               test_the_full_check_runs_once_a_day_and_the_quick_one_in_between,
+               test_the_check_stops_at_its_deadline_and_says_it_did_not_measure,
+               test_the_step_has_a_limit_of_its_own,
                test_a_failed_check_is_critical,
                test_an_unopenable_store_is_also_critical_and_says_which_it_is,
                test_a_sound_store_is_silent,
                test_an_absent_store_is_silent,
                test_a_stale_verdict_is_reported_as_stale,
                test_an_absent_receipt_raises_nothing,
+               test_an_unmeasured_check_is_information_naming_the_last_full_one,
                test_the_check_runs_early_in_the_tick,
                test_the_receipt_is_a_foreign_write_to_the_gate):
         fn()
