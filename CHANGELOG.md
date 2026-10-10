@@ -5,6 +5,12 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+## 0.21.0 — 2026-10-10
+
+The engine runs on Windows, and a check of the agent on a heavily loaded machine fixed what it
+said wrongly about itself and what kept its own tail from running. The companion plugin
+`observatory-log` moves to 0.21.0.
+
 ### Added
 
 - **The engine on Windows** (docs/design/WINDOWS-LINUX.md, W0–W3). One module per OS seam, each

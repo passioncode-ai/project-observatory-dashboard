@@ -10,7 +10,7 @@ The distribution is the complete engine: project and repository inventory, findi
 
 ## Quick start for a new teammate
 
-The complete engine supports macOS and Linux, Python 3.11+ and SQLite 3.37+ with loadable-extension support. The `python3` that ships with macOS is 3.9, and pip run from it fails with a misleading `ResolutionImpossible` rather than naming the interpreter, so choose an extension-enabled interpreter such as Homebrew Python explicitly; the [onboarding guide](docs/ONBOARDING.md#sqlite-runtime-prerequisite) checks this. Every machine runs a tagged release, the same wheel byte for byte ([staying in step](docs/ONBOARDING.md#staying-in-step)).
+The complete engine supports macOS and Linux, Python 3.11+ and SQLite 3.37+ with loadable-extension support. On Windows (Python 3.13+, since 0.21.0) the engine, the CLI and a whole tick run and are tested on every change; scheduling the tick and the server with Task Scheduler and a desktop app are not there yet ([the plan](docs/design/WINDOWS-LINUX.md)). The `python3` that ships with macOS is 3.9, and pip run from it fails with a misleading `ResolutionImpossible` rather than naming the interpreter, so choose an extension-enabled interpreter such as Homebrew Python explicitly; the [onboarding guide](docs/ONBOARDING.md#sqlite-runtime-prerequisite) checks this. Every machine runs a tagged release, the same wheel byte for byte ([staying in step](docs/ONBOARDING.md#staying-in-step)).
 
 ### Install
 
