@@ -68,6 +68,12 @@ First run of the `windows` job (PR #185, run 38006719799, Python 3.14.7, after W
 | `test_oslocks` | the lock semantics held; every case failed in cleanup — the test deleted its folder before closing its descriptors, which Windows refuses (fixed: cleanups, last in first out) |
 | Top-level tests | 19 of 133 red: CRLF checkout (inventory, licence and allowlist digests — `.gitattributes`); `pwd` in `maintenance._real_home` (`osprivacy.real_home`); three test fixtures (an environment cleared of `USERPROFILE`, `?` in a file name, LF turned into CRLF on a text pipe to `git hash-object`); the macOS notarization script (skipped on Windows); `env.permissions` read mode bits, which Windows does not keep (W2b: the file's ACL) |
 
+After W2b (PR #187, run 38010490756): every step green — 76/76 modules load, `test_oslocks` 6/6,
+`test_osproc` 10/10, `test_osprivacy` 14/14, the CLI, and the top-level tests 133 OK (10 skipped:
+the macOS notarization script). Two Windows facts the run taught: SDDL names the built-in
+Administrator account `LA` rather than by its SID, and a folder created inside the profile
+inherits an OWNER RIGHTS (`OW`) entry — both are compared as the SIDs they stand for.
+
 ## Known differences on Windows
 
 - **No graceful stop.** A process without a console receives no SIGTERM, so `osproc.stop_group`
