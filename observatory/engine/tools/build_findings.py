@@ -1407,6 +1407,24 @@ def blank_page_findings(receipt: dict | None,
     ran_at = str(receipt.get("ran_at") or "an unrecorded time")
     checked = str(receipt.get("page_sha") or "")
 
+    if verdict == "unmeasured":
+        # A busy machine, not a broken page: smoke ran the script, the processor was
+        # given to other work, and a longer try ran out as well (dashboard/smoke.js).
+        # Raising `dashboard.blank` here is what made 2026-10-10 00:52 a critical false
+        # alarm about a page that rendered clean the tick before.
+        reason = str(receipt.get("reason") or "the machine was too busy to run the page's script")
+        return [{
+            "type": "dashboard.unverified", "subject": "surface:dashboard",
+            "severity": "info",
+            **titled("the page was not verified this time — the machine was too busy to run its script"),
+            "detail": (f"`dashboard/smoke.js` tried at {ran_at}: {reason}. A script that "
+                       f"spins forever still reads as a blank page; this one was waiting "
+                       f"for the processor, so whether the page renders is unknown rather "
+                       f"than false. The next tick measures it again."),
+            "action": "`project-observatory full smoke` when the machine is quieter, or "
+                      "wait for the next tick",
+            "evidence": ["docs/projects-dashboard.smoke.json"]}]
+
     if verdict not in ("clean", "blank"):
         return [{
             "type": "dashboard.unverified", "subject": "surface:dashboard",
@@ -3738,6 +3756,22 @@ def collect() -> list[dict]:
                            "store/observatory.db.backup-* beside it"),
                 "evidence": ["store/raw/integrity.json",
                              "tools/check_store.py"]})
+        elif verdict == "unmeasured":
+            # The step stopped itself at its deadline (tools/check_store.py): nothing is
+            # known to be wrong, and the honest number is how old the last full pass is.
+            full_h = hours_since(iv.get("full_checked_at") or "")
+            last = (f"the last full check passed {int(full_h)}h ago ({iv.get('full_checked_at')})"
+                    if full_h is not None else "no full check has passed on record")
+            out.append({
+                "type": "store.integrity_unmeasured", "subject": "store:observatory.db",
+                "severity": "info",
+                **titled("the store's integrity check ran out of time — {last}", last=last),
+                "detail": (f"{iv.get('detail') or 'the check stopped before it finished'}. "
+                           f"Checked at {iv.get('ran_at')} with PRAGMA {iv.get('pragma') or '?'}; "
+                           f"{last}. A busy machine stops the check before it reads the "
+                           f"whole file; the next tick tries again."),
+                "action": "`project-observatory full integrity` when the machine is quieter",
+                "evidence": ["store/raw/integrity.json", "tools/check_store.py"]})
         elif verdict == "ok" and age_h is not None and age_h >= INTEGRITY_STALE_HOURS:
             # A VERDICT IS ABOUT WHEN IT WAS TAKEN. `ok` from three days ago says
             # the store was sound three days ago, and presenting it as current

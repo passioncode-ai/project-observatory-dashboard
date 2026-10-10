@@ -380,7 +380,10 @@ SUPERVISOR_GRACE = 10
 #: A step's own wall-clock limit. The slowest steps measured on a loaded machine
 #: (2026-10-03, last 30 ticks): leaks 849 s, git-hygiene 418 s, scan-fs 374 s.
 DEFAULT_STEP_SECONDS = 900
-STEP_SECONDS = {"leaks": 1200}
+#: `integrity` is a guard over an ~80 MiB store that checks in 4–38 s; 2026-10-10 it
+#: spent 785 s under a load near 400 and left `scan-fs` no time. It stops itself before
+#: its limit and records `unmeasured` (tools/check_store.py).
+STEP_SECONDS = {"leaks": 1200, "integrity": 240}
 #: The whole tick's ceiling, below the 30-minute interval (lifecycle LC-03: a
 #: watchdog shorter than the interval). `install_launchd.build` lowers it for a
 #: shorter interval and writes it into the plist.

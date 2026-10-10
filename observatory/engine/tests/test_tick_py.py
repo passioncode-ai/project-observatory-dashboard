@@ -78,6 +78,36 @@ class WholeTick(unittest.TestCase):
         self.assertIn("dashboard: ", self.tick.stdout)
 
 
+class TailOrder(unittest.TestCase):
+    """2026-10-09/10: `plugins` (92–497 s) and `agent` (135–244 s) ran first among the tail's
+    optional steps and used the window every tick, so `index`, `retention` — the erasure —
+    `sweep`, `corroborate`, `ledger` and `lost`, seconds each, were `not started` tick after
+    tick. The cheap ones run first now; the heavy ones take what is left."""
+    CHEAP = ("index", "retention", "sweep", "corroborate", "ledger", "lost")
+    HEAVY = ("plugins", "rollup", "agent")
+
+    def order(self):
+        sys.path.insert(0, str(ROOT / "tests"))
+        import tick_reader
+        return [name for _line, _fn, name, _words in tick_reader.tick_calls(ROOT)]
+
+    def test_the_cheap_optional_steps_run_before_the_heavy_ones(self):
+        order = self.order()
+        for cheap in self.CHEAP:
+            for heavy in self.HEAVY:
+                self.assertLess(order.index(cheap), order.index(heavy), f"{cheap} after {heavy}: {order}")
+
+    def test_the_heavy_ones_still_run_before_the_findings(self):
+        order = self.order()
+        for heavy in self.HEAVY:
+            self.assertLess(order.index(heavy), order.index("findings"), order)
+
+    def test_the_change_of_the_tick_is_known_before_the_agent_asks(self):
+        # `diff` decides whether the agent is called at all.
+        order = self.order()
+        self.assertLess(order.index("diff"), order.index("agent"), order)
+
+
 class Bail(unittest.TestCase):
     def test_a_bail_still_releases_the_lease(self):
         # `steps` stops through `bail` (SystemExit); the release sits in `run`'s `finally`.
