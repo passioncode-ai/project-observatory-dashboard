@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import configuration
+import osprivacy
 
 ROOT = Path(__file__).resolve().parent
 HOME = configuration.home()
@@ -109,15 +110,15 @@ def tighten() -> list[str]:
              *SCRATCH.rglob("*.jsonl")]
     for d in dirs:
         try:
-            if not any(p.is_symlink() for p in (d, *d.parents)) and d.is_dir() and (d.stat().st_mode & 0o777) != 0o700:
-                d.chmod(0o700)
+            if not any(p.is_symlink() for p in (d, *d.parents)) and d.is_dir() and osprivacy.loose(d, 0o700):
+                osprivacy.make_private(d)
                 changed.append(str(d))
         except OSError:
             pass
     for f in files:
         try:
-            if not any(p.is_symlink() for p in (f, *f.parents)) and f.is_file() and (f.stat().st_mode & 0o777) != 0o600:
-                f.chmod(0o600)
+            if not any(p.is_symlink() for p in (f, *f.parents)) and f.is_file() and osprivacy.loose(f, 0o600):
+                osprivacy.make_private(f)
                 changed.append(str(f))
         except OSError:
             pass

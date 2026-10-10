@@ -64,6 +64,7 @@ from typing import Any, Callable
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import memory_redact                                                               # noqa: E402
+import osprivacy                                                                   # noqa: E402
 from store import ledger as L                                                      # noqa: E402
 
 #: Statuses a step can be left in. `closed` is not one of them: closing is a
@@ -928,7 +929,7 @@ def _journal_known(kind: str, workflow_id: str | None, step_id: str | None,
     target = pathlib.Path(paths.STATE) / "logs" / REDACTIONS
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        fd = osprivacy.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     except OSError:

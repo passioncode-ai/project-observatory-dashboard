@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import oslocks  # after the path setup: this file also runs as a script
+import osprivacy  # noqa: E402
 import osproc
 import paths
 import configuration
@@ -556,7 +557,7 @@ def supervised(command: list[str]) -> int:
     if paths.STATE.is_symlink():
         raise configuration.ConfigurationError("State directory cannot be a symbolic link")
     paths.STATE.chmod(0o700)
-    fd = os.open(paths.STATE / "tick.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = osprivacy.open(paths.STATE / "tick.lock", os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
     try:
         os.fchmod(fd, 0o600)
         try:

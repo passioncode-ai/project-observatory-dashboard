@@ -68,6 +68,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import oslocks  # after the path setup: this file also runs as a script
+import osprivacy  # noqa: E402
 import credential_shape  # noqa: E402
 import leak_register  # noqa: E402
 import paths                                            
@@ -126,11 +127,7 @@ def _private_dirs(leaf: pathlib.Path) -> None:
     # Injecting an env file must not chmod the user's whole project directory.
     walk = leaf
     while walk == STORE or STORE in walk.parents:
-        fd = os.open(walk, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
-        try:
-            os.fchmod(fd, 0o700)
-        finally:
-            os.close(fd)
+        osprivacy.private_folder(walk)
         if walk == STORE:
             break
         walk = walk.parent
@@ -138,10 +135,10 @@ def _private_dirs(leaf: pathlib.Path) -> None:
 
 def _read_private(path: pathlib.Path, *, private: bool = True) -> str:
     _no_symlinks(path)
-    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+    fd = osprivacy.open(path, os.O_RDONLY | osprivacy.NONBLOCK | osprivacy.NOFOLLOW)
     with os.fdopen(fd, "r", encoding="utf-8") as stream:
         info = os.fstat(stream.fileno())
-        if not stat.S_ISREG(info.st_mode) or (private and info.st_mode & 0o077):
+        if not stat.S_ISREG(info.st_mode) or (private and not osprivacy.private(stream.fileno())):
             raise VaultBoundaryError("Private data must be a regular owner-only file")
         return stream.read()
 
@@ -149,8 +146,8 @@ def _read_private(path: pathlib.Path, *, private: bool = True) -> str:
 def _append_private(path: pathlib.Path, text: str) -> None:
     _no_symlinks(path)
     _private_dirs(path.parent)
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NONBLOCK |
-                 getattr(os, "O_NOFOLLOW", 0), 0o600)
+    fd = osprivacy.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NONBLOCK |
+                 osprivacy.NOFOLLOW, 0o600)
     with os.fdopen(fd, "a", encoding="utf-8") as stream:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise VaultBoundaryError("Private journal must be a regular file")
@@ -182,7 +179,7 @@ def _mutation_lock():
     _private_dirs(STORE)
     lock = STORE / ".vault.lock"
     _no_symlinks(lock)
-    fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    fd = osprivacy.open(lock, os.O_CREAT | os.O_RDWR | osprivacy.NONBLOCK | osprivacy.NOFOLLOW, 0o600)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise VaultBoundaryError("Vault lock must be a regular file")
@@ -740,14 +737,13 @@ def cmd_list(a) -> int:
         if a.env and env != a.env:
             continue
         meta = _read_meta(slot)
-        mode = stat.S_IMODE(slot.stat().st_mode)
         extras = []
         if meta.get("rotated"):
             extras.append(f"rotated {meta['rotated'][:10]}×{meta.get('rotations', 1)}")
         if isinstance(meta.get("header_for"), str):
             extras.append(f"header for {meta['header_for']}")
-        if mode & 0o077:
-            extras.append(f"MODE {mode:o} — READABLE BEYOND OWNER")
+        if not osprivacy.private(slot):
+            extras.append(f"MODE {osprivacy.describe(slot).lstrip('0')} — READABLE BEYOND OWNER")
         print(f"  {project}/{env}/{name}  ({slot.stat().st_size}B"
               + (", " + ", ".join(extras) if extras else "") + ")")
         found += 1

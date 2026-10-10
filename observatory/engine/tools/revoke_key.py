@@ -21,6 +21,7 @@ import argparse, json, os, pathlib, stat, sys, urllib.error, urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import private_io
+import osprivacy
 import paths                                            
 
 SECRET = paths.source_path("secret_store", paths.SECRETS) / 'openrouter-provisioning'
@@ -60,9 +61,8 @@ def load_or_store() -> str:
             "it is stored at mode 600 and used from then on: "
             "python \"$(project-observatory full-path)/tools/revoke_key.py\" --list < key-file")
     target = private_io.legacy_path(SECRET)
-    mode = stat.S_IMODE(target.stat().st_mode)
-    if mode & 0o077:
-        die(f"{SECRET} is mode {mode:o} — readable beyond the owner. "
+    if not osprivacy.private(target):
+        die(f"{SECRET} is mode {osprivacy.describe(target).lstrip('0')} — readable beyond the owner. "
             f"chmod 600 it, or replace it; a key this exposed is not used.")
     return private_io.read(target).strip()
 

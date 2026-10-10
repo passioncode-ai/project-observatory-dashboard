@@ -8,7 +8,6 @@ import os
 import re
 import secrets
 import sqlite3
-import stat
 import subprocess
 import tempfile
 from contextlib import closing
@@ -122,13 +121,30 @@ def private_dir(path: Path) -> None:
         if part.is_symlink():
             raise ObservatoryError("State directories must not use symlinks.")
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path.chmod(0o700)
+    osprivacy().make_private(path)
+
+
+_OSPRIVACY = []
+
+
+def osprivacy():
+    """The engine's privacy boundary, one module for both profiles: `engine/osprivacy.py`, loaded
+    by its path because the engine folder is not a package (docs/design/WINDOWS-LINUX.md, W2b).
+    POSIX reads mode bits; Windows reads the file's ACL."""
+    if not _OSPRIVACY:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "observatory_osprivacy", Path(__file__).with_name("engine") / "osprivacy.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _OSPRIVACY.append(module)
+    return _OSPRIVACY[0]
 
 
 def private_file(path: Path) -> None:
     if path.is_symlink() or any(p.is_symlink() for p in path.parents) or not path.is_file():
         raise ObservatoryError("Expected a regular private state file.")
-    if os.name == "posix" and stat.S_IMODE(path.stat().st_mode) & 0o077:
+    if not osprivacy().private(path):
         raise ObservatoryError("Private state file has group or world permissions; set mode 600 before continuing.")
 
 
@@ -353,7 +369,7 @@ def observe_project(row: dict, salt: bytes, sensitive: set[str], budget: dict) -
                 budget["values"] -= len(pairs)
                 sensitive.update(v for _, v in pairs if v)
                 item["environment"].append({"file": str(path.relative_to(root)),
-                    "private_mode": os.name != "posix" or not (path.stat().st_mode & 0o077),
+                    "private_mode": osprivacy().private(path),
                     "variables": [{"name": k, "present": bool(v),
                         "fingerprint": hmac.new(salt, v.encode(), hashlib.sha256).hexdigest() if v else None}
                         for k, v in pairs]})

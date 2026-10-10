@@ -89,7 +89,11 @@ class ObservatoryTest(unittest.TestCase):
     def test_env_only_metadata_salted_per_installation(self):
         sentinel = "synthetic-value-with-no-provider-identity"
         (self.project / ".env").write_text(f"EXAMPLE_TOKEN={sentinel}\nEMPTY=\n")
-        (self.project / ".env").chmod(0o644)
+        if os.name == "nt":  # Windows keeps access in the file's ACL, not in mode bits
+            subprocess.run(["icacls", str(self.project / ".env"), "/grant", "*S-1-1-0:(R)"], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            (self.project / ".env").chmod(0o644)
         core.add_project(self.state, "example", str(self.project))
         report = core.scan(self.state)
         serialized = json.dumps(report)
@@ -144,10 +148,13 @@ class ObservatoryTest(unittest.TestCase):
     def test_private_secret_permissions_and_symlink_refused(self):
         credentials.put_secret(self.state, "EXAMPLE", "synthetic-example-value")
         file = self.state / "secrets" / "EXAMPLE"
-        if os.name == "posix":
+        if os.name == "nt":  # the same refusal, from the file's ACL
+            subprocess.run(["icacls", str(file), "/grant", "*S-1-1-0:(R)"], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
             file.chmod(0o644)
-            with self.assertRaises(core.ObservatoryError):
-                credentials.read_secret(self.state, "EXAMPLE")
+        with self.assertRaises(core.ObservatoryError):
+            credentials.read_secret(self.state, "EXAMPLE")
         file.unlink()
         file.symlink_to(self.project / "outside")
         with self.assertRaises(core.ObservatoryError):

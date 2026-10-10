@@ -11,6 +11,7 @@ import argparse, plistlib, subprocess, sys, os, pathlib, hashlib, re, shutil, st
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 import paths
 import configuration
 
@@ -154,7 +155,7 @@ def prepare_logs(names: tuple[str, ...], directory: pathlib.Path = LOG_DIR) -> N
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     directory.chmod(0o700)
     for name in names:
-        fd = os.open(directory / name, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        fd = osprivacy.open(directory / name, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
         os.fchmod(fd, 0o600)
         os.close(fd)
 
@@ -299,7 +300,7 @@ def repair_interpreters(expected: str | None = None, *, write: bool = True,
         found.append({"name": job["name"], "label": job["label"], "plist": str(path),
                       "was": before[0], "now": expected})
         if write:
-            fd = os.open(path, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            fd = osprivacy.open(path, os.O_WRONLY | os.O_TRUNC | osprivacy.NOFOLLOW, 0o600)
             with os.fdopen(fd, "wb") as stream:
                 stream.write(plistlib.dumps(doc))
             os.chmod(path, 0o600)
@@ -359,7 +360,7 @@ def main() -> int:
     PLIST.parent.mkdir(parents=True, exist_ok=True)
     if PLIST.is_symlink():
         raise configuration.ConfigurationError("LaunchAgent plist cannot be a symbolic link")
-    fd = os.open(PLIST, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    fd = osprivacy.open(PLIST, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | osprivacy.NOFOLLOW, 0o600)
     with os.fdopen(fd, "wb") as stream:
         stream.write(payload)
     run("launchctl", "bootout", target)                                        

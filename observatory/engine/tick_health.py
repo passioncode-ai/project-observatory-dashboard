@@ -23,6 +23,7 @@ and says so in its log; nothing else is affected.
 from __future__ import annotations
 
 import oslocks
+import osprivacy
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -54,7 +55,7 @@ def _stamp(path: Path, *keys: str) -> datetime | None:
 def lock_held(lock: Path) -> bool:
     """True while a tick holds the workspace lock."""
     try:
-        fd = os.open(lock, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = osprivacy.open(lock, os.O_RDONLY | osprivacy.NOFOLLOW)
     except OSError:
         return False
     try:

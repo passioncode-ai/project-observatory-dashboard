@@ -31,6 +31,7 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import atomic
+import osprivacy
 import paths
 
 CONFIG = paths.config_file('models.json')
@@ -709,9 +710,8 @@ def _read_from(env_name: str, files: tuple) -> tuple[str | None, str]:
     for f in files:
         if not f.is_file():
             continue
-        mode = f.stat().st_mode & 0o777
-        if mode & 0o077:
-            raise Fatal(f"{f} is mode {mode:o} — group or world readable. "
+        if not osprivacy.private(f):
+            raise Fatal(f"{f} is mode {osprivacy.describe(f).lstrip('0')} — group or world readable. "
                         f"A key file must be 600.\n  chmod 600 {f}")
         value = f.read_text(encoding="utf-8").strip()
         if not value:

@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .core import (ObservatoryError, add_project, config, discover, init, latest,
+from .core import (ObservatoryError, add_project, config, discover, init, latest, osprivacy,
                    known_slot_values, private_file, public_export, redact, scan, state_path, write_json)
 from .credentials import put_secret, run_secret, scan_leaks, secret_names
 
@@ -63,7 +63,7 @@ def demo(state: Path) -> dict:
     # Plainly synthetic, no provider prefix and no relationship to a live key.
     synthetic = "SYNTHETIC_DEMO_VALUE_NOT_A_CREDENTIAL"
     (project / ".env").write_text(f"DEMO_TOKEN={synthetic}\n")
-    (project / ".env").chmod(0o600)
+    osprivacy().make_private(project / ".env")
     transcript = directory / "synthetic-transcript.txt"
     transcript.write_text("Synthetic example: a value echoed into a local artifact.\n" + synthetic + "\n" + synthetic + "\n")
     try:

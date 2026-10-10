@@ -33,7 +33,7 @@ turns from informative to required once W1–W3 are in.
 | W0 | **CI job `windows`** (`.github/workflows/check.yml`) and `.gitattributes` (LF on every checkout, so the inventory and licence digests match) — install the package, load every engine library module in its own interpreter (`tools/check_imports.py`), the lock tests, `--help` and the demo of the CLI, the top-level tests; each step runs regardless of the one before and the job summary lists every outcome; informative until W3 | new | exists |
 | W1 | **`oslocks`** — `flock(fd, LOCK_SH/LOCK_EX/LOCK_NB/LOCK_UN)` over `fcntl.flock` on POSIX and `LockFileEx`/`UnlockFileEx` on Windows (shared, exclusive, fail-immediately; `BlockingIOError` on contention, as `fcntl`) | new | unchanged |
 | W2a | **Process control — `osproc`** — a child in a group of its own (`CREATE_NEW_PROCESS_GROUP`), the tree stopped with `taskkill /T /F`, whether a process is alive asked through `OpenProcess` (on Windows `os.kill(pid, 0)` TERMINATES the process, so `jobs._alive` would have killed every job it checked), only the stop signals the OS has, no signal masks, the assistant's deadline as a timer instead of `SIGALRM`; `test_osproc` refuses `os.killpg`, `start_new_session=True`, `os.kill(pid, 0)`, `SIGHUP`, `pthread_sigmask` and `signal.alarm` anywhere else in the engine | new | unchanged |
-| W2b | **File privacy — `osprivacy`** — the account's real home without `pwd` (`SHGetKnownFolderPath`, done: `maintenance._real_home`), the current user without `getuid`, owner-only files through the file's ACL instead of mode 0600, link refusals without `O_NOFOLLOW` | new | unchanged |
+| W2b | **File privacy — `osprivacy`** — one module for both profiles (the light `core` loads it by path): `open` (binary on Windows — without `O_BINARY` a descriptor is in text mode and LF becomes CRLF; `NOFOLLOW` refuses a link or junction by looking first), `private`/`others_may_write`/`owned_by_me` (mode bits and `st_uid` on POSIX; the file's ACL on Windows — every granting ACE names this account, LocalSystem or Administrators), `make_private` (0600/0700; a protected ACL inherited inside a folder), `private_folder`, `loose`, `describe`, and `real_home` without `pwd` (`SHGetKnownFolderPath`). `runtime_identity` holds its folder by path on Windows, where a folder has no descriptor. `test_osprivacy` refuses `os.open`, the POSIX-only open flags, mode-bit and `st_uid` checks anywhere else; `os.getuid` stays only in the five launchd/Mac-app modules W4 replaces | new | unchanged |
 | W3 | **The tick in Python** — `tools/tick.sh` becomes `tools/tick.py` with the same steps, order, watchdog and log lines; `tick.sh` stays a two-line wrapper on POSIX for existing jobs | new | same code |
 | W4 | **Scheduling** — Windows Task Scheduler for the tick, the server and the maintenance job (`schtasks` with an XML task, per-workspace names, no stored password); systemd user units for the tick and the server on Linux | new | completes |
 | W5 | **Secret store** — the backup passphrase in Windows Credential Manager (`CredWriteW`/`CredReadW`); the vault's own files under the ACL of W2 | new | exists |
@@ -41,6 +41,12 @@ turns from informative to required once W1–W3 are in.
 | W7 | **Paths and tools** — `%LOCALAPPDATA%` homes, `.exe`/`.cmd` lookup for `git`, `gh`, `heroku`, UTF-8 console output | new | exists |
 | W8 | **Desktop app for Windows and Linux** — a Tauri 2 shell (the organization's Switchboard stack): the dashboard window on `127.0.0.1:47311`, start/stop of the server, a tray icon, Restart to update; Windows installer signed with the organization's Authenticode certificate, Linux AppImage and `.deb`; updater signature key in the vault | new | new |
 | W9 | **Release and documentation** — the release workflow builds and signs the app per OS; onboarding per OS | new | new |
+
+## Requirements on Windows
+
+- **Python 3.13 or newer.** `os.fchmod` exists on Windows from 3.13; the engine calls it where a
+  file it creates must not be read-only. Privacy itself comes from the folder's protected ACL,
+  which every file created inside inherits.
 
 ## What stays the same
 
@@ -60,7 +66,13 @@ First run of the `windows` job (PR #185, run 38006719799, Python 3.14.7, after W
 | Every engine library module loads | pass — 76 of 76 |
 | `--help`, `demo`, `doctor` of the CLI | pass |
 | `test_oslocks` | the lock semantics held; every case failed in cleanup — the test deleted its folder before closing its descriptors, which Windows refuses (fixed: cleanups, last in first out) |
-| Top-level tests | 19 of 133 red: CRLF checkout (inventory, licence and allowlist digests — `.gitattributes`); `pwd` in `maintenance._real_home` (`osprivacy.real_home`); three test fixtures (an environment cleared of `USERPROFILE`, `?` in a file name, LF turned into CRLF on a text pipe to `git hash-object`); the macOS notarization script (skipped on Windows); `env.permissions` reads mode bits, which Windows does not keep (W2b, still red) |
+| Top-level tests | 19 of 133 red: CRLF checkout (inventory, licence and allowlist digests — `.gitattributes`); `pwd` in `maintenance._real_home` (`osprivacy.real_home`); three test fixtures (an environment cleared of `USERPROFILE`, `?` in a file name, LF turned into CRLF on a text pipe to `git hash-object`); the macOS notarization script (skipped on Windows); `env.permissions` read mode bits, which Windows does not keep (W2b: the file's ACL) |
+
+After W2b (PR #187, run 38010490756): every step green — 76/76 modules load, `test_oslocks` 6/6,
+`test_osproc` 10/10, `test_osprivacy` 14/14, the CLI, and the top-level tests 133 OK (10 skipped:
+the macOS notarization script). Two Windows facts the run taught: SDDL names the built-in
+Administrator account `LA` rather than by its SID, and a folder created inside the profile
+inherits an OWNER RIGHTS (`OW`) entry — both are compared as the SIDs they stand for.
 
 ## Known differences on Windows
 

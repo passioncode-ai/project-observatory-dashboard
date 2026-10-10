@@ -16,6 +16,7 @@ import sqlite3, sys, pathlib, uuid, os
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import paths
+import osprivacy
 
 DB_PATH = paths.DB
 SCHEMA = paths.ROOT / "store" / "schema.sql"
@@ -60,7 +61,7 @@ def connect(path: pathlib.Path | None = None) -> sqlite3.Connection:
         compatibility.preflight(target)
         fresh = not target.exists()
         if fresh:
-            fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+            fd = osprivacy.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | osprivacy.NOFOLLOW, 0o600)
             os.close(fd)
         else:
             if not target.stat().st_mode & 0o200:

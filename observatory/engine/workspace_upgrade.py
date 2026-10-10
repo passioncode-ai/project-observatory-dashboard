@@ -5,6 +5,7 @@ import argparse
 import contextlib
 import datetime
 import oslocks
+import osprivacy
 import hashlib
 import json
 import os
@@ -92,7 +93,7 @@ def managed_layout(base: Path) -> None:
 
 
 def sync_directory(path: Path) -> None:
-    fd = os.open(path,os.O_RDONLY)
+    fd = osprivacy.open(path,os.O_RDONLY)
     try:
         os.fsync(fd)
     finally:
@@ -105,7 +106,7 @@ def sync_tree(base: Path) -> None:
         if file.is_dir():
             directories.append(file)
         else:
-            fd = os.open(file,os.O_RDONLY|os.O_NOFOLLOW)
+            fd = osprivacy.open(file,os.O_RDONLY|osprivacy.NOFOLLOW)
             try:
                 os.fsync(fd)
             finally:
@@ -138,7 +139,7 @@ def operation_lock(base: Path, *, existing: bool = True):
     try:
         for file in locks:
             file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            fd = os.open(file, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            fd = osprivacy.open(file, os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
             os.fchmod(fd, 0o600)
             handles.append(fd)
             try:
@@ -166,7 +167,7 @@ COPY_ATTEMPTS = 3
 def copy_database(source: Path, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     for attempt in range(COPY_ATTEMPTS):
-        fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        fd = osprivacy.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY | osprivacy.NOFOLLOW, 0o600)
         os.close(fd)
         try:
             with contextlib.closing(sqlite3.connect(target)) as dst:

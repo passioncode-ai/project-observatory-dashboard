@@ -20,9 +20,12 @@ class FullLauncherTests(unittest.TestCase):
         home_only = {k: v for k, v in os.environ.items() if k in ('HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH')}
         with patch.dict(os.environ, home_only, clear=True):
             self.assertEqual(full_cli.full_home(), Path.home() / '.local/share/project-observatory-full')
-        with patch.dict(os.environ, {'OBSERVATORY_HOME': '/private/old', 'OBSERVATORY_FULL_HOME': '/private/new'}, clear=True):
-            self.assertEqual(full_cli.full_home(), Path('/private/new'))
-            self.assertEqual(full_cli.full_home('/private/explicit'), Path('/private/explicit'))
+        # Absolute on this OS: on Windows a path without a drive is not.
+        root = Path(tempfile.gettempdir()).resolve()
+        old, new, explicit = (str(root / name) for name in ('old', 'new', 'explicit'))
+        with patch.dict(os.environ, {'OBSERVATORY_HOME': old, 'OBSERVATORY_FULL_HOME': new}, clear=True):
+            self.assertEqual(full_cli.full_home(), Path(new))
+            self.assertEqual(full_cli.full_home(explicit), Path(explicit))
 
     def test_portable_state_refused_without_modification(self):
         with tempfile.TemporaryDirectory() as tmp:

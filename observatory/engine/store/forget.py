@@ -52,6 +52,7 @@ from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 
 MARKER = "[forgotten]"
 JOURNAL = "forget.jsonl"
@@ -440,7 +441,7 @@ def _journal(receipt: dict) -> None:
     target = pathlib.Path(paths.STATE) / "logs" / JOURNAL
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        fd = osprivacy.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(json.dumps(receipt, ensure_ascii=False) + "\n")
     except OSError:

@@ -29,6 +29,7 @@ no credentials are accepted as arguments.
 from __future__ import annotations
 import errno
 import oslocks
+import osprivacy
 import osproc
 import json
 import os
@@ -92,7 +93,7 @@ def _locked(job_id: str) -> Iterator[None]:
     if any(p.is_symlink() for p in (lock_path, *lock_path.parents)):
         raise OSError(errno.ELOOP, "linked job state refused")
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(directory / f"{job_id}.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    fd = osprivacy.open(directory / f"{job_id}.lock", os.O_RDWR | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
     try:
         oslocks.flock(fd, oslocks.LOCK_EX)
         yield

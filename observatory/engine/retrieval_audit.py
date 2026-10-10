@@ -34,6 +34,7 @@ import hashlib
 import hmac
 import json
 import os
+import osprivacy
 import pathlib
 import secrets
 from datetime import datetime, timezone
@@ -153,7 +154,7 @@ def record(grant: Any, *, query: str, project_id: str | None, answer: dict,
     target = journal_path()
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        fd = osprivacy.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     except OSError as exc:

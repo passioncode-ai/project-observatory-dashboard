@@ -39,6 +39,7 @@ import contextvars
 import dataclasses
 import json
 import os
+import osprivacy
 import pathlib
 from datetime import datetime, timezone
 from typing import Any, Iterator, Mapping
@@ -464,7 +465,7 @@ def _journal(binding: AB.Binding | None, tool: str, scope: str, effect: str,
     target_file = pathlib.Path(paths.STATE) / "logs" / JOURNAL
     try:
         target_file.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(target_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        fd = osprivacy.open(target_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     except OSError:

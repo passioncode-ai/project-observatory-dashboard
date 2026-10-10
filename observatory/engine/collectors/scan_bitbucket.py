@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import paths  # noqa: E402
+import osprivacy  # noqa: E402
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import listing_guard  # noqa: E402
 import local_scan  # noqa: E402
@@ -76,9 +77,8 @@ def credential() -> tuple[str | None, str, str]:
     if not SECRET.is_file():
         return None, "", (f"no credential at {SECRET}. Create a Bitbucket API token or "
                           f"app password, write it there as `username:token`, chmod 600.")
-    mode = stat.S_IMODE(SECRET.stat().st_mode)
-    if mode & 0o077:
-        return None, "", (f"{SECRET} is mode {mode:o} — readable beyond its owner. "
+    if not osprivacy.private(SECRET):
+        return None, "", (f"{SECRET} is mode {osprivacy.describe(SECRET).lstrip('0')} — readable beyond its owner. "
                           f"A credential that exposed is refused, not used.")
     raw = SECRET.read_text().strip()
     if not raw:

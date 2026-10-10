@@ -3,9 +3,13 @@
 The selected final directory is opened without following a symlink. Operations
 are relative to that descriptor. Ancestors belong to the local operator; this
 is not a defence against a hostile owner moving the ancestor hierarchy.
+
+Windows has no directory descriptors: there the folder is held by its path, refused when it is
+a link, and every operation names `folder / name` (docs/design/WINDOWS-LINUX.md, W2b).
 """
 from __future__ import annotations
 import os
+import osprivacy
 from pathlib import Path
 import re
 import secrets
@@ -30,28 +34,42 @@ def failure(path: Path, kind: str, reason: str) -> IdentityError:
         'OBSERVATORY_STATE. Existing files are never replaced.')
 
 
-def _directory(path: Path, kind: str, initialize: bool) -> int:
+def _at(folder, name: str) -> tuple:
+    """(what to open, dir_fd) for `name` inside `folder`."""
+    return (name, folder) if isinstance(folder, int) else (folder / name, None)
+
+
+def _directory(path: Path, kind: str, initialize: bool):
     if initialize:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    if osprivacy.WINDOWS:
+        folder = path.parent
+        if folder.is_symlink() or folder.is_junction() or not folder.is_dir():
+            raise FileNotFoundError(str(folder))
+        if not osprivacy.owned_by_me(folder) or osprivacy.others_may_write(folder):
+            raise failure(path, kind, 'state directory owner or permissions are unsafe '
+                                      f'({osprivacy.explain(folder)})')
+        return folder
+    fd = osprivacy.open(path.parent, os.O_RDONLY | osprivacy.DIRECTORY | osprivacy.NOFOLLOW)
     try:
-        info = os.fstat(fd)
-        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o022:
-            raise failure(path, kind, 'state directory owner or permissions are unsafe')
+        if not osprivacy.owned_by_me(fd) or osprivacy.others_may_write(fd):
+            raise failure(path, kind, 'state directory owner or permissions are unsafe '
+                                      f'({osprivacy.explain(fd)})')
     except BaseException:
         os.close(fd)
         raise
     return fd
 
 
-def _read(fd: int, path: Path, kind: str) -> str:
+def _read(fd, path: Path, kind: str) -> str:
     # NONBLOCK makes a FIFO refuse without waiting for a writer.
-    child = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+    name, dir_fd = _at(fd, path.name)
+    child = osprivacy.open(name, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK, dir_fd=dir_fd)
     try:
         info = os.fstat(child)
         if not stat.S_ISREG(info.st_mode):
             raise failure(path, kind, 'identity is not a regular file')
-        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+        if not osprivacy.owned_by_me(child) or not osprivacy.private(child):
             raise failure(path, kind, 'identity owner or permissions are unsafe; require owner-only access')
         with os.fdopen(child, 'rb', closefd=False) as stream:
             data = stream.read(MAX_BYTES + 1)
@@ -85,19 +103,24 @@ def load(path: Path, kind: str, *, initialize: bool = False) -> str:
             if not initialize:
                 raise
         candidate = f'.identity-{secrets.token_hex(16)}.tmp'
-        child = os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                        0o600, dir_fd=fd)
+        name, dir_fd = _at(fd, candidate)
+        child = osprivacy.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW,
+                               0o600, dir_fd=dir_fd)
         temporary = candidate  # cleanup only a file this call actually created
         with os.fdopen(child, 'wb') as stream:
             stream.write((KINDS[kind][2]() + '\n').encode('ascii'))
             stream.flush()
             os.fsync(stream.fileno())
         try:
-            os.link(temporary, path.name, src_dir_fd=fd, dst_dir_fd=fd,
-                    follow_symlinks=False)
+            if isinstance(fd, int):
+                os.link(temporary, path.name, src_dir_fd=fd, dst_dir_fd=fd,
+                        follow_symlinks=False)
+            else:
+                os.link(fd / temporary, fd / path.name)
         except FileExistsError:
             pass
-        os.fsync(fd)
+        if isinstance(fd, int):
+            os.fsync(fd)
         return _read(fd, path, kind)
     except FileNotFoundError:
         raise failure(path, kind, 'identity is missing; no new value was created') from None
@@ -108,10 +131,12 @@ def load(path: Path, kind: str, *, initialize: bool = False) -> str:
             try:
                 if temporary is not None:
                     try:
-                        os.unlink(temporary, dir_fd=fd)
+                        target, dir_fd = _at(fd, temporary)
+                        os.unlink(target, dir_fd=dir_fd)
                     except FileNotFoundError:
                         pass
                     except OSError:
                         raise failure(path, kind, 'temporary file cleanup failed; inspect private state') from None
             finally:
-                os.close(fd)
+                if isinstance(fd, int):
+                    os.close(fd)
