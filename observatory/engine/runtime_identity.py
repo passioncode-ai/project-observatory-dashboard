@@ -47,12 +47,14 @@ def _directory(path: Path, kind: str, initialize: bool):
         if folder.is_symlink() or folder.is_junction() or not folder.is_dir():
             raise FileNotFoundError(str(folder))
         if not osprivacy.owned_by_me(folder) or osprivacy.others_may_write(folder):
-            raise failure(path, kind, 'state directory owner or permissions are unsafe')
+            raise failure(path, kind, 'state directory owner or permissions are unsafe '
+                                      f'({osprivacy.explain(folder)})')
         return folder
     fd = osprivacy.open(path.parent, os.O_RDONLY | osprivacy.DIRECTORY | osprivacy.NOFOLLOW)
     try:
         if not osprivacy.owned_by_me(fd) or osprivacy.others_may_write(fd):
-            raise failure(path, kind, 'state directory owner or permissions are unsafe')
+            raise failure(path, kind, 'state directory owner or permissions are unsafe '
+                                      f'({osprivacy.explain(fd)})')
     except BaseException:
         os.close(fd)
         raise
