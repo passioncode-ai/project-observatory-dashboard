@@ -680,13 +680,13 @@ class Installer(Sandbox):
 
     def test_uninstall_removes_the_plist_and_the_descriptor_and_keeps_the_data(self):
         self.install()
-        loaded = iter([True, True, False, False])
+        loaded = iter([True, True, False])
         with mock.patch.object(sys, "platform", "darwin"), \
                 mock.patch.object(self.serverd.fs, "_launchctl") as launchctl, \
                 mock.patch.object(self.serverd.fs, "launchd_loaded", side_effect=lambda label: next(loaded)) as probe:
             self.assertEqual(self.serverd.uninstall(), 0)
         self.assertEqual(launchctl.call_args_list[0].args[0], "bootout")
-        self.assertEqual(probe.call_count, 4, "uninstall waits until launchd no longer lists the job")
+        self.assertEqual(probe.call_count, 3, "uninstall waits until launchd no longer lists the job (the kit's wait)")
         self.assertFalse(self.serverd.PLIST.exists())
         self.assertEqual(list(self.services.glob("*.json")), [])
         self.assertTrue((self.home / "workspace.json").exists())
@@ -911,7 +911,11 @@ class RunningServer(unittest.TestCase):
         not_run = {k for k, v in verdicts.items() if v["verdict"] == "NOT_RUN"}
         expected_not_run = {"login.single-use", "lifecycle.launchd",
                             "interop.well-known-capabilities", "interop.tools-match",
-                            "interop.job-tools", "interop.unknown-job", "interop.trace-propagation"}
+                            "interop.job-tools", "interop.unknown-job", "interop.trace-propagation",
+                            # Kit 0.8.2: skipped with the other capability checks this server does
+                            # not declare, and the optional usage report (DEC-0021) it does not
+                            # offer yet (docs/backlog.md OBS-53).
+                            "interop.output-schema-object", "usage.report"}
         if shutil.which("lsof", path=self.env.get("PATH")) is None:
             expected_not_run.add("network.loopback-only")
             self.assertEqual(verdicts["network.loopback-only"]["verdict"], "NOT_RUN")

@@ -842,13 +842,14 @@ def uninstall() -> int:
     existed = PLIST.exists()
     unloaded = True
     if sys.platform == "darwin":
-        fs.launchd_uninstall(LABEL, PLIST)
-        # bootout returns before the job is gone: SIGTERM, the drain, then the
-        # unload. "Stopped" is said only once launchd no longer knows the label.
-        deadline = time.monotonic() + EXIT_TIMEOUT
-        while fs.launchd_loaded(LABEL) and time.monotonic() < deadline:
-            time.sleep(0.25)
-        unloaded = not fs.launchd_loaded(LABEL)
+        # bootout returns before the job is gone: SIGTERM, the drain, then the unload. The kit
+        # (0.8.2) waits until launchd no longer knows the label, and refuses to say "stopped"
+        # before that, leaving the plist in place.
+        try:
+            fs.launchd_uninstall(LABEL, PLIST, timeout=EXIT_TIMEOUT + 10)
+        except fs.ServiceError as exc:
+            print(str(exc), file=sys.stderr)
+            unloaded = False
     else:
         PLIST.unlink(missing_ok=True)
     described = fs.remove_descriptor(service_identity.SERVICE_ID, service_identity.instance())

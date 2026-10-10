@@ -1,6 +1,6 @@
-# Vendored from passioncode-ai/fabric-agent-adapter f31c2b2792f7 (fabric-agent-adapter 0.5.0),
+# Vendored from passioncode-ai/fabric-agent-adapter 744a9045f1cb (fabric-agent-adapter 0.8.2),
 # plugins/fabric-agent-adapter/skills/building-fabric-services/scripts/fabric_interop.py,
-# upstream sha256 a9914847ed54bedd56a988320aad6cebe91d1a7477e362cca4540193b69a3537 (the bytes below this header).
+# upstream sha256 5da0caac7476c1e16ba9257a7a1a176b7f97a947523a1570a4147e17e3b41af7 (the bytes below this header).
 # Do not edit here: update the kit upstream and copy it again (tests/test_fabric_service.py checks the digest).
 #!/usr/bin/env python3
 """Reference kit for the fabric-interop/0.1 extension: how agents are called.
@@ -14,13 +14,14 @@ it, so a service that calls these functions inherits the rule:
 - C3.3 a question for a person is an elicitation (form mode, never a secret; URL mode for those);
 - C3.4 every answer is a child span of the caller's traceparent, and so is every event.
 
-Normative source: fabric-agent-contract docs/specification/interop.md (DEC-0016).
+Normative source: fabric-agent-contract docs/specification/interop.md (DEC-0016, rulings DEC-0017).
 """
 
 # #region interop-kit — docs: plugins/fabric-agent-adapter/skills/building-fabric-services/references/interop.md#the-kit
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 import re
@@ -34,7 +35,22 @@ import fabric_service as _fs  # noqa: E402
 PROTOCOL = "fabric-interop/0.1"
 EXTENSION_KEY = "https://fabric.passioncode.ai/agent-contract/extensions/interop/0.1"
 MCP_REVISION = "2026-07-28"
+# Revisions a client may name in `initialize`. MCP 2026-07-28 needs no handshake, but clients
+# built on earlier revisions (Claude Code 2.1.285 among them) still open with one, and a server
+# that refuses it is marked failed before tools/list is ever called.
+HANDSHAKE_REVISIONS = ("2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28")
+CONTRACT_VERSION = "0.1.0"
 JOB_STATES = ("working", "input_required", "completed", "failed", "cancelled")
+OUTCOMES = ("succeeded", "partial", "failed", "cancelled", "blocked")
+ENVELOPE_REQUIRED = ["id", "contractVersion", "outcome", "done", "proof", "scope", "notVerified", "artifacts",
+                     "createdAt", "producer", "output", "usage"]
+# The job handle inline, as a job tool's outputSchema carries it (contract interop-job-handle.schema.json).
+JOB_HANDLE_SCHEMA: Dict[str, Any] = {
+    "type": "object", "required": ["job"], "additionalProperties": False,
+    "properties": {"job": {"type": "object", "required": ["id", "status"], "additionalProperties": False,
+                           "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9._:-]+$"},
+                                          "status": {"const": "working"}}}},
+}
 TERMINAL = ("completed", "failed", "cancelled")
 
 _TRACEPARENT = re.compile(r"^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$")
@@ -102,16 +118,35 @@ def expected_annotations(effect: str, idempotency: str) -> Dict[str, bool]:
     return hints
 
 
+def job_tool_output_schema(output_schema: Dict[str, Any]) -> Dict[str, Any]:
+    """DEC-0017: a job-backed tool's outputSchema is oneOf[result envelope, job handle], self-contained,
+    so structuredContent always conforms; the manifest's capability keeps the pure output schema."""
+    return {"type": "object",
+            "oneOf": [{"type": "object", "required": list(ENVELOPE_REQUIRED), "properties": {"output": output_schema}},
+                      JOB_HANDLE_SCHEMA]}
+
+
+def require_object_root(name: str, output_schema: Any) -> None:
+    """DEC-0018 (FAC-SEM-023): an outputSchema is rooted at type object. MCP requires it, and a client
+    may reject the WHOLE tools/list when one tool's outputSchema is, say, a bare oneOf."""
+    if not isinstance(output_schema, dict) or output_schema.get("type") != "object":
+        raise InteropError("Tool %s: an outputSchema must have root type \"object\"." % name)
+
+
+def is_job_capability(capability: Dict[str, Any]) -> bool:
+    block = (capability.get("extensions") or {}).get(EXTENSION_KEY) or {}
+    return capability.get("job") is True or block.get("job") is True
+
+
 def tool_for_capability(capability: Dict[str, Any], input_schema: Dict[str, Any], output_schema: Dict[str, Any],
                         title: Optional[str] = None) -> Dict[str, Any]:
-    """The MCP tool for one manifest capability: its name, its two schemas as they are, derived annotations.
-
-    A job-capable tool still serves the capability's outputSchema, though its
-    structuredContent is the job handle (contract OQ-0006)."""
+    """The MCP tool for one manifest capability: its name, its input schema as it is, derived annotations,
+    and its output schema — wrapped in the job union when the capability is a job (DEC-0017)."""
+    require_object_root(capability["name"], output_schema)
     tool: Dict[str, Any] = {
         "name": capability["name"],
         "inputSchema": input_schema,
-        "outputSchema": output_schema,
+        "outputSchema": job_tool_output_schema(output_schema) if is_job_capability(capability) else output_schema,
         "annotations": expected_annotations(capability.get("effect", ""), capability.get("idempotency", "")),
     }
     if capability.get("description"):
@@ -157,16 +192,30 @@ def _usage(usage: Any) -> Dict[str, Any]:
     return dict(usage)
 
 
-def result_envelope(*, done: List[Dict[str, Any]], proof: List[Dict[str, Any]], scope: Dict[str, Any],
-                    not_verified: List[Dict[str, Any]], output: Any, usage: Dict[str, Any]) -> Dict[str, Any]:
-    """DONE / PROOF / SCOPE / NOT VERIFIED (DEC-0011) plus the output and usage; the four collections are always present."""
-    for label, value in (("done", done), ("proof", proof), ("notVerified", not_verified)):
+def result_envelope(*, outcome: str, done: List[Dict[str, Any]], proof: List[Dict[str, Any]], scope: Dict[str, Any],
+                    not_verified: List[Dict[str, Any]], output: Any, usage: Dict[str, Any], producer: Dict[str, Any],
+                    artifacts: Optional[List[Dict[str, Any]]] = None, traceparent: Optional[str] = None,
+                    result_id: Optional[str] = None, created_at: Optional[str] = None) -> Dict[str, Any]:
+    """The full result envelope (contract result.schema.json, DEC-0011, DEC-0017): the same shape a
+    synchronous call returns, with output, usage and — when the work was traced — its trace."""
+    if outcome not in OUTCOMES:
+        raise InteropError("outcome must be one of %s." % ", ".join(OUTCOMES))
+    for label, value in (("done", done), ("proof", proof), ("notVerified", not_verified), ("artifacts", artifacts or [])):
         if not isinstance(value, list):
             raise InteropError("%s must be a list, even when empty." % label)
-    if not isinstance(scope, dict):
-        raise InteropError("scope must be an object.")
-    return {"done": list(done), "proof": list(proof), "scope": dict(scope), "notVerified": list(not_verified),
-            "output": output, "usage": _usage(usage)}
+    if outcome == "succeeded" and not_verified:
+        raise InteropError("A succeeded result cannot keep unverified claims (FAC-SEM-001); report partial.")
+    if not isinstance(scope, dict) or not isinstance(producer, dict):
+        raise InteropError("scope and producer must be objects.")
+    envelope: Dict[str, Any] = {
+        "id": result_id or "urn:fabric:result:" + secrets.token_hex(12), "contractVersion": CONTRACT_VERSION,
+        "outcome": outcome, "done": list(done), "proof": list(proof), "scope": dict(scope),
+        "notVerified": list(not_verified), "artifacts": list(artifacts or []), "createdAt": created_at or _fs.now_iso(),
+        "producer": dict(producer), "output": output, "usage": _usage(usage),
+    }
+    if parse_traceparent(traceparent):
+        envelope["trace"] = {"traceparent": traceparent}
+    return envelope
 
 
 # --- C3.3 awaiting a choice ------------------------------------------------------------
@@ -291,8 +340,17 @@ class JobStore:
         return matched
 
     def complete(self, job_id: str, envelope: Dict[str, Any]) -> Dict[str, Any]:
-        if not isinstance(envelope, dict) or not {"done", "proof", "scope", "notVerified", "output", "usage"} <= set(envelope):
+        """The envelope carries the job's trace, authoritative for the stored result (DEC-0017); one that names
+        another span is refused, so fabric.job.get's _meta and the envelope always agree (FAC-SEM-022)."""
+        if not isinstance(envelope, dict) or not set(ENVELOPE_REQUIRED) <= set(envelope):
             raise InteropError("A completed job carries the full result envelope; build it with result_envelope.")
+        stored = self.traceparent(job_id)
+        given = (envelope.get("trace") or {}).get("traceparent")
+        ids = lambda value: ((parse_traceparent(value) or {}).get("trace_id"), (parse_traceparent(value) or {}).get("span_id"))
+        if stored and given and ids(given) != ids(stored):
+            raise InteropError("Job %s ran in span %s; its result names another trace." % (job_id, stored))
+        if stored and not given:
+            envelope = dict(envelope, trace={"traceparent": stored})
         return self._transition(job_id, "completed", result=envelope)
 
     def fail(self, job_id: str, code: Any, message: str) -> Dict[str, Any]:
@@ -329,6 +387,83 @@ JOB_REQUEST_SCHEMA = {"type": "object", "required": ["id"], "additionalPropertie
     "inputResponses": {"type": "object"}}}
 
 
+NAMED_METHODS = {"tools/call": "name", "prompts/get": "name", "resources/read": "uri"}
+HEADER_MISMATCH = -32020  # the code the official 2026-07-28 server SDK answers a header/body mismatch with
+
+
+_SENTINEL = ("=?base64?", "?=")
+
+
+def encode_header_value(value: str) -> str:
+    """A body value as an HTTP header value, by MCP 2026-07-28 Streamable HTTP "Value Encoding": as
+    it is when it is printable ASCII without leading or trailing whitespace, otherwise — and for a
+    plain value that itself looks like the sentinel — `=?base64?<base64 of its UTF-8>?=`."""
+    plain = (all(0x20 <= ord(c) <= 0x7E for c in value) and value == value.strip(" ")
+             and not (value.startswith(_SENTINEL[0]) and value.endswith(_SENTINEL[1])))
+    if plain:
+        return value
+    return _SENTINEL[0] + base64.b64encode(value.encode("utf-8")).decode("ascii") + _SENTINEL[1]
+
+
+def decode_header_value(value: str) -> Optional[str]:
+    """The body value a header carries, decoding the Base64 sentinel; None for a header value with
+    invalid characters or a sentinel that is not valid Base64 of UTF-8 (a server rejects both)."""
+    if value.startswith(_SENTINEL[0]) and value.endswith(_SENTINEL[1]) and len(value) >= len(_SENTINEL[0]) + len(_SENTINEL[1]):
+        try:
+            return base64.b64decode(value[len(_SENTINEL[0]):-len(_SENTINEL[1])], validate=True).decode("utf-8")
+        except ValueError:  # binascii.Error and UnicodeDecodeError are both ValueErrors
+            return None
+    if any(not (0x20 <= ord(c) <= 0x7E or c == "\t") for c in value):
+        return None
+    return value
+
+
+def mcp_header_problem(message: Any, headers: Any) -> Optional[str]:
+    """MCP 2026-07-28 Streamable HTTP mirrors the body in `Mcp-Method` (every request and
+    notification) and `Mcp-Name` (`params.name` or `params.uri` of tools/call, prompts/get,
+    resources/read). A server MUST reject a mismatch; a request that declares 2026-07-28 must
+    carry them. Earlier revisions may omit them, but what they send must still agree.
+    `headers` is any case-insensitive mapping with `.get` (http.server's message, a dict)."""
+    if not isinstance(message, dict) or headers is None:
+        return None
+    def header(name: str) -> Optional[str]:
+        value = headers.get(name) if hasattr(headers, "get") else None
+        if value is None and isinstance(headers, dict):
+            value = next((v for k, v in headers.items() if k.lower() == name.lower()), None)
+        if isinstance(value, (list, tuple)):
+            value = value[0] if value else None
+        return None if value is None else str(value)
+    declared = header("MCP-Protocol-Version") == MCP_REVISION
+    method = message.get("method")
+    sent = header("Mcp-Method")
+    if sent is None and declared:
+        return "the body names method %s but the required Mcp-Method header is absent" % method
+    if sent is not None and sent != method:
+        return "Mcp-Method %s disagrees with the body's method %s" % (sent, method)
+    field = NAMED_METHODS.get(str(method))
+    if field:
+        value = (message.get("params") or {}).get(field)
+        named = header("Mcp-Name")
+        if named is None and declared:
+            return "the body carries params.%s but the required Mcp-Name header is absent" % field
+        if named is not None:
+            decoded = decode_header_value(named)
+            if decoded is None:
+                return "Mcp-Name is malformed: invalid characters or a broken =?base64?…?= value"
+            if decoded != str(value):
+                return "Mcp-Name disagrees with the body's params.%s" % field
+    return None
+
+
+def mcp_request_headers(method: str, params: Dict[str, Any]) -> Dict[str, str]:
+    """The standard headers a 2026-07-28 client sends with one request."""
+    out = {"MCP-Protocol-Version": MCP_REVISION, "Mcp-Method": method}
+    field = NAMED_METHODS.get(method)
+    if field and params.get(field) is not None:
+        out["Mcp-Name"] = encode_header_value(str(params[field]))
+    return out
+
+
 class McpToolServer:
     """tools/list and tools/call for an MCP 2026-07-28 server, with fabric.job.get/cancel built in.
 
@@ -351,6 +486,8 @@ class McpToolServer:
     def add_tool(self, tool: Dict[str, Any], handler: Handler) -> None:
         if tool["name"] in self.handlers:
             raise InteropError("Tool %s is served twice." % tool["name"])
+        if "outputSchema" in tool:
+            require_object_root(tool["name"], tool["outputSchema"])
         self.tools.append(tool)
         self.handlers[tool["name"]] = handler
 
@@ -373,9 +510,15 @@ class McpToolServer:
     def _error(rid: Any, code: int, message: str) -> Dict[str, Any]:
         return {"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": message}}
 
-    def handle(self, message: Any) -> Optional[Dict[str, Any]]:
+    def handle(self, message: Any, headers: Any = None) -> Optional[Dict[str, Any]]:
+        """One JSON-RPC message. Pass the HTTP request headers so the 2026-07-28 standard headers
+        are checked (`mcp_header_problem`); a mismatch answers HEADER_MISMATCH even for a
+        notification, so the transport can return HTTP 400."""
         if not isinstance(message, dict) or message.get("jsonrpc") != "2.0" or not isinstance(message.get("method"), str):
             return self._error(message.get("id") if isinstance(message, dict) else None, -32600, "Invalid request.")
+        problem = mcp_header_problem(message, headers)
+        if problem:
+            return self._error(message.get("id"), HEADER_MISMATCH, "Bad Request: the request headers and body disagree: " + problem)
         if "id" not in message:
             return None  # a notification gets no response
         rid = message["id"]
@@ -383,6 +526,13 @@ class McpToolServer:
         meta = params.get("_meta") or {}
         span = child_traceparent(meta.get("traceparent"))
         method = message["method"]
+        if method == "initialize":
+            asked = params.get("protocolVersion")
+            return {"jsonrpc": "2.0", "id": rid, "result": {
+                "protocolVersion": asked if asked in HANDSHAKE_REVISIONS else MCP_REVISION,
+                "capabilities": {"tools": {"listChanged": False}}, "serverInfo": self.info}}
+        if method == "ping":
+            return {"jsonrpc": "2.0", "id": rid, "result": {}}
         if method == "server/discover":
             return {"jsonrpc": "2.0", "id": rid, "result": {"resultType": "complete", "capabilities": {"tools": {}},
                                                              "serverInfo": self.info, "_meta": {"traceparent": span}}}
@@ -408,6 +558,8 @@ class McpToolServer:
         job_id = str(arguments.get("id", ""))
         try:
             job_span = self.jobs.traceparent(job_id) or span
+            state = self.jobs.get(job_id)
+            job_span = ((state.get("result") or {}).get("trace") or {}).get("traceparent") or job_span
             if name == "fabric.job.cancel":
                 state = self.jobs.get(job_id)
                 if state["status"] not in TERMINAL:
