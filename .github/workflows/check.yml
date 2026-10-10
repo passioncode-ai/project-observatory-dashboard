@@ -204,6 +204,12 @@ jobs:
           OBSERVATORY_HOME="$ws" OBSERVATORY_SYSTEM_SETUP=0 python observatory/engine/tools/tick.py | tee "$RUNNER_TEMP/tick.log"
           grep -q " tick done$" "$RUNNER_TEMP/tick.log"
           python -c "import json, sys; d = json.load(open(sys.argv[1], encoding='utf-8')); print(d); sys.exit(1 if d['failed_steps'] else 0)" "$ws/store/raw/tick.json"
+      - id: credentials
+        name: The backup passphrase in the Credential Manager (W5)
+        continue-on-error: true
+        run: |
+          cd observatory/engine
+          python tests/test_maintenance.py -v Passphrase.test_the_real_credential_manager_round_trips Passphrase.test_windows_keeps_it_in_the_credential_manager
       - id: jobs
         name: The server and the tick under Task Scheduler (W4b)
         continue-on-error: true
@@ -236,6 +242,7 @@ jobs:
             echo "| osproc | ${{ steps.osproc.outcome }} |"
             echo "| osprivacy | ${{ steps.osprivacy.outcome }} |"
             echo "| osschedule | ${{ steps.osschedule.outcome }} |"
+            echo "| Credential Manager | ${{ steps.credentials.outcome }} |"
             echo "| server and tick jobs | ${{ steps.jobs.outcome }} |"
             echo "| CLI | ${{ steps.cli.outcome }} |"
             echo "| A whole tick | ${{ steps.tick.outcome }} |"
