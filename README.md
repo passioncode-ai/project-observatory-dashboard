@@ -33,6 +33,25 @@ python -m pip install -c "$(project-observatory full-path)/requirements-full.loc
     "project_observatory-$V-py3-none-any.whl[full]"                             # its [full] extra at the tested versions
 ```
 
+On Windows (PowerShell; Python 3.13 or newer, from python.org or `winget install Python.Python.3.13`):
+
+```powershell
+$V = (Invoke-RestMethod https://api.github.com/repos/passioncode-ai/project-observatory-dashboard/releases/latest).tag_name.Substring(1)
+$whl = "project_observatory-$V-py3-none-any.whl"
+New-Item -ItemType Directory -Force "$env:USERPROFILE\observatory-release" | Out-Null; Set-Location "$env:USERPROFILE\observatory-release"
+$base = "https://github.com/passioncode-ai/project-observatory-dashboard/releases/download/v$V"
+Invoke-WebRequest "$base/$whl" -OutFile $whl; Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
+(Get-FileHash $whl -Algorithm SHA256).Hash.ToLower() -eq (Select-String -SimpleMatch $whl SHA256SUMS).Line.Split()[0]   # → True
+py -3.13 -m venv "$env:LOCALAPPDATA\project-observatory-venv"
+$env:Path = "$env:LOCALAPPDATA\project-observatory-venv\Scripts;$env:Path"
+python -m pip install --no-deps $whl
+python -m pip install -c "$(project-observatory full-path)\requirements-full.lock" "$whl[full]"
+```
+
+The workspace then defaults to `%LOCALAPPDATA%\project-observatory-full`; the tick, the server and the
+maintenance pass run as per-user Task Scheduler tasks (no administrator rights, no stored password), and the
+backup passphrase is kept in the Windows Credential Manager ([design](docs/design/WINDOWS-LINUX.md)).
+
 The wheel carries `requirements-full.lock`, the dependency set this release was tested with; the second
 `pip` line installs the `full` extra against it. Without `-c`, pip resolves the newest releases of the
 transitive dependencies instead, which this release was not tested with.

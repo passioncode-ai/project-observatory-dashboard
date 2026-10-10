@@ -68,7 +68,10 @@ def home() -> Path:
     value = os.environ.get("OBSERVATORY_HOME")
     if value and not Path(value).expanduser().is_absolute():
         raise ConfigurationError("OBSERVATORY_HOME must be an absolute path")
-    return refuse_home_inside_code(Path(value).expanduser() if value else Path.home() / ".local/share/project-observatory-full")
+    if value:
+        return refuse_home_inside_code(Path(value).expanduser())
+    import osprivacy   # beside this file; lazily, since everything imports configuration first
+    return refuse_home_inside_code(osprivacy.default_home("project-observatory-full"))
 
 def version_tuple(value: str) -> tuple[int, int, int]:
     if not isinstance(value, str) or not re.fullmatch(r"\d+\.\d+\.\d+", value):

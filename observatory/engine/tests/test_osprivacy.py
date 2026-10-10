@@ -137,6 +137,32 @@ class RealHome(unittest.TestCase):
             self.assertNotEqual(Path.home().resolve(), before.resolve())
 
 
+class DefaultHome(unittest.TestCase):
+    """W7: a workspace's default place is local application data on Windows, and an installation
+    already in the 0.21.0 place stays where it is."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home, self.local = Path(tmp.name) / "user", Path(tmp.name) / "Local"
+        self.home.mkdir()
+
+    def place(self, nt: bool) -> Path:
+        with mock.patch.object(osprivacy.Path, "home", return_value=self.home), \
+                mock.patch.dict(os.environ, {"LOCALAPPDATA": str(self.local)}):
+            return osprivacy.default_home("project-observatory-full", nt=nt)
+
+    def test_posix_keeps_local_share(self):
+        self.assertEqual(self.place(False), self.home / ".local/share/project-observatory-full")
+
+    def test_windows_uses_local_app_data(self):
+        self.assertEqual(self.place(True), self.local / "project-observatory-full")
+
+    def test_a_windows_workspace_in_the_old_place_stays_there(self):
+        (self.home / ".local/share/project-observatory-full").mkdir(parents=True)
+        self.assertEqual(self.place(True), self.home / ".local/share/project-observatory-full")
+
+
 class Boundary(unittest.TestCase):
     #: Modules that only run on macOS, under launchd or for the Mac app — W4 gives them a
     #: scheduler per OS; until then `os.getuid` there names a launchd domain.

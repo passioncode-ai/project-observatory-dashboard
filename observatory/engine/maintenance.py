@@ -659,11 +659,12 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
 
 
 def _services():
-    """This workspace's launchd tick and server, or None where there are none (Linux)."""
-    if sys.platform != "darwin" or shutil.which("launchctl") is None:
-        return None
+    """This workspace's tick and server: launchd, Task Scheduler or systemd; None without one."""
     import engine_update
-    return engine_update.LaunchdServices()
+    if sys.platform == "darwin":
+        return engine_update.LaunchdServices() if shutil.which("launchctl") else None
+    services = engine_update.OsscheduleServices()
+    return services if services.available() else None
 
 
 def step_jobs(launch=None) -> dict:
