@@ -6,8 +6,14 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 SCRATCH=${OBSERVATORY_SWIFT_BUILD:-"$ROOT/macos/.build"}
 OUT=${1:-"$ROOT/dist/macos"}
 CONFIG=${OBSERVATORY_SWIFT_CONFIGURATION:-release}
-swift build --package-path "$ROOT/macos" --scratch-path "$SCRATCH" -c "$CONFIG"
-BIN=$(swift build --package-path "$ROOT/macos" --scratch-path "$SCRATCH" -c "$CONFIG" --show-bin-path)
+# One universal app, every Mach-O carrying both slices (fabric-workspace platforms.md PL-01):
+# a thin x86_64 file makes macOS warn "Support Ending for Intel-Based Apps", and an arm64-only
+# one does not open on an Intel Mac. OBSERVATORY_SWIFT_ARCHS narrows a local QA build.
+ARCHS=${OBSERVATORY_SWIFT_ARCHS:-"arm64 x86_64"}
+ARCH_ARGS=()
+for arch in $ARCHS; do ARCH_ARGS+=(--arch "$arch"); done
+swift build --package-path "$ROOT/macos" --scratch-path "$SCRATCH" -c "$CONFIG" "${ARCH_ARGS[@]}"
+BIN=$(swift build --package-path "$ROOT/macos" --scratch-path "$SCRATCH" -c "$CONFIG" "${ARCH_ARGS[@]}" --show-bin-path)
 APP="$OUT/Project Observatory.app"
 # The bundle this replaces is forgotten by LaunchServices first, so no stale copy
 # answers an `open` (lifecycle LC-15).
@@ -16,6 +22,13 @@ if [[ -d "$APP" && -x "$LSREG" ]]; then "$LSREG" -u "$APP" 2>/dev/null || true; 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/ProjectObservatory" "$APP/Contents/MacOS/ProjectObservatory"
+BUILT=$(lipo -archs "$APP/Contents/MacOS/ProjectObservatory")
+for arch in $ARCHS; do
+  case " $BUILT " in
+    *" $arch "*) ;;
+    *) echo "build-app.sh: the executable has slices '$BUILT', missing $arch (PL-01)" >&2; exit 1 ;;
+  esac
+done
 
 # The icon is the product mark, rasterized at every size the iconset needs.
 ICONSET="$SCRATCH/AppIcon.iconset"
