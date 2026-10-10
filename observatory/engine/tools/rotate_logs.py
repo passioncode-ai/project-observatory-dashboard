@@ -18,6 +18,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import log_policy  # noqa: E402
+import osprivacy  # noqa: E402
 import paths  # noqa: E402
 
 #: Journals outside store/logs that grow by appending, one line per event.
@@ -42,8 +43,8 @@ def main(argv: list[str]) -> int:
     for p in extra:
         for n in range(1, log_policy.GENERATIONS + 1):
             g = p.with_name(f"{p.name}.{n}")
-            if g.is_file() and not g.is_symlink() and g.stat().st_mode & 0o077:
-                g.chmod(0o600)
+            if g.is_file() and not g.is_symlink() and not osprivacy.private(g):
+                osprivacy.make_private(g)
     for name in rotated:
         print(f"rotated {name}: past {log_policy.MAX_BYTES} bytes, "
               f"{log_policy.GENERATIONS} generations kept")

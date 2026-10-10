@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import oslocks
+import osprivacy  # noqa: E402
 import os
 from pathlib import Path
 import sqlite3
@@ -91,7 +92,7 @@ def preflight(target: Path) -> None:
 def upgrade_lock(target: Path, timeout: float = 30):
     """Stable flock file: never unlink a lock another waiter may have opened."""
     lock_path = target.with_name(target.name + ".upgrade.lock")
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = osprivacy.open(lock_path, os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
     try:
         os.fchmod(fd, 0o600)
         deadline = time.monotonic() + timeout

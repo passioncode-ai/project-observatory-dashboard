@@ -183,14 +183,14 @@ def allowed_path(rel: Path) -> bool:
             return False
         # The tested dependency set ships in the wheel (a release's only asset besides SHA256SUMS),
         # admitted by exact path: no other lock file belongs in the engine.
-        if str(engine) == "requirements-full.lock":
+        if engine.as_posix() == "requirements-full.lock":
             return True
         if engine.parts and engine.parts[0] == "store":
-            return len(engine.parts) == 2 and (engine.suffix == ".py" or str(engine) == "store/schema.sql")
+            return len(engine.parts) == 2 and (engine.suffix == ".py" or engine.as_posix() == "store/schema.sql")
         if engine.suffix == ".sh":
-            return str(engine) in {"tools/tick.sh", "tools/gate.sh", "skill/plugins/observatory-log/hooks/record-turn.sh", "skill/plugins/observatory-log/hooks/session-start.sh"}
+            return engine.as_posix() in {"tools/tick.sh", "tools/gate.sh", "skill/plugins/observatory-log/hooks/record-turn.sh", "skill/plugins/observatory-log/hooks/session-start.sh"}
         if any(x.startswith(".") for x in engine.parts):
-            return str(engine) in {"skill/.claude-plugin/marketplace.json", "skill/plugins/observatory-log/.claude-plugin/plugin.json"}
+            return engine.as_posix() in {"skill/.claude-plugin/marketplace.json", "skill/plugins/observatory-log/.claude-plugin/plugin.json"}
         return bool(engine.suffix in EXTENSIONS or engine.suffix == ".mjs")
     allowed = (len(rel.parts) == 1 and str(rel) in ALLOWED_ROOT) or (len(rel.parts) > 1 and rel.parts[0] in ALLOWED_TOP)
     return bool(allowed and not any(x.startswith(".env") or x in {"registry", "secrets", "store"} for x in rel.parts)

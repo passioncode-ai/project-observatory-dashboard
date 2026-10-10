@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import datetime
 import oslocks
+import osprivacy
 import hashlib
 import importlib.metadata
 import json
@@ -48,7 +49,7 @@ def lock(base: Path):
     reject_symlinks(base)
     base.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = base / ".workspace.lock"
-    fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    fd = osprivacy.open(path, os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
     try:
         os.fchmod(fd, 0o600)
         try:
@@ -203,8 +204,8 @@ def copy_private(source: Path, target: Path) -> int:
         raise config.ConfigurationError("Migration refuses special files")
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
-        with os.fdopen(os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)), "rb") as inp:
-            with os.fdopen(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as out:
+        with os.fdopen(osprivacy.open(source, os.O_RDONLY | osprivacy.NOFOLLOW), "rb") as inp:
+            with os.fdopen(osprivacy.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as out:
                 shutil.copyfileobj(inp, out)
         def digest(file):
             h = hashlib.sha256()
@@ -228,7 +229,7 @@ def backup_database(source: Path, target: Path) -> None:
     if source.is_symlink():
         raise config.ConfigurationError("Database must not be a symbolic link")
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    fd = osprivacy.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     os.close(fd)
     try:
         from store.compatibility import read_consistently, verify_database
@@ -916,7 +917,7 @@ def _backups_command(base: Path, a) -> int:
                 shutil.rmtree(stage, ignore_errors=True)
                 raise
         else:
-            fd = os.open(a.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            fd = osprivacy.open(a.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "wb") as out:
                 backup_vault.decrypt_to(a.file, out, secret)
         result = {"status": "decrypted", "kind": header.get("kind"), "output": str(a.output)}

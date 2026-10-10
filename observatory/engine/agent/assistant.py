@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 import oslocks  # after the path setup: this file also runs as a script
+import osprivacy  # noqa: E402
 import osproc
 import configuration
 import paths
@@ -65,7 +66,7 @@ def write(p,doc):
 def locked():
     if linked(folder()):raise AssistantError('linked-history')
     folder().mkdir(parents=True,exist_ok=True,mode=0o700)
-    fd=os.open(folder()/'assistant.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
+    fd=osprivacy.open(folder()/'assistant.lock',os.O_RDWR|os.O_CREAT|osprivacy.NOFOLLOW,0o600)
     try:
         oslocks.flock(fd,oslocks.LOCK_EX);yield
     finally:os.close(fd)

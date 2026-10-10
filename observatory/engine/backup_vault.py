@@ -34,6 +34,7 @@ import base64
 import contextlib
 import datetime
 import oslocks
+import osprivacy
 import hashlib
 import io
 import json
@@ -186,7 +187,7 @@ def passphrase(base: Path | None = None) -> str | None:
         raise BackupError("The backup passphrase file must not be a symbolic link")
     if not file.exists():
         return None
-    if file.stat().st_mode & 0o077:
+    if not osprivacy.private(file):
         raise BackupError(f"{file} is readable by group or others; chmod 600 it")
     text = file.read_text(encoding="utf-8").rstrip("\n")
     return text or None
@@ -343,7 +344,7 @@ class SecretStore:
         if file.is_symlink() or (file.exists() and not file.is_file()):
             raise BackupError(f"{file} is not a plain file; refusing to read it")
         if file.is_file():
-            if file.stat().st_mode & 0o077:
+            if not osprivacy.private(file):
                 raise BackupError(f"{file} is readable by others; refusing to read it")
             value = file.read_text(encoding="utf-8").rstrip("\n")
             if value:
@@ -357,7 +358,7 @@ class SecretStore:
 def _passphrase_lock(base: Path):
     folder = base / "secrets"
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(folder / ".passphrase.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = osprivacy.open(folder / ".passphrase.lock", os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
     try:
         oslocks.flock(fd, oslocks.LOCK_EX)
         yield
@@ -616,7 +617,7 @@ def stamp() -> str:
 
 
 def _sync_dir(path: Path) -> None:
-    fd = os.open(path, os.O_RDONLY)
+    fd = osprivacy.open(path, os.O_RDONLY)
     try:
         os.fsync(fd)
     finally:
@@ -706,7 +707,7 @@ def extract_tree(path: Path, parent: Path, secret: str) -> Path:
                         continue
                     dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                     source = tar.extractfile(member)
-                    with os.fdopen(os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as out:
+                    with os.fdopen(osprivacy.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as out:
                         shutil.copyfileobj(source, out, CHUNK)
         return target
     except BaseException:

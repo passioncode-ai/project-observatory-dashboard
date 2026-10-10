@@ -2,6 +2,7 @@
 from __future__ import annotations
 import contextlib
 import oslocks
+import osprivacy
 import os
 from pathlib import Path
 import re
@@ -20,17 +21,15 @@ def parent(path: Path) -> None:
     if not path.is_absolute() or any(p.is_symlink() for p in (path, *path.parents)):
         raise RuntimeError('Private directories must be absolute and contain no symbolic links')
     path.mkdir(mode=0o700,parents=True,exist_ok=True)
-    fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
-    try:os.fchmod(fd,0o700)
-    finally:os.close(fd)
+    osprivacy.private_folder(path)
 
 
 def read(path: Path) -> str:
     check(path)
-    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    fd=osprivacy.open(path,os.O_RDONLY|osprivacy.NOFOLLOW|osprivacy.NONBLOCK)
     with os.fdopen(fd,'r',encoding='utf-8') as stream:
         info=os.fstat(stream.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+        if not stat.S_ISREG(info.st_mode) or not osprivacy.private(stream.fileno()):
             raise RuntimeError('Private credential file must be regular and owner-only')
         return stream.read()
 
@@ -67,7 +66,7 @@ def legacy_path(path: Path) -> Path:
 @contextlib.contextmanager
 def lock(path: Path):
     check(path);parent(path.parent)
-    fd=os.open(path,os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW|os.O_NONBLOCK,0o600)
+    fd=osprivacy.open(path,os.O_CREAT|os.O_RDWR|osprivacy.NOFOLLOW|osprivacy.NONBLOCK,0o600)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):raise RuntimeError('Private lock must be regular')
         os.fchmod(fd,0o600);oslocks.flock(fd,oslocks.LOCK_EX)

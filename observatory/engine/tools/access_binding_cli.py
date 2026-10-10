@@ -35,6 +35,7 @@ from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 import access_binding as AB                                                         # noqa: E402
 import memory_access as MA                                                          # noqa: E402
 
@@ -157,7 +158,7 @@ def cmd_issue(a: argparse.Namespace) -> int:
     except AB.BindingError as exc:
         raise SystemExit(f"access-binding: refused — {exc}") from None
     token_file.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    fd = osprivacy.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(bearer + "\n")
     try:

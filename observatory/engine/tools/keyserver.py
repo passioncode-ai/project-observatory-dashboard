@@ -77,6 +77,7 @@ from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 sys.path.insert(0, str(ROOT / "collectors"))
 import credential_shape
 import paths              
@@ -218,8 +219,8 @@ def audit(action: str, subject: str, detail: dict) -> None:
             return {k: scrub(k, v) for k, v in value.items()}
         return value
     encoded = json.dumps({k: scrub(k, v) for k, v in row.items()}, ensure_ascii=False)
-    fd = os.open(AUDIT, os.O_WRONLY | os.O_APPEND | os.O_CREAT |
-                 getattr(os, "O_NOFOLLOW", 0) | os.O_NONBLOCK, 0o600)
+    fd = osprivacy.open(AUDIT, os.O_WRONLY | os.O_APPEND | os.O_CREAT |
+                 osprivacy.NOFOLLOW | osprivacy.NONBLOCK, 0o600)
     with os.fdopen(fd, "a", encoding="utf-8") as fh:
         if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
             raise ValueError("audit destination must be a regular file")

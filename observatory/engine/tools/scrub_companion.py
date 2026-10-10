@@ -43,6 +43,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import osprivacy  # noqa: E402
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "collectors"))
 import paths  # noqa: E402
@@ -93,7 +94,7 @@ def backup(db: pathlib.Path) -> pathlib.Path | None:
     BACKUP_DIR.chmod(0o700)
     import uuid
     dest = BACKUP_DIR / f"{db.stem}-pre-scrub-{now().replace(':', '-')}-{uuid.uuid4().hex[:12]}.db"
-    fd = os.open(dest, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    fd = osprivacy.open(dest, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     os.close(fd)
     src = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
@@ -238,7 +239,7 @@ def load_watermark() -> dict:
 def save_watermark(doc: dict) -> None:
     WATERMARK.parent.mkdir(parents=True, exist_ok=True)
     tmp = WATERMARK.with_name(WATERMARK.name + ".tmp")
-    fd = os.open(tmp, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+    fd = osprivacy.open(tmp, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump(doc, fh, indent=1, sort_keys=True)
     os.replace(tmp, WATERMARK)

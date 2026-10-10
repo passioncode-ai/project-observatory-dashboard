@@ -24,6 +24,7 @@ import datetime
 import hashlib
 import json
 import os
+import osprivacy
 from pathlib import Path
 import sys
 
@@ -79,7 +80,7 @@ def emit(event: str, code: str, *, subject: str = "engine", base: Path | None = 
             return
         import log_policy
         log_policy.rotate(file)
-        fd = os.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        fd = osprivacy.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as out:
             out.write(json.dumps(row, sort_keys=True) + "\n")
     except (OSError, ImportError):

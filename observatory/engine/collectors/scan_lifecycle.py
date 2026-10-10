@@ -49,6 +49,7 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import paths  # noqa: E402
+import osprivacy  # noqa: E402
 
 #: Command-line words that name secrets; a script after one is not kept.
 SECRETISH = re.compile(r"(?i)(token|secret|password|passwd|api[-_]?key|auth|bearer|cookie|session)")
@@ -294,8 +295,8 @@ def evaluate(snap: dict, products: list[dict]) -> dict:
                 if st.st_size > product["log_cap_bytes"]:
                     obs.append({"kind": "log-over-cap", **base, "bytes": st.st_size,
                                 "cap": product["log_cap_bytes"]})
-                if st.st_mode & 0o077:
-                    obs.append({"kind": "log-readable", **base, "mode": f"{st.st_mode & 0o777:04o}"})
+                if not osprivacy.private(f):
+                    obs.append({"kind": "log-readable", **base, "mode": osprivacy.describe(f)})
     obs.sort(key=lambda o: (o["product"], o["kind"], str(o.get("pid") or o.get("file") or "")))
     return {"schema_version": 1, "measured_at": now_z(now) if now else now_z(),
             "products": [{"product": p["product"], "slug": p["slug"], "labels": p["labels"],

@@ -26,6 +26,8 @@ import os
 import shutil
 from pathlib import Path
 
+import osprivacy
+
 #: The lifecycle contract's default: 5 generations of 5 MB.
 MAX_BYTES = 5 * 1024 * 1024
 GENERATIONS = 5
@@ -37,8 +39,8 @@ HELD_OPEN = frozenset({"serverd.err", "serverd.out", "tick.log", "tick.err"})
 
 def _private(path: Path) -> None:
     try:
-        if path.is_file() and not path.is_symlink() and path.stat().st_mode & 0o077:
-            path.chmod(0o600)
+        if path.is_file() and not path.is_symlink() and not osprivacy.private(path):
+            osprivacy.make_private(path)
     except OSError:
         pass
 

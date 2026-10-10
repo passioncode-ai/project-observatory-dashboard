@@ -55,6 +55,7 @@ import dataclasses
 import datetime
 import email.parser
 import oslocks
+import osprivacy
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -336,7 +337,7 @@ class Fetcher:
     def fetch_file(self, url: str, dest: Path, limit: int) -> tuple[str, int]:
         """Stream into a new private file; returns (sha256, size)."""
         digest, size = hashlib.sha256(), 0
-        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        fd = osprivacy.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
         try:
             with os.fdopen(fd, "wb") as out, self._open(url, "application/octet-stream") as response:
                 while True:
@@ -856,7 +857,7 @@ def log(base: Path, event: str, **fields) -> None:
         file = base / LOG
         workspace.reject_symlinks(file)
         file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd = os.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        fd = osprivacy.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as out:
             out.write(json.dumps({"at": now_z(), "event": event, **fields}, ensure_ascii=False) + "\n")
     except (OSError, config.ConfigurationError):
@@ -1325,7 +1326,7 @@ def update_lock(base: Path):
     place does not drop it."""
     file = _update_lock_path(base)
     file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(file, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = osprivacy.open(file, os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
     try:
         try:
             oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
@@ -1342,7 +1343,7 @@ def update_lock_held(base: Path) -> bool:
     file = _update_lock_path(base)
     if not file.exists():
         return False
-    fd = os.open(file, os.O_RDWR | os.O_NOFOLLOW)
+    fd = osprivacy.open(file, os.O_RDWR | osprivacy.NOFOLLOW)
     try:
         oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
     except BlockingIOError:

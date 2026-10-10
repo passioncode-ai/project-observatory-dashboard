@@ -32,6 +32,7 @@ import datetime
 import hashlib
 import json
 import os
+import osprivacy
 from pathlib import Path
 import re
 import shutil
@@ -240,7 +241,7 @@ def _log(base: Path, event: str, **fields) -> None:
         file = base / LOG
         workspace.reject_symlinks(file)
         file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd = os.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        fd = osprivacy.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         with os.fdopen(fd, "a", encoding="utf-8") as out:
             out.write(json.dumps({"at": stamp, "event": event, **fields}, ensure_ascii=False) + "\n")
@@ -336,7 +337,7 @@ def export(base: Path, target: Path | None, force: bool) -> dict:
         os.chmod(target, 0o600)
     else:
         try:
-            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            fd = osprivacy.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
         except FileExistsError:
             raise ProfileError(f"{target.name} already exists; choose a new file or pass --force") from None
         with os.fdopen(fd, "w", encoding="utf-8") as out:

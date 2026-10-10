@@ -69,6 +69,7 @@ hook is a bad place to discover a missing dependency.
 from __future__ import annotations
 
 import atexit
+import importlib.util
 import os
 import re
 import shutil
@@ -77,6 +78,20 @@ import tempfile
 import threading
 from pathlib import Path
 from typing import Mapping, Sequence
+
+
+def _load_osprivacy():
+    """The sibling `osprivacy.py`, by its path: this module is itself loaded by path from outside
+    the engine (the release tools, the companion plugin's hooks), where the engine folder is not
+    on `sys.path`."""
+    spec = importlib.util.spec_from_file_location(
+        "observatory_safe_git_osprivacy", os.path.join(os.path.dirname(os.path.abspath(__file__)), "osprivacy.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+osprivacy = _load_osprivacy()
 
 #: The transports git may use. Everything else — `ext::`, `fd::` and every
 #: `git-remote-<scheme>` helper such as `gcrypt::` — is refused by git itself.
@@ -269,7 +284,7 @@ def forward_file(git: str | None = None) -> str:
         path = os.path.join(directory, "forwarded.gitconfig")
         try:
             os.chmod(directory, 0o700)
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            fd = osprivacy.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as fh:
                 fh.write(text)
         except BaseException:

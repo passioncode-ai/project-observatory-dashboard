@@ -444,7 +444,7 @@ def apply_output_paths(base: Path) -> tuple[Path, Path]:
 
 def _private_file(path: Path):
     """Truncated, owner-only, and never through a symbolic link."""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    fd = osprivacy.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | osprivacy.NOFOLLOW, 0o600)
     os.fchmod(fd, 0o600)
     return os.fdopen(fd, "w", encoding="utf-8")
 
@@ -456,7 +456,7 @@ def pass_lock(base: Path):
     """One pass at a time per workspace; a second one finds it busy and leaves."""
     file = base / "store" / "maintenance.lock"
     file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(file, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = osprivacy.open(file, os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
     try:
         try:
             oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
@@ -475,7 +475,7 @@ def pass_running(base: Path) -> bool:
     file = base / "store" / "maintenance.lock"
     if not file.exists():
         return False
-    fd = os.open(file, os.O_RDWR | os.O_NOFOLLOW)
+    fd = osprivacy.open(file, os.O_RDWR | osprivacy.NOFOLLOW)
     try:
         oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
     except BlockingIOError:
@@ -983,7 +983,7 @@ class LaunchdSchedule:
             raise config.ConfigurationError("LaunchAgent plist cannot be a symbolic link")
         tmp = self.plist.with_suffix(".plist.tmp")
         tmp.unlink(missing_ok=True)
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        fd = osprivacy.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
         with os.fdopen(fd, "wb") as stream:
             stream.write(plistlib.dumps(doc))
         os.replace(tmp, self.plist)
