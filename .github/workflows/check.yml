@@ -213,7 +213,7 @@ jobs:
           project-observatory --home "$ws" full configure features scheduler true
           export OBSERVATORY_HOME="$ws"
           python observatory/engine/tools/serverd.py --install
-          python -c "import json, sys, urllib.request; d = json.load(urllib.request.urlopen('http://127.0.0.1:47311/.well-known/fabric-service', timeout=10)); print(d['id'], d['instance'], d['status'])"
+          python -c "import json, sys, urllib.request; d = json.load(urllib.request.urlopen('http://127.0.0.1:47311/.well-known/fabric-service', timeout=10)); print(d['service']['id'], d['service']['instance'], d['status'])"
           python observatory/engine/tools/serverd.py --uninstall
           python observatory/engine/tools/install_launchd.py install
           python observatory/engine/tools/install_launchd.py status

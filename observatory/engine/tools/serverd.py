@@ -888,7 +888,8 @@ def install_other(wait_seconds: float = 30.0) -> int:
     answer = None
     while time.monotonic() < deadline:
         answer = fs.fetch_well_known(origin)
-        if answer and answer.get("id") == service_identity.SERVICE_ID and answer.get("instance") == service_identity.instance():
+        service = (answer or {}).get("service") or {}
+        if service.get("id") == service_identity.SERVICE_ID and service.get("instance") == service_identity.instance():
             break
         time.sleep(0.5)
     else:

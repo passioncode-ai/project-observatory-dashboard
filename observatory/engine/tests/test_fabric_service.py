@@ -721,7 +721,8 @@ class Installer(Sandbox):
                 return {"task": self.path}
 
         made = []
-        answer = {"id": self.si.SERVICE_ID, "instance": self.si.instance()}
+        answer = {"protocol": "fabric-service/0.1",
+                  "service": {"id": self.si.SERVICE_ID, "instance": self.si.instance()}}
         with mock.patch.object(sys, "platform", "win32"), \
                 mock.patch.object(osschedule, "supervisor", side_effect=lambda job: made.append(Task(job)) or made[-1]), \
                 mock.patch.object(self.serverd.fs, "fetch_well_known", return_value=answer):
