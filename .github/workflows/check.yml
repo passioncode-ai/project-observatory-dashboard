@@ -179,6 +179,10 @@ jobs:
         name: Who the engine runs as (W2b)
         continue-on-error: true
         run: python observatory/engine/tests/test_osprivacy.py
+      - id: osschedule
+        name: Background jobs under Task Scheduler (W4)
+        continue-on-error: true
+        run: python observatory/engine/tests/test_osschedule.py
       - id: cli
         name: The CLI answers
         continue-on-error: true
@@ -216,6 +220,7 @@ jobs:
             echo "| oslocks | ${{ steps.oslocks.outcome }} |"
             echo "| osproc | ${{ steps.osproc.outcome }} |"
             echo "| osprivacy | ${{ steps.osprivacy.outcome }} |"
+            echo "| osschedule | ${{ steps.osschedule.outcome }} |"
             echo "| CLI | ${{ steps.cli.outcome }} |"
             echo "| A whole tick | ${{ steps.tick.outcome }} |"
             echo "| Top-level tests | ${{ steps.tests.outcome }} |"
