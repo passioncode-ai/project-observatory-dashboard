@@ -406,36 +406,31 @@ def test_an_ordinary_emit_is_not_refused() -> None:
 
 # ─────────── stopping is a result ──────────────────────────────────────
 
-def shell_function(name: str) -> str:
-    """`^\\}$`, not `^\\}`. The Python heredoc inside `write_report` has a line
-    beginning `})` at column 0, and the looser pattern cut the function in half
-    — the driver was then a syntax error and looked like a defect in tick.sh."""
-    src = (ROOT / "tools/tick.sh").read_text(encoding="utf-8")
-    m = re.search(rf"^{name}\(\) \{{.*?^\}}$", src, re.S | re.M)
-    return m.group(0) if m else ""
+def tick_module():
+    """`tools/tick.py`, loaded fresh: the tick's record (`Tick`) is what writes the report."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tick_under_test", ROOT / "tools/tick.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_a_stopping_tick_records_why_it_stopped() -> None:
+    tick = tick_module()
     for name in ("write_report", "bail"):
-        check(f"`{name}` is a function in tick.sh", bool(shell_function(name)),
+        check(f"`{name}` belongs to the tick's record", callable(getattr(tick.Tick, name, None)),
               "the report write was inline and unreachable from an early exit")
-    if not shell_function("bail"):
-        return
     d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-bail-"))
-    driver = d / "drive.sh"
-    driver.write_text(
-        "#!/bin/bash\nset -uo pipefail\nlog(){ echo \"LOG: $1\"; }\n"
-        f"PY={PY}\nFAILED_STEPS=\"\"\n"
-        + shell_function("write_report") + "\n" + shell_function("bail") + "\n"
-        'bail emit 1 "emit REFUSED a wholesale change"\n'
-        'echo "REACHED THE LINE AFTER BAIL"\n', encoding="utf-8")
-    p = subprocess.run(["bash", str(driver)], cwd=ROOT,
-                       env=dict(os.environ, OBSERVATORY_SCRATCH=str(d)),
-                       capture_output=True, text=True, timeout=300)
-    check("bail exits, so nothing after it runs",
-          "REACHED THE LINE AFTER BAIL" not in p.stdout, p.stdout[-160:])
-    check("it exits 0, because launchd must not retry a reported state",
-          p.returncode == 0, str(p.returncode))
+    t = tick.Tick(d)
+    reached, code = False, None
+    try:
+        t.bail("emit", 1, "emit REFUSED a wholesale change")
+        reached = True
+    except SystemExit as stop:
+        code = stop.code
+    check("bail exits, so nothing after it runs", not reached, "bail returned")
+    check("it exits 0, because a scheduler must not retry a reported state",
+          code == 0, str(code))
     f = d / "tick.json"
     check("and it leaves a report", f.is_file(),
           "the three most consequential outcomes wrote none")
@@ -449,41 +444,24 @@ def test_a_stopping_tick_records_why_it_stopped() -> None:
 
 
 def test_all_three_early_exits_go_through_bail() -> None:
-    src = (ROOT / "tools/tick.sh").read_text(encoding="utf-8")
-    for what in ("bail merge", "bail emit", "bail validate"):
+    import ast
+    src = (ROOT / "tools/tick.py").read_text(encoding="utf-8")
+    for what in ('t.bail("merge"', 't.bail("emit"', 't.bail("validate"'):
         check(f"`{what}` is wired", what in src,
-              "an `exit 0` before the report is a tick nobody can diagnose")
-    # ENUMERATED, with a reason each, rather than counted. The first version
-    # asserted `len(lines) <= 3` and failed on two exits that are both correct:
-    # a bound that happens to hold says nothing about why.
-    EXEMPT = {
-        'cd "$(dirname "$0")/.." || exit 0':
-            "the script cannot find itself; there is no scratch dir to report into",
-        '[ -x "$PY" ] || PY="$(command -v python3)" || exit 0':
-            "no interpreter, so nothing could write a report anyway",
-        "exit 0  # inside bail":
-            "bail IS the reporter — it writes and then exits",
-        "lease":
-            "another run holds the registry. The tick correctly stands down and "
-            "the next one is 30 minutes away; a `failed_steps` row here would "
-            "raise a finding every time an operator session overlaps a tick",
-    }
-    body = shell_function("bail")
-    unexplained = []
-    for l in src.splitlines():
-        if "exit 0" not in l or l.strip().startswith("#"):
-            continue
-        if "bail " in l or l in body:
-            continue
-        if l in EXEMPT:
-            continue
-        unexplained.append(l.strip())
-    # The lease stand-down is matched by its surrounding log line rather than the
-    # bare `exit 0`, which carries no words of its own.
-    if unexplained == ["exit 0"] and "tick skipped — the registry belongs" in src:
-        unexplained = []
-    check("every early exit either reports or is exempt with a reason",
-          not unexplained, str(unexplained))
+              "an early stop before the report is a tick nobody can diagnose")
+    # ENUMERATED, with a reason each, rather than counted. `steps` returns nowhere: it ends
+    # or it bails. `run` has two returns: the lease stand-down — another run holds the
+    # registry, the tick correctly stands down and the next one is 30 minutes away, and a
+    # `failed_steps` row there would raise a finding every time an operator session overlaps
+    # a tick — and the end of a tick that ran.
+    funcs = {f.name: f for f in ast.walk(ast.parse(src)) if isinstance(f, ast.FunctionDef)}
+    stops = lambda f: [n for n in ast.walk(f) if isinstance(n, ast.Return)
+                       or (isinstance(n, ast.Raise) and "SystemExit" in ast.unparse(n))]
+    check("`steps` has no exit of its own", "steps" in funcs and not stops(funcs["steps"]),
+          str([ast.unparse(n) for n in stops(funcs["steps"])]) if "steps" in funcs else "no `steps`")
+    returns = stops(funcs["run"]) if "run" in funcs else []
+    check("`run` stops only at the lease stand-down and at the end",
+          len(returns) == 2, str([ast.unparse(n) for n in returns]))
     check("and the lease stand-down says why it is not a failure",
           "the next tick is 30 minutes away" in src,
           "an exit with no explanation reads as an oversight")

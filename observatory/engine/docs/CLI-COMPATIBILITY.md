@@ -74,7 +74,7 @@ remote environment comparison and Google collection before merge; collectors
 retain their cache policies. Git remote probes require
 `integrations.git_remotes=true`, including direct collector invocation.
 The scheduler itself requires `features.scheduler=true`.
-[`tools/tick.sh`](../tools/tick.sh),
+[`tools/tick.py`](../tools/tick.py) (the tick; [`tools/tick.sh`](../tools/tick.sh) is the wrapper a scheduler names),
 [`INTEGRATION_STEPS` and `FEATURE_STEPS`](../tools/tick_lease.py), and
 [`collectors/scan_remotes.py`](../collectors/scan_remotes.py) define this contract.
 
@@ -211,6 +211,10 @@ were 14 and 16 when the routing landed; re-measured 2026-10-03 with
 - `tests/test_cli_compatibility.py`: 17 tests passed.
 - `tests/test_workspace_scheduler.py`: 17 tests passed.
 - `/bin/bash -n tools/tick.sh` and `/bin/bash -n tools/gate.sh`: exit 0.
+
+Since 2026-10-10 the tick is `tools/tick.py` and `tools/tick.sh` only hands over to it
+(docs/design/WINDOWS-LINUX.md, W3); `tests/test_tick_py.py` runs a whole tick through it, and
+`tests/test_workspace_scheduler.py` still checks that the wrapper parses.
 
 These receipts cover the new routing and scheduler boundaries. They are not a
 claim that the complete packaged acceptance runner or live providers passed.

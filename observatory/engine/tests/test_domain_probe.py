@@ -117,14 +117,14 @@ def test_the_tick_records_the_refusal_rather_than_only_logging_it() -> None:
     src = tick_reader.tick(ROOT)
     at = tick_reader.first_invocation(src, "scan_domains.py")
     check("the domain scan runs through `step`", at != -1 and
-          src.splitlines()[at].strip().startswith("step "),
+          src.splitlines()[at].strip().startswith("step("),
           src.splitlines()[at].strip()[:80] if at != -1 else "not invoked")
     check("so a refusal reaches tick.json",
-          "FAILED_STEPS" in src, "otherwise the only trace is one log line")
+          '"failed_steps"' in src, "otherwise the only trace is one log line")
     # And the freshness test is on the FILE's mtime, so a refusal — which writes
     # nothing — leaves the next tick to try again half an hour later.
     check("the scan is gated on the file's age, so a refusal retries",
-          "-mmin -1440" in src, "a refusal must not become permanent silence")
+          'stale(SCRATCH / "domains_live.json", 24)' in src, "a refusal must not become permanent silence")
 
 
 # ─────────── unmeasured is not dark ────────────────────────────────────

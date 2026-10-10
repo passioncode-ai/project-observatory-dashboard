@@ -251,7 +251,7 @@ def test_info_findings_still_never_notify() -> None:
     # `dashboard/build_dashboard.py` gives every finding TYPE a row rather than
     # cutting the list at forty. Once, ten classes sat below that cut, and none
     # of them was pushed either, so they reached nobody.
-    tick = (ROOT / "tools/tick.sh").read_text(encoding="utf-8")
+    tick = (ROOT / "tools/tick.py").read_text(encoding="utf-8")
     line = [l for l in tick.splitlines() if "notify_findings.py" in l]
     check("the tick sends without --include-info", line and "--include-info" not in line[0],
           str(line))

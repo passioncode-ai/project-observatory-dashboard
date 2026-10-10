@@ -179,7 +179,7 @@ def hold(identity: str) -> tuple[object | None, str]:
      
     # An identity that does not carry THIS process's pid names somebody else's
     # run, so it is replaced rather than honoured. A value that does carry it —
-    # `tools/tick.sh` exports one for its acquire and its release trap — is left
+    # `tools/tick.py` sets one for its acquire and its release — is left
     # exactly as the caller set it.
     want = run_identity(identity)
     current = os.environ.get("AGENT_SYNC_RUN_ID") or ""
@@ -399,7 +399,7 @@ STEP_DEADLINE_ENV = "OBSERVATORY_STEP_DEADLINE"
 #: and stops `tail_reserve_seconds()` before the ceiling. An unknown step falls
 #: on the collectors' side on purpose: a forgotten collector would otherwise eat
 #: the tail's time. `test_every_step_after_the_merge_is_a_tail_step` derives the
-#: set from `tick.sh` and fails when the two disagree.
+#: set from `tools/tick.py` and fails when the two disagree.
 TAIL_STEPS = frozenset({
     "merge", "emit", "validate", "events", "snapshot", "diff", "plugins", "rollup",
     "agent", "index", "retention", "sweep", "corroborate", "ledger", "lost", "findings",

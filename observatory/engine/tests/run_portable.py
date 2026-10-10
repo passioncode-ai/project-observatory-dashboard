@@ -111,6 +111,8 @@ BOUNDARY += ('oslocks',)
 BOUNDARY += ('osproc',)
 # docs/design/WINDOWS-LINUX.md W2b: who the engine runs as, on every OS.
 BOUNDARY += ('osprivacy',)
+# docs/design/WINDOWS-LINUX.md W3: a whole tick, through tools/tick.py.
+BOUNDARY += ('tick_py',)
 # One credential-shape heuristic for every door that judges typed text.
 BOUNDARY += ('credential_shape',)
 # PROJECT is the folder name; the registry id names the same folder.
@@ -310,7 +312,7 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 #: tools/check_paths.py over the tree since 0.20.0, took 14 s alone and passed 120 s at a load
 #: average near 150).
 #: A larger --timeout still wins; a smaller one never cuts these short.
-SUITE_SECONDS = {'maintenance': 480, 'conformance_receipt': 360, 'backup_vault': 300, 'dashboard_render': 600,
+SUITE_SECONDS = {'maintenance': 480, 'tick_py': 300, 'conformance_receipt': 360, 'backup_vault': 300, 'dashboard_render': 600,
                  'workspace': 300, 'interop': 300, 'indexer_load': 300, 'api_listings': 300}
 
 

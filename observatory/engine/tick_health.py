@@ -12,7 +12,7 @@ Inputs, all written by the tick itself:
 - `store/raw/tick-lease.json`: `last_acquired_at`, when the last tick started
   (tools/tick_lease.py);
 - `store/raw/tick.json`: `finished_at`, when the last tick reached its end or
-  stopped at a step (tools/tick.sh `write_report`);
+  stopped at a step (tools/tick.py `Tick.write_report`);
 - `store/tick.lock`: held with an exclusive flock for as long as a tick runs
   (tools/tick_lease.py `supervised`).
 

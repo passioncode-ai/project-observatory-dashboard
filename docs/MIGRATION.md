@@ -22,7 +22,7 @@ changed some of what it describes; the [changelog](../CHANGELOG.md) and the
 | Versioned trusted plugin interface | `collectors/run_plugins.py`, plugin manifests | `test_plugins.py`; manifest API and dependency boundaries |
 | MCP and proposal authority | `mcp/server.py`, `fabric/schemas/` | wire contract/input/MCP/provenance suites; external host admission unverified |
 | Credentials and explicit remediation | `tools/vault.py`, `use_secret.py`, `keyserver.py`, `scrub_companion.py` | vault/keyserver/provider boundary cases; live rotation not executed |
-| Workspace-specific scheduler | `tools/tick.sh`, `install_launchd.py`, `serverd.py` | scheduler isolation/lease/opt-in tests; the tick and server start only when chosen (in 0.2.0 no service started by itself; since 0.17.0 `full init`, `install_launchd.py` and `full update` schedule the maintenance job, `maintenance.py`) |
+| Workspace-specific scheduler | `tools/tick.py` (wrapper `tools/tick.sh`), `install_launchd.py`, `serverd.py` | scheduler isolation/lease/opt-in tests; the tick and server start only when chosen (in 0.2.0 no service started by itself; since 0.17.0 `full init`, `install_launchd.py` and `full update` schedule the maintenance job, `maintenance.py`) |
 | Agent instructions | `skill/plugins/observatory-log/` | both skill audits and strict plugin validation |
 | Reviewed public distribution | source inventory, public privacy gate, wheel gate | clean source export and installed-wheel test; see [release receipt](RELEASE.md) |
 

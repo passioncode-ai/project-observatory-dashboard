@@ -216,7 +216,7 @@ class Findings(Watch):
         self.assertIn('"lifecycle.json"', src)
 
     def test_the_tick_runs_the_collector(self):
-        body = (ROOT / "tools/tick.sh").read_text()
+        body = (ROOT / "tools/tick.py").read_text()
         self.assertIn("collectors/scan_lifecycle.py", body)
 
 

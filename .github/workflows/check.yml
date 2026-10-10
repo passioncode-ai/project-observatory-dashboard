@@ -187,6 +187,19 @@ jobs:
           demo_root="$(mktemp -d)"
           project-observatory --home "$demo_root/state" demo
           project-observatory --home "$demo_root/state" doctor
+      - id: tick
+        name: A whole tick runs in a sandbox workspace (W3)
+        continue-on-error: true
+        run: |
+          ws="$RUNNER_TEMP/tick-ws"
+          mkdir -p "$RUNNER_TEMP/tick-projects/example"
+          printf '%s\n' '{"name":"example"}' > "$RUNNER_TEMP/tick-projects/example/package.json"
+          project-observatory --home "$ws" full init
+          project-observatory --home "$ws" full configure sources projects "$RUNNER_TEMP/tick-projects"
+          project-observatory --home "$ws" full configure features scheduler true
+          OBSERVATORY_HOME="$ws" OBSERVATORY_SYSTEM_SETUP=0 python observatory/engine/tools/tick.py | tee "$RUNNER_TEMP/tick.log"
+          grep -q " tick done$" "$RUNNER_TEMP/tick.log"
+          python -c "import json, sys; d = json.load(open(sys.argv[1], encoding='utf-8')); print(d); sys.exit(1 if d['failed_steps'] else 0)" "$ws/store/raw/tick.json"
       - id: tests
         name: Synthetic runtime and privacy tests
         continue-on-error: true
@@ -204,5 +217,6 @@ jobs:
             echo "| osproc | ${{ steps.osproc.outcome }} |"
             echo "| osprivacy | ${{ steps.osprivacy.outcome }} |"
             echo "| CLI | ${{ steps.cli.outcome }} |"
+            echo "| A whole tick | ${{ steps.tick.outcome }} |"
             echo "| Top-level tests | ${{ steps.tests.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"

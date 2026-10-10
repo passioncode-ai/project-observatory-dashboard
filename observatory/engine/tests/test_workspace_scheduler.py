@@ -249,13 +249,17 @@ class WorkspaceScheduler(unittest.TestCase):
                 ('127.0.0.1:47311','http://user@localhost:47311',None)):
             self.assertFalse(valid(host,origin,fetch,47311))
 
-    def test_tick_shell_is_valid_and_runtime_paths_are_quoted(self):
+    def test_tick_is_valid_and_runtime_paths_come_from_the_workspace(self):
+        # The wrapper parses as bash, the tick as Python, and the tick names the workspace's
+        # scratch and page rather than a source-tree path.
         subprocess.run(['/bin/bash','-n',str(ROOT/'tools/tick.sh')],check=True)
-        active = '\n'.join(line for line in (ROOT/'tools/tick.sh').read_text().splitlines() if not line.lstrip().startswith('#'))
+        import ast
+        ast.parse((ROOT/'tools/tick.py').read_text())
+        active = '\n'.join(line for line in (ROOT/'tools/tick.py').read_text().splitlines() if not line.lstrip().startswith('#'))
         self.assertNotIn('store/raw/',active)
         self.assertNotIn('docs/projects-dashboard.html',active)
-        self.assertIn('"$SCRATCH/local.json"',active)
-        self.assertIn('"$DASHBOARD"',active)
+        self.assertIn('SCRATCH / "local.json"',active)
+        self.assertIn('paths.DASHBOARD_HTML',active)
 
 if __name__=='__main__':
     unittest.main()

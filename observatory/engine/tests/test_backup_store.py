@@ -109,30 +109,30 @@ def test_a_missing_store_is_not_a_failure_and_list_names_what_exists() -> None:
 
 
 def backup_gate(src: str) -> tuple[str, list[str]]:
-    """The `if` condition that encloses tick.sh's `step "backup"` line, and that block's
-    body. ("", []) when the step is not inside an `if … fi` of its own.
+    """The `if` condition that encloses the tick's `step("backup", …)` call, and that block's
+    statements, as source text. ("", []) when the step is not inside an `if` of its own.
 
-    Audit A24: the earlier check asked only whether `-mmin -1440` occurred anywhere in
-    tick.sh, and it does — for four OTHER steps. The backup step is gated by
-    `backup_store.py --due`, so a tick.sh that ran the backup on every tick still passed."""
-    lines = src.splitlines()
-    for i, line in enumerate(lines):
-        if line.strip().startswith('step "backup"'):
-            start = next((j for j in range(i - 1, -1, -1) if lines[j].lstrip().startswith(("if ", "fi"))), None)
-            end = next((j for j in range(i + 1, len(lines)) if lines[j].strip() == "fi"), None)
-            if start is None or end is None or not lines[start].lstrip().startswith("if "):
-                return "", []
-            return lines[start].strip(), [l.strip() for l in lines[start + 1:end]]
+    Audit A24: the earlier check asked only whether a daily age gate occurred anywhere in the
+    tick, and it does — for four OTHER steps. The backup step is gated by
+    `backup_store.py --due`, so a tick that ran the backup on every tick still passed."""
+    import ast
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        body = [ast.unparse(s) for s in node.body]
+        if any(b.startswith("step('backup'") for b in body):
+            return ast.unparse(node.test), body
     return "", []
 
 
 def test_the_tick_takes_one_a_day() -> None:
-    src = (ROOT / "tools/tick.sh").read_text(encoding="utf-8")
+    src = (ROOT / "tools/tick.py").read_text(encoding="utf-8")
     condition, body = backup_gate(src)
-    check("tick.sh's backup step runs only inside the `backup_store.py --due` question",
-          "tools/backup_store.py --due" in condition and any(l.startswith('step "backup"') for l in body),
+    check("the tick's backup step runs only inside the `backup_store.py --due` question",
+          "'tools/backup_store.py', '--due'" in condition and any(l.startswith("step('backup'") for l in body),
           condition or "the backup step is not inside an `if` of its own")
-    check("and that block runs nothing else", len(body) == 2 and body[0].startswith("log "), str(body))
+    check("and that block runs nothing else", len(body) == 2 and body[0].startswith("log("), str(body))
     # The question itself: due with no copy, not due once one exists, due again a day later.
     db = planted()
     home = db.parent / "home"

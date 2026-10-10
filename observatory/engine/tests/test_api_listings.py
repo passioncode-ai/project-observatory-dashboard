@@ -527,7 +527,7 @@ def test_the_four_collectors_reach_tick_json() -> None:
                  "scan_sessions.py"):
         at = tick_reader.first_invocation(src, name)
         line = src.splitlines()[at].strip() if at != -1 else "not invoked"
-        check(f"{name} runs through `step`", at != -1 and line.startswith("step "),
+        check(f"{name} runs through `step`", at != -1 and line.startswith("step("),
               line[:90])
 
 

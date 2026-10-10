@@ -176,7 +176,7 @@ def test_remediation_is_off_until_a_workspace_turns_it_on() -> None:
 
 
 def test_the_tick_runs_it_and_the_rule_is_written_where_agents_read() -> None:
-    tick = (ROOT / "tools/tick.sh").read_text(encoding="utf-8")
+    tick = (ROOT / "tools/tick.py").read_text(encoding="utf-8")
     check("the tick scrubs the companion after the leak scan",
           "scrub_companion.py" in tick and tick.index("scrub_companion.py") > tick.index("scan_leaks.py"), "")
     obs = (ROOT / "observatory.py").read_text(encoding="utf-8")
