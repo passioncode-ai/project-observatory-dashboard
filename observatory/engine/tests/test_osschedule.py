@@ -151,6 +151,7 @@ class TaskLifecycle(Workspace):
             task.install()
 
 
+@unittest.skipIf(os.name == "nt", "systemd units name POSIX paths; Windows paths have backslashes")
 class SystemdUnits(Workspace):
     def unit(self, name, **kw):
         return osschedule.SystemdJob(job(name, self.ws, **kw), which=lambda _: "systemctl")

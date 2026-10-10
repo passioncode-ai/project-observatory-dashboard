@@ -2850,8 +2850,8 @@
       "path": "tests/test_osschedule.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bfdaaaa248793ccd60da3e4a01704c95a81f48e68f53dfb63e64ce7423f70ed5",
-      "bytes": 11284
+      "export_sha256": "3a95345c67c098c63557f81bc8efba7f46afa6cee36049d869a39ecc084a4ad3",
+      "bytes": 11384
     },
     {
       "path": "tests/test_page_omission.py",
