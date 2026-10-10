@@ -5,6 +5,12 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **`osschedule`: background jobs under Windows Task Scheduler and systemd** (W4a). One job description, a
+  per-user task created from XML (`InteractiveToken`, no stored password, `pythonw.exe` through
+  `tools/scheduled.py`, so no console window opens) or a systemd user unit. Not wired to `full init` yet (W4b).
+
 ### Fixed
 
 - **The Mac app is universal.** `macos/scripts/build-app.sh` builds `arm64` and `x86_64` and refuses an

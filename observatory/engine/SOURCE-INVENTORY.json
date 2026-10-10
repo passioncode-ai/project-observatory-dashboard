@@ -1244,6 +1244,13 @@
       "bytes": 8436
     },
     {
+      "path": "osschedule.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "8a8d79529ae0fce126aa149919ac6e83f316c28c05512ee692ef8ff10baf3fd5",
+      "bytes": 17574
+    },
+    {
       "path": "paths.py",
       "source_sha256": "08aeba912f8605f5e050975ae92c6421a7432f35af72f5cc2a6d2dc26f3f616c",
       "export_sha256": "5290001ba93e33a107b51e91744fe78650835a8c118f2e90f5b3743eba83f00b",
@@ -2840,6 +2847,13 @@
       "bytes": 5723
     },
     {
+      "path": "tests/test_osschedule.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "3a95345c67c098c63557f81bc8efba7f46afa6cee36049d869a39ecc084a4ad3",
+      "bytes": 11384
+    },
+    {
       "path": "tests/test_page_omission.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -4133,6 +4147,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/scheduled.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "4cad09e12f46eda25524ca06aab294b7713f04dc861d73904692a1af7838c3e8",
+      "bytes": 2881
+    },
+    {
       "path": "tools/scrub_companion.py",
       "source_sha256": "02aacd3cc398f1d4d2d9c62c31913f0b9dc825411f081c17d2181dffc40f6f28",
       "export_sha256": "3eee9ec812de42ef8c2bdbbd414ba6ad1ddf4befee17dcd5b651f86f046a75c2",
@@ -4360,7 +4381,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 559,
+  "file_count": 562,
   "excluded": [
     "git-history",
     "operator-registries",
