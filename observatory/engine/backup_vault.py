@@ -212,14 +212,86 @@ def set_passphrase(base: Path, value: str) -> Path:
     return file
 
 
+class WindowsCredentials:
+    """Generic credentials in the Windows Credential Manager (`CredWriteW`/`CredReadW`), kept for
+    this account on this machine (CRED_PERSIST_LOCAL_MACHINE: never roaming with the profile).
+    The value is the UTF-8 bytes of the passphrase in the credential's blob; it is never an
+    argument of any process. `read` answers None only for ERROR_NOT_FOUND; any other failure is
+    not absence and raises (audit A01: a store that could not answer must not look empty)."""
+
+    _GENERIC, _PERSIST_LOCAL_MACHINE, _NOT_FOUND = 1, 2, 1168
+
+    def __init__(self):
+        import ctypes
+        from ctypes import wintypes
+        self.ctypes, self.wintypes = ctypes, wintypes
+
+        class CREDENTIAL(ctypes.Structure):
+            _fields_ = [("Flags", wintypes.DWORD), ("Type", wintypes.DWORD), ("TargetName", wintypes.LPWSTR),
+                        ("Comment", wintypes.LPWSTR), ("LastWritten", wintypes.FILETIME),
+                        ("CredentialBlobSize", wintypes.DWORD), ("CredentialBlob", ctypes.POINTER(ctypes.c_ubyte)),
+                        ("Persist", wintypes.DWORD), ("AttributeCount", wintypes.DWORD), ("Attributes", ctypes.c_void_p),
+                        ("TargetAlias", wintypes.LPWSTR), ("UserName", wintypes.LPWSTR)]
+
+        self.CREDENTIAL = CREDENTIAL
+        self.advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        self.advapi32.CredWriteW.argtypes = [ctypes.POINTER(CREDENTIAL), wintypes.DWORD]
+        self.advapi32.CredWriteW.restype = wintypes.BOOL
+        self.advapi32.CredReadW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                            ctypes.POINTER(ctypes.POINTER(CREDENTIAL))]
+        self.advapi32.CredReadW.restype = wintypes.BOOL
+        self.advapi32.CredDeleteW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD]
+        self.advapi32.CredDeleteW.restype = wintypes.BOOL
+        self.advapi32.CredFree.argtypes = [ctypes.c_void_p]
+
+    def write(self, target: str, value: str, *, comment: str = "") -> None:
+        ctypes = self.ctypes
+        blob = value.encode("utf-8")
+        buffer = (ctypes.c_ubyte * len(blob)).from_buffer_copy(blob)
+        cred = self.CREDENTIAL(Type=self._GENERIC, TargetName=target, Comment=comment or None,
+                               CredentialBlobSize=len(blob),
+                               CredentialBlob=ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)),
+                               Persist=self._PERSIST_LOCAL_MACHINE, UserName="project-observatory")
+        if not self.advapi32.CredWriteW(ctypes.byref(cred), 0):
+            raise BackupError(f"the Credential Manager refused the backup passphrase (error {ctypes.get_last_error()})")
+
+    def read(self, target: str) -> str | None:
+        ctypes = self.ctypes
+        found = ctypes.POINTER(self.CREDENTIAL)()
+        if not self.advapi32.CredReadW(target, self._GENERIC, 0, ctypes.byref(found)):
+            code = ctypes.get_last_error()
+            if code == self._NOT_FOUND:
+                return None
+            raise BackupError(f"the Credential Manager did not answer (error {code})")
+        try:
+            item = found.contents
+            data = ctypes.string_at(item.CredentialBlob, item.CredentialBlobSize)
+        finally:
+            self.advapi32.CredFree(found)
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise BackupError(f"the credential {target} is not a passphrase this engine wrote") from None
+
+    def delete(self, target: str) -> bool:
+        ctypes = self.ctypes
+        if self.advapi32.CredDeleteW(target, self._GENERIC, 0):
+            return True
+        if ctypes.get_last_error() == self._NOT_FOUND:
+            return False
+        raise BackupError(f"the Credential Manager did not delete {target} (error {ctypes.get_last_error()})")
+
+
 class SecretStore:
     """Where a workspace's backup passphrase is kept OUTSIDE the workspace, so a deleted
     workspace or a reinstall can still open the backups it left (decision D5,
     docs/runs/2026-10-05-auto-update).
 
     macOS: the login Keychain, item service "Project Observatory backups", account = the
-    workspace label. Elsewhere: the Secret Service through `secret-tool`, or, without it,
-    an owner-only file under ~/.config/project-observatory/backup-passphrases/.
+    workspace label. Windows: the Credential Manager, a generic credential named
+    "Project Observatory backups/<label>", kept for this account on this machine (W5).
+    Elsewhere: the Secret Service through `secret-tool`, or, without it, an owner-only file
+    under ~/.config/project-observatory/backup-passphrases/.
     A value travels on stdin and is never an argument: `security -i` reads its command
     from stdin, `secret-tool store` reads the secret from stdin. The Keychain copy is
     hex-encoded, so no character of a person's passphrase meets `security`'s parser."""
@@ -227,14 +299,20 @@ class SecretStore:
     SERVICE = "Project Observatory backups"
     TOOL_SERVICE = "project-observatory-backups"
 
-    def __init__(self, runner=subprocess.run, platform: str | None = None, which=shutil.which):
+    def __init__(self, runner=subprocess.run, platform: str | None = None, which=shutil.which,
+                 credentials=None):
         self.runner, self.which = runner, which
         self.platform = platform or sys.platform
+        # The Windows Credential Manager, or a stand-in with read/write (the tests).
+        self.credentials = credentials if credentials is not None else (
+            WindowsCredentials() if self.platform == "win32" else None)
 
     def kind(self) -> str:
         if self.platform == "darwin" and self.which("security"):
             return "keychain"
-        if self.platform != "darwin" and self.which("secret-tool"):
+        if self.platform == "win32" and self.credentials is not None:
+            return "credential-manager"
+        if self.platform not in ("darwin", "win32") and self.which("secret-tool"):
             return "secret-service"
         return "file"
 
@@ -277,6 +355,12 @@ class SecretStore:
             if code != 0:
                 raise BackupError("the login Keychain refused the backup passphrase")
             return kind
+        if kind == "credential-manager":
+            target = f"{self.SERVICE}/{label}"
+            if not replace and self.credentials.read(target) is not None:
+                raise BackupError(f"the Credential Manager already holds a passphrase for {label}")
+            self.credentials.write(target, value, comment=f"{self.SERVICE} for workspace {label}")
+            return kind
         if kind == "secret-service":
             if not replace:
                 code, out, err = self._run_full(["secret-tool", "lookup", "service", self.TOOL_SERVICE,
@@ -294,7 +378,7 @@ class SecretStore:
         if not replace and (file.exists() or file.is_symlink()):
             raise BackupError(f"{file} already exists")
         file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(file.parent, 0o700)
+        osprivacy.make_private(file.parent)   # 0700, or a protected owner-only ACL on Windows
         fd, tmp = tempfile.mkstemp(dir=file.parent, prefix=".passphrase-")
         try:
             os.fchmod(fd, 0o600)
@@ -329,6 +413,8 @@ class SecretStore:
                 except ValueError:
                     raise BackupError(f"the Keychain item for {label} is not a passphrase this engine wrote") from None
             return text
+        if kind == "credential-manager":
+            return self.credentials.read(f"{self.SERVICE}/{label}")
         keyring_error = None
         if kind == "secret-service":
             code, out, err = self._run_full(["secret-tool", "lookup", "service", self.TOOL_SERVICE,

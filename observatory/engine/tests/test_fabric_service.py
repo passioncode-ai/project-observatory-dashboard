@@ -680,21 +680,57 @@ class Installer(Sandbox):
 
     def test_uninstall_removes_the_plist_and_the_descriptor_and_keeps_the_data(self):
         self.install()
-        loaded = iter([True, True, False, False])
+        loaded = iter([True, True, False])
         with mock.patch.object(sys, "platform", "darwin"), \
                 mock.patch.object(self.serverd.fs, "_launchctl") as launchctl, \
                 mock.patch.object(self.serverd.fs, "launchd_loaded", side_effect=lambda label: next(loaded)) as probe:
             self.assertEqual(self.serverd.uninstall(), 0)
         self.assertEqual(launchctl.call_args_list[0].args[0], "bootout")
-        self.assertEqual(probe.call_count, 4, "uninstall waits until launchd no longer lists the job")
+        self.assertEqual(probe.call_count, 3, "uninstall waits until launchd no longer lists the job (the kit's wait)")
         self.assertFalse(self.serverd.PLIST.exists())
         self.assertEqual(list(self.services.glob("*.json")), [])
         self.assertTrue((self.home / "workspace.json").exists())
 
-    def test_install_refuses_off_macos_without_writing(self):
-        with mock.patch.object(sys, "platform", "linux"):
+    def test_off_macos_a_supervisor_that_cannot_be_used_writes_nothing(self):
+        import osschedule
+        with mock.patch.object(sys, "platform", "linux"), \
+                mock.patch.object(osschedule, "supervisor", side_effect=osschedule.ScheduleError("no systemd user manager")):
             self.assertEqual(self.serverd.install(), 1)
         self.assertFalse(self.services.exists())
+
+    def test_off_macos_the_server_installs_through_its_systems_supervisor(self):
+        # W4b: Task Scheduler on Windows, systemd on Linux; the descriptor names the job, and the
+        # install says "started" only once the well-known document answers as this service.
+        import osschedule
+
+        class Task:
+            kind, path = "task-scheduler", "\\ProjectObservatory\\x-server"
+
+            def __init__(self, job):
+                self.job, self.calls = job, []
+
+            def install(self):
+                self.calls.append("install")
+                return {"changed": True}
+
+            def start(self):
+                self.calls.append("start")
+                return True, ""
+
+            def status(self):
+                return {"task": self.path}
+
+        made = []
+        answer = {"protocol": "fabric-service/0.1",
+                  "service": {"id": self.si.SERVICE_ID, "instance": self.si.instance()}}
+        with mock.patch.object(sys, "platform", "win32"), \
+                mock.patch.object(osschedule, "supervisor", side_effect=lambda job: made.append(Task(job)) or made[-1]), \
+                mock.patch.object(self.serverd.fs, "fetch_well_known", return_value=answer):
+            self.assertEqual(self.serverd.install(), 0)
+        self.assertEqual(made[0].calls, ["install", "start"])
+        self.assertTrue(made[0].job.argv[1].endswith("serverd.py"))
+        [descriptor] = [json.loads(p.read_text()) for p in self.services.glob("project-observatory.*.json")]
+        self.assertEqual(descriptor["lifecycle"], {"manager": "task-scheduler", "task": Task.path})
 
 
 # --- the running server --------------------------------------------------------------
@@ -911,7 +947,11 @@ class RunningServer(unittest.TestCase):
         not_run = {k for k, v in verdicts.items() if v["verdict"] == "NOT_RUN"}
         expected_not_run = {"login.single-use", "lifecycle.launchd",
                             "interop.well-known-capabilities", "interop.tools-match",
-                            "interop.job-tools", "interop.unknown-job", "interop.trace-propagation"}
+                            "interop.job-tools", "interop.unknown-job", "interop.trace-propagation",
+                            # Kit 0.8.2: skipped with the other capability checks this server does
+                            # not declare, and the optional usage report (DEC-0021) it does not
+                            # offer yet (docs/backlog.md OBS-53).
+                            "interop.output-schema-object", "usage.report"}
         if shutil.which("lsof", path=self.env.get("PATH")) is None:
             expected_not_run.add("network.loopback-only")
             self.assertEqual(verdicts["network.loopback-only"]["verdict"], "NOT_RUN")

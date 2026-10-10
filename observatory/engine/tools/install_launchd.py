@@ -140,8 +140,12 @@ def _seconds(value: str) -> bool:
 def environment() -> dict[str, str]:
     # OBSERVATORY_PYTHON: the tick runs every step with the interpreter the engine
     # is installed in, not the installer's and not whatever python3 is first on PATH.
-    env = {"PATH": launch_path(), "OBSERVATORY_PYTHON": stable_interpreter(configuration.engine_python()),
-           "HOME": str(pathlib.Path.home()), "OBSERVATORY_HOME": str(paths.HOME)}
+    env = {"OBSERVATORY_PYTHON": stable_interpreter(configuration.engine_python()),
+           "OBSERVATORY_HOME": str(paths.HOME)}
+    if os.name != "nt":
+        # A Windows task runs with the account's own environment, PATH and profile included;
+        # launchd and systemd start a job with a bare one.
+        env = {"PATH": launch_path(), **env, "HOME": str(pathlib.Path.home())}
     for name in TICK_LIMITS:
         value = os.environ.get(name, "").strip()
         if value and _seconds(value):
@@ -307,18 +311,59 @@ def repair_interpreters(expected: str | None = None, *, write: bool = True,
     return found
 
 
+def tick_job(interval: int):
+    """The tick for Task Scheduler or systemd (`osschedule`), as `build` describes it for launchd."""
+    import osschedule
+    if interval < 60:
+        raise ValueError("Tick interval must be at least 60 seconds")
+    env = environment()
+    env["OBSERVATORY_TICK_CEILING_SECONDS"] = str(tick_ceiling(interval))
+    return osschedule.Job(name="tick", workspace=paths.HOME,
+                          argv=(stable_interpreter(configuration.engine_python()), str(ROOT / "tools/tick.py")),
+                          env=tuple(sorted(env.items())), cwd=ROOT,
+                          stdout=LOG_DIR / "tick.log", stderr=LOG_DIR / "tick.err",
+                          interval_seconds=interval, time_limit_seconds=tick_ceiling(interval) + exit_timeout())
+
+
+def main_other(action: str, interval: int) -> int:
+    """install | uninstall | status | run-now on Windows (Task Scheduler) and Linux (systemd)."""
+    import osschedule
+    try:
+        job = osschedule.supervisor(tick_job(interval))
+        if action == "status":
+            print(job.status())
+            log = LOG_DIR / "tick.log"
+            if log.exists():
+                print(f"\nlast lines of {log}:")
+                print("\n".join(log.read_text(errors="replace").splitlines()[-12:]))
+            return 0
+        if action == "uninstall":
+            print(job.uninstall())
+            return 0
+        if action == "run-now":
+            ok, out = job.start()
+            print(out or ("started" if ok else "not started"))
+            return 0 if ok else 1
+        prepare_logs(("tick.log", "tick.err"))
+        result = job.install()
+    except (osschedule.ScheduleError, configuration.ConfigurationError, ValueError) as exc:
+        print(f"Not installed: {exc}", file=sys.stderr)
+        return 1
+    print(f"installed: the tick every {interval // 60} min ({result})")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("action", choices=["install", "uninstall", "status", "run-now"])
     ap.add_argument("--interval", type=int, default=1800)
     args = ap.parse_args()
-    target = f"gui/{uid()}/{LABEL}"
     if args.action in {"install", "run-now"} and not scheduler_allowed():
         print("Scheduler disabled: enable features.scheduler in the workspace settings first", file=sys.stderr)
         return 1
     if sys.platform != "darwin":
-        print("launchd is supported on macOS only", file=sys.stderr)
-        return 1
+        return main_other(args.action, args.interval)
+    target = f"gui/{uid()}/{LABEL}"
 
     if args.action == "status":
         code, out = run("launchctl", "print", target)

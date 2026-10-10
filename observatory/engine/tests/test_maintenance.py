@@ -458,6 +458,54 @@ class Passphrase(Base):
         with self.assertRaises(vault.BackupError):
             store.get("ws-2")
 
+    def test_windows_keeps_it_in_the_credential_manager(self):
+        # W5: Windows has no `security` and no Secret Service; a generic credential per workspace.
+        class Fake:
+            def __init__(self):
+                self.items, self.writes = {}, []
+
+            def read(self, target):
+                return self.items.get(target)
+
+            def write(self, target, value, *, comment=""):
+                self.writes.append(target)
+                self.items[target] = value
+
+        fake = Fake()
+        store = vault.SecretStore(platform="win32", which=lambda name: None, credentials=fake)
+        self.assertEqual(store.kind(), "credential-manager")
+        self.assertEqual(store.put("ws-1", "the value"), "credential-manager")
+        self.assertEqual(fake.writes, ["Project Observatory backups/ws-1"])
+        self.assertEqual(store.get("ws-1"), "the value")
+        self.assertIsNone(store.get("ws-2"))
+        with self.assertRaises(vault.BackupError, msg="a first copy never replaces one"):
+            store.put("ws-1", "another value")
+        store.put("ws-1", "another value", replace=True)
+        self.assertEqual(store.get("ws-1"), "another value")
+
+    def test_a_credential_manager_that_does_not_answer_is_not_an_absent_item(self):
+        class Broken:
+            def read(self, target):
+                raise vault.BackupError("the Credential Manager did not answer (error 5)")
+
+        store = vault.SecretStore(platform="win32", which=lambda name: None, credentials=Broken())
+        with self.assertRaises(vault.BackupError):
+            store.get("ws-1")
+
+    @unittest.skipUnless(os.name == "nt", "needs the Windows Credential Manager")
+    def test_the_real_credential_manager_round_trips(self):
+        import uuid
+        label = f"test-{uuid.uuid4().hex[:12]}"
+        target = f"Project Observatory backups/{label}"
+        creds = vault.WindowsCredentials()
+        self.addCleanup(creds.delete, target)
+        store = vault.SecretStore(credentials=creds)
+        self.assertIsNone(store.get(label))
+        self.assertEqual(store.put(label, "π and spaces \\ \" quote"), "credential-manager")
+        self.assertEqual(store.get(label), "π and spaces \\ \" quote")
+        self.assertTrue(creds.delete(target))
+        self.assertIsNone(store.get(label))
+
     def test_the_file_store_is_owner_only_outside_the_workspace(self):
         store = vault.SecretStore(platform="linux", which=lambda name: None)
         self.assertEqual(store.put("ws-1", "file value"), "file")

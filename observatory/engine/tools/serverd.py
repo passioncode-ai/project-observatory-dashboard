@@ -791,8 +791,7 @@ def install() -> int:
         print("Scheduler disabled: enable features.scheduler before installing background jobs", file=sys.stderr)
         return 1
     if sys.platform != "darwin":
-        print("launchd is supported on macOS only", file=sys.stderr)
-        return 1
+        return install_other()
     if PLIST.is_symlink():
         print(f"Not installed: {PLIST} is a symbolic link", file=sys.stderr)
         return 1
@@ -837,18 +836,102 @@ def install() -> int:
     return 0
 
 
+def server_job():
+    """The server for Task Scheduler or systemd (`osschedule`), as `build_plist` describes it for
+    launchd: started at logon, restarted on failure, no time limit, standard priority."""
+    import osschedule
+    return osschedule.Job(name="server", workspace=paths.HOME,
+                          argv=(install_launchd.stable_interpreter(configuration.engine_python()),
+                                str(ROOT / "tools/serverd.py"), "--run", "--port", str(PORT)),
+                          env=tuple(sorted(install_launchd.environment().items())), cwd=ROOT,
+                          stdout=paths.STATE / "logs/serverd.out", stderr=paths.STATE / "logs/serverd.err",
+                          time_limit_seconds=EXIT_TIMEOUT + 10, background=False)
+
+
+def _supervisor_record(job) -> dict:
+    """The descriptor's lifecycle for this system's supervisor (fabric-service DEC-0032)."""
+    if job.kind == "task-scheduler":
+        return {"manager": "task-scheduler", "task": job.path}
+    return {"manager": "systemd", "unit": job.unit}
+
+
+def install_other(wait_seconds: float = 30.0) -> int:
+    """Descriptor, the supervisor's job, a start — and proof it answers as THIS service.
+
+    Windows: a Task Scheduler task; Linux: a systemd user service (`osschedule`). As on macOS the
+    descriptor goes first, because it is where the port is claimed, and a refused claim leaves
+    no job behind."""
+    import osschedule
+    try:
+        job = osschedule.supervisor(server_job())
+    except (osschedule.ScheduleError, configuration.ConfigurationError) as exc:
+        print(f"Not installed: {exc}", file=sys.stderr)
+        return 1
+    install_launchd.prepare_logs(("serverd.err", "serverd.out"), paths.STATE / "logs")
+    try:
+        service_identity.write_installed_manifest()
+        where = fs.write_descriptor(service_identity.descriptor(PORT, supervisor=_supervisor_record(job)))
+    except (fs.ServiceError, OSError) as exc:
+        print(f"Not installed: {exc}", file=sys.stderr)
+        return 1
+    try:
+        job.install()
+        ok, out = job.start()
+        if not ok:
+            raise osschedule.ScheduleError(f"the supervisor did not start it: {out[:200]}")
+    except osschedule.ScheduleError as exc:
+        print(f"{exc} The descriptor ({where}) stays in place; "
+              f"`python \"$(project-observatory full-path)/tools/serverd.py\" --uninstall` removes it.", file=sys.stderr)
+        return 1
+    origin = f"http://127.0.0.1:{PORT}"
+    deadline = time.monotonic() + wait_seconds
+    answer = None
+    while time.monotonic() < deadline:
+        answer = fs.fetch_well_known(origin)
+        service = (answer or {}).get("service") or {}
+        if service.get("id") == service_identity.SERVICE_ID and service.get("instance") == service_identity.instance():
+            break
+        time.sleep(0.5)
+    else:
+        print(f"installed, but {origin} did not answer as this service within {wait_seconds:.0f} s; "
+              f"`{job.kind}` status: {job.status()}", file=sys.stderr)
+        return 1
+    print(f"installed and started: {job.status().get('task') or job.status().get('unit')} — {origin}/")
+    print(f"  fabric-service descriptor: {where}")
+    print(f"  off is `python \"$(project-observatory full-path)/tools/serverd.py\" --uninstall`; off STAYS off until --install")
+    return 0
+
+
+def uninstall_other() -> int:
+    import osschedule
+    try:
+        job = osschedule.supervisor(server_job())
+        result = job.uninstall()
+    except (osschedule.ScheduleError, configuration.ConfigurationError) as exc:
+        print(f"Not removed: {exc}", file=sys.stderr)
+        return 1
+    described = fs.remove_descriptor(service_identity.SERVICE_ID, service_identity.instance())
+    print(f"stopped and removed {result.get('task') or result.get('unit')}")
+    if described:
+        print("  removed the fabric-service descriptor")
+    return 0
+
+
 def uninstall() -> int:
     """Off: bootout, the plist, the descriptor. The workspace's data stays."""
+    if sys.platform != "darwin":
+        return uninstall_other()
     existed = PLIST.exists()
     unloaded = True
     if sys.platform == "darwin":
-        fs.launchd_uninstall(LABEL, PLIST)
-        # bootout returns before the job is gone: SIGTERM, the drain, then the
-        # unload. "Stopped" is said only once launchd no longer knows the label.
-        deadline = time.monotonic() + EXIT_TIMEOUT
-        while fs.launchd_loaded(LABEL) and time.monotonic() < deadline:
-            time.sleep(0.25)
-        unloaded = not fs.launchd_loaded(LABEL)
+        # bootout returns before the job is gone: SIGTERM, the drain, then the unload. The kit
+        # (0.8.2) waits until launchd no longer knows the label, and refuses to say "stopped"
+        # before that, leaving the plist in place.
+        try:
+            fs.launchd_uninstall(LABEL, PLIST, timeout=EXIT_TIMEOUT + 10)
+        except fs.ServiceError as exc:
+            print(str(exc), file=sys.stderr)
+            unloaded = False
     else:
         PLIST.unlink(missing_ok=True)
     described = fs.remove_descriptor(service_identity.SERVICE_ID, service_identity.instance())

@@ -204,6 +204,27 @@ jobs:
           OBSERVATORY_HOME="$ws" OBSERVATORY_SYSTEM_SETUP=0 python observatory/engine/tools/tick.py | tee "$RUNNER_TEMP/tick.log"
           grep -q " tick done$" "$RUNNER_TEMP/tick.log"
           python -c "import json, sys; d = json.load(open(sys.argv[1], encoding='utf-8')); print(d); sys.exit(1 if d['failed_steps'] else 0)" "$ws/store/raw/tick.json"
+      - id: credentials
+        name: The backup passphrase in the Credential Manager (W5)
+        continue-on-error: true
+        run: |
+          cd observatory/engine
+          python tests/test_maintenance.py -v Passphrase.test_the_real_credential_manager_round_trips Passphrase.test_windows_keeps_it_in_the_credential_manager
+      - id: jobs
+        name: The server and the tick under Task Scheduler (W4b)
+        continue-on-error: true
+        run: |
+          ws="$RUNNER_TEMP/jobs-ws"
+          project-observatory --home "$ws" full init
+          project-observatory --home "$ws" full configure features scheduler true
+          export OBSERVATORY_HOME="$ws"
+          python observatory/engine/tools/serverd.py --install || { echo "--- server logs"; tail -n 60 "$ws"/store/logs/serverd.* 2>/dev/null; ls -la "$ws/store/logs" || true; exit 1; }
+          python -c "import json, sys, urllib.request; d = json.load(urllib.request.urlopen('http://127.0.0.1:47311/.well-known/fabric-service', timeout=10)); print(d['service']['id'], d['service']['instance'], d['status'])"
+          python observatory/engine/tools/serverd.py --uninstall
+          python observatory/engine/tools/install_launchd.py install
+          python observatory/engine/tools/install_launchd.py status
+          python observatory/engine/tools/install_launchd.py uninstall
+          schtasks /Query /FO LIST | grep -c ProjectObservatory || true
       - id: tests
         name: Synthetic runtime and privacy tests
         continue-on-error: true
@@ -221,6 +242,8 @@ jobs:
             echo "| osproc | ${{ steps.osproc.outcome }} |"
             echo "| osprivacy | ${{ steps.osprivacy.outcome }} |"
             echo "| osschedule | ${{ steps.osschedule.outcome }} |"
+            echo "| Credential Manager | ${{ steps.credentials.outcome }} |"
+            echo "| server and tick jobs | ${{ steps.jobs.outcome }} |"
             echo "| CLI | ${{ steps.cli.outcome }} |"
             echo "| A whole tick | ${{ steps.tick.outcome }} |"
             echo "| Top-level tests | ${{ steps.tests.outcome }} |"
