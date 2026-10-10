@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import unittest
 import xml.etree.ElementTree as ET
@@ -209,6 +210,74 @@ class Wrapper(Workspace):
         self.assertIn("here", text)
         self.assertIn(str(self.ws.resolve()).lower()[-12:], text.lower())
         self.assertEqual(err.read_bytes().replace(b"\r\n", b"\n"), b"e\n")
+
+
+class Wiring(Workspace):
+    """The engine's own jobs through `osschedule` (W4b): the tick, the server, maintenance, and the
+    descriptor a host reads. Each case runs in a child with its own workspace, because `paths`
+    reads OBSERVATORY_HOME when it is imported."""
+
+    def child(self, code: str) -> dict:
+        import json
+        env = {**os.environ, "OBSERVATORY_HOME": str(self.ws), "OBSERVATORY_SYSTEM_SETUP": "0"}
+        out = subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=env, capture_output=True, text=True,
+                             timeout=120)
+        self.assertEqual(out.returncode, 0, out.stderr[-1500:])
+        return json.loads(out.stdout.strip().splitlines()[-1])
+
+    def test_the_tick_job_runs_tick_py_every_interval(self):
+        got = self.child(textwrap.dedent("""
+            import json, sys
+            sys.path[:0] = ['.', 'tools']
+            import install_launchd
+            j = install_launchd.tick_job(1800)
+            print(json.dumps({"argv": list(j.argv), "env": dict(j.env), "interval": j.interval_seconds,
+                              "limit": j.time_limit_seconds, "ceiling": install_launchd.tick_ceiling(1800)}))
+            """))
+        self.assertTrue(got["argv"][1].endswith("tick.py"))
+        self.assertEqual(got["interval"], 1800)
+        self.assertGreater(got["limit"], got["ceiling"])
+        self.assertEqual(got["env"]["OBSERVATORY_HOME"], str(self.ws))
+        self.assertEqual(got["env"]["OBSERVATORY_TICK_CEILING_SECONDS"], str(got["ceiling"]))
+        self.assertEqual("PATH" in got["env"], os.name != "nt")
+
+    def test_the_server_descriptor_names_this_systems_supervisor(self):
+        got = self.child(textwrap.dedent("""
+            import json, sys
+            sys.path[:0] = ['.', 'tools']
+            import fabric_service as fs, osschedule, service_identity, serverd
+            j = serverd.server_job()
+            out = {"service": j.service, "background": j.background}
+            for kind in (osschedule.TaskSchedulerJob, osschedule.SystemdJob):
+                record = serverd._supervisor_record(kind(j))
+                doc = service_identity.descriptor(serverd.PORT, supervisor=record)
+                out[record["manager"]] = {"lifecycle": doc["lifecycle"], "problems": fs.validate_descriptor(doc)}
+            print(json.dumps(out))
+            """))
+        self.assertTrue(got["service"])
+        self.assertFalse(got["background"])
+        self.assertEqual(got["task-scheduler"]["problems"], [])
+        self.assertTrue(got["task-scheduler"]["lifecycle"]["task"].startswith("\\ProjectObservatory\\"))
+        self.assertEqual(got["systemd"]["problems"], [])
+        self.assertTrue(got["systemd"]["lifecycle"]["unit"].endswith("-server.service"))
+
+    def test_maintenance_on_windows_is_a_task_after_logon_and_hourly(self):
+        got = self.child(textwrap.dedent("""
+            import json, sys
+            from unittest import mock
+            sys.path[:0] = ['.']
+            import maintenance
+            from pathlib import Path
+            import os
+            with mock.patch.object(sys, "platform", "win32"):
+                s = maintenance.schedule_for(Path(os.environ["OBSERVATORY_HOME"]))
+            print(json.dumps({"kind": s.kind, "xml": s.job.xml(), "path": s.job.path}))
+            """))
+        self.assertEqual(got["kind"], "task-scheduler")
+        self.assertTrue(got["path"].endswith("-maintain"))
+        self.assertIn("<Delay>PT1M30S</Delay>", got["xml"])
+        self.assertIn("<Interval>PT1H</Interval>", got["xml"])
+        self.assertIn("OBSERVATORY_SYSTEM_SETUP=1", got["xml"])
 
 
 @unittest.skipUnless(os.name == "nt", "needs Windows Task Scheduler")
