@@ -15,6 +15,10 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **The backup passphrase in the Windows Credential Manager** (W5): a generic credential per workspace, kept
+  for this account on this machine (`CredWriteW`/`CredReadW`, never roaming, the value never an argument);
+  a store that does not answer is not an empty one. The file fallback is owner-only on Windows too (a
+  protected ACL instead of mode bits).
 - **`osschedule`: background jobs under Windows Task Scheduler and systemd** (W4a). One job description, a
   per-user task created from XML (`InteractiveToken`, no stored password, `pythonw.exe` through
   `tools/scheduled.py`, so no console window opens) or a systemd user unit. Not wired to `full init` yet (W4b).
