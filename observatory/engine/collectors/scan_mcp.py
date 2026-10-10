@@ -60,7 +60,6 @@ import os
 import pathlib
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -71,6 +70,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import paths  # per-user configuration and private state
 import atomic                                                       # noqa: E402
+import osproc                                                       # noqa: E402
 
 HOME = paths.source_path("mcp_config_root", paths.HOME / "disabled/mcp")
 #: Where each agent keeps its user-level MCP declarations, relative to the home the
@@ -355,13 +355,7 @@ def probe_wire(target: str) -> str:
 
 
 def _group_alive(pgid: int) -> bool:
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    return osproc.group_alive(pgid)
 
 
 def reap_group(pgid: int, grace: float = PROBE_GRACE) -> None:
@@ -371,18 +365,7 @@ def reap_group(pgid: int, grace: float = PROBE_GRACE) -> None:
     after the CLI exits, reparented to launchd (measured: firebase-tools held
     165 MB for two minutes after the probe answered). Killing the group, not the
     leader, is what leaves nothing behind."""
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(pgid, sig)
-        except ProcessLookupError:
-            return
-        except PermissionError:
-            return
-        deadline = time.monotonic() + (grace if sig == signal.SIGTERM else 1.0)
-        while time.monotonic() < deadline:
-            if not _group_alive(pgid):
-                return
-            time.sleep(0.05)
+    osproc.stop_group(pgid, grace)
 
 
 def run_reaped(argv: list[str], timeout: float) -> tuple[int | None, str]:
@@ -396,7 +379,7 @@ def run_reaped(argv: list[str], timeout: float) -> tuple[int | None, str]:
     import tempfile
     with tempfile.TemporaryFile() as sink:
         proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink,
-                                stderr=subprocess.STDOUT, start_new_session=True)
+                                stderr=subprocess.STDOUT, **osproc.new_group())
         try:
             code = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:

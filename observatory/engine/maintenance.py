@@ -50,6 +50,8 @@ import argparse
 import contextlib
 import datetime
 import oslocks
+import osproc
+import osprivacy
 import hashlib
 import json
 import os
@@ -357,10 +359,10 @@ SYSTEM_TEMP_ROOTS = (Path("/tmp"), Path("/private/tmp"), Path("/var/tmp"), Path(
 
 
 def _real_home() -> bool:
-    import pwd
     try:
-        return Path.home().resolve() == Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
-    except (KeyError, OSError):
+        real = osprivacy.real_home()
+        return real is not None and Path.home().resolve() == real.resolve()
+    except (OSError, RuntimeError):
         return False
 
 
@@ -400,7 +402,7 @@ class Commands:
                 proc = subprocess.Popen(
                     [self.python, "-P", "-m", "observatory", "--home", str(self.base), "full", "update", *args],
                     stdin=subprocess.DEVNULL, stdout=out, stderr=err, env=environ,
-                    cwd=tempfile.gettempdir(), start_new_session=True)
+                    cwd=tempfile.gettempdir(), **osproc.new_group())
             code = proc.wait()
         except OSError as exc:
             return 125, {}, type(exc).__name__

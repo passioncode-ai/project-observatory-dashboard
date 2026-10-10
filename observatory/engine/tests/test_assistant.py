@@ -453,11 +453,11 @@ class AssistantTests(unittest.TestCase):
             return original(doc)
         with self.enabled(), patch.object(self.a.providers, 'complete', return_value=reply):
             first = self.a.ask(self.request())
-            with patch.object(self.a.signal, 'alarm', side_effect=lambda s: calls.append(('alarm', s))), \
+            with patch.object(self.a.osproc, 'disarm_deadline', side_effect=lambda: calls.append(('disarm',))), \
                  patch.object(self.a, 'save_conversation', side_effect=save):
                 self.a.run_question(self.a.jobs.get(first['job']['id']))
         commit = calls.index(('save', True))
-        self.assertIn(('alarm', 0), calls[:commit])
+        self.assertIn(('disarm',), calls[:commit])
 
     def test_stop_ends_a_runner_started_with_sigterm_blocked(self):
         # The Mac app's bridge once handed its children a blocked signal mask; Stop

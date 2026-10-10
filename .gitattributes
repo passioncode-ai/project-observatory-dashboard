@@ -1,0 +1,8 @@
+# Every text file is checked out with LF on every OS (docs/design/WINDOWS-LINUX.md, W0): the
+# source inventory, the licence check and the release digests hash the bytes, and a Windows
+# checkout with core.autocrlf would otherwise hand them CRLF.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary

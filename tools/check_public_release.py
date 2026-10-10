@@ -48,7 +48,7 @@ def public_identifiers(path: Path = PUBLIC_IDENTIFIERS) -> set[str]:
         out.add(entry["token"].strip().lower())
     return out
 ALLOWED_TOP = {".github", ".claude-plugin", "observatory", "tests", "tools", "docs", "site"}
-ALLOWED_ROOT = {".gitignore", "LICENSE", "COMMERCIAL-LICENSE.md", "CLA.md", "README.md", "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "CHANGELOG.md", "pyproject.toml", "AGENTS.md", "CLAUDE.md", "requirements-full.lock",
+ALLOWED_ROOT = {".gitignore", ".gitattributes", "LICENSE", "COMMERCIAL-LICENSE.md", "CLA.md", "README.md", "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "CHANGELOG.md", "pyproject.toml", "AGENTS.md", "CLAUDE.md", "requirements-full.lock",
                 ".gitleaksignore",  # reviewed gitleaks false positives, by fingerprint (path:rule:line)
                 ".check-private-allow"}  # reviewed org-index check_private findings, by fingerprint (rule:file:hash)
 # `.agent-sync/` is agent-sync's local, git-ignored state (run id, lease bookkeeping): it exists on

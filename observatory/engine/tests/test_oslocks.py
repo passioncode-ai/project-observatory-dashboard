@@ -33,11 +33,11 @@ sys.stdin.readline()
 class Flock(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        # A cleanup, not tearDown: cleanups run last-in first-out, so the directory goes after
+        # every descriptor and holder a test registered — Windows refuses to delete an open file.
+        self.addCleanup(self.tmp.cleanup)
         self.path = str(Path(self.tmp.name) / "lock")
         Path(self.path).write_bytes(b"data")
-
-    def tearDown(self):
-        self.tmp.cleanup()
 
     def hold(self, mode: str) -> subprocess.Popen:
         p = subprocess.Popen([sys.executable, "-c", HOLDER.format(root=str(ROOT), path=self.path, mode=mode)],

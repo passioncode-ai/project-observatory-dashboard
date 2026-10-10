@@ -107,6 +107,10 @@ BOUNDARY += ('step_references',)
 BOUNDARY += ('honest_absence',)
 # docs/design/WINDOWS-LINUX.md W1: one lock API on every OS.
 BOUNDARY += ('oslocks',)
+# docs/design/WINDOWS-LINUX.md W2: process groups on every OS.
+BOUNDARY += ('osproc',)
+# docs/design/WINDOWS-LINUX.md W2b: who the engine runs as, on every OS.
+BOUNDARY += ('osprivacy',)
 # One credential-shape heuristic for every door that judges typed text.
 BOUNDARY += ('credential_shape',)
 # PROJECT is the folder name; the registry id names the same folder.
@@ -188,7 +192,7 @@ ROOT_FILES = (
     'maintenance.py', 'app_update.py', 'update_events.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
-    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
+    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
 )

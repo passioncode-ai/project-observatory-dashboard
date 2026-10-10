@@ -181,7 +181,8 @@ class ObservatoryTest(unittest.TestCase):
     def test_sqlite_scan_is_readonly_and_quotes_identifiers(self):
         sentinel = "synthetic-sqlite-value"
         credentials.put_secret(self.state, "EXAMPLE", sentinel)
-        target = self.base / "synthetic-memory?.sqlite3"
+        # `?` is what a sqlite URI must escape; Windows forbids it in a name, `#` and `%` it allows.
+        target = self.base / ("synthetic-memory?.sqlite3" if os.name != "nt" else "synthetic-memory#%.sqlite3")
         with contextlib.closing(sqlite3.connect(target)) as db, db:
             db.execute('CREATE TABLE "odd""name" (body TEXT)')
             db.execute('INSERT INTO "odd""name" VALUES (?)', (sentinel,))
@@ -242,7 +243,8 @@ class ObservatoryTest(unittest.TestCase):
                   f"committer F <f@example.invalid> 1759400000 +0000\n"
                   "gpgsig -----BEGIN PGP SIGNATURE-----\n \n iQEzBAABCAAdFiEEFAKE=\n =FAKE\n"
                   " -----END PGP SIGNATURE-----\n\nsigned fixture commit\n")
-        commit = git("hash-object", "-t", "commit", "-w", "--stdin", input=signed, text=True).stdout.strip()
+        # Bytes, not text: a text pipe on Windows turns every LF into CRLF and the object is invalid.
+        commit = git("hash-object", "-t", "commit", "-w", "--stdin", input=signed.encode()).stdout.decode().strip()
         git("update-ref", "HEAD", commit)
         marker = self.base / "gpg-executed"
         program = self.base / "gpg-probe"

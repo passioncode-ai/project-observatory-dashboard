@@ -16,7 +16,9 @@ class FullLauncherTests(unittest.TestCase):
             self.assertEqual(cli.parser().parse_args([command]).cmd, command)
 
     def test_home_precedence_and_separate_default(self):
-        with patch.dict(os.environ, {}, clear=True):
+        # Only what names the home stays: on Windows that is USERPROFILE, not HOME.
+        home_only = {k: v for k, v in os.environ.items() if k in ('HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH')}
+        with patch.dict(os.environ, home_only, clear=True):
             self.assertEqual(full_cli.full_home(), Path.home() / '.local/share/project-observatory-full')
         with patch.dict(os.environ, {'OBSERVATORY_HOME': '/private/old', 'OBSERVATORY_FULL_HOME': '/private/new'}, clear=True):
             self.assertEqual(full_cli.full_home(), Path('/private/new'))

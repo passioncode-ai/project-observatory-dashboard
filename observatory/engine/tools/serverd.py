@@ -98,6 +98,7 @@ from urllib.parse import parse_qs, urlsplit
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import atomic                                                                   
+import osproc  # noqa: E402
 import fabric_service as fs  # noqa: E402 — the vendored fabric-service/0.1 kit
 import leak_register  # noqa: E402
 import paths                                                                    
@@ -736,7 +737,7 @@ def serve(port: int) -> int:
     # A blocked mask survives exec: a server started from a thread that blocks
     # asynchronous signals (the Mac app's bridge did) never saw SIGTERM, so neither
     # `full open --stop` nor launchd could stop it. Unblock what stops us.
-    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM, signal.SIGINT, signal.SIGHUP})
+    osproc.unblock_stop_signals()
     threading.Thread(target=beat, daemon=True).start()
     print(f"observatory serverd {VERSION} on http://127.0.0.1:{port} "
           f"(pid {os.getpid()}, instance {RUNTIME.instance})", flush=True)

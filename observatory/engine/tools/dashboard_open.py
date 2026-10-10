@@ -23,6 +23,7 @@ import webbrowser
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import configuration  # noqa: E402
+import osproc  # noqa: E402
 
 DEFAULT_PORT = int(os.environ.get("OBSERVATORY_SERVER_PORT", "47311"))
 
@@ -171,7 +172,7 @@ def start_server(port: int, wait: float = 45.0) -> dict:
     with open(log, "ab") as out:
         proc = subprocess.Popen([sys.executable, str(ROOT / "tools/serverd.py"), "--run", "--port", str(port)],
                                 cwd=ROOT, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                start_new_session=True)
+                                **osproc.new_group(detached=True))
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
         beat = healthy(port)
