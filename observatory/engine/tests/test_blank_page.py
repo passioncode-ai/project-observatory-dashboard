@@ -237,7 +237,7 @@ def test_the_unattended_runner_still_runs_it() -> None:
     """The tick is the unattended user, and its verdict must outlive its log
     line. It needs no configuration to record one — which is the point — so what
     this checks is that the run is still there."""
-    src = (ROOT / "tools/tick.sh").read_text(encoding="utf-8")
+    src = (ROOT / "tools/tick.py").read_text(encoding="utf-8")
     check("the tick still runs smoke", "dashboard/smoke.js" in src, "")
     # THE INVARIANT AT ITS SOURCE, not by searching the tree for a name. Two
     # versions of this assertion were wrong before this one. The first matched
@@ -291,22 +291,22 @@ def test_the_tick_records_the_failure_and_does_not_wait_a_cycle() -> None:
     And the ORDER: the receipt is written after `findings` has already run this
     cycle, so without a re-run on the failure path the operator learns at the
     next tick — thirty minutes of a page showing nothing."""
-    src = (ROOT / "tools/tick.sh").read_text(encoding="utf-8")
+    src = (ROOT / "tools/tick.py").read_text(encoding="utf-8")
     check("the dashboard build goes through `step`",
-          'step "dashboard" "$PY" dashboard/build_dashboard.py' in src,
+          'step("dashboard", PY, "dashboard/build_dashboard.py")' in src,
           "a failed build of the operator's page must reach `tick.json`")
     # PORTED-DIVERGED: the page's path is the workspace's, passed as
-    # "$DASHBOARD" rather than a fixed source-tree path.
+    # DASHBOARD rather than a fixed source-tree path.
     check("and smoke does too",
-          'step "smoke" node dashboard/smoke.js "$DASHBOARD"' in src,
+          'step("smoke", "node", "dashboard/smoke.js", DASHBOARD)' in src,
           "otherwise `tick.step_failed` can never name it")
     check("a blank page re-runs findings, so notify carries it this tick",
-          'step "findings-recheck"' in src,
+          'step("findings-recheck"' in src,
           "the receipt is written after findings ran; without this the row waits "
           "for the next tick")
-    i = src.find('step "findings-recheck"')
+    i = src.find('step("findings-recheck"')
     check("and the re-run happens BEFORE the notifier",
-          i != -1 and i < src.find('step "notify"'),
+          i != -1 and i < src.find('step("notify"'),
           "a row computed after the notifier ran is a row that waits a cycle")
     check("a machine without node is still reported as unmeasured, not failed",
           "node is absent" in src,

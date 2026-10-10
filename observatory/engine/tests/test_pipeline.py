@@ -384,28 +384,18 @@ def step_signature(argv: list[str]) -> tuple[str, tuple[str, ...]] | None:
 
 
 def tick_order() -> list[str]:
-    """The steps tools/tick.sh runs, in the order it runs them."""
+    """The steps tools/tick.py runs, in the order it runs them — read from its syntax tree
+    (`tests/tick_reader.tick_calls`), not from its text, so neither a comment nor a redirection
+    can drop a step and turn this file green for the wrong reason."""
+    sys.path.insert(0, str(ROOT / "tests"))
+    import tick_reader
     by_sig = {}
     for name, argv in obs.STEPS.items():
         sig = step_signature(argv)
         if sig:
             by_sig[sig] = name
     order: list[str] = []
-    for raw in (ROOT / "tools/tick.sh").read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        # Redirections FIRST, then operators. Splitting on `>` alone leaves the
-        # file descriptor of `2>&1` behind as a bare argument, which made
-        # `build_findings.py 2` match no step at all — so the tick's real
-        # dashboard/findings inversion read as a clean pipeline. A parser that
-        # silently drops a step turns this whole file green for the wrong reason.
-        head = re.sub(r"\d*>>?\s*&?\S+", " ", line)
-        head = re.split(r"\|\||&&|[|;]", head)[0]
-        try:
-            words = shlex.split(head)
-        except ValueError:
-            continue
+    for _line, _fn, _name, words in tick_reader.tick_calls(ROOT):
         sig = step_signature(words)
         if sig and sig in by_sig and by_sig[sig] not in order:
             order.append(by_sig[sig])
@@ -442,8 +432,8 @@ def assert_topological(label: str, steps: list[str]) -> None:
 
 def test_both_orchestrators_are_topological() -> None:
     tick = tick_order()
-    check("tick.sh parses to a step list", len(tick) > 10, f"{len(tick)} matched: {tick}")
-    assert_topological("tick.sh", tick)
+    check("tick.py parses to a step list", len(tick) > 10, f"{len(tick)} matched: {tick}")
+    assert_topological("tick.py", tick)
     assert_topological("observatory.py `all`", obs.GROUPS["all"])
     # The gate is a pipeline too: `design` and `smoke` read the page `dashboard`
     # builds, and a gate whose input is built after it inspects it is a gate over

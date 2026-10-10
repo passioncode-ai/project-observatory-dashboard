@@ -138,7 +138,7 @@ def _seconds(value: str) -> bool:
 
 
 def environment() -> dict[str, str]:
-    # OBSERVATORY_PYTHON: tick.sh runs every step with the interpreter the engine
+    # OBSERVATORY_PYTHON: the tick runs every step with the interpreter the engine
     # is installed in, not the installer's and not whatever python3 is first on PATH.
     env = {"PATH": launch_path(), "OBSERVATORY_PYTHON": stable_interpreter(configuration.engine_python()),
            "HOME": str(pathlib.Path.home()), "OBSERVATORY_HOME": str(paths.HOME)}

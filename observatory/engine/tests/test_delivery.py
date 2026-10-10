@@ -349,7 +349,7 @@ def test_the_tick_runs_the_link_audit() -> None:
     """The receipt exists so a finding can read it; the finding matters only if
     something refreshes it. `commit_projection` writes into the wiki on every
     tick, so the check belongs immediately after it."""
-    src = (ROOT / "tools/tick.sh").read_text(encoding="utf-8")
+    src = (ROOT / "tools/tick.py").read_text(encoding="utf-8")
     check("the tick runs the audit", "audit_vault_links.py" in src,
           "the tick writes into the wiki, and nothing else checks it")
     i, j = src.index("commit_projection.py"), src.index("audit_vault_links.py")

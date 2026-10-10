@@ -294,7 +294,7 @@ STEPS = {
     "index":     [PY, "store/indexer.py", "index"],
     "reindex":   [PY, "store/indexer.py", "rebuild"],
     "index-status": [PY, "store/indexer.py", "status"],
-    "tick":      ["bash", "tools/tick.sh"],
+    "tick":      [PY, "tools/tick.py"],
     "validate-plugin": ["bash", "-c",
                         "claude plugin validate skill --strict && "
                         "claude plugin validate skill/plugins/observatory-log --strict"],

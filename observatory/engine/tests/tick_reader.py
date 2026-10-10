@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Read `tools/tick.sh` as a sequence of INVOCATIONS, not as a string.
+"""Read the tick — `tools/tick.py` — as a sequence of INVOCATIONS, not as a string.
+
+The tick was `tools/tick.sh` until it became Python (docs/design/WINDOWS-LINUX.md, W3);
+`tick_calls` reads its step calls from the syntax tree, and the line-based readers below still
+serve the shell hooks, which pass their own markers.
 
 Four assertions in one sitting broke on the same shape: they located a step with
 `src.find("some_script.py")` and compared offsets, so the day a COMMENT
@@ -20,6 +24,7 @@ The distinction it encodes: a line RUNS something when it names the interpreter
 anything, whatever it mentions.
 """
 from __future__ import annotations
+import ast
 import pathlib
 import re
 
@@ -31,7 +36,7 @@ import re
 #: written minutes after this module existed, because it compared
 #: `index("tools/record_turn.py")` and found the EXISTENCE CHECK
 #: `[ -f "$root/tools/record_turn.py" ]` rather than the call.
-DEFAULT_MARKERS = ('"$PY"', "step ")
+DEFAULT_MARKERS = ('"$PY"', "step ", "step(", "bounded(", "lease(")
 
 #: A `[ … ]` or `[[ … ]]` test that contains no command substitution: it names
 #: paths and strings without executing any of them.
@@ -47,7 +52,7 @@ def run_lines(src: str, markers: tuple[str, ...] = DEFAULT_MARKERS) -> list[tupl
     out = []
     for i, line in enumerate(src.splitlines()):
         s = line.strip()
-        if not s or s.startswith("#"):
+        if not s or s.startswith(("#", "def ")):   # a Python definition names, it does not run
             continue
         # A bracket test with no command substitution names things without
         # running them — `[ -f "$root/tools/record_turn.py" ] || exit 0` is why
@@ -86,7 +91,34 @@ def runs_before(src: str, first: str, second: str,
 
 
 def tick(root: pathlib.Path) -> str:
-    return (root / "tools/tick.sh").read_text(encoding="utf-8")
+    return (root / "tools/tick.py").read_text(encoding="utf-8")
+
+
+def _word(node: ast.AST) -> str:
+    """An argument as the shell tick wrote it: a name as `$NAME`, `A / "b"` as `$A/b`."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return "$" + node.id
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return f"{_word(node.left)}/{_word(node.right)}"
+    return ast.unparse(node)
+
+
+def tick_calls(root: pathlib.Path, helpers: tuple[str, ...] = ("step", "bounded")) -> list[tuple[int, str, str, list[str]]]:
+    """(line, helper, step name, argv words) for every call of `helpers` in the tick, in the
+    order the source runs them. `t.bail(...)` and `lease(...)` are not steps."""
+    tree = ast.parse(tick(root))
+    calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func.id if isinstance(node.func, ast.Name) else (
+            node.func.attr if isinstance(node.func, ast.Attribute) else "")
+        if fn in helpers and node.args and isinstance(node.args[0], ast.Constant):
+            calls.append((node.lineno, node.col_offset, fn, node.args[0].value,
+                          [_word(a) for a in node.args[1:]]))
+    return [(line, fn, name, words) for line, _col, fn, name, words in sorted(calls)]
 
 
 def code_only(src: str) -> str:

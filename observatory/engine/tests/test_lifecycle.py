@@ -164,8 +164,8 @@ class McpProbeStaysOutOfTheTick(Workspace):
         self.assertEqual(doc["servers"][0]["liveness_at"], probed["probe"]["probed_at"])
         self.assertEqual(doc["probe"]["state"], "carried")
 
-    def test_tick_sh_asks_for_declarations_only(self):
-        tick = (ROOT / "tools/tick.sh").read_text()
+    def test_tick_asks_for_declarations_only(self):
+        tick = (ROOT / "tools/tick.py").read_text()
         line = next(l for l in tick.splitlines() if "collectors/scan_mcp.py" in l)
         self.assertIn("--declarations-only", line)
 
@@ -340,11 +340,13 @@ class EveryStepHasAWatchdog(Workspace):
         self.assertLessEqual(self.tl.tail_reserve_seconds(), 20)
 
     def test_every_step_after_the_merge_is_a_tail_step(self):
-        text = (ROOT / "tools/tick.sh").read_text(encoding="utf-8")
-        head, _, tail = text.partition("bounded merge ")
-        self.assertTrue(tail, "tick.sh no longer runs `bounded merge`")
-        names = lambda s: set(re.findall(r'(?:^|[\s(])(?:step|bounded) "?([a-z][a-z0-9-]*)"?\s', s, re.M))
-        after, before = names("bounded merge " + tail), names(head)
+        sys.path.insert(0, str(ROOT / "tests"))
+        import tick_reader
+        calls = tick_reader.tick_calls(ROOT)
+        merge = next((i for i, c in enumerate(calls) if c[1:3] == ("bounded", "merge")), None)
+        self.assertIsNotNone(merge, "the tick no longer runs `bounded(\"merge\", …)`")
+        after = {c[2] for c in calls[merge:]}
+        before = {c[2] for c in calls[:merge]}
         self.assertIn("findings", after)
         self.assertIn("scan-fs", before)
         self.assertEqual(after - set(self.tl.TAIL_STEPS), set(), "a step after the merge would get no time")
@@ -381,11 +383,22 @@ class EveryStepHasAWatchdog(Workspace):
         self.assertGreaterEqual(plist["ExitTimeOut"], 20)
         self.assertGreater(plist["ExitTimeOut"], self.tl.SUPERVISOR_GRACE + self.tl.STEP_GRACE)
 
-    def test_tick_sh_runs_every_command_through_the_watchdog(self):
-        body = (ROOT / "tools/tick.sh").read_text()
-        bare = [l for l in body.splitlines()
-                if re.match(r'^\s*"\$PY" (collectors|tools|store|agent)/', l)
-                and "tick_lease.py" not in l]
+    def test_the_tick_runs_every_command_through_the_watchdog(self):
+        # Every process the tick starts goes through `tick_lease.py`: `step` and `bounded`
+        # hand the watchdog the command, `lease` asks it for the lease, and `supervise`
+        # re-enters through it. A subprocess call anywhere else is a step nothing bounds.
+        import ast
+        tree = ast.parse((ROOT / "tools/tick.py").read_text())
+        allowed = {"step", "bounded", "lease", "supervise"}
+        bare = []
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef) or fn.name in allowed:
+                continue
+            for node in ast.walk(fn):
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and isinstance(node.func.value, ast.Name) and node.func.value.id in ("subprocess", "os")
+                        and node.func.attr in ("run", "Popen", "call", "check_call", "check_output", "system", "execv")):
+                    bare.append(f"{fn.name}:{node.lineno}")
         self.assertEqual(bare, [], "commands the watchdog does not bound")
 
 
@@ -503,8 +516,8 @@ class OneRotationPolicy(Workspace):
     def test_the_policy_is_the_lifecycle_default(self):
         self.assertEqual((self.lp.MAX_BYTES, self.lp.GENERATIONS), (5 * 1024 * 1024, 5))
 
-    def test_tick_sh_has_no_rotation_of_its_own(self):
-        body = (ROOT / "tools/tick.sh").read_text()
+    def test_the_tick_has_no_rotation_of_its_own(self):
+        body = (ROOT / "tools/tick.py").read_text()
         self.assertNotIn("rotate_log()", body)
         self.assertIn("tools/rotate_logs.py", body)
 

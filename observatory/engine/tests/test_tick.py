@@ -31,7 +31,7 @@ import tmp as tmpdir  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PY = str(ROOT / ".venv/bin/python") if (ROOT / ".venv/bin/python").exists() else sys.executable
-TICK = ROOT / "tools/tick.sh"
+TICK = ROOT / "tools/tick.py"
 LEASE = ROOT / "tools/tick_lease.py"
 COMMIT = ROOT / "tools/commit_registry.py"
 FAILURES: list[str] = []
@@ -110,8 +110,8 @@ def head(repo: pathlib.Path) -> str:
 def test_the_tick_carries_its_own_identity() -> None:
     """Without an explicit id the tick IS every shell command in this checkout."""
     src = TICK.read_text(encoding="utf-8")
-    check("tick.sh exports AGENT_SYNC_RUN_ID",
-          re.search(r"^export AGENT_SYNC_RUN_ID=", src, re.M) is not None,
+    check("the tick sets AGENT_SYNC_RUN_ID",
+          re.search(r'^\s*os\.environ\["AGENT_SYNC_RUN_ID"\] = ', src, re.M) is not None,
           "a lease under the shared identity separates nothing")
 
     sys.path.insert(0, str(ROOT / "tools"))
@@ -155,25 +155,25 @@ from tick_reader import first_invocation                              # noqa: E4
 
 def test_a_lost_lease_stops_the_tick_before_it_writes() -> None:
     src = TICK.read_text(encoding="utf-8")
-    acquire_at = first_invocation(src, "tick_lease.py acquire")
-    check("tick.sh acquires the lease", acquire_at != -1)
+    acquire_at = first_invocation(src, 'lease("acquire")')
+    check("the tick acquires the lease", acquire_at != -1)
     for w in WRITER_SCRIPTS:
         at = first_invocation(src, w)
         check(f"the lease is taken before {w}", at == -1 or acquire_at < at,
               f"acquire at {acquire_at}, writer at {at}")
-    m = re.search(r"tick_lease\.py acquire.*?\n(.*?)\nfi", src, re.S)
+    m = re.search(r'lease\("acquire"\)\n(.*?)\n    log\(f"lease: ', src, re.S)
     body = m.group(1) if m else ""
-    check("a lost lease exits the tick", "exit 0" in body,
+    check("a lost lease exits the tick", "return 0" in body,
           "the tick must not scan, emit or commit while another run may be writing")
     check("the lease is released on every path, including failure",
-          re.search(r"^trap .*tick_lease\.py release", src, re.M) is not None,
-          "without a trap a crashed tick holds the lease until its TTL")
+          re.search(r'finally:\n(?:\s*#[^\n]*\n)*\s*_, out = lease\("release"\)', src) is not None,
+          "without a finally a crashed tick holds the lease until its TTL")
 
 
 def test_the_commit_runs_after_every_registry_writer() -> None:
     src = TICK.read_text(encoding="utf-8")
     at = src.find("commit_registry.py")
-    check("tick.sh commits the registry", at != -1)
+    check("the tick commits the registry", at != -1)
     for w in WRITER_SCRIPTS:
         wat = src.find(w)
         check(f"the commit runs after {w}", wat == -1 or wat < at, f"writer {wat}, commit {at}")

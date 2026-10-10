@@ -279,14 +279,16 @@ def test_an_absent_receipt_raises_nothing() -> None:
 def test_the_check_runs_early_in_the_tick() -> None:
     """A cycle that writes into a corrupt store makes it worse, and the
     collectors' scratch output does not need the store to succeed."""
-    tick = (ROOT / "tools/tick.sh").read_text(encoding="utf-8")
+    tick = (ROOT / "tools/tick.py").read_text(encoding="utf-8")
     check("the tick runs it", "check_store.py" in tick, "")
     if "check_store.py" not in tick:
         return
     # THE `step` INVOCATIONS, not the bare filenames: `tick.sh` mentions
     # retention in a comment above the insertion point, so searching raw text
     # compared a comment's position with a command's.
-    steps = [l for l in tick.splitlines() if l.strip().startswith('step "')]
+    sys.path.insert(0, str(ROOT / "tests"))
+    import tick_reader
+    steps = [" ".join(words) for _line, fn, _name, words in tick_reader.tick_calls(ROOT) if fn == "step"]
     # `scan_events.py` is NOT in this list, and the first version of this
     # comment said the tick does not run it. **That was wrong** — tick.sh line
     # 160 invokes it directly, outside the `step` wrapper, as

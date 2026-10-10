@@ -7,8 +7,8 @@ That guarantee is the contract's: *"completion blocks until every configured
 backend attests"*. The function honours it and `tests/test_retention.py` drives
 the refusal.
 
-**The system did not.** `tools/tick.sh` piped that step's output through its
-logger and never looked at what the pipeline returned — `set -o pipefail` is on,
+**The system did not.** The shell tick (`tools/tick.sh`, now `tools/tick.py`) piped that
+step's output through its logger and never looked at what the pipeline returned — `set -o pipefail` is on,
 so the value was there and simply discarded. Nearly half of the tick's steps
 were in that shape.
 So an incomplete erasure was logged and the tick went on to build the dashboard
@@ -43,109 +43,73 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 
 def tick_src() -> str:
-    return (ROOT / "tools/tick.sh").read_text(encoding="utf-8")
+    return (ROOT / "tools/tick.py").read_text(encoding="utf-8")
+
+
+def tick_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tick_under_test", ROOT / "tools/tick.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 # ─────────────────── no step discards its exit code ─────────────────────
+#
+# In the shell tick this was a property of ONE option: `step` piped a step's output into the
+# logger and read `$?` after the pipeline, which is the logger's status unless `set -o
+# pipefail` is on. The Python tick has no pipeline — the step's process is waited on and its
+# own exit is what is recorded — so the tests below drive the real helper instead of reading
+# its text.
 
-def discarding_steps(src: str) -> list[str]:
-    """Steps that pipe into the logger without their exit code being kept.
-
-    The shape that hid an incomplete erasure. `step` is the one legitimate
-    holder of this pattern — it is where the code is captured — and the lease
-    release in the EXIT trap is the one exemption, because
-    `tick_lease.py release` exits 0 on every path by design.
-    """
-    out = []
-    for i, line in enumerate(src.splitlines(), 1):
-        if "while IFS= read -r l" not in line:
-            continue
-        if line.strip().startswith(('"$@"', '"$PY" tools/tick_lease.py step "$name"')):   # inside `step` itself
-            continue
-        if "tick_lease.py release" in line:        # the declared exemption
-            continue
-        out.append(f"line {i}: {line.strip()[:70]}")
-    return out
+def stand_in_watchdog() -> pathlib.Path:
+    """A stand-in for `tick_lease.py step NAME -- CMD…` that runs CMD itself, so the step under
+    test is the only thing that can fail."""
+    fake = pathlib.Path(tmpdir.mkdtemp()) / "watchdog.py"
+    fake.write_text("import subprocess, sys\nargs = sys.argv[1:]\n"
+                    "raise SystemExit(subprocess.call(args[args.index('--') + 1:]))\n", encoding="utf-8")
+    return fake
 
 
-def test_every_piped_step_keeps_its_exit_code() -> None:
+def test_every_step_keeps_its_exit_code() -> None:
+    import contextlib, io
+    tick = tick_module()
+    tick.LEASE = str(stand_in_watchdog())
+    t = tick.Tick(pathlib.Path(tmpdir.mkdtemp()))
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        t.step("boom", PY, "-c", "print('hi'); print('more'); raise SystemExit(7)")
+        t.step("fine", PY, "-c", "print('ok')")
+    logged = out.getvalue()
+    check("a failing step is recorded with its own exit", t.failed == [("boom", 7)], str(t.failed))
+    check("and a passing one is not", all(name != "fine" for name, _ in t.failed), str(t.failed))
+    check("every line it printed is logged under its name",
+          "boom: hi" in logged and "boom: more" in logged and "fine: ok" in logged, logged[-200:])
+    check("and the failure itself is logged", "boom: EXIT 7 — recorded as a failed step" in logged,
+          logged[-200:])
+    check("the helper returns, because the tick must not abort on a degradation",
+          "fine: ok" in logged, "the step after a failure did not run")
+
+
+def test_every_step_goes_through_the_helper() -> None:
+    """Eleven steps went through the helper when it was written; the count is the evidence."""
     src = tick_src()
-    left = discarding_steps(src)
-    check("no step pipes into the logger and drops its code", not left, str(left))
-    check("the helper exists", "\nstep() {" in src)
-    check("it reads the pipeline's status", "local rc=$?" in src)
-    check("records the failure", 'FAILED_STEPS="$FAILED_STEPS' in src)
-    check("and returns 0, because the tick must not abort on a degradation",
-          re.search(r"FAILED_STEPS=\"\$FAILED_STEPS[^\n]*\"\n  fi\n  return 0", src)
-          is not None, "launchd would retry a state that needs reporting")
-    check("a string accumulator, not an array — macOS ships bash 3.2",
-          'FAILED_STEPS=""' in src,
-          "expanding an empty array under `set -u` is an error there")
-
-
-def test_the_helper_depends_on_pipefail_and_that_line_is_watched() -> None:
-    """`local rc=$?` after a pipeline reads the WHILE LOOP, not the command.
-
-    Every failure this suite exists to record travels through one shell option.
-    Without `set -o pipefail` the helper is inert — it logs the output, reads the
-    logger's exit code, finds 0, and records nothing — and it is inert SILENTLY,
-    which is the shape of every defect in this repository worth naming. Two
-    assertions, because either alone is weak: the source line can be present and
-    the dependency imagined, or the dependency real and the line quietly dropped.
-    """
-    src = tick_src()
-    check("the tick sets pipefail", re.search(r"^set -[a-z]*o pipefail", src, re.M)
-          is not None, "the helper's exit code comes from it")
-    helper = re.search(r"step\(\) \{.*?\n\}", src, re.S)
-    check("the helper is readable", helper is not None)
-    if not helper:
-        return
-    body = helper.group(0)
-    # The helper first asks the workspace whether the step is enabled
-    # (`"$PY" tools/tick_lease.py allowed <name>`); `PY=true` answers yes so the
-    # pipeline under test is the only thing that can fail.
-    # The helper runs each step through the watchdog (`tick_lease.py step NAME --
-    # CMD…`); this stand-in for the interpreter runs CMD itself, so the pipeline
-    # under test is the only thing that can fail.
-    fake = pathlib.Path(tmpdir.mkdtemp()) / "fakepy"
-    fake.write_text('#!/bin/bash\nwhile [ "$1" != "--" ]; do shift; done; shift; exec "$@"\n')
-    fake.chmod(0o755)
-    prog = (f'log(){{ :; }}\nPY={fake}\nFAILED_STEPS=""\n' + body
-            + '\nstep "boom" sh -c "echo hi; exit 7"\necho "[$FAILED_STEPS]"\n')
-    with_pf = subprocess.run(["bash", "-c", "set -o pipefail\n" + prog],
-                             capture_output=True, text=True, timeout=60)
-    without = subprocess.run(["bash", "-c", "set +o pipefail\n" + prog],
-                             capture_output=True, text=True, timeout=60)
-    check("with pipefail the real helper records the failure",
-          "boom=7" in with_pf.stdout, (with_pf.stdout + with_pf.stderr)[:120])
-    check("and without it the SAME helper records nothing",
-          "boom=7" not in without.stdout, without.stdout[:120])
-    check("so the dependency is real, not a comment",
-          "boom=7" in with_pf.stdout and "boom=7" not in without.stdout,
-          "if both agreed, this test would prove nothing about the option")
-
-
-def test_the_rewrite_covered_every_step_that_had_the_shape() -> None:
-    """Eleven steps went through the helper; the count is the evidence."""
-    src = tick_src()
-    routed = len(re.findall(r"^\s*step \"", src, re.M))
-    check("eleven or more steps now run through `step`", routed >= 11, str(routed))
+    routed = len(re.findall(r'^\s*step\("', src, re.M))
+    check("eleven or more steps run through `step`", routed >= 11, str(routed))
     check("including the erasure, which is the reason this exists",
-          'step "retention"' in src, "the step whose failure breaks a guarantee")
+          'step("retention"' in src, "the step whose failure breaks a guarantee")
     check("and the agent, which sits inside a conditional block",
-          'step "agent"' in src, "an indented line the first rewrite missed")
+          'step("agent"' in src, "an indented line the first rewrite missed")
 
 
-def test_the_trap_exemption_is_declared() -> None:
-    """The one pipe outside `step` is the lease release, and it is exempt only
-    because it runs from the EXIT trap and `tick_lease.py release` exits 0 on
-    every path. Asserted by position rather than by a comment, which the
-    engine's source does not carry."""
+def test_the_lease_release_is_the_one_call_outside_step() -> None:
+    """The lease release runs in `finally`, so it happens on every path — a bail and a crash
+    included — and it is outside `step` because `tick_lease.py release` exits 0 on every path."""
     src = tick_src()
-    trap = [ln for ln in src.splitlines() if "tick_lease.py release" in ln]
-    check("the lease release is left outside `step`, in the EXIT trap",
-          len(trap) == 1 and trap[0].lstrip().startswith("trap ") and trap[0].rstrip().endswith("EXIT"),
-          str(trap)[:200])
+    release = [ln for ln in src.splitlines() if 'lease("release")' in ln]
+    check("the lease is released once, in the `finally` of the tick",
+          len(release) == 1 and re.search(r'finally:\n(?:\s*#[^\n]*\n)*\s*_, out = lease\("release"\)', src)
+          is not None, str(release)[:200])
 
 
 # ─────────────────── the failure becomes a finding ──────────────────────
@@ -215,17 +179,16 @@ def test_the_tick_writes_a_report_even_when_nothing_failed() -> None:
     """An absent report and a clean one are different claims."""
     src = tick_src()
     check("the report is written unconditionally at the end of the tick",
-          'paths.SCRATCH / "tick.json"' in src)
+          'self.scratch / "tick.json"' in src and re.search(r"steps\(t, scratch, dashboard\)\n\s*t\.write_report\(\)", src))
     check("and the failure to write it is itself logged",
           "could not record the step report" in src)
 
 
 if __name__ == "__main__":
     print("a failed step of the tick — recorded, graded, and reported\n")
-    for fn in (test_every_piped_step_keeps_its_exit_code,
-               test_the_helper_depends_on_pipefail_and_that_line_is_watched,
-               test_the_rewrite_covered_every_step_that_had_the_shape,
-               test_the_trap_exemption_is_declared,
+    for fn in (test_every_step_keeps_its_exit_code,
+               test_every_step_goes_through_the_helper,
+               test_the_lease_release_is_the_one_call_outside_step,
                test_a_broken_guarantee_is_critical_and_a_degradation_is_not,
                test_a_healthy_tick_raises_nothing,
                test_the_severity_map_carries_its_reasons,
