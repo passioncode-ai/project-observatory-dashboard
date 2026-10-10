@@ -2373,8 +2373,8 @@
       "path": "tests/test_fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e59887c5a9b1b93ff60efb0b12cc12d58d948913ad0b9cb4540d05d7d99af4c7",
-      "bytes": 55039
+      "export_sha256": "6e099dc23212e882f1d6bccdfeb8aab18f68fde5e8d2d7e0508c00a90fc05ae4",
+      "bytes": 55104
     },
     {
       "path": "tests/test_facts_learning.py",
@@ -4166,8 +4166,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "bf9b1a36fa7bdc3b96b5eb0d59ca6a2366ded83c19478f1610b72d6c24e3bf1c",
-      "bytes": 46948,
+      "export_sha256": "f1e03e57319a669d2290c58e7b3206ea18998837bd167a17b690290b34aa6f2f",
+      "bytes": 46993,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
