@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime
-import fcntl
+import oslocks
 import hashlib
 import json
 import os
@@ -142,7 +142,7 @@ def operation_lock(base: Path, *, existing: bool = True):
             os.fchmod(fd, 0o600)
             handles.append(fd)
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
             except BlockingIOError:
                 raise config.ConfigurationError('Workspace or scheduler is busy; stop writers and retry') from None
         yield

@@ -49,7 +49,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime
-import fcntl
+import oslocks
 import hashlib
 import json
 import os
@@ -457,7 +457,7 @@ def pass_lock(base: Path):
     fd = os.open(file, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
         except BlockingIOError:
             yield False
             return
@@ -475,7 +475,7 @@ def pass_running(base: Path) -> bool:
         return False
     fd = os.open(file, os.O_RDWR | os.O_NOFOLLOW)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
     except BlockingIOError:
         return True
     finally:

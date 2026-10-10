@@ -53,7 +53,6 @@ so a crash mid-write cannot leave a half-written credential.
 from __future__ import annotations
 import argparse
 import contextlib
-import fcntl
 import functools
 import re
 import tempfile
@@ -68,6 +67,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import oslocks  # after the path setup: this file also runs as a script
 import credential_shape  # noqa: E402
 import leak_register  # noqa: E402
 import paths                                            
@@ -155,7 +155,7 @@ def _append_private(path: pathlib.Path, text: str) -> None:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise VaultBoundaryError("Private journal must be a regular file")
         os.fchmod(stream.fileno(), 0o600)
-        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        oslocks.flock(stream.fileno(), oslocks.LOCK_EX)
         stream.write(text)
         stream.flush()
         os.fsync(stream.fileno())
@@ -187,7 +187,7 @@ def _mutation_lock():
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise VaultBoundaryError("Vault lock must be a regular file")
         os.fchmod(fd, 0o600)
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        oslocks.flock(fd, oslocks.LOCK_EX)
         for journal_path in (MOVES, LEAKS):
             _no_symlinks(journal_path)
             if journal_path.exists() and not journal_path.is_file():

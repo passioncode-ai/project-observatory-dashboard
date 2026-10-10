@@ -27,11 +27,12 @@ Two facts about the coordination tool shape everything here:
   far more.
 """
 from __future__ import annotations
-import argparse, importlib.util, json, os, pathlib, sys, subprocess, fcntl, signal, time
+import argparse, importlib.util, json, os, pathlib, sys, subprocess, signal, time
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import oslocks  # after the path setup: this file also runs as a script
 import paths
 import configuration
 
@@ -569,7 +570,7 @@ def supervised(command: list[str]) -> int:
     try:
         os.fchmod(fd, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
         except BlockingIOError:
             print("tick skipped: another run holds this workspace's lock")
             return 0
@@ -618,7 +619,7 @@ def supervised(command: list[str]) -> int:
                 _step_marker().unlink(missing_ok=True)
             record_run(started, outcome, code, reason)
     finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        oslocks.flock(fd, oslocks.LOCK_UN)
         os.close(fd)
 
 

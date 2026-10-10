@@ -54,7 +54,7 @@ import contextlib
 import dataclasses
 import datetime
 import email.parser
-import fcntl
+import oslocks
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -1328,7 +1328,7 @@ def update_lock(base: Path):
     fd = os.open(file, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
         except BlockingIOError:
             raise UpdateError("Another `full update --apply` is running for this workspace, or the daily "
                               "backup holds the jobs stopped; nothing was changed — try again in a few "
@@ -1344,7 +1344,7 @@ def update_lock_held(base: Path) -> bool:
         return False
     fd = os.open(file, os.O_RDWR | os.O_NOFOLLOW)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
     except BlockingIOError:
         return True
     finally:

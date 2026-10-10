@@ -135,3 +135,64 @@ jobs:
           path: ${{ runner.temp }}/observatory-full-check
           if-no-files-found: ignore
           retention-days: 7
+
+  windows:
+    # docs/design/WINDOWS-LINUX.md, W0: what the engine does on Windows, measured on every
+    # change. Informative until W3 — each step runs whatever the one before it did, and the
+    # summary lists every outcome — so it is not one of the required checks yet.
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+      - id: sqlite
+        name: SQLite extension support
+        continue-on-error: true
+        run: python -c "import sqlite3; c=sqlite3.connect(':memory:'); c.enable_load_extension(True); c.enable_load_extension(False)"
+      - id: install
+        name: Install package
+        run: python -m pip install -c requirements-full.lock '.[full]'
+      - id: compile
+        name: Compile every distributed Python module
+        continue-on-error: true
+        run: python -m compileall -q observatory
+      - id: imports
+        name: Every engine library module loads
+        continue-on-error: true
+        run: python tools/check_imports.py
+      - id: oslocks
+        name: One lock API on every OS (W1)
+        continue-on-error: true
+        run: python observatory/engine/tests/test_oslocks.py
+      - id: cli
+        name: The CLI answers
+        continue-on-error: true
+        run: |
+          project-observatory --help
+          demo_root="$(mktemp -d)"
+          project-observatory --home "$demo_root/state" demo
+          project-observatory --home "$demo_root/state" doctor
+      - id: tests
+        name: Synthetic runtime and privacy tests
+        continue-on-error: true
+        run: python -m unittest discover -s tests
+      - name: Outcomes
+        if: always()
+        run: |
+          {
+            echo "| Step | Outcome |"
+            echo "|---|---|"
+            echo "| SQLite extension support | ${{ steps.sqlite.outcome }} |"
+            echo "| Compile | ${{ steps.compile.outcome }} |"
+            echo "| Engine modules load | ${{ steps.imports.outcome }} |"
+            echo "| oslocks | ${{ steps.oslocks.outcome }} |"
+            echo "| CLI | ${{ steps.cli.outcome }} |"
+            echo "| Top-level tests | ${{ steps.tests.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

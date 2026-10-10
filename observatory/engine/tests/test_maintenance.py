@@ -912,11 +912,11 @@ class Pass(Base):
 
     def test_a_running_tick_defers_the_update_and_is_never_stopped(self):
         # Seen live on 2026-10-06: an automatic update booted out a tick 57 s into its run.
-        import fcntl
+        import oslocks
         lock = self.home / "store" / "tick.lock"
         fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)      # a tick is running
+            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)      # a tick is running
             commands = FakeCommands(check=10, apply=0)
             report = self.run_pass(commands)
             self.assertEqual(report["update"]["result"], "deferred")

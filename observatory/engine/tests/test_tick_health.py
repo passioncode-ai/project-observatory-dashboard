@@ -1,5 +1,4 @@
 """PB-132: a tick that died, or ticks that stopped, are visible from outside the tick."""
-import fcntl
 import json
 import os
 import subprocess
@@ -12,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import oslocks  # after the path setup: this file also runs as a script
 import tick_health as T  # noqa: E402
 
 NOW = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
@@ -54,7 +54,8 @@ class TickHealth(unittest.TestCase):
         lock = self.state / "tick.lock"
         lock.touch()
         holder = subprocess.Popen([sys.executable, "-c",
-            "import fcntl,os,sys,time;fd=os.open(sys.argv[1],os.O_RDWR);fcntl.flock(fd,fcntl.LOCK_EX);"
+            f"import os,sys,time;sys.path.insert(0,{str(ROOT)!r});import oslocks;"
+            "fd=os.open(sys.argv[1],os.O_RDWR);oslocks.flock(fd,oslocks.LOCK_EX);"
             "print('held',flush=True);time.sleep(30)", str(lock)], stdout=subprocess.PIPE, text=True)
         try:
             self.assertEqual(holder.stdout.readline().strip(), "held")
@@ -74,7 +75,7 @@ class TickHealth(unittest.TestCase):
         self.verdict()
         fd = os.open(self.state / "tick.lock", os.O_RDWR)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # would raise if the probe kept a lock
+            oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)  # would raise if the probe kept a lock
         finally:
             os.close(fd)
 

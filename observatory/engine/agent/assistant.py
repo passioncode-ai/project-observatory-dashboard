@@ -4,7 +4,6 @@ A bounded evidence-reading workflow, with no shell or mutation tools for the mod
 """
 from __future__ import annotations
 from contextlib import contextmanager
-import fcntl
 import hashlib
 import json
 import os
@@ -20,6 +19,7 @@ from datetime import datetime, timezone
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
+import oslocks  # after the path setup: this file also runs as a script
 import configuration
 import paths
 import workspace
@@ -67,7 +67,7 @@ def locked():
     folder().mkdir(parents=True,exist_ok=True,mode=0o700)
     fd=os.open(folder()/'assistant.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
     try:
-        fcntl.flock(fd,fcntl.LOCK_EX);yield
+        oslocks.flock(fd,oslocks.LOCK_EX);yield
     finally:os.close(fd)
 
 def validate(doc):
