@@ -28,8 +28,10 @@ Windows:
   on Windows, so `DIRECTORY` and `dir_fd` raise `NotImplementedError` and the caller takes its
   path-based branch; there are no FIFOs to wait on.
 - "Private" means every ACE that grants access names this account, LocalSystem or the
-  Administrators group (the counterpart of root, who reads every file on POSIX too). An ACE that
-  only passes inheritance on to children (`IO`) grants nothing on the object itself.
+  Administrators group (the counterpart of root, who reads every file on POSIX too), or OWNER
+  RIGHTS when the owner is one of those. An ACE that only passes inheritance on to children
+  (`IO`) grants nothing on the object itself. SDDL aliases (`LA`, `BA`, `OW`, …) are compared as
+  the SIDs they stand for.
 - `make_private` replaces the list with a protected one: this account, LocalSystem and
   Administrators, full control, inherited by whatever is created inside a folder.
 - The account's home comes from the known-folder store (`SHGetKnownFolderPath(FOLDERID_Profile)`),
@@ -239,8 +241,22 @@ else:  # pragma: no cover - exercised by the Windows CI job
             _kernel32.CloseHandle(token)
         return _user_sid[0]
 
+    _OWNER_RIGHTS = "S-1-3-4"
+
     def _trusted() -> set[str]:
         return _ROOTLIKE | {user_sid()}
+
+    def _trusted_for(target: Target) -> set[str]:
+        """The trusted SIDs for this object: OWNER RIGHTS (`OW`, S-1-3-4) stands for whoever owns
+        it, so it is trusted exactly when the owner is — a folder created inside the profile
+        carries `(A;OICIID;FA;;;OW)`."""
+        trusted = _trusted()
+        return trusted | {_OWNER_RIGHTS} if _owner(target) in trusted else trusted
+
+    def _owner(target: Target) -> str:
+        text = _sddl(target, _OWNER)
+        owner = text.split("O:", 1)[1].split("G:", 1)[0].split("D:", 1)[0] if "O:" in text else ""
+        return _sid(owner) if owner else ""
 
     def _sddl(target: Target, what: int) -> str:
         sd = _PVOID()
@@ -308,20 +324,18 @@ else:  # pragma: no cover - exercised by the Windows CI job
         aces = _granting_aces(target)
         if aces is None:
             return False
-        trusted = _trusted()
+        trusted = _trusted_for(target)
         return all(trustee in trusted for trustee, _ in aces)
 
     def others_may_write(target: Target) -> bool:
         aces = _granting_aces(target)
         if aces is None:
             return True
-        trusted = _trusted()
+        trusted = _trusted_for(target)
         return any(trustee not in trusted and _writes(rights) for trustee, rights in aces)
 
     def owned_by_me(target: Target) -> bool:
-        text = _sddl(target, _OWNER)
-        owner = text.split("O:", 1)[1].split("G:", 1)[0].split("D:", 1)[0] if "O:" in text else ""
-        return bool(owner) and _sid(owner) in _trusted()
+        return _owner(target) in _trusted()
 
     def make_private(target: Target) -> None:
         """A protected list: this account, LocalSystem, Administrators; inherited inside a folder."""

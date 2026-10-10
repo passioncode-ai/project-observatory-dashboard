@@ -63,6 +63,14 @@ class Privacy(unittest.TestCase):
         if os.name == "nt":  # inherited from the protected list
             self.assertTrue(osprivacy.private(inside), osprivacy.explain(inside))
 
+    def test_a_new_folder_in_the_workspace_parent_is_owner_only(self):
+        # What the engine creates under the account's own folders: on Windows the inherited list
+        # names SYSTEM, Administrators and OWNER RIGHTS (`OW`), the owner being this account.
+        folder = self.dir / "store"
+        folder.mkdir()
+        self.assertTrue(osprivacy.owned_by_me(folder), osprivacy.explain(folder))
+        self.assertFalse(osprivacy.others_may_write(folder), osprivacy.explain(folder))
+
     def test_a_descriptor_says_what_its_path_says(self):
         for prepare in (osprivacy.make_private, share_with_everyone):
             prepare(self.file)

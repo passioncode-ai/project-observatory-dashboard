@@ -1233,8 +1233,8 @@
       "path": "osprivacy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "eddeb1cd161daa3309271636c22d99709fb740dc41589e81417cff866b0a8c92",
-      "bytes": 19194
+      "export_sha256": "071755f8a1769311ce43bb5c1c7a6c66bd2be50a2678019dfc06a3ad9e63455a",
+      "bytes": 19843
     },
     {
       "path": "osproc.py",
@@ -2829,8 +2829,8 @@
       "path": "tests/test_osprivacy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f1a6ccd8afb61c2dcbe7a9068fd85c854919be909243ac2c65747776df73832f",
-      "bytes": 7413
+      "export_sha256": "1413c2592056e2dce47709191e644dac4bbcbdc0ac18664a5619c3dfe4721eac",
+      "bytes": 7905
     },
     {
       "path": "tests/test_osproc.py",
