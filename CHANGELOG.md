@@ -5,6 +5,14 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Changed
+
+- **The vendored fabric-service kit is fabric-agent-adapter 0.8.2** (was 0.5.0): Windows and Linux support
+  (contract DEC-0032, DEC-0033) — the instance lock, the token-file ACL rule, Task Scheduler and systemd in
+  the descriptor — which the always-on server needs on Windows (W4b). `serverd --uninstall` relies on the
+  kit's own wait for launchd to unload the job. The conformance probe's two new checks the server does not
+  declare yet are NOT_RUN (`usage.report`: OBS-53).
+
 ### Added
 
 - **`osschedule`: background jobs under Windows Task Scheduler and systemd** (W4a). One job description, a

@@ -1091,8 +1091,8 @@
       "path": "fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "86862f3ce93d52e30206130c193f221ec18e3eca6a8b7ac0625817241d205c3b",
-      "bytes": 28002
+      "export_sha256": "2298a333a9625fa3ea438690d5ba9cff1d13a335ca22188e8626d44a4bfdafea",
+      "bytes": 70646
     },
     {
       "path": "identity.py",
@@ -1721,8 +1721,8 @@
       "path": "tests/check_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "43500ee7e6076b12e9f55aeeac2e042af4c10b6bba9ba503745467a1bdf05f58",
-      "bytes": 29880
+      "export_sha256": "2ac0e345b3f028194b626f3e8e91717cff11748f5af5a93ed7a19323aa19f7cf",
+      "bytes": 44686
     },
     {
       "path": "tests/concurrency.py",
@@ -1770,8 +1770,8 @@
       "path": "tests/fabric_interop.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "669d15c034f7361b8061a94862e5aca9b8f50c2016b7e714eb0e1c1efdeecb84",
-      "bytes": 21800
+      "export_sha256": "a8ade245b916d2239ab55d4cc81fe1dc4897ebd9bab393396457748ceba59302",
+      "bytes": 31105
     },
     {
       "path": "tests/focus_check.js",
@@ -2373,8 +2373,8 @@
       "path": "tests/test_fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3f13c89f09cf431fdd7a821c5e5f837b92e9ae2843c6d8dace3498c20dd96421",
-      "bytes": 52979
+      "export_sha256": "b8dffe8874ee4f2e3cd65d7507c7840f87df8dcaee6f11966b7a40bfa8ad6ae7",
+      "bytes": 53326
     },
     {
       "path": "tests/test_facts_learning.py",
@@ -4166,8 +4166,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "4098f6ef415bfad581652ea6a925f307e5a0d0ce84efb16f0b656cc500364c27",
-      "bytes": 43038,
+      "export_sha256": "a83dd17b826f37709ed2788ac6c19ff9da7a7e00f79dcbf1297bd0901b271632",
+      "bytes": 43075,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
