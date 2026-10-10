@@ -5,6 +5,40 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **The engine on Windows** (docs/design/WINDOWS-LINUX.md, W0–W3). One module per OS seam, each
+  with a test that runs the same on every OS and refuses the POSIX-only call anywhere else:
+  `oslocks` (file locks — `LockFileEx` on Windows), `osproc` (process groups, the stop signals an
+  OS has, the assistant's deadline without `SIGALRM`; on Windows `os.kill(pid, 0)` terminates the
+  process, so checking a job killed it), `osprivacy` (owner-only files through the file's ACL;
+  descriptors opened in binary mode, without which Windows turns every LF into CRLF). The tick is
+  Python (`tools/tick.py`; `tools/tick.sh` hands over to it), and a whole tick runs on the
+  `windows` CI job. Windows needs Python 3.13 or newer.
+
+### Fixed
+
+- **A busy machine no longer reads as a blank dashboard.** Under a load average near 300 the
+  page's script did not finish within 10 s and smoke reported a critical `dashboard.blank` about a
+  page that renders in 0.13 s of processor. A timed-out script is blank only when it has used a
+  5 s processor budget; a starved one is tried once more with 60 s, then recorded as not measured
+  (`dashboard.unverified`, information).
+- **The tail's cheap optional steps run before the heavy ones.** The index, retention (the
+  erasure), the fixture sweep, corroboration, the ledger export and the lost-projects record —
+  seconds each — were not started tick after tick behind `plugins` and the agent's model calls.
+  What the agent proposes is now indexed and exported on the next tick.
+- **A plugin stopped at its limit keeps what it measured**, and is told its deadline
+  (`OBSERVATORY_STEP_DEADLINE`). `disk-usage` walked every tree twice and lost every row at the
+  300 s limit, so it ran again on every tick and cost the tail 300 s each half hour; it now walks
+  each folder once, measures the projects measured longest ago first and stops between projects
+  (51 s for this machine's estate).
+- **The store's integrity check is bounded.** `integrity_check` runs once a day and after any
+  verdict that was not `ok`, `quick_check` in between; the step stops itself at its deadline and
+  records `unmeasured` (a `store.integrity_unmeasured` row naming the last full pass) instead of
+  being killed with nothing written. Its limit is 240 s: one tick spent 785 s there and left the
+  collectors no time.
+- **The public-release check reads engine paths the same on Windows** (`as_posix()`).
+
 ## 0.20.1 — 2026-10-09
 
 A patch release from a read-only audit of 0.20.0 running on a working machine. The companion plugin

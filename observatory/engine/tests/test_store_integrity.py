@@ -355,6 +355,7 @@ def test_an_unmeasured_check_is_information_naming_the_last_full_one() -> None:
     f = got[0] if len(got) == 1 else None
     check("it is reported", f is not None, str(got)[:200])
     if f:
+        check("as its own rule", f["type"] == "store.integrity_unmeasured", f["type"])
         check("as info — nothing is known to be wrong", f["severity"] == "info", f["severity"])
         check("and it names when the store last passed the full check",
               "30h" in f["title"] or "30" in f["detail"] or stamp(30)[:13] in f["detail"],

@@ -2054,5 +2054,8 @@
  "step {step} in progress, {at}": "шаг {step} в работе, {at}",
  "step {step} done, {at}": "шаг {step} готов, {at}",
  "step {step} blocked, {at}": "шаг {step} заблокирован, {at}",
- "Observer state, data freshness and the agents' records.": "Состояние наблюдателя, свежесть данных и записи агентов."
+ "Observer state, data freshness and the agents' records.": "Состояние наблюдателя, свежесть данных и записи агентов.",
+ "Store integrity check ran out of time": "Проверка целостности хранилища не успела",
+ "the page was not verified this time — the machine was too busy to run its script": "страница на этот раз не проверена — машина была слишком занята, чтобы выполнить её скрипт",
+ "the store's integrity check ran out of time — {last}": "проверка целостности хранилища не успела — {last}"
 }

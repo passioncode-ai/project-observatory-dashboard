@@ -220,8 +220,8 @@
     {
       "path": "collectors/run_plugins.py",
       "source_sha256": "e4a4ce8e3a801a030636a7d21fe7b2258fef4e60e6322a6b6449c76aeb78107f",
-      "export_sha256": "44ec0cbf19f4281e7765be4c9ce14a22e9593f324b65205b70375a16c3a017fa",
-      "bytes": 23599,
+      "export_sha256": "86f0df02b48642a1021561327df5e21ba9e71a25d9ccb9bb1cd23f19f2665e67",
+      "bytes": 25561,
       "python_comments_removed": 41,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -484,8 +484,8 @@
       "path": "dashboard/finding_types.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1abe17d5ab837db6fb2b9a205ea764134c1f535923138da7078525cbf5df79dc",
-      "bytes": 11758
+      "export_sha256": "8fea4d6a36ca7409743e66baae174156a8acbffe785d6f646a15359567357323",
+      "bytes": 11833
     },
     {
       "path": "dashboard/i18n.py",
@@ -505,8 +505,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0c63b635a660491fa09cfa6b6d819ce980de4c41a7efb15bbb10e3e51764e0aa",
-      "bytes": 152334
+      "export_sha256": "9278ef426f7b6c9581ee00fde44a8e34dce5504c4b9845e6e4c6e4cb9714e263",
+      "bytes": 152861
     },
     {
       "path": "dashboard/machine_page.py",
@@ -1303,8 +1303,8 @@
     {
       "path": "plugins/disk_usage.py",
       "source_sha256": "d4f4b4a5e970caf7f9a6f07376d88d08258893124499434a15a90105658e7e1b",
-      "export_sha256": "e4bf929e2f27583efb4d880bdf69d352ac91f29fd03c8e9e7b8e59b8607c2667",
-      "bytes": 7492,
+      "export_sha256": "e6a0069a1692b8231dbd27dac2935aaddd2a2721f41f408794d864fa110c8045",
+      "bytes": 8851,
       "python_comments_removed": 18,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
@@ -2880,8 +2880,8 @@
     {
       "path": "tests/test_plugins.py",
       "source_sha256": "007dc90f606b207a9e321e33b32acde069b51a420031b17366bd5086369dbb7c",
-      "export_sha256": "f921dc52d7b6f9c39517eae697ca648cea4e8a1f21af08f4dba56756feeab983",
-      "bytes": 15497,
+      "export_sha256": "f665bddfdd513b19284d2ae225bdc0aaa0e9d5e48e4cb97abeb9ea284ffc6e6f",
+      "bytes": 20701,
       "python_comments_removed": 26,
       "python_docstrings_removed": 6,
       "tool_descriptions_retained": 0,
@@ -3306,8 +3306,8 @@
       "path": "tests/test_store_integrity.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4bf7f98d918e8189180b40afa233be6443bbe8c7346caebdadc51d06a12c7954",
-      "bytes": 21041
+      "export_sha256": "991814f101c03fcf2455f7d1e9b98f16487112a4210f72c6abcb005c2ba0f377",
+      "bytes": 21128
     },
     {
       "path": "tests/test_store_modes.py",
