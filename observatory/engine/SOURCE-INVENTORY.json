@@ -1208,8 +1208,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "a7e5d608a9b4410640860682c65c036e52ea13295f79c9897827c0b5d649110e",
-      "bytes": 81677,
+      "export_sha256": "3f8ad71dcff257c1620798dcad08439c130270fd673b55fc451941e3609ceef5",
+      "bytes": 81764,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -1560,8 +1560,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "b3b196977e2b5e2184f0a35723737dd9f8c4c32751574b0512a65688e859c2c4",
-      "bytes": 14068,
+      "export_sha256": "82324d06d9fe2012350803ddb847b0cc16f94ea9be4d352cf309078a484a1787",
+      "bytes": 15341,
       "upstream_modified": true
     },
     {

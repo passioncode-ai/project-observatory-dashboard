@@ -126,6 +126,24 @@ exposure and record it with `vault.py leak`. The design is
 
 ## Provider integrations
 
+**A provider's MCP tool can be the leak.** Some tools return a credential in their
+answer by design, whatever you asked them for: DigitalOcean's `db-cluster-list`,
+`db-cluster-get`, `db-cluster-*-user`, `docr-docker-credentials`, `doks-get-kubeconfig`,
+`spaces-key-create`. The transcript keeps a tool result whole; it cannot be redacted
+afterwards. On 2026-10-10 one `db-cluster-list`, asked for names, printed five
+clusters' passwords. Do not call such a tool; get names from the provider CLI with an
+explicit `--format`, and credentials through the door below. Record any sighting with
+`vault.py leak` and rotate.
+
+DigitalOcean managed databases go through `digitalocean.py` (the operator's `doctl`
+context). `db list` names clusters and says which are open to the internet;
+`db consumers CLUSTER` names the App Platform apps that bind one and the password keys
+they keep in their own spec. `db credential CLUSTER USER --db NAME --to
+vault:<project>/<env>/<NAME>` delivers a connection URL on stdin. `db rotate` resets a
+user and moves every consumer in one run: it reads every spec before the reset,
+writes the new password into each `--spec-env APP:KEY` literal, redeploys each `--app`,
+retries every call but the reset, and waits for ACTIVE. Nothing prints a value.
+
 Cloudflare and OpenRouter have separate tools, `cloudflare.py` and
 `openrouter.py`. Check their installed `--help` and non-secret inventory first.
 They require an explicitly configured integration and the user's own admin or
