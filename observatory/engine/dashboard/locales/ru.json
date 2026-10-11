@@ -2057,5 +2057,24 @@
  "Observer state, data freshness and the agents' records.": "Состояние наблюдателя, свежесть данных и записи агентов.",
  "Store integrity check ran out of time": "Проверка целостности хранилища не успела",
  "the page was not verified this time — the machine was too busy to run its script": "страница на этот раз не проверена — машина была слишком занята, чтобы выполнить её скрипт",
- "the store's integrity check ran out of time — {last}": "проверка целостности хранилища не успела — {last}"
+ "the store's integrity check ran out of time — {last}": "проверка целостности хранилища не успела — {last}",
+ "Instruction file read whole by every session": "Файл инструкций, который каждая сессия читает целиком",
+ "Skill descriptions over the listing budget": "Описания скиллов сверх бюджета списка",
+ "MCP tool schemas load upfront": "Схемы инструментов MCP грузятся заранее",
+ "Skill changed since first seen": "Скилл изменился с первого появления",
+ "Skill matches a security rule": "Скилл подпадает под правило безопасности",
+ "{n} skill descriptions do not fit the session's skill listing": {
+  "one": "{n} описание скилла не помещается в список скиллов сессии",
+  "few": "{n} описания скиллов не помещаются в список скиллов сессии",
+  "many": "{n} описаний скиллов не помещаются в список скиллов сессии",
+  "other": "{n} описания скиллов не помещаются в список скиллов сессии"
+ },
+ "{path} is {lines} lines, and every session reads all of it": "{path} — {lines} строк, и каждая сессия читает его целиком",
+ "every MCP tool schema loads into each session upfront": "схемы всех инструментов MCP загружаются в каждую сессию заранее",
+ "skill {skill} downloads and runs code ({host})": "скилл {skill} скачивает и запускает код ({host})",
+ "skill {skill} reads a credential and sends data out in one script": "скилл {skill} читает учётные данные и отправляет данные наружу в одном скрипте",
+ "skill {skill} carries hidden Unicode characters": "в скилле {skill} есть скрытые символы Unicode",
+ "skill {skill} tells the agent to hide something or override its instructions": "скилл {skill} велит агенту что-то скрыть или обойти инструкции",
+ "skill {skill} ships opaque or oversized files": "в скилле {skill} есть непрозрачные или слишком большие файлы",
+ "skill {skill} changed since it was first seen": "скилл {skill} изменился с тех пор, как появился впервые"
 }

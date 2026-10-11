@@ -622,5 +622,9 @@
   "one": "Show the newest {n}",
   "other": "Show the newest {n}"
  },
- "language@@System": "System"
+ "language@@System": "System",
+ "{n} skill descriptions do not fit the session's skill listing": {
+  "one": "{n} skill description does not fit the session's skill listing",
+  "other": "{n} skill descriptions do not fit the session's skill listing"
+ }
 }

@@ -2579,6 +2579,102 @@ def collect() -> list[dict]:
                            "or adopt the host onto a project when work begins here"),
                 "evidence": ["store/raw/plugins.json#note", paths.config_label("host_boundary.json")]})
 
+    # THE AGENT HARNESS (docs/design/HARNESS.md). What every session loads before the first word:
+    # loss of function first — skill descriptions over the listing budget are dropped and those skills
+    # can no longer be matched to a request — then instruction files every session reads whole, the
+    # setting that loads every MCP tool schema upfront, and the deterministic skill rules, weighted
+    # by provenance. A skill whose content changed since it was first seen is said until accepted.
+    _hf = paths.SCRATCH / "harness.json"
+    if _hf.is_file():
+        try:
+            _h = json.loads(_hf.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _h = {}
+        _drop = _h.get("dropped") or []
+        if _drop:
+            out.append({
+                "type": "harness.listing_overflow", "subject": "harness:claude-code", "severity": "warning",
+                **titled("{n} skill descriptions do not fit the session's skill listing", n=len(_drop)),
+                "detail": (f"{_h.get('skills_offered')} skills are offered to the model; their descriptions take "
+                           f"{_h.get('listing_chars')} characters against a listing budget of {_h.get('budget_chars')} "
+                           "(OBSERVATORY_HARNESS_BUDGET_CHARS). Over it, Claude Code drops descriptions, the least "
+                           "used first, and a skill without its description is no longer matched to a request. "
+                           "The largest entries: " + listed(_drop, 8) + "."),
+                "action": "set `disable-model-invocation: true` on skills used only by name, set rarely used ones "
+                          "name-only (`skillOverrides`), disable plugins this machine's projects do not use, and "
+                          "keep project skills in their project; `project-observatory full harness` lists the cost",
+                "evidence": ["store/raw/harness.json#dropped"]})
+        for _i in _h.get("instructions") or []:
+            if (_i.get("lines") or 0) > 200:
+                out.append({
+                    "type": "harness.instruction_long", "subject": f"harness:file:{_i.get('path')}",
+                    "severity": "warning" if _i["lines"] > 500 else "info",
+                    **titled("{path} is {lines} lines, and every session reads all of it",
+                             path=_i.get("path"), lines=_i["lines"]),
+                    "detail": (f"{_i.get('chars')} characters load into every session's context before the "
+                               "first word (about a quarter as many tokens). Anthropic's guidance is under 200 "
+                               "lines; past 500 the instructions crowd the task. Codex cuts AGENTS.md at 32 KiB "
+                               "without saying so."),
+                    "action": "move procedures into files the instructions name and load on demand; keep the "
+                              "rules that apply to every task",
+                    "evidence": ["store/raw/harness.json#instructions"]})
+        _md = _h.get("mcp_deferral") or {}
+        if _md.get("off"):
+            out.append({
+                "type": "harness.mcp_deferral_off", "subject": "harness:claude-code", "severity": "warning",
+                **titled("every MCP tool schema loads into each session upfront"),
+                "detail": ("Claude Code defers MCP tool definitions until a tool is needed, unless "
+                           + ("ANTHROPIC_BASE_URL points at " + str(_md.get("base_url_host")) if _md.get("base_url_host") else "")
+                           + (" and " if _md.get("base_url_host") and _md.get("betas_disabled") else "")
+                           + ("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS is set" if _md.get("betas_disabled") else "")
+                           + "; then every declared server's whole tool list is paid for in every session."),
+                "action": "remove the setting, or keep only the servers this work needs",
+                "evidence": ["store/raw/harness.json#mcp_deferral"]})
+        _rank = {"info": 0, "warning": 1, "critical": 2}
+        # The subject carries the skill's digest, so an ack (tools/ack.py) holds for the files that were read and
+        # the row speaks again when the skill changes (docs/design/HARNESS.md H10).
+        _digest = {}
+        for _s in _h.get("skills") or []:
+            _digest.setdefault(_s.get("name"), str(_s.get("digest") or "")[:12])
+        _groups: dict = {}
+        for _x in _h.get("security") or []:
+            _k = (_x.get("skill"), _x.get("rule"))
+            _g = _groups.setdefault(_k, {"files": [], "severity": "info", "hosts": set(), "tier": _x.get("tier")})
+            _g["files"].append(_x.get("file"))
+            _g["hosts"] |= {_x["host"]} if _x.get("host") else set()
+            if _rank.get(_x.get("severity"), 0) > _rank[_g["severity"]]:
+                _g["severity"] = _x["severity"]
+        for (_skill, _rule), _g in sorted(_groups.items()):
+            _host = ", ".join(sorted(_g["hosts"])) or "an unnamed host"
+            _base = {
+                "subject": f"harness:skill:{_skill}:{_rule}:{_digest.get(_skill, '')}",
+                "detail": (f"Rule `{_rule}` in " + listed(_g["files"], 5) + f"; provenance tier {_g['tier']} "
+                           "(1 this operator's own code, 2 a pinned marketplace, 3 anything else). A skill's text is "
+                           "a prompt and its scripts run with this account's rights; a scan is an alert to read, "
+                           "not a verdict."),
+                "action": "read those lines; if the source is the vendor's own installer, record that with "
+                          "`ack.py` (it comes back if the skill changes); otherwise remove or replace the skill",
+                "evidence": ["store/raw/harness.json#security"]}
+            if _rule == "download-exec":
+                out.append({"type": "harness.skill_risk", "severity": _g["severity"], **_base, **titled("skill {skill} downloads and runs code ({host})", skill=_skill, host=_host)})
+            elif _rule == "credential-egress":
+                out.append({"type": "harness.skill_risk", "severity": _g["severity"], **_base, **titled("skill {skill} reads a credential and sends data out in one script", skill=_skill)})
+            elif _rule == "hidden-unicode":
+                out.append({"type": "harness.skill_risk", "severity": _g["severity"], **_base, **titled("skill {skill} carries hidden Unicode characters", skill=_skill)})
+            elif _rule == "concealment":
+                out.append({"type": "harness.skill_risk", "severity": _g["severity"], **_base, **titled("skill {skill} tells the agent to hide something or override its instructions",
+                                              skill=_skill)})
+            elif _rule == "opaque-content":
+                out.append({"type": "harness.skill_risk", "severity": _g["severity"], **_base, **titled("skill {skill} ships opaque or oversized files", skill=_skill)})
+        for _c in _h.get("changed") or []:
+            out.append({
+                "type": "harness.skill_changed", "subject": f"harness:changed:{_c.get('key')}", "severity": "info",
+                **titled("skill {skill} changed since it was first seen", skill=_c.get("skill")),
+                "detail": (f"Its files differ from the digest recorded on {_c.get('since')}. An update is usually "
+                           "the reason; a skill that changes after review is also how a trusted one turns hostile."),
+                "action": f"read the change, then `project-observatory full harness --accept {_c.get('key')}`",
+                "evidence": ["store/raw/harness.json#changed", "store/harness-pins.json"]})
+
     # THE MCP SERVERS THE AGENTS ARE TOLD TO REACH. The gateway
     # that held them is off; each agent's own config holds them now, and these
     # rows are the only place a dead server, a key in a URL, or the

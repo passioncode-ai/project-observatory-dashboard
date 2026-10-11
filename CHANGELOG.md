@@ -3,6 +3,19 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Added
+
+- **The agent harness scan** (`integrations.harness`, `sources.harness_root`; off until turned on): what every
+  Claude Code and Codex session loads before the first word. It counts each skill's entry in the session's skill
+  listing against a budget (`OBSERVATORY_HARNESS_BUDGET_CHARS`, default 30,000 characters) and names the
+  descriptions that no longer fit, largest first; flags an instruction file over 200 lines and the settings that
+  load every MCP tool upfront; and runs deterministic rules over skill files — hidden Unicode, concealment
+  directives, download-and-execute, a credential read beside a send, opaque content — weighed by where the skill
+  comes from. Files are read, never run. A skill whose files change is reported until
+  `full harness --accept KEY`; an ack of a rule hit lapses when the skill changes. Design: `docs/design/HARNESS.md`.
+
 ## 0.22.0 — 2026-10-11
 
 Project Observatory on Windows and Linux: a desktop app with a signed Windows installer, the tick, the server

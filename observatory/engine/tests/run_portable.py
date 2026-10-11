@@ -112,6 +112,7 @@ BOUNDARY += ('osproc',)
 # docs/design/WINDOWS-LINUX.md W2b: who the engine runs as, on every OS.
 BOUNDARY += ('osprivacy',)
 BOUNDARY += ('osschedule',)
+BOUNDARY += ('harness',)
 # docs/design/WINDOWS-LINUX.md W3: a whole tick, through tools/tick.py.
 BOUNDARY += ('tick_py',)
 # One credential-shape heuristic for every door that judges typed text.

@@ -132,7 +132,7 @@ UPDATE_SETTINGS = ("auto", "scheduled")
 #: fails when one is missing here. A metric plugin's `integration:KEY` adds itself.
 KNOWN_INTEGRATIONS = frozenset({
     "bitbucket", "cloudflare", "cloudflare_analytics", "domains", "ga4", "git_remotes",
-    "github", "google", "heroku", "mcp", "openrouter", "remote_env", "search_console",
+    "github", "google", "harness", "heroku", "mcp", "openrouter", "remote_env", "search_console",
     "sessions", "wiki"})
 KNOWN_FEATURES = frozenset({
     "agent", "auto_cleanup", "companion_remediation", "embeddings", "fixture_cleanup",
@@ -140,7 +140,7 @@ KNOWN_FEATURES = frozenset({
     "scheduler", "wiki_projection"})
 KNOWN_SOURCES = frozenset({
     "cloudflare_snapshot", "companion_db", "companion_home", "domain_export", "gateway_root",
-    "mcp_config_root", "projects", "secret_store", "secrets", "sessions", "wiki"})
+    "harness_root", "mcp_config_root", "projects", "secret_store", "secrets", "sessions", "wiki"})
 
 
 #: The wallet ceilings `configure budget` sets; each must be above 0 for a model

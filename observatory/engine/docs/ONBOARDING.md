@@ -142,6 +142,7 @@ and token provisioning are different permissions.
 | `google` | Analytics property and search inventory | The user's service account files and resource grants |
 | `domains` | Domain observations | Explicit domain export and network access |
 | `mcp` | The MCP servers the agent configs on this machine declare (Claude Code, Cursor, OpenCode, Codex, Gemini CLI, Kiro), served as `machine.mcp.inventory` | Explicit `sources.mcp_config_root` |
+| `harness` | What every agent session loads before the first word: skills and their share of the skill listing, instruction files, the settings that load every MCP tool upfront, and deterministic security rules over skills ([design](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/HARNESS.md)) | Explicit `sources.harness_root` |
 | `sessions` | Local agent activity | Explicit `sources.sessions`; `sources.companion_db` is optional, set only where a memory companion (claude-mem) is installed |
 | `wiki` | Knowledge-base inventory | Explicit `sources.wiki` |
 | `openrouter` | Key and usage inventory | A locally supplied provider credential |
@@ -176,6 +177,7 @@ The `projects` source is the exception: the filesystem scan always runs, so a mi
 | `projects` | the directory that holds your project checkouts | filesystem scan, events, leak scan |
 | `sessions` | agent session transcripts, e.g. `~/.claude/projects` for Claude Code | `sessions` integration, leak scan |
 | `mcp_config_root` | the home directory whose agent configs declare MCP servers | `mcp` integration |
+| `harness_root` | the home directory whose `.claude` and `.codex` folders hold the skills, plugins and instruction files every session loads | `harness` integration |
 | `wiki` | a Markdown knowledge base, e.g. an Obsidian vault | `wiki` integration, `wiki_projection` |
 | `secret_store` | a private directory of provider credentials and project slots (`projects/`) | vault, OpenRouter, Google, Cloudflare analytics |
 | `companion_home`, `companion_db` | a memory companion's home and database file (claude-mem); optional, only where one is installed | `sessions` integration (`companion_db`, optional: an absent file is fine, a path that is not a file is a warning), leak scan (`companion_db`, when the file exists), `companion_remediation` (both required) |

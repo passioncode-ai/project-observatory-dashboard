@@ -406,6 +406,7 @@ def migrate_local(source: Path, target: Path, apply: bool) -> dict:
 SOURCE_NEEDS = {
     ("integrations", "sessions"): ("sessions",),
     ("integrations", "mcp"): ("mcp_config_root",),
+    ("integrations", "harness"): ("harness_root",),
     ("integrations", "wiki"): ("wiki",),
     ("integrations", "openrouter"): ("secret_store",),
     ("integrations", "google"): ("secret_store",),

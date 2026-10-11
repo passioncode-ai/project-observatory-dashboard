@@ -93,6 +93,14 @@ project-observatory full scan-mcp
 
 Other agents take the same command line; [connect an agent](docs/ONBOARDING.md#connect-an-agent) has the details.
 
+To watch what every session loads — how much of the skill listing your skills take, which descriptions no longer fit, instruction files that grew too long, and skills that download and run code or carry hidden characters — turn on the harness scan the same way; files are read, never run, and a changed skill is reported until you accept it ([design](docs/design/HARNESS.md)):
+
+```sh
+project-observatory full configure sources harness_root "$HOME"
+project-observatory full configure integrations harness true
+project-observatory full scan-harness && project-observatory full harness
+```
+
 ### Develop
 
 Run from source and run the gate — the commands CI runs are listed in order in [AGENTS.md](AGENTS.md#build-and-test):

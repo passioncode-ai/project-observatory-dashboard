@@ -81,6 +81,8 @@ SAMPLES = {
     # machine_view._load's survey command: `machine` or `cleanup` (audit A42).
     "{command}": "cleanup",
     'shellArg(RUNTIME.user_home || "$HOME")': "/srv/example-ws/home",
+    # A harness skill key (collectors/scan_harness.py): `plain/<folder>` or `plugin:<plugin>/<folder>`.
+    "KEY": "plain/tidy-notes", "{_c.get('key')}": "plugin:tool@family/installer", "{c['key']}": "plain/tidy-notes",
 }
 PLACEHOLDER = re.compile(r"[A-Z][A-Z0-9_./,]*[A-Z]|[A-Z]{2,}")
 SHIPPED_TEXT = {".js", ".mjs", ".sh", ".json", ".md", ".html", ".txt"}
