@@ -60,6 +60,17 @@ else:
     BINARY = os.O_BINARY
 
 
+def default_home(name: str, *, nt: bool | None = None) -> Path:
+    """Where a workspace lives when no OBSERVATORY_HOME names one (W7): `~/.local/share/<name>`;
+    on Windows `%LOCALAPPDATA%\\<name>` — local, not roaming — unless the place 0.21.0 used there,
+    `~\\.local\\share\\<name>`, already exists, which keeps that installation where it is."""
+    legacy = Path.home() / ".local" / "share" / name
+    if not (os.name == "nt" if nt is None else nt) or legacy.exists():
+        return legacy
+    base = os.environ.get("LOCALAPPDATA")
+    return (Path(base) if base else Path.home() / "AppData" / "Local") / name
+
+
 def _stat(target: Target, follow: bool = True) -> os.stat_result:
     if isinstance(target, int):
         return os.fstat(target)

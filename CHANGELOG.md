@@ -15,6 +15,15 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Updates on Windows** (W6): `full update --apply` stops and restarts the tick and server tasks (systemd units
+  on Linux) around the install, and replaces the `project-observatory.exe` it may be running from — moved aside
+  first, put back if the install fails.
+- **The server's always-on state off macOS** (W4c): «Start server» in an app restarts the Task Scheduler task
+  or systemd unit of an installed server instead of calling `launchctl`; `server.silent` watches that
+  installation too.
+- **Windows paths and tools** (W7): the default workspace is `%LOCALAPPDATA%\project-observatory-full` (an
+  existing `~\.local\share` one stays); tools npm installs as `.cmd` (`heroku`, `claude`) start by name; the
+  CLI and the scheduled jobs write UTF-8. README → Install has the PowerShell steps.
 - **The backup passphrase in the Windows Credential Manager** (W5): a generic credential per workspace, kept
   for this account on this machine (`CredWriteW`/`CredReadW`, never roaming, the value never an argument);
   a store that does not answer is not an empty one. The file fallback is owner-only on Windows too (a

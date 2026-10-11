@@ -107,7 +107,8 @@ def parser() -> argparse.ArgumentParser:
     # (and the bare command, which opens its dashboard) never reads the portable one.
     p.add_argument("--home", help="Private state directory. Portable commands: otherwise OBSERVATORY_HOME "
                    "or ~/.local/share/project-observatory . `full` and the bare command: otherwise "
-                   "OBSERVATORY_FULL_HOME, then OBSERVATORY_HOME, or ~/.local/share/project-observatory-full")
+                   "OBSERVATORY_FULL_HOME, then OBSERVATORY_HOME, or ~/.local/share/project-observatory-full . "
+                   "On Windows both live in %%LOCALAPPDATA%% instead.")
     cmds = p.add_subparsers(dest="cmd")
     for name in ("init", "doctor", "demo", "scan", "status", "dashboard", "export"):
         cmds.add_parser(name)
@@ -163,8 +164,23 @@ def open_dashboard(explicit_home: str | None = None) -> int:
     return 2
 
 
+def utf8_console() -> None:
+    """On Windows, print UTF-8 whatever the console's code page (W7): the engine's text is Russian
+    as often as English, and cp1252 cannot encode it. Elsewhere the locale already does."""
+    if os.name != "nt":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def main(argv: list[str] | None = None) -> int:
     global _OUTPUT_STATE
+    utf8_console()
     args = parser().parse_args(argv)
     if args.cmd is None:
         return open_dashboard(args.home)

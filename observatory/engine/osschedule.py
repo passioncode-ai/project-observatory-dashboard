@@ -107,7 +107,11 @@ class TaskSchedulerJob:
         python = self.job.argv[0]
         args = [str(WRAPPER), "--cwd", str(self.job.cwd), "--stdout", str(self.job.stdout),
                 "--stderr", str(self.job.stderr)]
-        for key, value in self.job.env:
+        # A Windows console and a redirected handle default to the ANSI code page; the engine's
+        # Russian log lines and page text need UTF-8 (W7).
+        env = dict(self.job.env)
+        env.setdefault("PYTHONUTF8", "1")
+        for key, value in sorted(env.items()):
             args += ["--env", f"{key}={value}"]
         return windowless(python), args + ["--", python, *self.job.argv[1:]]
 
@@ -213,8 +217,12 @@ class TaskSchedulerJob:
     def running(self) -> bool:
         return self._verbose().get("Status", "").lower() == "running"
 
-    def start(self) -> tuple[bool, str]:
-        self._schtasks("/Change", "/TN", self.path, "/ENABLE")
+    def start(self, run: bool = True) -> tuple[bool, str]:
+        """Enable, then run now unless `run` is false (a periodic job waits for its trigger, as
+        launchd's RunAtLoad=false tick does)."""
+        code, out = self._schtasks("/Change", "/TN", self.path, "/ENABLE")
+        if not run:
+            return code == 0, out
         code, out = self._schtasks("/Run", "/TN", self.path)
         return code == 0, out
 
@@ -341,7 +349,7 @@ class SystemdJob:
     def running(self) -> bool:
         return self._systemctl("is-active", self.unit)[0] == 0
 
-    def start(self) -> tuple[bool, str]:
+    def start(self, run: bool = True) -> tuple[bool, str]:  # noqa: ARG002 - a timer waits for itself
         code, out = self._systemctl("enable", "--now", self._target())
         return code == 0, out
 
@@ -358,6 +366,15 @@ class SystemdJob:
         fields = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
         return {"kind": self.kind, "unit": self._target(), "installed": self.installed(),
                 "state": fields.get("ActiveState"), "enabled": fields.get("UnitFileState")}
+
+
+def handle(name: str, workspace: Path, **kwargs):
+    """This system's supervisor for an installed job, by name: enough to ask whether it is
+    installed and to stop, start or restart it (its definition is the installer's business)."""
+    job = Job(name=name, workspace=Path(workspace), argv=(sys.executable,), env=(), cwd=Path(workspace),
+              stdout=Path(workspace) / "x", stderr=Path(workspace) / "x",
+              interval_seconds=None if name == "server" else 3600)
+    return supervisor(job, **kwargs)
 
 
 def supervisor(job: Job, **kwargs):

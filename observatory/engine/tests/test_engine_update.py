@@ -1131,5 +1131,87 @@ class CliRoute(unittest.TestCase):
             self.assertEqual(json.loads(p.stdout)["status"], "degraded")
 
 
+class WindowsUpdates(unittest.TestCase):
+    """W6: an update on Windows stops and restarts its Task Scheduler jobs, and replaces the
+    launcher it was started from although Windows keeps a running .exe locked."""
+
+    def setUp(self):
+        import engine_update
+        self.eu = engine_update
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.scripts = Path(tmp.name) / "Scripts"
+        self.scripts.mkdir()
+        (self.scripts / "python.exe").write_bytes(b"py")
+        self.launcher = self.scripts / "project-observatory.exe"
+        self.launcher.write_bytes(b"old launcher")
+
+    def test_the_running_launcher_is_moved_aside_and_back_on_failure(self):
+        aside = self.eu.move_locked_launcher(str(self.scripts / "python.exe"), str(self.launcher), nt=True)
+        self.assertEqual(aside, self.scripts / "project-observatory.exe.old")
+        self.assertFalse(self.launcher.exists())
+        self.eu.put_launcher_back(aside)
+        self.assertEqual(self.launcher.read_bytes(), b"old launcher")
+
+    def test_a_new_launcher_is_never_overwritten_by_the_old_one(self):
+        aside = self.eu.move_locked_launcher(str(self.scripts / "python.exe"), str(self.launcher), nt=True)
+        self.launcher.write_bytes(b"new launcher")       # pip wrote it, then a later step failed
+        self.eu.put_launcher_back(aside)
+        self.assertEqual(self.launcher.read_bytes(), b"new launcher")
+
+    def test_nothing_moves_elsewhere_or_when_started_by_python(self):
+        self.assertIsNone(self.eu.move_locked_launcher(str(self.scripts / "python.exe"), str(self.launcher), nt=False))
+        self.assertIsNone(self.eu.move_locked_launcher(str(self.scripts / "python.exe"), "-m", nt=True))
+        self.assertTrue(self.launcher.exists())
+
+    def test_a_failed_install_puts_the_launcher_back(self):
+        def failing(argv, **kw):
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="boom")
+        real = self.eu.move_locked_launcher
+        installer = self.eu.Installer(python=str(self.scripts / "python.exe"), runner=failing)
+        with mock.patch.object(self.eu, "move_locked_launcher",
+                               side_effect=lambda python: real(python, str(self.launcher), nt=True)), \
+                mock.patch.object(installer, "available", return_value="pip"):
+            with self.assertRaises(self.eu.InstallFailed):
+                installer.install(Path("x.whl"), force=False)
+        self.assertEqual(self.launcher.read_bytes(), b"old launcher")
+        self.assertFalse((self.scripts / "project-observatory.exe.old").exists())
+
+    def test_the_jobs_stop_and_come_back_under_task_scheduler(self):
+        calls = []
+
+        class Job:
+            def __init__(self, name):
+                self.name, self.path = name, f"\\ProjectObservatory\\x-{name}"
+
+            def installed(self):
+                return True
+
+            def loaded(self):
+                return True
+
+            def stop(self):
+                calls.append(("stop", self.name))
+                return True, ""
+
+            def start(self, run=True):
+                calls.append(("start", self.name, run))
+                return True, ""
+
+            def restart(self):
+                calls.append(("restart", self.name))
+                return True, ""
+
+        services = self.eu.OsscheduleServices.__new__(self.eu.OsscheduleServices)
+        services._job = Job
+        self.assertEqual([j["name"] for j in services.managed()], ["tick", "server"])
+        services.stop("tick")
+        services.start("tick")
+        services.start("server")
+        self.assertEqual(calls, [("stop", "tick"), ("start", "tick", False), ("start", "server", True)])
+        with mock.patch.object(sys, "platform", "win32"):
+            self.assertIn("schtasks /Change /TN", services.fix({"name": "server"}))
+
+
 if __name__ == "__main__":
     unittest.main()

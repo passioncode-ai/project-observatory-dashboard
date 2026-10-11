@@ -213,6 +213,12 @@ def test_the_board_rule_fires_on_silence_and_only_with_the_plist() -> None:
     # process tree only.
     plist = (pathlib.Path.home() / "Library/LaunchAgents"
              / f"{install_launchd.instance_label('server')}.plist")
+    if sys.platform != "darwin":
+        # Off macOS an installed server is its systemd unit (W4b), in the sandbox's config folder.
+        import osschedule
+        import paths
+        unit = osschedule.handle("server", paths.HOME)
+        plist = unit.units / unit.unit
     check("the plist this rule looks for is not installed in the sandbox", not plist.exists(),
           str(plist))
     got = [f for f in board(work / "scratch") if f["type"] == "server.silent"]

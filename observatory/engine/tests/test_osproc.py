@@ -6,6 +6,7 @@ check that a process is alive that never touches it, and a stop that reaches the
 """
 from __future__ import annotations
 
+import os
 import re
 import signal
 import subprocess
@@ -13,6 +14,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -139,6 +141,28 @@ class Processes(unittest.TestCase):
                     offenders.append(f"{rel.as_posix()}:{n}")
         self.assertEqual(offenders, [])
 
+
+
+class Program(unittest.TestCase):
+    """W7: a tool npm installs is `<name>.cmd` on Windows, which a bare name does not start."""
+
+    def test_a_path_and_an_unknown_name_are_left_alone(self):
+        import osproc
+        self.assertEqual(osproc.program([sys.executable, "-V"]), [sys.executable, "-V"])
+        self.assertEqual(osproc.program(["no-such-tool-xyz", "a"]), ["no-such-tool-xyz", "a"])
+
+    @unittest.skipUnless(os.name == "nt", "PATHEXT is Windows'")
+    def test_a_cmd_tool_resolves_to_its_full_path(self):
+        import osproc
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            tool = Path(folder) / "obs-probe-tool.cmd"
+            tool.write_text("@echo off\r\necho ran %1\r\n")
+            with mock.patch.dict(os.environ, {"PATH": folder + os.pathsep + os.environ.get("PATH", "")}):
+                argv = osproc.program(["obs-probe-tool", "x"])
+                self.assertEqual(Path(argv[0]).name.lower(), "obs-probe-tool.cmd")
+                out = subprocess.run(argv, capture_output=True, text=True)
+                self.assertIn("ran x", out.stdout)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

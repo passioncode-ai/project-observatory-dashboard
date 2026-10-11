@@ -2406,10 +2406,12 @@ def collect() -> list[dict]:
     # not installed — nothing, because off is a legitimate state the operator
     # chose with --uninstall.
     sys.path.insert(0, str(paths.ROOT / "tools"))
+    import dashboard_open   # launchd's plist, or the Task Scheduler task / systemd unit (W4b)
     import install_launchd
-    sd_plist = pathlib.Path.home() / "Library/LaunchAgents" / f"{install_launchd.instance_label('server')}.plist"
     sd = paths.SCRATCH / "serverd.json"
-    if sd_plist.is_file():
+    sd_plist = (pathlib.Path.home() / "Library/LaunchAgents" / f"{install_launchd.instance_label('server')}.plist"
+                if sys.platform == "darwin" else "the server's Task Scheduler task or systemd unit")
+    if dashboard_open._always_on():
         beat = None
         if sd.is_file():
             try:
