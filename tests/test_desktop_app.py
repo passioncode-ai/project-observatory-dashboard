@@ -78,5 +78,55 @@ class DesktopApp(unittest.TestCase):
         self.assertNotIn("remote", caps)
 
 
+class DesktopRelease(unittest.TestCase):
+    """tools/desktop_release.py: the release workflow's names, receipts and the unsigned-notes rule."""
+
+    def setUp(self):
+        import importlib.util
+        import tempfile
+        spec = importlib.util.spec_from_file_location("desktop_release", ROOT / "tools/desktop_release.py")
+        self.dr = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.dr)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        self.version = self.dr.version()
+
+    def test_a_tag_must_name_the_version(self):
+        self.assertTrue(any("does not name" in p for p in self.dr.preflight("v0.0.1", True)))
+        problems = self.dr.preflight(f"v{self.version}-rc.1", True)
+        self.assertFalse(any("does not name" in p for p in problems), problems)
+
+    def test_an_unsigned_release_must_say_so(self):
+        from unittest import mock
+        section = f"## {self.version} — today\n\nNothing about signing.\n"
+        with mock.patch.object(self.dr, "changelog_section", return_value=section):
+            self.assertTrue(any("must say" in p for p in self.dr.preflight(f"v{self.version}", False)))
+            self.assertEqual(self.dr.preflight(f"v{self.version}", True), [])
+        with mock.patch.object(self.dr, "changelog_section", return_value=section + self.dr.UNSIGNED_LINE):
+            self.assertEqual(self.dr.preflight(f"v{self.version}", False), [])
+
+    def test_packages_get_our_names_and_a_receipt(self):
+        bundle = self.tmp / "bundle"
+        (bundle / "nsis").mkdir(parents=True)
+        (bundle / "nsis" / "Project Observatory_1.0.0_x64-setup.exe").write_bytes(b"MZ")
+        out = self.tmp / "out"
+        r = self.dr.package("windows", "arm64", False, bundle, out, None, {"install": "PASS"})
+        name = f"ProjectObservatory-{self.version}-windows-arm64-setup.exe"
+        self.assertEqual(list(r["files"]), [name])
+        self.assertEqual(r["windows_authenticode"], "NOT_SIGNED")
+        receipt = json.loads((out / f"ProjectObservatory-{self.version}-windows-arm64-receipt.json").read_text())
+        for key in ("version", "commit", "arch", "windows_authenticode", "checks"):
+            self.assertIn(key, receipt)
+        (bundle / "appimage").mkdir()
+        (bundle / "deb").mkdir()
+        (bundle / "appimage" / "Project Observatory_1.0.0_amd64.AppImage").write_bytes(b"x")
+        (bundle / "deb" / "Project Observatory_1.0.0_amd64.deb").write_bytes(b"y")
+        r = self.dr.package("linux", "x64", False, bundle, out, None, {})
+        self.assertEqual(sorted(r["files"]), [f"ProjectObservatory-{self.version}-linux-x64.AppImage",
+                                              f"ProjectObservatory-{self.version}-linux-x64.deb"])
+        self.assertNotIn("windows_authenticode", r)
+
+
 if __name__ == "__main__":
     unittest.main()
