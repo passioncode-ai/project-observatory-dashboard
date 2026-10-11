@@ -15,7 +15,8 @@ of the token it was called with). The meter:
 
    - L3 `call`  the grant's `perCallMaxUsd` (contract DEC-0041 adds the `call` window);
    - L2 `task`  the grant's spend on one task — keyed by the token's `task` claim, else the first
-                `act.session` of the chain, else the request's `tokenJti` (DEC-0041);
+                `act.session` of the chain, else the whole grant (`grant:<ref>`) — never the unsigned
+                `tokenJti` (DEC-0041);
    - L1         the grant's `total`, `project`, `day`, `week` and `month` windows, calendar windows in UTC
                 (a week starts on Monday);
    - L0 `month` the estate's total across every provider key (USD 1,000 a month by default) and the ceiling of
@@ -290,7 +291,11 @@ class Meter:
         return grant, None
 
     @staticmethod
-    def task_key(claims: dict, token_jti: str) -> str:
+    def task_key(claims: dict, grant_ref: str) -> str:
+        """The task window's key: the token's signed `task` claim, else the first `act.session` from the
+        outermost actor, else the whole grant (`grant:<ref>`, one window, closed). Never the request's
+        `tokenJti`: it is not signed, and a caller choosing it could open a new window per call and walk past
+        L2 (Fabric ADR-0144 amendment 2, 217aff4d; contract DEC-0041)."""
         if isinstance(claims.get("task"), str) and claims["task"]:
             return f"task:{claims['task']}"
         node = claims.get("act")
@@ -298,7 +303,7 @@ class Meter:
             if isinstance(node.get("session"), str) and node["session"]:
                 return f"session:{node['sub']}:{node['session']}"
             node = node.get("act")
-        return f"jti:{token_jti}"
+        return f"grant:{grant_ref}"
 
     def check(self, token: Any, request: Any) -> dict:
         """One grant check: the answer document (`grant-check.schema.json`). Raises RequestError on bad input."""
@@ -345,7 +350,7 @@ class Meter:
         if isinstance(per_call, (int, float)) and amount > per_call:
             return self._denied(now, "limit-reached", f"above the grant's per-call maximum of ${per_call:g}",
                                 "L3", "call")
-        task = self.task_key(claims, request["tokenJti"])
+        task = self.task_key(claims, ref)
         grant_id = grant["meta"]["id"]
         receipt = "rcpt_" + secrets.token_urlsafe(18)
         expires_at = min(now + self.reservation_seconds, 2**62)

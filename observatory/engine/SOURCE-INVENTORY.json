@@ -1272,8 +1272,8 @@
       "path": "meter.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d4b6ae6c61a122d10e70cf45836aab60aa5b538c94e54b6b55d2116cd616ed80",
-      "bytes": 24334
+      "export_sha256": "6a99845f50a3c655350b66d2591c68a26629dbfb6c9d69f86ada32acadd8cfe9",
+      "bytes": 24769
     },
     {
       "path": "observatory.py",
@@ -2861,15 +2861,15 @@
       "path": "tests/test_meter.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7daf7beb7de75c0bf3703fcfc4145fdf8d0851eabfeb406cf0405998d7929884",
-      "bytes": 25140
+      "export_sha256": "f1af379a7627aeb8c594e3912245dcc2bdfae441b86dc2f99b1bf80d8293db34",
+      "bytes": 25542
     },
     {
       "path": "tests/test_meter_wire.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1b810245d86d9f11c16c79c4c79d06eda3a68d83b73c09bad7f2c22d7c83445e",
-      "bytes": 6647
+      "export_sha256": "913617b2a3b22826cde79de7cfaed4cb4deb86dc19fe9a5d0038c149b691943c",
+      "bytes": 6751
     },
     {
       "path": "tests/test_metric_labels.py",

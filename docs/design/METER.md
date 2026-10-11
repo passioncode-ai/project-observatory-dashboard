@@ -55,7 +55,7 @@ The amount is reserved against every window of the grant and every level above i
 | Level | Window | Counted over |
 |---|---|---|
 | L3 | `call` | the grant's `perCallMaxUsd` (contract DEC-0041 adds `call` to the window enum) |
-| L2 | `task` | the grant's spend under one task: the token's `task` claim, else the first `act.session` in the chain, else the request's `tokenJti` (DEC-0041) |
+| L2 | `task` | the grant's spend under one task: the token's `task` claim, else the first `act.session` from the outermost actor, else the whole grant (`grant:<ref>`, one window, closed). Never the request's `tokenJti`: it is not signed, so a caller choosing a fresh one per call would open a fresh window and walk past L2 (Fabric ADR-0144 amendment 2, contract DEC-0041) |
 | L1 | `total`, `project`, `day`, `week`, `month` | the grant's whole life, everything on its project, and calendar windows in UTC (a week starts on Monday) |
 | L0 | `month` | the estate's total across every provider key (`estateMonthUsd`, default USD 1,000) and the ceiling of the provider key the grant's `project-key` source names (`keyCeilingsUsd`) |
 

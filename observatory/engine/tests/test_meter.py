@@ -267,23 +267,28 @@ class Meter(unittest.TestCase):
 
     def test_a_reservation_is_refused_at_the_window(self):
         """Fabric's step-3 gate: a reservation refused at the window."""
-        for jti in ("tok-callee-000000001", "tok-callee-000000002", "tok-callee-000000003"):
-            self.assertEqual(self.check(1.4, jti=jti)["decision"], "allowed")
-        self.assertDenied(self.check(1.0, jti="tok-callee-000000004"), "limit-reached", "L1", "day")
+        for i in (1, 2, 3):                       # three tasks, each inside its own 2 USD task window
+            self.assertEqual(self.check(1.4, claims(task=f"task-{i}"))["decision"], "allowed")
+        self.assertDenied(self.check(1.0, claims(task="task-4")), "limit-reached", "L1", "day")
         self.now[0] += 86400                      # the next UTC day opens a new day window
-        self.assertEqual(self.check(1.0, jti="tok-callee-000000005")["decision"], "allowed")
+        self.assertEqual(self.check(1.0, claims(task="task-5"))["decision"], "allowed")
 
     def test_the_per_call_maximum_is_window_call_at_L3(self):
         self.assertDenied(self.check(1.6), "limit-reached", "L3", "call")
 
-    def test_the_task_window_keys_on_task_then_session_then_jti(self):
+    def test_the_task_window_keys_on_task_then_session_then_grant(self):
         self.assertEqual(self.check(1.2, claims(task="task-1"), jti="tok-callee-000000001")["decision"], "allowed")
         self.assertDenied(self.check(1.2, claims(task="task-1"), jti="tok-callee-000000002"), "limit-reached", "L2", "task")
         self.assertEqual(self.check(1.2, claims(task="task-2"), jti="tok-callee-000000002")["decision"], "allowed")
         session = claims(act={"sub": "example-writer", "act": {"sub": "example-media", "session": "s-1"}})
         self.assertEqual(self.check(1.2, session, jti="tok-callee-000000003")["decision"], "allowed")
         self.assertDenied(self.check(1.2, session, jti="tok-callee-000000004"), "limit-reached", "L2", "task")
-        self.assertEqual(M.Meter.task_key(claims(), "tok-callee-000000009"), "jti:tok-callee-000000009")
+        self.assertEqual(M.Meter.task_key(claims(), f"{GRANT_ID}#3"), f"grant:{GRANT_ID}#3")
+
+    def test_without_task_or_session_the_task_window_is_the_whole_grant(self):
+        """An unsigned tokenJti never keys the window: fresh jtis must not open fresh L2 windows."""
+        self.assertEqual(self.check(1.2, jti="tok-callee-000000001")["decision"], "allowed")
+        self.assertDenied(self.check(1.2, jti="tok-callee-000000002"), "limit-reached", "L2", "task")
 
     def test_total_project_week_and_month_windows(self):
         self.write_grant(grant(spend={**grant()["spend"], "perCallMaxUsd": None, "limits": [
@@ -365,25 +370,26 @@ class Meter(unittest.TestCase):
                 self.meter.check(token, body)
 
     def test_settlement_counts_what_was_spent_and_a_reservation_lapses(self):
-        first = self.check(1.4, jti="tok-callee-000000001")
+        first = self.check(1.4, claims(task="task-1"))
         self.meter.settle(first["receipt"], 0.2)
         with self.assertRaises(M.RequestError):
             self.meter.settle(first["receipt"], 0.2)
         with self.assertRaises(M.RequestError):
             self.meter.settle("rcpt_unknown", 0.1)
-        self.assertEqual(self.check(1.4, jti="tok-callee-000000002")["decision"], "allowed")
-        self.assertEqual(self.check(1.4, jti="tok-callee-000000003")["decision"], "allowed")   # 0.2 + 2.8
-        self.assertEqual(self.check(1.4, jti="tok-callee-000000004")["decision"], "allowed")   # 4.4
-        self.assertDenied(self.check(1.4, jti="tok-callee-000000005"), "limit-reached", "L1", "day")
+        self.assertEqual(self.check(1.4, claims(task="task-2"))["decision"], "allowed")
+        self.assertEqual(self.check(1.4, claims(task="task-3"))["decision"], "allowed")   # 0.2 + 2.8
+        self.assertEqual(self.check(1.4, claims(task="task-4"))["decision"], "allowed")   # 4.4
+        self.assertDenied(self.check(1.4, claims(task="task-5")), "limit-reached", "L1", "day")
         self.now[0] += 3601                        # unsettled reservations lapse; the settled 0.2 stays
-        self.assertEqual(self.check(1.4, jti="tok-callee-000000006")["decision"], "allowed")
+        self.assertEqual(self.check(1.4, claims(task="task-6"))["decision"], "allowed")
 
     def test_concurrent_checks_cannot_overrun_a_limit(self):
         answers, lock = [], threading.Lock()
 
         def one(i):
             meter = self.make()                    # one connection each, as separate callers would hold
-            answer = meter.check(self.estate.sign(claims()), request(0.9, jti=f"tok-callee-{i:09d}"))
+            answer = meter.check(self.estate.sign(claims(task=f"task-{i}")),
+                                 request(0.9, jti=f"tok-callee-{i:09d}"))
             with lock:
                 answers.append(answer)
         threads = [threading.Thread(target=one, args=(i,)) for i in range(16)]

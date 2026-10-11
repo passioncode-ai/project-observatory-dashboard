@@ -55,14 +55,16 @@ class GrantCheckOverHttp(Base):
         return self.estate.sign(claims(iat=now - 5, exp=now + 300, **over))
 
     def test_an_allowed_check_then_the_window(self) -> None:
-        token = self.token()
-        first = self.call(token, "grant.check", {"amountUsd": 1.4, "tokenJti": "tok-callee-000000001"})
+        first = self.call(self.token(task="task-1"), "grant.check",
+                          {"amountUsd": 1.4, "tokenJti": "tok-callee-000000001"})
         self.assertEqual((first["decision"], first["_isError"]), ("allowed", False), first)
         self.assertTrue(first["receipt"].startswith("rcpt_"))
-        for jti in ("tok-callee-000000002", "tok-callee-000000003"):
-            self.assertEqual(self.call(token, "grant.check", {"amountUsd": 1.4, "tokenJti": jti})["decision"],
+        for i in (2, 3):
+            self.assertEqual(self.call(self.token(task=f"task-{i}"), "grant.check",
+                                       {"amountUsd": 1.4, "tokenJti": f"tok-callee-00000000{i}"})["decision"],
                              "allowed")
-        denied = self.call(token, "grant.check", {"amountUsd": 1.4, "tokenJti": "tok-callee-000000004"})
+        denied = self.call(self.token(task="task-4"), "grant.check",
+                           {"amountUsd": 1.4, "tokenJti": "tok-callee-000000004"})
         self.assertEqual((denied["decision"], denied["code"], denied["level"], denied["window"]),
                          ("denied", "limit-reached", "L1", "day"), denied)
 
