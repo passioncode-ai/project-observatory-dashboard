@@ -1998,8 +1998,8 @@
       "path": "tests/test_assistant.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e1c8670a3abc3811618939bcf541e7bbe9c34b2ec308d7bc92f4e1bbc8561197",
-      "bytes": 31296
+      "export_sha256": "4516a5a0dc709a4425b001fcb1ca830a1555d7a2d0e6e18a0468c6475cb62f25",
+      "bytes": 32437
     },
     {
       "path": "tests/test_at_stake.py",
@@ -3229,8 +3229,8 @@
       "path": "tests/test_serverd.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5ce82f5426cf932db24e5d5950b3ad6ab2ba81d911ada1b5273f25762aa313b3",
-      "bytes": 18485
+      "export_sha256": "ae78b676dbc4ae67631ef21c9cad64ff801f68494b8d1d52979f11f5fc5c9427",
+      "bytes": 18758
     },
     {
       "path": "tests/test_session_start.py",
