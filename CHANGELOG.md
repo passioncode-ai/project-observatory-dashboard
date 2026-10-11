@@ -3,7 +3,13 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.24.0 — 2026-10-12
+
+The disk guard keeps up with a disk that fills fast and frees more on every system: the maintenance pass runs
+every 15 minutes, under pressure the guard acts on every pass, clears application and tool caches and lowers the
+git tier's thresholds, and it knows what is held without `lsof`. One project answers to many names (aliases,
+`project.resolve`). The meter grows: the estate's month measured, `grant.check` declared, the keyserver trusting
+the delegation token. The companion plugin `observatory-log` is unchanged.
 
 ### Added
 
