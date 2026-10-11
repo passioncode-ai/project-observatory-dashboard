@@ -1164,15 +1164,15 @@
       "path": "mcp/capability_tools.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "96bf8689af9a18c3dbee780bbf2e8a88e80d5000628050bfebaf952940c024b9",
-      "bytes": 22338
+      "export_sha256": "661579d18062b2e66f9cc7e6ed333ce0d52c3c7a64d1730a88d3e89c8e7fed31",
+      "bytes": 26872
     },
     {
       "path": "mcp/http_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d93edde4356b11def9e18c5b5135d096fb08b5e656b1ed66312d23e5cd2bf397",
-      "bytes": 10717
+      "export_sha256": "0304b7808a9d744e434e57a9d84721348880791b53609b21dcb3b4afe91e8846",
+      "bytes": 12141
     },
     {
       "path": "mcp/memory_wire.py",
@@ -1202,8 +1202,8 @@
       "path": "memory_access.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8aa995933d1996ebe6068dffeb0c9212205d473e7a2b3fe044a454329b9ddbea",
-      "bytes": 22432
+      "export_sha256": "09105ae0e21b80cb50ffd6b3367318fff79e96a6dc1b3bfda9c8d7098c1ef4d2",
+      "bytes": 23274
     },
     {
       "path": "memory_redact.py",
@@ -1215,8 +1215,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "eb1f203c55eb7167bee7e283e9bd3ab97c5c2f09f64f3111e18d898237e95c9c",
-      "bytes": 82522,
+      "export_sha256": "eed2236f023a4561eeaebcbdf1db17d07fea2aca6ba15b2a1789ac7557f2a4f6",
+      "bytes": 83872,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -1866,8 +1866,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "b18ec97f6ec91c095b5a015eaa75537fd916ef989fb0416fe8d9a722f7263be8",
-      "bytes": 23247,
+      "export_sha256": "f7b6a2f48762d5725fa475d97c24af16ed80bed3ee91ec439ee3f5b377f6a7c6",
+      "bytes": 23531,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2495,8 +2495,8 @@
       "path": "tests/test_handed_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5ce2359c381fe164aa1fc0934ab87b97ee7175acdb600071b8963b51c4071f42",
-      "bytes": 22409
+      "export_sha256": "ff47200a759529eeb52449c638cbace07da2699f8bae75544b22bebdf212c72b",
+      "bytes": 22629
     },
     {
       "path": "tests/test_handoff.py",
@@ -2745,8 +2745,8 @@
     {
       "path": "tests/test_mcp_wire.py",
       "source_sha256": "6ef615d88123f97f325c42bf8e4a9a41c0d3e501756f82c8833f761143cdf006",
-      "export_sha256": "41c60659018cb79547e2009a44dd04822e9280351995e582f7fab4ae76041e30",
-      "bytes": 42970,
+      "export_sha256": "c0bce876ae4a134544ca26ead375b449e1de57dda043c2bc3a103f8ca7d7ff39",
+      "bytes": 43079,
       "python_comments_removed": 13,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,

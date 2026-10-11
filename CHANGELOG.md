@@ -7,6 +7,15 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **The meter** (OBS-55; Fabric ADR-0144 step 3, contract DEC-0037/0038/0039): `grant.check` on the memory-http
+  door answers whether a call may spend. The caller presents the onward delegation token Fabric's hub minted for
+  `project-observatory` in `Authorization` (never in an argument); the meter verifies it offline against the
+  estate's Ed25519 keys (`delegation.py`, the contract's verifier table DL-13), reads the grant from the hub's
+  grant directory, and reserves the amount against the grant's `call`, `task`, `total`, `project`, `day`, `week`
+  and `month` windows and the estate's monthly total (L0, USD 1,000 by default) and provider-key ceilings, in one
+  transaction. It answers a receipt, or a denial naming the code, the level and the window. `full grant --status`,
+  `--check` (token on stdin) and `--settle`. The ledger records no person and no chain. Configuration:
+  `config/meter.json`. Design: `docs/design/METER.md`.
 - **The agent harness scan** (`integrations.harness`, `sources.harness_root`; off until turned on): what every
   Claude Code and Codex session loads before the first word. It counts each skill's entry in the session's skill
   listing against a budget (`OBSERVATORY_HARNESS_BUDGET_CHARS`, default 30,000 characters) and names the

@@ -1,0 +1,97 @@
+# The meter: grant checks against delegation tokens (OBS-55)
+
+Observatory is the estate's **meter** in Fabric's delegation model
+([Fabric ADR-0144](https://github.com/passioncode-ai/fabric/blob/812876cf/docs/adr/0144-one-delegation-model-fabric-issues-the-chain-the-callee-checks-it-observatory-meters-it.md),
+step 3 of [its plan](https://github.com/passioncode-ai/fabric/blob/812876cf/docs/evidence/plans/2026-10-11-delegation-model/README.md)).
+Fabric's hub issues identity and holds the grants. Observatory issues neither: it answers the contract's
+`grant-check` (fabric-agent-contract DEC-0037/0038/0039, `docs/specification/spend-policy.md` and
+`delegation.md` at `8e49fbd`). Code: `observatory/engine/delegation.py` (the verifier),
+`observatory/engine/meter.py` (the check and the ledger), `tools/grant.py` (the CLI), `grant.check` in
+`mcp/capability_tools.py`, and the door in `mcp/http_service.py`.
+
+## M1 — Who may ask
+
+A callee about to spend exchanges its own delegation token at the hub for an **onward token for the meter**:
+`aud` = `project-observatory`, `scope` = `grant.check`, `effect` = `["none"]`, with the same grant, person and
+project. It calls `grant.check` on the memory-http door (`project-observatory full memory-http`, default port
+47313) with that token in `Authorization: Bearer`, or the hub forwards it in `Fabric-Delegation`.
+
+`delegation.py` checks the token offline against the estate's Ed25519 keys, in the order of the contract's
+verifier table DL-13: the key set, the compact form and header (no duplicate member, `typ`
+`fabric-delegation+jwt`, no `jku`/`jwk`/`x5u`/`x5c`/`crit`), the key, the signature, the claims and issuer, the
+lifetime (at most 600 s) and clock (60 s leeway both ways), the audience, the chain depth (at most four), the
+scope and the effect at a read-only door. Any refusal of the meter's token is `principal-unproven`, with the
+verifier's code in the reason (`verifyMeterToken`).
+
+**The token travels in a header and nowhere else** (DL-11). It opens `grant.check` alone: the door puts it on
+a `delegation` channel that every memory tool refuses (`unknown-channel`) and every other tool answers
+`local-only`. It is never journalled. A present but invalid `Fabric-Delegation` header is the token, never a
+fallthrough to a binding. The stdio server carries no token, so `grant.check` there answers
+`principal-unproven`. From a terminal: `full grant --check --amount USD --jti JTI < token-file`.
+
+## M2 — Which grant
+
+The token's `grant` claim names `<meta.id>#<meta.revision>`; a token naming several needs `grantRef`. The meter
+reads `<grantsDir>/<meta.id>.json`, which the hub writes for every grant it holds, in the contract's
+standing-grant shape (Fabric ADR-0144 amendment 1). The file is never authority by itself:
+
+| What the meter finds | Answer |
+|---|---|
+| no grant directory configured | `unknown-state` (an unknown grant state is a denial) |
+| no file | `no-grant` |
+| a file that does not parse or is not that standing grant | `unknown-state` |
+| another revision than the token names | `no-grant` |
+| `state: revoked` | `grant-revoked` |
+| `state: expired`, or past `expiresAt` | `grant-expired` |
+| before `startsAt`, or a project other than the token's | `no-grant` |
+| a credential source other than `project-key` or `capability` | `credential-source-refused` |
+| no `spend` block and an amount above zero | `no-grant` |
+
+## M3 — Windows and levels
+
+The amount is reserved against every window of the grant and every level above it, in one SQLite
+`BEGIN IMMEDIATE` transaction, so concurrent checks queue and cannot together overrun a limit:
+
+| Level | Window | Counted over |
+|---|---|---|
+| L3 | `call` | the grant's `perCallMaxUsd` (contract DEC-0041 adds `call` to the window enum) |
+| L2 | `task` | the grant's spend under one task: the token's `task` claim, else the first `act.session` in the chain, else the request's `tokenJti` (DEC-0041) |
+| L1 | `total`, `project`, `day`, `week`, `month` | the grant's whole life, everything on its project, and calendar windows in UTC (a week starts on Monday) |
+| L0 | `month` | the estate's total across every provider key (`estateMonthUsd`, default USD 1,000) and the ceiling of the provider key the grant's `project-key` source names (`keyCeilingsUsd`) |
+
+A reservation counts its amount until `expiresAt` (default one hour later); a settled receipt counts what was
+spent instead (`full grant --settle RECEIPT --usd USD`); an unsettled one lapses. `remainingUsd` is the smallest
+remainder over the grant's windows, `null` for an unlimited grant. `full grant --status` reports the month
+against L0 with `alert` at 80 %, each key against its ceiling, the open reservations, and `degraded` while the
+keys or the grant directory cannot be read.
+
+The ledger is `STATE/meter/meter.db` (directory 0700, file 0600). It records the grant reference, the project,
+the task key, the key reference, the token's jti, the amount and the times. **It records no person and no
+chain** (DL-22): the mapping from a grant to who acted is in the hub's journal.
+
+## M4 — Configuration
+
+`config/meter.json`, every field optional:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `audience` | `project-observatory` | the meter's agent id: the onward token's `aud` |
+| `capability` | `grant.check` | the scope the onward token must carry |
+| `issuer` | none (any) | the `iss` to trust (`urn:fabric:estate:<id>`) |
+| `hubJson` | none | the hub's `hub.json`: its `jwks` and `grantsDir` |
+| `jwks`, `grantsDir` | from `hubJson` | a JWK Set file and the grant directory, overriding `hubJson` |
+| `estateMonthUsd` | 1000 | L0, the estate's monthly total |
+| `alertRatio` | 0.8 | where `--status` raises `alert` |
+| `keyCeilingsUsd` | `{}` | L0 per provider key, by the `ref` of a `project-key` credential source |
+| `reservationSeconds` | 3600 | how long an unsettled reservation holds |
+
+The keys are cached for ten minutes and re-read at most once a minute on an unknown `kid` (DL-15).
+
+## Not decided here
+
+- Declaring `grant.check` in `fabric-agent.json`: the manifest's capabilities point at published schema URLs
+  and carry the manifest's content hash, so the declaration ships with a contract-schema publication (OBS-67).
+- Settling from usage reports (`byGrant` receipts) instead of by hand, and the alert at 80 % as a finding
+  (OBS-56).
+- `use_secret.py run` releasing a slot only under a grant that names it (OBS-57) and the keyserver trusting the
+  token rather than `X-Observatory-Caller` (OBS-62).

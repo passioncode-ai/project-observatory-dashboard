@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/delegation-jwks.schema.json",
+  "title": "The estate's published signing keys (fabric-delegation/0.1, DEC-0039)",
+  "description": "A JWK Set (RFC 7517) of Ed25519 public keys (RFC 8037). It carries public members only: a key with a private member is refused. During a rotation it holds the new key and the previous one.",
+  "type": "object",
+  "required": ["keys"],
+  "properties": {
+    "keys": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["kty", "crv", "x", "kid"],
+        "properties": {
+          "kty": { "const": "OKP" },
+          "crv": { "const": "Ed25519" },
+          "x": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "The 32-byte public key, base64url without padding." },
+          "kid": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "use": { "const": "sig" },
+          "alg": { "const": "EdDSA" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

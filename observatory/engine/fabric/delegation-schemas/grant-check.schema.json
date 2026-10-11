@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/grant-check.schema.json",
+  "title": "Grant check answer (DEC-0037)",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/allowed"
+    },
+    {
+      "$ref": "#/$defs/denied"
+    }
+  ],
+  "$defs": {
+    "level": {
+      "enum": [
+        "L0",
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "description": "L0 the limits no grant can raise: the estate total across all provider keys and each provider key's own ceiling (DEC-0039); L1 project policy; L2 task budget; L3 call."
+    },
+    "allowed": {
+      "type": "object",
+      "required": [
+        "decision",
+        "receipt",
+        "grantRef",
+        "reservedUsd",
+        "expiresAt",
+        "checkedAt"
+      ],
+      "properties": {
+        "decision": {
+          "const": "allowed"
+        },
+        "receipt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "grantRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "remainingUsd": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checkedAt": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "reservedUsd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Held against the grant (and every level above it) until settled or expired, so concurrent checks cannot overrun a limit together."
+        },
+        "expiresAt": {
+          "$ref": "common.schema.json#/$defs/timestamp",
+          "description": "An unsettled reservation lapses here."
+        }
+      },
+      "additionalProperties": false
+    },
+    "denied": {
+      "type": "object",
+      "required": [
+        "decision",
+        "level",
+        "code",
+        "reason",
+        "checkedAt"
+      ],
+      "properties": {
+        "decision": {
+          "const": "denied"
+        },
+        "level": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/level"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where the check stopped; null when it stopped before any level (no grant, unproven principal, unknown state)."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approvalRequest": {
+          "$ref": "common.schema.json#/$defs/uri",
+          "description": "The durable request filed for this spend, when the limit allows one."
+        },
+        "checkedAt": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "code": {
+          "$ref": "#/$defs/code"
+        },
+        "window": {
+          "enum": [
+            "total",
+            "task",
+            "project",
+            "day",
+            "week",
+            "month"
+          ],
+          "description": "DEC-0039: the window that was reached; required with limit-reached."
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "limit-reached"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "window"
+            ],
+            "properties": {
+              "level": {
+                "$ref": "#/$defs/level"
+              },
+              "window": true
+            }
+          }
+        }
+      ]
+    },
+    "code": {
+      "enum": [
+        "limit-reached",
+        "no-grant",
+        "grant-expired",
+        "grant-revoked",
+        "principal-unproven",
+        "credential-source-refused",
+        "unknown-state"
+      ],
+      "description": "Why a check stopped; the level says where."
+    }
+  }
+}

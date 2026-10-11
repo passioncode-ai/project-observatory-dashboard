@@ -52,6 +52,8 @@ GOLDEN_TOOLS = [
     "memory.checkpoint.latest", "memory.checkpoint.write", "memory.handoff.accept",
     "memory.handoff.create", "memory.handoff.get", "memory.recall", "memory.record",
     "memory.search", "memory.workflow.list",
+    # the meter (OBS-55): a delegation token over HTTP, principal-unproven over stdio (1)
+    "grant.check",
 ]
 FAILURES: list[str] = []
 

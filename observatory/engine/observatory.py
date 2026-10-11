@@ -109,6 +109,7 @@ STEPS = {
     "scan-mcp":  [PY, "collectors/scan_mcp.py", "store/raw/mcp.json"],
     "scan-harness": [PY, "collectors/scan_harness.py", "store/raw/harness.json"],
     "harness":   [PY, "tools/harness.py"],
+    "grant":     [PY, "tools/grant.py"],
     "openrouter": [PY, "collectors/scan_openrouter.py", "store/raw/openrouter.json"],
     "env":       [PY, "collectors/scan_env.py", "store/raw/env.json"],
     # Gated to once a day inside the scan itself: every run pulls every
@@ -499,6 +500,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                listing budget and security rules (integration harness)
   harness [--accept KEY|--accept-all]  the last harness scan; --accept records a changed skill's
                                new digest as reviewed
+  grant --status | --check --amount USD --jti JTI [--grant-ref REF] < token | --settle RECEIPT --usd USD
+                               the meter: spend against grants and the estate's monthly limit (L0);
+                               the delegation token is read from stdin, never an argument
 
 `project-observatory full-path` (outside `full`) prints the engine directory, where the
 credential tools live: tools/vault.py, tools/use_secret.py, tools/install_key.py.
@@ -552,6 +556,12 @@ class CommandRefused(ValueError):
 OPTION_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 #: A harness skill key, `plain/<folder>` or `plugin:<plugin>@<marketplace>/<folder>` (collectors/scan_harness.py).
 HARNESS_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}")
+#: The meter's values (tools/grant.py): an amount, a token jti, a grant ref `<id>#<revision>`, a receipt.
+USD = re.compile(r"\d{1,9}(\.\d{1,6})?")
+TOKEN_JTI = re.compile(r"[A-Za-z0-9._~-]{16,128}")
+GRANT_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:~/@+-]{0,250}#\d{1,9}")
+RECEIPT = re.compile(r"rcpt_[A-Za-z0-9_-]{8,64}")
+PURPOSE = re.compile(r"[^\x00-\x1f]{1,200}")
 
 #: OPTIONS A SINGLE STEP FORWARDS TO ITS TOOL: an allowlist, not a pass-through.
 #: A step's command is fixed and its positional arguments are already this
@@ -571,6 +581,14 @@ STEP_OPTIONS: dict[str, dict[str, tuple[str | None, re.Pattern | None, str]]] = 
                 "--force": (None, None, "ignore each plugin's age gate")},
     "harness": {"--accept": ("KEY", HARNESS_KEY, "record a changed skill's current digest as reviewed"),
                 "--accept-all": (None, None, "the same for every changed skill")},
+    "grant": {"--status": (None, None, "the month, the keys and open reservations"),
+              "--check": (None, None, "one grant check; the token on stdin"),
+              "--amount": ("USD", USD, "--check: the amount to reserve"),
+              "--jti": ("JTI", TOKEN_JTI, "--check: the jti of the token the callee was called with"),
+              "--grant-ref": ("REF", GRANT_REF, "--check: which of the token's grants"),
+              "--purpose": ("TEXT", PURPOSE, "--check: one line a person can read"),
+              "--settle": ("RECEIPT", RECEIPT, "settle a receipt"),
+              "--usd": ("USD", USD, "--settle: what was spent")},
 }
 
 

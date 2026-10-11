@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/delegation-token.schema.json",
+  "title": "Delegation token claims (fabric-delegation/0.1, DEC-0039)",
+  "description": "The decoded payload of a delegation token: a JWT (RFC 7519) signed by the estate hub with Ed25519 (alg EdDSA, RFC 8037), shaped as OAuth 2.0 Token Exchange (RFC 8693). The protected header is $defs/header. The issuer emits exactly these claims; a verifier ignores claims it does not know (RFC 7519 §4).",
+  "type": "object",
+  "required": ["iss", "sub", "act", "aud", "scope", "effect", "grant", "iat", "exp", "jti"],
+  "properties": {
+    "iss": { "$ref": "common.schema.json#/$defs/uri", "description": "The estate hub that signed the token; stable across key rotation and port changes (urn:fabric:estate:<estate id>)." },
+    "sub": { "$ref": "common.schema.json#/$defs/uri", "description": "The principal: the person of the estate on whose behalf the work runs (the operator, or an external person under a share grant)." },
+    "act": { "$ref": "#/$defs/actor", "description": "RFC 8693 §4.1 actor chain: the agent now calling outermost, each earlier agent nested inside, at most four deep." },
+    "aud": { "$ref": "common.schema.json#/$defs/agentId", "description": "Exactly one callee agent id, as a string, never an array." },
+    "scope": {
+      "type": "string",
+      "maxLength": 4096,
+      "pattern": "^[a-z][a-z0-9._-]{1,127}( [a-z][a-z0-9._-]{1,127})*$",
+      "description": "RFC 8693 §4.2: space-delimited capability names (tool names) of the callee."
+    },
+    "effect": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/effectClass" },
+      "description": "The effect ceiling: the classes admitted, with none below every class and draft below every external class."
+    },
+    "grant": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 256 },
+      "description": "Opaque references of the grant(s) the call is under; a usage report's byGrant repeats them."
+    },
+    "spend": {
+      "description": "What the grant had left when the token was minted. Informative: the meter's grant check decides, not this claim.",
+      "oneOf": [
+        { "type": "object", "required": ["mode"], "properties": { "mode": { "const": "unlimited" } }, "additionalProperties": false },
+        {
+          "type": "object",
+          "required": ["mode", "remaining"],
+          "properties": {
+            "mode": { "const": "limited" },
+            "remaining": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "type": "object",
+                "required": ["window", "remainingUsd"],
+                "properties": {
+                  "window": { "enum": ["total", "task", "project", "day", "week", "month"] },
+                  "remainingUsd": { "type": "number", "minimum": 0 }
+                },
+                "additionalProperties": false
+              }
+            },
+            "perCallMaxUsd": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "project": { "$ref": "common.schema.json#/$defs/uri", "description": "Present when the grant is bound to a project." },
+    "iat": { "type": "integer", "minimum": 0 },
+    "exp": { "type": "integer", "minimum": 0, "description": "At most 600 seconds after iat (FAC-SEM-049)." },
+    "jti": { "type": "string", "pattern": "^[A-Za-z0-9._~-]{16,128}$" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "session": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$", "description": "An opaque id of the session the actor runs in, when it runs in one." },
+    "header": {
+      "type": "object",
+      "required": ["alg", "typ", "kid"],
+      "properties": {
+        "alg": { "const": "EdDSA" },
+        "typ": { "const": "fabric-delegation+jwt" },
+        "kid": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "additionalProperties": false
+    },
+    "actor": {
+      "type": "object",
+      "required": ["sub"],
+      "properties": { "sub": { "$ref": "common.schema.json#/$defs/agentId" }, "session": { "$ref": "#/$defs/session" }, "act": { "$ref": "#/$defs/actor2" } },
+      "additionalProperties": false
+    },
+    "actor2": {
+      "type": "object",
+      "required": ["sub"],
+      "properties": { "sub": { "$ref": "common.schema.json#/$defs/agentId" }, "session": { "$ref": "#/$defs/session" }, "act": { "$ref": "#/$defs/actor3" } },
+      "additionalProperties": false
+    },
+    "actor3": {
+      "type": "object",
+      "required": ["sub"],
+      "properties": { "sub": { "$ref": "common.schema.json#/$defs/agentId" }, "session": { "$ref": "#/$defs/session" }, "act": { "$ref": "#/$defs/actor4" } },
+      "additionalProperties": false
+    },
+    "actor4": {
+      "type": "object",
+      "required": ["sub"],
+      "properties": { "sub": { "$ref": "common.schema.json#/$defs/agentId" }, "session": { "$ref": "#/$defs/session" } },
+      "additionalProperties": false,
+      "description": "The fourth actor is the last: it carries no act."
+    }
+  }
+}

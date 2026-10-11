@@ -113,6 +113,8 @@ BOUNDARY += ('osproc',)
 BOUNDARY += ('osprivacy',)
 BOUNDARY += ('osschedule',)
 BOUNDARY += ('harness',)
+# OBS-55: the meter and the delegation verifier (contract DEC-0039).
+BOUNDARY += ('meter', 'meter_wire')
 # docs/design/WINDOWS-LINUX.md W3: a whole tick, through tools/tick.py.
 BOUNDARY += ('tick_py',)
 # One credential-shape heuristic for every door that judges typed text.
@@ -196,6 +198,8 @@ ROOT_FILES = (
     'maintenance.py', 'app_update.py', 'update_events.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
+    # The meter and the delegation verifier (OBS-55).
+    'delegation.py', 'meter.py',
     'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
@@ -236,6 +240,7 @@ def copy_source(target: Path) -> None:
     selected.add(ROOT / 'fabric/FABRIC-CONFORMANCE.md')
     selected.add(ROOT / 'fabric/interop-schemas/README.md')
     selected.add(ROOT / 'fabric/memory-schemas/README.md')
+    selected.add(ROOT / 'fabric/delegation-schemas/README.md')
     selected.add(ROOT / 'fabric/memory-provider.json')
     selected.add(ROOT / 'store/schema.sql')
     # The agent-memory evaluation corpus (tools/memory_eval.py reads it).
@@ -248,7 +253,7 @@ def copy_source(target: Path) -> None:
                      and '__pycache__' not in p.parts}
     # The dashboard's catalogs and the vendored brand manifest are data it reads.
     for folder in ('defaults', 'plugins', 'fabric/fixtures', 'fabric/schemas', 'fabric/service-schemas',
-                   'fabric/interop-schemas', 'fabric/memory-schemas',
+                   'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas',
                    'dashboard/locales', 'dashboard/brand'):
         selected |= set((ROOT / folder).glob('*.json'))
     for source in sorted(selected):
