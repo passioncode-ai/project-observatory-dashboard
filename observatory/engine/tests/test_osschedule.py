@@ -276,7 +276,7 @@ class Wiring(Workspace):
         self.assertEqual(got["kind"], "task-scheduler")
         self.assertTrue(got["path"].endswith("-maintain"))
         self.assertIn("<Delay>PT1M30S</Delay>", got["xml"])
-        self.assertIn("<Interval>PT1H</Interval>", got["xml"])
+        self.assertIn("<Interval>PT15M</Interval>", got["xml"])
         self.assertIn("OBSERVATORY_SYSTEM_SETUP=1", got["xml"])
 
 

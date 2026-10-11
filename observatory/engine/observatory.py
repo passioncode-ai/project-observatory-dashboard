@@ -488,7 +488,7 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   cleanup [--apply [--include manual]]  plan, or remove what loses nothing; manual tier archives first
   disk-guard [--apply] [--level L]  keep free space by pressure: temp, browser clones, Trash, cache
                                tools, build output of idle checkouts; never what a process holds.
-                               Runs every hour from `maintain` when features.auto_cleanup is on
+                               Runs from `maintain` (every 15 min) when features.auto_cleanup is on
   tick                         configured cycle; scheduler must be explicitly enabled
   assistant ACTION             the app's JSON protocol (observatory-assistant/1) on stdin/stdout
   workflow list|show|handoff|close   agent workflows; handoff --force and close need a terminal

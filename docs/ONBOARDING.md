@@ -608,8 +608,9 @@ worktree stays and the run reports it as failed with the reason.
 
 The tick is long on a busy machine, and its cleanup step comes late: on a loaded
 machine it can go unreached for hours, exactly when the disk is filling. So with
-`features.auto_cleanup` on, the hourly maintenance job (`full maintain`) runs the
-**disk guard** first in every pass, before the update and the backup:
+`features.auto_cleanup` on, the maintenance job (`full maintain`, every 15 minutes) runs the
+**disk guard** first in its pass, before the update and the backup — once an hour while space is
+normal, on every pass once free space falls below the `low` line:
 
 ```sh
 project-observatory full disk-guard                  # the plan at the current pressure; removes nothing
@@ -628,8 +629,21 @@ under `guard`:
 | Temporary entries untouched for | 3 days | 1 day | 1 day |
 | Trash items older than | 30 days | 30 days | 3 days |
 
+Application and tool cache folders (`~/Library/Caches`, `~/.cache`) untouched for 7 / 2 / 1 days go
+too, except the downloaded browsers and SDKs a tool does not fetch again by itself (`cache_keep`:
+Playwright, camoufox, puppeteer, cargo-xwin and others) and `uv`, which has its own command.
 Browser code-sign clones a crashed browser left behind go at any pressure, and
-the cleanup's own git auto tier runs after them. "Nobody worked in" means no
+the cleanup's own git auto tier runs after them — with its thresholds lowered by the same
+pressure (`pressure` in `config/cleanup.json`): a clean worktree or a merged branch nobody
+touched for 3 days at `low`, 1 day at `critical`, instead of 7. Only that tier moves; a
+worktree with uncommitted edits or a branch with unique commits never does. npx's package
+cache and macOS diagnostic reports are swept too.
+
+**On every system.** What a process holds is read with `lsof` on macOS and Linux, from
+`/proc` on a Linux without `lsof`, and on Windows by renaming the folder aside before
+removing it — Windows refuses to rename a folder something holds, so a refusal is a skip
+and nothing of it is deleted. The schedule is the same maintenance job everywhere: launchd,
+a systemd user timer, or a Task Scheduler task, every 15 minutes. "Nobody worked in" means no
 checkout or commit and no uncommitted file changed since — never the index,
 which every `git status` rewrites.
 

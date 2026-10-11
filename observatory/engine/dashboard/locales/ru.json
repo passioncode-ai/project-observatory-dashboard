@@ -2106,5 +2106,6 @@
  },
  "pressure": "давление",
  "Estate spend near its monthly limit": "Расход хозяйства близок к месячному лимиту",
- "the estate has spent ${spent} of its ${limit} monthly limit": "хозяйство потратило ${spent} из месячного лимита ${limit}"
+ "the estate has spent ${spent} of its ${limit} monthly limit": "хозяйство потратило ${spent} из месячного лимита ${limit}",
+ "cache-dir": "кеш приложения"
 }

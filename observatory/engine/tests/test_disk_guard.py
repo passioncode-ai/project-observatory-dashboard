@@ -38,7 +38,10 @@ def age(path: Path, days: float) -> None:
     t = time.time() - days * DAY
     for dirpath, dirnames, filenames in os.walk(path, topdown=False):
         for n in filenames + dirnames:
-            os.utime(os.path.join(dirpath, n), (t, t), follow_symlinks=False)
+            try:
+                os.utime(os.path.join(dirpath, n), (t, t), follow_symlinks=False)
+            except FileNotFoundError:
+                pass            # git's own short-lived files (a lock, a gc temp) come and go meanwhile
     os.utime(path, (t, t), follow_symlinks=False)
 
 
@@ -185,14 +188,14 @@ class Temp(Base):
 
 
 class Order(Base):
-    def test_commands_first_then_largest_paths_and_the_cap_is_per_class(self):
+    def test_paths_first_largest_first_commands_last_and_the_cap_is_per_class(self):
         for name, size in (("small", 10), ("large", 5000), ("mid", 300)):
             (self.t1 / name).mkdir()
             (self.t1 / name / "f").write_bytes(b"x" * size)
             age(self.t1 / name, 9)
         cfg = self.cfg(commands=[{"argv": ["python3", "-c", "pass"], "level": "normal"}])
         plan = self.g.build_plan(cfg, "normal", self.free(), time.time(), [])
-        self.assertEqual(plan[0]["class"], "cache-command")
+        self.assertEqual(plan[-1]["class"], "cache-command", "a tool's command waits behind the paths")
         self.assertEqual([Path(a["target"]).name for a in plan if a["class"] == "temp"], ["large", "mid", "small"])
         with patch.object(self.g, "load_config", return_value={**cfg, "max_actions_per_class": 1}), \
                 patch.object(self.g.Holders, "take", return_value=self.free()), \
@@ -243,12 +246,67 @@ class Acting(Base):
             self.assertEqual(self.g.act(a, self.free())["result"], "skipped")
             self.assertEqual(self.g.act({**a, "busy_output": ""}, self.free())["result"], "failed")
 
+    def test_a_command_held_up_on_a_lock_is_skipped_quickly(self):
+        a = {"class": "cache-command", "target": "tool prune", "busy_if": [], "needs": [], "timeout": 1,
+             "argv": [sys.executable, "-c", "import time; time.sleep(30)"]}
+        started = time.monotonic()
+        with patch.object(self.g, "running", return_value=False):
+            rec = self.g.act(a, self.free())
+        self.assertEqual(rec["result"], "skipped")
+        self.assertLess(time.monotonic() - started, 10)
+
     def test_commands_are_chosen_by_pressure_and_by_what_is_installed(self):
         cfg = self.cfg(commands=[{"argv": ["python3", "-c", "pass"], "level": "normal"},
                                  {"argv": ["python3", "-V"], "level": "critical"},
                                  {"argv": ["no-such-tool-here", "prune"], "level": "normal"}])
         self.assertEqual([a["target"] for a in self.g.plan_commands(cfg, "normal")], ["python3 -c pass"])
         self.assertEqual(len(self.g.plan_commands(cfg, "critical")), 2)
+
+
+class CacheDirs(Base):
+    def test_old_unheld_caches_go_and_held_fresh_and_kept_ones_stay(self):
+        caches = self.base / "Caches"
+        for name in ("com.example.editor", "held-app", "fresh-tool", "ms-playwright"):
+            (caches / name).mkdir(parents=True)
+            (caches / name / "blob").write_bytes(b"x" * 10)
+        age(caches, 9)
+        (caches / "fresh-tool" / "new").write_text("now")
+        cfg = self.cfg(cache_roots=[str(caches)], cache_keep=["ms-playwright"])
+        plan = self.g.plan_cache_dirs(cfg, "normal", self.free(caches / "held-app" / "blob"), time.time())
+        self.assertEqual([Path(a["target"]).name for a in plan], ["com.example.editor"])
+        self.assertEqual(plan[0]["class"], "cache-dir")
+
+    def test_pressure_shortens_the_age(self):
+        caches = self.base / "Caches"
+        (caches / "tool").mkdir(parents=True)
+        age(caches, 3)
+        cfg = self.cfg(cache_roots=[str(caches)], cache_keep=[])
+        self.assertEqual(self.g.plan_cache_dirs(cfg, "normal", self.free(), time.time()), [])
+        self.assertEqual(len(self.g.plan_cache_dirs(cfg, "low", self.free(), time.time())), 1)
+
+
+class Cadence(Base):
+    def run_auto(self, previous_at, free_gb):
+        import paths
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "disk-guard.json").write_text(json.dumps({"at": previous_at, "acting": True}))
+        settings = self.home / "config" / "settings.json"
+        doc = json.loads(settings.read_text())
+        doc.setdefault("features", {})["auto_cleanup"] = True
+        settings.write_text(json.dumps(doc))
+        with patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "free_bytes", return_value=int(free_gb * self.g.GB)), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g.subprocess, "run", side_effect=OSError):
+            return self.g.run(["--auto"])
+
+    def test_normal_pressure_acts_hourly_and_low_pressure_every_pass(self):
+        just_now = self.g.now()
+        self.assertTrue(self.run_auto(just_now, 100).get("not_due"), "normal, ran a minute ago: not due")
+        self.assertFalse(self.run_auto(just_now, 20).get("not_due"), "low: every pass")
+        self.assertFalse(self.run_auto("2026-01-01T00:00:00Z", 100).get("not_due"), "normal, an hour ago: due")
 
 
 class Clones(Base):
@@ -417,8 +475,8 @@ class RunBudget(Base):
                 stack.enter_context(p)
             stack.enter_context(patch.object(self.g, "refresh", side_effect=lambda *a, **k: ran.append(a) or "x"))
             # A plan already made, so what is measured is the act phase stopping, not planning.
-            stack.enter_context(patch.object(self.g, "build_plan", return_value=[
-                {"class": "temp", "target": str(self.t1 / n), "bytes": 0} for n in "abc"]))
+            stack.enter_context(patch.object(self.g, "planners", return_value=[
+                ("temp", lambda b: [{"class": "temp", "target": str(self.t1 / n), "bytes": 0} for n in "abc"])]))
             doc = self.g.run(["--apply", "--budget", "0"])
         self.assertEqual(doc["results"]["removed"], 0)
         self.assertTrue(all((self.t1 / n).exists() for n in "abc"))
@@ -450,6 +508,99 @@ class RunBudget(Base):
         self.assertEqual(rows[0]["result"], "removed")
         report = json.loads((paths.SCRATCH / "disk-guard.json").read_text())
         self.assertEqual(report["results"]["removed"], 1)
+
+
+class AnyDevice(Base):
+    """The guard on macOS, Linux and Windows: one rule, three ways to know what is held."""
+
+    def test_windows_probes_by_renaming_and_skips_what_is_held(self):
+        (self.t1 / "held").mkdir()
+        (self.t1 / "free").mkdir()
+        h = self.g.Holders([])
+        h.mode = "rename"
+        self.assertFalse(h.busy(self.t1 / "held"), "Windows cannot know beforehand; the rename decides")
+        real_rename = os.rename
+
+        def rename(src, dst):
+            if pathlib_name(src) == "held":
+                raise PermissionError(32, "being used by another process")
+            return real_rename(src, dst)
+        with patch.object(self.g.os, "rename", side_effect=rename):
+            held = self.g.act({"class": "temp", "target": str(self.t1 / "held"), "bytes": 0}, h)
+            free = self.g.act({"class": "temp", "target": str(self.t1 / "free"), "bytes": 0}, h)
+        self.assertEqual(held["result"], "skipped")
+        self.assertTrue((self.t1 / "held").exists(), "nothing of a held folder is deleted")
+        self.assertEqual(free["result"], "removed")
+        self.assertFalse((self.t1 / "free").exists())
+        self.assertFalse(list(self.t1.glob("*.observatory-removing")))
+
+    def test_linux_without_lsof_reads_proc(self):
+        if not os.path.isdir("/proc/self/fd"):
+            self.skipTest("no /proc here")
+        here = os.getcwd()
+        with patch.object(self.g.shutil, "which", return_value=None):
+            h = self.g.Holders.take()
+        self.assertEqual(h.mode, "proc")
+        self.assertTrue(h.busy(here), "this process works inside its own cwd")
+
+    def test_no_way_to_know_means_nothing_is_removed(self):
+        with patch.object(self.g.shutil, "which", return_value=None), \
+                patch.object(self.g.os.path, "isdir", return_value=False), \
+                patch.object(self.g.sys, "platform", "darwin"):
+            h = self.g.Holders.take()
+        self.assertFalse(h.known)
+        self.assertTrue(h.busy(self.t1))
+
+    def test_a_root_of_another_os_is_skipped_not_read_as_here(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LOCALAPPDATA", None)
+            self.assertEqual(self.g.expand("{localappdata}/npm-cache/_npx"), "")
+        cfg = self.cfg(cache_roots=["{localappdata}/npm-cache/_npx"], cache_keep=[])
+        self.assertEqual(self.g.plan_cache_dirs(cfg, "critical", self.free(), time.time()), [])
+
+
+class GitTierPressure(Base):
+    def test_pressure_lowers_only_the_tier_that_loses_nothing(self):
+        import cleanup
+        cfg = {"auto": {"clean_worktree_idle_days": 7, "merged_branch_idle_days": 7},
+               "manual": {"dirty_worktree_idle_days": 7},
+               "pressure": {"critical": {"clean_worktree_idle_days": 1, "merged_branch_idle_days": 30,
+                                         "dirty_worktree_idle_days": 1}}}
+        got = cleanup.under_pressure(cfg, "critical")
+        self.assertEqual(got["auto"]["clean_worktree_idle_days"], 1)
+        self.assertEqual(got["auto"]["merged_branch_idle_days"], 7, "pressure never raises a threshold")
+        self.assertEqual(got["manual"]["dirty_worktree_idle_days"], 7, "the only copy of work never moves")
+        self.assertIs(cleanup.under_pressure(cfg, "normal"), cfg)
+
+    def test_an_older_workspace_file_still_gets_the_pressure_table(self):
+        import importlib, cleanup, paths
+        own = paths.config_file("cleanup.json")
+        own.parent.mkdir(parents=True, exist_ok=True)
+        own.write_text(json.dumps({"auto": {"clean_worktree_idle_days": 5}, "manual": {}}))
+        cleanup = importlib.reload(cleanup)
+        cfg = cleanup.load_config()
+        self.assertEqual(cfg["auto"]["clean_worktree_idle_days"], 5, "the workspace's own value wins")
+        self.assertIn("critical", cfg.get("pressure") or {}, "a key added by a release reaches it")
+        self.assertEqual(cleanup.under_pressure(cfg, "critical")["auto"]["clean_worktree_idle_days"], 1)
+
+    def test_the_guard_hands_its_pressure_to_the_git_tier(self):
+        seen = []
+
+        def fake_run(argv, **kw):
+            seen.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "cleanup: 0 removed\n", "")
+        with patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g.subprocess, "run", side_effect=fake_run):
+            self.g.run(["--apply", "--level", "critical"])
+        calls = [a for a in seen if a and str(a[1]).endswith("cleanup.py")]
+        self.assertTrue(calls and calls[0][-2:] == ["--level", "critical"], seen)
+
+
+def pathlib_name(p) -> str:
+    return Path(str(p)).name
 
 
 class JsonLine(Base):

@@ -8,6 +8,10 @@
   "clean_worktree_idle_days": 7,
   "build_artifacts_project_idle_days": 30
  },
+ "pressure": {
+  "low": {"merged_branch_idle_days": 3, "pushed_branch_idle_days": 14, "clean_worktree_idle_days": 3, "build_artifacts_project_idle_days": 7},
+  "critical": {"merged_branch_idle_days": 1, "pushed_branch_idle_days": 7, "clean_worktree_idle_days": 1, "build_artifacts_project_idle_days": 3}
+ },
  "manual": {
   "unique_branch_idle_days": 14,
   "dirty_worktree_idle_days": 7
@@ -26,7 +30,8 @@
    {"path": "{tmpdir}", "depth": 1},
    {"path": "/private/tmp", "depth": 1},
    {"path": "/private/tmp/claude-{uid}", "depth": 2},
-   {"path": "~/Library/Developer/Xcode/DerivedData", "depth": 1, "level": "low"}
+   {"path": "~/Library/Developer/Xcode/DerivedData", "depth": 1, "level": "low"},
+  {"path": "~/Library/Logs/DiagnosticReports", "depth": 1, "level": "low"}
   ],
   "temp_keep": ["cc-socks", "*.sock", "*.socket", "tmux-*", "com.apple.*", "launchd*", "powerlog", ".X*", "*.pid", "*.lock"],
   "commands": [
@@ -49,8 +54,13 @@
   "git_survey_every_hours": 6,
   "machine_survey_every_hours": 2,
   "plan_budget_seconds": 300,
+  "normal_every_minutes": 60,
+  "command_timeout_seconds": 90,
+  "cache_roots": ["~/Library/Caches", "~/.cache", "~/.npm/_npx", "{localappdata}/npm-cache/_npx"],
+  "cache_days": {"normal": 7, "low": 2, "critical": 1},
+  "cache_keep": ["ms-playwright", "ms-playwright-go", "camoufox", "puppeteer", "hyperframes", "chrome-for-testing", "cargo-xwin", "codex-runtimes", "uv", "pnpm", "Homebrew", "com.apple.*", "CloudKit", "observatory*", "agent-chrome", "huggingface", "torch", "whisper*", "*-models"],
   "run_budget_seconds": 900,
   "run_reserve_seconds": 60,
-  "max_actions_per_class": 2000
+  "max_actions_per_class": 20000
  }
 }
