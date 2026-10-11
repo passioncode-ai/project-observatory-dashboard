@@ -1437,27 +1437,44 @@ def observatory_handoff_get(
     return _scrub_workflow(out)
 
 
-def _published_shape(schema: dict, value: Any, dropped: set[str], path: str = "") -> Any:
+def _published_shape(schema: dict, value: Any, dropped: set[str], path: str = "", root: dict | None = None) -> Any:
     """`value` cut down to what a closed published schema lists, naming what went.
 
     The survey grew fields after v0.2.0 was published (`organization`,
     `resources`); the item schema is `additionalProperties: false`, so EVERY
     estate.survey answer on an estate that records an organization failed its
     own contract and reached the host as an error. The names come from the
-    bundled schema itself, never from a list kept here that would drift from it."""
-    if isinstance(value, dict) and schema.get("type") == "object":
+    bundled schema itself, never from a list kept here that would drift from it.
+
+    A local `$ref` (`#/$defs/...`) is followed, and a `oneOf` of objects is cut by
+    the branch whose `required` keys the value carries — `project.resolve` answers
+    with either an answer or a refusal, and cutting by neither cut nothing."""
+    root = root if root is not None else schema
+    ref = schema.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/$defs/"):
+        schema = (root.get("$defs") or {}).get(ref.rsplit("/", 1)[-1], {})
+    if isinstance(value, dict) and isinstance(schema.get("oneOf"), list):
+        for branch in schema["oneOf"]:
+            target = branch
+            bref = branch.get("$ref")
+            if isinstance(bref, str) and bref.startswith("#/$defs/"):
+                target = (root.get("$defs") or {}).get(bref.rsplit("/", 1)[-1], {})
+            if set(target.get("required") or []) <= set(value):
+                return _published_shape(target, value, dropped, path, root)
+        return value
+    if isinstance(value, dict) and (schema.get("type") == "object" or "properties" in schema):
         props = schema.get("properties", {})
         out = {}
         for k, v in value.items():
             if k in props:
-                out[k] = _published_shape(props[k], v, dropped, f"{path}{k}.")
+                out[k] = _published_shape(props[k], v, dropped, f"{path}{k}.", root)
             elif schema.get("additionalProperties") is False:
                 dropped.add(f"{path}{k}")
             else:
                 out[k] = v
         return out
     if isinstance(value, list) and isinstance(schema.get("items"), dict):
-        return [_published_shape(schema["items"], v, dropped, path) for v in value]
+        return [_published_shape(schema["items"], v, dropped, path, root) for v in value]
     return value
 
 

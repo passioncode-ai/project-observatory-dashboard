@@ -1268,8 +1268,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "23362e309256737674290ac03ac0244f80e6fd86e6c096432929777b8810e014",
-      "bytes": 93061,
+      "export_sha256": "ed0f1721d0c7db868faecfcac93f75ea42839b963b3ad279f7b1128eb86f38a4",
+      "bytes": 94078,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -3639,8 +3639,8 @@
     {
       "path": "tests/test_wire_inputs.py",
       "source_sha256": "6b58435504b17a045429feaa049a582fdb1e06c57b03f3b464a4e48526f28c55",
-      "export_sha256": "f03b4eb524bced5264d4ba3da75151aaec59c1c64cd2baa3b9b2922b683d931f",
-      "bytes": 8137,
+      "export_sha256": "bab6519c289536fc9922bf101a49c79bd911860213f87ef7ee6c613d14651184",
+      "bytes": 9861,
       "python_comments_removed": 2,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
