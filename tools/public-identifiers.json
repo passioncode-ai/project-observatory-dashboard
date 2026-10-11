@@ -148,6 +148,10 @@
   {
    "token": "backoff",
    "reason": "a common technical word (retry backoff)"
+  },
+  {
+   "token": "fabric-dashboards",
+   "reason": "Fabric Dashboards' public repository (passioncode-ai/fabric-dashboards), whose session raised OBS-54…OBS-59"
   }
  ]
 }
