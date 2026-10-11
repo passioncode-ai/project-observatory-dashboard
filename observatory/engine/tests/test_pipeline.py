@@ -105,6 +105,7 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
     "scan-vault": {"writes": ["store/raw/vault.json"], "reads": ["registry/domains.json"]},
     "scan-cloudflare": {"writes": ["store/raw/cloudflare_zones.json"], "reads": []},
     "scan-mcp": {"writes": ["store/raw/mcp.json"], "reads": []},
+    "scan-harness": {"writes": ["store/raw/harness.json"], "reads": []},
     # READS the registry it will later help write, and that is a fixpoint over
     # ticks rather than a cycle: attribution needs the project list, so a
     # project's first sessions attach on the NEXT tick after the project itself
@@ -260,7 +261,7 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             "store/raw/sessions-seen.jsonl",
                             # the lifecycle watch (collectors/scan_lifecycle.py),
                             # written by the tick's `lifecycle` step before this one
-                            "store/raw/lifecycle.json",
+                            "store/raw/lifecycle.json", "store/raw/harness.json",
                             "store/raw/bitbucket.json", "store/raw/domains_live.json",
                             "store/raw/local.json", "store/raw/model.json",
                             "store/raw/projection.json", "store/raw/vault.json",

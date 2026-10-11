@@ -2888,8 +2888,8 @@
       "path": "tests/test_pipeline.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a8ffc4660891942b344bd9bc292a93332f03b53541fc8f1ed6e19eec41c55fc8",
-      "bytes": 42845
+      "export_sha256": "b52d305c428e3050c46075ba5e7b152d0287352c49eb633a1f357f7a6629e42b",
+      "bytes": 42944
     },
     {
       "path": "tests/test_plugin_pair.py",
@@ -4286,8 +4286,8 @@
     {
       "path": "tools/tick_lease.py",
       "source_sha256": "e77182b3838aba63707e5e182c066b17fed6e195b2f18c67ee938c80236bad84",
-      "export_sha256": "b8fdf3c3f3a3a24c3c4d126e7609e7f2fd75ec59f4be4b4636355d02cb65e81e",
-      "bytes": 30998,
+      "export_sha256": "61f9968dc3f71b59d1f6ceb1d1fb008ac4c30dc2353fb4cea13cc2660096cc0d",
+      "bytes": 31025,
       "python_comments_removed": 45,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
