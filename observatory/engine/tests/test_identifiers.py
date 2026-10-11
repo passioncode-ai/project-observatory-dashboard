@@ -287,6 +287,76 @@ def test_the_emit_publishes_aliases_as_edges() -> None:
           p.returncode == 0 and not known, str(known)[:200])
 
 
+def test_the_review_of_pr_203_each_rule_on_its_own_row() -> None:
+    """One check per finding of the #203 review (project-observatory-3d, 2026-10-11)."""
+    # 1. A write reads the table with the duplicate-key hook and refuses duplicates.
+    text = ('{"schema_version": 1, "aliases": {'
+            '"store:app:7": {"resolves_to": "project:alpha-app", "owner": "a", "source": "s", "since": "2026-10-11"},'
+            '"store:app:7": {"resolves_to": "project:beta-api", "owner": "b", "source": "s", "since": "2026-10-11"}}}')
+    try:
+        ids.load_table(curated(text))
+        refused = False
+    except ids.AliasConflict as exc:
+        refused = "store:app:7" in str(exc)
+    check("1: a table with a name written twice is refused for a write, not collapsed to the last row", refused)
+    table = ids.load_table(curated({"schema_version": 1, "aliases": {"store:app:1": row("project:alpha-web")}}))
+    check("1: a clean table loads without the hook's bookkeeping",
+          "__pairs__" not in json.dumps(table) and table["aliases"]["store:app:1"]["owner"] == "store-agent",
+          json.dumps(table)[:200])
+    check("1: an absent table loads as empty", ids.load_table(pathlib.Path(tmpdir.mkdtemp()) / "none.json") == {})
+
+    # 2. Accepting the same name with the same target never rewrites the curated row.
+    curated_row = row("project:alpha-app", owner="operator-curated", why="the operator wrote it")
+    merged = ids.merge_accepted({"schema_version": 1, "aliases": {"store:app:42": curated_row}},
+                                [{"id": "store:app:42", "owner": "agent-x", "source": "a proposal"}],
+                                target="project:alpha-app", on="2026-12-01",
+                                provenance={"why": "agent says", "proposed_by": "p-9", "evidence": []})
+    check("2: an operator-curated row survives an accepted proposal byte for byte",
+          merged["aliases"]["store:app:42"] == curated_row, json.dumps(merged["aliases"])[:300])
+    merged = ids.merge_accepted({"schema_version": 1, "aliases": {"Store:App:42": curated_row}},
+                                [{"id": "store:app:42", "owner": "agent-x", "source": "a proposal"}],
+                                target="project:alpha-app", on="2026-12-01",
+                                provenance={"why": "w", "proposed_by": "p-9", "evidence": []})
+    check("2: and so does its other spelling — no second row appears",
+          list(merged["aliases"]) == ["Store:App:42"], str(list(merged["aliases"])))
+
+    # 3. The canonical namespaces are reserved whatever the case, and never case-matched.
+    check("3: `Project:foo` is refused as an alias", "canonical" in ids.id_problem("Project:foo"),
+          ids.id_problem("Project:foo"))
+    check("3: so is `PRODUCT:foo`", "canonical" in ids.id_problem("PRODUCT:foo"))
+    planted = {"schema_version": 1, "aliases": [{"id": "Project:alpha", "resolves_to": "project:alpha-web",
+                                                 "owner": "x", "source": "s", "since": "2026-10-11"}],
+               "conflicts": []}
+    reg = ids.Registry(PROJECTS, PRODUCTS, RELATIONS, planted)
+    check("3: even a planted canonical-looking alias is not reached through case folding",
+          ids.resolve("project:alpha", reg).get("error") == "not-found", json.dumps(ids.resolve("project:alpha", reg)))
+
+    # 4. A curated alias is compared with measured names without case.
+    doc, _edges, errors = ids.document(PROJECTS, PRODUCTS, RELATIONS, "2026-10-11", path=curated({
+        "schema_version": 1, "aliases": {"domain:ALPHA.example": row("project:beta-api")}}))
+    check("4: a measured domain in another case still makes a contradicting alias a conflict",
+          not errors and [c["id"] for c in doc["conflicts"]] == ["domain:ALPHA.example"]
+          and not doc["aliases"], json.dumps(doc)[:300])
+
+    # 5. A trailing newline is not a name, and not a date.
+    check("5: `store:x` followed by a newline is refused", ids.id_problem("store:x\n") != "")
+    doc, _e, errors = ids.document(PROJECTS, PRODUCTS, RELATIONS, "2026-10-11", path=curated({
+        "schema_version": 1, "aliases": {"store:app:1": row("project:alpha-app", since="2026-10-11\n")}}))
+    check("5: a date followed by a newline is refused", any("since" in e for e in errors), str(errors))
+
+    # 6. Two aliases whose slugs agree still get two edges.
+    doc, edges, errors = ids.document(PROJECTS, PRODUCTS, RELATIONS, "2026-10-11", path=curated({
+        "schema_version": 1, "aliases": {"store:a_b": row("project:alpha-app"),
+                                         "store:a-b": row("project:alpha-app")}}))
+    check("6: `a_b` and `a-b` are two edges with two ids",
+          not errors and len(edges) == 2 and len({e["id"] for e in edges}) == 2, str([e["id"] for e in edges]))
+
+    # 8. The tool agrees with the published input schema (`^\\S+$`): whitespace is refused.
+    reg = ids.Registry(PROJECTS, PRODUCTS, RELATIONS, ids.empty_document("2026-10-11"))
+    for spaced in (" project:beta-api", "project:beta-api ", "project:beta-api\n"):
+        check(f"8: {spaced!r} is refused rather than trimmed", ids.resolve(spaced, reg).get("error") == "not-found")
+
+
 if __name__ == "__main__":
     print("identifiers — many names, one canonical id, never a guess\n")
     for fn in (test_curated_aliases_become_known_as_edges_and_resolve_to_one_id,
@@ -294,7 +364,8 @@ if __name__ == "__main__":
                test_a_conflict_is_a_finding_and_never_a_silent_overwrite,
                test_a_malformed_file_is_refused_whole_and_an_unknown_target_is_dropped_and_named,
                test_an_alias_proposal_has_one_shape,
-               test_the_emit_publishes_aliases_as_edges):
+               test_the_emit_publishes_aliases_as_edges,
+               test_the_review_of_pr_203_each_rule_on_its_own_row):
         fn()
     print()
     if FAILURES:

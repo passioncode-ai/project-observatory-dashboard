@@ -34,6 +34,7 @@ This module does no I/O except reading the curated file it is handed.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -51,8 +52,8 @@ CANONICAL = ("project:", "product:")
 DERIVED = (("implemented_by", "to", "repository"),
            ("deployed_to", "to", "deployment"),
            ("public_domain_of", "from", "domain"))
-_ID = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,63}:\S{1,240}$")
-_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_ID = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,63}:\S{1,240}\Z")
+_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}\Z")
 ROW_FIELDS = {"resolves_to", "owner", "source", "since"}
 #: Fields an accepted proposal writes beside the row: provenance, never data.
 PROVENANCE = {"why", "proposed_by", "evidence", "accepted_on"}
@@ -85,7 +86,7 @@ def id_problem(alias: Any) -> str:
         return "an alias id must be a string"
     if credential_shape.shaped(alias, uuids=False):
         return f"{_shown(alias)} looks like a credential, not a name"
-    if alias.startswith(CANONICAL):
+    if alias.casefold().startswith(CANONICAL):
         return f"{alias} is in a canonical namespace ({', '.join(CANONICAL)}): it is an id, not an alias"
     if not _ID.match(alias):
         return (f"{_shown(alias)} is not `<system>:<value>` — a system prefix, a colon, and no "
@@ -136,6 +137,29 @@ def _read(path: Path) -> tuple[list[tuple[str, Any]] | None, dict, list[str]]:
         return None, {}, ["identifiers.json: `aliases` must be an object of alias -> row"]
     pairs = list(aliases.get("__pairs__") or [])
     return pairs, doc, []
+
+
+def _plain(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items() if k != "__pairs__"}
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    return value
+
+
+def load_table(path: Path) -> dict:
+    """The curated table for a WRITE: read with the duplicate-key hook, refused when a
+    name is written twice. A plain `json.loads` keeps the last of two rows and the
+    write would persist that silently, turning a conflict into no conflict."""
+    pairs, raw, errors = _read(path)
+    if pairs is None:
+        raise ValueError("; ".join(errors))
+    names = [a for a, _r in pairs]
+    twice = sorted({a for a in names if names.count(a) > 1})
+    if twice:
+        raise AliasConflict(f"{', '.join(_shown(a) for a in twice)} written more than once in "
+                            "config/identifiers.json; the operator resolves that before anything is accepted")
+    return _plain(raw)
 
 
 def _row_problems(alias: str, row: Any) -> list[str]:
@@ -203,6 +227,11 @@ def document(projects: list[dict], products: list[dict], relations: list[dict], 
 
     targets = {p["id"] for p in projects} | {p["id"] for p in products}
     measured = derived_names(relations)
+    # A measured name is compared without case: `domain:Alpha.example` measured on one
+    # project must stop `domain:alpha.example` being published for another.
+    measured_folded: dict[str, tuple[str, set[str]]] = {}
+    for name, (via, owners) in measured.items():
+        measured_folded.setdefault(name.casefold(), (via, set()))[1].update(owners)
     member_of = _products_of(relations)
     # Group every spelling by its case-folded form: one name, however it is typed.
     groups: dict[str, list[tuple[str, dict]]] = {}
@@ -230,7 +259,7 @@ def document(projects: list[dict], products: list[dict], relations: list[dict], 
                                     "reason": f"{alias}: {target} is not in this registry; the alias is "
                                               "withheld until it is"})
             continue
-        hit = measured.get(alias)
+        hit = measured_folded.get(alias.casefold())
         if hit:
             via, owners = hit
             allowed = set(owners) | {p["id"] for o in owners for p in member_of.get(o, [])}
@@ -245,7 +274,7 @@ def document(projects: list[dict], products: list[dict], relations: list[dict], 
 
     edges = []
     for a in published:
-        edges.append({"id": f"relation:{_slug(a['resolves_to'])}:known-as:{_slug(a['id'])}",
+        edges.append({"id": edge_id(a["resolves_to"], a["id"]),
                       "type": "known_as", "from": a["resolves_to"], "to": a["id"],
                       "owner": a["owner"], "source_refs": SRC})
     doc["aliases"] = published
@@ -253,6 +282,13 @@ def document(projects: list[dict], products: list[dict], relations: list[dict], 
     doc["totals"] = {"aliases": len(published), "conflicts": len(conflicts),
                      "targets": len({a["resolves_to"] for a in published})}
     return doc, edges, []
+
+
+def edge_id(target: str, alias: str) -> str:
+    """Readable AND collision-safe: `a_b` and `a-b` slug alike, so the exact alias's
+    hash rides beside the slug — two names never share one edge id."""
+    digest = hashlib.sha256(alias.encode("utf-8")).hexdigest()[:8]
+    return f"relation:{_slug(target)}:known-as:{_slug(alias)}-{digest}"
 
 
 def _slug(value: str) -> str:
@@ -271,9 +307,13 @@ def merge_accepted(doc: dict, rows: list[dict], *, target: str, on: str, provena
         if existing and aliases[existing].get("resolves_to") != target:
             raise AliasConflict(f"{existing} already names {aliases[existing].get('resolves_to')}; "
                                 f"giving it {target} too would make it ambiguous")
-        key = existing or r["id"]
-        aliases[key] = {"resolves_to": target, "owner": r["owner"], "source": r["source"], "since": on,
-                        **{k: v for k, v in provenance.items() if k in PROVENANCE}}
+        if existing:
+            # Same name, same target: the row is already there. It is never rewritten —
+            # owner, source, since and provenance stay what the first writer recorded,
+            # so an accepted proposal cannot take over an operator-curated row.
+            continue
+        aliases[r["id"]] = {"resolves_to": target, "owner": r["owner"], "source": r["source"], "since": on,
+                            **{k: v for k, v in provenance.items() if k in PROVENANCE}}
     return out
 
 
@@ -329,9 +369,10 @@ def _refusal(code: str, query: str, reg: Registry, **extra: Any) -> dict:
 
 def resolve(query: str, reg: Registry) -> dict:
     """Any name -> the canonical project or product it names, or a typed refusal."""
-    if not isinstance(query, str) or not query.strip():
+    # The published input schema requires `^\\S+$`; the tool agrees and refuses
+    # surrounding whitespace rather than quietly trimming it.
+    if not isinstance(query, str) or not query or query != query.strip() or any(c.isspace() for c in query):
         return _refusal("not-found", str(query), reg)
-    query = query.strip()
     if query in reg.conflicts:
         c = reg.conflicts[query]
         return _refusal("conflict", query, reg, candidates=sorted({x["resolves_to"] for x in c["claims"]}))
@@ -339,7 +380,8 @@ def resolve(query: str, reg: Registry) -> dict:
         canonical, via = query, "canonical"
     elif query in reg.aliases:
         canonical, via = reg.aliases[query]["resolves_to"], "alias"
-    elif query.casefold() in reg.folded and not query.startswith(("repository:", "domain:")):
+    elif (query.casefold() in reg.folded and not query.startswith(("repository:", "domain:"))
+          and not query.casefold().startswith(CANONICAL)):
         # One name, however it is typed — but only for curated names. A measured
         # repository or domain keeps the case the registry wrote.
         canonical, via = reg.aliases[reg.folded[query.casefold()]]["resolves_to"], "alias"

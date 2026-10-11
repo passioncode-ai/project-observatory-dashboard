@@ -489,7 +489,7 @@ def cmd_proposal_accept(conn, args) -> int:
         import identifiers
         fi = paths.config_file(proposals.ALIASES_LAND_IN)
         try:
-            current = json.loads(fi.read_text(encoding="utf-8")) if fi.is_file() else {}
+            current = identifiers.load_table(fi)
             table = identifiers.merge_accepted(current, patch["aliases"], target=row["target_id"],
                                                on=L._now()[:10], provenance=provenance)
         except identifiers.AliasConflict as exc:

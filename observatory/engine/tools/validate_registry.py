@@ -256,6 +256,10 @@ def main():
             if r[side] not in endpoints: errors.append(f"unresolved relation endpoint: {r['id']} {side}={r[side]}")
         if r["type"]=="known_as" and (r["to"] not in ii or not r.get("owner")):
             errors.append(f"known_as edge without a published, owned alias: {r['id']}")
+    # The other direction: every published alias has its edge. The emitter drops a
+    # second edge whose id it has seen, so an id collision would lose a name silently.
+    for alias in sorted(ii-{r["to"] for r in relations if r["type"]=="known_as"}):
+        errors.append(f"published alias without its known_as edge: {alias}")
     for p in projects:
         if not p.get("source_refs") or set(p["source_refs"])-si: errors.append(f"project has missing or unresolved sources: {p['id']}")
         cp=p.get("canonical_page")

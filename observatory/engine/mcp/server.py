@@ -1499,7 +1499,12 @@ def capability_project_timeline(arguments: dict[str, Any], span: Any) -> dict[st
 
 @server.capability("project.resolve")
 def capability_project_resolve(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
-    return observatory_resolve(id=arguments["id"])
+    """The same answer as the MCP tool, cut to the published output schema like every
+    sibling capability. Read-only and ungated like `project.detail`: it returns only ids
+    and names the registry already publishes through `estate.survey`."""
+    out = observatory_resolve(id=arguments["id"])
+    schema = next(d["outputSchema"] for d in interop.tool_definitions() if d["name"] == "project.resolve")
+    return _published_shape(schema, out, set())
 
 
 @server.capability("project.record")

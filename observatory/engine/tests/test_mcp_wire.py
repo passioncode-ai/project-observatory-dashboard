@@ -163,6 +163,18 @@ async def run() -> None:
             check("project: an unknown id is a typed answer, not a crash",
                   data.get("error") == "unknown project", str(data)[:120])
 
+            res = await session.call_tool("project.resolve", {"id": SYNTHETIC_PROJECT})
+            data = payload(res)
+            import jsonschema as _js
+            schema = json.loads((ROOT / "fabric/schemas/project-resolve-output.schema.json").read_text())
+            errors = [e.message for e in _js.Draft202012Validator(schema).iter_errors(data)]
+            check("resolve: a canonical id answers itself, in the published shape",
+                  data.get("canonical") == SYNTHETIC_PROJECT and not errors, (str(errors) or str(data))[:200])
+            res = await session.call_tool("observatory_resolve", {"id": "nothing:by-this-name"})
+            data = payload(res)
+            check("resolve: an unknown name is a typed not-found, not a guess",
+                  data.get("error") == "not-found" and not res.is_error, str(data)[:160])
+
             # The throwaway store has no events, so this asserts the honest-degradation
             # contract instead of a commit count that would depend on the live store.
             res = await session.call_tool("observatory_timeline",
