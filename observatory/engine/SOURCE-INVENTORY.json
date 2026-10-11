@@ -580,8 +580,8 @@
       "path": "defaults/cleanup.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d6bf49a6598cc186d9c488a175669aeb5fe72fa7147dbb051478da195faa6304",
-      "bytes": 4492
+      "export_sha256": "e12e9c865bf4d08158301d458dd991e0be7321297e547fe57b6fe1a3131bd723",
+      "bytes": 4529
     },
     {
       "path": "defaults/credential_annotations.json",
@@ -2391,8 +2391,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "89a37e1c4a45b9a3d8edc97181dbfdad9e4cb2e3e5aaac41ba15e406a84867f1",
-      "bytes": 32279
+      "export_sha256": "bd2597c391b7a27aa69866976c23ad0c23be6ded47d5a95a97d246dd24f8e1b5",
+      "bytes": 32442
     },
     {
       "path": "tests/test_docs_current.py",

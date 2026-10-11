@@ -38,7 +38,10 @@ def age(path: Path, days: float) -> None:
     t = time.time() - days * DAY
     for dirpath, dirnames, filenames in os.walk(path, topdown=False):
         for n in filenames + dirnames:
-            os.utime(os.path.join(dirpath, n), (t, t), follow_symlinks=False)
+            try:
+                os.utime(os.path.join(dirpath, n), (t, t), follow_symlinks=False)
+            except FileNotFoundError:
+                pass            # git's own short-lived files (a lock, a gc temp) come and go meanwhile
     os.utime(path, (t, t), follow_symlinks=False)
 
 
