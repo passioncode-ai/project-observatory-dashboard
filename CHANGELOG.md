@@ -65,6 +65,9 @@ companion plugin `observatory-log` is unchanged.
   the token names has `credentialSource {kind: project-key, ref: PROJECT/ENV/NAME}`, never read a `.env`, and
   remove the token before the child starts. `slotsRequireGrant` in `config/meter.json`: `when-token` (default
   until Fabric's issuer ships), `always`, `off`.
+- **The keyserver trusts the delegation token** (OBS-62): with a valid token for the action's scope (`keys.*`,
+  `ledger.*`), the journal names the hub's signed caller, principal, chain and grant (`caller_verified: true`).
+  `reveal` is never served to a token. `keyserverRequiresDelegation: agents` demands a token from non-page callers.
 - **The agent harness scan** (`integrations.harness`, `sources.harness_root`; off until turned on): what every
   Claude Code and Codex session loads before the first word. It counts each skill's entry in the session's skill
   listing against a budget (`OBSERVATORY_HARNESS_BUDGET_CHARS`, default 30,000 characters) and names the

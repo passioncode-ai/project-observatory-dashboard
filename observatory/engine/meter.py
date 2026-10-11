@@ -61,6 +61,9 @@ SLOT_CAPABILITY = "secret.use"
 #: How `use_secret.py` treats a slot release: `when-token` checks a token when one is present (the default
 #: until Fabric's issuer ships), `always` refuses a release without one, `off` never checks.
 SLOT_MODES = ("off", "when-token", "always")
+#: Whether the keyserver demands a delegation token from a caller that is not the operator's page (OBS-62):
+#: `off` until Fabric's issuer ships, then `agents`.
+KEYSERVER_MODES = ("off", "agents")
 ESTATE_MONTH_USD = 1000.0
 ALERT_RATIO = 0.8
 RESERVATION_SECONDS = 3600
@@ -187,6 +190,9 @@ class Meter:
         self.slot_mode = self.config.get("slotsRequireGrant", "when-token")
         if self.slot_mode not in SLOT_MODES:
             raise ValueError(f"slotsRequireGrant must be one of {', '.join(SLOT_MODES)}")
+        self.keyserver_mode = self.config.get("keyserverRequiresDelegation", "off")
+        if self.keyserver_mode not in KEYSERVER_MODES:
+            raise ValueError(f"keyserverRequiresDelegation must be one of {', '.join(KEYSERVER_MODES)}")
         self.keys = KeySource(self._read_jwks)
         self._db_ready = False
 

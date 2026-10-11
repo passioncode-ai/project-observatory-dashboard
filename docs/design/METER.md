@@ -123,12 +123,36 @@ A release spends nothing. Provider spend is metered through grant checks and usa
 The journal row (`secret-use.jsonl`) carries the verdict, `granted:<grant refs>`, `no-token` or the refusal
 code, and never the token.
 
+## M6 — The keyserver trusts the token (OBS-62)
+
+An agent calling a keyserver action presents a Fabric delegation token (aud `project-observatory`). The scope
+and effect per action are Fabric's:
+
+| Action | Scope | Effect |
+|---|---|---|
+| `mint` | `keys.mint` | `charge` |
+| `limit`, `disable`, `enable`, `rotate-key` | `keys.limit`, `keys.disable`, `keys.enable`, `keys.rotate` | `change-policy` |
+| `revoke` | `keys.revoke` | `delete` |
+| `leak`, `annotate` | `ledger.leak`, `ledger.annotate` | `draft` |
+
+With a valid token the journal row names `caller` (the outermost actor), `principal` (`sub`), `chain` and
+`grant`, sets `caller_verified: true`, and keeps the self-named header as `label`. A refused token answers the
+contract's code and HTTP status (DL-19) before any effect. `reveal` is never served to a token
+(`scope-not-granted`): a value must not enter an agent's context, so agents use `use_secret.py run`.
+
+`keyserverRequiresDelegation` in `config/meter.json` selects the mode:
+
+- `off`: the default until the issuer ships;
+- `agents`: a request without this server's `Origin` must carry a token.
+
+**The boundary:** any local process can send an `Origin` header and read the 0600 keyserver token. `agents`
+stops accidental and confused borrowing, not a hostile process of the same user (Fabric CO-090).
+
 ## Not decided here
 
 - Declaring `grant.check` in `fabric-agent.json`: the manifest's capabilities point at published schema URLs
   and carry the manifest's content hash, so the declaration ships with a contract-schema publication (OBS-67).
 - Settling from usage reports (`byGrant` receipts) instead of by hand, and the alert at 80 % as a finding
   (OBS-56).
-- The keyserver trusting the token rather than `X-Observatory-Caller` (OBS-62).
 - Switching `slotsRequireGrant` to `always` on this machine: once Fabric's issuer mints `secret.use` tokens and
   the agents hand them over.

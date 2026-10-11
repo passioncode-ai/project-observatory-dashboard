@@ -16,6 +16,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
 with tempfile.TemporaryDirectory(prefix="observatory-import-boundary-") as import_home:
     with patch.dict(os.environ, {"OBSERVATORY_HOME": str(Path(import_home).resolve())}):
         import keyserver
@@ -428,6 +429,136 @@ class KeyserverBoundaryTests(unittest.TestCase):
             code, _, raw = self.request()
         self.assertEqual(code, 500)
         self.assertNotIn(synthetic.encode(), raw)
+
+
+class DelegatedCallers(unittest.TestCase):
+    """OBS-62 (Fabric ADR-0144): an agent proves who it is with a delegation token; the journal then names the
+    hub's signed caller, not the self-named header. `reveal` is never served to a token, and `agents` mode
+    demands a token from anything that is not the operator's page."""
+
+    def setUp(self):
+        try:
+            from test_meter import Estate, ISSUER, claims
+            Estate()
+        except Exception:                               # noqa: BLE001 — the full extra's cryptography
+            self.skipTest("needs the cryptography package")
+        import time as _time
+        self.Estate, self.claims = Estate, claims
+        self.sandbox = tempfile.TemporaryDirectory(prefix="observatory-keyserver-delegation-")
+        self.root = Path(self.sandbox.name)
+        self.token = "-".join(("only", "a", "synthetic", "test", "token"))
+        self.estate = Estate()
+        (self.root / "config").mkdir()
+        (self.root / "jwks.json").write_text(json.dumps(self.estate.jwks))
+        self.config = {"issuer": ISSUER, "jwks": str(self.root / "jwks.json")}
+        self.write_config()
+        self.patches = [
+            patch.object(keyserver, "TOKEN_FILE", self.root / "private" / "token"),
+            patch.object(keyserver, "AUDIT", self.root / "audit" / "journal.jsonl"),
+            patch.object(keyserver.paths, "CONFIG", self.root / "config"),
+            patch.object(keyserver.paths, "REGISTRY", self.root / "registry"),
+            patch.object(keyserver.paths, "SCRATCH", self.root / "scratch"),
+            patch.object(keyserver.paths, "DATA", self.root / "projects"),
+        ]
+        for item in self.patches:
+            item.start()
+        self.effects = []
+
+        def record(body):
+            keyserver.audit("fixture.limit", "fixture-key", {})
+            self.effects.append(body)
+            return {"ok": True}
+        self.action = patch.dict(keyserver.ACTIONS, {"limit": record, "reveal": record})
+        self.action.start()
+        self.server = keyserver.Server(("127.0.0.1", 0), keyserver.Handler, self.token)
+        self.port = self.server.server_address[1]
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.now = int(_time.time())
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
+        self.action.stop()
+        for item in reversed(self.patches):
+            item.stop()
+        self.sandbox.cleanup()
+
+    def write_config(self, **over):
+        (self.root / "config" / "meter.json").write_text(json.dumps({**self.config, **over}))
+
+    def signed(self, **over):
+        base = {"scope": "keys.limit", "effect": ["change-policy"], "iat": self.now - 5, "exp": self.now + 300}
+        return self.estate.sign(self.claims(**{**base, **over}))
+
+    def post(self, action="limit", headers=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            conn.request("POST", f"/api/{action}", body=b"{}",
+                         headers={"X-Observatory-Token": self.token, "X-Observatory-Caller": "agent:says-so",
+                                  **(headers or {})})
+            response = conn.getresponse()
+            return response.status, dict(response.getheaders()), json.loads(response.read() or b"{}")
+        finally:
+            conn.close()
+
+    def journal(self):
+        path = keyserver.AUDIT
+        return [json.loads(l) for l in path.read_text().splitlines()] if path.exists() else []
+
+    def test_a_verified_token_names_the_signed_caller(self):
+        token = self.signed()
+        code, _, _ = self.post(headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(code, 200)
+        row = self.journal()[-1]
+        self.assertEqual((row["caller"], row["principal"], row["caller_verified"], row["label"]),
+                         ("example-writer", "urn:person:operator", True, "agent:says-so"))
+        self.assertEqual(row["chain"], ["example-writer", "example-media"])
+        self.assertEqual(row["grant"], ["urn:grant:project-a:writer#3"])
+        raw = keyserver.AUDIT.read_text()
+        self.assertNotIn(token, raw)
+        self.assertNotIn(token.split(".")[2], raw)
+        code, _, _ = self.post(headers={"Fabric-Delegation": self.signed()})
+        self.assertEqual(code, 200, "the hub's forwarding header works the same")
+
+    def test_refused_tokens_use_the_contracts_codes_before_any_effect(self):
+        cases = [
+            ({"Authorization": f"Bearer {self.Estate().sign(self.claims(scope='keys.limit', effect=['change-policy'], iat=self.now - 5, exp=self.now + 300))}"},
+             401, "unauthenticated"),
+            ({"Authorization": f"Bearer {self.signed(scope='keys.mint')}"}, 403, "scope-not-granted"),
+            ({"Authorization": f"Bearer {self.signed(effect=['draft'])}"}, 403, "effect-above-ceiling"),
+            ({"Authorization": f"Bearer {self.signed(aud='copylot')}"}, 403, "wrong-audience"),
+            ({"Fabric-Delegation": "not-a-token"}, 401, "unauthenticated"),
+        ]
+        for headers, status, code in cases:
+            with self.subTest(code=code):
+                got, answer_headers, body = self.post(headers=headers)
+                self.assertEqual((got, body["error"]["code"]), (status, code), body)
+                if status == 401:
+                    self.assertIn("invalid_token", answer_headers.get("WWW-Authenticate", ""))
+        self.assertEqual(self.effects, [])
+
+    def test_reveal_is_never_served_to_a_token(self):
+        token = self.estate.sign(self.claims(scope="secret.reveal keys.limit", effect=["change-policy"],
+                                             iat=self.now - 5, exp=self.now + 300))
+        code, _, body = self.post("reveal", {"Authorization": f"Bearer {token}"})
+        self.assertEqual((code, body["error"]["code"]), (403, "scope-not-granted"))
+        self.assertIn("use_secret.py run", body["error"]["message"])
+        self.assertEqual(self.effects, [])
+
+    def test_agents_mode_demands_a_token_and_leaves_the_page_alone(self):
+        self.assertEqual(self.post()[0], 200, "off: today's callers keep working")
+        self.write_config(keyserverRequiresDelegation="agents")
+        code, _, body = self.post()
+        self.assertEqual((code, body["error"]["code"], body["error"]["data"]["detail"]),
+                         (401, "unauthenticated", "delegation-required"))
+        page = {"Host": f"127.0.0.1:{self.port}", "Origin": f"http://127.0.0.1:{self.port}"}
+        self.assertEqual(self.post(headers=page)[0], 200, "the operator's page keeps its local token")
+        self.assertEqual(self.post(headers={"Authorization": f"Bearer {self.signed()}"})[0], 200)
+        self.assertEqual(len(self.effects), 3)
+        unverified = [r for r in self.journal() if not r["caller_verified"]]
+        self.assertEqual({r["principal"] for r in unverified}, {"local-token-holder"})
 
 
 if __name__ == "__main__":

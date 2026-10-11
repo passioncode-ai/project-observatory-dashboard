@@ -1300,8 +1300,8 @@
       "path": "meter.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2678bfdd426cec4554f7d673e2733931a2b6c78b451ecb3c88671e133b5db611",
-      "bytes": 28342
+      "export_sha256": "c9b583bab39514020a7afc6e94a35363a552c9244c4fd58a9085694f1c4b1300",
+      "bytes": 28783
     },
     {
       "path": "observatory.py",
@@ -2732,8 +2732,8 @@
     {
       "path": "tests/test_keyserver_boundary.py",
       "source_sha256": "2d1679c184b45707a5c31e4bb503a6fdb37d458a04706b4c469fb6e3e654a2ab",
-      "export_sha256": "50c0974aee3b775a5beb46389d86ac7acd03803278479998c95f1f61282e4ee2",
-      "bytes": 23228,
+      "export_sha256": "2b2d830660497dc05f0a024b4727bfa84236dd09f703f74e307778d525df0e3a",
+      "bytes": 30295,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -4094,8 +4094,8 @@
     {
       "path": "tools/keyserver.py",
       "source_sha256": "5dfc52b15ea31b3d4d608cf4892bc16c274bacca224dacb28ef88c53fd92c571",
-      "export_sha256": "3424212357848eee386285999ade986ab45d92dd72ac2b117ddca0827d22fd4c",
-      "bytes": 36097,
+      "export_sha256": "c8b14a774fc7cd4303d5e1de22d23784279ba284a445f2b57adfddf0af7b4080",
+      "bytes": 41192,
       "python_comments_removed": 46,
       "python_docstrings_removed": 15,
       "tool_descriptions_retained": 0,
