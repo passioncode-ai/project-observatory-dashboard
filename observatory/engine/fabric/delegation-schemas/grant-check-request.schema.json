@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/grant-check-request.schema.json",
+  "title": "Grant check request (DEC-0037, DEC-0039)",
+  "description": "What a callee sends the meter's grant-check capability before it spends. The caller is proven by the onward delegation token in the request's Authorization header (aud the meter, scope the grant-check capability, effect none: DL-21), never by a field here; the request carries the amount and, for attribution, the jti of the token the callee itself was called with.",
+  "type": "object",
+  "required": [
+    "amountUsd",
+    "tokenJti"
+  ],
+  "properties": {
+    "amountUsd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "The amount to reserve, in USD."
+    },
+    "tokenJti": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._~-]{16,128}$",
+      "description": "The jti of the delegation token the callee was called with: the call this spend belongs to."
+    },
+    "grantRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Which of the token's grants, when it names several."
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "One line a person can read; no prompt, output or identity."
+    }
+  },
+  "additionalProperties": false
+}

@@ -223,6 +223,24 @@ def http_channel(*, bearer: str | None, audience: str | None = None,
     return out
 
 
+def delegation_channel(token: str) -> dict:
+    """The channel of an HTTP request that carries a Fabric delegation token (contract DL-9/DL-10).
+
+    It opens exactly one tool, the meter's `grant.check`, which verifies the token itself; every
+    memory tool refuses it (`unknown-channel`) and every other tool is local-only. The token is
+    kept in memory for this request only: never journalled, never logged."""
+    return {"channel": "delegation", "delegationToken": token}
+
+
+def delegation_token() -> str | None:
+    """The delegation token this request carries, or None (stdio and bindings carry none)."""
+    observed = current()
+    if isinstance(observed, Mapping) and observed.get("channel") == "delegation":
+        token = observed.get("delegationToken")
+        return token if isinstance(token, str) else None
+    return None
+
+
 def current() -> Mapping | None:
     observed = _CHANNEL.get()
     return observed if observed is not None else _DEFAULT

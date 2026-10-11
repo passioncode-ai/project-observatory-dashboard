@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/governance.schema.json",
+  "title": "Standing grant or data policy",
+  "oneOf": [{ "$ref": "#/$defs/grant" }, { "$ref": "#/$defs/dataPolicy" }],
+  "$defs": {
+    "grant": {
+      "type": "object",
+      "required": ["kind", "meta", "project", "principal", "resourcePatterns", "dataClasses", "startsAt", "expiresAt", "idempotency", "issuer", "state"],
+      "properties": {
+        "kind": { "const": "standing-grant" },
+        "meta": { "$ref": "common.schema.json#/$defs/revisionMeta" },
+        "project": { "$ref": "common.schema.json#/$defs/uri" },
+        "principal": { "$ref": "common.schema.json#/$defs/revisionRef" },
+        "effects": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/effectClass" }, "not": { "contains": { "const": "none" } } },
+        "resourcePatterns": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "channels": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "recipientConstraints": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "dataClasses": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/dataClass" } },
+        "startsAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "expiresAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "rateLimit": { "type": "integer", "minimum": 1 },
+        "idempotency": { "enum": ["required", "provider-native"] },
+        "issuer": { "$ref": "common.schema.json#/$defs/uri" },
+        "state": { "enum": ["active", "expired", "revoked"] },
+        "principalKind": { "enum": ["agent", "session", "external"], "description": "DEC-0037: external is a person or organization outside the issuer's estate (a share grant)." },
+        "audience": { "$ref": "common.schema.json#/$defs/agentId", "description": "DEC-0039: the callee agent this grant lets its principal call. A grant with an audience is a delegation grant: the hub mints delegation tokens only under one, and it then names capabilities, effectCeiling and principalKind." },
+        "capabilities": { "type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/capabilityName" }, "description": "DEC-0039: the audience's capabilities (tool names) a token minted under this grant may name in its scope." },
+        "effectCeiling": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/effectClass" }, "description": "DEC-0039: the highest effects a token under this grant may carry; none (a read) and draft are allowed here, and every other member is one of effects (FAC-SEM-050)." },
+        "spend": {
+          "type": "object",
+          "description": "DEC-0037, DEC-0038: what this grant may spend — unlimited, or limited by one or more windows; the owner pays. Spend outside it is denied.",
+          "required": ["mode", "payer", "credentialSource"],
+          "properties": {
+            "mode": { "enum": ["limited", "unlimited"] },
+            "limits": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["window", "limitUsd"],
+                "properties": {
+                  "window": { "enum": ["total", "task", "project", "day", "week", "month"] },
+                  "limitUsd": { "type": "number", "minimum": 0 }
+                },
+                "additionalProperties": false
+              }
+            },
+            "perCallMaxUsd": { "type": "number", "minimum": 0 },
+            "autoApproveUsd": { "type": "number", "minimum": 0 },
+            "payer": { "const": "owner" },
+            "credentialSource": { "oneOf": [{ "type": "object", "required": ["kind", "ref"], "properties": { "kind": { "const": "project-key" }, "ref": { "type": "string", "minLength": 1 } }, "additionalProperties": false }, { "type": "object", "required": ["kind", "agent"], "properties": { "kind": { "const": "capability" }, "agent": { "$ref": "common.schema.json#/$defs/uri" }, "capability": { "$ref": "common.schema.json#/$defs/capabilityName" } }, "additionalProperties": false }] },
+            "modelClasses": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+          },
+          "allOf": [
+            { "if": { "properties": { "mode": { "const": "limited" } } }, "then": { "properties": { "limits": true }, "required": ["limits"] } },
+            { "if": { "properties": { "mode": { "const": "unlimited" } } }, "then": { "not": { "properties": { "limits": true }, "required": ["limits"] } } }
+          ],
+          "additionalProperties": false
+        }
+      },
+      "dependentRequired": { "audience": ["capabilities", "effectCeiling", "principalKind"] },
+      "anyOf": [
+        { "required": ["effects"], "properties": { "effects": true } },
+        { "required": ["audience"], "properties": { "audience": true }, "description": "DEC-0039: a delegation grant may omit effects; it then authorises reads and drafts only (a read-only grant has effectCeiling [none])." }
+      ],
+      "additionalProperties": false
+    },
+    "dataPolicy": {
+      "type": "object",
+      "required": ["kind", "meta", "project", "rules"],
+      "properties": {
+        "kind": { "const": "data-policy" },
+        "meta": { "$ref": "common.schema.json#/$defs/revisionMeta" },
+        "project": { "$ref": "common.schema.json#/$defs/uri" },
+        "rules": {
+          "type": "array",
+          "minItems": 6,
+          "items": {
+            "type": "object",
+            "required": ["classification", "purpose", "retention", "deletionMode", "owner", "globalPromotion"],
+            "properties": {
+              "classification": { "$ref": "common.schema.json#/$defs/dataClass" },
+              "purpose": { "type": "string", "minLength": 1 },
+              "retention": { "type": "string", "minLength": 1 },
+              "deletionMode": { "enum": ["delete", "tombstone", "durable"] },
+              "owner": { "$ref": "common.schema.json#/$defs/uri" },
+              "globalPromotion": { "enum": ["allowed", "anonymized-only", "forbidden"] }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

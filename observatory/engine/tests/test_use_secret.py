@@ -298,6 +298,92 @@ def test_serve_starts_a_service_from_the_vault_and_rotation_names_it() -> None:
           and second not in rot.stdout + rot.stderr, "IT LEAKED")
 
 
+def test_a_slot_is_released_only_under_a_grant() -> None:
+    """OBS-57 (Fabric ADR-0144 amendment 2): an agent hands over its delegation token in
+    FABRIC_DELEGATION_TOKEN (aud project-observatory, scope secret.use), and a vault slot is released only
+    when a grant the token names has `spend.credentialSource {kind: project-key, ref: <the slot>}`. The
+    token leaves the environment before the child starts and is never logged."""
+    try:
+        from test_meter import Estate, ISSUER, claims, grant
+        Estate()
+    except Exception:                                   # noqa: BLE001 — the full extra's cryptography
+        print("  SKIP  slot grants need the cryptography package")
+        return
+    import time as _time
+    d, env = estate()
+    home = d / "home"
+    (home / "config").mkdir(parents=True)
+    grants = d / "grants"
+    grants.mkdir()
+    issuer = Estate()
+    (d / "jwks.json").write_text(json.dumps(issuer.jwks), encoding="utf-8")
+    config = {"issuer": ISSUER, "jwks": str(d / "jwks.json"), "grantsDir": str(grants)}
+    (home / "config" / "meter.json").write_text(json.dumps(config), encoding="utf-8")
+    env = {**env, "OBSERVATORY_VAULT_DIR": str(d / "vault"), "OBSERVATORY_HOME": str(home)}
+    value = "sk-" + "or-v1-" + "Gr4nT5lo" * 4
+    put = subprocess.run([sys.executable, str(ROOT / "tools/vault.py"), "put", "demo", "local", "SERVICE_KEY"],
+                         input=value, env=env, capture_output=True, text=True, timeout=60)
+    check("slot grants: a slot is put", put.returncode == 0, put.stderr[-200:])
+    child = d / "child.py"
+    child.write_text("import os\nprint('len', len(os.environ.get('SERVICE_KEY', '')))\n"
+                     "print('token-inherited', 'FABRIC_DELEGATION_TOKEN' in os.environ)\n", encoding="utf-8")
+    now = int(_time.time())
+
+    def write_grant(source, **over):
+        doc = grant(startsAt="2026-01-01T00:00:00Z", expiresAt="2099-01-01T00:00:00Z",
+                    spend={"mode": "unlimited", "payer": "owner", "credentialSource": source}, **over)
+        (grants / f"{doc['meta']['id']}.json").write_text(json.dumps(doc), encoding="utf-8")
+
+    def run(token=None, names="SERVICE_KEY", extra=None):
+        e = {**env, **(extra or {})}
+        if token is not None:
+            e["FABRIC_DELEGATION_TOKEN"] = token
+        return subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "run", "demo", names, "--",
+                               sys.executable, str(child)], env=e, capture_output=True, text=True, timeout=60)
+
+    token = issuer.sign(claims(scope="secret.use", iat=now - 5, exp=now + 300))
+    write_grant({"kind": "project-key", "ref": "demo/local/SERVICE_KEY"})
+    p = run()
+    check("slot grants: without a token the default mode still releases (until the issuer ships)",
+          f"len {len(value)}" in p.stdout, p.stderr[-200:])
+    p = run(token)
+    check("slot grants: a grant naming the slot releases it", f"len {len(value)}" in p.stdout, p.stderr[-300:])
+    check("slot grants: and the child does not inherit the token", "token-inherited False" in p.stdout, p.stdout)
+    write_grant({"kind": "project-key", "ref": "demo/local/OTHER_KEY"})
+    p = run(token)
+    check("slot grants: a grant naming another slot is no-grant", p.returncode == 2 and "no-grant" in p.stderr
+          and "len" not in p.stdout, p.stderr[-300:])
+    write_grant({"kind": "capability", "agent": "urn:agent:example-writer", "capability": "writer.write"})
+    p = run(token)
+    check("slot grants: a capability source never releases a slot",
+          p.returncode == 2 and "credential-source-refused" in p.stderr, p.stderr[-300:])
+    write_grant({"kind": "project-key", "ref": "demo/local/SERVICE_KEY"}, state="revoked")
+    p = run(token)
+    check("slot grants: a revoked grant is grant-revoked", "grant-revoked" in p.stderr, p.stderr[-300:])
+    write_grant({"kind": "project-key", "ref": "demo/local/SERVICE_KEY"})
+    p = run(issuer.sign(claims(scope="grant.check", iat=now - 5, exp=now + 300)))
+    check("slot grants: a token for another scope is principal-unproven", "principal-unproven" in p.stderr,
+          p.stderr[-300:])
+    p = run(token, names="DEMO_API_KEY")
+    check("slot grants: with a token a project's .env is never read", p.returncode == 2
+          and "not in the vault" in p.stderr and PLANTED not in p.stdout + p.stderr, p.stderr[-300:])
+    (home / "config" / "meter.json").write_text(json.dumps({**config, "slotsRequireGrant": "always"}),
+                                                encoding="utf-8")
+    p = run()
+    check("slot grants: `always` refuses a release without a token",
+          p.returncode == 2 and "principal-unproven" in p.stderr and "len" not in p.stdout,
+          f"rc={p.returncode} out={p.stdout[-200:]} err={p.stderr[-300:]}")
+    p = run(token)
+    check("slot grants: `always` releases under the grant", f"len {len(value)}" in p.stdout, p.stderr[-300:])
+    journal = (d / "state" / "logs" / "secret-use.jsonl").read_text(encoding="utf-8")
+    rows = [json.loads(l) for l in journal.splitlines()]
+    check("slot grants: the journal names the verdict", any(str(r.get("grant", "")).startswith("granted:")
+                                                            for r in rows)
+          and any(r.get("grant") == "no-grant" for r in rows), journal[-400:])
+    check("slot grants: and never the token or the value", token not in journal and token.split(".")[2] not in
+          journal and value not in journal, "IT LEAKED")
+
+
 def test_where_reports_the_source_it_would_take() -> None:
     d, env = estate()
     p = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "where",
@@ -496,6 +582,7 @@ if __name__ == "__main__":
                test_where_reports_the_source_it_would_take,
                test_vault_only_refuses_a_project_env_file,
                test_serve_starts_a_service_from_the_vault_and_rotation_names_it,
+               test_a_slot_is_released_only_under_a_grant,
                test_the_leak_scan_finds_a_planted_value,
                test_the_file_a_value_lives_in_is_not_a_sighting,
                test_an_undistinctive_value_is_named_rather_than_hunted,

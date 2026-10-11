@@ -82,6 +82,9 @@ SAMPLES = {
     "{command}": "cleanup",
     'shellArg(RUNTIME.user_home || "$HOME")': "/srv/example-ws/home",
     # A harness skill key (collectors/scan_harness.py): `plain/<folder>` or `plugin:<plugin>/<folder>`.
+    # The meter's values (tools/grant.py): an amount, a token jti, a receipt, a grant ref.
+    "USD": "0.42", "JTI": "tok-callee-000000001", "RECEIPT": "rcpt_0123456789abcdef",
+    "REF": "urn:grant:project-a:writer#3",
     "KEY": "plain/tidy-notes", "{_c.get('key')}": "plugin:tool@family/installer", "{c['key']}": "plain/tidy-notes",
 }
 PLACEHOLDER = re.compile(r"[A-Z][A-Z0-9_./,]*[A-Z]|[A-Z]{2,}")

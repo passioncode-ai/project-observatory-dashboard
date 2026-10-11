@@ -272,9 +272,12 @@ class WorkspaceUpgrade(unittest.TestCase):
             (self.home/'secrets'/'demo-slot').write_text('a different synthetic value')
             return out
         with patch.object(upgrade,'prepare_upgrade',side_effect=staged_while_settings_change):
-            with self.assertRaises(config.ConfigurationError):
+            with self.assertRaises(config.ConfigurationError) as refused:
                 upgrade.upgrade(self.home,apply=True,writers_stopped=True)
         self.assertFalse((self.home/upgrade.JOURNAL).exists())
+        # The refusal names what moved, so the writer can be found (0.22.0, 2026-10-11).
+        self.assertIn('secrets/demo-slot', str(refused.exception))
+        self.assertNotIn('a different synthetic value', str(refused.exception))
 
     def test_a_failed_live_migration_puts_the_files_back(self):
         setting=config.read_json(self.home/'config/settings.json')

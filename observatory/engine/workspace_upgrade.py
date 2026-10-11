@@ -487,8 +487,14 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
         try:
             workspace.copy_private(Path(receipt['snapshot']) / 'data',stage)
             changed = [name for name in prepare_upgrade(stage) if name not in databases]
-            if steady(before) != steady(inventory(base)):
-                raise config.ConfigurationError('Workspace changed while upgrade was staged; stop all writers')
+            held, now = steady(before), steady(inventory(base))
+            if held != now:
+                # Name what moved (workspace-relative paths, never contents): without them the
+                # refusal of 0.22.0 on 2026-10-11 could not say which writer to stop.
+                moved = sorted(k for k in set(held) | set(now) if held.get(k) != now.get(k))
+                more = f' and {len(moved) - 5} more' if len(moved) > 5 else ''
+                raise config.ConfigurationError('Workspace changed while upgrade was staged; stop all writers '
+                                                f'(changed: {", ".join(moved[:5])}{more})')
             # The live store first, before the interrupted-upgrade marker exists (the code
             # that migrates refuses a workspace mid-upgrade): one SQLite transaction, so a
             # failure changes nothing and no file has been swapped yet.

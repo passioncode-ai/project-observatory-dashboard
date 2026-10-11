@@ -10,6 +10,12 @@
     python "$T/use_secret.py" header [--env ENV] [--name Authorization] [--scheme Bearer] <project> <NAME>
                                                     one MCP server's headersHelper, vault only, bound slot only
 
+UNDER A GRANT (OBS-57). With `FABRIC_DELEGATION_TOKEN` in its environment — the agent's token from Fabric's
+hub, aud `project-observatory`, scope `secret.use` — `run`, `serve` and `header` release a vault slot only
+when a grant the token names has `credentialSource {kind: project-key, ref: <project>/<env>/<NAME>}`, read
+no `.env`, and remove the token before the child starts (docs/design/METER.md M5). `slotsRequireGrant` in
+`config/meter.json` is `when-token` by default, `always` or `off`.
+
 WHY THIS EXISTS. The secrets rule already says an agent works with NAMES after
 an inject — and without this file there was no way to HONOUR that for a one-off
 command. An agent that needs an API key for one `curl` reads the `.env`, and
@@ -188,6 +194,61 @@ VAULT_ONLY_ENV = "OBSERVATORY_VAULT_ONLY"
 
 def vault_only_default() -> bool:
     return os.environ.get(VAULT_ONLY_ENV, "") not in ("", "0", "false", "no")
+
+
+#: THE CALLER'S DELEGATION TOKEN (OBS-57, Fabric ADR-0144 amendment 2). An agent that uses a slot asks
+#: Fabric's hub for a token (aud `project-observatory`, scope `secret.use`) under its grant that names the
+#: slot, and hands it over in this variable: never argv (contract DL-11), never a file. `main` removes it
+#: from the environment before anything runs, so no child inherits it, and it is never logged.
+DELEGATION_ENV = "FABRIC_DELEGATION_TOKEN"
+_DELEGATION_TOKEN: str | None = None
+
+
+class SlotRefused(Exception):
+    """A slot release the grant check refused: `code` is the contract's refusal code."""
+
+    def __init__(self, code: str, reason: str):
+        super().__init__(reason)
+        self.code = code
+
+
+def slot_mode() -> str:
+    """`config/meter.json` `slotsRequireGrant`: `when-token` (default until the issuer ships), `always`, `off`."""
+    import meter
+    return meter.default_meter().slot_mode
+
+
+def grant_required() -> bool:
+    """A grant names vault slots only: with a token, or in `always` mode, an env file is never read."""
+    return _DELEGATION_TOKEN is not None or slot_mode() == "always"
+
+
+def check_slots(wheres: dict[str, str]) -> str:
+    """Release only slots a grant names. Returns the verdict for the audit row; raises SlotRefused.
+
+    `wheres` maps each NAME to where `resolve` found it (`vault:<project>/<env>/<NAME>`)."""
+    import meter
+    m = meter.default_meter()
+    if m.slot_mode == "off":
+        return "not-checked"
+    token = _DELEGATION_TOKEN
+    if token is None:
+        if m.slot_mode == "always":
+            raise SlotRefused("principal-unproven", f"refused: principal-unproven — no {DELEGATION_ENV}; this machine releases a "
+                              f"slot only under a grant (slotsRequireGrant: always). Ask Fabric's hub for a "
+                              f"token for project-observatory with scope {meter.SLOT_CAPABILITY}.")
+        return "no-token"
+    refs = []
+    for name, where in wheres.items():
+        if not where.startswith("vault:"):
+            raise SlotRefused("no-grant", f"refused: no-grant — {name} came from a project file, and a grant names "
+                              f"vault slots only")
+        answer = m.authorize_slot(token, where[len("vault:"):])
+        if answer["decision"] != "allowed":
+            raise SlotRefused(answer["code"], f"refused: {where[len('vault:'):]}: {answer['code']} — "
+                              f"{answer['reason']}")
+        refs.append(answer["grantRef"])
+    return "granted:" + ",".join(sorted(set(refs)))
 
 
 def resolve(project: str, name: str, env: str | None = None,
@@ -383,15 +444,24 @@ def cmd_run(args) -> int:
     for n in names:
         try:
             values[n], wheres[n] = resolve(args.project, n, args.env,
-                                           vault_only=args.vault_only or vault_only_default())
+                                           vault_only=args.vault_only or vault_only_default()
+                                           or grant_required())
         except LookupError as exc:
             print(str(exc), file=sys.stderr)
             return 2
+    try:
+        verdict = check_slots(wheres)
+    except SlotRefused as exc:
+        values.clear()
+        audit("use-refused", f"{args.project}:{','.join(names)}",
+              {"from": wheres, "command": args.command[0], "grant": exc.code})
+        print(f"use_secret: {exc}", file=sys.stderr)
+        return 2
     # WRITTEN BEFORE THE RUN, like every other audited action here: a log
     # written afterwards loses the run that never came back.
     audit("use", f"{args.project}:{','.join(names)}",
           {"from": wheres, "command": args.command[0],
-           "argv_len": len(args.command)})
+           "argv_len": len(args.command), "grant": verdict})
     child_env = dict(os.environ)
     child_env.update(values)
     if args.as_name and len(names) == 1:
@@ -484,9 +554,17 @@ def cmd_serve(args) -> int:
         except LookupError as exc:
             print(str(exc), file=sys.stderr)
             return 2
+    try:
+        verdict = check_slots(wheres)
+    except SlotRefused as exc:
+        values.clear()
+        audit("serve-refused", f"{args.project}:{','.join(names)}",
+              {"project": args.project, "from": wheres, "consumer": label, "grant": exc.code})
+        print(f"use_secret: {exc}", file=sys.stderr)
+        return 2
     audit("serve", f"{args.project}:{','.join(names)}",
           {"project": args.project, "from": wheres, "consumer": label, "pid": os.getpid(),
-           "command": args.command[0], "argv_len": len(args.command)})
+           "command": args.command[0], "argv_len": len(args.command), "grant": verdict})
     child_env = dict(os.environ)
     child_env.update(values)
     try:
@@ -674,6 +752,10 @@ def _header_value(args, url: str) -> tuple[str, str]:
                             f"but {args.project}/{got_env}/{args.name} is bound to {bound} "
                             f"(host {bound_host}); a value is served only to the server it is "
                             f"bound to")
+    try:
+        args.grant_verdict = check_slots({args.name: f"vault:{args.project}/{got_env}/{args.name}"})
+    except SlotRefused as exc:
+        raise HeaderRefused(f"grant:{exc.code}", str(exc)) from None
     value = private_files._read_private(slot).strip()
     if not value or _control(value):
         raise HeaderRefused("control-character", f"refused: the value in {args.project}/{got_env}/"
@@ -704,7 +786,8 @@ def cmd_header(args) -> int:
         print(f"use_secret header: {exc}", file=sys.stderr)
         return 2
     audit("header", f"{args.project}:{args.name}",
-          {**row, "host": host, "verdict": "served", "header": args.header_name})
+          {**row, "host": host, "verdict": "served", "header": args.header_name,
+           "grant": getattr(args, "grant_verdict", None)})
     sys.stdout.write(json.dumps({args.header_name: header_value}) + "\n")
     sys.stdout.flush()
     return 0
@@ -720,6 +803,10 @@ def _audit_quietly(action: str, detail: dict) -> None:
 
 
 def main(argv: list[str]) -> int:
+    global _DELEGATION_TOKEN
+    # Taken out of the environment before anything else runs: no child, no `exec`, no traceback's
+    # environment dump ever carries it (OBS-57).
+    _DELEGATION_TOKEN = os.environ.pop(DELEGATION_ENV, None) or None
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
