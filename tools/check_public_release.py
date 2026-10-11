@@ -68,6 +68,8 @@ PUBLIC_IMAGES = {
 
 
 def approved_image(relative: str, data: bytes) -> bool:
+    if relative in DESKTOP_ICONS:
+        return len(data) <= 1024 * 1024 and hashlib.sha256(data).hexdigest() in DESKTOP_ICONS[relative]
     return (relative in PUBLIC_IMAGES and data.startswith(b"\x89PNG\r\n\x1a\n")
             and len(data) <= 4 * 1024 * 1024
             and hashlib.sha256(data).hexdigest() in PUBLIC_IMAGES[relative])
@@ -159,10 +161,49 @@ NATIVE_SOURCES = {
     "macos/Tests/ObservatoryCoreTests/ScratchDefaults.swift", "macos/Tests/ObservatoryCoreTests/LocalizationTests.swift",
     "macos/Tests/ObservatoryCoreTests/AppUpdateTests.swift",
 }
+# The Windows and Linux app (docs/desktop/, W8), file by file like the macOS sources above.
+DESKTOP_SOURCES = {
+    "desktop/.gitignore",
+    "desktop/package-lock.json",
+    "desktop/package.json",
+    "desktop/src-tauri/Cargo.lock",
+    "desktop/src-tauri/Cargo.toml",
+    "desktop/src-tauri/build.rs",
+    "desktop/src-tauri/capabilities/main.json",
+    "desktop/src-tauri/src/bridge.rs",
+    "desktop/src-tauri/src/l10n.rs",
+    "desktop/src-tauri/src/main.rs",
+    "desktop/src-tauri/src/pages.rs",
+    "desktop/src-tauri/src/settings.rs",
+    "desktop/src-tauri/tauri.conf.json",
+    "desktop/src-tauri/tauri.linux.conf.json",
+    "desktop/src-tauri/tauri.windows.conf.json",
+    "desktop/ui/app.css",
+    "desktop/ui/app.js",
+    "desktop/ui/empty.html",
+    "desktop/ui/empty.js",
+    "desktop/ui/i18n/ru.json",
+    "desktop/ui/settings.html",
+    "desktop/ui/settings.js",
+    "desktop/ui/setup.html",
+    "desktop/ui/setup.js",
+}
+# Its icons, rasterized from the product mark (dashboard/brand/observatory-mark.svg) by `tauri icon`;
+# admitted by digest, as the public images are.
+#: The desktop app's build output: ignored by its .gitignore and never part of a release tree.
+DESKTOP_BUILD = ("desktop/node_modules/", "desktop/src-tauri/target/", "desktop/src-tauri/gen/")
+DESKTOP_ICONS = {
+    "desktop/src-tauri/icons/128x128.png": {"158b3d8cc427b4b6288271ca267825543bd504d19af26521054910ea9e3986a4"},
+    "desktop/src-tauri/icons/128x128@2x.png": {"1880d5de11b47f1499a55a95d6639cf50baf189a02aa47c87147fbba75c87a42"},
+    "desktop/src-tauri/icons/32x32.png": {"c559f80f9f3cbeec25fcd2227d7955b6332567e860ac90a57cd005cf7b54324c"},
+    "desktop/src-tauri/icons/64x64.png": {"040b636bd7f7a2adc264186931b01529ec0b870d899f8b1ff37ba1685e79b8df"},
+    "desktop/src-tauri/icons/icon.ico": {"52666e2548d062ab058aa4eeca2fc120276f0b32a1b124d34a6476abace1d5d7"},
+    "desktop/src-tauri/icons/icon.png": {"1656594f554576e4e9835052335f4ca3db99cb9184d51f00beb246465420a92b"},
+}
 
 
 def allowed_path(rel: Path) -> bool:
-    if rel.as_posix() in NATIVE_SOURCES:
+    if rel.as_posix() in NATIVE_SOURCES or rel.as_posix() in DESKTOP_SOURCES or rel.as_posix() in DESKTOP_ICONS:
         return True
     if rel.as_posix() in PUBLIC_IMAGES:
         return True
@@ -204,6 +245,8 @@ def audit(root: Path, deny: list[str], history: bool, refs: tuple[str, ...] = ("
         rel = p.relative_to(root)
         if any(x in SKIP or x.endswith(".egg-info") for x in rel.parts):
             continue
+        if rel.as_posix().startswith(DESKTOP_BUILD):
+            continue   # the desktop app's ignored build output, never committed
         if p.is_symlink():
             findings.append({"file_index": len(files), "kind": "symlink", "count": 1})
             continue
@@ -215,7 +258,7 @@ def audit(root: Path, deny: list[str], history: bool, refs: tuple[str, ...] = ("
             findings.append({"file_index": index, "kind": "path:" + kind, "count": n})
         if not allowed_path(rel):
             findings.append({"file_index": index, "kind": "outside-public-allowlist", "count": 1})
-        if rel.as_posix() in PUBLIC_IMAGES:
+        if rel.as_posix() in PUBLIC_IMAGES or rel.as_posix() in DESKTOP_ICONS:
             if not approved_image(rel.as_posix(), p.read_bytes()):
                 findings.append({"file_index": index, "kind": "unreviewed-image", "count": 1})
             continue
@@ -283,7 +326,7 @@ def audit(root: Path, deny: list[str], history: bool, refs: tuple[str, ...] = ("
                     findings.append({"kind": "history:unreadable-blob", "count": 1})
                     continue
                 blobs += 1
-                if rel in PUBLIC_IMAGES:
+                if rel in PUBLIC_IMAGES or rel in DESKTOP_ICONS:
                     if not approved_image(rel, blob.stdout):
                         findings.append({"kind": "history:unreviewed-image", "count": 1})
                     continue
