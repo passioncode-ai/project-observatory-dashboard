@@ -3,9 +3,30 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.23.0 — 2026-10-11
+
+The disk guard keeps free space by itself, every hour, without touching anything a process holds; the meter
+answers whether a delegated call may spend; a vault slot is released only under a grant that names it; and the
+harness scan reports what every agent session loads. Releases are now approved by checks, not by a click. The
+companion plugin `observatory-log` is unchanged.
 
 ### Added
+
+- **The disk guard** (OBS-63): with `features.auto_cleanup` on, the hourly maintenance job runs
+  `tools/disk_guard.py` first in every pass, before the update and the backup — no longer only from the tick,
+  whose cleanup step a loaded machine could leave unreached for a day. Free space sets the pressure (`normal`,
+  `low` under 25 GB, `critical` under 10 GB) and the pressure moves every threshold: the cache tools' own cleanup
+  (`uv`, `pnpm`, Homebrew, Docker only while its daemon already runs; `npm cache verify`, `uv cache clean`, Go and
+  Yarn from `low`), git-ignored build output of checkouts idle 14 / 3 / 1 days (by checkout, commit or an
+  uncommitted file, never the index), temporary entries, Trash items older than 30 days (3 at `critical`),
+  abandoned browser code-sign clones, then the cleanup's git auto tier. Nothing a process holds open or works in
+  is removed: one `lsof` listing per run, re-checked at each removal, and without it no path goes. Freed space is
+  the disk's own before/after count (`freed_mb`), not `du`, which counts an APFS clone in full.
+  `full disk-guard [--apply] [--level L] [--large-files]` runs it by hand. The Machine page and
+  `observatory_machine` (`section: guard`) show the last run, the largest files under the home directory and the
+  running simulators with the command that stops each; `machine.guard_idle` warns when the guard has not reported
+  for three hours, and `machine.disk_low` names the guard's run, the swap holders and the largest files.
+  Configuration: `config/cleanup.json` → `guard`. Supersedes the Space-page draft (OBS-15).
 
 - **The meter** (OBS-55; Fabric ADR-0144 step 3, contract DEC-0037/0038/0039): `grant.check` on the memory-http
   door answers whether a call may spend. The caller presents the onward delegation token Fabric's hub minted for
@@ -29,6 +50,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   directives, download-and-execute, a credential read beside a send, opaque content — weighed by where the skill
   comes from. Files are read, never run. A skill whose files change is reported until
   `full harness --accept KEY`; an ack of a rule hit lapses when the skill changes. Design: `docs/design/HARNESS.md`.
+
+### Fixed
+
+- `full update` refusing with "the workspace changed while staged" now names the paths that moved, so the writer
+  to stop can be found (#200).
 
 ## 0.22.0 — 2026-10-11
 
