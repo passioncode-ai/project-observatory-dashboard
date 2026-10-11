@@ -124,7 +124,7 @@ def summary_html(m: dict, t: Translator) -> str:
     return f'<div class="tiles machine-tiles">{cells}</div>'
 
 
-GUARD_CLASSES = ("cache-command", "build-output", "temp", "trash", "browser-clone")
+GUARD_CLASSES = ("cache-command", "cache-dir", "build-output", "temp", "trash", "browser-clone")
 
 
 def guard_html(g: dict | None, t: Translator) -> str:
@@ -257,7 +257,7 @@ DYNAMIC = ("cache", "toolchain", "build", "simulator", "vm", "worktrees", "user"
            "branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts",
            "branch-unique", "worktree-dirty", "removed", "pruned", "skipped", "failed",
            # The disk guard's classes and pressure levels (tools/disk_guard.py).
-           "cache-command", "build-output", "temp", "trash", "browser-clone", "normal", "low", "critical",
+           "cache-command", "cache-dir", "build-output", "temp", "trash", "browser-clone", "normal", "low", "critical",
            # Empty states chosen by whether their survey ran (see UNMEASURED).
            UNMEASURED, UNMEASURED_GIT, "Every worktree is clean and in recent use.", "No branch holds commits found nowhere else.",
            "Nothing to clean.", "No process runs inside a project folder.")

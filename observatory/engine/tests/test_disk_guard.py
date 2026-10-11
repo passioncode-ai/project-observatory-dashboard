@@ -185,14 +185,14 @@ class Temp(Base):
 
 
 class Order(Base):
-    def test_commands_first_then_largest_paths_and_the_cap_is_per_class(self):
+    def test_paths_first_largest_first_commands_last_and_the_cap_is_per_class(self):
         for name, size in (("small", 10), ("large", 5000), ("mid", 300)):
             (self.t1 / name).mkdir()
             (self.t1 / name / "f").write_bytes(b"x" * size)
             age(self.t1 / name, 9)
         cfg = self.cfg(commands=[{"argv": ["python3", "-c", "pass"], "level": "normal"}])
         plan = self.g.build_plan(cfg, "normal", self.free(), time.time(), [])
-        self.assertEqual(plan[0]["class"], "cache-command")
+        self.assertEqual(plan[-1]["class"], "cache-command", "a tool's command waits behind the paths")
         self.assertEqual([Path(a["target"]).name for a in plan if a["class"] == "temp"], ["large", "mid", "small"])
         with patch.object(self.g, "load_config", return_value={**cfg, "max_actions_per_class": 1}), \
                 patch.object(self.g.Holders, "take", return_value=self.free()), \
@@ -243,12 +243,67 @@ class Acting(Base):
             self.assertEqual(self.g.act(a, self.free())["result"], "skipped")
             self.assertEqual(self.g.act({**a, "busy_output": ""}, self.free())["result"], "failed")
 
+    def test_a_command_held_up_on_a_lock_is_skipped_quickly(self):
+        a = {"class": "cache-command", "target": "tool prune", "busy_if": [], "needs": [], "timeout": 1,
+             "argv": [sys.executable, "-c", "import time; time.sleep(30)"]}
+        started = time.monotonic()
+        with patch.object(self.g, "running", return_value=False):
+            rec = self.g.act(a, self.free())
+        self.assertEqual(rec["result"], "skipped")
+        self.assertLess(time.monotonic() - started, 10)
+
     def test_commands_are_chosen_by_pressure_and_by_what_is_installed(self):
         cfg = self.cfg(commands=[{"argv": ["python3", "-c", "pass"], "level": "normal"},
                                  {"argv": ["python3", "-V"], "level": "critical"},
                                  {"argv": ["no-such-tool-here", "prune"], "level": "normal"}])
         self.assertEqual([a["target"] for a in self.g.plan_commands(cfg, "normal")], ["python3 -c pass"])
         self.assertEqual(len(self.g.plan_commands(cfg, "critical")), 2)
+
+
+class CacheDirs(Base):
+    def test_old_unheld_caches_go_and_held_fresh_and_kept_ones_stay(self):
+        caches = self.base / "Caches"
+        for name in ("com.example.editor", "held-app", "fresh-tool", "ms-playwright"):
+            (caches / name).mkdir(parents=True)
+            (caches / name / "blob").write_bytes(b"x" * 10)
+        age(caches, 9)
+        (caches / "fresh-tool" / "new").write_text("now")
+        cfg = self.cfg(cache_roots=[str(caches)], cache_keep=["ms-playwright"])
+        plan = self.g.plan_cache_dirs(cfg, "normal", self.free(caches / "held-app" / "blob"), time.time())
+        self.assertEqual([Path(a["target"]).name for a in plan], ["com.example.editor"])
+        self.assertEqual(plan[0]["class"], "cache-dir")
+
+    def test_pressure_shortens_the_age(self):
+        caches = self.base / "Caches"
+        (caches / "tool").mkdir(parents=True)
+        age(caches, 3)
+        cfg = self.cfg(cache_roots=[str(caches)], cache_keep=[])
+        self.assertEqual(self.g.plan_cache_dirs(cfg, "normal", self.free(), time.time()), [])
+        self.assertEqual(len(self.g.plan_cache_dirs(cfg, "low", self.free(), time.time())), 1)
+
+
+class Cadence(Base):
+    def run_auto(self, previous_at, free_gb):
+        import paths
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "disk-guard.json").write_text(json.dumps({"at": previous_at, "acting": True}))
+        settings = self.home / "config" / "settings.json"
+        doc = json.loads(settings.read_text())
+        doc.setdefault("features", {})["auto_cleanup"] = True
+        settings.write_text(json.dumps(doc))
+        with patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "free_bytes", return_value=int(free_gb * self.g.GB)), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g.subprocess, "run", side_effect=OSError):
+            return self.g.run(["--auto"])
+
+    def test_normal_pressure_acts_hourly_and_low_pressure_every_pass(self):
+        just_now = self.g.now()
+        self.assertTrue(self.run_auto(just_now, 100).get("not_due"), "normal, ran a minute ago: not due")
+        self.assertFalse(self.run_auto(just_now, 20).get("not_due"), "low: every pass")
+        self.assertFalse(self.run_auto("2026-01-01T00:00:00Z", 100).get("not_due"), "normal, an hour ago: due")
 
 
 class Clones(Base):
@@ -417,8 +472,8 @@ class RunBudget(Base):
                 stack.enter_context(p)
             stack.enter_context(patch.object(self.g, "refresh", side_effect=lambda *a, **k: ran.append(a) or "x"))
             # A plan already made, so what is measured is the act phase stopping, not planning.
-            stack.enter_context(patch.object(self.g, "build_plan", return_value=[
-                {"class": "temp", "target": str(self.t1 / n), "bytes": 0} for n in "abc"]))
+            stack.enter_context(patch.object(self.g, "planners", return_value=[
+                ("temp", lambda b: [{"class": "temp", "target": str(self.t1 / n), "bytes": 0} for n in "abc"])]))
             doc = self.g.run(["--apply", "--budget", "0"])
         self.assertEqual(doc["results"]["removed"], 0)
         self.assertTrue(all((self.t1 / n).exists() for n in "abc"))

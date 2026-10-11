@@ -28,6 +28,12 @@ while the major version is 0, a minor release may change behaviour and says so h
   `observatory_propose` (`aliases`); accepting one never rewrites an existing row.
 
 ### Fixed
+- **The disk guard keeps up with a disk that fills fast** (OBS-63): the maintenance pass runs every 15 minutes
+  (it was hourly), and the guard acts on every pass once free space is below the `low` line (hourly while it is
+  normal); it now also clears application and tool cache folders (`~/Library/Caches`, `~/.cache`) untouched for
+  7 / 2 / 1 days — the folders a hand cleanup freed 10 GB from — keeping downloaded browsers and SDKs a tool does
+  not fetch again by itself (`cache_keep`); and its per-class cap is 20,000, since the run budget bounds its time.
+  Measured on one machine: free space fell from 6 GB to 0.3 GB inside one hourly gap.
 - **The disk guard finishes inside the hourly pass** (OBS-63): the first scheduled pass on 0.23.0 killed it at
   the job's 1200 s ceiling, under launchd's background priority, and recorded only `exit 124` — no report, no
   journal. The guard now stops itself at `--budget` (the job passes 1020 s; `run_budget_seconds`, 900 s, by

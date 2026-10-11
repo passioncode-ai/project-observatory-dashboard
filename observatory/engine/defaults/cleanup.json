@@ -49,8 +49,13 @@
   "git_survey_every_hours": 6,
   "machine_survey_every_hours": 2,
   "plan_budget_seconds": 300,
+  "normal_every_minutes": 60,
+  "command_timeout_seconds": 90,
+  "cache_roots": ["~/Library/Caches", "~/.cache"],
+  "cache_days": {"normal": 7, "low": 2, "critical": 1},
+  "cache_keep": ["ms-playwright", "ms-playwright-go", "camoufox", "puppeteer", "cargo-xwin", "codex-runtimes", "uv", "pnpm", "Homebrew", "com.apple.*", "CloudKit", "observatory*", "agent-chrome", "huggingface", "torch", "whisper*", "*-models"],
   "run_budget_seconds": 900,
   "run_reserve_seconds": 60,
-  "max_actions_per_class": 2000
+  "max_actions_per_class": 20000
  }
 }

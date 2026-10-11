@@ -1242,13 +1242,13 @@ class RecordingApp:
 # --- R3: the schedule -------------------------------------------------------------------
 
 class Schedule(Base):
-    def test_the_launchd_job_runs_hourly_and_is_never_a_managed_job(self):
+    def test_the_launchd_job_runs_every_quarter_hour_and_is_never_a_managed_job(self):
         sched = M.LaunchdSchedule(self.home)
         doc = sched.document()
         self.assertTrue(doc["Label"].endswith(".maintain"))
         self.assertEqual(doc["ProgramArguments"][1:], [str(ROOT / "tools" / "maintain.py"), "run",
                                                        "--first-check-delay", "90"])
-        self.assertEqual((doc["StartInterval"], doc["RunAtLoad"]), (3600, True))
+        self.assertEqual((doc["StartInterval"], doc["RunAtLoad"]), (900, True))
         # No Background/LowPriorityIO throttling: it stretched a 2 s check past 600 s live.
         self.assertEqual(doc["ProcessType"], "Standard")
         self.assertNotIn("LowPriorityIO", doc)
@@ -1347,7 +1347,7 @@ class Schedule(Base):
         self.assertIn(f'Environment="OBSERVATORY_HOME={self.home}"', service)
         # A stop or a logout must not take the detached update down with the pass (A03 review).
         self.assertIn("KillMode=process", service.splitlines())
-        self.assertIn("OnUnitActiveSec=60min", timer)
+        self.assertIn("OnUnitActiveSec=15min", timer)
         # LC-16: the first pass, and its check, 90 seconds after the user manager starts.
         self.assertIn("OnStartupSec=90s", timer.splitlines())
         self.assertNotIn("OnBootSec=10min", timer)
