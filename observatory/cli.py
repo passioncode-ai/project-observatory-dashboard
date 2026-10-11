@@ -106,9 +106,9 @@ def parser() -> argparse.ArgumentParser:
     # Two defaults, because the two command sets keep separate workspaces: `full`
     # (and the bare command, which opens its dashboard) never reads the portable one.
     p.add_argument("--home", help="Private state directory. Portable commands: otherwise OBSERVATORY_HOME "
-                   "or ~/.local/share/project-observatory (%%LOCALAPPDATA%% on Windows). `full` and the bare command: otherwise "
-                   "OBSERVATORY_FULL_HOME, then OBSERVATORY_HOME, or ~/.local/share/project-observatory-full "
-                   "(%%LOCALAPPDATA%%\\project-observatory-full on Windows)")
+                   "or ~/.local/share/project-observatory . `full` and the bare command: otherwise "
+                   "OBSERVATORY_FULL_HOME, then OBSERVATORY_HOME, or ~/.local/share/project-observatory-full . "
+                   "On Windows both live in %%LOCALAPPDATA%% instead.")
     cmds = p.add_subparsers(dest="cmd")
     for name in ("init", "doctor", "demo", "scan", "status", "dashboard", "export"):
         cmds.add_parser(name)
