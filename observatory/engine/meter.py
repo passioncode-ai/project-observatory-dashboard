@@ -55,6 +55,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 import delegation
+import osprivacy
 
 AUDIENCE = "project-observatory"
 CAPABILITY = "grant.check"
@@ -92,11 +93,12 @@ def rfc3339(value: Any) -> Optional[int]:
     return parse_time(value.replace("t", "T").replace("z", "Z"))
 
 
-def _loose_or_foreign(st: os.stat_result) -> Optional[str]:
-    """The hub's projection is the owner's alone: 0700 and 0600, owned by this user."""
-    if st.st_mode & 0o077:
+def _loose_or_foreign(target: Any) -> Optional[str]:
+    """The hub's projection is the owner's alone: no group or other bit, owned by this user (osprivacy decides,
+    the one place mode bits and owners are read)."""
+    if not osprivacy.private(target):
         return "loose-permissions"
-    if hasattr(os, "getuid") and st.st_uid != os.getuid():
+    if not osprivacy.owned_by_me(target):
         return "foreign-owner"
     return None
 
@@ -328,7 +330,7 @@ class Meter:
             return deny("no-grant", "malformed-reference")
         grant_id, revision = match.group(1), int(match.group(2))
         # Windows has no owner-only mode bits and no O_NOFOLLOW; the profile is POSIX-only in 0.1.
-        if os.name == "nt" or not hasattr(os, "O_NOFOLLOW"):
+        if osprivacy.WINDOWS:
             return deny("unknown-state", "unsupported-platform")
         try:
             dir_stat = os.stat(directory)
@@ -338,12 +340,12 @@ class Meter:
             return deny("unknown-state", "unreadable")
         if not stat.S_ISDIR(dir_stat.st_mode):
             return deny("unknown-state", "no-projection")
-        problem = _loose_or_foreign(dir_stat)
+        problem = _loose_or_foreign(directory)
         if problem:
             return deny("unknown-state", problem)
         # One open, then every check on what was opened: O_NOFOLLOW refuses a link, O_NONBLOCK a FIFO's hang.
         try:
-            fd = os.open(directory / f"{grant_id}.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            fd = osprivacy.open(directory / f"{grant_id}.json", os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
         except FileNotFoundError:
             return deny("no-grant", "not-projected")
         except OSError as exc:
@@ -352,7 +354,7 @@ class Meter:
             file_stat = os.fstat(fd)
             if not stat.S_ISREG(file_stat.st_mode):
                 return deny("unknown-state", "not-a-file")
-            problem = _loose_or_foreign(file_stat)
+            problem = _loose_or_foreign(fd)
             if problem:
                 return deny("unknown-state", problem)
             if file_stat.st_size > MAX_PROJECTED_GRANT_BYTES:
