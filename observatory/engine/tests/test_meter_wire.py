@@ -42,9 +42,11 @@ class GrantCheckOverHttp(Base):
         self.estate = Estate()
         import paths
         grants = self.ws.home / "fabric-grants"
-        grants.mkdir()
+        grants.mkdir(mode=0o700)
+        grants.chmod(0o700)
         doc = grant(startsAt=stamp(-1), expiresAt=stamp(30))
         (grants / f"{doc['meta']['id']}.json").write_text(json.dumps(doc))
+        (grants / f"{doc['meta']['id']}.json").chmod(0o600)
         (self.ws.home / "jwks.json").write_text(json.dumps(self.estate.jwks))
         (paths.CONFIG / "meter.json").write_text(json.dumps(
             {"issuer": ISSUER, "jwks": str(self.ws.home / "jwks.json"), "grantsDir": str(grants)}))

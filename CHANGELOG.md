@@ -60,6 +60,12 @@ companion plugin `observatory-log` is unchanged.
   transaction. It answers a receipt, or a denial naming the code, the level and the window. `full grant --status`,
   `--check` (token on stdin) and `--settle`. The ledger records no person and no chain. Configuration:
   `config/meter.json`. Design: `docs/design/METER.md`.
+- **The meter reads the hub's grant projection strictly** (contract DEC-0041, `readProjectedGrant`): a projection
+  that is not the owner's alone (0700/0600), a link or FIFO (one `open` with `O_NOFOLLOW` and `O_NONBLOCK`), over
+  1 MiB, outside the standing-grant shape, with times that are not RFC 3339 with a zone, behind the token's
+  revision or of another grant is `unknown-state`; a revised grant is `no-grant`; Windows is `unknown-state` until
+  the profile covers it. A malformed `task` claim refuses the token. The contract schemas are vendored again at
+  `7931c1d` (the `call` window and the `task` claim are in them now).
 - **A vault slot only under a grant** (OBS-57): an agent hands `use_secret.py` its delegation token in
   `FABRIC_DELEGATION_TOKEN` (scope `secret.use`). `run`, `serve` and `header` then release a slot only when a grant
   the token names has `credentialSource {kind: project-key, ref: PROJECT/ENV/NAME}`, never read a `.env`, and

@@ -31,21 +31,29 @@ fallthrough to a binding. The stdio server carries no token, so `grant.check` th
 
 ## M2 — Which grant
 
-The token's `grant` claim names `<meta.id>#<meta.revision>`; a token naming several needs `grantRef`. The meter
-reads `<grantsDir>/<meta.id>.json`, which the hub writes for every grant it holds, in the contract's
-standing-grant shape (Fabric ADR-0144 amendment 1). The file is never authority by itself:
+The token's `grant` claim names `<meta.id>#<meta.revision>`; a token naming several needs `grantRef`, and a
+`grantRef` the verified token does not name is `no-grant` (the request is unsigned). The meter reads
+`<grantsDir>/<meta.id>.json`, which the hub writes for every grant it holds, in the contract's standing-grant
+shape, 0600 in a 0700 directory (Fabric ADR-0144 amendment 1). The read is the contract's `readProjectedGrant`
+(DEC-0041 DL-23/DL-24, fabric-agent-contract `7931c1d`), in its order. The file is never authority by itself:
 
 | What the meter finds | Answer |
 |---|---|
 | no grant directory configured | `unknown-state` (an unknown grant state is a denial) |
+| a reference that is not `<id>#<revision>` (the id has no separator and no leading dot) | `no-grant` |
+| Windows | `unknown-state`: the profile is POSIX-only in 0.1 |
+| no directory, or one not the owner's alone (any group or other bit, or another owner) | `unknown-state` |
 | no file | `no-grant` |
-| a file that does not parse or is not that standing grant | `unknown-state` |
-| another revision than the token names | `no-grant` |
-| `state: revoked` | `grant-revoked` |
-| `state: expired`, or past `expiresAt` | `grant-expired` |
-| before `startsAt`, or a project other than the token's | `no-grant` |
-| a credential source other than `project-key` or `capability` | `credential-source-refused` |
+| a link, a FIFO or anything but a regular file (one `open` with `O_NOFOLLOW` and `O_NONBLOCK`), a loose or foreign file, over 1 MiB, not JSON, outside the standing-grant shape, times that are not RFC 3339 with a zone, or another grant's content | `unknown-state` |
+| an earlier revision than the token names (the hub has not written it yet) | `unknown-state` |
+| `state: revoked` / `expired` / any other state but `active` | `grant-revoked` / `grant-expired` / `unknown-state` |
+| a later revision than the token names (revised since the token was minted) | `no-grant` |
+| past `expiresAt` / before `startsAt` | `grant-expired` / `no-grant` |
+| a project other than the token's | `no-grant` |
 | no `spend` block and an amount above zero | `no-grant` |
+
+Another agent's key as a credential source is outside the standing-grant shape (DEC-0038), so such a projection
+is `unknown-state` before the source is read; `credential-source-refused` stays as a second guard.
 
 ## M3 — Windows and levels
 

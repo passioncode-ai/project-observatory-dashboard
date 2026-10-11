@@ -759,8 +759,8 @@
       "path": "delegation.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "38e23ef8e47e538c0ddb3db546e9ca1db97afbaf7061b181cb8ed6509b560e0f",
-      "bytes": 12116
+      "export_sha256": "9e3cb6d17119c311f85bdc6d9550ea5b06af63167ba2851dceb16220974e66cc",
+      "bytes": 12496
     },
     {
       "path": "docs/AGENT-ONBOARDING.md",
@@ -846,8 +846,8 @@
       "path": "fabric/delegation-schemas/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f980969102d6a11b2f607dad31cb13df33ee485eab1c884052949a4a3f922d83",
-      "bytes": 1908
+      "export_sha256": "00aa536675094d8813ce7349106511174d40a768373827e7f44ddd7b73ba4a68",
+      "bytes": 1552
     },
     {
       "path": "fabric/delegation-schemas/common.schema.json",
@@ -867,8 +867,8 @@
       "path": "fabric/delegation-schemas/delegation-token.schema.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "74605fbb7ada1b6824c7f923c32e067dd9e9bfa534b977f3e7fbe5cdf4cd69c3",
-      "bytes": 5347
+      "export_sha256": "2fb1d2794f12e2fc85d5b9f900e074860262af1965ab4c44f19cb0047bb099a7",
+      "bytes": 5782
     },
     {
       "path": "fabric/delegation-schemas/governance.schema.json",
@@ -888,8 +888,8 @@
       "path": "fabric/delegation-schemas/grant-check.schema.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2803f990a6ab09a406b6c4c79a60e188567eed78f948a7c4e3c567309b0117c1",
-      "bytes": 3957
+      "export_sha256": "d18763d5a1ced6dbca074d347bf0c152d978db50738555c2a02806820f75ab1a",
+      "bytes": 4486
     },
     {
       "path": "fabric/fixtures/admission-input.json",
@@ -1248,8 +1248,8 @@
       "path": "mcp/capability_tools.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "661579d18062b2e66f9cc7e6ed333ce0d52c3c7a64d1730a88d3e89c8e7fed31",
-      "bytes": 26872
+      "export_sha256": "3b38c9d53b48901719eec3b2823a65cb993f6da85ad94065026b9fcd4a665cfc",
+      "bytes": 26622
     },
     {
       "path": "mcp/http_service.py",
@@ -1300,8 +1300,8 @@
       "path": "meter.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c9b583bab39514020a7afc6e94a35363a552c9244c4fd58a9085694f1c4b1300",
-      "bytes": 28783
+      "export_sha256": "d2b0392357d1fc177ed4d4663d138a427c5b1c62d5db2e76939e4b9d430fb5e6",
+      "bytes": 32435
     },
     {
       "path": "observatory.py",
@@ -2903,15 +2903,15 @@
       "path": "tests/test_meter.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f1af379a7627aeb8c594e3912245dcc2bdfae441b86dc2f99b1bf80d8293db34",
-      "bytes": 25542
+      "export_sha256": "e4f7298802109f1c45b37f3f525d121012c6d10da035b91a11975327a4681f3e",
+      "bytes": 27787
     },
     {
       "path": "tests/test_meter_wire.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "913617b2a3b22826cde79de7cfaed4cb4deb86dc19fe9a5d0038c149b691943c",
-      "bytes": 6751
+      "export_sha256": "925b0e77cb72976246f2405eb2309e3a4b2a7b7c2b221add4785d1a57626075b",
+      "bytes": 6849
     },
     {
       "path": "tests/test_metric_labels.py",
@@ -3589,8 +3589,8 @@
       "path": "tests/test_use_secret.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bd9145880cd988338333a1d047cee75e14e4a559ff001c252a05d75c2413e1b7",
-      "bytes": 36001
+      "export_sha256": "231edb0ff74712846826918bd21b9d8dda8ce2e3b089f17e58712efd8233e713",
+      "bytes": 36095
     },
     {
       "path": "tests/test_validator_rules.py",

@@ -113,9 +113,10 @@
             "project",
             "day",
             "week",
-            "month"
+            "month",
+            "call"
           ],
-          "description": "DEC-0039: the window that was reached; required with limit-reached."
+          "description": "DEC-0039: the window that was reached; required with limit-reached. DEC-0041: call means the grant's perCallMaxUsd was exceeded; it is a refusal window, not a grant limit window, and its level is L3."
         }
       },
       "additionalProperties": false,
@@ -140,6 +141,25 @@
                 "$ref": "#/$defs/level"
               },
               "window": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "window": {
+                "const": "call"
+              }
+            },
+            "required": [
+              "window"
+            ]
+          },
+          "then": {
+            "properties": {
+              "level": {
+                "const": "L3"
+              }
             }
           }
         }

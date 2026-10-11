@@ -217,9 +217,6 @@ def grant_check_tool() -> Tool:
     answer = json.loads((_DELEGATION_SCHEMAS / "grant-check.schema.json").read_text(encoding="utf-8"))
     # MCP requires an object at the root of an output schema; the contract's root is a oneOf of two objects.
     output = {"type": "object", **_inline_common(answer, common)}
-    # contract DEC-0041 (reserved 2026-10-11): `call`, the per-call maximum's window.
-    output["$defs"]["denied"]["properties"]["window"]["enum"] = \
-        list(dict.fromkeys(output["$defs"]["denied"]["properties"]["window"]["enum"] + ["call"]))
     return Tool(name=GRANT_CHECK, title=GRANT_CHECK,
                 description=("The meter (contract DEC-0037/0039): before a call that spends, reserve its "
                              "amount against the grant the delegation token names and the estate's monthly "

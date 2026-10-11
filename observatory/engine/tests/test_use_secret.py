@@ -314,7 +314,8 @@ def test_a_slot_is_released_only_under_a_grant() -> None:
     home = d / "home"
     (home / "config").mkdir(parents=True)
     grants = d / "grants"
-    grants.mkdir()
+    grants.mkdir(mode=0o700)
+    grants.chmod(0o700)
     issuer = Estate()
     (d / "jwks.json").write_text(json.dumps(issuer.jwks), encoding="utf-8")
     config = {"issuer": ISSUER, "jwks": str(d / "jwks.json"), "grantsDir": str(grants)}
@@ -333,6 +334,7 @@ def test_a_slot_is_released_only_under_a_grant() -> None:
         doc = grant(startsAt="2026-01-01T00:00:00Z", expiresAt="2099-01-01T00:00:00Z",
                     spend={"mode": "unlimited", "payer": "owner", "credentialSource": source}, **over)
         (grants / f"{doc['meta']['id']}.json").write_text(json.dumps(doc), encoding="utf-8")
+        (grants / f"{doc['meta']['id']}.json").chmod(0o600)
 
     def run(token=None, names="SERVICE_KEY", extra=None):
         e = {**env, **(extra or {})}

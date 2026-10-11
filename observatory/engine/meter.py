@@ -41,11 +41,13 @@ once a minute on an unknown `kid` (DL-15).
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import re
 import secrets
 import sqlite3
+import stat
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -75,7 +77,46 @@ WINDOW_LEVEL = {"call": "L3", "task": "L2", "total": "L1", "project": "L1", "day
                 "month": "L1"}
 CREDENTIAL_SOURCES = ("project-key", "capability")
 _JTI = re.compile(r"^[A-Za-z0-9._~-]{16,128}$")
-_UNSAFE_ID = re.compile(r"[/\\\x00]|\.\.")
+#: `<meta.id>#<meta.revision>` of a projectable grant: the id is the file's name — no separator, no leading dot.
+_GRANT_REF = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._:-]{0,199})#(0|[1-9][0-9]{0,15})$")
+MAX_PROJECTED_GRANT_BYTES = 1_048_576
+#: An RFC 3339 date-time with `Z` or a numeric offset; a local time is not one.
+_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$")
+_SCHEMAS = Path(__file__).resolve().parent / "fabric" / "delegation-schemas"
+_GRANT_VALIDATOR: Any = None
+
+
+def rfc3339(value: Any) -> Optional[int]:
+    if not isinstance(value, str) or not _RFC3339.match(value):
+        return None
+    return parse_time(value.replace("t", "T").replace("z", "Z"))
+
+
+def _loose_or_foreign(st: os.stat_result) -> Optional[str]:
+    """The hub's projection is the owner's alone: 0700 and 0600, owned by this user."""
+    if st.st_mode & 0o077:
+        return "loose-permissions"
+    if hasattr(os, "getuid") and st.st_uid != os.getuid():
+        return "foreign-owner"
+    return None
+
+
+def _standing_grant_ok(doc: dict) -> bool:
+    """Valid against the contract's `governance.schema.json#/$defs/grant`. No validator, no grant: an unknown
+    shape is a denial."""
+    global _GRANT_VALIDATOR
+    if _GRANT_VALIDATOR is None:
+        try:
+            import jsonschema
+            from referencing import Registry, Resource
+        except ImportError:
+            return False
+        docs = [json.loads(p.read_text(encoding="utf-8")) for p in _SCHEMAS.glob("*.schema.json")]
+        registry = Registry().with_resources((d["$id"], Resource.from_contents(d)) for d in docs)
+        governance = next(d for d in docs if d["$id"].endswith("governance.schema.json"))
+        schema = {"$ref": governance["$id"] + "#/$defs/grant"}
+        _GRANT_VALIDATOR = jsonschema.validators.validator_for(governance)(schema, registry=registry)
+    return _GRANT_VALIDATOR.is_valid(doc)
 REQUEST_FIELDS = {"amountUsd", "tokenJti", "grantRef", "purpose"}
 
 
@@ -274,37 +315,82 @@ class Meter:
         return doc
 
     def _grant(self, ref: str, now: int) -> tuple[Optional[dict], Optional[dict]]:
-        """The grant the ref names, or the denial: the projection is read, never trusted alone."""
+        """The grant the ref names, or the denial. The contract's `readProjectedGrant` (DEC-0041 DL-23/DL-24 at
+        fabric-agent-contract 7931c1d), in its order: the projection authorises nothing alone, and every doubt
+        about it is a denial."""
+        def deny(code: str, detail: str) -> tuple[None, dict]:
+            return None, self._denied(now, code, f"the hub's projection of the grant: {detail}")
         directory = self.grants_dir()
         if directory is None:
-            return None, self._denied(now, "unknown-state", "no grant directory is configured; an unknown "
-                                      "grant state is a denial")
-        grant_id, sep, revision = ref.rpartition("#")
-        if not sep or not grant_id or not revision.isdigit() or _UNSAFE_ID.search(grant_id):
-            return None, self._denied(now, "no-grant", "the grant reference is not <id>#<revision>")
-        path = directory / f"{grant_id}.json"
+            return deny("unknown-state", "no grant directory is configured")
+        match = _GRANT_REF.match(ref)
+        if not match:
+            return deny("no-grant", "malformed-reference")
+        grant_id, revision = match.group(1), int(match.group(2))
+        # Windows has no owner-only mode bits and no O_NOFOLLOW; the profile is POSIX-only in 0.1.
+        if os.name == "nt" or not hasattr(os, "O_NOFOLLOW"):
+            return deny("unknown-state", "unsupported-platform")
         try:
-            grant = json.loads(path.read_text(encoding="utf-8"))
+            dir_stat = os.stat(directory)
         except FileNotFoundError:
-            return None, self._denied(now, "no-grant", "the hub holds no such grant")
-        except (OSError, ValueError, UnicodeDecodeError):
-            return None, self._denied(now, "unknown-state", "the grant could not be read")
-        meta = grant.get("meta") if isinstance(grant, dict) else None
-        if not isinstance(meta, dict) or grant.get("kind") != "standing-grant" or meta.get("id") != grant_id:
-            return None, self._denied(now, "unknown-state", "the grant file is not this standing grant")
-        if meta.get("revision") != int(revision):
-            return None, self._denied(now, "no-grant", f"the grant is at revision {meta.get('revision')}, "
-                                      f"the token names {revision}")
-        state = grant.get("state")
-        if state == "revoked":
-            return None, self._denied(now, "grant-revoked", "the grant was revoked")
-        expires, starts = parse_time(grant.get("expiresAt")), parse_time(grant.get("startsAt"))
-        if state == "expired" or (expires is not None and now >= expires):
-            return None, self._denied(now, "grant-expired", "the grant has expired")
-        if state != "active" or expires is None or starts is None:
-            return None, self._denied(now, "unknown-state", "the grant's state or times cannot be read")
+            return deny("unknown-state", "no-projection")
+        except OSError:
+            return deny("unknown-state", "unreadable")
+        if not stat.S_ISDIR(dir_stat.st_mode):
+            return deny("unknown-state", "no-projection")
+        problem = _loose_or_foreign(dir_stat)
+        if problem:
+            return deny("unknown-state", problem)
+        # One open, then every check on what was opened: O_NOFOLLOW refuses a link, O_NONBLOCK a FIFO's hang.
+        try:
+            fd = os.open(directory / f"{grant_id}.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except FileNotFoundError:
+            return deny("no-grant", "not-projected")
+        except OSError as exc:
+            return deny("unknown-state", "not-a-file" if exc.errno == errno.ELOOP else "unreadable")
+        try:
+            file_stat = os.fstat(fd)
+            if not stat.S_ISREG(file_stat.st_mode):
+                return deny("unknown-state", "not-a-file")
+            problem = _loose_or_foreign(file_stat)
+            if problem:
+                return deny("unknown-state", problem)
+            if file_stat.st_size > MAX_PROJECTED_GRANT_BYTES:
+                return deny("unknown-state", "malformed-file")
+            with os.fdopen(os.dup(fd), "rb") as fh:
+                raw = fh.read(MAX_PROJECTED_GRANT_BYTES + 1)
+        except OSError:
+            return deny("unknown-state", "unreadable")
+        finally:
+            os.close(fd)
+        try:
+            grant = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return deny("unknown-state", "malformed-file")
+        # The standing-grant shape, with the state left to its own rows below.
+        if not isinstance(grant, dict) or not isinstance(grant.get("state"), str) \
+                or not _standing_grant_ok({**grant, "state": "active"}):
+            return deny("unknown-state", "malformed-file")
+        meta = grant["meta"]
+        starts, expires = rfc3339(grant.get("startsAt")), rfc3339(grant.get("expiresAt"))
+        if starts is None or expires is None:
+            return deny("unknown-state", "malformed-file")
+        if meta.get("id") != grant_id:
+            return deny("unknown-state", "another-grant")
+        if meta["revision"] < revision:
+            return deny("unknown-state", "projection-behind")
+        if grant["state"] == "revoked":
+            return deny("grant-revoked", "revoked")
+        if grant["state"] == "expired":
+            return deny("grant-expired", "expired")
+        if grant["state"] != "active":
+            return deny("unknown-state", "unknown-grant-state")
+        if meta["revision"] > revision:
+            return deny("no-grant", "revised")
+        if now >= expires:
+            return deny("grant-expired", "expired")
         if now < starts:
-            return None, self._denied(now, "no-grant", "the grant has not started")
+            return deny("no-grant", "not-started")
         return grant, None
 
     @staticmethod

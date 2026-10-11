@@ -204,7 +204,8 @@ class Meter(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.dir = Path(tmp.name)
         self.grants = self.dir / "grants"
-        self.grants.mkdir()
+        self.grants.mkdir(mode=0o700)
+        self.grants.chmod(0o700)
         self.estate = Estate()
         (self.dir / "jwks.json").write_text(json.dumps(self.estate.jwks))
         self.now = [NOW]
@@ -217,8 +218,12 @@ class Meter(unittest.TestCase):
                 "keyCeilingsUsd": {"openrouter:project-a": 30}}
         return M.Meter(db_path=self.dir / "meter" / "meter.db", config={**base, **config}, clock=lambda: self.now[0])
 
-    def write_grant(self, doc: dict) -> None:
-        (self.grants / f"{doc['meta']['id']}.json").write_text(json.dumps(doc))
+    def write_grant(self, doc: dict) -> Path:
+        """As the hub writes it: 0600 in a 0700 directory."""
+        path = self.grants / f"{doc['meta']['id']}.json"
+        path.write_text(json.dumps(doc))
+        path.chmod(0o600)
+        return path
 
     def schema_validator(self):
         try:
@@ -228,12 +233,8 @@ class Meter(unittest.TestCase):
             return None
         docs = {p.name: json.loads(p.read_text()) for p in SCHEMAS.glob("*.schema.json")}
         registry = Registry().with_resources((d["$id"], Resource.from_contents(d)) for d in docs.values())
-        call = json.loads(json.dumps(docs["grant-check.schema.json"]))
-        call["$defs"]["denied"]["properties"]["window"]["enum"].append("call")   # DEC-0041, see the README
-        call["$id"] = call["$id"].replace("grant-check", "grant-check-dec0041")
-        registry = registry.with_resource(call["$id"], Resource.from_contents(call))
-        cls = jsonschema.validators.validator_for(call)
-        return {"now": cls(docs["grant-check.schema.json"], registry=registry), "call": cls(call, registry=registry),
+        cls = jsonschema.validators.validator_for(docs["grant-check.schema.json"])
+        return {"now": cls(docs["grant-check.schema.json"], registry=registry),
                 "request": cls(docs["grant-check-request.schema.json"], registry=registry),
                 "grant": cls({"$ref": docs["governance.schema.json"]["$id"] + "#/$defs/grant"}, registry=registry)}
 
@@ -246,7 +247,7 @@ class Meter(unittest.TestCase):
         answer = self.meter.check(token, body)
         if self.validator:
             self.validator["request"].validate(body)
-            self.validator["call" if answer.get("window") == "call" else "now"].validate(answer)
+            self.validator["now"].validate(answer)
         return answer
 
     def assertDenied(self, answer, code, level=None, window=None):
@@ -343,9 +344,49 @@ class Meter(unittest.TestCase):
         self.meter = self.make()
         self.assertDenied(self.check(0.1, claims(grant=["../../etc/passwd#1"])), "no-grant")
 
+    def test_the_projection_is_read_strictly(self):
+        """DEC-0041 DL-23/DL-24: the owner's alone, a regular file, the standing-grant shape, RFC 3339 times."""
+        import os as _os
+        path = self.grants / f"{GRANT_ID}.json"
+        path.chmod(0o644)
+        self.assertDenied(self.check(0.1), "unknown-state")
+        self.assertIn("loose-permissions", self.meter.check(self.estate.sign(claims()), request(0.1))["reason"])
+        path.chmod(0o600)
+        self.grants.chmod(0o755)
+        self.assertDenied(self.check(0.1), "unknown-state")
+        self.grants.chmod(0o700)
+        path.unlink()
+        target = self.dir / "outside.json"                        # this grant itself, but not where the hub writes
+        target.write_text(json.dumps(grant()))
+        target.chmod(0o600)
+        path.symlink_to(target)
+        self.assertDenied(self.check(0.1), "unknown-state")
+        path.unlink()
+        _os.mkfifo(path, 0o600)
+        self.assertDenied(self.check(0.1), "unknown-state")       # O_NONBLOCK: a FIFO never hangs the meter
+        path.unlink()
+        self.write_grant(grant(startsAt="2026-10-11 09:00:00"))
+        self.assertDenied(self.check(0.1), "unknown-state")       # a local time is not RFC 3339
+        self.write_grant(grant(dataClasses=[]))
+        self.assertDenied(self.check(0.1), "unknown-state")       # outside the standing-grant shape
+        doc = grant()
+        (self.grants / f"{GRANT_ID}.json").write_text(json.dumps({**doc, "meta": {**doc["meta"], "id": "urn:grant:x"}}))
+        self.assertDenied(self.check(0.1), "unknown-state")       # another grant's content under this name
+        self.write_grant(grant(meta={**grant()["meta"], "revision": 2}))
+        self.assertDenied(self.check(0.1), "unknown-state")       # the hub has not written the token's revision yet
+        self.write_grant(grant(meta={**grant()["meta"], "revision": 4}))
+        self.assertDenied(self.check(0.1), "no-grant")            # revised since the token was minted
+        self.write_grant(grant())
+        self.assertEqual(self.check(0.1)["decision"], "allowed")
+
+    def test_a_malformed_task_claim_is_an_unproven_principal(self):
+        self.assertDenied(self.check(0.1, claims(task="has spaces")), "principal-unproven")
+
     def test_the_credential_source_must_be_the_projects_key_or_a_capability(self):
+        # Another agent's key is outside the standing-grant shape itself (DEC-0038): the projection is refused
+        # before the source is read. The meter's own credential-source-refused branch stays as a second guard.
         self.write_grant(grant(spend={**grant()["spend"], "credentialSource": {"kind": "agent-key", "ref": "copylot"}}))
-        self.assertDenied(self.check(0.1), "credential-source-refused")
+        self.assertDenied(self.check(0.1), "unknown-state")
 
     def test_which_grant(self):
         two = claims(grant=[f"{GRANT_ID}#3", "urn:grant:project-a:other#1"])

@@ -36,6 +36,8 @@ LEEWAY_SECONDS = 60
 MAX_TOKEN_LENGTH = 8192
 
 _B64URL = re.compile(r"^[A-Za-z0-9_-]+$")
+#: A session or task id (`delegation-token.schema.json#/$defs/session`, `#/$defs/task`): opaque, 1-128 characters.
+OPAQUE_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 @dataclass(frozen=True)
@@ -220,6 +222,9 @@ def _delegation_shape(payload: dict) -> bool:
     if not isinstance(effect, list) or not effect or not all(e in EFFECT_CLASSES for e in effect):
         return False
     if not isinstance(grant, list) or not grant or not all(_is_string(g) for g in grant):
+        return False
+    # DEC-0041: an optional claim the meter keys a window on is typed like any other.
+    if "task" in payload and not (isinstance(payload["task"], str) and OPAQUE_ID.match(payload["task"])):
         return False
     return isinstance(payload.get("act"), dict)
 

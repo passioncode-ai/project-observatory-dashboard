@@ -61,6 +61,7 @@
       ]
     },
     "project": { "$ref": "common.schema.json#/$defs/uri", "description": "Present when the grant is bound to a project." },
+    "task": { "$ref": "#/$defs/task", "description": "DEC-0041: the issuing host's task the work runs under, set by the hub when the session or run has one; the meter keys the task window on it. An onward token keeps the parent's task or none, never another." },
     "iat": { "type": "integer", "minimum": 0 },
     "exp": { "type": "integer", "minimum": 0, "description": "At most 600 seconds after iat (FAC-SEM-049)." },
     "jti": { "type": "string", "pattern": "^[A-Za-z0-9._~-]{16,128}$" }
@@ -68,6 +69,7 @@
   "additionalProperties": false,
   "$defs": {
     "session": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$", "description": "An opaque id of the session the actor runs in, when it runs in one." },
+    "task": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$", "description": "An opaque id of the issuing host's task, in the session id's grammar (DEC-0041)." },
     "header": {
       "type": "object",
       "required": ["alg", "typ", "kid"],
