@@ -97,7 +97,9 @@ def summary_html(m: dict, t: Translator) -> str:
     procs = m.get("processes") or {}
     cleanup = m.get("cleanup") or {}
     done = [r for r in cleanup.get("journal") or [] if r.get("result") in ("removed", "pruned")]
-    freed = sum(r.get("kb") or 0 for r in done) / 1048576
+    # The disk's own count (`freed_mb`, the guard's statvfs delta) where a row has one:
+    # `du` counts an APFS clone in full, and removing one frees nothing.
+    freed = sum(max(0, r["freed_mb"]) * 1024 if "freed_mb" in r else (r.get("kb") or 0) for r in done) / 1048576
     used = None
     if mem.get("total_mb") is not None and mem.get("free_mb") is not None:
         used = mem["total_mb"] - mem["free_mb"] - (mem.get("inactive_mb") or 0)
@@ -120,6 +122,42 @@ def summary_html(m: dict, t: Translator) -> str:
     ]
     cells = "".join(f'<div class="tile">{k}<b>{v}</b>{sub}</div>' for k, v, sub in tiles)
     return f'<div class="tiles machine-tiles">{cells}</div>'
+
+
+GUARD_CLASSES = ("cache-command", "build-output", "temp", "trash", "browser-clone")
+
+
+def guard_html(g: dict | None, t: Translator) -> str:
+    """The disk guard's last run, the largest files it found, and the simulators that
+    hold memory swap writes to this disk — each with what brings the space back."""
+    if not g:
+        return _table(t, "Disk guard", [("What", False), ("Planned", True)], [],
+                      "The disk guard has not run yet — project-observatory full disk-guard")
+    results, planned = g.get("results") or {}, g.get("planned") or {}
+    # The level is a word of its own, marked on its own: passed as an argument it was
+    # escaped, and the page printed its markup (seen on the first look, 2026-10-11).
+    ran = t.mark("Disk guard ran {at}: free {before} → {after} GB, {n} removed", at=stamp(g.get("at")),
+                 before=g.get("freeGbBefore", "—"), after=g.get("freeGbAfter", "—"), n=results.get("removed", 0))
+    parts = [f'<p class="machine-at">{ran} · {t.mark("pressure")} {_word(t, g.get("level"))}</p>']
+    parts.append(_table(t, "Disk guard", [("What", False), ("Planned", True)],
+                        [[_word(t, c), t.number(planned[c])] for c in GUARD_CLASSES if planned.get(c)],
+                        "Nothing to free at this pressure."))
+    parts.append(t.mark("Every hour, from the maintenance job, when features.auto_cleanup is on; never anything a "
+                        "process holds open or works inside: project-observatory full disk-guard --apply",
+                        tag="p", attrs=' class="machine-hint"'))
+    files = ((g.get("largeFiles") or {}).get("files") or [])[:ROWS]
+    parts.append(_table(t, "Largest files",
+                        [("File", False), ("Size", True), ("Modified", False)],
+                        [[f'<span class="mono">{_e(f["path"])}</span>', _gigabytes(f.get("gb"), t), t.date(f.get("modified"))]
+                         for f in files],
+                        "No file above the size line."))
+    sims = (g.get("memory") or {}).get("simulators") or []
+    if sims:
+        parts.append(_table(t, "Running simulators",
+                            [("Device", False), ("Memory", True), ("How it comes back", False)],
+                            [[_e(x["name"]), _size(x.get("rss_mb"), t), f'<span class="mono">{_e(x["command"])}</span>']
+                             for x in sims[:ROWS]], ""))
+    return "".join(parts)
 
 
 def machine_html(payload: dict, t: Translator | None = None) -> str:
@@ -157,6 +195,7 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                           + (f'<br><span class="mono">{_e(l["command"])}</span>' if l.get("command") else "")]
                          for l in disk.get("locations") or []],
                         "No disk location measured yet."))
+    parts.append(guard_html(m.get("guard"), t))
     git = m.get("git") or {}
     # Worth a look: a stale record, one git cannot read, or one nobody has touched
     # in a week. Uncommitted edits in a worktree someone works in today are work.
@@ -217,6 +256,8 @@ DYNAMIC = ("cache", "toolchain", "build", "simulator", "vm", "worktrees", "user"
            "regenerable", "command", "history", "manual", "auto", "clean", "dirty", "missing", "unreadable",
            "branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts",
            "branch-unique", "worktree-dirty", "removed", "pruned", "skipped", "failed",
+           # The disk guard's classes and pressure levels (tools/disk_guard.py).
+           "cache-command", "build-output", "temp", "trash", "browser-clone", "normal", "low", "critical",
            # Empty states chosen by whether their survey ran (see UNMEASURED).
            UNMEASURED, UNMEASURED_GIT, "Every worktree is clean and in recent use.", "No branch holds commits found nowhere else.",
            "Nothing to clean.", "No process runs inside a project folder.")

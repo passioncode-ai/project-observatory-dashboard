@@ -576,7 +576,7 @@ same summary.
   missing, in use, idle days) and branches (merged, patch-merged, pushed,
   unique).
 
-With `features.auto_cleanup` also on, the tick removes what loses nothing:
+With `features.auto_cleanup` also on, the tick and the hourly disk guard (below) remove what loses nothing:
 branches merged into the default branch or identical to their upstream, clean
 worktrees nobody has touched for a week, stale worktree records, and git-ignored
 build output of projects idle for a month (thresholds and protected branch
@@ -595,6 +595,52 @@ of untracked files per worktree under `<home>/archive/cleanup/<date>/` before
 removing anything. A worktree's patch is re-applied, in check mode, to a scratch
 index of its HEAD first; if git cannot produce it or it does not apply, the
 worktree stays and the run reports it as failed with the reason.
+
+### The disk guard
+
+The tick is long on a busy machine, and its cleanup step comes late: on a loaded
+machine it can go unreached for hours, exactly when the disk is filling. So with
+`features.auto_cleanup` on, the hourly maintenance job (`full maintain`) runs the
+**disk guard** first in every pass, before the update and the backup:
+
+```sh
+project-observatory full disk-guard                  # the plan at the current pressure; removes nothing
+project-observatory full disk-guard --apply          # act now
+project-observatory full disk-guard --level critical # plan as if the disk were nearly full
+```
+
+The guard reads free space and picks a pressure: `normal`, `low` (under 25 GB),
+`critical` (under 10 GB). Pressure moves every threshold in `config/cleanup.json`
+under `guard`:
+
+| What | normal | low | critical |
+|---|---|---|---|
+| The cache tools' own cleanup | `uv cache prune`, `pnpm store prune`, `brew cleanup --prune=14`, Docker build cache older than a week | also `npm cache verify`, `uv cache clean`, Go and Yarn caches, dangling Docker images | also `brew cleanup --prune=all` |
+| Git-ignored build and dependency output (`node_modules`, `.venv`, `dist`, …) of checkouts nobody worked in | 14 days | 3 days | 1 day |
+| Temporary entries untouched for | 3 days | 1 day | 1 day |
+| Trash items older than | 30 days | 30 days | 3 days |
+
+Browser code-sign clones a crashed browser left behind go at any pressure, and
+the cleanup's own git auto tier runs after them. "Nobody worked in" means no
+checkout or commit and no uncommitted file changed since — never the index,
+which every `git status` rewrites.
+
+What it never does: remove anything a process holds open or works inside (one
+`lsof` listing per run, re-checked at each removal; without it no path goes),
+follow a symlink, open a privacy-guarded folder, touch another user's file, stop a
+process, start an app (Docker commands run only while the daemon already runs),
+or run a cache command while that tool is running. Memory is reported, not
+freed: the Machine page names who holds the memory that swap writes to this disk,
+and each running simulator with the command that stops it.
+
+Freed space is what the disk reports before and after each action (`freed_mb` in
+`store/logs/cleanup.jsonl`), not a `du` estimate: `du` counts an APFS clone in
+full, and removing one can free nothing. The delta also counts whatever else wrote to
+the disk meanwhile, so a single row can read negative; a run's total (`freed_gb` in
+`store/raw/disk-guard.json`) is the figure to trust. The Machine page also lists the largest
+files under the home directory, walked once a day within a time budget, and never
+removes one. If the guard has not reported for three hours while
+`auto_cleanup` is on, the finding `machine.guard_idle` says so.
 
 ## Organizations and resources
 

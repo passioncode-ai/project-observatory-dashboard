@@ -611,6 +611,17 @@ def machine_parser(name: str) -> argparse.ArgumentParser:
         ap.add_argument("--disk", action="store_true", help="also size the disk's largest places (slower)")
         ap.add_argument("--explain", type=int, metavar="PID", help="why one process runs, and print nothing else")
         return ap
+    if name == "disk-guard":
+        ap = argparse.ArgumentParser(prog=f"{PROG} disk-guard",
+                                     description="keep free space: temporary files, abandoned browser clones, the Trash, "
+                                                 "cache tools' own cleanup and build output of idle checkouts, by "
+                                                 "pressure; never what a process holds. Without --apply only the plan "
+                                                 "is written (store/raw/disk-guard.json)")
+        ap.add_argument("--apply", action="store_true", help="act now, at the current pressure")
+        ap.add_argument("--level", choices=["normal", "low", "critical"],
+                        help="plan or act as if the pressure were this level")
+        ap.add_argument("--large-files", action="store_true", help="re-walk the home directory for large files now")
+        return ap
     ap = argparse.ArgumentParser(prog=f"{PROG} cleanup",
                                  description="plan cleanup, or remove what loses nothing; without --apply only the plan is written")
     ap.add_argument("--apply", action="store_true", help="remove the auto tier")
@@ -648,7 +659,7 @@ def parse(argv: list[str]) -> argparse.Namespace:
     if name == "profile":
         import workspace_profile
         return workspace_profile.parser().parse_args(rest)
-    if name in {"machine", "cleanup"}:
+    if name in {"machine", "cleanup", "disk-guard"}:
         return machine_parser(name).parse_args(rest)
     if name in {"workspace-backup", "upgrade", "restore"}:
         import workspace_upgrade
@@ -673,7 +684,7 @@ def main(argv: list[str]) -> int:
     if argv and argv[0] == "profile":
         import workspace_profile
         return workspace_profile.main(argv[1:])
-    if argv and argv[0] in {"machine", "cleanup"}:
+    if argv and argv[0] in {"machine", "cleanup", "disk-guard"}:
         return machine_command(argv[0], argv[1:])
     if argv and argv[0] in {"workspace-backup", "upgrade", "restore"}:
         import workspace_upgrade
@@ -825,6 +836,10 @@ def machine_command(name: str, argv: list[str]) -> int:
     for sub in ("collectors", "tools"):
         sys.path.insert(0, str(config.SOURCE / sub))
     import paths
+    if name == "disk-guard":
+        import disk_guard
+        return disk_guard.main((["--apply"] if a.apply else []) + (["--level", a.level] if a.level else [])
+                               + (["--large-files", "--refresh"] if a.large_files else ["--refresh"]))
     import scan_machine
     if name == "machine":
         if a.explain is not None:

@@ -479,17 +479,19 @@ def observatory_machine(
                                             description="A process id to explain: its origin, ancestry, and "
                                                         "witr's service/port detail when witr is installed. "
                                                         "The answer is then that explanation alone.")] = None,
-    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup"],
+    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup", "guard"],
                        Field(description="overview = totals and the top few of each (default); "
                                          "a named section = that section in full.")] = "overview",
 ) -> dict[str, Any]:
     """The machine this estate runs on: processes grouped by ORIGIN (agent
     session, launchd job, simulator, app, detached), memory and swap, free disk
     and the largest cache/VM/history locations, worktrees and branches by class,
-    and the cleanup plan with its journal.
+    the cleanup plan with its journal, and the disk guard's last run (pressure,
+    what it freed by the disk's own count, the largest files, who holds the swap).
 
     Read-only. It never kills a process or deletes a file: the auto tier of the
-    cleanup runs in the tick when the operator enabled it, and anything that
+    cleanup and the disk guard run in the hourly maintenance job when the operator
+    enabled features.auto_cleanup, and anything that
     holds unique work only through `full cleanup --apply --include manual`.
     A process is reported by executable and script, never by its environment or
     full command line, because either can carry a credential.
@@ -506,7 +508,7 @@ def observatory_machine(
     if section != "overview":
         return {**base, section: full.get(section)}
     out = {**base, "memory": full.get("memory"), "witr": full.get("witr", False),
-           "sections": ["memory", "processes", "disk", "git", "cleanup"]}
+           "sections": ["memory", "processes", "disk", "git", "cleanup", "guard"]}
     if full.get("processes"):
         procs = full["processes"]
         out["processes"] = {"count": procs.get("count"), "top": (procs.get("top") or [])[:MACHINE_TOP],
@@ -524,6 +526,11 @@ def observatory_machine(
         plan = full["cleanup"]
         out["cleanup"] = {"plannedAt": plan.get("plannedAt"), "autoEnabled": plan.get("autoEnabled"),
                           "counts": plan.get("counts"), "actions": len(plan.get("actions") or [])}
+    if full.get("guard"):
+        g = full["guard"]
+        out["guard"] = {k: g.get(k) for k in ("at", "level", "acting", "freeGbBefore", "freeGbAfter", "freedGb",
+                                              "planned", "plannedGb", "results")}
+        out["guard"]["largeFiles"] = ((g.get("largeFiles") or {}).get("files") or [])[:MACHINE_TOP]
     return out
 
 

@@ -1162,6 +1162,68 @@ class Pass(Base):
         self.assertNotIn(SECRET_MARK, text)
 
 
+class Guard(Base):
+    """The disk guard runs first in every pass, only with features.auto_cleanup on."""
+
+    def set_cleanup(self, on: bool):
+        f = self.home / "config" / "settings.json"
+        doc = json.loads(f.read_text())
+        doc.setdefault("features", {})["auto_cleanup"] = on
+        f.write_text(json.dumps(doc))
+
+    def test_off_runs_nothing_and_says_so(self):
+        self.set_cleanup(False)
+        ran = []
+        report = M.step_guard(self.home, {}, AT, runner=lambda *a, **k: ran.append(a))
+        self.assertEqual(report, {"result": "off"})
+        self.assertEqual(ran, [])
+
+    def test_on_runs_the_auto_tier_and_records_the_disk(self):
+        self.set_cleanup(True)
+        seen = {}
+
+        def runner(argv, **kw):
+            seen["argv"], seen["env"], seen["timeout"] = argv, kw["env"], kw["timeout"]
+            out = json.dumps({"level": "low", "free_gb_after": 21.5, "freed_gb": 3.2, "results": {"removed": 4}})
+            return subprocess.CompletedProcess(argv, 0, out + "\n", "")
+        state = {}
+        report = M.step_guard(self.home, state, AT, runner=runner)
+        self.assertEqual(seen["argv"][-2:], ["--auto", "--json"])
+        self.assertTrue(seen["argv"][-3].endswith("tools/disk_guard.py"))
+        self.assertEqual(seen["env"]["OBSERVATORY_HOME"], str(self.home))
+        self.assertEqual(seen["timeout"], M.GUARD_TIMEOUT)
+        self.assertEqual((report["result"], report["level"], report["freed_gb"]), ("ran", "low", 3.2))
+        self.assertEqual(state["guard"]["free_gb_after"], 21.5)
+
+    def test_a_guard_that_hangs_is_stopped_and_named(self):
+        self.set_cleanup(True)
+
+        def runner(argv, **kw):
+            raise subprocess.TimeoutExpired(argv, kw["timeout"])
+        report = M.step_guard(self.home, {}, AT, runner=runner)
+        self.assertEqual((report["result"], report["exit"]), ("failed", 124))
+        self.assertIn("stopped at", report["detail"])
+
+    def test_it_runs_before_the_update_and_a_crash_never_stops_the_pass(self):
+        order = []
+        commands = FakeCommands(check=0)
+        original = commands.full
+
+        def full(*args, **kw):
+            order.append("update-check")
+            return original(*args, **kw)
+        commands.full = full
+
+        def guard(base, state, at):
+            order.append("guard")
+            raise RuntimeError("synthetic")
+        report = M.run_pass(self.home, at=AT, commands=commands, services=None, store=self.store,
+                            app=NoApp(), sleep=lambda s: None, guard=guard)
+        self.assertEqual(order[:2], ["guard", "update-check"])
+        self.assertEqual(report["guard"]["result"], "error")
+        self.assertEqual(report["update"]["result"], "up-to-date")
+
+
 class NoApp:
     def step(self, state, at):
         return {"result": "not-installed"}

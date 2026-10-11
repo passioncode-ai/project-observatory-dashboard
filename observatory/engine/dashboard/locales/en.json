@@ -626,5 +626,9 @@
  "{n} skill descriptions do not fit the session's skill listing": {
   "one": "{n} skill description does not fit the session's skill listing",
   "other": "{n} skill descriptions do not fit the session's skill listing"
+ },
+ "Disk guard ran {at}: free {before} → {after} GB, {n} removed": {
+  "one": "Disk guard ran {at}: free {before} → {after} GB, {n} removed",
+  "other": "Disk guard ran {at}: free {before} → {after} GB, {n} removed"
  }
 }
