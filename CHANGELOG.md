@@ -3,7 +3,12 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.22.0 — 2026-10-11
+
+Project Observatory on Windows and Linux: a desktop app with a signed Windows installer, the tick, the server
+and maintenance as per-user Task Scheduler tasks or systemd units, updates that work on Windows, and the backup
+passphrase in the Credential Manager. The Mac app is universal again for Intel Macs. The companion plugin
+`observatory-log` moves to 0.22.0.
 
 ### Changed
 
@@ -37,7 +42,9 @@ while the major version is 0, a minor release may change behaviour and says so h
   protected ACL instead of mode bits).
 - **`osschedule`: background jobs under Windows Task Scheduler and systemd** (W4a). One job description, a
   per-user task created from XML (`InteractiveToken`, no stored password, `pythonw.exe` through
-  `tools/scheduled.py`, so no console window opens) or a systemd user unit. Not wired to `full init` yet (W4b).
+  `tools/scheduled.py`, so no console window opens) or a systemd user unit; `tools/install_launchd.py` and
+  `tools/serverd.py --install` use it off macOS, the server's fabric-service descriptor naming `task-scheduler`
+  or `systemd` (W4b).
 
 ### Fixed
 

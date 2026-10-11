@@ -10,7 +10,7 @@ The distribution is the complete engine: project and repository inventory, findi
 
 ## Quick start for a new teammate
 
-The complete engine supports macOS and Linux, Python 3.11+ and SQLite 3.37+ with loadable-extension support. On Windows (Python 3.13+, since 0.21.0) the engine, the CLI and a whole tick run and are tested on every change; scheduling the tick and the server with Task Scheduler and a desktop app are not there yet ([the plan](docs/design/WINDOWS-LINUX.md)). The `python3` that ships with macOS is 3.9, and pip run from it fails with a misleading `ResolutionImpossible` rather than naming the interpreter, so choose an extension-enabled interpreter such as Homebrew Python explicitly; the [onboarding guide](docs/ONBOARDING.md#sqlite-runtime-prerequisite) checks this. Every machine runs a tagged release, the same wheel byte for byte ([staying in step](docs/ONBOARDING.md#staying-in-step)).
+The complete engine supports macOS and Linux, Python 3.11+ and SQLite 3.37+ with loadable-extension support. On Windows (Python 3.13+) the engine, the CLI, the tick, the server and maintenance run — the background jobs as per-user Task Scheduler tasks, systemd user units on Linux — and are tested on every change; a desktop app ships for Windows and Linux ([below](#windows-and-linux-app), [design](docs/design/WINDOWS-LINUX.md)). The `python3` that ships with macOS is 3.9, and pip run from it fails with a misleading `ResolutionImpossible` rather than naming the interpreter, so choose an extension-enabled interpreter such as Homebrew Python explicitly; the [onboarding guide](docs/ONBOARDING.md#sqlite-runtime-prerequisite) checks this. Every machine runs a tagged release, the same wheel byte for byte ([staying in step](docs/ONBOARDING.md#staying-in-step)).
 
 ### Install
 
@@ -214,6 +214,24 @@ Versions up to and including v0.9.1 were released under PolyForm Noncommercial o
 Contributions are accepted under the [CLA](CLA.md).
 
 Part of [PassionCode.ai](https://passioncode.ai/) — the design system is [PassionCode 1.1.0](https://passioncode.ai/design-system/), dark theme. Observatory is also the observation component of the [ssheleg harness](https://skills.sshlg.me/harness/): skills guide the work; Observatory records and checks the state around it.
+
+## Windows and Linux app
+
+0.22.0 ships a desktop app for Windows (x64, arm64) and Linux (x64, arm64) that opens on this dashboard the way the
+Mac app does: live when the workspace's own server answers, otherwise the saved pages under a banner with
+**Start server**, and **Build the dashboard** when there are none yet; the assistant is one window away
+(Ctrl+Shift+A). Each release attaches, listed in `SHA256SUMS`:
+
+- `ProjectObservatory-<version>-windows-<arch>-setup.exe` — a per-user installer (no administrator rights),
+  Authenticode-signed by the publisher;
+- `ProjectObservatory-<version>-linux-<arch>.AppImage` and `.deb`.
+
+The app needs the engine installed as [Install](#install) describes; on first launch it looks for it where that puts
+it (`%LOCALAPPDATA%\project-observatory-venv\Scripts\project-observatory.exe` on Windows,
+`~/.local/share/project-observatory-venv/bin/project-observatory` on Linux) and names the step when it is missing.
+It updates itself from the release's `latest.json` (each package minisign-signed): **Restart to update** in its
+menu and tray; the `.deb` copy is updated by the next `.deb`. Closing its window keeps it in the tray. Scenarios
+and their differences from macOS: [docs/desktop/SCENARIOS.md](docs/desktop/SCENARIOS.md).
 
 ## Mac app
 

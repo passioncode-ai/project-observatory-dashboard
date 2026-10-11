@@ -411,7 +411,7 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "57becb75e67b57c9aa2d0595bbbddff5e3d6727b7130379d0c0ee0522d64457a",
+      "export_sha256": "b2caec8454996e5121bd5d14f2d6866878d0f6fba2b1b211dd75064b3cca2841",
       "bytes": 15504,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
@@ -765,7 +765,7 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "f42bdc6de36c3c7adfd4fbb7a02e132bc6b4c034949633e4773264a291c24726",
+      "export_sha256": "8ba4114c433a8d4834cec7c0a74b27a5e82224bb3f7556da7ffad7001883e696",
       "bytes": 14547,
       "upstream_modified": true
     },
@@ -1507,14 +1507,14 @@
     {
       "path": "skill/.claude-plugin/marketplace.json",
       "source_sha256": "68a99261f346d399ff411a8bbe6cb46d7b169e6ef030d84f7b92c41a2f797c57",
-      "export_sha256": "d3f38f19dd24b7d9292dc9b3baf61ae66a08d71e46810bd32bfc5d2dcad4de4a",
+      "export_sha256": "f6d7c26e0891138bfb4d73d97c5b14ce94ece3af9f574a1e45885e909522976e",
       "bytes": 941,
       "upstream_modified": true
     },
     {
       "path": "skill/plugins/observatory-log/.claude-plugin/plugin.json",
       "source_sha256": "1f267b5383edab6b68302df81f1790f73ebf2ef0a5e697bff81778bc0e9b31f2",
-      "export_sha256": "7a47fec9175d4055397eae1ec848dcfc4ccff2362729cadb3bc09547934dede7",
+      "export_sha256": "f1ad7025d59439969963586362a20729740760a7ff134b384b660a19747a1caa",
       "bytes": 626,
       "upstream_modified": true
     },
@@ -1553,14 +1553,14 @@
     {
       "path": "skill/plugins/observatory-log/skills/explaining-changes/SKILL.md",
       "source_sha256": "1a0b0708fc8a17a9bc1c45d89c59aeb44330147e77bc0e5e2262f197b97d31d4",
-      "export_sha256": "53b3370c03fa2744b7b3c1c20fdb417a7139e7a842d282dfb5550ea77f2483da",
+      "export_sha256": "af8f3087e278aa1f76e86aeb2d04c76f515d6b762c5b65548301210d60f4e0ab",
       "bytes": 5451,
       "upstream_modified": true
     },
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "b3b196977e2b5e2184f0a35723737dd9f8c4c32751574b0512a65688e859c2c4",
+      "export_sha256": "5e233780f76bcb797ab37a7d76c15ac2eb0795c460dfbfa708a99a1614c2ae3e",
       "bytes": 14068,
       "upstream_modified": true
     },
@@ -1568,7 +1568,7 @@
       "path": "skill/plugins/observatory-log/skills/tracking-resources/SKILL.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0a887fbaf77495aa43472621990f16ac0dfa0d0f37c1fb1817ec596ce531dc51",
+      "export_sha256": "1910af9cf250c94128185a04fe421ea00d68d484225fd40c8da5f2f030f7dee4",
       "bytes": 4618
     },
     {
