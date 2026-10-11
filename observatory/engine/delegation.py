@@ -221,7 +221,8 @@ def _delegation_shape(payload: dict) -> bool:
     effect, grant = payload.get("effect"), payload.get("grant")
     if not isinstance(effect, list) or not effect or not all(e in EFFECT_CLASSES for e in effect):
         return False
-    if not isinstance(grant, list) or not grant or not all(_is_string(g) for g in grant):
+    # Fabric ADR-0144 amendment 3: exactly one grant per token; an onward token keeps the same reference.
+    if not isinstance(grant, list) or len(grant) != 1 or not _is_string(grant[0]):
         return False
     # DEC-0041: an optional claim the meter keys a window on is typed like any other.
     if "task" in payload and not (isinstance(payload["task"], str) and OPAQUE_ID.match(payload["task"])):
@@ -230,7 +231,7 @@ def _delegation_shape(payload: dict) -> bool:
 
 
 def verify_delegation(token: Any, *, audience: str, jwks: Any, now: int, capability: str, effect: str,
-                      issuer: Optional[str] = None, read_only: bool = False):
+                      issuer: Optional[str] = None, read_only: bool = False, max_depth: int = MAX_CHAIN_DEPTH):
     """DL-13, in order: an `Accepted` or the first `Refusal` that applies."""
     if not has_keys(jwks):
         return Refusal("issuer-unavailable", "no-published-keys")
@@ -255,7 +256,7 @@ def verify_delegation(token: Any, *, audience: str, jwks: Any, now: int, capabil
     depth = chain_depth(claims["act"])
     if depth == float("inf"):
         return Refusal("unauthenticated", "malformed-chain")
-    if depth > MAX_CHAIN_DEPTH:
+    if depth > max_depth:
         return Refusal("chain-too-deep", f"depth-{int(depth)}")
     if capability not in claims["scope"].split(" "):
         return Refusal("scope-not-granted", "capability-not-in-scope")
@@ -272,8 +273,10 @@ def verify_meter_token(token: Any, *, meter: str, capability: str, jwks: Any, no
     """DL-21: the onward token minted for the meter (aud the meter, scope its grant-check capability, effect
     none, a read-only door). Any refusal of it is the meter's `principal-unproven`, the verifier's code kept in
     the detail."""
+    # Amendment 3: the meter's hop may sit one actor deeper than the limit — the callee adds itself to a chain
+    # that may already be four deep — and only a token for the meter, read-only, with effect none.
     result = verify_delegation(token, audience=meter, capability=capability, effect="none", jwks=jwks,
-                               now=now, issuer=issuer, read_only=True)
+                               now=now, issuer=issuer, read_only=True, max_depth=MAX_CHAIN_DEPTH + 1)
     if result.ok:
         return result
     return Refusal("principal-unproven", f"{result.code}:{result.detail}")

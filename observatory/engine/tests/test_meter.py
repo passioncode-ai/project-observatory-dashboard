@@ -184,6 +184,20 @@ class Verifier(unittest.TestCase):
         self.assertTrue(self.verify(token, capability="writer.send", effect="draft").ok, "draft is below send")
         self.assertRefused(self.verify(token, capability="writer.send", effect="charge"), "effect-above-ceiling")
 
+    def test_the_meters_hop_may_be_one_actor_deeper(self):
+        """Amendment 3: a token for the meter (read-only, effect none) may carry five actors; no other may."""
+        def chain(n):
+            node = None
+            for i in reversed(range(n)):
+                node = {"sub": f"agent-{i}", **({"act": node} if node else {})}
+            return node
+        five, six = self.estate.sign(claims(act=chain(5))), self.estate.sign(claims(act=chain(6)))
+        self.assertTrue(D.verify_meter_token(five, meter="project-observatory", capability="grant.check",
+                                             jwks=self.estate.jwks, now=NOW).ok)
+        self.assertEqual(D.verify_meter_token(six, meter="project-observatory", capability="grant.check",
+                                              jwks=self.estate.jwks, now=NOW).detail, "chain-too-deep:depth-6")
+        self.assertRefused(self.verify(five), "chain-too-deep", "depth-5")
+
     def test_the_meter_token_maps_every_refusal_to_principal_unproven(self):
         result = D.verify_meter_token(self.estate.sign(claims(aud="copylot")), meter="project-observatory",
                                       capability="grant.check", jwks=self.estate.jwks, now=NOW)
@@ -389,9 +403,11 @@ class Meter(unittest.TestCase):
         self.assertDenied(self.check(0.1), "unknown-state")
 
     def test_which_grant(self):
+        # Fabric ADR-0144 amendment 3: exactly one grant per token; two refuse the token itself.
         two = claims(grant=[f"{GRANT_ID}#3", "urn:grant:project-a:other#1"])
-        self.assertDenied(self.check(0.1, two), "no-grant")
-        self.assertEqual(self.check(0.1, two, grantRef=f"{GRANT_ID}#3")["decision"], "allowed")
+        self.assertDenied(self.check(0.1, two), "principal-unproven")
+        self.assertDenied(self.check(0.1, two, grantRef=f"{GRANT_ID}#3"), "principal-unproven")
+        self.assertEqual(self.check(0.1, grantRef=f"{GRANT_ID}#3")["decision"], "allowed")
         self.assertDenied(self.check(0.1, grantRef="urn:grant:project-a:else#1"), "no-grant")
 
     def test_an_unproven_principal_is_denied_before_anything_is_read(self):

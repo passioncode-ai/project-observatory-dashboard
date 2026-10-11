@@ -759,8 +759,8 @@
       "path": "delegation.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9e3cb6d17119c311f85bdc6d9550ea5b06af63167ba2851dceb16220974e66cc",
-      "bytes": 12496
+      "export_sha256": "35741079c803b2f3b00065b944716d5d614cc4e499b61cdce02b68f64ed9ed44",
+      "bytes": 12868
     },
     {
       "path": "docs/AGENT-ONBOARDING.md",
@@ -2903,8 +2903,8 @@
       "path": "tests/test_meter.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e4f7298802109f1c45b37f3f525d121012c6d10da035b91a11975327a4681f3e",
-      "bytes": 27787
+      "export_sha256": "85e2212dea2f913d3a36969db5a84ce6abfe2ee7829628382eee248ebab254ee",
+      "bytes": 28926
     },
     {
       "path": "tests/test_meter_wire.py",
