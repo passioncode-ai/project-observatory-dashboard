@@ -62,10 +62,11 @@ CAPABILITY = "grant.check"
 #: The scope of a token that asks for a vault slot (OBS-57, Fabric ADR-0144 amendment 2).
 SLOT_CAPABILITY = "secret.use"
 #: How `use_secret.py` treats a slot release: `when-token` checks a token when one is present (the default
-#: until Fabric's issuer ships), `always` refuses a release without one, `off` never checks.
+#: on the operator's own machines, T0/T1: METER.md M0), `always` refuses a release without one (a machine serving T2
+#: callers), `off` never checks.
 SLOT_MODES = ("off", "when-token", "always")
 #: Whether the keyserver demands a delegation token from a caller that is not the operator's page (OBS-62):
-#: `off` until Fabric's issuer ships, then `agents`.
+#: `off` on the operator's own machines (T0/T1, METER.md M0); `agents` only where T2 callers are served.
 KEYSERVER_MODES = ("off", "agents")
 ESTATE_MONTH_USD = 1000.0
 ALERT_RATIO = 0.8

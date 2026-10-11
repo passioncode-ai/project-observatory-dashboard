@@ -1300,8 +1300,8 @@
       "path": "meter.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "29988652d4e75dc1e1926daa6c079e436c42ee0b556f54ec84275b6b6f1241dc",
-      "bytes": 32496
+      "export_sha256": "49dfe71c363e920dcc4a22920eed3fd08ab99763e09d60dadd2db20979963347",
+      "bytes": 32605
     },
     {
       "path": "observatory.py",
@@ -4459,8 +4459,8 @@
     {
       "path": "tools/use_secret.py",
       "source_sha256": "8836e5826c78ca12bd852fd8f7b036c49db3b41383209d829f321318afc76bc1",
-      "export_sha256": "5386e8db927d5b2f05c71944f724c80f199068cfad15f44ed3600bf8d16b1292",
-      "bytes": 43330,
+      "export_sha256": "96d8c073dd854c8999f41d1c56e62ad2c03c651ee1000ded0aab062ecda43f20",
+      "bytes": 43349,
       "python_comments_removed": 14,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,

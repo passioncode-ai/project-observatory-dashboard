@@ -9,6 +9,25 @@ Fabric's hub issues identity and holds the grants. Observatory issues neither: i
 `observatory/engine/meter.py` (the check and the ledger), `tools/grant.py` (the CLI), `grant.check` in
 `mcp/capability_tools.py`, and the door in `mcp/http_service.py`.
 
+## M0 — Trust tiers: proof starts at the machine boundary
+
+The operator's decision of 2026-10-11 (Fabric ADR-0144 amendment 4, `19ad05ca`; the operator's global rule
+"This machine is the operator's workplace"):
+
+| Tier | Caller | What a call needs |
+|---|---|---|
+| T0 | an agent on the operator's own machine, under the operator's account | nothing beyond the operator's instruction: no delegation token, no approval document, no grant record |
+| T1 | an agent on another machine of the operator's, enrolled in the agent network (RM-21) | the same as T0, once the machine is enrolled |
+| T2 | an agent of another person or organization | the full model: a share grant with limits, an expiry and a payer; a delegation token per call; an approval per effect |
+
+Money limits bind at every tier: the project limit, L0 and each key's ceiling. The human gates bind too:
+sign-ins, consents, payments, secrets typed into hidden prompts.
+
+So on the operator's machines the meter and the doors never demand a token. They verify one when it is
+presented, for attribution and narrowing. `slotsRequireGrant` stays `when-token` and
+`keyserverRequiresDelegation` stays `off` (M5, M6). The strict settings (`always`, `agents`) are for a machine
+that serves T2 callers. Observatory's services listen on loopback only, so every caller they see today is T0.
+
 ## M1 — Who may ask
 
 A callee about to spend exchanges its own delegation token at the hub for an **onward token for the meter**:
@@ -123,9 +142,9 @@ A release spends nothing. Provider spend is metered through grant checks and usa
 
 `config/meter.json` `slotsRequireGrant` selects the mode:
 
-- `when-token` (the default until the issuer ships): check a token when one is present, and release as before
-  when none is;
-- `always`: refuse a release without a token;
+- `when-token` (the default, and the setting for the operator's own machines): check a token when one is
+  present, and release as before when none is (M0);
+- `always`: refuse a release without a token — only for a machine that serves T2 callers;
 - `off`: never check.
 
 The journal row (`secret-use.jsonl`) carries the verdict, `granted:<grant refs>`, `no-token` or the refusal
@@ -150,8 +169,9 @@ contract's code and HTTP status (DL-19) before any effect. `reveal` is never ser
 
 `keyserverRequiresDelegation` in `config/meter.json` selects the mode:
 
-- `off`: the default until the issuer ships;
-- `agents`: a request without this server's `Origin` must carry a token.
+- `off`: the default, and the setting for the operator's own machines (M0);
+- `agents`: a request without this server's `Origin` must carry a token — only for a machine that serves T2
+  callers.
 
 **The boundary:** any local process can send an `Origin` header and read the 0600 keyserver token. `agents`
 stops accidental and confused borrowing, not a hostile process of the same user (Fabric CO-090).
@@ -162,5 +182,4 @@ stops accidental and confused borrowing, not a hostile process of the same user 
   and carry the manifest's content hash, so the declaration ships with a contract-schema publication (OBS-67).
 - Settling from usage reports (`byGrant` receipts) instead of by hand, and the alert at 80 % as a finding
   (OBS-56).
-- Switching `slotsRequireGrant` to `always` on this machine: once Fabric's issuer mints `secret.use` tokens and
-  the agents hand them over.
+- How an enrolled machine (T1) proves itself to this one: the agent network's device binding (RM-21, OBS-77).

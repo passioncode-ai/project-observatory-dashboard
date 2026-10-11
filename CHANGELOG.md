@@ -5,6 +5,13 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Changed
+
+- **Trust tiers, written down** (Fabric ADR-0144 amendment 4): on the operator's own machines (T0, and enrolled
+  machines T1) the meter and the doors never demand a delegation token — `slotsRequireGrant: when-token` and
+  `keyserverRequiresDelegation: off` stay the settings there; the strict ones are for a machine that serves another
+  person's agents (T2). Design: `docs/design/METER.md` M0.
+
 ### Added
 
 - One project under many names (OBS-65). The operator curates `config/identifiers.json`
@@ -70,7 +77,7 @@ companion plugin `observatory-log` is unchanged.
   `FABRIC_DELEGATION_TOKEN` (scope `secret.use`). `run`, `serve` and `header` then release a slot only when a grant
   the token names has `credentialSource {kind: project-key, ref: PROJECT/ENV/NAME}`, never read a `.env`, and
   remove the token before the child starts. `slotsRequireGrant` in `config/meter.json`: `when-token` (default
-  until Fabric's issuer ships), `always`, `off`.
+  on the operator's own machines; METER.md M0), `always`, `off`.
 - **The keyserver trusts the delegation token** (OBS-62): with a valid token for the action's scope (`keys.*`,
   `ledger.*`), the journal names the hub's signed caller, principal, chain and grant (`caller_verified: true`).
   `reveal` is never served to a token. `keyserverRequiresDelegation: agents` demands a token from non-page callers.

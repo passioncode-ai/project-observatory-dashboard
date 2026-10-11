@@ -213,7 +213,7 @@ class SlotRefused(Exception):
 
 
 def slot_mode() -> str:
-    """`config/meter.json` `slotsRequireGrant`: `when-token` (default until the issuer ships), `always`, `off`."""
+    """`config/meter.json` `slotsRequireGrant`: `when-token` (default; the operator's own machines, METER.md M0), `always`, `off`."""
     import meter
     return meter.default_meter().slot_mode
 
