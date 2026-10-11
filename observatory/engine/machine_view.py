@@ -52,7 +52,8 @@ def summary(explain_pid: int | None = None) -> dict:
     machine, d1 = _load("machine.json", "machine")
     hygiene, d2 = _load("git-hygiene.json", "cleanup")
     plan, d3 = _load("cleanup-plan.json", "cleanup")
-    degraded += [d for d in (d1, d2, d3) if d]
+    guard, d4 = _load("disk-guard.json", "disk-guard")
+    degraded += [d for d in (d1, d2, d3, d4) if d]
     out: dict = {"degraded": degraded}
     if machine:
         out["measuredAt"] = machine.get("measured_at")
@@ -77,6 +78,15 @@ def summary(explain_pid: int | None = None) -> dict:
     if plan:
         out["cleanup"] = {"plannedAt": plan.get("planned_at"), "autoEnabled": plan.get("auto_enabled"),
                           "counts": plan.get("counts"), "actions": plan.get("actions"), "journal": journal()}
+    if guard:
+        out["guard"] = {"at": guard.get("at"), "level": guard.get("level"), "acting": guard.get("acting"),
+                        "autoEnabled": guard.get("auto_enabled"), "freeGbBefore": guard.get("free_gb_before"),
+                        "freeGbAfter": guard.get("free_gb_after"), "freedGb": guard.get("freed_gb"),
+                        "planned": guard.get("planned"), "plannedGb": guard.get("planned_gb"),
+                        "results": guard.get("results"), "seconds": guard.get("seconds"),
+                        "actions": guard.get("actions"), "largeFiles": guard.get("large_files"),
+                        "memory": guard.get("memory")}
+        degraded += guard.get("degraded") or []
     if explain_pid is not None:
         sys.path.insert(0, str(paths.ROOT / "collectors"))
         import scan_machine

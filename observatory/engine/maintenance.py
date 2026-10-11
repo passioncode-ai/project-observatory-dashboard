@@ -797,9 +797,60 @@ def restart_left_stopped(base: Path, state: dict, services) -> list[dict]:
     return started
 
 
+#: The disk guard's ceiling inside a pass. A guard killed at it stops between removals of
+#: regenerable things; the next pass starts over from a fresh plan.
+GUARD_TIMEOUT = 1200
+
+
+def step_guard(base: Path, state: dict, at: datetime.datetime, runner=None) -> dict:
+    """The disk guard (`tools/disk_guard.py --auto`), FIRST in a pass, before the update
+    and the backup — both need space, and a full disk had them failing (OBS-40).
+
+    Why here and not in the tick: on 2026-10-11 the tick's `machine` and `cleanup` steps
+    were "not started" hour after hour, because a loaded machine spent the tick's window
+    on slower collectors first; the disk fell to 1.7 GB with the self-cleaning idle for
+    a day. This pass runs every hour whatever the tick does. Off unless the operator
+    turned on `features.auto_cleanup` — the same switch the cleanup's auto tier obeys."""
+    if not configuration_enabled(base, "auto_cleanup"):
+        state["guard"] = {"at": iso(at), "result": "off"}
+        return {"result": "off"}
+    environ = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "OBSERVATORY_ROOT"}}
+    environ["OBSERVATORY_HOME"] = str(base)
+    environ[IN_PASS_ENV] = "1"
+    run = runner or subprocess.run
+    try:
+        p = run([engine_python(), "-P", str(Path(__file__).resolve().parent / "tools" / "disk_guard.py"), "--auto", "--json"],
+                capture_output=True, text=True, timeout=GUARD_TIMEOUT, env=environ, cwd=tempfile.gettempdir(),
+                stdin=subprocess.DEVNULL)
+        code, line = p.returncode, ((p.stdout or "").strip().splitlines() or [""])[-1]
+        tail = ((p.stderr or "").strip().splitlines() or [""])[-1]
+    except subprocess.TimeoutExpired:
+        code, line, tail = 124, "", f"stopped at {GUARD_TIMEOUT} s"
+    except OSError as exc:
+        code, line, tail = 125, "", type(exc).__name__
+    try:
+        doc = json.loads(line) if line.startswith("{") else {}
+    except ValueError:
+        doc = {}
+    result = {"result": "ran" if code == 0 else "failed", "exit": code,
+              **{k: doc[k] for k in ("level", "free_gb_before", "free_gb_after", "freed_gb", "results") if k in doc},
+              **({"detail": tail[:300]} if code and tail else {})}
+    state["guard"] = {"at": iso(at), **result}
+    return result
+
+
+def configuration_enabled(base: Path, name: str) -> bool:
+    """A feature switch of THIS workspace, read from its own settings file."""
+    try:
+        doc = json.loads((base / "config" / "settings.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return (doc.get("features") or {}).get(name) is True
+
+
 def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Commands | None = None,
              services=..., store=None, app=None, sleep=time.sleep, first_check_delay: float = 0,
-             clock=time.monotonic) -> dict:
+             clock=time.monotonic, guard=step_guard) -> dict:
     """One pass of everything that is due. Never raises for a step's own failure: each
     is recorded in store/maintenance.json and named in the answer.
 
@@ -825,6 +876,10 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
         # recorded by name and place, never the value.
         state["passphrase"] = {k: v for k, v in report["passphrase"].items()
                                if k in ("passphrase", "kept_outside", "warning", "error")}
+        try:
+            report["guard"] = guard(base, state, at)
+        except Exception as exc:  # noqa: BLE001 — the guard never stops an update or a backup
+            report["guard"] = {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
         def settle() -> None:
             wait = first_check_delay - (clock() - PROCESS_STARTED)
             if wait > 0:

@@ -132,6 +132,11 @@ if not WINDOWS:
         info = _stat(target)
         return f"mode {stat.S_IMODE(info.st_mode):04o}, uid {info.st_uid} (this account: {os.getuid()})"
 
+    def account() -> str:
+        """This account's id as text — the uid — for a path template such as a per-user
+        temporary root (`tools/disk_guard.py`); never an ownership decision."""
+        return str(os.getuid())
+
     def real_home() -> Path | None:
         """The home the password database records for this uid; None when it has none."""
         import pwd
@@ -396,6 +401,10 @@ else:  # pragma: no cover - exercised by the Windows CI job
     class _GUID(ctypes.Structure):
         _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD), ("Data3", wintypes.WORD),
                     ("Data4", ctypes.c_ubyte * 8)]
+
+    def account() -> str:
+        """This account's id as text — its SID — for a path template; never a decision."""
+        return user_sid()
 
     def real_home() -> Path | None:
         """The account's profile folder from the known-folder store; None when it cannot say."""

@@ -114,6 +114,7 @@ LABELS: dict[str, str] = {
     "lifecycle.stale_servers": "Session servers on replaced code",
     "machine.detached_servers": "Detached server processes",
     "machine.disk_low": "Machine disk low",
+    "machine.guard_idle": "Disk guard not running",
     "machine.heavy_origin": "Heavy memory use by one origin",
     "machine.memory_pressure": "Memory pressure",
     "machine.stale": "Machine survey out of date",

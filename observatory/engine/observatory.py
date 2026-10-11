@@ -449,7 +449,7 @@ PUBLIC_SOURCE_ONLY = {
     "all": "historical composite includes private development gates; use local or the opt-in tick",
 }
 WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migrate-local", "open", "agent",
-                      "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup",
+                      "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup", "disk-guard",
                       "update", "profile", "maintain", "auto-update"}
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
@@ -485,6 +485,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                never sources, secrets or the registry
   machine [--disk] [--explain PID]   processes by origin, memory, disk; why one process runs
   cleanup [--apply [--include manual]]  plan, or remove what loses nothing; manual tier archives first
+  disk-guard [--apply] [--level L]  keep free space by pressure: temp, browser clones, Trash, cache
+                               tools, build output of idle checkouts; never what a process holds.
+                               Runs every hour from `maintain` when features.auto_cleanup is on
   tick                         configured cycle; scheduler must be explicitly enabled
   assistant ACTION             the app's JSON protocol (observatory-assistant/1) on stdin/stdout
   workflow list|show|handoff|close   agent workflows; handoff --force and close need a terminal
