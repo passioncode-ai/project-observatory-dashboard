@@ -253,7 +253,10 @@ tasks are the operator's and which a contributor can take.
 
 1. Bump the version in `pyproject.toml`, `observatory/__init__.py`,
    `observatory/engine/configuration.py` and both `COMPATIBILITY.md` files
-   (`tests/test_version_consistency.py` fails until they agree), and add the `## X.Y.Z — date`
+   (`tests/test_version_consistency.py` fails until they agree), and the desktop app's in
+   `desktop/package.json`, `desktop/package-lock.json` (its root entries),
+   `desktop/src-tauri/tauri.conf.json`, `desktop/src-tauri/Cargo.toml` and its own entry in
+   `desktop/src-tauri/Cargo.lock` (`tests/test_desktop_app.py`), and add the `## X.Y.Z — date`
    section to `CHANGELOG.md`. A plugin change bumps `observatory-log` separately, in its three
    manifests and every `SKILL.md` (`tests/test_plugin_manifests.py`).
 2. Merge that pull request through the required checks, then push the annotated tag `vX.Y.Z` on
