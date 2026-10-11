@@ -2858,8 +2858,8 @@
       "path": "tests/test_maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "862984892b5938a19519ddf32f3930506699b245190a414bac1ed43f323a4e17",
-      "bytes": 119621
+      "export_sha256": "50ed0613682926799af4037df100428cb650e1f566b0415e3f8a89cb105f02b2",
+      "bytes": 119966
     },
     {
       "path": "tests/test_mcp_inventory.py",
