@@ -2,7 +2,7 @@
 
 Date: 2026-10-11. Branch `agent/obs-65-identity-aliases`. Not a release: no version bump, no
 CHANGELOG entry. The new capability's schemas are pinned to the release that will publish them,
-`v0.23.0`.
+`v0.24.0`.
 
 ## What shipped
 
@@ -20,7 +20,7 @@ CHANGELOG entry. The new capability's schemas are pinned to the release that wil
   provenance; a name that already names something else is refused at the decision.
 - `mcp/server.py` — tool `observatory_resolve` and capability `project.resolve`; the propose
   tool's `patch` description names `aliases`; the instructions list the capability.
-- `fabric-agent.json` revision 8 (contentHash restamped), lock release `v0.23.0` with two schemas
+- `fabric-agent.json` revision 8 (contentHash restamped), lock release `v0.24.0` with two schemas
   and one fixture, probe `resolve-names-one-id-or-refuses` with its assessor in `tools/run_probes.py`.
 - Docs: [IDENTITY.md](../../design/IDENTITY.md#other-names-aliases-and-projectresolve-obs-65),
   [ONBOARDING.md](../../ONBOARDING.md), scenario OSS-56, `fabric/FABRIC-CONFORMANCE.md`
@@ -43,7 +43,7 @@ the site checks — this change touches none of their inputs; CI runs them.
 
 ## Open
 
-- A release (`v0.23.0`) publishes the `project.resolve` schemas at their pinned address; until
+- A release (`v0.24.0`) publishes the `project.resolve` schemas at their pinned address; until
   then a host that fetches the URI gets 404 while the bundled bytes serve locally.
 - The dashboard does not show aliases or conflicts yet; `registry/identifiers.json` and the
   emit's printed line are the surfaces. Next task: a row per product on the products page listing

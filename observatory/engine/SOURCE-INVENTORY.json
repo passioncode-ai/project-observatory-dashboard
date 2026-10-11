@@ -824,21 +824,21 @@
     {
       "path": "fabric-agent.json",
       "source_sha256": "47102010501764ba9275f011f8f6d13250f619bc1d855312eecd53af23647e34",
-      "export_sha256": "95b3b336b89853d6f25e4a7128d33ae5319ef1d352a11c7528e2dc8d90cbfc72",
+      "export_sha256": "d300b1b12804b944aa046b1644dbac371438d971f1913c4997a71b12aead9a27",
       "bytes": 20383,
       "upstream_modified": true
     },
     {
       "path": "fabric-contract.lock.json",
       "source_sha256": "b3f14ff51ad696ca3b1bbd21676dc648c678058d9840f727362c2b14ca19589d",
-      "export_sha256": "684253b18c075ab1e218644d9c3bd9200f5a994ea3f7b49933b1f882de6d246d",
+      "export_sha256": "8e529546b3589a756c5e9d8525bdf6f16183612a21a223914251c9f85e29e442",
       "bytes": 2550,
       "upstream_modified": true
     },
     {
       "path": "fabric/FABRIC-CONFORMANCE.md",
       "source_sha256": "8353184efa4e9f48a2b464028d7366b975bf217c42b7736ab404f06e188a4fc8",
-      "export_sha256": "ca0142a0eb293948875ed3e11d144fc130147415899110d93441b32374b54275",
+      "export_sha256": "b17071522186c18d0fa4a01279c90c1bf59d2f6124ff8049718f6a802104bc85",
       "bytes": 12928,
       "upstream_modified": true
     },
@@ -1095,14 +1095,14 @@
       "path": "fabric/schemas/project-resolve-input.schema.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3e8e76f0cab42a08682a55d8823ad5ec768fdfdfce2b6953d2b44353e94af894",
+      "export_sha256": "51a6ebf02adbec8ed78212fcdf47d0af2c9db66a18bfca7c7a462fa5f4a14b58",
       "bytes": 862
     },
     {
       "path": "fabric/schemas/project-resolve-output.schema.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "17be6c98883ec8d23e7495eb05336f7a7e9a710c0eb53c9c75ef28de0f0ef559",
+      "export_sha256": "bda37736bceacc628c302748dc3b7fda0eaeb201d221e3e45a1b6767e71e484e",
       "bytes": 6565
     },
     {

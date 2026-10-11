@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.23.0/observatory/engine/fabric/schemas/project-resolve-output.schema.json",
+  "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.0/observatory/engine/fabric/schemas/project-resolve-output.schema.json",
   "title": "project.resolve — output",
   "description": "The canonical project or product a name resolves to, with its members, their repositories, deployments and domains, and every other name it is known by; or a typed refusal. Exact matches only.",
   "type": "object",

@@ -11,7 +11,7 @@ bundled schema and fixture, the one release tag that published it: the first eig
 schemas and six fixtures at `v0.2.0`, under the repository's address at the time
 (`ssheleg/project-observatory-open-source`, which GitHub redirects), and the
 `machine.mcp.inventory` and `machine.mcp.refresh` schemas and fixtures at `v0.9.0`, and the
-`project.resolve` ones at `v0.23.0` (revision 8), both under
+`project.resolve` ones at `v0.24.0` (revision 8), both under
 `passioncode-ai/project-observatory-dashboard`. Published identifiers are never
 rewritten, so a capability added later is pinned to the release that adds it
 instead of moving the old ones. `tools/publish_contract.py --local` refuses a file

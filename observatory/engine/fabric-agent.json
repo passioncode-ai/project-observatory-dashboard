@@ -3,7 +3,7 @@
   "provider": {
     "id": "https://github.com/ssheleg/project-observatory-open-source",
     "revision": 8,
-    "contentHash": "sha256:a6458ceffdbb3e6f4517330fafcc08f2b81f827f79e47fa334425b1e7e51022c",
+    "contentHash": "sha256:2d4d3c694cf12b959e92d3571e11c458312f69e75b0048429993579ae4d11946",
     "createdAt": "2026-09-03T13:22:35Z",
     "createdBy": "https://github.com/ssheleg",
     "name": "Project Observatory",
@@ -185,8 +185,8 @@
     {
       "id": "https://github.com/ssheleg/project-observatory-open-source/capabilities/project.resolve",
       "name": "project.resolve",
-      "inputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.23.0/observatory/engine/fabric/schemas/project-resolve-input.schema.json",
-      "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.23.0/observatory/engine/fabric/schemas/project-resolve-output.schema.json",
+      "inputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.0/observatory/engine/fabric/schemas/project-resolve-input.schema.json",
+      "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.0/observatory/engine/fabric/schemas/project-resolve-output.schema.json",
       "effect": "none",
       "idempotency": "supported",
       "dataClasses": [
@@ -209,8 +209,8 @@
           {
             "id": "resolve-names-one-id-or-refuses",
             "description": "A bounded probe against an explicitly selected synthetic fixture workspace.",
-            "inputFixture": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.23.0/observatory/engine/fabric/fixtures/project-resolve-input.json",
-            "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.23.0/observatory/engine/fabric/schemas/project-resolve-output.schema.json",
+            "inputFixture": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.0/observatory/engine/fabric/fixtures/project-resolve-input.json",
+            "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.0/observatory/engine/fabric/schemas/project-resolve-output.schema.json",
             "timeoutMs": 30000,
             "sideEffectCeiling": "none",
             "assertions": [

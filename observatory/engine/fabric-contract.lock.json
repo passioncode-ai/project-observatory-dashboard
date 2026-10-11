@@ -51,7 +51,7 @@
       ]
     },
     {
-      "release": "v0.23.0",
+      "release": "v0.24.0",
       "repository": "passioncode-ai/project-observatory-dashboard",
       "files": [
         "fixtures/project-resolve-input.json",
