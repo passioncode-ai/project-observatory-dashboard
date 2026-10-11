@@ -3623,8 +3623,8 @@
       "path": "tests/test_vault_project.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "978c7f0ef211798b70b758edab65e30767e8233e4eaac18db33810f489e18b94",
-      "bytes": 15557
+      "export_sha256": "1c8d6c90a225125f411af98f5f246709926834b14f7ce0f7791cad46cfc34014",
+      "bytes": 15730
     },
     {
       "path": "tests/test_vector_namespaces.py",
@@ -4504,8 +4504,8 @@
       "path": "vault_project.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "344fc78947b6169499625f22b9dcfb3d7ee97ff1a3fa3fb6866c5fa7ff3b3f58",
-      "bytes": 7330
+      "export_sha256": "6e75866c66cf05d3eb89daec6dafbfd308de1fb0b02268f0be326169684a67e5",
+      "bytes": 7429
     },
     {
       "path": "workspace.py",
