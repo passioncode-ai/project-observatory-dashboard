@@ -756,6 +756,13 @@
       "upstream_modified": true
     },
     {
+      "path": "delegation.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "38e23ef8e47e538c0ddb3db546e9ca1db97afbaf7061b181cb8ed6509b560e0f",
+      "bytes": 12116
+    },
+    {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
       "export_sha256": "2fb50f1e792445ae87cc07ceb25f647f976ef3ad647c84810b51717fbaa67129",
@@ -834,6 +841,55 @@
       "export_sha256": "3aa281f8189ea510398f7a78fc73b01aed40fdb1dc7b3225a74122e189ed5d02",
       "bytes": 13006,
       "upstream_modified": true
+    },
+    {
+      "path": "fabric/delegation-schemas/README.md",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f980969102d6a11b2f607dad31cb13df33ee485eab1c884052949a4a3f922d83",
+      "bytes": 1908
+    },
+    {
+      "path": "fabric/delegation-schemas/common.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "a00baa59c8b7a236a40b7dca659f99e8aa26e9265fdd9fd6b325f8c3714412ca",
+      "bytes": 4313
+    },
+    {
+      "path": "fabric/delegation-schemas/delegation-jwks.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "24354d5653e11bf6df61eb3ebe5b690a737c777fe44a473dffdb9e349d1a2c2e",
+      "bytes": 1179
+    },
+    {
+      "path": "fabric/delegation-schemas/delegation-token.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "74605fbb7ada1b6824c7f923c32e067dd9e9bfa534b977f3e7fbe5cdf4cd69c3",
+      "bytes": 5347
+    },
+    {
+      "path": "fabric/delegation-schemas/governance.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "6adc932b5e82e078ad43e9383a1333e9e6871312f14e69e1aea0b9ba6d6d5480",
+      "bytes": 6517
+    },
+    {
+      "path": "fabric/delegation-schemas/grant-check-request.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5ceba8fae472ad59f5d4d653401a5ca236c62cf4a96a182a1796d7966824e63a",
+      "bytes": 1416
+    },
+    {
+      "path": "fabric/delegation-schemas/grant-check.schema.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "2803f990a6ab09a406b6c4c79a60e188567eed78f948a7c4e3c567309b0117c1",
+      "bytes": 3957
     },
     {
       "path": "fabric/fixtures/admission-input.json",
@@ -1211,6 +1267,13 @@
       "upstream_modified": true,
       "export_sha256": "71d16eb4fb7aedd3bd7fc123aca5a3a9861f92568ce69671d5871c448b0e409f",
       "bytes": 8977
+    },
+    {
+      "path": "meter.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "d4b6ae6c61a122d10e70cf45836aab60aa5b538c94e54b6b55d2116cd616ed80",
+      "bytes": 24334
     },
     {
       "path": "observatory.py",
@@ -2795,6 +2858,20 @@
       "bytes": 22364
     },
     {
+      "path": "tests/test_meter.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7daf7beb7de75c0bf3703fcfc4145fdf8d0851eabfeb406cf0405998d7929884",
+      "bytes": 25140
+    },
+    {
+      "path": "tests/test_meter_wire.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "1b810245d86d9f11c16c79c4c79d06eda3a68d83b73c09bad7f2c22d7c83445e",
+      "bytes": 6647
+    },
+    {
       "path": "tests/test_metric_labels.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -3922,6 +3999,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/grant.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "4d426c93e9d414c024037a3195377f3d925e27c304c897e6e140d197949ede60",
+      "bytes": 3985
+    },
+    {
       "path": "tools/harness.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -4402,7 +4486,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 565,
+  "file_count": 577,
   "excluded": [
     "git-history",
     "operator-registries",
