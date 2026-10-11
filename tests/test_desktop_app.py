@@ -127,6 +127,32 @@ class DesktopRelease(unittest.TestCase):
                                               f"ProjectObservatory-{self.version}-linux-x64.deb"])
         self.assertNotIn("windows_authenticode", r)
 
+    def test_the_feed_names_every_shipped_platform_with_its_own_signature(self):
+        folder = self.tmp / "release"
+        folder.mkdir()
+        tag = f"v{self.version}"
+        for suffix in self.dr.FEED.values():
+            name = f"ProjectObservatory-{self.version}-{suffix}"
+            (folder / name).write_bytes(b"pkg")
+            (folder / f"{name}.sig").write_text(f"sig-of-{suffix}\n")
+        doc = self.dr.feed(tag, folder)
+        self.assertEqual(self.dr.check_feed(doc, tag, folder), [])
+        self.assertEqual(doc["platforms"]["windows-aarch64"]["signature"], "sig-of-windows-arm64-setup.exe")
+        self.assertTrue(doc["platforms"]["linux-x86_64"]["url"].endswith(f"/download/{tag}/ProjectObservatory-{self.version}-linux-x64.AppImage"))
+
+    def test_a_feed_missing_a_platform_or_another_signature_is_refused(self):
+        folder = self.tmp / "release"
+        folder.mkdir()
+        tag = f"v{self.version}"
+        for suffix in list(self.dr.FEED.values())[:3]:
+            name = f"ProjectObservatory-{self.version}-{suffix}"
+            (folder / name).write_bytes(b"pkg")
+            (folder / f"{name}.sig").write_text("sig\n")
+        doc = self.dr.feed(tag, folder)
+        self.assertTrue(any("linux-aarch64" in p for p in self.dr.check_feed(doc, tag, folder)))
+        doc["platforms"]["windows-x86_64"]["signature"] = "forged"
+        self.assertTrue(any("signature" in p for p in self.dr.check_feed(doc, tag, folder)))
+
 
 if __name__ == "__main__":
     unittest.main()
