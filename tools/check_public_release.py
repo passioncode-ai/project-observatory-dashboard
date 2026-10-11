@@ -163,6 +163,10 @@ NATIVE_SOURCES = {
 }
 # The Windows and Linux app (docs/desktop/, W8), file by file like the macOS sources above.
 DESKTOP_SOURCES = {
+    "desktop/src-tauri/src/updates.rs",
+    "desktop/ui/assistant.js",
+    "desktop/ui/assistant.css",
+    "desktop/ui/assistant.html",
     "desktop/.gitignore",
     "desktop/package-lock.json",
     "desktop/package.json",

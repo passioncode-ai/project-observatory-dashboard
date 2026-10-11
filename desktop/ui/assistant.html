@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assistant</title><link rel="stylesheet" href="app.css"><link rel="stylesheet" href="assistant.css"></head>
+<body class="assistant">
+<aside class="sidebar" aria-label="Conversations">
+  <div class="bar">
+    <button class="primary" id="new" data-t="New conversation">New conversation</button>
+    <button id="refresh" data-t="Refresh">Refresh</button>
+  </div>
+  <ul id="conversations" role="listbox"></ul>
+</aside>
+<section class="chat">
+  <div id="transcript" class="transcript" aria-live="polite"></div>
+  <div id="empty" class="empty" hidden>
+    <h1 data-t="Ask about this machine's projects">Ask about this machine's projects</h1>
+    <p data-t="Answers come from this workspace's facts — findings, projects, the machine — and name their evidence. Sending uses the configured model.">Answers come from this workspace's facts.</p>
+    <div class="starters" id="starters"></div>
+  </div>
+  <p class="status" id="status" role="status"></p>
+  <form class="composer" id="composer">
+    <label for="project" data-t="Project">Project</label>
+    <select id="project"><option value="" data-t="All projects">All projects</option></select>
+    <textarea id="question" rows="3" maxlength="6000"></textarea>
+    <div class="row">
+      <button class="primary" id="send" type="submit" data-t="Send">Send</button>
+      <button id="stop" type="button" data-t="Stop" hidden>Stop</button>
+    </div>
+  </form>
+</section>
+<script src="app.js"></script>
+<script src="assistant.js"></script>
+</body></html>

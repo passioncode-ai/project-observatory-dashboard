@@ -42,6 +42,13 @@ class DesktopApp(unittest.TestCase):
             self.assertNotRegex(html, r"<script(?![^>]*\bsrc=)[^>]*>", page.name)
             self.assertNotRegex(html, r"\son[a-z]+=", page.name)
 
+    def test_model_text_is_never_html(self):
+        # docs/macos/SPEC.md: model text renders as text, without executable HTML.
+        for script in (DESKTOP / "ui").glob("*.js"):
+            text = script.read_text(encoding="utf-8")
+            for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"):
+                self.assertNotIn(sink, text, script.name)
+
     def test_its_versions_move_with_the_engines(self):
         engine = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
         self.assertEqual(json.loads((DESKTOP / "package.json").read_text())["version"], engine)
@@ -73,7 +80,7 @@ class DesktopApp(unittest.TestCase):
 
     def test_its_windows_may_only_pick_a_file(self):
         caps = json.loads((DESKTOP / "src-tauri/capabilities/main.json").read_text())
-        self.assertEqual(sorted(caps["windows"]), ["main", "settings"])
+        self.assertEqual(sorted(caps["windows"]), ["assistant", "main", "settings"])
         self.assertEqual(sorted(caps["permissions"]), ["core:default", "dialog:allow-open"])
         self.assertNotIn("remote", caps)
 

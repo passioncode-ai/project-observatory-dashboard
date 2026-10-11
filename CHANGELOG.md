@@ -21,7 +21,7 @@ while the major version is 0, a minor release may change behaviour and says so h
   step; stays in the tray when its window closes. Built as an NSIS installer and an AppImage/.deb by
   `.github/workflows/desktop.yml`; the release builds and Authenticode-signs it (W9). It updates itself from the
   release's `latest.json`, each package minisign-signed: «Restart to update» in the menu and the tray (W8c). The
-  assistant window follows (W8b).
+  assistant window (Ctrl+Shift+A) asks the workspace's assistant, with each answer's evidence and Stop (W8b).
 - **Updates on Windows** (W6): `full update --apply` stops and restarts the tick and server tasks (systemd units
   on Linux) around the install, and replaces the `project-observatory.exe` it may be running from — moved aside
   first, put back if the install fails.

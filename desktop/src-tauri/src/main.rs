@@ -23,7 +23,7 @@ use std::time::Duration;
 use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem, SubmenuBuilder};
 use tauri::tray::TrayIconBuilder;
 use tauri::webview::PageLoadEvent;
-use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 
 const GUIDE: &str = "https://github.com/passioncode-ai/project-observatory-dashboard#install";
@@ -258,6 +258,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .item(&MenuItem::with_id(app, "reload", t("Reload"), true, Some("F5"))?)
         .separator()
         .item(&MenuItem::with_id(app, "browser", t("Open in browser"), true, None::<&str>)?)
+        .separator()
+        .item(&MenuItem::with_id(app, "assistant", t("Assistant"), true, Some("CmdOrCtrl+Shift+A"))?)
         .build()?;
     let server = SubmenuBuilder::new(app, t("Server"))
         .item(&MenuItem::with_id(app, "start", t("Start server"), true, None::<&str>)?)
@@ -315,10 +317,24 @@ fn open_settings_window(app: &AppHandle) {
         .build();
 }
 
+fn open_assistant_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("assistant") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return;
+    }
+    let _ = WebviewWindowBuilder::new(app, "assistant", WebviewUrl::App("assistant.html".into()))
+        .title(l10n::t(lang(app), "Assistant", &[]))
+        .inner_size(1040.0, 720.0)
+        .min_inner_size(760.0, 520.0)
+        .build();
+}
+
 fn on_menu(app: &AppHandle, id: &str) {
     let main = app.get_webview_window("main");
     match id {
         "settings" => open_settings_window(app),
+        "assistant" => open_assistant_window(app),
         "quit" => app.exit(0),
         "back" => { main.map(|w| w.eval("history.back()")); }
         "forward" => { main.map(|w| w.eval("history.forward()")); }
@@ -366,6 +382,7 @@ async fn save_settings(app: AppHandle, settings: settings::Settings) -> Result<V
     *state.settings.lock().unwrap() = settings;
     *state.generation.lock().unwrap() += 1;
     refresh_menus(&app);
+    let _ = app.emit("workspace-changed", ()); // the assistant drops what it showed (SCN-005)
     show_dashboard(&app);
     Ok(status)
 }
@@ -383,6 +400,20 @@ async fn build_dashboard(app: AppHandle) -> Result<(), bridge::BridgeError> {
         .map_err(|e| bridge::BridgeError { code: "backend-failed".into(), detail: Some(e.to_string()) })??;
     show_dashboard(&app);
     Ok(())
+}
+
+/// The assistant window's engine calls: only the assistant's own actions, never `serve` or `build`
+/// (those are the dashboard window's), each bounded like every bridge call.
+#[tauri::command]
+async fn assistant(app: AppHandle, action: String, input: Value) -> Result<Value, bridge::BridgeError> {
+    const ALLOWED: &[&str] = &["status", "list", "get", "ask", "job", "cancel", "delete"];
+    if !ALLOWED.contains(&action.as_str()) || !input.is_object() {
+        return Err(bridge::BridgeError { code: "backend-configuration".into(), detail: None });
+    }
+    let b = backend(&app);
+    tauri::async_runtime::spawn_blocking(move || b.call(&action, &input, Duration::from_secs(30)))
+        .await
+        .map_err(|e| bridge::BridgeError { code: "backend-failed".into(), detail: Some(e.to_string()) })?
 }
 
 #[tauri::command]
@@ -408,6 +439,7 @@ fn main() {
             save_settings,
             show_dashboard_cmd,
             build_dashboard,
+            assistant,
             open_settings,
             open_guide
         ])
