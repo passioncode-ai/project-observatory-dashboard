@@ -2104,5 +2104,7 @@
   "many": "Страж диска работал {at}: свободно {before} → {after} ГБ, удалено {n} объектов",
   "other": "Страж диска работал {at}: свободно {before} → {after} ГБ, удалено {n} объекта"
  },
- "pressure": "давление"
+ "pressure": "давление",
+ "Estate spend near its monthly limit": "Расход хозяйства близок к месячному лимиту",
+ "the estate has spent ${spent} of its ${limit} monthly limit": "хозяйство потратило ${spent} из месячного лимита ${limit}"
 }

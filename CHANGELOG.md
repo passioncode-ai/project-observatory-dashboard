@@ -18,6 +18,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   input and output schemas published at `v0.24.1`, a probe that a call carrying no delegation token is denied
   `principal-unproven`. Fabric's registry reads the meter from the service descriptor; the token-carrying call
   goes to the same tool on the memory-http door.
+- **The estate's month, measured** (OBS-56): the new step `scan-spend` sums this month's spend of every OpenRouter
+  account the door holds (`GET /activity`, per account, never a key) into `store/raw/spend.json`. The meter counts
+  it, plus open reservations, against L0 (USD 1,000 by default), and the finding `spend.estate_month` warns at
+  80 % and is critical at the limit. Measured on the operator's machine on 2026-10-11: $262.97 across four
+  accounts.
 - One project under many names (OBS-65). The operator curates `config/identifiers.json`
   (another system's name → the canonical `project:`/`product:` id, with the name's owner); the
   emitter publishes `registry/identifiers.json` and one `known_as` relation per alias. A name

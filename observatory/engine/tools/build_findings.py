@@ -2579,6 +2579,40 @@ def collect() -> list[dict]:
                            "or adopt the host onto a project when work begins here"),
                 "evidence": ["store/raw/plugins.json#note", paths.config_label("host_boundary.json")]})
 
+    # THE ESTATE'S MONTH AGAINST L0 (OBS-56; docs/design/METER.md M3). What the providers charged this month,
+    # summed over every account the doors hold (collectors/scan_spend.py), against the estate's monthly limit in
+    # config/meter.json (USD 1,000 by default): a warning at the alert ratio (80 %), critical at the limit, where
+    # the meter refuses every further reservation. A partial scan says which accounts it could not read.
+    _sf = paths.SCRATCH / "spend.json"
+    if _sf.is_file():
+        try:
+            _s = json.loads(_sf.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _s = {}
+        try:
+            _mc = json.loads(paths.config_file("meter.json").read_text(encoding="utf-8")) \
+                if paths.config_file("meter.json").is_file() else {}
+        except (OSError, ValueError):
+            _mc = {}
+        _limit = float(_mc.get("estateMonthUsd", 1000) or 1000)
+        _ratio = float(_mc.get("alertRatio", 0.8) or 0.8)
+        _spent = float(_s.get("total_usd") or 0)
+        if _s.get("month") and _spent >= _ratio * _limit:
+            _sev = "critical" if _spent >= _limit else "warning"
+            out.append({
+                "type": "spend.estate_month", "subject": f"spend:estate:{_s['month']}", "severity": _sev,
+                **titled("the estate has spent ${spent} of its ${limit} monthly limit", spent=f"{_spent:.2f}",
+                         limit=f"{_limit:g}"),
+                "detail": ("By account: " + ", ".join(f"{a.get('account')} ${float(a.get('usd') or 0):.2f}"
+                                                       for a in _s.get("accounts") or [])
+                           + (" (partial: " + ", ".join(d.get("source", "?") for d in _s.get("degraded") or [])
+                              + " not read)" if _s.get("partial") else "")
+                           + ". At the limit the meter refuses every further reservation until the month ends."),
+                "action": "see which keys spend with `project-observatory full grant --status` and the door's "
+                          "`openrouter.py list`; lower or disable a key's ceiling through the door, or raise "
+                          "`estateMonthUsd` in config/meter.json if the operator decided a higher limit",
+                "evidence": ["store/raw/spend.json"]})
+
     # THE AGENT HARNESS (docs/design/HARNESS.md). What every session loads before the first word:
     # loss of function first — skill descriptions over the listing budget are dropped and those skills
     # can no longer be matched to a request — then instruction files every session reads whole, the

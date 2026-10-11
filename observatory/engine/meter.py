@@ -231,6 +231,8 @@ class Meter:
         self.alert_ratio = float(self.config.get("alertRatio", ALERT_RATIO))
         self.key_ceilings = {str(k): float(v) for k, v in (self.config.get("keyCeilingsUsd") or {}).items()}
         self.reservation_seconds = int(self.config.get("reservationSeconds", RESERVATION_SECONDS))
+        #: What the providers charged this month (collectors/scan_spend.py, OBS-56); unset, the ledger alone.
+        self.spend_file = self._path(self.config.get("spendFile")) if self.config.get("spendFile") else None
         self.slot_mode = self.config.get("slotsRequireGrant", "when-token")
         if self.slot_mode not in SLOT_MODES:
             raise ValueError(f"slotsRequireGrant must be one of {', '.join(SLOT_MODES)}")
@@ -268,6 +270,36 @@ class Meter:
             return self._path(self._hub().get("grantsDir"))
         except (OSError, ValueError):
             return None
+
+    def measured(self, now: int) -> Optional[dict]:
+        """This month's provider spend from the spend scan, or None when there is no fresh one for this month.
+
+        Fresh means scanned within the last 36 hours: the provider's activity lags about a day, and a scan older
+        than that would let the meter believe a month that has moved on."""
+        path = self.spend_file
+        if path is None or not path.is_file():
+            return None
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        scanned = parse_time(doc.get("scanned_at"))
+        if doc.get("month") != iso(now)[:7] or scanned is None or now - scanned > 36 * 3600:
+            return None
+        return doc
+
+    def estate_spent(self, conn: sqlite3.Connection, now: int) -> tuple[float, str]:
+        """(USD counted against L0 this month, how it was counted).
+
+        With a fresh spend scan: what the providers charged plus the reservations still open, which the
+        providers have not charged yet. Settled receipts are already in the providers' figure. Without one:
+        the meter's own ledger, reserved and settled."""
+        month = {"now": now, "since": window_start("month", now)}
+        measured = self.measured(now)
+        if measured is None:
+            return self._sum(conn, "created_at >= :since", month), "ledger"
+        open_now = self._sum(conn, "created_at >= :since AND settled_usd IS NULL", month)
+        return float(measured.get("total_usd") or 0) + open_now, "providers+open"
 
     # -- the ledger --------------------------------------------------------------------------------------------
     def _connect(self) -> sqlite3.Connection:
@@ -487,7 +519,7 @@ class Meter:
                                         f"reached (${used:.2f} counted)", WINDOW_LEVEL[window], window)
                 remaining.append(cap - used - amount)
             month = {"now": now, "since": window_start("month", now)}
-            estate = self._sum(conn, "created_at >= :since", month)
+            estate, _how = self.estate_spent(conn, now)
             if estate + amount > self.estate_month + 1e-9:
                 conn.execute("ROLLBACK")
                 return self._denied(now, "limit-reached", f"the estate's monthly total of "
@@ -578,7 +610,7 @@ class Meter:
         now = int(self.clock())
         month = {"now": now, "since": window_start("month", now)}
         with contextlib.closing(self._connect()) as conn:
-            estate = self._sum(conn, "created_at >= :since", month)
+            estate, how = self.estate_spent(conn, now)
             held = conn.execute("SELECT COUNT(*) FROM reservations WHERE settled_usd IS NULL AND expires_at > ?",
                                 (now,)).fetchone()[0]
             keys = {r["key_ref"]: float(r["used"]) for r in conn.execute(
@@ -597,7 +629,7 @@ class Meter:
         ratio = estate / self.estate_month if self.estate_month > 0 else 1.0
         return {"audience": self.audience, "capability": self.capability,
                 "month": iso(window_start("month", now))[:7], "estateUsd": round(estate, 6),
-                "estateLimitUsd": self.estate_month, "estateRatio": round(ratio, 4),
+                "estateLimitUsd": self.estate_month, "estateRatio": round(ratio, 4), "estateCountedFrom": how,
                 "alert": ratio >= self.alert_ratio, "openReservations": held,
                 "keys": {k: {"usedUsd": round(v, 6), "ceilingUsd": self.key_ceilings.get(k)}
                          for k, v in sorted(keys.items())},
@@ -608,5 +640,5 @@ def default_meter() -> Meter:
     """The installed meter: its ledger under STATE, its configuration in config/meter.json."""
     import paths
     config_path = paths.config_file("meter.json")
-    return Meter(db_path=Path(paths.STATE) / "meter" / "meter.db", config=load_config(config_path),
-                 base=config_path.parent)
+    config = {"spendFile": str(Path(paths.SCRATCH) / "spend.json"), **load_config(config_path)}
+    return Meter(db_path=Path(paths.STATE) / "meter" / "meter.db", config=config, base=config_path.parent)

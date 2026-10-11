@@ -177,6 +177,7 @@ LABELS: dict[str, str] = {
     "store.integrity": "Store integrity failure",
     "store.integrity_stale": "Store integrity not checked",
     "store.integrity_unmeasured": "Store integrity check ran out of time",
+    "spend.estate_month": "Estate spend near its monthly limit",
     "tick.standing_down": "Scheduled run standing down",
     "tick.step_failed": "Scheduled step failed",
     "wallet.shared_key": "Wallet key shared",
