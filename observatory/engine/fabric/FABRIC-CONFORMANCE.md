@@ -2,7 +2,7 @@
 
 Project Observatory publishes a self-contained local MCP profile at
 https://github.com/ssheleg/project-observatory-open-source. The provider manifest
-is revision 8. `fabric-contract.lock.json` selects profile `observatory-local-mcp`
+is revision 9. `fabric-contract.lock.json` selects profile `observatory-local-mcp`
 version `1.2.0`; `fabric-agent.json` retains contract version `0.1.0`. These are
 separate version axes.
 
@@ -11,7 +11,8 @@ bundled schema and fixture, the one release tag that published it: the first eig
 schemas and six fixtures at `v0.2.0`, under the repository's address at the time
 (`ssheleg/project-observatory-open-source`, which GitHub redirects), and the
 `machine.mcp.inventory` and `machine.mcp.refresh` schemas and fixtures at `v0.9.0`, and the
-`project.resolve` ones at `v0.24.0` (revision 8), both under
+`project.resolve` ones at `v0.24.0` (revision 8), and the `grant.check` ones at `v0.24.1`
+(revision 9), all under
 `passioncode-ai/project-observatory-dashboard`. Published identifiers are never
 rewritten, so a capability added later is pinned to the release that adds it
 instead of moving the old ones. `tools/publish_contract.py --local` refuses a file
@@ -33,6 +34,7 @@ The capability definitions and effects come from `../fabric-agent.json`:
 | `project.resolve` | `none` | `project.resolve` | `observatory_resolve` |
 | `project.timeline` | `none` | `project.timeline` | `observatory_timeline` |
 | `project.record` | `draft` | `project.record` | `observatory_record`, `observatory_propose`, `observatory_recall` |
+| `grant.check` | `none` | `grant.check`; a token-carrying call goes to the same tool on the memory-http door (loopback streamable-http, token in `Authorization`), while over stdio it answers `principal-unproven` | — |
 | `machine.mcp.inventory` | `none` | `machine.mcp.inventory` | — |
 | `machine.mcp.refresh` | `none`, job | `machine.mcp.refresh`, then `fabric.job.get` / `fabric.job.cancel` | — |
 

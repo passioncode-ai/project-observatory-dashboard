@@ -1,0 +1,186 @@
+{
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.1/observatory/engine/fabric/schemas/grant-check-output.schema.json",
+  "title": "grant.check — output",
+  "description": "The grant-check answer of fabric-agent-contract DEC-0037/0039/0041 at 7931c1d, self-contained: allowed with a receipt, or denied with the code, the level and the window.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/allowed"
+    },
+    {
+      "$ref": "#/$defs/denied"
+    }
+  ],
+  "$defs": {
+    "level": {
+      "enum": [
+        "L0",
+        "L1",
+        "L2",
+        "L3"
+      ],
+      "description": "L0 the limits no grant can raise: the estate total across all provider keys and each provider key's own ceiling (DEC-0039); L1 project policy; L2 task budget; L3 call."
+    },
+    "allowed": {
+      "type": "object",
+      "required": [
+        "decision",
+        "receipt",
+        "grantRef",
+        "reservedUsd",
+        "expiresAt",
+        "checkedAt"
+      ],
+      "properties": {
+        "decision": {
+          "const": "allowed"
+        },
+        "receipt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "grantRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "remainingUsd": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checkedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reservedUsd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Held against the grant (and every level above it) until settled or expired, so concurrent checks cannot overrun a limit together."
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false
+    },
+    "denied": {
+      "type": "object",
+      "required": [
+        "decision",
+        "level",
+        "code",
+        "reason",
+        "checkedAt"
+      ],
+      "properties": {
+        "decision": {
+          "const": "denied"
+        },
+        "level": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/level"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where the check stopped; null when it stopped before any level (no grant, unproven principal, unknown state)."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approvalRequest": {
+          "type": "string",
+          "format": "uri",
+          "minLength": 1
+        },
+        "checkedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "code": {
+          "$ref": "#/$defs/code"
+        },
+        "window": {
+          "enum": [
+            "total",
+            "task",
+            "project",
+            "day",
+            "week",
+            "month",
+            "call"
+          ],
+          "description": "DEC-0039: the window that was reached; required with limit-reached. DEC-0041: call means the grant's perCallMaxUsd was exceeded; it is a refusal window, not a grant limit window, and its level is L3."
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "limit-reached"
+              }
+            },
+            "required": [
+              "code"
+            ]
+          },
+          "then": {
+            "required": [
+              "window"
+            ],
+            "properties": {
+              "level": {
+                "$ref": "#/$defs/level"
+              },
+              "window": true
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "window": {
+                "const": "call"
+              }
+            },
+            "required": [
+              "window"
+            ]
+          },
+          "then": {
+            "properties": {
+              "level": {
+                "const": "L3"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "code": {
+      "enum": [
+        "limit-reached",
+        "no-grant",
+        "grant-expired",
+        "grant-revoked",
+        "principal-unproven",
+        "credential-source-refused",
+        "unknown-state"
+      ],
+      "description": "Why a check stopped; the level says where."
+    }
+  }
+}

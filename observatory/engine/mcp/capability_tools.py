@@ -25,7 +25,6 @@ trace, the one of the request that started it.
 """
 from __future__ import annotations
 import json
-import pathlib
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -193,39 +192,9 @@ def _name_unknown_arguments(result: Any, tool: Any, arguments: dict) -> Any:
     return result
 
 
-#: The meter's capability (OBS-55): served under its capability name, as the memory/0.1 family is.
+#: The meter's capability (OBS-55), declared in fabric-agent.json (OBS-67) and listed from it like every
+#: capability; its call is answered by `_grant_check`, which reads the delegation token from the channel.
 GRANT_CHECK = "grant.check"
-_DELEGATION_SCHEMAS = pathlib.Path(__file__).resolve().parents[1] / "fabric" / "delegation-schemas"
-
-
-def _inline_common(node: Any, common: dict) -> Any:
-    """A vendored contract schema with its `common.schema.json` references inlined: an MCP client
-    does not fetch a `$ref` (the same reason the interop tools serve self-contained schemas)."""
-    if isinstance(node, dict):
-        ref = node.get("$ref")
-        if isinstance(ref, str) and ref.startswith("common.schema.json#/$defs/"):
-            return _inline_common(common["$defs"][ref.rsplit("/", 1)[1]], common)
-        return {k: _inline_common(v, common) for k, v in node.items() if k not in ("$schema", "$id")}
-    if isinstance(node, list):
-        return [_inline_common(v, common) for v in node]
-    return node
-
-
-def grant_check_tool() -> Tool:
-    common = json.loads((_DELEGATION_SCHEMAS / "common.schema.json").read_text(encoding="utf-8"))
-    request = json.loads((_DELEGATION_SCHEMAS / "grant-check-request.schema.json").read_text(encoding="utf-8"))
-    answer = json.loads((_DELEGATION_SCHEMAS / "grant-check.schema.json").read_text(encoding="utf-8"))
-    # MCP requires an object at the root of an output schema; the contract's root is a oneOf of two objects.
-    output = {"type": "object", **_inline_common(answer, common)}
-    return Tool(name=GRANT_CHECK, title=GRANT_CHECK,
-                description=("The meter (contract DEC-0037/0039): before a call that spends, reserve its "
-                             "amount against the grant the delegation token names and the estate's monthly "
-                             "limit. Present the onward token minted for project-observatory (scope "
-                             "grant.check) in Authorization: Bearer, never in an argument. Answers allowed "
-                             "with a receipt, or denied with the code, the level and the window."),
-                input_schema=_inline_common(request, common), output_schema=output,
-                annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False,
-                                            idempotent_hint=False))
 
 
 class InteropServer(MCPServer):
@@ -263,7 +232,8 @@ class InteropServer(MCPServer):
 
     def missing_handlers(self) -> list[str]:
         """Capabilities the manifest declares that nothing here answers. Must be empty."""
-        return sorted(n for n, c in self._caps.items() if n not in self._handlers and not interop.is_job(c))
+        return sorted(n for n, c in self._caps.items()
+                      if n not in self._handlers and not interop.is_job(c))
 
     # ── listing ──────────────────────────────────────────────────────────────
     def interop_tools(self) -> list[Tool]:
@@ -306,9 +276,9 @@ class InteropServer(MCPServer):
                 for name, d in self._memory.items()]
 
     async def list_tools(self) -> list[Tool]:
-        own = {t.name for t in self.interop_tools()} | set(self._memory) | {GRANT_CHECK}
+        own = {t.name for t in self.interop_tools()} | set(self._memory)
         base = [t for t in await super().list_tools() if t.name not in own]
-        return base + self.interop_tools() + self.memory_listing() + [grant_check_tool()]
+        return base + self.interop_tools() + self.memory_listing()
 
     async def _grant_check(self, arguments: dict) -> CallToolResult:
         """The meter (OBS-55, contract DL-21): the onward delegation token comes from the request's

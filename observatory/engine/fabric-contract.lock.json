@@ -16,7 +16,9 @@
     "fabric/schemas/mcp-inventory-output.schema.json",
     "fabric/schemas/mcp-refresh-input.schema.json",
     "fabric/schemas/project-resolve-input.schema.json",
-    "fabric/schemas/project-resolve-output.schema.json"
+    "fabric/schemas/project-resolve-output.schema.json",
+    "fabric/schemas/grant-check-input.schema.json",
+    "fabric/schemas/grant-check-output.schema.json"
   ],
   "releases": [
     {
@@ -57,6 +59,15 @@
         "fixtures/project-resolve-input.json",
         "schemas/project-resolve-input.schema.json",
         "schemas/project-resolve-output.schema.json"
+      ]
+    },
+    {
+      "release": "v0.24.1",
+      "repository": "passioncode-ai/project-observatory-dashboard",
+      "files": [
+        "fixtures/grant-check-input.json",
+        "schemas/grant-check-input.schema.json",
+        "schemas/grant-check-output.schema.json"
       ]
     }
   ],

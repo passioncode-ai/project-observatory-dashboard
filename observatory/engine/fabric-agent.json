@@ -2,8 +2,8 @@
   "contractVersion": "0.1.0",
   "provider": {
     "id": "https://github.com/ssheleg/project-observatory-open-source",
-    "revision": 8,
-    "contentHash": "sha256:2d4d3c694cf12b959e92d3571e11c458312f69e75b0048429993579ae4d11946",
+    "revision": 9,
+    "contentHash": "sha256:a26d4720adacf7a3a0da35f202b50015d1b0b3000b4a7b0f2b38cdda6ab9aee9",
     "createdAt": "2026-09-03T13:22:35Z",
     "createdBy": "https://github.com/ssheleg",
     "name": "Project Observatory",
@@ -361,6 +361,47 @@
         }
       },
       "description": "Take a new MCP inventory now: re-read every agent config and ask Claude Code to probe the servers it knows. The probe health-checks each server and can take minutes, so the call answers a job; the finished job's result envelope carries a machine.mcp.inventory answer as its output. A refresh already running is joined, not started twice. Observation only: nothing outside the observatory's own scan file changes."
+    },
+    {
+      "id": "https://github.com/ssheleg/project-observatory-open-source/capabilities/grant.check",
+      "name": "grant.check",
+      "inputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.1/observatory/engine/fabric/schemas/grant-check-input.schema.json",
+      "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.1/observatory/engine/fabric/schemas/grant-check-output.schema.json",
+      "effect": "none",
+      "idempotency": "not-supported",
+      "dataClasses": [
+        "project-internal"
+      ],
+      "profile": {
+        "kind": "mcp",
+        "protocolRevision": "2026-07-28",
+        "connection": {
+          "mode": "stdio",
+          "executableRef": "observatory-install:mcp-server",
+          "args": [
+            "--stdio"
+          ]
+        },
+        "requiredFeatures": [
+          "tool:grant.check"
+        ],
+        "probes": [
+          {
+            "id": "grant-check-unproven-is-denied",
+            "description": "A bounded probe against an explicitly selected synthetic fixture workspace.",
+            "inputFixture": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.1/observatory/engine/fabric/fixtures/grant-check-input.json",
+            "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.1/observatory/engine/fabric/schemas/grant-check-output.schema.json",
+            "timeoutMs": 30000,
+            "sideEffectCeiling": "none",
+            "assertions": [
+              "result validates against grant-check-output.schema.json",
+              "a call carrying no delegation token is denied principal-unproven at no level",
+              "registry git status and ledger max revision are unchanged after the call"
+            ]
+          }
+        ]
+      },
+      "description": "The meter (fabric-agent-contract DEC-0037/0039/0041, Fabric ADR-0144): before a call that spends, a callee presents the onward delegation token the hub minted for project-observatory (scope grant.check) in Authorization: Bearer and asks whether the amount may be spent. The token travels only over HTTP: the same tool is served on the memory-http door (`project-observatory full memory-http`, loopback), where the token sits in Authorization; over stdio no token travels and the answer is principal-unproven. Answers allowed with a receipt and the reservation, or denied with the code, the level and the window. On the operator's own machine no token is demanded for anything else (ADR-0144 amendment 4); this capability answers principal-unproven without one, because a reservation needs the grant the token names."
     }
   ]
 }

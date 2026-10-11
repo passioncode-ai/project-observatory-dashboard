@@ -178,8 +178,6 @@ stops accidental and confused borrowing, not a hostile process of the same user 
 
 ## Not decided here
 
-- Declaring `grant.check` in `fabric-agent.json`: the manifest's capabilities point at published schema URLs
-  and carry the manifest's content hash, so the declaration ships with a contract-schema publication (OBS-67).
 - Settling from usage reports (`byGrant` receipts) instead of by hand, and the alert at 80 % as a finding
   (OBS-56).
 - How an enrolled machine (T1) proves itself to this one: the agent network's device binding (RM-21, OBS-77).

@@ -14,6 +14,10 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **`grant.check` is declared in `fabric-agent.json`** (OBS-67; manifest revision 9): effect `none`, its
+  input and output schemas published at `v0.24.1`, a probe that a call carrying no delegation token is denied
+  `principal-unproven`. Fabric's registry reads the meter from the service descriptor; the token-carrying call
+  goes to the same tool on the memory-http door.
 - One project under many names (OBS-65). The operator curates `config/identifiers.json`
   (another system's name → the canonical `project:`/`product:` id, with the name's owner); the
   emitter publishes `registry/identifiers.json` and one `known_as` relation per alias. A name

@@ -53,6 +53,11 @@ def tool_parameters() -> dict[str, list[str]]:
         if isinstance(node, ast.FunctionDef) and node.name.startswith("observatory_"):
             args = node.args
             out[node.name] = [a.arg for a in (args.posonlyargs + args.args + args.kwonlyargs)]
+    # `grant.check` is not a function of server.py: `InteropServer._grant_check` hands its arguments to
+    # the meter, and the names the meter accepts are `meter.REQUEST_FIELDS` (any other is refused).
+    sys.path.insert(0, str(ROOT))
+    import meter
+    out["grant.check"] = sorted(meter.REQUEST_FIELDS)
     return out
 
 

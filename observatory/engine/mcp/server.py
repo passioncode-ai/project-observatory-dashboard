@@ -1521,6 +1521,14 @@ def capability_project_timeline(arguments: dict[str, Any], span: Any) -> dict[st
     return _published_shape(schema, out, set())
 
 
+@server.capability("grant.check")
+def capability_grant_check(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
+    """Registered so the manifest's capability has its handler. `InteropServer.call_tool` answers
+    `grant.check` first, in `_grant_check`, because the delegation token comes from the channel the
+    HTTP door built and never from the arguments; this path is never reached by a call."""
+    raise RuntimeError("grant.check is answered by InteropServer._grant_check")
+
+
 @server.capability("project.resolve")
 def capability_project_resolve(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
     """The same answer as the MCP tool, cut to the published output schema like every

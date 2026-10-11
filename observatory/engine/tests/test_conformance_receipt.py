@@ -357,9 +357,10 @@ def test_the_published_surface_did_not_change() -> None:
     # Revision 5 was earned by the fabric-service/0.1 extension key (docs/design/FABRIC-SERVICE.md,
     # rule 9), revision 6 by the `machine.mcp.inventory` capability, revision 7 by the
     # fabric-interop/0.1 extension key and the `machine.mcp.refresh` job, revision 8 by the
-    # `project.resolve` capability; the pin moves only with a deliberate bump like those.
-    check("the provider is still revision 8",
-          manifest["provider"]["revision"] == 8,
+    # `project.resolve` capability, revision 9 by the `grant.check` capability (OBS-67); the pin
+    # moves only with a deliberate bump like those.
+    check("the provider is still revision 9",
+          manifest["provider"]["revision"] == 9,
           str(manifest["provider"]["revision"]))
     # THROUGH THE HASH, not through `git status`: what matters is that the
     # surface still matches the stamp the manifest carries, which is exactly
