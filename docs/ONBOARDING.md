@@ -91,6 +91,14 @@ it does not replace an existing installation. Configuration belongs in
 `project-observatory full-path` prints the immutable engine directory, useful
 for connecting scripts, hooks and MCP.
 
+**What else a project is called** — a store id, a hosting app, another agent's own slug — is
+curated in `config/identifiers.json` as `{"aliases": {"<system>:<value>": {"resolves_to":
+"project:…" or "product:…", "owner": …, "source": …, "since": "YYYY-MM-DD"}}}`; agents can propose
+rows with `observatory_propose` (`patch: {"aliases": [...]}`). One name has one target: two targets
+for one name, or a name that contradicts a measured repository, deployment or domain, is listed as
+a conflict in `registry/identifiers.json` and withheld. `project.resolve` answers any of these
+names with the one canonical id ([design](design/IDENTITY.md)).
+
 **Which environment an app serves** comes from the provider (a Heroku pipeline stage) or from you:
 `config/environments.json` holds `{"deployments": {"heroku:<app>": "production"}}`. The names
 `production`, `staging`, `review`, `development`, `test` and `local` are recognised (`prod` and

@@ -15,6 +15,12 @@ The [2026-10-01 quality run](runs/2026-10-01-organization-quality/README.md) con
 repository to the common workspace backlog and corrects the conformance suite's missing-lsof
 expectation. It changes test evidence and documentation, not the published engine version.
 
+## Latest run
+
+[2026-10-11 — OBS-65, one project under many names](runs/2026-10-11-identity-aliases/README.md):
+curated aliases, `known_as` edges, `project.resolve`. Next task there: aliases and conflicts on
+the dashboard.
+
 ## Completed implementation
 
 - Complete source export under `observatory/engine/`; generic defaults, individual

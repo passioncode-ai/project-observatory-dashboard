@@ -69,10 +69,10 @@ print(json.dumps({'allowed':sorted(proposals.appliable()['project:']), 'names':s
  'annotation_writer':str(sign_credential.FILE),'acks':str(paths.FINDING_ACKS),'boundary':rows[0]['boundary_why']}))
 """)
             if not result:continue
-            # The engine always admits the structured organization/resources fields
-            # (agents report what they created through them); everything else is
-            # derived from the selected policy.
-            check('proposal fields come from selected policy',result['allowed']==['description','organization','resources'],str(result['allowed']))
+            # The engine always admits the structured organization/resources/aliases
+            # fields (agents report what they created, and the other names a system
+            # uses, through them); everything else is derived from the selected policy.
+            check('proposal fields come from selected policy',result['allowed']==['aliases','description','organization','resources'],str(result['allowed']))
             check('session exclusions come from selected policy',set(result['names'])=={root.name})
             check('credential owners come from selected policy',result['owners']==[{'credential':root.name,'projects':['project:fixture-a'],'evidence':['fixture:policy']}])
             check('credential annotations come from selected policy',result['annotations']=={'credential:fixture':{'purpose':root.name}})
@@ -95,7 +95,7 @@ import json,proposals
 from collectors import credentials_registry as c,scan_sessions as s
 print(json.dumps({'fields':sorted(proposals.appliable()['project:']),'owners':c.load_owners(),'annotations':c.load_annotations(),'exclusions':s.exclusions()}))
 """)
-            check('absent optional selected policy never borrows checkout contents',absent=={'fields':['organization','resources'],'owners':[],'annotations':{},'exclusions':[[],{}]},str(absent))
+            check('absent optional selected policy never borrows checkout contents',absent=={'fields':['aliases','organization','resources'],'owners':[],'annotations':{},'exclusions':[[],{}]},str(absent))
 
 
 def test_selected_proposal_writer_and_emitter():

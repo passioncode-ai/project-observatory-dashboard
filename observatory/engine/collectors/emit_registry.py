@@ -98,7 +98,7 @@ NEW_SOURCES = [
     ("SRC-0014", "The machine's credential surfaces, read for METADATA only and never for values: OpenRouter's provisioning listing (name, the provider's own label, limit, usage, reset, disabled), tools/vault.py's slot paths and meta.json beside each value, and its leaks.jsonl register. Answers WHAT CREDENTIALS EXIST, WHICH PROJECTS MAY USE THEM and WHAT HAS LEAKED AND NOT BEEN ROTATED.", ["registry:credentials.json"]),
     ("SRC-0013", "Heroku Platform API v3 through the CLI's own session token (`heroku auth:token`, never stored): every application the account and its teams can see, with its formation, dynos, add-ons and release history, plus the Deploy tab\'s GitHub link from kolkrabbi. Answers WHERE A PROJECT IS RUNNING and what leaving it running costs — a fact no other source here holds.", ["registry:heroku-apps.json"]),
     ("SRC-0015", "Every inventoried `.env` under the configured project directory, read by collectors/scan_env.py for NAMES and never for values: the file, its project, its mode, its git state, and each variable\'s name and class. The value is read to decide the class and then dropped; the one derivation that survives it is a salted fingerprint kept in the gitignored scan, which is what lets `shared_with` be MEASURED rather than declared. Answers WHAT EACH PROJECT HOLDS LOCALLY, WHAT BREAKS IF A VALUE IS ROTATED and WHERE AN EMPTY SLOT COULD BE FILLED FROM.", ["registry:env-inventory.json"]),
-    ("SRC-0016", "Cloudflare zone listings through the narrow tokens `tools/cloudflare.py` issues (Zone Read, one per account), joined at emit time to the domain registry, the projects' sites and the operator's boundary and claim files; and the operator's curated product groupings in " + paths.config_label("products.json") + " with the groupings suggested from shared registrable domains. Answers WHICH DOMAINS THE ESTATE HOLDS, whose surface each is, and what several projects are one product.", ["registry:cloudflare-zones.json", "registry:products.json"]),
+    ("SRC-0016", "Cloudflare zone listings through the narrow tokens `tools/cloudflare.py` issues (Zone Read, one per account), joined at emit time to the domain registry, the projects' sites and the operator's boundary and claim files; and the operator's curated product groupings in " + paths.config_label("products.json") + " with the groupings suggested from shared registrable domains, and the other names of projects and products the operator curates in " + paths.config_label("identifiers.json") + " (each owned by the system that uses it). Answers WHICH DOMAINS THE ESTATE HOLDS, whose surface each is, what several projects are one product, and what else each is called.", ["registry:cloudflare-zones.json", "registry:products.json", "registry:identifiers.json"]),
     ("SRC-0017", "The MCP declarations in each agent's own config (~/.claude.json with its project scopes, ~/.cursor/mcp.json, ~/.config/opencode/opencode.json, ~/.codex/config.toml, ~/.gemini/settings.json, ~/.kiro/settings/mcp.json) plus what `claude mcp list` reports for plugins and claude.ai connectors — read for names, transports, targets without query strings and the PRESENCE of a key, never a value. Answers WHICH MCP SERVERS THE AGENTS ARE TOLD TO REACH and whether Claude reached them.", ["registry:mcp-servers.json"]),
     ("SRC-0018", "Heroku\'s config-vars endpoint through the same CLI session token, read by collectors/scan_remote_env.py: the endpoint answers with names AND values in one object and has no names-only form, so the values are TRANSIT — classified, fingerprinted with the machine-local salt collectors/scan_env.py uses, and dropped. The fingerprints stay in the gitignored scan beside the vault\'s own retired-value fingerprints; the document built from them carries only the verdict. Answers WHAT PRODUCTION IS CONFIGURED WITH, whether it matches this machine, and whether a value the vault has already rotated away is still deployed.", ["registry:remote-env.json"]),
     ("SRC-0019", "Google Analytics Admin and Data APIs, and Search Console, through the service accounts in the machine\'s secret store: every account and property the credential can see, each property\'s own declared web hosts and app bundle ids, thirty days of active users, sessions and views, and the Search Console sites. The credential signs a JWT and never leaves the collector; what is recorded is the account\'s public `client_email`. Answers WHICH PRODUCTS PEOPLE ACTUALLY USE, and joins each property to a project by what the property declares about itself rather than by a hand-written map.", ["registry:google-properties.json"]),
@@ -244,7 +244,7 @@ for k in sorted(repos):
 #: survive because it was written once. T26 pruned relations whose endpoints
 #: vanished; this is the other half — a relation whose JUSTIFICATION vanished,
 #: which is what an operator's correction produces.
-DERIVED_TYPES = {"implemented_by", "public_domain_of", "deployed_to", "credential_used_by", "part_of", "in_account", "serves"}
+DERIVED_TYPES = {"implemented_by", "public_domain_of", "deployed_to", "credential_used_by", "part_of", "in_account", "serves", "known_as"}
 authored = [r for r in rel_doc["relations"] if r["type"] not in DERIVED_TYPES]
 stale = len(rel_doc["relations"]) - len(authored)
 if stale:
@@ -667,11 +667,32 @@ if REMOTE_SRC.is_file() and ENV_SRC.is_file() and CRED_SRC.is_file():
         add_rel(e["id"], e["type"], e["from"], e["to"], e["source_refs"], e.get("rule"), e)
     print(f"run bindings: {len(_run)} vault slot(s) read at run time by a production app")
 
+# ---- other names (identifiers.py) ----------------------------------------
+# Computed LAST, over every relation the emit has made: a curated alias is checked
+# against the repositories, deployments and domains measured above, and an alias
+# that contradicts them is a conflict rather than a second truth.
+import identifiers
+_idoc, _iedges, _ierrors = identifiers.document(out_projs, products_doc["products"], relations, OBS,
+                                                path=paths.config_file("identifiers.json"))
+if _ierrors:
+    # Refused whole, as products.json is: half of an operator's table is a table nobody wrote.
+    sys.exit(paths.config_label("identifiers.json") + " refused:\n  " + "\n  ".join(_ierrors))
+for e in _iedges:
+    add_rel(e["id"], e["type"], e["from"], e["to"], e["source_refs"])
+    if relations[-1]["id"] == e["id"]:
+        relations[-1]["owner"] = e["owner"]
+_stamped("identifiers.json", _idoc)
+print(f"identifiers.json: {_idoc['totals']['aliases']} alias(es) for {_idoc['totals']['targets']} "
+      f"target(s), {_idoc['totals']['conflicts']} conflict(s)")
+for _dg in _idoc["degraded"]:
+    print(f"  degraded identifiers.json: {_dg['reason'][:110]}")
+
 endpoints = ({p["id"] for p in out_projs} | {r["id"] for r in out_repos}
              | {a["id"] for a in heroku_apps} | {c["id"] for c in credentials}
              | {z["id"] for z in zone_rows} | {a["id"] for a in _acc_doc["accounts"]}
              | {e["id"] for e in _env_doc["environments"]}
              | {pr["id"] for pr in products_doc["products"]}
+             | {a["id"] for a in _idoc["aliases"]}
              | {"domain:" + d["name"] for d in json.load(open(INV/"domains.json"))["domains"]})
 kept, dropped = [], []
 for r in relations:
@@ -694,6 +715,9 @@ rel_doc["relation_types"]["credential_used_by"] = ("A project may use a credenti
 rel_doc["relation_types"]["part_of"] = ("A project is one part of a product — a site, its admin, "
     "its app, its wiki. Curated only: the edge carries the member's `role`, and a "
     "suggested grouping in registry/products.json never becomes an edge.")
+rel_doc["relation_types"]["known_as"] = ("A project or product is known by another name in another system — a "
+    "store id, a hosting app, an agent's own slug. Curated only, in config/identifiers.json: the edge carries "
+    "the name's `owner`, and a name with two targets is a conflict in registry/identifiers.json, never an edge.")
 rel_doc["relation_types"]["deployed_to"] = ("A project is deployed to a hosting application. "
     "The edge carries the rule that made it in registry/heroku-apps.json; a name was never enough.")
 rel_doc["relation_types"]["in_account"] = ("A provider resource (a Heroku app, a Cloudflare zone) lives in a "

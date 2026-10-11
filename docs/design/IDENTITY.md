@@ -100,6 +100,63 @@ The first run with the map seeds it from the current registry. Every existing id
 recorded as is, so no id changes on upgrade. `identity_overrides.json` keeps working and still takes
 precedence. Existing `former_ids` (local folder to published) remain an additional alias source.
 
+## Other names: aliases and `project.resolve` (OBS-65)
+
+Status: implemented in `observatory/engine/identifiers.py`, emitted by
+`collectors/emit_registry.py`, served as `project.resolve` (tool `observatory_resolve`).
+
+The sections above keep ONE project's id stable across its own renames. This one answers a
+different question: what the same project or product is called in OTHER systems. A store console
+knows an app by a numeric id, a finance agent by a slug of its own, a hosting platform by an app
+name, a bot by the namespace it files knowledge under. None of them is wrong, and renaming any of
+them to the registry's id would break the system that owns the name.
+
+**The table.** `config/identifiers.json` in the workspace, curated:
+
+```json
+{"schema_version": 1, "aliases": {
+  "store:app:1000000001": {"resolves_to": "project:alpha-app", "owner": "store-agent",
+                           "source": "store console", "since": "2026-10-11"},
+  "urn:finance:project:alpha": {"resolves_to": "product:alpha", "owner": "finance-agent",
+                                "source": "finance slug", "since": "2026-10-11"}}}
+```
+
+An alias is `<system>:<value>` with no whitespace (a `urn:` prefix is fine), never in a canonical
+namespace (`project:`, `product:`), never credential-shaped. It names exactly one `project:` or
+`product:` id and the agent or system that owns the name. A product groups several projects
+(`config/products.json`, `part_of` edges); several repositories implement one project
+(`implemented_by`). An alias may name either level.
+
+**The rules.**
+
+1. **One alias, one target.** A name written twice with two targets, in the same file or in two
+   spellings that differ only in case, is a CONFLICT: both rows are withheld and
+   `registry/identifiers.json` lists the conflict. The file is read with a duplicate-key hook,
+   because a plain JSON object would silently keep the last row.
+2. **The table is the decision, the emit is the measurement.** A curated alias that names a
+   repository, deployment or domain the registry has measured on another project is a conflict.
+   Naming the product the measured project belongs to is not.
+3. **A malformed file is refused whole**, as `products.json` is; a target the registry does not
+   hold today is withheld and named in `degraded`, so a renamed project does not stop the tick.
+4. **`known_as` edges are rebuilt on every emit** (`DERIVED_TYPES`): an alias removed from the
+   table loses its edge on the next run.
+
+**Resolution.** `project.resolve {id}` answers a registry id, an alias, or a name the registry
+already measures (`repository:`, a deployment id such as `heroku:<app>`, `domain:<name>`), by
+exact match only. It returns the canonical id, the product's members with their role,
+repositories, deployments and domains, the products a project is part of, and every alias with its
+owner. A measured name on two projects is `ambiguous` with both candidates; a conflicted name is
+`conflict`; anything else is `not-found`. A near match is never offered. The canonical id is
+always an Observatory id: which project a folder or repository belongs to in a host's own project
+model is that host's decision, and `project.resolve` does not make it.
+
+**Intake.** The system that owns a name files it: `observatory_propose` (or `project.record`) with
+`targetId` a `project:` or `product:` id and `patch: {"aliases": [{"id", "owner", "source"}]}`.
+The wire refuses a malformed alias; `review.py accept-proposal` lands it in
+`config/identifiers.json` with the decision's provenance and refuses a name that already names
+something else. A product accepts no other field by proposal: its members are the operator's
+grouping.
+
 ## Out of scope for this slice
 
 - **Environments, accounts and deployments**: [DEPLOYMENTS.md](DEPLOYMENTS.md) (PB-004).
@@ -110,6 +167,12 @@ precedence. Existing `former_ids` (local folder to published) remain an addition
 - **Rewriting stored history**: not planned.
 
 ## Tests that define done
+
+Aliases: `observatory/engine/tests/test_identifiers.py` (document, conflicts, resolve, the real
+emit), `test_validator_rules.py` (one plant per alias rule), `test_write_surface.py`
+`test_an_alias_proposal_is_checked_at_the_wire_and_lands_in_the_table_of_names`.
+
+Ids:
 
 - Renaming a wiki folder keeps the project id, the timeline shows both periods, and curation keyed
   by the id still applies.

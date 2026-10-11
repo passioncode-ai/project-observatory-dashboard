@@ -123,6 +123,8 @@ BOUNDARY += ('vault_project',)
 BOUNDARY += ('lifecycle', 'lifecycle_watch')
 # Agent memory: checkpoints, one executor per workflow, handoff packs.
 BOUNDARY += ('workflow_memory',)
+# One project under many names: curated aliases, known_as edges, project.resolve.
+BOUNDARY += ('identifiers',)
 # The Agents page: workflows, handoffs and sessions, rendered.
 BOUNDARY += ('agents_page',)
 # Agents' credentials: the findings that report keys outside the vault.
@@ -188,7 +190,7 @@ RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', '
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py',
-    'identity_map.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'workspace.py',
+    'identity_map.py', 'identifiers.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'log_policy.py', 'code_freshness.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',

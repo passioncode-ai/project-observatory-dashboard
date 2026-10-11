@@ -2,8 +2,8 @@
   "contractVersion": "0.1.0",
   "provider": {
     "id": "https://github.com/ssheleg/project-observatory-open-source",
-    "revision": 7,
-    "contentHash": "sha256:10085b2b2014e3e7ad8ebe4de73487798ef9aac531c018a2b20c89248f457c1d",
+    "revision": 8,
+    "contentHash": "sha256:a6458ceffdbb3e6f4517330fafcc08f2b81f827f79e47fa334425b1e7e51022c",
     "createdAt": "2026-09-03T13:22:35Z",
     "createdBy": "https://github.com/ssheleg",
     "name": "Project Observatory",
@@ -181,6 +181,48 @@
         ]
       },
       "description": "Commits and recorded events for one project, newest first, paged by `limit` and bounded by `since`. Payloads arrive parsed: a host must not have to know how this system serialises one."
+    },
+    {
+      "id": "https://github.com/ssheleg/project-observatory-open-source/capabilities/project.resolve",
+      "name": "project.resolve",
+      "inputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.23.0/observatory/engine/fabric/schemas/project-resolve-input.schema.json",
+      "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.23.0/observatory/engine/fabric/schemas/project-resolve-output.schema.json",
+      "effect": "none",
+      "idempotency": "supported",
+      "dataClasses": [
+        "project-internal"
+      ],
+      "profile": {
+        "kind": "mcp",
+        "protocolRevision": "2026-07-28",
+        "connection": {
+          "mode": "stdio",
+          "executableRef": "observatory-install:mcp-server",
+          "args": [
+            "--stdio"
+          ]
+        },
+        "requiredFeatures": [
+          "tool:observatory_resolve"
+        ],
+        "probes": [
+          {
+            "id": "resolve-names-one-id-or-refuses",
+            "description": "A bounded probe against an explicitly selected synthetic fixture workspace.",
+            "inputFixture": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.23.0/observatory/engine/fabric/fixtures/project-resolve-input.json",
+            "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.23.0/observatory/engine/fabric/schemas/project-resolve-output.schema.json",
+            "timeoutMs": 30000,
+            "sideEffectCeiling": "none",
+            "assertions": [
+              "result validates against project-resolve-output.schema.json",
+              "the requested registry id resolves to itself, matched as canonical",
+              "degraded is present, even when empty",
+              "registry git status and ledger max revision are unchanged after the call"
+            ]
+          }
+        ]
+      },
+      "description": "Any name of a project or product — its registry id, another system's name for it (a store id, a hosting app, an agent's own slug, curated in config/identifiers.json), a repository, deployment or domain id — resolved to the ONE canonical Observatory id, with the product's members, their repositories, deployments and domains, and every other name it is known by and who owns that name. Exact matches only: a name measured on two projects is `ambiguous`, a name the operator's table gives two targets is `conflict`, anything else is `not-found`. The answer never decides which project a folder belongs to in another system."
     },
     {
       "id": "https://github.com/ssheleg/project-observatory-open-source/capabilities/project.record",

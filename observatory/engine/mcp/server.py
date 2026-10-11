@@ -112,11 +112,11 @@ server = InteropServer(
         "findings, disk — a few KB.\n"
         "READ, paged with `limit` and `cursor` → `nextCursor`, totals over the whole "
         "scope: `observatory_status` (pass `limit` and `detail: summary`; unpaged is "
-        "every project, hundreds of KB); `observatory_findings` filters by `projectId`; "
+        "hundreds of KB); `observatory_findings` filters by `projectId`; "
         "`observatory_recall`. `limit` only: `observatory_project`, `observatory_timeline`. "
         "Also `observatory_machine` (`section` or `explainPid`); `observatory_assistant_status`; `observatory_assistant_conversation`.\n"
         "Fabric capabilities (fabric-interop/0.1) use their published schemas exactly: "
-        "`estate.survey`, `project.detail`, "
+        "`estate.survey`, `project.detail`, `project.resolve`, "
         "`project.timeline`, `project.record`, `machine.mcp.inventory`, `machine.mcp.refresh`."
     ),
 )
@@ -396,6 +396,52 @@ def observatory_project(
     own capability publishes.
     """
     return survey_mod.project_detail(projectId, timeline_limit=timelineLimit)
+
+
+@server.tool()
+def observatory_resolve(
+    id: Annotated[str, Field(min_length=3, max_length=300,
+                             description="Any name of a project or product: its registry id, another system's "
+                                         "name for it (a store id, a hosting app, an agent's own slug), or a "
+                                         "repository:, deployment or domain: id. Matched exactly.")],
+) -> dict[str, Any]:
+    """Any name of a project or product -> the ONE canonical Observatory id.
+
+    Agents name the same thing differently, and renaming any of them would break
+    the system that owns the name; so the registry keeps one canonical id and a
+    table of the other names (`config/identifiers.json`, each with its owner).
+    Exact matches only: a name measured on two projects is `ambiguous`, a name the
+    table gives two targets is `conflict`, anything else is `not-found` — a near
+    match is never offered, because acting on the wrong project is worse than "no".
+
+    Reads four registry documents. A missing `identifiers.json` is a registry the
+    current engine has not emitted yet: canonical and measured names still resolve,
+    and `degraded` says the curated table was not read rather than implying there
+    are no other names."""
+    import identifiers
+    degraded: list[dict[str, str]] = []
+
+    def doc(name: str, key: str) -> list[dict]:
+        try:
+            return json.loads((paths.REGISTRY / name).read_text(encoding="utf-8"))[key]
+        except FileNotFoundError:
+            degraded.append({"source": f"registry/{name}", "reason": "absent: the emit has not written it"})
+        except (OSError, ValueError, KeyError) as exc:
+            degraded.append({"source": f"registry/{name}", "reason": f"unreadable: {type(exc).__name__}"})
+        return []
+
+    projects, products, relations = (doc("projects.json", "projects"), doc("products.json", "products"),
+                                     doc("relations.json", "relations"))
+    try:
+        idoc = json.loads((paths.REGISTRY / "identifiers.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        idoc = {}
+        degraded.append({"source": "registry/identifiers.json",
+                         "reason": "absent: curated other names were not read; run `project-observatory full emit`"})
+    except (OSError, ValueError) as exc:
+        idoc = {}
+        degraded.append({"source": "registry/identifiers.json", "reason": f"unreadable: {type(exc).__name__}"})
+    return identifiers.resolve(id, identifiers.Registry(projects, products, relations, idoc, degraded))
 
 
 @server.tool()
@@ -1029,7 +1075,11 @@ def observatory_propose(
                                                        "\"properties/123\", \"account\": \"accounts/456\", \"url\": …, "
                                                        "\"note\": …}]}; it is appended, never replacing what "
                                                        "is recorded. `organization` names whose accounts the "
-                                                       "project uses.")],
+                                                       "project uses. To record another NAME a system uses for a "
+                                                       "project or product, send {\"aliases\": [{\"id\": "
+                                                       "\"<system>:<value>\", \"owner\": <who owns the name>, "
+                                                       "\"source\": <where it is used>}]}; project.resolve then "
+                                                       "answers it.")],
     evidence: Annotated[list[dict[str, Any]] | None,
                         Field(description="What justifies it. A patch with no evidence is a guess.")] = None,
 ) -> dict[str, Any]:
@@ -1059,6 +1109,11 @@ def observatory_propose(
             (paths.REGISTRY / "projects.json").read_text(encoding="utf-8"))["projects"]}
         registry_ids |= {r["id"] for r in json.loads(
             (paths.REGISTRY / "repositories.json").read_text(encoding="utf-8"))["repositories"]}
+        # Products are proposal subjects too (their other names), and an absent
+        # products document is a registry that has not grouped anything yet.
+        _products = paths.REGISTRY / "products.json"
+        if _products.is_file():
+            registry_ids |= {p["id"] for p in json.loads(_products.read_text(encoding="utf-8"))["products"]}
     except (OSError, ValueError, KeyError) as exc:
         # The registry is unreadable, so the subject cannot be checked. The
         # proposal is still accepted and the gap is NAMED: refusing every write
@@ -1440,6 +1495,11 @@ def capability_project_timeline(arguments: dict[str, Any], span: Any) -> dict[st
                                limit=arguments.get("limit", 100))
     schema = next(d["outputSchema"] for d in interop.tool_definitions() if d["name"] == "project.timeline")
     return _published_shape(schema, out, set())
+
+
+@server.capability("project.resolve")
+def capability_project_resolve(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
+    return observatory_resolve(id=arguments["id"])
 
 
 @server.capability("project.record")

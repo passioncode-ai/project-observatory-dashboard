@@ -37,7 +37,14 @@ import paths
 LANDS_IN = {
     "project:": ("project_overrides.json", "projects"),
     "repository:": ("repo_overrides.json", "repositories"),
+    # A product takes ONLY other names (`aliases`): its members, roles and domains
+    # are the operator's grouping, and a merge of a proposed `members` object into
+    # it would replace a decision rather than add to it.
+    "product:": ("products.json", "products"),
 }
+#: Where an accepted `aliases` patch lands, whatever its target: the table of
+#: other names (identifiers.py), never the target's own override row.
+ALIASES_LAND_IN = "identifiers.json"
 
 #: Fields that are provenance about the override rather than data in it. `why`
 #: is required of an accepted proposal — it is what the next reader needs to
@@ -62,7 +69,10 @@ def _fields(name: str, key: str) -> set[str]:
 #: used them: the organization split and the resource inventory are how agents
 #: report what they created, and "the operator adds the first row by hand" would
 #: leave the first agent with nowhere to report it. Their shape is checked here.
-STRUCTURED = {"project:": {"organization", "resources"}}
+STRUCTURED = {"project:": {"organization", "resources", "aliases"}, "product:": {"aliases"}}
+#: Prefixes whose appliable set is the structured fields ALONE — nothing the
+#: curation file happens to hold may be proposed into it.
+ONLY_STRUCTURED = {"product:"}
 
 
 def appliable() -> dict[str, set[str]]:
@@ -73,7 +83,7 @@ def appliable() -> dict[str, set[str]]:
     that has never been used, and the operator adding the first row by hand is
     what teaches this function the field.
     """
-    return {prefix: _fields(name, key) | STRUCTURED.get(prefix, set())
+    return {prefix: (set() if prefix in ONLY_STRUCTURED else _fields(name, key)) | STRUCTURED.get(prefix, set())
             for prefix, (name, key) in LANDS_IN.items()}
 
 
@@ -112,6 +122,21 @@ def refusal(target_id: str, patch: dict, evidence: list) -> str:
             problem = organizations.resource_problem(row)
             if problem:
                 return problem
+    if "aliases" in patch:
+        # OTHER NAMES of the target: a store id, a hosting app, an agent's own
+        # slug. Each names the system that owns it; one name may never name two
+        # things, which the decision re-checks against the table it lands in.
+        import identifiers
+        rows = patch["aliases"]
+        if not isinstance(rows, list) or not rows:
+            return "`aliases` must be a non-empty list of {id, owner, source}"
+        for row in rows:
+            problem = identifiers.alias_problem(row)
+            if problem:
+                return problem
+        names = [r["id"].casefold() for r in rows]
+        if len(set(names)) != len(names):
+            return "`aliases` names one alias twice"
     if "organization" in patch:
         import organizations
         known = set((organizations.load().get("organizations") or {})) | {"external"}

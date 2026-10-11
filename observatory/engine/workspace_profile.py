@@ -77,6 +77,7 @@ POLICY_FILES: dict[str, tuple[bool, str]] = {
     "ga4_properties.json": (False, "analytics property ids (account identifiers)"),
     "heroku_links.json": (False, "hosting apps linked to projects (inventory and account identifiers)"),
     "host_boundary.json": (False, "host names of this estate (inventory)"),
+    "identifiers.json": (False, "other names of this estate's projects and products, with their owners (inventory and account identifiers)"),
     "identity_overrides.json": (False, "project identity overrides (inventory)"),
     "machine.json": (False, "disk locations under this machine's home directory (paths)"),
     "organizations.json": (False, "organizations with their analytics accounts and design teams (account ids)"),

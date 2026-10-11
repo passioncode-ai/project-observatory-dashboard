@@ -167,7 +167,10 @@ def test_the_appliable_set_is_derived_from_the_curation_files() -> None:
         # Plus the structured fields the engine always admits for a project
         # (organization, resources): agents report what they created through
         # them before any operator row has used them.
-        want = (fields - proposals.PROVENANCE) | proposals.STRUCTURED.get(prefix, set())
+        # A prefix in ONLY_STRUCTURED (a product) admits its structured fields alone:
+        # the operator's grouping is never a field a proposal merges into.
+        measured = set() if prefix in proposals.ONLY_STRUCTURED else fields - proposals.PROVENANCE
+        want = measured | proposals.STRUCTURED.get(prefix, set())
         check(f"{prefix} matches {name} exactly",
               got[prefix] == want, f"{sorted(got[prefix])} vs {sorted(want)}")
     check("provenance is not proposable", "why" not in got["project:"],
@@ -313,6 +316,51 @@ def test_accept_re_checks_appliability_at_the_decision() -> None:
           "a decision that looks immediate but is not is the worse lie")
 
 
+def test_an_alias_proposal_is_checked_at_the_wire_and_lands_in_the_table_of_names() -> None:
+    """Other names of a project or product — a store id, an agent's own slug — are
+    proposed like any other fact and land in `identifiers.json`, never in the
+    target's override row. One name, one target: the decision refuses a second."""
+    d, m = store()
+    db = d / "observatory.db"
+    alias = {"id": "store:app:42", "owner": "store-agent", "source": "store console"}
+    for label, target, patch, needle in (
+            ("an alias in a canonical namespace", "project:alpha-web",
+             {"aliases": [dict(alias, id="project:beta-api")]}, "canonical"),
+            ("an alias with no owner", "project:alpha-web",
+             {"aliases": [{"id": "store:app:42", "source": "s"}]}, "owner"),
+            ("one alias twice in one patch", "project:alpha-web",
+             {"aliases": [alias, dict(alias, id="STORE:app:42")]}, "twice"),
+            ("a product's members, which are the operator's grouping", "product:alpha",
+             {"members": {"project:beta-api": "api"}}, "cannot be applied"),
+            ("an alias for a repository", "repository:example/beta-api", {"aliases": [alias]},
+             "cannot be applied")):
+        r = m.observatory_propose(owner="agent:test", targetId=target, patch=patch, evidence=EV)
+        check(f"{label} is refused at the wire", r.get("error") == "unappliable-proposal"
+              and needle in r.get("detail", ""), json.dumps(r)[:240])
+    made = m.observatory_propose(owner="agent:test", targetId="project:alpha-web",
+                                 patch={"aliases": [alias]}, evidence=EV)
+    check("a well-formed alias proposal is queued", made.get("status") == "proposed", json.dumps(made)[:200])
+    code, out = review(db, "accept-proposal", made["proposalId"], "--why", "the console says so")
+    check("accepting it succeeds", code == 0, out[-300:])
+    table = json.loads(paths.config_file("identifiers.json").read_text(encoding="utf-8"))
+    row = table["aliases"].get("store:app:42") or {}
+    check("the alias lands in identifiers.json with its target, owner and provenance",
+          row.get("resolves_to") == "project:alpha-web" and row.get("owner") == "store-agent"
+          and row.get("why") == "the console says so" and row.get("proposed_by", "").startswith(made["proposalId"]),
+          json.dumps(row)[:300])
+    overrides = json.loads(paths.config_file("project_overrides.json").read_text(encoding="utf-8"))
+    check("and NOT in the project's override row",
+          "aliases" not in overrides["projects"].get("project:alpha-web", {}), str(overrides)[:200])
+    again = m.observatory_propose(owner="agent:other", targetId="project:beta-api",
+                                  patch={"aliases": [dict(alias, owner="other-agent")]}, evidence=EV)
+    code, out = review(db, "accept-proposal", again["proposalId"], "--why", "a second target")
+    check("giving the same name a second target is refused at the decision, naming the first",
+          code != 0 and "project:alpha-web" in out, out[-300:])
+    table = json.loads(paths.config_file("identifiers.json").read_text(encoding="utf-8"))
+    check("and the table is unchanged",
+          table["aliases"]["store:app:42"]["resolves_to"] == "project:alpha-web", json.dumps(table)[:200])
+
+
 # ─────────── the orphaned subjects ─────────────────────────────────────
 
 def test_a_note_about_a_missing_project_is_reported() -> None:
@@ -363,6 +411,7 @@ if __name__ == "__main__":
                test_the_terminal_gate_still_refuses_a_pipe,
                test_an_accepted_proposal_lands_in_the_curation_file,
                test_accept_and_reject_decide_the_row,
+               test_an_alias_proposal_is_checked_at_the_wire_and_lands_in_the_table_of_names,
                test_accept_re_checks_appliability_at_the_decision,
                test_a_note_about_a_missing_project_is_reported):
         fn()

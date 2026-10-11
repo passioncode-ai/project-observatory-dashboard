@@ -68,9 +68,14 @@ def seed(root: Path) -> Path:
     repos = [dict(id='repository:fixture/' + n, name_with_owner='fixture/' + n, source_refs=refs)
              for n in ['a', 'b']]
     write('repositories.json', {'repositories': repos})
-    write('relations.json', {'relation_types': {'implemented_by': {}}, 'relations': [
+    write('relations.json', {'relation_types': {'implemented_by': {}, 'known_as': {}}, 'relations': [
         {'id': 'relation:fixture', 'from': PROJECT, 'to': repos[0]['id'], 'type': 'implemented_by',
-         'rule': 'synthetic', 'source_refs': refs}]})
+         'rule': 'synthetic', 'source_refs': refs},
+        {'id': 'relation:fixture:known-as:store-app-1', 'from': PROJECT, 'to': 'store:app:1',
+         'type': 'known_as', 'owner': 'store-agent', 'source_refs': refs}]})
+    write('identifiers.json', {'aliases': [dict(id='store:app:1', resolves_to=PROJECT, owner='store-agent',
+                                                source='synthetic', since='2026-10-11', source_refs=refs)],
+          'conflicts': [], 'degraded': [], 'totals': {'aliases': 1, 'conflicts': 0, 'targets': 1}})
     write('domain-liveness.json', {'source_refs': refs})
     write('stale-remotes.json', {'source_refs': refs, 'clones': []})
     write('heroku-apps.json', {'apps': [dict(id='heroku:fixture', name='fixture', state='running',

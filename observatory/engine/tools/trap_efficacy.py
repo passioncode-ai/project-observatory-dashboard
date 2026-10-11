@@ -205,7 +205,7 @@ MUTATIONS: list[dict] = [
      # grows with the registry is a mutation site that moves with it, and the
      # check that says "occurs 0 times" is what turns a stale mutation into a
      # red rather than a silent pass.
-     "find": 'DERIVED_TYPES = {"implemented_by", "public_domain_of", "deployed_to", "credential_used_by", "part_of", "in_account", "serves"}',
+     "find": 'DERIVED_TYPES = {"implemented_by", "public_domain_of", "deployed_to", "credential_used_by", "part_of", "in_account", "serves", "known_as"}',
      "replace": 'DERIVED_TYPES = set()',
      "why": "an edge whose REASON vanished survives, because the emitter kept "
             "every relation it had ever written"},
