@@ -800,6 +800,10 @@ def restart_left_stopped(base: Path, state: dict, services) -> list[dict]:
 #: The disk guard's ceiling inside a pass. A guard killed at it stops between removals of
 #: regenerable things; the next pass starts over from a fresh plan.
 GUARD_TIMEOUT = 1200
+#: What the guard leaves of that ceiling: it stops itself at GUARD_TIMEOUT - GUARD_MARGIN, so
+#: its report and journal are written before the job would kill it (2026-10-11: the first
+#: scheduled pass on 0.23.0 killed it at 1200 s and recorded only "exit 124").
+GUARD_MARGIN = 180
 
 
 def step_guard(base: Path, state: dict, at: datetime.datetime, runner=None) -> dict:
@@ -819,7 +823,8 @@ def step_guard(base: Path, state: dict, at: datetime.datetime, runner=None) -> d
     environ[IN_PASS_ENV] = "1"
     run = runner or subprocess.run
     try:
-        p = run([engine_python(), "-P", str(Path(__file__).resolve().parent / "tools" / "disk_guard.py"), "--auto", "--json"],
+        p = run([engine_python(), "-P", str(Path(__file__).resolve().parent / "tools" / "disk_guard.py"), "--auto", "--json",
+                 "--budget", str(GUARD_TIMEOUT - GUARD_MARGIN)],
                 capture_output=True, text=True, timeout=GUARD_TIMEOUT, env=environ, cwd=tempfile.gettempdir(),
                 stdin=subprocess.DEVNULL)
         code, line = p.returncode, ((p.stdout or "").strip().splitlines() or [""])[-1]

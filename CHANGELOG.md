@@ -17,6 +17,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   `observatory_propose` (`aliases`); accepting one never rewrites an existing row.
 
 ### Fixed
+- **The disk guard finishes inside the hourly pass** (OBS-63): the first scheduled pass on 0.23.0 killed it at
+  the job's 1200 s ceiling, under launchd's background priority, and recorded only `exit 124` — no report, no
+  journal. The guard now stops itself at `--budget` (the job passes 1020 s; `run_budget_seconds`, 900 s, by
+  hand), acts before it refreshes any survey, writes each action to `store/logs/cleanup.jsonl` as it happens,
+  and always writes its report, naming what the budget left for the next pass.
 
 - `_published_shape` follows local `$ref`s and cuts a `oneOf` by the branch whose required
   keys the value carries; before, such an answer passed through uncut.

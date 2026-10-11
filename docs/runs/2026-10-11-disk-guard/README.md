@@ -132,8 +132,22 @@ Run 2 by class, by the disk's count: temporary entries ≈ 3.5 GB, `pnpm store p
   operator's call.
 - OBS-64 (demo findings in one language) arrived from another session during this run and is on the board; the alias layer it also asked for is OBS-65, in its own pull request.
 
+## After the release: the first scheduled pass
+
+0.23.0 was released (run 38158369296; assets verified: `shasum -c`, `gh attestation verify --signer-repo
+passioncode-ai/.github`, `gpg --verify`) and installed on the maintainer's machine. Its first scheduled
+maintenance pass (18:32 UTC) ran the guard and the job **killed it at 1200 s**: `guard: failed, exit 124,
+stopped at 1200 s`, and the guard had written neither its report nor its journal. Under launchd's background
+I/O priority the survey refreshes (up to 600 + 300 s), planning and two thousand removals did not fit. The
+manual runs from a terminal had fit, so nothing before the release could have shown it.
+
+Fixed on `agent/disk-guard-budget`: a run budget inside the guard (`--budget`, the job passes its ceiling
+minus `GUARD_MARGIN`), act first and refresh surveys last within what is left, the journal per action, the
+report in a `finally`. `tests/test_disk_guard.py` RunBudget — each part watched failing against a planted
+defect (no act budget, journal at the end, no `finally`, surveys ignoring the budget).
+
 ## Next task
 
-Merge the pull request after the three required checks, release it with the next
-version, update the maintainer's installation, and confirm in `store/maintenance.json`
-that the hourly pass records `guard` with `result: ran`.
+Release the budget fix with 0.24.0, update the maintainer's installation, and confirm in
+`store/maintenance.json` that a scheduled pass records `guard` with `result: ran` and a report whose
+`seconds` stays under its `budget_seconds`.

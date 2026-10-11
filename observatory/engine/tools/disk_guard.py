@@ -40,6 +40,7 @@ report is store/raw/disk-guard.json, which the Machine page and findings read.
     disk_guard.py --auto         act when features.auto_cleanup is on (maintenance job)
     disk_guard.py --level L      plan/act as if pressure were L (normal|low|critical)
     disk_guard.py --json         print the run's summary as one JSON line (the maintenance job)
+    disk_guard.py --budget S     stop by itself after S seconds (default `run_budget_seconds`)
 """
 from __future__ import annotations
 
@@ -667,8 +668,24 @@ def build_plan(cfg: dict, level: str, holders: Holders, at: float, degraded: lis
 
 
 def run(argv: list[str]) -> dict:
+    """One guard run, inside its own time budget.
+
+    WHY A RUN BUDGET (2026-10-11). The first scheduled pass on 0.23.0 killed the guard at
+    the maintenance job's 1200 s ceiling: under launchd's background priority the survey
+    refreshes, the plan and two thousand removals did not fit, and because the report and
+    the journal were written at the end, the pass recorded only "exit 124". Now the guard
+    stops itself at `--budget` (the job passes its ceiling minus a margin) or
+    `run_budget_seconds`, acts BEFORE it refreshes any survey (a slightly old survey plans
+    as well), journals every action as it happens, and always writes its report."""
     cfg = load_config()
     started = time.monotonic()
+    budget = float(cfg.get("run_budget_seconds", 900))
+    if "--budget" in argv:
+        try:
+            budget = float(argv[argv.index("--budget") + 1])
+        except (IndexError, ValueError):
+            pass
+    left = lambda: budget - (time.monotonic() - started)  # noqa: E731
     out_file = paths.SCRATCH / "disk-guard.json"
     try:
         previous = json.loads(out_file.read_text(encoding="utf-8"))
@@ -678,72 +695,94 @@ def run(argv: list[str]) -> dict:
     enabled = configuration.enabled("auto_cleanup", "features")
     acting = apply or (auto and enabled)
     degraded: list[dict] = []
-    surveys = {}
-    if acting or "--refresh" in argv:
-        # The git survey feeds the checkout list and the cleanup's auto tier; the machine
-        # survey feeds the Machine page, the memory report and the findings — both
-        # starve in a long tick, so the guard keeps them fresh itself.
-        surveys["git-hygiene"] = refresh("collectors/scan_git_hygiene.py", paths.SCRATCH / "git-hygiene.json",
-                                         float(cfg.get("git_survey_every_hours", 6)), 600)
-        surveys["machine"] = refresh("collectors/scan_machine.py", paths.SCRATCH / "machine.json",
-                                     float(cfg.get("machine_survey_every_hours", 2)), 300)
+    surveys: dict = {}
+    phases: dict = {}
+    plan: list[dict] = []
+    rows: list[dict] = []
+    found = (previous or {}).get("large_files")
     free0 = free_bytes()
     level = next((a.split("=", 1)[1] for a in argv if a.startswith("--level=")), None)
     if "--level" in argv:
         level = argv[argv.index("--level") + 1]
     level = level if level in LEVELS else level_for(free0, cfg)
-    holders = Holders.take()
-    if not holders.known:
-        degraded.append({"source": "lsof", "reason": "open files could not be listed; no path is removed"})
-    at = time.time()
-    phases = {"surveys+lsof": round(time.monotonic() - started)}
-    mark = time.monotonic()
-    plan = build_plan(cfg, level, holders, at, degraded)
-    phases["plan"] = round(time.monotonic() - mark)
-    mark = time.monotonic()
-    rows: list[dict] = []
-    if acting:
-        cap, taken = int(cfg.get("max_actions_per_class", 2000)), {}
-        for a in plan:
-            taken[a["class"]] = taken.get(a["class"], 0) + 1
-            if taken[a["class"]] > cap:
-                continue
-            try:
-                rows.append(act(a, holders))
-            except (OSError, subprocess.SubprocessError) as exc:
-                rows.append({"at": now(), "class": a["class"], "target": a["target"], "mode": "guard",
-                             "result": "failed", "reason": f"{type(exc).__name__}: {exc}"[:200]})
-        if enabled or apply:
-            # The git tier: merged/pushed branches, clean idle worktrees — the cleanup's
-            # own rules and re-checks, journalled by it.
-            try:
-                p = subprocess.run([sys.executable, str(ROOT / "tools" / "cleanup.py"), "--apply" if apply else "--auto"],
-                                   capture_output=True, text=True, timeout=900, cwd=str(ROOT))
-                surveys["git-cleanup"] = (p.stdout.strip().splitlines() or [f"exit {p.returncode}"])[-1][:200]
-            except (OSError, subprocess.SubprocessError) as exc:
-                surveys["git-cleanup"] = f"failed: {type(exc).__name__}"
-        journal(rows)
-    phases["act"] = round(time.monotonic() - mark)
-    mark = time.monotonic()
-    found = large_files(cfg, previous, "--large-files" in argv)
-    phases["large-files"] = round(time.monotonic() - mark)
-    free1 = free_bytes()
-    doc = {"schema_version": 1, "at": now(), "level": level, "acting": acting, "auto_enabled": enabled,
-           "free_gb_before": round(free0 / GB, 1), "free_gb_after": round(free1 / GB, 1),
-           "freed_gb": round((free1 - free0) / GB, 2), "seconds": round(time.monotonic() - started), "phases": phases,
-           "planned": {cls: sum(1 for a in plan if a["class"] == cls) for cls in
-                       ("browser-clone", "temp", "trash", "cache-command", "build-output")},
-           "planned_gb": round(sum(a.get("bytes") or 0 for a in plan) / GB, 1),
-           "results": {r: sum(1 for x in rows if x["result"] == r) for r in ("removed", "skipped", "failed")},
-           "actions": [{k: a[k] for k in ("class", "target", "why") if k in a} | {"gb": round((a.get("bytes") or 0) / GB, 2)}
-                       for a in plan[:200]],
-           "surveys": surveys, "large_files": found,
-           "memory": memory_report(), "degraded": degraded}
-    out_file.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out_file.with_suffix(".tmp")
-    tmp.write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, out_file)
+    try:
+        holders = Holders.take()
+        if not holders.known:
+            degraded.append({"source": "lsof", "reason": "open files could not be listed; no path is removed"})
+        at = time.time()
+        phases["lsof"] = round(time.monotonic() - started)
+        mark = time.monotonic()
+        # Planning may take at most its own budget and never more than a third of what is left.
+        plan_cfg = {**cfg, "plan_budget_seconds": max(0.0, min(float(cfg.get("plan_budget_seconds", 300)), left() / 3))}
+        plan = build_plan(plan_cfg, level, holders, at, degraded)
+        phases["plan"] = round(time.monotonic() - mark)
+        mark = time.monotonic()
+        reserve = float(cfg.get("run_reserve_seconds", 60))
+        if acting:
+            cap, taken = int(cfg.get("max_actions_per_class", 2000)), {}
+            for n, a in enumerate(plan):
+                if left() < reserve:
+                    degraded.append({"source": "act", "reason": f"stopped at the run budget; {len(plan) - n} planned "
+                                                                f"action(s) are looked at again next pass"})
+                    break
+                taken[a["class"]] = taken.get(a["class"], 0) + 1
+                if taken[a["class"]] > cap:
+                    continue
+                try:
+                    row = act(a, holders)
+                except (OSError, subprocess.SubprocessError) as exc:
+                    row = {"at": now(), "class": a["class"], "target": a["target"], "mode": "guard",
+                           "result": "failed", "reason": f"{type(exc).__name__}: {exc}"[:200]}
+                rows.append(row)
+                journal([row])               # as it happens: a run stopped from outside keeps its record
+            phases["act"] = round(time.monotonic() - mark)
+            if left() > 2 * reserve:
+                # The git tier: merged/pushed branches, clean idle worktrees — the cleanup's own
+                # rules and re-checks, journalled by it.
+                try:
+                    p = subprocess.run([sys.executable, str(ROOT / "tools" / "cleanup.py"),
+                                        "--apply" if apply else "--auto"], capture_output=True, text=True,
+                                       timeout=max(30, min(900, left() - reserve)), cwd=str(ROOT))
+                    surveys["git-cleanup"] = (p.stdout.strip().splitlines() or [f"exit {p.returncode}"])[-1][:200]
+                except (OSError, subprocess.SubprocessError) as exc:
+                    surveys["git-cleanup"] = f"failed: {type(exc).__name__}"
+            else:
+                surveys["git-cleanup"] = "skipped: the run budget is spent"
+        if acting or "--refresh" in argv:
+            # Surveys LAST: the git survey feeds the next plan's checkout list, the machine survey
+            # the Machine page and the memory report. Each gets only the time that is left.
+            for name, script, hours, cap_s in (
+                    ("git-hygiene", "collectors/scan_git_hygiene.py", cfg.get("git_survey_every_hours", 6), 600),
+                    ("machine", "collectors/scan_machine.py", cfg.get("machine_survey_every_hours", 2), 300)):
+                room = left() - reserve / 2
+                surveys[name] = (refresh(script, paths.SCRATCH / f"{name}.json", float(hours), int(min(cap_s, room)))
+                                 if room > 30 else "skipped: the run budget is spent")
+        mark = time.monotonic()
+        room = left() - reserve / 2
+        if room > 30 or "--large-files" in argv:
+            found = large_files({**cfg, "large_files_budget_seconds":
+                                 min(float(cfg.get("large_files_budget_seconds", 120)), max(room, 30))},
+                                previous, "--large-files" in argv)
+        phases["large-files"] = round(time.monotonic() - mark)
+    finally:
+        free1 = free_bytes()
+        doc = {"schema_version": 1, "at": now(), "level": level, "acting": acting, "auto_enabled": enabled,
+               "free_gb_before": round(free0 / GB, 1), "free_gb_after": round(free1 / GB, 1),
+               "freed_gb": round((free1 - free0) / GB, 2), "seconds": round(time.monotonic() - started),
+               "budget_seconds": round(budget), "phases": phases,
+               "planned": {cls: sum(1 for a in plan if a["class"] == cls) for cls in
+                           ("browser-clone", "temp", "trash", "cache-command", "build-output")},
+               "planned_gb": round(sum(a.get("bytes") or 0 for a in plan) / GB, 1),
+               "results": {r: sum(1 for x in rows if x["result"] == r) for r in ("removed", "skipped", "failed")},
+               "actions": [{k: a[k] for k in ("class", "target", "why") if k in a}
+                           | {"gb": round((a.get("bytes") or 0) / GB, 2)} for a in plan[:200]],
+               "surveys": surveys, "large_files": found,
+               "memory": memory_report(), "degraded": degraded}
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out_file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, out_file)
     return doc
 
 

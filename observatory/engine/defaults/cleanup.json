@@ -49,6 +49,8 @@
   "git_survey_every_hours": 6,
   "machine_survey_every_hours": 2,
   "plan_budget_seconds": 300,
+  "run_budget_seconds": 900,
+  "run_reserve_seconds": 60,
   "max_actions_per_class": 2000
  }
 }

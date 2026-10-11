@@ -6,6 +6,7 @@ listing. Nothing here reads or removes anything outside its temporary directory 
 every root the guard walks is pointed into it, and the cache commands are fakes.
 """
 from __future__ import annotations
+import contextlib
 import importlib
 import json
 import os
@@ -393,6 +394,62 @@ class Run(Base):
         self.assertIn("freed_mb", rows[-1])
         self.assertFalse((self.t1 / "old").exists())
         self.assertTrue((paths.SCRATCH / "disk-guard.json").exists())
+
+
+class RunBudget(Base):
+    """2026-10-11: the scheduled pass killed the guard at its ceiling and nothing was written."""
+
+    def setUp(self):
+        super().setUp()
+        for name in ("a", "b", "c"):
+            (self.t1 / name).mkdir()
+            age(self.t1 / name, 9)
+
+    def patched(self):
+        return [patch.object(self.g, "load_config", return_value=self.cfg(run_reserve_seconds=0)),
+                patch.object(self.g.Holders, "take", return_value=self.free()),
+                patch.object(self.g, "large_files", return_value=None)]
+
+    def test_a_spent_budget_stops_acting_says_so_and_still_reports(self):
+        ran = []
+        with contextlib.ExitStack() as stack:
+            for p in self.patched():
+                stack.enter_context(p)
+            stack.enter_context(patch.object(self.g, "refresh", side_effect=lambda *a, **k: ran.append(a) or "x"))
+            # A plan already made, so what is measured is the act phase stopping, not planning.
+            stack.enter_context(patch.object(self.g, "build_plan", return_value=[
+                {"class": "temp", "target": str(self.t1 / n), "bytes": 0} for n in "abc"]))
+            doc = self.g.run(["--apply", "--budget", "0"])
+        self.assertEqual(doc["results"]["removed"], 0)
+        self.assertTrue(all((self.t1 / n).exists() for n in "abc"))
+        self.assertIn("act", [d["source"] for d in doc["degraded"]])
+        self.assertEqual(ran, [], "no survey is refreshed on a spent budget")
+        self.assertEqual(doc["surveys"]["git-cleanup"], "skipped: the run budget is spent")
+        import paths
+        self.assertTrue((paths.SCRATCH / "disk-guard.json").exists())
+
+    def test_the_journal_and_the_report_survive_a_run_stopped_midway(self):
+        import paths
+        calls = []
+        real = self.g.act
+
+        def act(a, holders):
+            calls.append(a)
+            if len(calls) == 2:
+                raise KeyboardInterrupt          # the job's kill, as far as this process can tell
+            return real(a, holders)
+        with contextlib.ExitStack() as stack:
+            for p in self.patched():
+                stack.enter_context(p)
+            stack.enter_context(patch.object(self.g, "act", side_effect=act))
+            stack.enter_context(patch.object(self.g, "refresh", return_value="fresh"))
+            with self.assertRaises(KeyboardInterrupt):
+                self.g.run(["--apply", "--budget", "600"])
+        rows = [json.loads(l) for l in (paths.STATE / "logs" / "cleanup.jsonl").read_text().splitlines()]
+        self.assertEqual(len(rows), 1, "the first removal is on the record before the second began")
+        self.assertEqual(rows[0]["result"], "removed")
+        report = json.loads((paths.SCRATCH / "disk-guard.json").read_text())
+        self.assertEqual(report["results"]["removed"], 1)
 
 
 class JsonLine(Base):

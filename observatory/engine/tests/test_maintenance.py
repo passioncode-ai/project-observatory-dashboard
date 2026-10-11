@@ -1188,8 +1188,9 @@ class Guard(Base):
             return subprocess.CompletedProcess(argv, 0, out + "\n", "")
         state = {}
         report = M.step_guard(self.home, state, AT, runner=runner)
-        self.assertEqual(seen["argv"][-2:], ["--auto", "--json"])
-        self.assertTrue(seen["argv"][-3].endswith("tools/disk_guard.py"))
+        self.assertEqual(seen["argv"][-4:], ["--auto", "--json", "--budget", str(M.GUARD_TIMEOUT - M.GUARD_MARGIN)])
+        self.assertTrue(seen["argv"][-5].endswith("tools/disk_guard.py"))
+        self.assertLess(M.GUARD_TIMEOUT - M.GUARD_MARGIN, M.GUARD_TIMEOUT, "the guard stops before the job kills it")
         self.assertEqual(seen["env"]["OBSERVATORY_HOME"], str(self.home))
         self.assertEqual(seen["timeout"], M.GUARD_TIMEOUT)
         self.assertEqual((report["result"], report["level"], report["freed_gb"]), ("ran", "low", 3.2))
