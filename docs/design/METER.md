@@ -87,11 +87,48 @@ chain** (DL-22): the mapping from a grant to who acted is in the hub's journal.
 
 The keys are cached for ten minutes and re-read at most once a minute on an unknown `kid` (DL-15).
 
+## M5 — Vault slots under a grant (OBS-57)
+
+`use_secret.py run`, `serve` and `header` release a vault slot into a child process. Under Fabric ADR-0144
+amendment 2, a release is authorized by a grant, not by being a local process:
+
+- the agent that uses the slot asks Fabric's hub for a token with `aud` = `project-observatory`, `scope` =
+  `secret.use` and `effect` = `none`, under its own grant that names the slot. An agent working for a caller
+  mints an onward token from the caller's token instead, so the chain is kept;
+- it hands the token over in the environment variable `FABRIC_DELEGATION_TOKEN`. That is never argv and never
+  a file. `use_secret.py` removes the variable before anything runs, so no child inherits it, and never logs it;
+- the slot `<project>/<env>/<NAME>` is released only when a grant the token names (read from the hub's
+  projection as in M2) has `spend.credentialSource` = `{kind: project-key, ref: "<project>/<env>/<NAME>"}`.
+
+Refusals:
+
+| Case | Refusal |
+|---|---|
+| a `capability` source | `credential-source-refused`: call that agent's capability instead; it never releases a slot |
+| a grant naming another slot | `no-grant` |
+| an unproven token | `principal-unproven` |
+| a revoked or expired grant | `grant-revoked` / `grant-expired` |
+| an unreadable projection | `unknown-state` |
+| any value from a project's `.env` while a token is present | refused: grants name vault slots only |
+
+A release spends nothing. Provider spend is metered through grant checks and usage reports.
+
+`config/meter.json` `slotsRequireGrant` selects the mode:
+
+- `when-token` (the default until the issuer ships): check a token when one is present, and release as before
+  when none is;
+- `always`: refuse a release without a token;
+- `off`: never check.
+
+The journal row (`secret-use.jsonl`) carries the verdict, `granted:<grant refs>`, `no-token` or the refusal
+code, and never the token.
+
 ## Not decided here
 
 - Declaring `grant.check` in `fabric-agent.json`: the manifest's capabilities point at published schema URLs
   and carry the manifest's content hash, so the declaration ships with a contract-schema publication (OBS-67).
 - Settling from usage reports (`byGrant` receipts) instead of by hand, and the alert at 80 % as a finding
   (OBS-56).
-- `use_secret.py run` releasing a slot only under a grant that names it (OBS-57) and the keyserver trusting the
-  token rather than `X-Observatory-Caller` (OBS-62).
+- The keyserver trusting the token rather than `X-Observatory-Caller` (OBS-62).
+- Switching `slotsRequireGrant` to `always` on this machine: once Fabric's issuer mints `secret.use` tokens and
+  the agents hand them over.

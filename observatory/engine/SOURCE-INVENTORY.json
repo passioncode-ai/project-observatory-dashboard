@@ -1272,8 +1272,8 @@
       "path": "meter.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6a99845f50a3c655350b66d2591c68a26629dbfb6c9d69f86ada32acadd8cfe9",
-      "bytes": 24769
+      "export_sha256": "2678bfdd426cec4554f7d673e2733931a2b6c78b451ecb3c88671e133b5db611",
+      "bytes": 28342
     },
     {
       "path": "observatory.py",
@@ -3547,8 +3547,8 @@
       "path": "tests/test_use_secret.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "520dc4337bdafb3483e608179b81aaaacb04b1eaa4369ed4f59d817bad34c003",
-      "bytes": 30436
+      "export_sha256": "bd9145880cd988338333a1d047cee75e14e4a559ff001c252a05d75c2413e1b7",
+      "bytes": 36001
     },
     {
       "path": "tests/test_validator_rules.py",
@@ -4410,8 +4410,8 @@
     {
       "path": "tools/use_secret.py",
       "source_sha256": "8836e5826c78ca12bd852fd8f7b036c49db3b41383209d829f321318afc76bc1",
-      "export_sha256": "e28be4bf1359d3f5d6a7e832c85bf16154b18679d104284f5bff2eb64f01939e",
-      "bytes": 39012,
+      "export_sha256": "5386e8db927d5b2f05c71944f724c80f199068cfad15f44ed3600bf8d16b1292",
+      "bytes": 43330,
       "python_comments_removed": 14,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,

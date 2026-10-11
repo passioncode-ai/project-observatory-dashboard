@@ -16,6 +16,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   transaction. It answers a receipt, or a denial naming the code, the level and the window. `full grant --status`,
   `--check` (token on stdin) and `--settle`. The ledger records no person and no chain. Configuration:
   `config/meter.json`. Design: `docs/design/METER.md`.
+- **A vault slot only under a grant** (OBS-57): an agent hands `use_secret.py` its delegation token in
+  `FABRIC_DELEGATION_TOKEN` (scope `secret.use`). `run`, `serve` and `header` then release a slot only when a grant
+  the token names has `credentialSource {kind: project-key, ref: PROJECT/ENV/NAME}`, never read a `.env`, and
+  remove the token before the child starts. `slotsRequireGrant` in `config/meter.json`: `when-token` (default
+  until Fabric's issuer ships), `always`, `off`.
 - **The agent harness scan** (`integrations.harness`, `sources.harness_root`; off until turned on): what every
   Claude Code and Codex session loads before the first word. It counts each skill's entry in the session's skill
   listing against a budget (`OBSERVATORY_HARNESS_BUDGET_CHARS`, default 30,000 characters) and names the

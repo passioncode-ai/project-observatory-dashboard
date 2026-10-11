@@ -56,6 +56,11 @@ import delegation
 
 AUDIENCE = "project-observatory"
 CAPABILITY = "grant.check"
+#: The scope of a token that asks for a vault slot (OBS-57, Fabric ADR-0144 amendment 2).
+SLOT_CAPABILITY = "secret.use"
+#: How `use_secret.py` treats a slot release: `when-token` checks a token when one is present (the default
+#: until Fabric's issuer ships), `always` refuses a release without one, `off` never checks.
+SLOT_MODES = ("off", "when-token", "always")
 ESTATE_MONTH_USD = 1000.0
 ALERT_RATIO = 0.8
 RESERVATION_SECONDS = 3600
@@ -179,8 +184,11 @@ class Meter:
         self.alert_ratio = float(self.config.get("alertRatio", ALERT_RATIO))
         self.key_ceilings = {str(k): float(v) for k, v in (self.config.get("keyCeilingsUsd") or {}).items()}
         self.reservation_seconds = int(self.config.get("reservationSeconds", RESERVATION_SECONDS))
+        self.slot_mode = self.config.get("slotsRequireGrant", "when-token")
+        if self.slot_mode not in SLOT_MODES:
+            raise ValueError(f"slotsRequireGrant must be one of {', '.join(SLOT_MODES)}")
         self.keys = KeySource(self._read_jwks)
-        self._ensure_db()
+        self._db_ready = False
 
     # -- configuration -----------------------------------------------------------------------------------------
     def _path(self, value: Any) -> Optional[Path]:
@@ -213,6 +221,9 @@ class Meter:
 
     # -- the ledger --------------------------------------------------------------------------------------------
     def _connect(self) -> sqlite3.Connection:
+        if not self._db_ready:
+            self._db_ready = True
+            self._ensure_db()
         conn = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
         conn.row_factory = sqlite3.Row
         return conn
@@ -224,7 +235,7 @@ class Meter:
         except OSError:
             pass
         fresh = not self.db_path.exists()
-        with contextlib.closing(self._connect()) as conn:
+        with contextlib.closing(sqlite3.connect(self.db_path, timeout=30, isolation_level=None)) as conn:
             conn.execute("""CREATE TABLE IF NOT EXISTS reservations (
                 receipt TEXT PRIMARY KEY, grant_ref TEXT NOT NULL, grant_id TEXT NOT NULL, project TEXT,
                 task_key TEXT NOT NULL, key_ref TEXT, token_jti TEXT NOT NULL, amount REAL NOT NULL,
@@ -410,6 +421,47 @@ class Meter:
         return {"decision": "allowed", "receipt": receipt, "grantRef": ref, "reservedUsd": amount,
                 "remainingUsd": round(min(remaining), 6) if remaining else None,
                 "expiresAt": iso(expires_at), "checkedAt": iso(now)}
+
+    # -- vault slots (OBS-57) ----------------------------------------------------------------------------------
+    def authorize_slot(self, token: Any, slot: str) -> dict:
+        """May the bearer of `token` have the vault slot `<project>/<env>/<NAME>` released into a child process?
+
+        The token is the caller's own, minted by the hub for `project-observatory` with scope `secret.use`
+        (Fabric ADR-0144 amendment 2). Only a grant the token names whose `spend.credentialSource` is
+        `{kind: project-key, ref: <the slot>}` releases it; a `capability` source never does (that agent's
+        capability is called instead). Answers `{"decision": "allowed", "grantRef"}` or a denial shaped as a
+        grant-check denial. Spends nothing: provider spend is metered by grant checks and usage reports."""
+        now = int(self.clock())
+        accepted = delegation.verify_delegation(
+            token, audience=self.audience, capability=SLOT_CAPABILITY, effect="none",
+            jwks=self.keys.get(_token_kid(token)), now=now, issuer=self.issuer, read_only=True)
+        if not accepted.ok:
+            return self._denied(now, "principal-unproven",
+                                f"the slot token was refused ({accepted.code}:{accepted.detail})")
+        claims = accepted.claims
+        denials: list[tuple[int, dict]] = []
+        for ref in claims["grant"]:
+            grant, denial = self._grant(ref, now)
+            if denial:
+                denials.append((1, denial))
+                continue
+            if claims.get("project") is not None and claims["project"] != grant.get("project"):
+                denials.append((1, self._denied(now, "no-grant", "the token's project is not the grant's")))
+                continue
+            source = (grant.get("spend") or {}).get("credentialSource")
+            if not isinstance(source, dict):
+                denials.append((0, self._denied(now, "no-grant", "the grant names no credential source")))
+            elif source.get("kind") == "project-key" and source.get("ref") == slot:
+                return {"decision": "allowed", "grantRef": ref, "checkedAt": iso(now)}
+            elif source.get("kind") == "project-key":
+                denials.append((0, self._denied(now, "no-grant", "the grant names another slot")))
+            else:
+                denials.append((2, self._denied(now, "credential-source-refused", "the grant's credential "
+                                                "source is an agent's capability: call it; it never "
+                                                "releases a slot")))
+        # The most telling denial: the source refused, then a state of a grant, then "names another slot".
+        return max(denials, key=lambda d: d[0])[1] if denials else \
+            self._denied(now, "no-grant", "the token names no grant")
 
     # -- settlement and status ---------------------------------------------------------------------------------
     def settle(self, receipt: str, spent_usd: float) -> dict:
