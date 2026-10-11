@@ -171,8 +171,9 @@ gets `cloudflare.py issue --preset email-send --account <slug> --vault
 group exists at account level only), verified by listing its suppressions.
 Adding an Email Routing rule in one zone — one address to a Worker — is
 `--preset email-routing --zone <zone>`, and deploying that Worker with its KV
-namespace is `--preset workers-edit --account <slug>`. Each is its own token in
-its own slot. When a preset's groups are unknown, `cloudflare.py groups
+namespace is `--preset workers-edit --account <slug>`; putting a Worker in front of
+a hostname (`example.com/*`) is the zone right `--preset workers-routes --zone <zone>`.
+Each is its own token in its own slot. When a preset's groups are unknown, `cloudflare.py groups
 --account <slug> --match "<words>"` lists the catalogue's names and levels,
 read-only and without ids.
 

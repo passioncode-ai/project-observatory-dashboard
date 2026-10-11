@@ -14,6 +14,7 @@
         [--expire-days 92] [--lifecycle-rule staging/:2 ...]   # rules only, no key
     python "$T/cloudflare.py" issue --preset email-send --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset email-routing --zone example.com --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset workers-routes --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-server --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-account --account <slug> --vault PROJECT/ENV/NAME
@@ -175,6 +176,22 @@ PRESETS: dict[str, dict] = {
         "why": "edits Email Routing rules in one zone for the project named by the vault slot",
         "scope": "zone",
         "probe": "/zones/{zone_id}/email/routing/rules?per_page=1",
+    },
+    # WORKER ROUTES, ONE ZONE, INTO THE VAULT. `workers-edit` deploys a script but
+    # cannot put it in front of a hostname: a route (`example.com/*`) is a ZONE
+    # right, Workers Routes Write, which the account-level preset deliberately
+    # leaves out. This is that right alone, on one zone — not DNS, not the zone's
+    # settings, not a second zone. Wrangler needs both tokens' groups in one value
+    # to deploy a routed Worker, so a deployer holds the two slots and the deploy
+    # step joins nothing: it runs `wrangler deploy` with the scripts token and
+    # attaches the route with this one. Named after the zone AND the slot, like
+    # email-routing. Verified by listing the zone's routes with the NEW value.
+    "workers-routes": {
+        "name": "observatory-workers-routes {zone} {slot} (managed)",
+        "groups": ("Zone Read", "Workers Routes Write"),
+        "why": "puts Workers in front of hostnames of one zone for the project named by the vault slot",
+        "scope": "zone",
+        "probe": "/zones/{zone_id}/workers/routes",
     },
     # R2 OBJECTS, ONE BUCKET, INTO THE VAULT. An off-site backup needs to put
     # and read objects in one bucket — not list the account's other buckets,
