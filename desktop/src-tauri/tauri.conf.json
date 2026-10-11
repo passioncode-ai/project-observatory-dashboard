@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Project Observatory",
+  "version": "0.21.0",
+  "identifier": "ai.passioncode.observatory",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [],
+    "publisher": "PassionCode.ai",
+    "copyright": "Copyright © 2026 Siarhei Sheleh · PassionCode.ai",
+    "homepage": "https://github.com/passioncode-ai/project-observatory-dashboard",
+    "license": "AGPL-3.0-only OR LicenseRef-PassionCode-Commercial",
+    "licenseFile": "../../LICENSE",
+    "category": "DeveloperTool",
+    "shortDescription": "What is true about every project on this machine",
+    "longDescription": "Project Observatory watches the projects, repositories, agents and services on one machine and shows what is true about them: what exists, what changed, what is at risk. This app opens its dashboard, starts its local server and keeps its settings. Open source under the GNU AGPL-3.0; a commercial license is available. Part of the PassionCode.ai toolkit.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZDMUEzMTQ0RjUzNDk0OEQKUldTTmxEVDFSREVhL0pVWWI3dkhsZk9RU04vd3ZmMUFnYnpScllQNHVFTCtLS2NCK3pGOUpUejEK",
+      "endpoints": [
+        "https://github.com/passioncode-ai/project-observatory-dashboard/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

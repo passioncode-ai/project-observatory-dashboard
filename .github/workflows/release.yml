@@ -1,5 +1,6 @@
-# The release: the wheel, and the Mac app signed with the organization's CI Developer ID,
-# notarized and stapled; then attested (Sigstore), summed and GPG-signed, and published.
+# The release: the wheel, the Mac app signed with the organization's CI Developer ID, notarized
+# and stapled, and the Windows (x64, arm64) and Linux (x64, arm64) app; then attested (Sigstore),
+# summed and GPG-signed, and published by the organization's shared workflow (PL-10).
 # Signing happens only here, in the protected `release` environment: approved by a
 # person from release-approvers, who may be whoever pushed the tag; an agent never
 # approves (passioncode-ai/.github release-signing/README.md). A published release is
@@ -79,8 +80,193 @@ jobs:
       - if: always()
         uses: passioncode-ai/.github/actions/apple-signing/cleanup@v1
 
+  # The Windows app (desktop/, W8), per architecture on its own runner: the executable signed, the NSIS
+  # installer built around it and signed, installed silently, then named and receipted (PL-02, PL-03,
+  # PL-10). Authenticode through the organization's Azure Artifact Signing over OIDC only while the
+  # release environment's AZURE_SIGNING_ENABLED is true; otherwise the receipt and the notes say NOT_SIGNED.
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, runner: windows-latest }
+          - { arch: arm64, runner: windows-11-arm }
+    runs-on: ${{ matrix.runner }}
+    environment: release
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      id-token: write   # windows-signing (OIDC), only when signing is switched on
+    env:
+      SIGNING: ${{ vars.AZURE_SIGNING_ENABLED == 'true' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: An unsigned Windows release says so in its notes
+        run: python tools/desktop_release.py preflight --tag "${GITHUB_REF_NAME}" --signing "$SIGNING"
+      - name: Rust stable
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Build the executable
+        working-directory: desktop
+        run: |
+          npm ci
+          npx tauri build --no-bundle --ci
+      # Pass 1: the program, before the installer packs it.
+      - if: env.SIGNING == 'true'
+        uses: passioncode-ai/.github/actions/windows-signing@v1
+        with:
+          files: |
+            ${{ github.workspace }}\desktop\src-tauri\target\release\project-observatory-app.exe
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          account: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
+          expected-subject: O=Siarhei Sheleh
+          report: ${{ runner.temp }}\signatures-exe.json
+      - name: Bundle the NSIS installer
+        working-directory: desktop
+        run: npx tauri bundle --bundles nsis --ci
+      # Pass 2: the installer itself; its report goes into the receipt.
+      - if: env.SIGNING == 'true'
+        uses: passioncode-ai/.github/actions/windows-signing@v1
+        with:
+          files-folder: ${{ github.workspace }}\desktop\src-tauri\target\release\bundle\nsis
+          files-folder-filter: exe
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          account: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
+          expected-subject: O=Siarhei Sheleh
+          report: ${{ runner.temp }}\signatures.json
+      - name: The installer installs the app and removes it again
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem desktop\src-tauri\target\release\bundle\nsis -Filter *-setup.exe).FullName
+          $dir = Join-Path $env:RUNNER_TEMP 'observatory-install-check'
+          $p = Start-Process -FilePath $setup -ArgumentList '/S', "/D=$dir" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exited $($p.ExitCode)" }
+          if (-not (Test-Path (Join-Path $dir 'project-observatory-app.exe'))) { throw 'the program is not installed' }
+          $u = Join-Path $dir 'uninstall.exe'
+          if (Test-Path $u) { Start-Process -FilePath $u -ArgumentList '/S' -Wait }
+      - name: Name the installer and write its receipt
+        run: |
+          sig=(); if [ "$SIGNING" = true ]; then sig=(--signatures "$RUNNER_TEMP/signatures.json"); fi
+          python tools/desktop_release.py package --platform windows --arch ${{ matrix.arch }} --signing "$SIGNING" \
+            --bundle desktop/src-tauri/target/release/bundle --out dist/release --check install=PASS "${sig[@]}"
+      # After the last Authenticode pass, so the bytes the updater verifies are the ones shipped (PL-04).
+      - name: Sign the installer for the app's updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          version=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          setup="$PWD/dist/release/ProjectObservatory-$version-windows-${{ matrix.arch }}-setup.exe"
+          (cd desktop && npx tauri signer sign --app-version "$version" "$setup")
+          test -s "$setup.sig"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-windows-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  # The Linux app: an AppImage and a .deb per architecture, built natively; the .deb installed and its
+  # program found. Linux packages are covered by SHA256SUMS, its signature and the attestations (PL-03).
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    environment: release   # the updater's signing key
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - name: Rust stable
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Build the AppImage and the .deb
+        working-directory: desktop
+        run: |
+          npm ci
+          npx tauri build --bundles appimage,deb --ci
+      - name: The .deb installs the app
+        run: |
+          sudo apt-get install -y "./$(ls desktop/src-tauri/target/release/bundle/deb/*.deb)"
+          test -x /usr/bin/project-observatory-app
+      - name: Name the packages and write their receipt
+        run: |
+          python tools/desktop_release.py package --platform linux --arch ${{ matrix.arch }} \
+            --bundle desktop/src-tauri/target/release/bundle --out dist/release --check deb-install=PASS
+      - name: Sign the AppImage for the app's updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          version=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          image="$PWD/dist/release/ProjectObservatory-$version-linux-${{ matrix.arch }}.AppImage"
+          (cd desktop && npx tauri signer sign --app-version "$version" "$image")
+          test -s "$image.sig"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  # The update feed the installed app reads (PL-04): one entry per platform shipped, each naming its
+  # file under this tag with that file's own signature; a feed missing a platform stops the release.
+  feed:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-windows-*
+          path: dist/release
+          merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-linux-*
+          path: dist/release
+          merge-multiple: true
+      - name: Write and check latest.json
+        run: |
+          python tools/desktop_release.py feed --tag "${GITHUB_REF_NAME}" --dir dist/release
+          mkdir -p dist/feed && cp dist/release/latest.json dist/feed/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-feed
+          path: dist/feed/latest.json
+          if-no-files-found: error
+
   publish:
-    needs: [wheel, macos]
+    needs: [wheel, macos, windows, linux, feed]
     permissions:
       contents: write
       id-token: write
