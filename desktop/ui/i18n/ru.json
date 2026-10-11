@@ -45,5 +45,6 @@
   "A folder initialized with `project-observatory full init`.": "Папка, подготовленная командой `project-observatory full init`.",
   "The path must be absolute.": "Путь должен быть абсолютным.",
   "Could not start the server": "Не удалось запустить сервер",
-  "Could not build the dashboard": "Не удалось собрать дашборд"
+  "Could not build the dashboard": "Не удалось собрать дашборд",
+  "Restart to update ({version})": "Перезапустить для обновления ({version})"
 }

@@ -19,8 +19,9 @@ while the major version is 0, a minor release may change behaviour and says so h
   server answers, else the built pages under a banner with «Start server», else «Build the dashboard»; Settings
   for the program, the workspace and the language; first-run messages that name the install or `full init`
   step; stays in the tray when its window closes. Built as an NSIS installer and an AppImage/.deb by
-  `.github/workflows/desktop.yml`, unsigned until the release workflow signs it (W9). The assistant window and
-  the app's updater follow (W8b, W8c).
+  `.github/workflows/desktop.yml`; the release builds and Authenticode-signs it (W9). It updates itself from the
+  release's `latest.json`, each package minisign-signed: «Restart to update» in the menu and the tray (W8c). The
+  assistant window follows (W8b).
 - **Updates on Windows** (W6): `full update --apply` stops and restarts the tick and server tasks (systemd units
   on Linux) around the install, and replaces the `project-observatory.exe` it may be running from — moved aside
   first, put back if the install fails.

@@ -14,6 +14,7 @@ mod bridge;
 mod l10n;
 mod pages;
 mod settings;
+mod updates;
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -45,6 +46,8 @@ struct State {
     config_dir: PathBuf,
     /// Bumped on every settings change, so a late answer cannot paint another workspace (SCN-005).
     generation: Mutex<u64>,
+    /// A verified update waiting for the person's «Restart to update» (SCN-010).
+    update: Mutex<Option<String>>,
 }
 
 fn lang(app: &AppHandle) -> &'static str {
@@ -236,7 +239,14 @@ fn serve_pages(app: &AppHandle, request: &tauri::http::Request<Vec<u8>>) -> taur
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let l = lang(app);
     let t = |s: &str| l10n::t(l, s, &[]);
-    let file = SubmenuBuilder::new(app, t("File"))
+    let pending = app.state::<State>().update.lock().unwrap().clone();
+    let mut file = SubmenuBuilder::new(app, t("File"));
+    if let Some(version) = &pending {
+        file = file
+            .item(&MenuItem::with_id(app, "update", l10n::t(l, "Restart to update ({version})", &[("version", version)]), true, None::<&str>)?)
+            .separator();
+    }
+    let file = file
         .item(&MenuItem::with_id(app, "settings", t("Settings…"), true, Some("CmdOrCtrl+,"))?)
         .separator()
         .item(&MenuItem::with_id(app, "quit", t("Quit"), true, Some("CmdOrCtrl+Q"))?)
@@ -258,6 +268,30 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .item(&PredefinedMenuItem::about(app, Some(&t("About Project Observatory")), None)?)
         .build()?;
     MenuBuilder::new(app).items(&[&file, &view, &server, &help]).build()
+}
+
+fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let l = lang(app);
+    let pending = app.state::<State>().update.lock().unwrap().clone();
+    let open = MenuItem::with_id(app, "open", l10n::t(l, "Open", &[]), true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", l10n::t(l, "Quit", &[]), true, None::<&str>)?;
+    match pending {
+        Some(version) => {
+            let update = MenuItem::with_id(app, "update", l10n::t(l, "Restart to update ({version})", &[("version", &version)]), true, None::<&str>)?;
+            Menu::with_items(app, &[&update, &open, &quit])
+        }
+        None => Menu::with_items(app, &[&open, &quit]),
+    }
+}
+
+/// Menus and tray say what is current: the language, and a waiting update.
+fn refresh_menus(app: &AppHandle) {
+    if let (Ok(menu), Some(w)) = (build_menu(app), app.get_webview_window("main")) {
+        let _ = w.set_menu(menu);
+    }
+    if let (Ok(menu), Some(tray)) = (build_tray_menu(app), app.tray_by_id("main")) {
+        let _ = tray.set_menu(Some(menu));
+    }
 }
 
 fn show_main(app: &AppHandle) {
@@ -298,6 +332,7 @@ fn on_menu(app: &AppHandle, id: &str) {
         "start" => run_action(app, "serve", "Starting the server…", "Could not start the server"),
         "build" => run_action(app, "build", "Building the dashboard…", "Could not build the dashboard"),
         "guide" => { let _ = app.opener().open_url(GUIDE, None::<&str>); }
+        "update" => updates::install_and_restart(app.clone()),
         "open" => show_main(app),
         _ => {}
     }
@@ -330,11 +365,7 @@ async fn save_settings(app: AppHandle, settings: settings::Settings) -> Result<V
         .map_err(|e| bridge::BridgeError { code: "settings-unwritable".into(), detail: Some(e.to_string()) })?;
     *state.settings.lock().unwrap() = settings;
     *state.generation.lock().unwrap() += 1;
-    if let Ok(menu) = build_menu(&app) {
-        if let Some(w) = app.get_webview_window("main") {
-            let _ = w.set_menu(menu);
-        }
-    }
+    refresh_menus(&app);
     show_dashboard(&app);
     Ok(status)
 }
@@ -369,6 +400,7 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| show_main(app)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .register_uri_scheme_protocol(pages::SCHEME, |ctx, request| serve_pages(ctx.app_handle(), &request))
         .invoke_handler(tauri::generate_handler![
             l10n,
@@ -387,6 +419,7 @@ fn main() {
                 shown: Mutex::new(Shown::default()),
                 config_dir,
                 generation: Mutex::new(0),
+                update: Mutex::new(None),
             });
             let handle = app.handle().clone();
             let nav = handle.clone();
@@ -416,20 +449,17 @@ fn main() {
                 }
             });
             app.on_menu_event(|app, event| on_menu(app, event.id().as_ref()));
-            let l = lang(&handle);
-            let tray_menu = Menu::with_items(
-                app,
-                &[
-                    &MenuItem::with_id(app, "open", l10n::t(l, "Open", &[]), true, None::<&str>)?,
-                    &MenuItem::with_id(app, "quit", l10n::t(l, "Quit", &[]), true, None::<&str>)?,
-                ],
-            )?;
+            let tray_menu = build_tray_menu(&handle)?;
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().expect("bundle icon"))
                 .tooltip("Project Observatory")
                 .menu(&tray_menu)
                 .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
                 .build(app)?;
+            updates::watch(handle.clone(), |app, version| {
+                *app.state::<State>().update.lock().unwrap() = Some(version);
+                refresh_menus(app);
+            });
             show_dashboard(&handle);
             Ok(())
         })
