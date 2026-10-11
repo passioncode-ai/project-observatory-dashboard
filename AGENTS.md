@@ -264,10 +264,13 @@ tasks are the operator's and which a contributor can take.
    - It attests every file (Sigstore), writes `SHA256SUMS` and `SHA256SUMS.asc` (the
      organization's GPG key), and publishes the release.
 
-   The signing jobs and the publish job wait for an approval in the `release` environment
-   from any member of `release-approvers`, the person who pushed the tag included (operator
-   decision, 2026-10-03). Approval is a person's act: an agent never approves a release run,
-   even when the account it uses could; it starts the run and says whose approval is pending
+   Nobody clicks (operator decision, 2026-10-11, "approval by checks"): the `guard` job
+   (`passioncode-ai/.github/actions/release-guard@v1`) lets the signing jobs start only when
+   `main` contains the tagged commit and `check.yml` passed on that exact commit, starting a
+   `check.yml` run on the tag when none ran; the `release` environment has no reviewers, and only
+   `release-approvers` can push a `v*` tag (ruleset `release-tags`), so pushing the tag is the
+   release decision. A guard refusal names its cause; fix that (merge to `main`, make CI pass),
+   never work around it
    ([organization release signing](https://github.com/passioncode-ai/.github/blob/main/release-signing/README.md)).
    Then:
    - Re-download the assets and run `shasum -a 256 -c SHA256SUMS` and
