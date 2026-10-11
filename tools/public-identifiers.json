@@ -152,6 +152,10 @@
   {
    "token": "fabric-dashboards",
    "reason": "Fabric Dashboards' public repository (passioncode-ai/fabric-dashboards), whose session raised OBS-54…OBS-59"
+  },
+  {
+   "token": "pubkey",
+   "reason": "the key name Tauri's updater configuration requires (desktop/src-tauri/tauri.conf.json → plugins.updater.pubkey); it holds the updater's public key"
   }
  ]
 }
