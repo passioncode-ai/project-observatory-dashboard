@@ -3,6 +3,24 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Added
+
+- One project under many names (OBS-65). The operator curates `config/identifiers.json`
+  (another system's name → the canonical `project:`/`product:` id, with the name's owner); the
+  emitter publishes `registry/identifiers.json` and one `known_as` relation per alias. A name
+  given two targets, or contradicting a measured repository, deployment or domain, is a
+  published conflict, never a silent pick. `project.resolve` (MCP `observatory_resolve`, Fabric
+  capability pinned at `v0.24.0`) answers any name with the one canonical id, exact match only;
+  an ambiguous or conflicted name is a typed refusal. Agents propose aliases through
+  `observatory_propose` (`aliases`); accepting one never rewrites an existing row.
+
+### Fixed
+
+- `_published_shape` follows local `$ref`s and cuts a `oneOf` by the branch whose required
+  keys the value carries; before, such an answer passed through uncut.
+
 ## 0.23.0 — 2026-10-11
 
 The disk guard keeps free space by itself, every hour, without touching anything a process holds; the meter
