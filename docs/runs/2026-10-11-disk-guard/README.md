@@ -48,7 +48,7 @@ measure of what a removal gives back on APFS: clones share blocks.
 - The Machine page: the guard's last run, what it planned, the largest files, running
   simulators. `observatory_machine` gains a `guard` section.
 - `defaults/cleanup.json` → `guard`; docs: `docs/ONBOARDING.md` (The disk guard),
-  `docs/AGENT-ONBOARDING.md`, scenario OSS-22; backlog OBS-63…66, OBS-15 superseded.
+  `docs/AGENT-ONBOARDING.md`, scenario OSS-22; backlog OBS-63, OBS-64, OBS-66, OBS-15 superseded (the alias layer requested the same day is OBS-65, filed by its own pull request).
 
 Operator decisions taken in this run (2026-10-11): supersede draft #109; build output by
 pressure 14 / 3 / 1 days; Trash after 30 days (3 at `critical`); memory and processes are
@@ -83,6 +83,7 @@ skipped, symlinks followed, guarded places walked, no re-check at removal, a too
 |---|---|---|---|
 | 1 | critical | 500 removed, all temporary entries — the cap was spent on the smallest items | 1.5 → 1.4 GB (others were writing) |
 | 2 (yield order, per-class cap) | critical | 2,064 removed, 1 skipped on re-check, 1 failed (`uv` cache in use; now a skip) | **1.3 → 6.9 GB** |
+| 3 (an hour later, during a full local test run and other sessions' installs) | critical | 2,007 removed, 3 skipped on re-check, 0 failed | 2.1 → 0.8 GB: what it freed was outpaced by what others wrote at the same time; the per-row `freed_mb` is the disk's delta over each action and includes their writes |
 
 Run 2 by class, by the disk's count: temporary entries ≈ 3.5 GB, `pnpm store prune`
 0.46 GB, Homebrew 0.73 GB; build output found only `__pycache__` — every large
@@ -115,7 +116,7 @@ Run 2 by class, by the disk's count: temporary entries ≈ 3.5 GB, `pnpm store p
 
 - `tests/test_disk_guard.py`: all cases pass (3.14); `tests/test_maintenance.py` Guard pass.
 - `tests/run_portable.py --suite i18n --suite machine --suite maintenance --suite disk_guard`.
-- The full portable set (`tests/run_portable.py --jobs 6`): result in the pull request.
+- The full portable set locally: twice stopped by the runner with `OSError` when the disk ran out (221 of 232 suites had run the first time, with failures in `api_listings`, `git_hardening` and `osprivacy` that were this branch's — git outside `safe_git`, a uid outside `osprivacy`, a report read by path — and are fixed; `lifecycle` and `conformance_receipt` failed under the full disk and pass on re-run). The complete set ran in CI instead: `test` on ubuntu 3.11, ubuntu 3.14 and macOS 3.14 and the Windows job, all passing on the pull request.
 - `python3.11 -m compileall` on every changed file; `tools/check_paths.py` 0 violations;
   `tools/update_inventory.py --check` passed; `tools/check_public_release.py` passed.
 - The Machine page built from the live workspace into a scratch directory and opened in
@@ -129,7 +130,7 @@ Run 2 by class, by the disk's count: temporary entries ≈ 3.5 GB, `pnpm store p
 - Swap is the largest single consumer when many agent sessions and simulators run; the
   guard reports it and never stops a process (operator decision). Reducing it is the
   operator's call.
-- OBS-64 and OBS-65 arrived from other sessions during this run and are on the board.
+- OBS-64 (demo findings in one language) arrived from another session during this run and is on the board; the alias layer it also asked for is OBS-65, in its own pull request.
 
 ## Next task
 
