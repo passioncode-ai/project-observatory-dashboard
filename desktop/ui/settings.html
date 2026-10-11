@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings</title><link rel="stylesheet" href="app.css"></head>
+<body><main>
+  <h1 data-t="Settings">Settings</h1>
+  <label for="program" data-t="Program">Program</label>
+  <div class="row"><input id="program" spellcheck="false"><button id="pick-program" data-t="Choose…">Choose…</button></div>
+  <p class="hint" data-t="The program's absolute path, as README → Install puts it.">The program's absolute path.</p>
+  <label for="workspace" data-t="Workspace">Workspace</label>
+  <div class="row"><input id="workspace" spellcheck="false"><button id="pick-workspace" data-t="Choose…">Choose…</button></div>
+  <p class="hint" data-t="A folder initialized with `project-observatory full init`.">A workspace folder.</p>
+  <label for="language" data-t="Language">Language</label>
+  <div class="row"><select id="language">
+    <option value="system" data-t="System">System</option><option value="en">English</option><option value="ru">Русский</option>
+  </select></div>
+  <div class="actions"><button class="primary" id="save" data-t="Save and check connection">Save and check connection</button></div>
+  <p class="status" id="status" role="status"></p>
+</main>
+<script src="app.js"></script>
+<script src="settings.js"></script></body></html>
