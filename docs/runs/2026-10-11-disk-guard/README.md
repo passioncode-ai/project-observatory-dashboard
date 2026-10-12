@@ -174,9 +174,29 @@ Branch `agent/disk-guard-v2-fixes`.
 Each guard was watched failing against a planted defect (14 planted, 14 caught). Not done, named in the design:
 an update replacing the engine while a pass runs, and APFS case-insensitive path comparison.
 
+## Releases 0.24.0–0.24.4: what the scheduled passes showed, and the fixes (2026-10-12)
+
+0.24.0 shipped both iterations and was installed on the maintainer's machine (`run interval = 900 seconds`).
+Its scheduled passes, at `critical` the whole day, found three more defects, each in how the run's time was spent:
+
+| Release | Pass on the machine | What it showed | Fix |
+|---|---|---|---|
+| 0.24.0 | guard `ran`, 425 of 480 s, 23 removed | the git tier got only what the six classes left: `skipped: the run budget is spent` | #232: `git_tier_seconds` (120 s, at most a third) kept back first |
+| 0.24.1 | 440 of 480 s, git skipped again | three cache commands ran 271 s inside their own timeouts and took that share | #234: a command's timeout is what is left of its class's share; none starts under 30 s |
+| 0.24.2 | git `stopped`, past 93 and 149 s, no journal row | each worktree re-check took a full listing of what processes hold, tens of seconds at load 300–700 | #236: one listing per 20 s |
+| 0.24.3 | git `ran` but `stopped: 116` | the child's listing plus a walk for build output (some 18,000 directories) took the share before the first action | #238: inside the guard `--git-only`, the listing bounded by the deadline, `plan_seconds` reported |
+| 0.24.4 | **330 of 480 s; git `ran`, 42 removed, `stopped: 0`, `plan_seconds` 6.4; 1.07 GB freed** | — | — |
+
+Run by hand during the day (`tools/cleanup.py --auto --level critical`), the tier removed 95 merged and 3 pushed
+branches and 7 clean worktrees; 10 were kept for ignored files that are not build output (`.agent-sync` among them).
+Each fix has a test watched failing against its planted defect (`RunBudget`, `Estate`, `GitTierPressure`).
+
+Measured, not fixed here: the swap file is the disk's largest consumer (about 20 GB with dozens of agent sessions and
+simulators; the guard reports it and stops nothing, by the operator's decision), and the scheduled job cannot read the
+Trash until macOS grants it Full Disk Access — a person's step.
+
 ## Next task
 
-Release both iterations with 0.24.0, update the maintainer's installation, confirm the job runs every 15
-minutes (`launchctl print` shows `run interval = 900 seconds`), and confirm in `store/maintenance.json` that a
-scheduled pass records `guard` as `ran` (or `not-due`/`busy`, never an earlier run's numbers) and a report whose
-`seconds` stays under its `budget_seconds`.
+Keep reading the scheduled passes (`store/logs/disk-guard.jsonl`, one `summary` row each): the git tier should keep
+showing removals with `stopped: 0`. If free space stays at `critical`, the next lever is the swap, which only fewer
+concurrent sessions or simulators reduce. Optional: give the maintenance job Full Disk Access so the Trash is swept.
