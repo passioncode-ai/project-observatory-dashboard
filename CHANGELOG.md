@@ -19,6 +19,13 @@ The disk guard keeps up with a disk that fills fast and never removes what a ses
   - `agent` starts a model call only while a whole call (150 s) fits, so a paid answer is never lost. The run
     report names the deadline, and the deltas wait for the next run.
 
+- **The collectors take turns** (OBS-52): after `integrity`, the tick runs its collectors least recently started
+  first, not in a fixed order. Under load the collectors in front used the window and the ones at the back were
+  `not started` tick after tick: on one machine (load average 26–30) the leak scan and the lifecycle watch had not
+  run for two days. A step that was not started keeps its place at the front of the next tick; a collector that
+  reads another's output this tick still runs after it (`READS_FROM`, held equal to the artefact graph by
+  `tests/test_pipeline.py`). Start times are kept in `store/tick-rotation.json`; `tick.json` reports
+  `collector_order` and `not_started`.
 - **Trust tiers, written down** (Fabric ADR-0144 amendment 4): on the operator's own machines (T0, and enrolled
   machines T1) the meter and the doors never demand a delegation token — `slotsRequireGrant: when-token` and
   `keyserverRequiresDelegation: off` stay the settings there; the strict ones are for a machine that serves another

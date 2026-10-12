@@ -20,6 +20,16 @@ its own wall-clock limit, never past the tick's ceiling, the whole group stopped
 recorded — 124 for one the watchdog stopped — and the tick goes on: a degradation is a state to
 report in `tick.json`, where `tick.step_failed` names it, not a reason for a scheduler to retry.
 
+**The collectors take turns.** Under load the collectors in front used the whole window, and the
+ones at the back of a fixed order were `not started` tick after tick: on one machine the leak scan
+and the lifecycle watch had not run for two days while the folder scan and the store check took
+the first thirteen minutes of every tick (2026-10-12, load average 26-30). So the collectors after
+`integrity` are planned first and then run least recently started first (`rotation_order`), with
+the start times kept in `store/tick-rotation.json`. A step that was `not started` keeps its old
+time and goes first next tick; one that ran goes to the back. A collector that reads another's
+output in the same tick still runs after it (`READS_FROM`, kept equal to the artefact graph by
+`tests/test_pipeline.py`).
+
 **The three early stops** — merge, emit, validate — go through `bail`, which writes the report
 and then stops, so the most consequential outcomes leave a record. The one quiet exit is the
 lease stand-down: another run holds the registry and the next tick is 30 minutes away.
@@ -41,9 +51,25 @@ sys.path.insert(0, str(ROOT))
 #: The interpreter running the tick is the one every step runs with: the wrapper and the
 #: schedulers choose the one that installed the engine, which carries the [full] dependencies.
 PY = sys.executable
+#: The watchdog's exit for a step it stopped or did not start (tick_lease.TIMED_OUT).
+TIMED_OUT = 124
 LEASE = "tools/tick_lease.py"
 #: Hours before the remotes and Bitbucket listings are read again.
 STALE_HOURS = 6
+#: Where the rotation keeps the last time each collector actually started (epoch seconds).
+ROTATION_FILE = "tick-rotation.json"
+#: What `tick_lease.py step` prints, first, for a step it did not start for want of time.
+NOT_STARTED = "not started"
+#: Collectors that read another collector's output in the same tick: the reader runs after the
+#: steps it names whenever both run this tick. Equal to the artefact graph (tests/test_pipeline.py).
+READS_FROM: dict[str, tuple[str, ...]] = {
+    "remotes": ("scan-fs",),
+    "bitbucket": ("scan-fs",),
+    "remote-env": ("heroku",),
+    "leaks": ("env",),
+    "scrub-companion": ("env", "leaks"),
+    "cleanup": ("machine", "git-hygiene"),
+}
 
 
 def log(message: str) -> None:
@@ -70,26 +96,104 @@ def lease(verb: str) -> tuple[int, str]:
     return p.returncode, (p.stdout + p.stderr).strip()
 
 
+def rotation_order(planned: list[str], started: dict[str, float],
+                   reads: dict[str, tuple[str, ...]] = READS_FROM) -> list[str]:
+    """`planned` least recently started first; a step never started goes first, and ties keep the
+    planned order. Then a writer that would run after a step reading its output is moved to just
+    before that reader, so the starved reader stays early and still reads this tick's output."""
+    order = sorted(planned, key=lambda name: started.get(name, 0.0))
+    moved = True
+    while moved:
+        moved = False
+        for reader, writers in reads.items():
+            for writer in writers:
+                if reader in order and writer in order and order.index(writer) > order.index(reader):
+                    order.remove(writer)
+                    order.insert(order.index(reader), writer)
+                    moved = True
+    return order
+
+
+def _ago(seconds: float | None) -> str:
+    if seconds is None:
+        return "never started"
+    hours = seconds / 3600
+    return f"last started {hours:.1f} h ago" if hours < 48 else f"last started {hours / 24:.1f} days ago"
+
+
+class Rotation:
+    """The collectors of one tick: planned by the same `step(...)` calls, run by `rotation_order`."""
+
+    def __init__(self, t: "Tick", record: Path):
+        self.t, self.record = t, record
+        self.planned: list[tuple[str, tuple]] = []
+
+    def step(self, name: str, *argv) -> None:
+        self.planned.append((name, argv))
+
+    def load(self) -> dict[str, float]:
+        try:
+            import json
+            doc = json.loads(self.record.read_text(encoding="utf-8"))
+            return {str(k): float(v) for k, v in (doc.get("started") or {}).items()}
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
+            log(f"rotation: {self.record.name} unreadable ({type(exc).__name__}) — the planned order this tick")
+            return {}
+
+    def save(self, started: dict[str, float]) -> None:
+        try:
+            import atomic
+            atomic.write_json(self.record, {"started": started})
+        except Exception as exc:  # noqa: BLE001 — losing the record costs fairness, never the tick
+            log(f"rotation: could not keep {self.record.name} ({type(exc).__name__})")
+
+    def run_in_turn(self) -> None:
+        started = self.load()
+        argv_of = dict(self.planned)
+        planned = [name for name, _ in self.planned]
+        order = rotation_order(planned, started)
+        ahead = [name for name in order if order.index(name) < planned.index(name)]
+        if ahead:
+            now = time.time()
+            log("rotation: " + ", ".join(
+                f"{name} ({_ago(now - started[name] if name in started else None)})" for name in ahead)
+                + " first — the collectors started least recently run first")
+        self.t.order = order
+        for name in order:
+            if self.t.step(name, *argv_of[name]):
+                started[name] = time.time()
+                self.save(started)
+            else:
+                self.t.not_started.append(name)
+
+
 class Tick:
     """One run's record: which steps failed, and where the report goes."""
 
     def __init__(self, scratch: Path):
         self.scratch = scratch
         self.failed: list[tuple[str, int]] = []
+        self.order: list[str] = []
+        self.not_started: list[str] = []
 
-    def step(self, name: str, *argv) -> None:
+    def step(self, name: str, *argv) -> bool:
         """Run a step under the watchdog; log every line it prints under its name; record a
-        non-zero exit as a failed step and go on."""
+        non-zero exit as a failed step and go on. False when the watchdog did not start it."""
         proc = subprocess.Popen([PY, LEASE, "step", name, "--", *_text(argv)], cwd=ROOT,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                                 errors="replace")
+        first = None
         for line in proc.stdout:
+            first = line if first is None else first
             log(f"{name}: {line.rstrip()}")
         rc = proc.wait()
         if rc != 0:
             log(f"{name}: EXIT {rc} — recorded as a failed step")
             self.failed.append((name, rc))
+        return not (rc == TIMED_OUT and (first or "").startswith(NOT_STARTED))
 
     def bounded(self, name: str, *argv) -> tuple[int, str]:
         """The same watchdog, ungated, for a command whose exit and output the tick reads itself."""
@@ -104,6 +208,8 @@ class Tick:
             atomic.write_json(self.scratch / "tick.json", {
                 "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "failed_steps": [{"step": s, "exit": rc} for s, rc in self.failed],
+                "collector_order": self.order,
+                "not_started": self.not_started,
             })
         except Exception:  # noqa: BLE001 — the report is best effort; the log says it is missing
             log("tick: could not record the step report")
@@ -147,6 +253,11 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     step, bounded = t.step, t.bounded
 
     step("integrity", PY, "tools/check_store.py", "--print")
+
+    # THE COLLECTORS take turns: each `step(...)` below plans; `rotation.run_in_turn()` runs them.
+    import paths
+    rotation = Rotation(t, paths.STATE / ROTATION_FILE)
+    step = rotation.step
 
     step("scan-fs", PY, "collectors/scan_filesystem.py", SCRATCH / "local.json")
     step("scan-gh", PY, "collectors/scan_github.py", SCRATCH / "gh")
@@ -197,6 +308,8 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     # jobs past their interval, logs past their cap. Reads the process table; starts nothing.
     step("lifecycle", PY, "collectors/scan_lifecycle.py", SCRATCH / "lifecycle.json")
     step("cleanup", PY, "tools/cleanup.py", "--auto")
+    rotation.run_in_turn()
+    step = t.step
 
     # THE TAIL. Every step from here on is in tick_lease.TAIL_STEPS, so it keeps its reserve.
     if bounded("merge", PY, "collectors/merge.py", SCRATCH)[0] != 0:

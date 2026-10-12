@@ -542,6 +542,61 @@ def test_the_check_would_catch_an_inversion() -> None:
           len(caught) == 1 and "findings.json" in caught[0], str(caught))
 
 
+def rotated_collectors() -> list[tuple[str, str]]:
+    """(name in the tick, name in `observatory.py`) for every collector the tick plans for its
+    rotation — the `step(...)` calls between `Rotation(...)` and `rotation.run_in_turn()`."""
+    import tick_reader
+    lines = (ROOT / "tools/tick.py").read_text(encoding="utf-8").splitlines()
+    start = next(i for i, l in enumerate(lines, 1) if "rotation = Rotation(" in l)
+    end = next(i for i, l in enumerate(lines, 1) if l.strip() == "rotation.run_in_turn()")
+    by_sig = {step_signature(argv): name for name, argv in obs.STEPS.items() if step_signature(argv)}
+    out = []
+    for line, fn, name, words in tick_reader.tick_calls(ROOT):
+        if fn == "step" and start < line < end:
+            out.append((name, by_sig.get(step_signature(words), name)))
+    return out
+
+
+def rotation_reads_problems(reads: dict[str, tuple[str, ...]]) -> list[str]:
+    """Every same-tick read between two rotated collectors that `reads` does not declare, and every
+    order `tools/tick.rotation_order` gives under the worst start times that the graph refuses."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tick_for_pipeline", ROOT / "tools/tick.py")
+    tick = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tick)
+    pairs = rotated_collectors()
+    to_obs = dict(pairs)
+    bad = []
+    for reader, r_obs in pairs:
+        for writer, w_obs in pairs:
+            shared = [path for path in ARTEFACTS.get(r_obs, {}).get("reads", [])
+                      if path in ARTEFACTS.get(w_obs, {}).get("writes", []) and (r_obs, path) not in ACROSS_TICKS]
+            if reader != writer and shared and writer not in reads.get(reader, ()):
+                bad.append(f"{reader} reads {shared[0]} from {writer}, and READS_FROM does not say so")
+    names = [name for name, _ in pairs]
+    # The worst case for a reader: it is the most starved collector and its writer the least.
+    for started in ({n: float(i) for i, n in enumerate(reversed(names))}, {n: float(i) for i, n in enumerate(names)}):
+        order = tick.rotation_order(names, started, reads)
+        bad += topological_problems([to_obs[n] for n in order])
+    return sorted(set(bad))
+
+
+def test_the_rotation_keeps_every_reader_after_its_writer() -> None:
+    """2026-10-12: the collectors run least recently started first (`tools/tick.py` Rotation), so
+    their order in the source no longer decides who runs first. What keeps a reader after its
+    writer is `READS_FROM`; it must say everything this graph knows."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tick_for_pipeline", ROOT / "tools/tick.py")
+    tick = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tick)
+    check("the tick plans its collectors for the rotation", len(rotated_collectors()) > 10,
+          str(rotated_collectors()))
+    problems = rotation_reads_problems(tick.READS_FROM)
+    check("READS_FROM names every same-tick read between rotated collectors", not problems, "; ".join(problems))
+    planted = {k: v for k, v in tick.READS_FROM.items() if k != "remote-env"}
+    check("and the check catches a dropped read (remote-env from heroku)",
+          any("remote-env" in p for p in rotation_reads_problems(planted)), "")
+
 
 def files_a_script_opens(script: pathlib.Path) -> set[str]:
     """Every registry document and scratch receipt named in one script.
@@ -719,6 +774,7 @@ if __name__ == "__main__":
                test_the_declaration_is_not_a_comment,
                test_every_traced_exemption_is_still_needed,
                test_the_check_would_catch_an_inversion,
+               test_the_rotation_keeps_every_reader_after_its_writer,
                test_every_step_declares_the_files_its_script_opens,
                test_the_path_a_step_is_HANDED_is_declared_too,
                test_every_test_a_suite_defines_is_dispatched):

@@ -371,6 +371,8 @@ INTEGRATION_STEPS = {
 # region tick-watchdog — docs: docs/runs/2026-10-03-lifecycle-contract/README.md#f5-f6-every-step-is-bounded
 #: Exit status of a step or tick the watchdog stopped, GNU `timeout`'s convention.
 TIMED_OUT = 124
+#: The first words of the line for a step this runner did not start; `tools/tick.py` reads them.
+NOT_STARTED = "not started"
 #: Seconds a step's process group gets between SIGTERM and SIGKILL.
 STEP_GRACE = 5
 #: Seconds the supervisor gives the whole tick group between SIGTERM and SIGKILL.
@@ -481,8 +483,8 @@ def bounded(name: str, command: list[str], *, limit: float | None = None,
         except ValueError:
             pass
     if limit <= 0:
-        print("not started — the tick's ceiling has been reached" if not reserve else
-              f"not started — the last {reserve:.0f} s before the tick's ceiling are kept for "
+        print(f"{NOT_STARTED} — the tick's ceiling has been reached" if not reserve else
+              f"{NOT_STARTED} — the last {reserve:.0f} s before the tick's ceiling are kept for "
               f"the registry, the findings and the dashboard; the previous run's output stands", flush=True)
         return TIMED_OUT
     marker = _step_marker()

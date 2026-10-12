@@ -490,7 +490,9 @@ dashboard: the collectors stop 5 minutes before it (at most a fifth of the
 ceiling), the tail's optional steps — plugins, rollup, the agent, the vector index,
 retention and review — stop 2 minutes before it (at most a twelfth), and the core
 from `findings` to the registry commit uses what is left. A step that did not run
-leaves the previous run's output in place. Each step is told its own deadline in
+leaves the previous run's output in place, and the collectors take turns: after the store check they
+run least recently started first, so one that was not started goes first on the next tick
+(`store/tick-rotation.json`; `tick.json` names the order and what was not started). Each step is told its own deadline in
 `OBSERVATORY_STEP_DEADLINE` (epoch seconds); the folder scan uses it to write what
 it measured and carry each folder it did not reach, marked `carried_from`.
 
