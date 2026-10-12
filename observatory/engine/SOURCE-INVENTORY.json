@@ -2426,8 +2426,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a0a833330680ab69fe362f1d69eef38d48715e32ad4f4488ea34c4a690098947",
-      "bytes": 48752
+      "export_sha256": "6394c46312b4f2acd3342a06fa14686eddeb8862c81328f816fb169f19df28e3",
+      "bytes": 50884
     },
     {
       "path": "tests/test_docs_current.py",
@@ -4036,8 +4036,8 @@
       "path": "tools/disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1ba87c610eaaa5f72d1b30679bc9c862daa1f35df51ff35c145bef65eb33c00d",
-      "bytes": 48258
+      "export_sha256": "649c44db1e08ae6084c069321cf322812b5e2fcebb5a18600072d6fc5cc28ac4",
+      "bytes": 48999
     },
     {
       "path": "tools/embedding_policy_cli.py",

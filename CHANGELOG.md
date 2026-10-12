@@ -3,6 +3,14 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Fixed
+
+- **A cache command never runs past its class's share** (OBS-63): on 0.24.1 three cache commands, each inside its
+  own 90–300 s timeout, ran 271 s together and took the git tier's time again. A command's timeout is now what is
+  left of the share, and none starts with less than 30 s left; the rest waits for the next pass.
+
 ## 0.24.1 — 2026-10-12
 
 The disk guard's git tier — merged and pushed branches, clean worktrees and their dependencies — gets its own

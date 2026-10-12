@@ -533,6 +533,37 @@ class RunBudget(Base):
         self.assertEqual(doc["surveys"]["git-cleanup"], {"result": "ran"})
         self.assertTrue(got and got[0] >= 110, got)
 
+    def test_a_command_never_runs_past_its_class_share(self):
+        """2026-10-12: cache commands ran 271 s, each within its own 90-300 s timeout but together
+        far past their share, and the git tier was skipped again. Each command's timeout is now
+        what is left of the share, and none starts with less than 30 s left."""
+        clock = [1000.0]
+        timeouts = []
+
+        def run_cmd(argv, **kw):
+            timeouts.append(kw.get("timeout"))
+            clock[0] += kw.get("timeout") or 0          # each command uses all the time it is given
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        cmds = [{"class": "cache-command", "target": f"tool{i} clean", "argv": ["tool", str(i)], "timeout": 400}
+                for i in range(5)]
+        with contextlib.ExitStack() as stack:
+            for p in self.patched():
+                stack.enter_context(p)
+            stack.enter_context(patch.object(self.g, "load_config",
+                                             return_value=self.cfg(run_reserve_seconds=60, git_tier_seconds=120)))
+            stack.enter_context(patch.object(self.g.time, "monotonic", lambda: clock[0]))
+            stack.enter_context(patch.object(self.g, "refresh", return_value="x"))
+            stack.enter_context(patch.object(self.g, "free_bytes", return_value=10 * 2**30))
+            stack.enter_context(patch.object(self.g.subprocess, "run", side_effect=run_cmd))
+            stack.enter_context(patch.object(self.g, "planners", return_value=[
+                (name, (lambda b, n=name: cmds if n == "cache-command" else [])) for name in self.g.CLASSES]))
+            stack.enter_context(patch.object(self.g, "_git_tier",
+                                             side_effect=lambda apply, level, seconds: {"result": "ran", "seconds": seconds}))
+            doc = self.g.run(["--apply", "--budget", "480", "--level", "critical"])
+        self.assertLess(sum(timeouts), 480 - 60 - 120 + 1, timeouts)
+        self.assertEqual(doc["surveys"]["git-cleanup"]["result"], "ran")
+        self.assertGreaterEqual(doc["surveys"]["git-cleanup"]["seconds"], 110)
+
     def test_the_journal_and_the_report_survive_a_run_stopped_midway(self):
         import paths
         calls = []

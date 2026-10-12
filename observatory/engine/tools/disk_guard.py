@@ -902,6 +902,15 @@ def run(argv: list[str]) -> dict:
                             degraded.append({"source": name, "reason": f"its share of the run ended; "
                                                                        f"{len(actions) - i} action(s) wait for next pass"})
                             break
+                        if a["class"] == "cache-command":
+                            # A COMMAND IS BOUNDED BY ITS SHARE, not only checked between commands:
+                            # on 2026-10-12 three of them ran 271 s and took the git tier's time.
+                            remaining = class_end - time.monotonic()
+                            if remaining < 30:
+                                degraded.append({"source": name, "reason": f"its share of the run ended; "
+                                                                           f"{len(actions) - i} action(s) wait for next pass"})
+                                break
+                            a = {**a, "timeout": min(_number(a.get("timeout"), 90), remaining)}
                         try:
                             row = act(a, holders)
                         except (OSError, subprocess.SubprocessError) as exc:
