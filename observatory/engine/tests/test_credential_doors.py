@@ -1940,7 +1940,9 @@ def _policy_door():
             calls["patched"].append((path, payload))
         return {"data": {"hash": path.rsplit("/", 1)[-1], "name": "project-a-prod-model-key"}}
     m._request = fake
-    m.find_key = lambda admin, name: {"hash": "h-1", "name": name, "label": "sk-or-v1-x...y"}
+    # The provider reports the ceiling the door last set: the ledger's, as an honest provider would.
+    m.find_key = lambda admin, name: {"hash": "h-1", "name": name, "label": "sk-or-v1-x...y",
+                                      "limit": (m.ledger()["issued"].get(name) or {}).get("limit_usd")}
     m.deliver = lambda value, to: calls["delivered"].append(to) or f"vault {to[len('vault:'):]}"
     m._journal = lambda *a, **k: None
     return m, calls
@@ -2057,6 +2059,9 @@ def test_or_policy_ceilings_sum_to_the_project_limit() -> None:
         ("--split leaving a slot without a ceiling", {"split": {"vault:project-a/prod/MODEL_KEY": 10.0}}, "no ceiling"),
         ("--limit per key over the project limit", {"limit_override": 21.0}, "cannot exceed"),
         ("--limit and --split together", {"limit_override": 5.0, "split": {"vault:project-a/prod/MODEL_KEY": 5.0}}, "not both"),
+        ("--split naming one slot twice under two spellings", {"split": {"vault:project-a/prod/MODEL_KEY": 10.0,
+                                                                         "project-a/prod/MODEL_KEY": 10.0,
+                                                                         "vault:project-a/prod/OTHER_KEY": 10.0}}, "twice"),
     ]:
         m, calls = _policy_door()
         try:
@@ -2129,10 +2134,24 @@ def test_or_policy_reads_held_keys_at_the_provider() -> None:
     plan = m.issue_for_policy(_policy(), "example", dry_run=True)
     check("a held key the provider no longer has is held-missing, even in a dry run",
           [s["action"] for s in plan if "to" in s] == ["held-missing"] and not calls["posted"], str(plan))
+    m, calls = door({"hash": "h-1", "name": "held", "limit": None, "disabled": False})
+    plan = m.issue_for_policy(_policy(), "example")
+    check("a provider row with no ceiling is unbounded: the ceiling is moved, never taken from the ledger",
+          [s["action"] for s in plan if "to" in s] == ["ceiling-moved"] and calls["patched"], str(plan))
+
     m, calls = door({"hash": "h-1", "name": "held", "limit": 25.0, "disabled": False})
     plan = m.issue_for_policy(_policy(), "example")
     check("a ceiling moved at the provider is read there, not from the ledger",
           [s["action"] for s in plan if "to" in s] == ["ceiling-moved"] and plan[-1]["previous"] == 25.0, str(plan))
+
+    m, calls = door(None)
+
+    def not_json(admin, name):
+        raise ValueError("Expecting value: line 1 column 1")
+    m.find_key = not_json
+    plan = m.issue_for_policy(_policy(), "example")
+    check("a provider answer that is not JSON is held-unread, not a crash",
+          [s["action"] for s in plan if "to" in s] == ["held-unread"] and not calls["posted"], str(plan))
 
     m, calls = door({"hash": "h-1", "name": "held", "limit": 40.0, "disabled": True})
     d = pathlib.Path(tmpdir.mkdtemp()).resolve()

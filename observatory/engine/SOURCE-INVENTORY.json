@@ -38,8 +38,8 @@
     {
       "path": "agent/providers.py",
       "source_sha256": "e2d88a03c47dc5985b106877fc894951b0b5972f37bed90df0a0e54dd03caaaf",
-      "export_sha256": "76a6a052e134f91abfa89f65432b8f206f18b9e63bc502bee0ff1d89e6ef4e16",
-      "bytes": 60069,
+      "export_sha256": "214a85d1504e9ba212e676607c75a380d5cc8247b22d732cade3f4da59fcaec4",
+      "bytes": 61296,
       "python_comments_removed": 168,
       "python_docstrings_removed": 24,
       "tool_descriptions_retained": 0,
@@ -2311,8 +2311,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "56d8fc5060686aad9882a92af03dde8598c73b1c3600018511e83139de1e2d15",
-      "bytes": 129301,
+      "export_sha256": "c7caefa70d3f6cbd4ec2580c4020feffb17cf98eccf4e5fe6cb9e08be03dca4a",
+      "bytes": 130584,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -3183,8 +3183,8 @@
       "path": "tests/test_provider_deadline.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "43e8f6cfbd58c9536cdfc5b32f30e024088341f6771affc81117cb3e14fb0ac9",
-      "bytes": 7899
+      "export_sha256": "348ad600631129878ce387f0b58d640b8c2ba18338949fa47c59069ac8269d21",
+      "bytes": 9717
     },
     {
       "path": "tests/test_provider_health.py",
@@ -4232,8 +4232,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "56674e292b69521103975dbf0d296388fa131da96b1723843f936454e0766a97",
-      "bytes": 65910,
+      "export_sha256": "4dcc5a1e40852047c09e92bf8f90e3f96c33a1948d335d1a689e885e46cc1183",
+      "bytes": 66363,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,

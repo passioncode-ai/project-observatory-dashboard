@@ -550,6 +550,8 @@ def _split_ceilings(slots: list[dict], mode: str, project_limit: float | None,
         for ref, usd in split.items():
             if ref not in names:
                 raise ValueError(f"--split names {ref!r}, which is not a project-key source of this policy")
+            if names[ref] in by_slot:
+                raise ValueError(f"--split names {names[ref]} twice (as {ref!r} too); give each slot one amount")
             if not isinstance(usd, (int, float)) or isinstance(usd, bool) or not math.isfinite(usd) or usd <= 0:
                 raise ValueError(f"--split gives {ref!r} no positive ceiling")
             by_slot[names[ref]] = float(usd)
@@ -658,7 +660,8 @@ def _held_state(step: dict, rec: dict) -> tuple[str | None, dict | None]:
     try:
         _label, admin = read_admin(rec.get("account"))
         row = find_key(admin, step["name"])
-    except (RuntimeError, LookupError, OSError) as exc:
+    except (RuntimeError, LookupError, OSError, ValueError) as exc:
+        # ValueError: an answer that is not JSON. Unread is never in place.
         step["why"] = f"read failed ({type(exc).__name__})"
         return "held-unread", None
     if not row:
@@ -692,18 +695,21 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
         name, rec = held
         step["name"] = name
         state, row = _held_state(step, rec)
-        current = row.get("limit") if row and isinstance(row.get("limit"), (int, float)) else rec.get("limit_usd")
-        period = (row or {}).get("limit_reset") or rec.get("limit_reset") or "monthly"
-        moves = current != step["limit"] or period != step["reset"]
         if state in ("held-missing", "held-unread"):
             step["action"] = state
             continue
+        # The provider's ceiling, never the ledger's: a row with none (null) is UNBOUNDED, and an
+        # unbounded key is the first one to bring under the limit.
+        limit = row.get("limit")
+        current = float(limit) if isinstance(limit, (int, float)) and not isinstance(limit, bool) else None
+        period = row.get("limit_reset") or rec.get("limit_reset") or "monthly"
+        moves = current != step["limit"] or period != step["reset"]
         if not moves:
             step["action"] = state or "in-place"
             continue
         step["previous"] = current
         step["held"] = state
-        lowering = isinstance(current, (int, float)) and step["limit"] < current
+        lowering = current is None or step["limit"] < current
         work.append((0 if lowering else 1, step, name))
     for _order, step, name in sorted(work, key=lambda w: w[0]):
         step["action"] = "not-reached"
@@ -774,7 +780,8 @@ def cmd_issue_for_policy(path: str, account: str | None, limit_override: float |
             print(f"{step['ref']}: skipped — {step['why']}")
             continue
         total += step["limit"]
-        extra = f" (was ${step['previous']:g})" if isinstance(step.get("previous"), (int, float)) else ""
+        extra = ((f" (was ${step['previous']:g})" if step["previous"] is not None else " (was unbounded)")
+                 if "previous" in step else "")
         why = f" — {step['why']}" if step.get("why") else ""
         print(f"{step['ref']}: {step['action']} {step['name']!r}, ceiling ${step['limit']:g} {step['reset']}{extra}{why}")
         if step["action"] in HELD_NOT_SERVING:

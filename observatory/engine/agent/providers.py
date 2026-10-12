@@ -26,7 +26,7 @@ matters, because reasoning carries a vendor credential that does not travel and
 fails as a 400 rather than as degradation.
 """
 from __future__ import annotations
-import contextlib, json, os, sys, pathlib, time, urllib.error, urllib.parse, urllib.request
+import contextlib, contextvars, json, os, sys, pathlib, time, urllib.error, urllib.parse, urllib.request
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -151,19 +151,19 @@ MIN_ATTEMPT_S = 30.0
 _clock = time.time
 #: The deadline (epoch seconds) of the `complete` call in progress, or None. The catalogue fetch
 #: and the key-usage read run inside it and read it here, so their signatures — and every stub
-#: that replaces them — stay as they were.
-_DEADLINE: float | None = None
+#: that replaces them — stay as they were. A context variable, so a thread or task running its
+#: own call never reads another's deadline.
+_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar("providers_deadline", default=None)
 
 
 @contextlib.contextmanager
 def deadline_scope(deadline: float | None):
     """Reads made inside this block are cut to the time `deadline` leaves (see `_read_timeout`)."""
-    global _DEADLINE
-    before, _DEADLINE = _DEADLINE, deadline
+    token = _DEADLINE.set(deadline)
     try:
         yield
     finally:
-        _DEADLINE = before
+        _DEADLINE.reset(token)
 
 
 def _left(deadline: float | None) -> float | None:
@@ -174,12 +174,20 @@ def _left(deadline: float | None) -> float | None:
 def _read_timeout(own: float) -> float | None:
     """A side read's timeout inside the current deadline: its own, or what is left if less.
     None when nothing is left — the read is then not made and degrades as unreachable."""
-    left = _left(_DEADLINE)
+    left = _left(_DEADLINE.get())
     if left is None:
         return own
     if left < 1:
         return None
     return min(own, left)
+
+
+def _timed_out(exc: BaseException) -> bool:
+    """True when a Retryable came from a socket timeout (`_post` chains the original exception)."""
+    cause = exc.__cause__
+    if isinstance(cause, urllib.error.URLError) and not isinstance(cause, urllib.error.HTTPError):
+        cause = cause.reason
+    return isinstance(cause, TimeoutError)
 
 
 def _attempt_timeout(deadline: float | None, attempts: int) -> float:
@@ -1097,6 +1105,14 @@ def _complete(messages: list[dict], *, schema_name: str, schema: dict,
             try:
                 raw = _post(cfg["base_url"], key, body, timeout=timeout)
             except Retryable as exc:
+                if timeout < ATTEMPT_TIMEOUT_S and _timed_out(exc):
+                    # The DEADLINE cut this attempt's timeout and the attempt then timed out: the
+                    # model might have answered in its full time, so its health is left alone and
+                    # the call ends here, as any other deadline cut does.
+                    log(f"  {model['id']} attempt {attempts}/{budget_attempts} timed out at the {timeout:.0f} s "
+                        f"the deadline left")
+                    raise OutOfTime(f"step deadline: attempt {attempts} timed out at the {timeout:.0f} s the "
+                                    f"deadline left; the model is not marked", attempts=attempts) from exc
                 last_retryable = exc
                 log(f"  {model['id']} attempt {attempts}/{budget_attempts} retryable: {exc}")
                 mark_unhealthy(model["id"], str(exc))

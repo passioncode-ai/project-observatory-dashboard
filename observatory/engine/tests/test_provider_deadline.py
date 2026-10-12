@@ -102,6 +102,40 @@ class DeadlineReachesTheCall(unittest.TestCase):
             self.call(T0 + 150)
         self.assertEqual(self.unhealthy, ["example/model-1"], "only the model that answered 503 is marked")
 
+    def test_a_timeout_the_deadline_clipped_marks_no_model_unhealthy(self):
+        """Verification round 1: an attempt whose timeout was CUT by the deadline and then timed out
+        says nothing about the model — the full 120 s might have answered. It ends the call as
+        OutOfTime and leaves the model's health alone."""
+        def slow_answer(base_url, key, body, timeout=120):
+            self.timeouts.append(timeout)
+            latency = 90
+            if latency > timeout:
+                self.clock.t += timeout
+                raise P.Retryable("TimeoutError: timed out") from TimeoutError("timed out")
+            self.clock.t += latency
+            raise AssertionError("not reached in this case")
+        with mock.patch.object(P, "_post", slow_answer):
+            with self.assertRaises(P.OutOfTime) as cut:
+                self.call(T0 + 100)
+        self.assertEqual(self.timeouts, [80])
+        self.assertEqual(self.unhealthy, [], "the clipped timeout is the deadline's, not the model's")
+        self.assertEqual(cut.exception.attempts, 1)
+
+    def test_a_timeout_at_the_full_120_s_still_marks_the_model(self):
+        def stuck(base_url, key, body, timeout=120):
+            self.timeouts.append(timeout)
+            self.clock.t += timeout
+            raise P.Retryable("URLError: timed out") from urllib.error.URLError(TimeoutError("timed out"))
+        with mock.patch.object(P, "_post", stuck):
+            with self.assertRaises(P.OutOfTime):
+                self.call(T0 + 300)
+        self.assertEqual(self.timeouts[0], 120)
+        self.assertEqual(self.unhealthy[0], "example/model-1", "a full-length timeout is the model's")
+
+    def test_the_deadline_is_a_context_variable(self):
+        import contextvars
+        self.assertIsInstance(P._DEADLINE, contextvars.ContextVar)
+
     def test_out_of_time_is_neither_retryable_nor_fatal(self):
         """A caller that retries on Retryable or retires a model on Fatal must not do either for a
         call the clock refused."""
