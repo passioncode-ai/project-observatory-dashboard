@@ -3,6 +3,22 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Changed
+
+- **The demo's findings speak the page's language** (OBS-64): `tools/demo_estate.py` wrote its five findings as
+  English sentences, so a Russian screenshot mixed two languages. Each title is now a rule's own message id with its
+  arguments, built by `finding_types.titled` like a real finding, so the Russian page renders them from the same
+  catalog; the detail and the action stay in English, as a real rule writes them.
+- **The disk table says what a removal frees on APFS** (OBS-66): `du` counts an APFS clone in full — 19
+  abandoned browser code-sign clones read as 13 GB and removing them freed nothing. On macOS a place of 512 MB
+  or more is walked a second time, inside the same budget, for each file's private size
+  (`getattrlist(ATTR_CMNEXT_PRIVATESIZE)`); the row gains `frees_at_least_gb` and `clone_shared_gb`, and where
+  clones hold a tenth of the place (and 100 MB) the Machine page and `machine.disk_low` name the floor. The walk
+  costs about three times `du`'s time (6.3 GB of caches: 7.6 s against 24.7 s under load); one that does not
+  finish leaves `du`'s number alone.
+
 ## 0.24.4 — 2026-10-12
 
 Inside the disk guard the git tier plans branches and worktrees only and fits its deadline, so a scheduled pass under load reaches its removals. The companion plugin `observatory-log` is unchanged.
@@ -49,23 +65,22 @@ plugin `observatory-log` is unchanged.
   and clean worktrees with their dependencies, where most of the space is. The tier now has `git_tier_seconds`
   (120 s by default, at most a third of the run) kept back before the classes split the rest.
 
+### Changed
+
+- **The collectors take turns** (OBS-52): after `integrity`, the tick runs its collectors least recently started
+  first, not in a fixed order. Under load the collectors in front used the window and the ones at the back were
+  `not started` tick after tick: on one machine (load average 26–30) the leak scan and the lifecycle watch had not
+  run for two days. A step that was not started keeps its place at the front of the next tick; a collector that
+  reads another's output this tick still runs after it (`READS_FROM`, held equal to the artefact graph by
+  `tests/test_pipeline.py`). Start times are kept in `store/tick-rotation.json`; `tick.json` reports
+  `collector_order` and `not_started`.
+
 ## 0.24.0 — 2026-10-12
 
 The disk guard keeps up with a disk that fills fast and never removes what a session still uses: the maintenance pass runs every 15 minutes, under pressure the guard acts on every pass, and a fresh, shared listing of what processes hold — open files, maps, executables, command lines — is re-checked at every removal, under one lock for every cleanup. One project answers to many names (aliases, `project.resolve`). The doors grow: `claim` brings a key minted elsewhere under the OpenRouter door, a project's own key comes from its spend policy, and Cloudflare gains `workers-routes` and `redirect-rules`. The meter grows: the estate's month measured, `grant.check` declared, a usage report. The harness scan names plaintext credentials in agent tools' configs. The companion plugin `observatory-log` is unchanged.
 
 ### Changed
 
-- **The demo's findings speak the page's language** (OBS-64): `tools/demo_estate.py` wrote its five findings as
-  English sentences, so a Russian screenshot mixed two languages. Each title is now a rule's own message id with its
-  arguments, built by `finding_types.titled` like a real finding, so the Russian page renders them from the same
-  catalog; the detail and the action stay in English, as a real rule writes them.
-- **The disk table says what a removal frees on APFS** (OBS-66): `du` counts an APFS clone in full — 19
-  abandoned browser code-sign clones read as 13 GB and removing them freed nothing. On macOS a place of 512 MB
-  or more is walked a second time, inside the same budget, for each file's private size
-  (`getattrlist(ATTR_CMNEXT_PRIVATESIZE)`); the row gains `frees_at_least_gb` and `clone_shared_gb`, and where
-  clones hold a tenth of the place (and 100 MB) the Machine page and `machine.disk_low` name the floor. The walk
-  costs about three times `du`'s time (6.3 GB of caches: 7.6 s against 24.7 s under load); one that does not
-  finish leaves `du`'s number alone.
 - **`leaks`, `git-hygiene` and `agent` stop before their deadline instead of being killed** (OBS-52), reading
   `OBSERVATORY_STEP_DEADLINE` as the folder scan, `integrity` and the plugins already do:
   - `leaks` starts a file only while two minutes are left and a SQLite store only while one is. Offsets of what it
@@ -76,13 +91,6 @@ The disk guard keeps up with a disk that fills fast and never removes what a ses
   - `agent` starts a model call only while a whole call (150 s) fits, so a paid answer is never lost. The run
     report names the deadline, and the deltas wait for the next run.
 
-- **The collectors take turns** (OBS-52): after `integrity`, the tick runs its collectors least recently started
-  first, not in a fixed order. Under load the collectors in front used the window and the ones at the back were
-  `not started` tick after tick: on one machine (load average 26–30) the leak scan and the lifecycle watch had not
-  run for two days. A step that was not started keeps its place at the front of the next tick; a collector that
-  reads another's output this tick still runs after it (`READS_FROM`, held equal to the artefact graph by
-  `tests/test_pipeline.py`). Start times are kept in `store/tick-rotation.json`; `tick.json` reports
-  `collector_order` and `not_started`.
 - **Trust tiers, written down** (Fabric ADR-0144 amendment 4): on the operator's own machines (T0, and enrolled
   machines T1) the meter and the doors never demand a delegation token — `slotsRequireGrant: when-token` and
   `keyserverRequiresDelegation: off` stay the settings there; the strict ones are for a machine that serves another
@@ -428,8 +436,6 @@ update rolled back safely, and a second try installed it.
   the server stopped, something loaded it again; the update's own start was then refused as
   "already loaded", it asked a person to run `launchctl bootstrap`, and the server kept the code
   it had started with. A job found loaded is now restarted (`launchctl kickstart -k`).
-
-
 
 ## 0.19.3 — 2026-10-08
 
