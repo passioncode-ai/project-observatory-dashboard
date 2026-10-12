@@ -1855,9 +1855,113 @@ def test_or_ping_names_the_strays_it_does_not_manage() -> None:
           "an operation keyed by provider listing could touch production keys")
 
 
+def _policy_door():
+    """The door with a fake provider, a tmp ledger, deliveries recorded, and project names resolved as typed."""
+    m = orr()
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    m.ADMIN_STORE = d / "openrouter-admin"
+    m.ADMIN_STORE.mkdir(parents=True)
+    private_io.write(m.ADMIN_STORE / "example", "prov\n")
+    m.LEDGER = d / "ledger.json"
+    m._project_folder = lambda project, env, name: {"a": "project-a"}.get(project, project)
+    m.vault_destination = lambda to: to
+    calls = {"posted": [], "patched": [], "delivered": []}
+
+    def fake(path, key, payload=None, method=None):
+        if path.startswith("/keys?"):
+            return {"data": []}
+        if path == "/keys" and payload:
+            calls["posted"].append(payload)
+            return {"data": {"hash": f"h-{len(calls['posted'])}", "label": "sk-or-v1-x...y"}, "key": "sk-or-v1-" + "q" * 40}
+        if method == "PATCH":
+            calls["patched"].append((path, payload))
+        return {"data": {"hash": path.rsplit("/", 1)[-1], "name": "project-a-prod-model-key"}}
+    m._request = fake
+    m.find_key = lambda admin, name: {"hash": "h-1", "name": name, "label": "sk-or-v1-x...y"}
+    m.deliver = lambda value, to: calls["delivered"].append(to) or f"vault {to[len('vault:'):]}"
+    m._journal = lambda *a, **k: None
+    return m, calls
+
+
+def _policy(**over):
+    base = {"kind": "spend-policy", "project": "urn:project:a", "mode": "limited", "limitUsd": 40, "period": "month",
+            "autoApproveUsd": 0.5, "credentialSources": [
+                {"kind": "capability", "agent": "urn:agent:copy:one", "capability": "copy.write"},
+                {"kind": "project-key", "ref": "vault:project-a/prod/MODEL_KEY"}]}
+    base.update(over)
+    return base
+
+
+def test_or_a_project_policy_gets_its_own_key_in_its_own_slot() -> None:
+    """OBS-58: the policy's project-key source is issued for that project, with the project limit as
+    the key's ceiling resetting monthly, delivered into exactly the slot the policy names; the
+    capability source spends another agent's wallet and gets no key; a second run moves nothing."""
+    m, calls = _policy_door()
+    plan = m.issue_for_policy(_policy(), "example")
+    step = [s for s in plan if "to" in s]
+    check("one key, for the one project-key source", len(step) == 1 and len(calls["posted"]) == 1, str(plan))
+    check("ceiling = the project limit, monthly", calls["posted"][0] == {"name": "project-a-prod-model-key", "limit": 40.0,
+          "limit_reset": "monthly"}, str(calls["posted"]))
+    check("delivered into the slot the policy names", calls["delivered"] == ["vault:project-a/prod/MODEL_KEY"], str(calls["delivered"]))
+    rec = json.loads(m.LEDGER.read_text())["issued"]["project-a-prod-model-key"]
+    check("the ledger records the project the key serves", rec["project"] == "project-a" and rec["limit_usd"] == 40.0, str(rec))
+    again = m.issue_for_policy(_policy(), "example")
+    check("a second run is in place: nothing minted, nothing moved",
+          [s["action"] for s in again if "to" in s] == ["in-place"] and len(calls["posted"]) == 1 and not calls["patched"], str(again))
+    m.issue_for_policy(_policy(limitUsd=60), "example")
+    check("a raised project limit moves the key's ceiling instead of minting a second key",
+          len(calls["posted"]) == 1 and calls["patched"] and calls["patched"][-1][1] == {"limit": 60.0, "limit_reset": "monthly"},
+          str(calls["patched"]))
+
+
+def test_or_a_policy_never_borrows_and_never_issues_an_unbounded_key() -> None:
+    """Refusals, all before a key exists: another project's slot (the no-borrowing rule), a zero
+    limit, a policy without a project limit and no explicit ceiling, a ceiling above the project
+    limit, a policy with no slot this door can fill, and something that is not a spend policy."""
+    m, calls = _policy_door()
+    cases = [
+        ("another project's slot", _policy(credentialSources=[{"kind": "project-key", "ref": "vault:project-b/prod/KEY"}]), None, "never another's"),
+        ("a $0 project limit", _policy(limitUsd=0), None, "spends nothing"),
+        ("no project limit and no --limit", _policy(mode="no-project-limit", limitUsd=None), None, "give --limit"),
+        ("a key ceiling above the project limit", _policy(), 41.0, "cannot exceed"),
+        ("only a capability source", _policy(credentialSources=[{"kind": "capability", "agent": "urn:agent:x"}]), None, "no project-key"),
+        ("not a spend policy", {"kind": "grant"}, None, "not a spend policy"),
+        ("a project that is not a project urn", _policy(project="https://example.test/p"), None, "urn:project"),
+    ]
+    for name, policy, limit, needle in cases:
+        try:
+            m.issue_for_policy(policy, "example", limit)
+            check(name, False, "issued")
+        except ValueError as exc:
+            check(f"refused: {name}", needle in str(exc), str(exc))
+    check("and nothing was minted for any of them", not calls["posted"], str(calls["posted"]))
+    plan = m.issue_for_policy(_policy(mode="no-project-limit", limitUsd=None), "example", 15.0, dry_run=True)
+    check("a dry run with an explicit ceiling plans the key and mints nothing",
+          [s.get("action") for s in plan if "to" in s] == ["would-issue"] and not calls["posted"], str(plan))
+    skipped = m.policy_key_plan(_policy(credentialSources=[{"kind": "project-key", "ref": "openrouter:project-a"},
+                                                           {"kind": "project-key", "ref": "project-a/prod/MODEL_KEY"}]))
+    check("a ref that is not a vault slot is skipped and named; the bare slot form is read",
+          [s.get("action", "plan") for s in skipped] == ["skipped", "plan"] and skipped[1]["to"] == "vault:project-a/prod/MODEL_KEY",
+          str(skipped))
+
+
+def test_or_issue_for_policy_command_line() -> None:
+    m, calls = _policy_door()
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    good, bad = d / "policy.json", d / "broken.json"
+    good.write_text(json.dumps(_policy()), encoding="utf-8")
+    bad.write_text("{", encoding="utf-8")
+    check("the command issues and exits 0", m.cmd_issue_for_policy(str(good), "example", None, False) == 0, "")
+    check("an unreadable policy exits 2", m.cmd_issue_for_policy(str(bad), "example", None, False) == 2, "")
+    check("a refused policy exits 2", m.cmd_issue_for_policy(str(good), "example", 99.0, False) == 2, "")
+
+
 if __name__ == "__main__":
     print("the credential doors — stash, issue, rotate, revoke, and what they refuse\n")
     for fn in (test_cf_a_token_this_call_created_is_deleted_when_the_issue_fails,
+               test_or_a_project_policy_gets_its_own_key_in_its_own_slot,
+               test_or_a_policy_never_borrows_and_never_issues_an_unbounded_key,
+               test_or_issue_for_policy_command_line,
                test_no_door_takes_or_prints_a_value_outside_stdin,
                test_the_ledgers_hold_no_values,
                test_cf_stash_refuses_an_admin_that_cannot_issue,
