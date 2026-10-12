@@ -333,6 +333,23 @@ class Meter(unittest.TestCase):
         status = self.meter.status()
         self.assertEqual((status["estateUsd"], status["alert"]), (39.0, True))
 
+    def test_measured_provider_spend_counts_against_L0(self):
+        """OBS-56: with a fresh spend scan the estate total is what the providers charged plus open reservations."""
+        spend = self.dir / "spend.json"
+        unlimited = grant(spend={"mode": "unlimited", "payer": "owner",
+                                 "credentialSource": {"kind": "capability", "agent": "urn:agent:x"}})
+        self.write_grant(unlimited)
+        spend.write_text(json.dumps({"month": M.iso(NOW)[:7], "scanned_at": M.iso(NOW - 3600), "total_usd": 995}))
+        self.meter = self.make(spendFile=str(spend), keyCeilingsUsd={})
+        self.assertEqual(self.check(4, claims(task="t-1"))["decision"], "allowed")          # 995 + 4 = 999
+        self.assertDenied(self.check(2, claims(task="t-2")), "limit-reached", "L0", "month")  # 999 + 2 > 1000
+        self.assertEqual(self.meter.status()["estateCountedFrom"], "providers+open")
+        spend.write_text(json.dumps({"month": M.iso(NOW)[:7], "scanned_at": M.iso(NOW - 40 * 3600), "total_usd": 995}))
+        self.assertEqual(self.check(2, claims(task="t-3"))["decision"], "allowed", "a stale scan is not believed")
+        self.assertEqual(self.meter.status()["estateCountedFrom"], "ledger")
+        spend.write_text(json.dumps({"month": "2026-09", "scanned_at": M.iso(NOW), "total_usd": 995}))
+        self.assertEqual(self.meter.status()["estateCountedFrom"], "ledger", "last month's scan is not this month's")
+
     def test_grant_states(self):
         cases = [(grant(state="revoked"), "grant-revoked"), (grant(state="expired"), "grant-expired"),
                  (grant(expiresAt="2026-10-12T00:00:00Z"), "grant-expired"),

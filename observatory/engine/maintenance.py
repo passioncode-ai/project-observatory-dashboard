@@ -150,7 +150,11 @@ def reconcile_in_flight(base: Path, state: dict) -> dict | None:
 
 
 SNAPSHOT_EVERY = datetime.timedelta(hours=24)
-INTERVAL_SECONDS = 3600
+#: Every 15 minutes (2026-10-11; it was an hour). Everything else in a pass is gated by its own
+#: cadence (the update check every 6 hours, the backup daily), so a pass that is not due for
+#: them is quick; the disk guard is what needs the frequency — below the `low` line it runs
+#: on every pass, because a full disk had stopped the machine inside one hourly gap.
+INTERVAL_SECONDS = 900
 #: Exit codes of `full update` (engine_update.EXIT_*), named here so a change there is
 #: caught by tests/test_maintenance.py rather than by a user's stalled install.
 UPDATE_OK, UPDATE_FAILED, UPDATE_REFUSED, UPDATE_UNDETERMINED = 0, 1, 2, 3
@@ -797,13 +801,13 @@ def restart_left_stopped(base: Path, state: dict, services) -> list[dict]:
     return started
 
 
-#: The disk guard's ceiling inside a pass. A guard killed at it stops between removals of
-#: regenerable things; the next pass starts over from a fresh plan.
-GUARD_TIMEOUT = 1200
+#: The disk guard's ceiling inside a pass, inside the 15-minute interval. A guard killed at it
+#: stops between removals of regenerable things; the next pass starts over from a fresh plan.
+GUARD_TIMEOUT = 600
 #: What the guard leaves of that ceiling: it stops itself at GUARD_TIMEOUT - GUARD_MARGIN, so
 #: its report and journal are written before the job would kill it (2026-10-11: the first
 #: scheduled pass on 0.23.0 killed it at 1200 s and recorded only "exit 124").
-GUARD_MARGIN = 180
+GUARD_MARGIN = 120
 
 
 def step_guard(base: Path, state: dict, at: datetime.datetime, runner=None) -> dict:

@@ -114,7 +114,7 @@ BOUNDARY += ('osprivacy',)
 BOUNDARY += ('osschedule',)
 BOUNDARY += ('harness',)
 # OBS-55: the meter and the delegation verifier (contract DEC-0039).
-BOUNDARY += ('meter', 'meter_wire')
+BOUNDARY += ('meter', 'meter_wire', 'spend')
 # docs/design/WINDOWS-LINUX.md W3: a whole tick, through tools/tick.py.
 BOUNDARY += ('tick_py',)
 # One credential-shape heuristic for every door that judges typed text.

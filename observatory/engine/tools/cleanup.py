@@ -59,12 +59,18 @@ def now() -> str:
 
 
 def load_config() -> dict:
-    for f in (paths.config_file("cleanup.json"), ROOT / "defaults" / "cleanup.json"):
+    """The workspace's cleanup.json over the shipped defaults, key by key.
+
+    A workspace's file is a copy taken at init, so a key a later release adds (`pressure`,
+    2026-10-11) was simply absent from it — and taking the workspace file WHOLE meant the new
+    behaviour never reached an existing installation. Its own keys still win."""
+    def read(f) -> dict:
         try:
-            return json.loads(f.read_text(encoding="utf-8"))
+            doc = json.loads(pathlib.Path(f).read_text(encoding="utf-8"))
+            return doc if isinstance(doc, dict) else {}
         except (OSError, ValueError):
-            continue
-    return {}
+            return {}
+    return {**read(ROOT / "defaults" / "cleanup.json"), **read(paths.config_file("cleanup.json"))}
 
 
 def git(repo: str, *args: str, timeout: int = 120, text: bool = True, input: bytes | None = None,
@@ -330,8 +336,28 @@ def journal(rows: list[dict]) -> None:
     os.chmod(log, 0o600)
 
 
+def under_pressure(cfg: dict, level: str | None) -> dict:
+    """The auto tier's thresholds at a disk pressure (`cleanup.json` → `pressure`).
+
+    Only the tier that loses nothing moves: a merged or pushed branch, a clean worktree whose
+    branch stays, ignored build output. A clean worktree nobody has worked in for a day is
+    still a full checkout with its own dependencies — on 2026-10-11 thirteen of them sat on a
+    disk that ran out — and removing it keeps its branch. The manual tier, the only copy of
+    somebody's work, never moves with pressure."""
+    lowered = (cfg.get("pressure") or {}).get(level or "") or {}
+    if not lowered:
+        return cfg
+    auto = dict(cfg.get("auto") or {})
+    for key, value in lowered.items():
+        if key in auto and isinstance(value, (int, float)):
+            auto[key] = min(auto[key], value)
+    return {**cfg, "auto": auto}
+
+
 def main(argv: list[str]) -> int:
     cfg = load_config()
+    if "--level" in argv[:-1]:
+        cfg = under_pressure(cfg, argv[argv.index("--level") + 1])
     from scan_machine import working_dirs
     busy = set(working_dirs().values())
     plan = build_plan(cfg, busy)

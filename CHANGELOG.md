@@ -25,6 +25,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   input and output schemas published at `v0.24.1`, a probe that a call carrying no delegation token is denied
   `principal-unproven`. Fabric's registry reads the meter from the service descriptor; the token-carrying call
   goes to the same tool on the memory-http door.
+- **The estate's month, measured** (OBS-56): the new step `scan-spend` sums this month's spend of every OpenRouter
+  account the door holds (`GET /activity`, per account, never a key) into `store/raw/spend.json`. The meter counts
+  it, plus open reservations, against L0 (USD 1,000 by default), and the finding `spend.estate_month` warns at
+  80 % and is critical at the limit. Measured on the operator's machine on 2026-10-11: $262.97 across four
+  accounts.
 - One project under many names (OBS-65). The operator curates `config/identifiers.json`
   (another system's name → the canonical `project:`/`product:` id, with the name's owner); the
   emitter publishes `registry/identifiers.json` and one `known_as` relation per alias. A name
@@ -35,6 +40,17 @@ while the major version is 0, a minor release may change behaviour and says so h
   `observatory_propose` (`aliases`); accepting one never rewrites an existing row.
 
 ### Fixed
+- **The disk guard frees more, on any system** (OBS-63): its pressure now lowers the git auto tier's thresholds
+  (`pressure` in `config/cleanup.json`: clean worktrees and merged branches after 3 days at `low`, 1 day at
+  `critical`; the manual tier never moves), it sweeps npx's package cache and macOS diagnostic reports, and it
+  knows what is held on Linux without `lsof` (from `/proc`) and on Windows (a folder that cannot be renamed aside is
+  held, and nothing of it is removed) — before, without `lsof` it removed no path at all.
+- **The disk guard keeps up with a disk that fills fast** (OBS-63): the maintenance pass runs every 15 minutes
+  (it was hourly), and the guard acts on every pass once free space is below the `low` line (hourly while it is
+  normal); it now also clears application and tool cache folders (`~/Library/Caches`, `~/.cache`) untouched for
+  7 / 2 / 1 days — the folders a hand cleanup freed 10 GB from — keeping downloaded browsers and SDKs a tool does
+  not fetch again by itself (`cache_keep`); and its per-class cap is 20,000, since the run budget bounds its time.
+  Measured on one machine: free space fell from 6 GB to 0.3 GB inside one hourly gap.
 - **The disk guard finishes inside the hourly pass** (OBS-63): the first scheduled pass on 0.23.0 killed it at
   the job's 1200 s ceiling, under launchd's background priority, and recorded only `exit 124` — no report, no
   journal. The guard now stops itself at `--budget` (the job passes 1020 s; `run_budget_seconds`, 900 s, by

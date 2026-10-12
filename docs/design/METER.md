@@ -86,6 +86,13 @@ The amount is reserved against every window of the grant and every level above i
 | L1 | `total`, `project`, `day`, `week`, `month` | the grant's whole life, everything on its project, and calendar windows in UTC (a week starts on Monday) |
 | L0 | `month` | the estate's total across every provider key (`estateMonthUsd`, default USD 1,000) and the ceiling of the provider key the grant's `project-key` source names (`keyCeilingsUsd`) |
 
+**What L0 counts.** `collectors/scan_spend.py` (step `scan-spend`, integration `openrouter`, every tick) sums this
+month's `GET /api/v1/activity` for every OpenRouter account the door holds a provisioning key for, into
+`store/raw/spend.json`. It records each account's month in USD and the last day covered, and never a key. With a
+scan of this month no older than 36 hours, the estate total is what the providers charged plus the reservations
+still open; without one, it is the meter's own ledger. `full grant --status` names which (`estateCountedFrom`).
+The finding `spend.estate_month` is a warning at the alert ratio (80 %) and critical at the limit (OBS-56).
+
 A reservation counts its amount until `expiresAt` (default one hour later); a settled receipt counts what was
 spent instead (`full grant --settle RECEIPT --usd USD`); an unsettled one lapses. `remainingUsd` is the smallest
 remainder over the grant's windows, `null` for an unlimited grant. `full grant --status` reports the month
@@ -178,6 +185,6 @@ stops accidental and confused borrowing, not a hostile process of the same user 
 
 ## Not decided here
 
-- Settling from usage reports (`byGrant` receipts) instead of by hand, and the alert at 80 % as a finding
-  (OBS-56).
+- Settling receipts from usage reports (`byGrant`) instead of by hand; other providers' spend in L0 (only
+  OpenRouter accounts are read today).
 - How an enrolled machine (T1) proves itself to this one: the agent network's device binding (RM-21, OBS-77).

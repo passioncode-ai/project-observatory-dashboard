@@ -149,9 +149,21 @@ class Holders:
         # 170,000 names again cost a minute a run. The TARGET is resolved instead.
         self.names = sorted({n for n in names or [] if n.startswith("/")})
 
+    #: How busy() was decided: "lsof", "proc" (Linux without lsof) or "rename" (Windows, where
+    #: a folder something holds cannot be renamed — the removal itself is the probe).
+    mode = "lsof"
+
     @classmethod
     def take(cls, timeout: int = 120) -> "Holders":
+        if sys.platform == "win32":
+            h = cls([])
+            h.mode = "rename"
+            return h
         if not shutil.which("lsof"):
+            if os.path.isdir("/proc/self/fd"):
+                h = cls(proc_holders())
+                h.mode = "proc"
+                return h
             return cls(None)
         try:
             p = subprocess.run(["lsof", "-n", "-P", "-w", "-Fn"], capture_output=True, text=True,
@@ -172,6 +184,31 @@ class Holders:
             return True
         j = bisect.bisect_left(self.names, real + "/")
         return j < len(self.names) and self.names[j].startswith(real + "/")
+
+
+def proc_holders() -> list[str]:
+    """Every path this account's processes hold open or work in, from /proc (Linux without
+    lsof). A process another account owns is unreadable and is not ours to protect."""
+    found: list[str] = []
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        base = f"/proc/{pid}"
+        for link in ("cwd", "root"):
+            try:
+                found.append(os.readlink(f"{base}/{link}"))
+            except OSError:
+                pass
+        try:
+            fds = os.listdir(f"{base}/fd")
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                found.append(os.readlink(f"{base}/fd/{fd}"))
+            except OSError:
+                pass
+    return [p for p in found if p.startswith("/") and p != "/"]
 
 
 def running(names: list[str]) -> bool:
@@ -243,8 +280,15 @@ def newest_and_size(root: str, limit: int = WALK_LIMIT) -> tuple[float, int, boo
     return newest, size, True
 
 
-def remove(path: str) -> None:
+def remove(path: str, probe: bool = False) -> None:
+    """Remove a path. With `probe` (Windows), rename it aside first: Windows refuses to rename a
+    folder while any process holds a file in it, so a refusal is the "busy" answer lsof gives
+    elsewhere, and nothing has been deleted when it comes."""
     p = pathlib.Path(path)
+    if probe:
+        aside = p.with_name(p.name + ".observatory-removing")
+        os.rename(p, aside)            # PermissionError: something holds it — the caller skips
+        p = aside
     if p.is_symlink() or p.is_file():
         p.unlink()
     else:
@@ -261,6 +305,11 @@ def owned(path: str) -> bool:
 
 def expand(raw: str) -> str:
     uid = osprivacy.account()
+    if "{localappdata}" in raw:
+        local = os.environ.get("LOCALAPPDATA", "")
+        if not local:
+            return ""                 # Windows only; elsewhere the root does not exist
+        raw = raw.replace("{localappdata}", local)
     return os.path.expanduser(raw.replace("{tmpdir}", tempfile.gettempdir().rstrip("/"))
                               .replace("{uid}", uid))
 
@@ -272,7 +321,7 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
     days = by_level(cfg, "temp_days", level, 3)
     keep = cfg.get("temp_keep") or []
     out, nested = [], set()
-    every = [r for r in cfg.get("temp_roots") or [] if isinstance(r, dict) and r.get("path")]
+    every = [r for r in cfg.get("temp_roots") or [] if isinstance(r, dict) and r.get("path") and expand(r["path"])]
     for r in every:
         nested.add(os.path.realpath(expand(r["path"])))
     # A root with its own `level` (Xcode's DerivedData: rebuilding costs time) is
@@ -325,6 +374,39 @@ def clone_root() -> pathlib.Path | None:
     if sys.platform != "darwin":
         return None
     return pathlib.Path(tempfile.gettempdir()).parent / "X"
+
+
+def plan_cache_dirs(cfg: dict, level: str, holders: Holders, at: float, budget: "Budget | None" = None) -> list[dict]:
+    """Applications' and tools' own cache folders nobody touched for `cache_days`.
+
+    WHY (2026-10-11). The hand cleanup of 2026-10-10 freed about 10 GB from `~/Library/Caches`
+    and `~/.cache` alone; the first guard left both to the tools' own commands and freed far
+    less, and the disk ran out again. A cache folder is regenerable by definition — except the
+    downloaded browsers and SDKs a tool does NOT fetch again by itself (`cache_keep`), which
+    stay. A folder anyone holds open, or touched recently anywhere inside, stays too."""
+    days = by_level(cfg, "cache_days", level, 7)
+    keep = cfg.get("cache_keep") or []
+    out = []
+    for root in (expand(r) for r in cfg.get("cache_roots") or []):
+        if not root:
+            continue                  # a root of another OS ({localappdata} on macOS)
+        entries = []
+        for e in _scan(root):
+            try:
+                entries.append((e.stat(follow_symlinks=False).st_mtime, e))
+            except OSError:
+                continue
+        for _top, e in sorted(entries, key=lambda x: x[0]):
+            if budget and budget.out("cache-dir"):
+                return out
+            if any(fnmatch.fnmatch(e.name, k) for k in keep) or e.is_symlink() or not owned(e.path):
+                continue
+            newest, size, complete = newest_and_size(e.path, limit=200_000)
+            age = (at - newest) / 86400
+            if complete and age >= days and not holders.busy(e.path):
+                out.append({"class": "cache-dir", "target": e.path, "bytes": size,
+                            "why": f"a cache untouched {age:.1f} days, nobody holds it"})
+    return out
 
 
 def plan_clones(cfg: dict, holders: Holders, at: float) -> list[dict]:
@@ -415,6 +497,7 @@ def plan_commands(cfg: dict, level: str) -> list[dict]:
         out.append({"class": "cache-command", "target": " ".join(argv), "argv": [tool, *argv[1:]],
                     "busy_if": c.get("busy_if") or [], "needs": c.get("needs_running") or [],
                     "busy_output": c.get("busy_output") or "",
+                    "timeout": c.get("timeout_seconds") or cfg.get("command_timeout_seconds", 90),
                     "bytes": 0, "why": c.get("why") or "the tool's own cleanup"})
     return out
 
@@ -613,8 +696,13 @@ def act(a: dict, holders: Holders) -> dict:
         if a.get("busy_if") and running(a["busy_if"]):
             return {**rec, "result": "skipped", "reason": "the tool is running now"}
         try:
-            p = subprocess.run(a["argv"], capture_output=True, text=True, timeout=600,
-                               stdin=subprocess.DEVNULL)
+            # SHORT, and a wait is not a fault (2026-10-11): `uv cache prune` waits on the lock a
+            # long-running `uv tool run` server holds, and one such wait spent five minutes of a
+            # ten-minute run while sixteen thousand removals waited behind it.
+            p = subprocess.run(a["argv"], capture_output=True, text=True,
+                               timeout=float(a.get("timeout") or 90), stdin=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            return {**rec, "result": "skipped", "reason": "held up past its time — something else holds the tool's cache"}
         except (OSError, subprocess.SubprocessError) as exc:
             return {**rec, "result": "failed", "reason": f"{type(exc).__name__}"}
         said = (p.stderr or p.stdout or "").strip()
@@ -633,8 +721,12 @@ def act(a: dict, holders: Holders) -> dict:
         if holders.busy(target):
             return {**rec, "result": "skipped", "reason": "a process holds it now"}
         try:
-            remove(target)
+            remove(target, probe=holders.mode == "rename")
             rec["result"] = "removed"
+        except PermissionError as exc:
+            if holders.mode == "rename":
+                return {**rec, "result": "skipped", "reason": "a process holds it now (it could not be renamed)"}
+            rec.update(result="failed", reason=f"{type(exc).__name__}: {exc}"[:200])
         except OSError as exc:
             rec.update(result="failed", reason=f"{type(exc).__name__}: {exc}"[:200])
     rec["freed_mb"] = round((free_bytes() - before) / 1048576)
@@ -652,19 +744,31 @@ def journal(rows: list[dict]) -> None:
     os.chmod(log, 0o600)
 
 
-def build_plan(cfg: dict, level: str, holders: Holders, at: float, degraded: list) -> list[dict]:
-    """Every action at this pressure, cheapest and safest first."""
-    budget = Budget(float(cfg.get("plan_budget_seconds", 300)), degraded)
-    # YIELD FIRST. The first live run (2026-10-11) spent its whole action cap on 500 of
-    # 21,563 tiny temporary entries — 46 MB — and never reached the cache commands or
-    # the build output that hold gigabytes. Commands come first (one each, large yield),
-    # then each class's paths largest first, and the cap is per class (`cap_per_class`).
+def planners(cfg: dict, level: str, holders: Holders, at: float, degraded: list) -> list[tuple[str, object]]:
+    """Each class's planner, in the order a run takes them.
+
+    PATHS FIRST, THE TOOLS' COMMANDS LAST (2026-10-11). With the commands first, `uv cache
+    prune` waiting on a lock spent half a run, and the eight commands together spent the rest
+    while sixteen thousand removals that take a second each waited behind them. Within a class
+    the largest go first."""
     big = lambda xs: sorted(xs, key=lambda a: -(a.get("bytes") or 0))  # noqa: E731
-    actions = plan_commands(cfg, level)
-    actions += big(plan_builds(cfg, level, holders, at, artifact_names(), budget))
-    actions += big(plan_temp(cfg, level, holders, at, budget))
-    actions += big(plan_trash(cfg, level, at, degraded)) + plan_clones(cfg, holders, at)
-    return actions
+    return [
+        ("cache-dir", lambda b: big(plan_cache_dirs(cfg, level, holders, at, b))),
+        ("build-output", lambda b: big(plan_builds(cfg, level, holders, at, artifact_names(), b))),
+        ("temp", lambda b: big(plan_temp(cfg, level, holders, at, b))),
+        ("trash", lambda b: big(plan_trash(cfg, level, at, degraded))),
+        ("browser-clone", lambda b: plan_clones(cfg, holders, at)),
+        ("cache-command", lambda b: plan_commands(cfg, level)),
+    ]
+
+
+def build_plan(cfg: dict, level: str, holders: Holders, at: float, degraded: list) -> list[dict]:
+    """Every action at this pressure, in the order a run takes them (plan only)."""
+    budget = Budget(float(cfg.get("plan_budget_seconds", 300)), degraded)
+    out: list[dict] = []
+    for _name, planner in planners(cfg, level, holders, at, degraded):
+        out += planner(budget)
+    return out
 
 
 def run(argv: list[str]) -> dict:
@@ -705,6 +809,18 @@ def run(argv: list[str]) -> dict:
     if "--level" in argv:
         level = argv[argv.index("--level") + 1]
     level = level if level in LEVELS else level_for(free0, cfg)
+    # HOW OFTEN. The maintenance pass runs every 15 minutes; at `normal` pressure the guard
+    # acts once per `normal_every_minutes` (60), and below the `low` line on EVERY pass —
+    # on 2026-10-11 the disk went from 6 GB to 0.3 GB inside one hour while the guard waited.
+    if auto and level == "normal" and previous:
+        try:
+            since = time.time() - datetime.strptime(previous.get("at", ""), "%Y-%m-%dT%H:%M:%SZ") \
+                .replace(tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            since = float("inf")
+        if since < float(cfg.get("normal_every_minutes", 60)) * 60 and previous.get("acting"):
+            return {**previous, "not_due": True, "results": {"removed": 0, "skipped": 0, "failed": 0},
+                    "seconds": 0, "acting": False}
     try:
         holders = Holders.take()
         if not holders.known:
@@ -712,22 +828,30 @@ def run(argv: list[str]) -> dict:
         at = time.time()
         phases["lsof"] = round(time.monotonic() - started)
         mark = time.monotonic()
-        # Planning may take at most its own budget and never more than a third of what is left.
-        plan_cfg = {**cfg, "plan_budget_seconds": max(0.0, min(float(cfg.get("plan_budget_seconds", 300)), left() / 3))}
-        plan = build_plan(plan_cfg, level, holders, at, degraded)
-        phases["plan"] = round(time.monotonic() - mark)
-        mark = time.monotonic()
         reserve = float(cfg.get("run_reserve_seconds", 60))
-        if acting:
-            cap, taken = int(cfg.get("max_actions_per_class", 2000)), {}
-            for n, a in enumerate(plan):
+        plan_cap = float(cfg.get("plan_budget_seconds", 300))
+        cap = int(cfg.get("max_actions_per_class", 20000))
+        stopped = False
+        # ONE CLASS AT A TIME: plan it (at most half of what is left), act on it, then the next.
+        # Planning everything before acting let a slow plan and slow commands spend a whole
+        # run with nothing removed (2026-10-11).
+        for name, planner in planners(cfg, level, holders, at, degraded):
+            if stopped or left() < reserve:
+                if acting and not stopped:
+                    degraded.append({"source": "act", "reason": f"stopped at the run budget before {name}; "
+                                                                f"the rest is looked at next pass"})
+                stopped = True
+                continue
+            actions = planner(Budget(max(0.0, min(plan_cap, (left() - reserve) / 2)), degraded))
+            plan += actions
+            if not acting:
+                continue
+            for n, a in enumerate(actions[:cap]):
                 if left() < reserve:
-                    degraded.append({"source": "act", "reason": f"stopped at the run budget; {len(plan) - n} planned "
-                                                                f"action(s) are looked at again next pass"})
+                    degraded.append({"source": "act", "reason": f"stopped at the run budget in {name}; "
+                                                                f"{len(actions) - n} action(s) are looked at again next pass"})
+                    stopped = True
                     break
-                taken[a["class"]] = taken.get(a["class"], 0) + 1
-                if taken[a["class"]] > cap:
-                    continue
                 try:
                     row = act(a, holders)
                 except (OSError, subprocess.SubprocessError) as exc:
@@ -735,13 +859,16 @@ def run(argv: list[str]) -> dict:
                            "result": "failed", "reason": f"{type(exc).__name__}: {exc}"[:200]}
                 rows.append(row)
                 journal([row])               # as it happens: a run stopped from outside keeps its record
-            phases["act"] = round(time.monotonic() - mark)
+        phases["plan+act"] = round(time.monotonic() - mark)
+        mark = time.monotonic()
+        if acting:
             if left() > 2 * reserve:
                 # The git tier: merged/pushed branches, clean idle worktrees — the cleanup's own
                 # rules and re-checks, journalled by it.
                 try:
                     p = subprocess.run([sys.executable, str(ROOT / "tools" / "cleanup.py"),
-                                        "--apply" if apply else "--auto"], capture_output=True, text=True,
+                                        "--apply" if apply else "--auto", "--level", level],
+                                       capture_output=True, text=True,
                                        timeout=max(30, min(900, left() - reserve)), cwd=str(ROOT))
                     surveys["git-cleanup"] = (p.stdout.strip().splitlines() or [f"exit {p.returncode}"])[-1][:200]
                 except (OSError, subprocess.SubprocessError) as exc:
@@ -771,7 +898,7 @@ def run(argv: list[str]) -> dict:
                "freed_gb": round((free1 - free0) / GB, 2), "seconds": round(time.monotonic() - started),
                "budget_seconds": round(budget), "phases": phases,
                "planned": {cls: sum(1 for a in plan if a["class"] == cls) for cls in
-                           ("browser-clone", "temp", "trash", "cache-command", "build-output")},
+                           ("browser-clone", "temp", "trash", "cache-command", "cache-dir", "build-output")},
                "planned_gb": round(sum(a.get("bytes") or 0 for a in plan) / GB, 1),
                "results": {r: sum(1 for x in rows if x["result"] == r) for r in ("removed", "skipped", "failed")},
                "actions": [{k: a[k] for k in ("class", "target", "why") if k in a}
