@@ -52,6 +52,18 @@ def summary() -> int:
         print(f"  {h['severity']:8} {h['skill']}: {h['rule']} in {h['file']}" + (f" ({h['host']})" if h.get("host") else ""))
     for c in doc.get("changed") or []:
         print(f"changed: {c['skill']} — `project-observatory full harness --accept {c['key']}`")
+    codex = doc.get("codex") or {}
+    if codex.get("skills"):
+        print(f"codex: {codex['skills']} skills, {codex['listing_chars']} description characters")
+    usage = doc.get("usage") or {}
+    if usage.get("transcripts"):
+        print(f"skill use over {usage.get('days')} days of {usage.get('transcripts')} transcripts: "
+              f"{usage.get('unused_offered')} offered skills never invoked")
+    hooks = doc.get("hooks") or []
+    print(f"hooks: {len(hooks)} ({sum(1 for h in hooks if h['event'] == 'SessionStart')} at SessionStart, "
+          f"{sum(1 for h in hooks if h['event'] == 'PreToolUse')} before tool calls)")
+    for h in doc.get("hook_security") or []:
+        print(f"  {h['severity']:8} {h['source']} {h['event']} hook ({h['program']}): {h['rule']}")
     return 0
 
 

@@ -318,8 +318,8 @@
       "path": "collectors/scan_harness.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "166f25ac7bfe9e8432a4baec7fa3dfcc25a960f95fe4a03ac91af2ca3263ab23",
-      "bytes": 15047
+      "export_sha256": "c30563d24912b03290df893c4be3a4ed3edeed17682f3d7cd982d2c66ee610bd",
+      "bytes": 25657
     },
     {
       "path": "collectors/scan_heroku.py",
@@ -498,8 +498,8 @@
       "path": "dashboard/finding_types.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7101b4aa0d8a15e667de576ff37f32f7287b32c2a601cd0f760db231300ad767",
-      "bytes": 12295
+      "export_sha256": "920ae3edd6c009203af17cbc76e85b4012939ebd9941398e797ad36de60cef70",
+      "bytes": 12451
     },
     {
       "path": "dashboard/i18n.py",
@@ -519,8 +519,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "714146a32a892672eba33838ad36eec6a4040418b9cec327388b89b05ece258d",
-      "bytes": 157994
+      "export_sha256": "2490ff3785d6c7461e5914c766df761a6f84a344a4017856693ce5d3cdf820ab",
+      "bytes": 158924
     },
     {
       "path": "dashboard/machine_page.py",
@@ -2635,8 +2635,8 @@
       "path": "tests/test_harness.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b058ad915c0eb4a70007e72325ef2d9175e23d107b2186fb7072bdf1cc70875b",
-      "bytes": 10581
+      "export_sha256": "256299fbac3c3ffa57230b3020d6fc8258ecd2a7b0f21adad5c8166457503327",
+      "bytes": 17235
     },
     {
       "path": "tests/test_heroku.py",
@@ -2865,8 +2865,8 @@
       "path": "tests/test_maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a5a3640a2faaf2964c2c9bc1d20759a47511306b519aa406646ff1a7a98a43f5",
-      "bytes": 119632
+      "export_sha256": "03c226726a451accf7249c57e81ffe7ed45196ba652fd1060a757de668b9f3de",
+      "bytes": 119762
     },
     {
       "path": "tests/test_mcp_inventory.py",
@@ -3893,8 +3893,8 @@
     {
       "path": "tools/build_findings.py",
       "source_sha256": "03136ce1f366d180307f7f0c17ab41a3de82631103750f081a6d79758569e0b3",
-      "export_sha256": "85050036fcc0f2f98df308bd8ff65cbad0b0f378509937cdabb963087a10cc13",
-      "bytes": 269933,
+      "export_sha256": "9d29f7b3cde89475dfaf0c0812f8eb30a682f3d2761cc4e7bb4773a0170914f3",
+      "bytes": 273466,
       "python_comments_removed": 996,
       "python_docstrings_removed": 28,
       "tool_descriptions_retained": 0,
@@ -4093,8 +4093,8 @@
       "path": "tools/harness.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "136f785612c6766d21f903b6de560bb3f647d012c2607f54d32e582896451a84",
-      "bytes": 3772
+      "export_sha256": "0588d1b266cc690b8f53848f861fc9897f3d719d40d2d883e1dd04ec3845f466",
+      "bytes": 4555
     },
     {
       "path": "tools/heroku_findings.py",
