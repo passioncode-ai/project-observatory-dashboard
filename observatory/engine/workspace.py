@@ -627,6 +627,8 @@ def machine_parser(name: str) -> argparse.ArgumentParser:
     ap.add_argument("--apply", action="store_true", help="remove the auto tier")
     ap.add_argument("--include", choices=["manual"],
                     help="with --apply, also archive and remove the manual tier")
+    ap.add_argument("--level", choices=["normal", "low", "critical"],
+                    help="the auto tier's thresholds at this disk pressure, as the disk guard runs it")
     return ap
 
 
@@ -858,7 +860,8 @@ def machine_command(name: str, argv: list[str]) -> int:
     import scan_git_hygiene
     import cleanup
     scan_git_hygiene.main(["scan_git_hygiene.py", str(paths.SCRATCH / "git-hygiene.json")])
-    args = ["cleanup.py"] + (["--apply"] if a.apply else []) + (["manual"] if a.include == "manual" else [])
+    args = (["cleanup.py"] + (["--apply"] if a.apply else []) + (["manual"] if a.include == "manual" else [])
+            + (["--level", a.level] if a.level else []))
     return cleanup.main(args)
 
 
