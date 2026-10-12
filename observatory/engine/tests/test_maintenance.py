@@ -1196,6 +1196,36 @@ class Guard(Base):
         self.assertEqual((report["result"], report["level"], report["freed_gb"]), ("ran", "low", 3.2))
         self.assertEqual(state["guard"]["free_gb_after"], 21.5)
 
+    def test_the_record_says_what_happened(self):
+        self.set_cleanup(True)
+
+        def answering(doc, code=0):
+            return lambda argv, **kw: subprocess.CompletedProcess(argv, code, json.dumps(doc) + "\n", "")
+        self.assertEqual(M.step_guard(self.home, {}, AT, runner=answering({"not_due": True, "free_gb_before": 80,
+                                                                              "level": "normal"}))["result"], "not-due")
+        self.assertEqual(M.step_guard(self.home, {}, AT, runner=answering({"busy": True}))["result"], "busy")
+        ran = M.step_guard(self.home, {}, AT, runner=answering({"level": "low", "results": {"removed": 3, "failed": 1}}))
+        self.assertEqual(ran["result"], "ran", "one failed action is a count, not a failed pass")
+        self.assertEqual(M.step_guard(self.home, {}, AT, runner=answering({"error": "boom"}, 2))["result"], "failed")
+
+    def test_a_failed_snapshot_backs_off_an_hour(self):
+        state = {"snapshot_failure": {"at": M.iso(AT - datetime.timedelta(minutes=15))}}
+        self.assertEqual(M.step_snapshot(self.home, state, AT)["result"], "backing-off")
+
+    def test_windows_does_not_kill_a_pass_at_its_interval(self):
+        self.assertGreater(M.PASS_TIME_LIMIT, M.GUARD_TIMEOUT + 900, "the guard, a check and a snapshot fit")
+
+    def test_a_deferred_schedule_reload_happens_after_the_pass(self):
+        pending = self.home / "store" / "maintenance-reload-pending"
+        pending.parent.mkdir(parents=True, exist_ok=True)
+        started = []
+        self.assertIsNone(M._reload_after_pass(self.home, spawn=lambda *a, **k: started.append(a)))
+        pending.write_text("x")
+        with patch.object(M.sys, "platform", "darwin"):
+            got = M._reload_after_pass(self.home, spawn=lambda *a, **k: started.append(a))
+        self.assertEqual(got, "after this pass")
+        self.assertIn("ensure", started[0][0][2])
+
     def test_a_guard_that_hangs_is_stopped_and_named(self):
         self.set_cleanup(True)
 
@@ -1332,7 +1362,7 @@ class Schedule(Base):
             self.assertFalse(sched.install()["changed"], "a caller's PATH does not flip the job")
         self.assertEqual(plistlib.loads(sched.plist.read_bytes())["EnvironmentVariables"]["PATH"], first)
 
-    def test_the_systemd_timer_is_hourly_persistent_and_quoted(self):
+    def test_the_systemd_timer_runs_every_quarter_hour_persistent_and_quoted(self):
         calls = []
 
         def run(argv, **kw):

@@ -58,7 +58,7 @@ reported, never stopped.
 
 | REQ | Requirement | Evidence |
 |---|---|---|
-| R1 | Runs by itself, hourly, independent of the tick | `maintenance.step_guard`; `tests/test_maintenance.py` Guard `test_it_runs_before_the_update_and_a_crash_never_stops_the_pass`, `test_on_runs_the_auto_tier_and_records_the_disk` |
+| R1 | Runs by itself, independent of the tick (every 15-minute pass below `low`, hourly at `normal`, since the second iteration) | `maintenance.step_guard`; `tests/test_maintenance.py` Guard `test_it_runs_before_the_update_and_a_crash_never_stops_the_pass`, `test_on_runs_the_auto_tier_and_records_the_disk` |
 | R2 | Repeatable by hand | `full disk-guard`; Surfaces `test_the_command_line_takes_the_guard_and_refuses_an_unknown_level` |
 | R3 | Never breaks a live session | Holding (both cases), Acting `test_a_path_that_became_held_after_the_plan_is_skipped`, Run `test_no_listing_of_open_files_means_no_path_is_removed`, Temp `test_old_unheld_entries_go_fresh_held_and_kept_ones_stay` (held file, live socket), Builds `test_idle_checkouts_lose_ignored_output_and_busy_or_recent_ones_keep_it`, `test_git_at_work_holds_the_checkout`, Acting `test_a_cache_command_waits_for_its_tool_and_never_starts_a_daemon` |
 | R4 | Forgotten worktrees and branches | the cleanup's auto tier, run by the guard; existing `tests/test_machine.py` Estate |
@@ -125,8 +125,8 @@ Run 2 by class, by the disk's count: temporary entries ≈ 3.5 GB, `pnpm store p
 ## Open work
 
 - OBS-66: the page's `du` sizes overstate clone-heavy places.
-- The guard does not yet run more often than hourly when pressure is `critical`; a
-  cheaper free-space check between passes is the obvious next step if hourly is not enough.
+- ~~The guard does not yet run more often than hourly when pressure is `critical`~~ — done: the pass runs every
+  15 minutes and the guard acts on every pass below `low`.
 - Swap is the largest single consumer when many agent sessions and simulators run; the
   guard reports it and never stops a process (operator decision). Reducing it is the
   operator's call.
@@ -146,8 +146,37 @@ minus `GUARD_MARGIN`), act first and refresh surveys last within what is left, t
 report in a `finally`. `tests/test_disk_guard.py` RunBudget — each part watched failing against a planted
 defect (no act budget, journal at the end, no `finally`, surveys ignoring the budget).
 
+## Second iteration (2026-10-12): a review, a redesign, the fixes
+
+The operator asked for bug-hunting in waves: search, research and architecture, implementation, validation.
+The design that came out of it is `docs/design/DISK-GUARD.md` (promises, what broke each one, the rule now).
+Branch `agent/disk-guard-v2-fixes`.
+
+| Found | Rule now | Guard |
+|---|---|---|
+| "Held" meant open files and working directories only; an executable, a memory map, a root directory or a path on a command line did not count | `holders.py`: one taker for both cleanups — `lsof` (escaped names decoded), `/proc` on Linux, process arguments; Windows a rename probe with rollback; unknown means everything is held | HoldersModule, SecondIteration |
+| One listing per run, minutes old by the last class | a fresh listing per class, and every removal re-checks held and unchanged-since-plan (`inspect` with the plan's cutoff) | SecondIteration |
+| The tick's cleanup and the guard could act at once | `cleanup_lock.held()` around both; the guard's child inherits the hold; a held lock is `busy` | SecondIteration, GitTierSafety |
+| A privacy-guarded folder could be walked by the cache and temp classes; another account's file could be removed in a shared temp | `protected_place` checked before opening; `osprivacy.owns` per entry | SecondIteration |
+| A tracked directory could be treated as build output under `--force` patterns | `_force_tracked` refuses it | SecondIteration |
+| The git tier removed a "clean" worktree with an ignored `.env.local` | `ignored_keepers` skips it | GitTierSafety |
+| Pressure overrode a person's own threshold; a workspace copy of old defaults pinned them | `_own_auto`; values equal to shipped or historical defaults (`defaults/cleanup-history.json`) count as unset | GitTierPressure, SecondIteration |
+| A run stopped at its deadline lost its undo record | journal per action, `--deadline-seconds`, `--json` | GitTierSafety |
+| The pass recorded `ran` with an earlier run's numbers when the guard was not due; one failed command made a run `failed` | outcomes `ran`/`not-due`/`busy`/`failed`; cadence from the previous start, 450 s tolerance | `tests/test_maintenance.py` Guard |
+| A failing backup stopped the tick and server on every pass | `SNAPSHOT_RETRY` 1 h | Guard |
+| Windows killed the 15-minute pass at 14 minutes | `PASS_TIME_LIMIT` 3540 s | Guard |
+| A schedule rewritten by an update waited for a session to reload it | `_reload_after_pass` after the pass exits (macOS) | Guard |
+| `uv cache clean` / `brew --prune=all` every pass wiped what the next build re-downloads | `every_hours` 24 for those, 6 for other commands | Cadence |
+| The Machine page and `cleanup.done` counted the newest 200 journal rows | the guard's run summaries over the window | Surfaces |
+| pytest's run directories sat under a base as fresh as its newest run, so the temporary root never reached them (2.5 GB at 1.2 GB free, freed by hand after a peer session reported it) | root `{tmpdir}/pytest-of-{user}` with `hours` 24 / 6 / 2 | Temp `test_a_root_with_its_own_hours_sweeps_old_runs_under_a_fresh_base` |
+| `test_machine.py` Estate injected busy state through `working_dirs`, which cleanup no longer reads | the test patches `holders.Holders.take` | Estate |
+
+Each guard was watched failing against a planted defect (14 planted, 14 caught). Not done, named in the design:
+an update replacing the engine while a pass runs, and APFS case-insensitive path comparison.
+
 ## Next task
 
-Release the budget fix with 0.24.0, update the maintainer's installation, and confirm in
-`store/maintenance.json` that a scheduled pass records `guard` with `result: ran` and a report whose
+Release both iterations with 0.24.0, update the maintainer's installation, confirm the job runs every 15
+minutes (`launchctl print` shows `run interval = 900 seconds`), and confirm in `store/maintenance.json` that a
+scheduled pass records `guard` as `ran` (or `not-due`/`busy`, never an earlier run's numbers) and a report whose
 `seconds` stays under its `budget_seconds`.

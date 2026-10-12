@@ -1,7 +1,7 @@
 """Updates that arrive by themselves, and a daily backup that leaves the workspace.
 
 The decisions behind it are in docs/runs/2026-10-05-auto-update (D1–D8). One job per
-workspace runs `tools/maintain.py run` every hour — launchd on macOS, a systemd user
+workspace runs `tools/maintain.py run` every 15 minutes — launchd on macOS, a systemd user
 timer on Linux — and each pass does only what is due:
 
 1. a backup passphrase exists and is kept outside the workspace (backup_vault.SecretStore);
@@ -19,7 +19,7 @@ timer on Linux — and each pass does only what is due:
 4. once a day: a full encrypted snapshot of the workspace (settings, registry, vault,
    store), with this workspace's tick and server stopped for the copy.
 
-The scheduler runs the pass hourly and at load; launchd passes `--first-check-delay 90`
+The scheduler runs the pass every 15 minutes and at load; launchd passes `--first-check-delay 90`
 so the first check waits 90 seconds after the job starts (a login, a boot), and the
 systemd timer starts 90 seconds after the user manager does (lifecycle LC-16).
 
@@ -150,6 +150,8 @@ def reconcile_in_flight(base: Path, state: dict) -> dict | None:
 
 
 SNAPSHOT_EVERY = datetime.timedelta(hours=24)
+#: How long a failed snapshot waits before it is tried again (it stops the tick and server).
+SNAPSHOT_RETRY = datetime.timedelta(hours=1)
 #: Every 15 minutes (2026-10-11; it was an hour). Everything else in a pass is gated by its own
 #: cadence (the update check every 6 hours, the backup daily), so a pass that is not due for
 #: them is quick; the disk guard is what needs the frequency — below the `low` line it runs
@@ -709,10 +711,18 @@ def step_snapshot(base: Path, state: dict, at: datetime.datetime, services=None,
     """A full encrypted snapshot once a day. An update's before-upgrade snapshot counts."""
     if not due(state, "snapshot", SNAPSHOT_EVERY, at):
         return {"result": "not-due"}
+    # A FAILED snapshot is retried after SNAPSHOT_RETRY, not on the next pass: every attempt
+    # stops the tick and the server, and with the pass every 15 minutes a lasting failure
+    # took them down four times an hour (review 2026-10-12).
+    failed_at = parse_iso((state.get("snapshot_failure") or {}).get("at"))
+    taken_at = parse_iso((state.get("snapshot") or {}).get("at"))
+    if failed_at and (taken_at is None or failed_at > taken_at) and at - failed_at < SNAPSHOT_RETRY:
+        return {"result": "backing-off", "detail": "the last attempt failed; the next one is "
+                                                   f"after {iso(failed_at + SNAPSHOT_RETRY)}"}
     import engine_update
     if _tick_busy(base):
         # Booting a running tick out would interrupt it every day (review F10); the next
-        # hourly pass tries again.
+        # pass tries again.
         return {"result": "deferred", "detail": "a tick or another workspace operation is running"}
     # A person's `full update` stops and starts the same jobs (audit A12). A check was not
     # enough: an update started while the snapshot had the jobs down found nothing to
@@ -808,6 +818,10 @@ GUARD_TIMEOUT = 600
 #: its report and journal are written before the job would kill it (2026-10-11: the first
 #: scheduled pass on 0.23.0 killed it at 1200 s and recorded only "exit 124").
 GUARD_MARGIN = 120
+#: The longest a pass may run before Task Scheduler ends it. NOT the interval: tied to it, the
+#: 15-minute pass was killed at 14 minutes, mid-backup, with the tick and server stopped
+#: (review 2026-10-12). A pass that is still running is never started twice (IgnoreNew).
+PASS_TIME_LIMIT = 3540
 
 
 def step_guard(base: Path, state: dict, at: datetime.datetime, runner=None) -> dict:
@@ -817,7 +831,7 @@ def step_guard(base: Path, state: dict, at: datetime.datetime, runner=None) -> d
     Why here and not in the tick: on 2026-10-11 the tick's `machine` and `cleanup` steps
     were "not started" hour after hour, because a loaded machine spent the tick's window
     on slower collectors first; the disk fell to 1.7 GB with the self-cleaning idle for
-    a day. This pass runs every hour whatever the tick does. Off unless the operator
+    a day. This pass runs every 15 minutes whatever the tick does. Off unless the operator
     turned on `features.auto_cleanup` — the same switch the cleanup's auto tier obeys."""
     if not configuration_enabled(base, "auto_cleanup"):
         state["guard"] = {"at": iso(at), "result": "off"}
@@ -841,9 +855,22 @@ def step_guard(base: Path, state: dict, at: datetime.datetime, runner=None) -> d
         doc = json.loads(line) if line.startswith("{") else {}
     except ValueError:
         doc = {}
-    result = {"result": "ran" if code == 0 else "failed", "exit": code,
-              **{k: doc[k] for k in ("level", "free_gb_before", "free_gb_after", "freed_gb", "results") if k in doc},
-              **({"detail": tail[:300]} if code and tail else {})}
+    # WHAT HAPPENED, said as such (review 2026-10-12): a run that was not due used to be
+    # recorded as "ran" with the previous run's numbers, and one failed cache command made a
+    # whole good run read "failed". Now: failed only when the guard itself did not finish.
+    if code != 0 or doc.get("error") or not doc:
+        outcome = "failed"
+    elif doc.get("busy"):
+        outcome = "busy"
+    elif doc.get("not_due"):
+        outcome = "not-due"
+    else:
+        outcome = "ran"
+    result = {"result": outcome, "exit": code,
+              **{k: doc[k] for k in ("level", "free_gb_before", "free_gb_after", "freed_gb", "results", "git")
+                 if k in doc and outcome == "ran"},
+              **({"free_gb": doc.get("free_gb_before"), "level": doc.get("level")} if outcome in ("not-due", "busy") else {}),
+              **({"detail": (doc.get("error") or tail or line)[:300]} if outcome == "failed" else {})}
     state["guard"] = {"at": iso(at), **result}
     return result
 
@@ -922,7 +949,31 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
         state["pass"] = {"at": iso(at)}
         write_state(base, state)
         _rotate_logs(base)
+        report["schedule_reload"] = _reload_after_pass(base)
         return report
+
+
+def _reload_after_pass(base: Path, spawn=None) -> str | None:
+    """Load a schedule an update wrote but could not reload from inside the pass that ran it.
+
+    The update's `maintain ensure` runs inside this pass, so it writes the new plist and
+    leaves `maintenance-reload-pending`; before 2026-10-12 only the plugin hook or a person
+    read that file, and an install without them kept the old hourly schedule. A detached
+    `maintain ensure`, started now and waiting until this pass has exited, reloads it."""
+    pending = base / "store" / "maintenance-reload-pending"
+    if not pending.exists() or sys.platform != "darwin":
+        return None
+    env = {k: v for k, v in os.environ.items() if k != IN_PASS_ENV}
+    env["OBSERVATORY_HOME"] = str(base)
+    script = str(Path(__file__).resolve().parent / "tools" / "maintain.py")
+    argv = ["/bin/sh", "-c", 'sleep 45; exec "$0" "$1" ensure', engine_python(), script]
+    try:
+        (spawn or subprocess.Popen)(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, cwd=tempfile.gettempdir(),
+                                    **osproc.new_group(detached=True))
+    except OSError as exc:
+        return f"not started: {type(exc).__name__}"
+    return "after this pass"
 
 
 def run_app_step(base: Path, *, at: datetime.datetime | None = None, app=None) -> dict:
@@ -930,7 +981,7 @@ def run_app_step(base: Path, *, at: datetime.datetime | None = None, app=None) -
 
     The Mac app starts this from a detached helper once it has quit — its *Restart to
     update*, a quit, or a long idle — so a verified bundle that waited with
-    `waiting-for-quit` is swapped in now instead of at the next hourly pass. Nothing else
+    `waiting-for-quit` is swapped in now instead of at the next pass. Nothing else
     a pass does (the engine update, the backup, the passphrase) runs here."""
     at = at or now()
     config.validate_workspace(base, required=True)
@@ -979,7 +1030,7 @@ def _instance_digest(base: Path) -> str:
 
 
 class LaunchdSchedule:
-    """org.project-observatory.<sha16>.maintain: hourly, at login too, never a managed job."""
+    """org.project-observatory.<sha16>.maintain: every 15 minutes, at login too, never a managed job."""
 
     kind = "launchd"
 
@@ -1020,7 +1071,7 @@ class LaunchdSchedule:
             "StandardErrorPath": str(logs / "maintain.err"),
             # Not "Background" with LowPriorityIO: on a loaded machine that throttling
             # stretched a 2-second `full update --check` past its 600-second limit (seen
-            # live, 2026-10-05). The pass is short and hourly; a nice value is enough.
+            # live, 2026-10-05). A nice value is enough.
             "ProcessType": "Standard",
             "Nice": 10,
             "EnvironmentVariables": env,
@@ -1077,7 +1128,7 @@ class LaunchdSchedule:
 
 
 class SystemdSchedule:
-    """A systemd user timer: hourly, 90 seconds after the user manager starts (LC-16)."""
+    """A systemd user timer: every 15 minutes, 90 seconds after the user manager starts (LC-16)."""
 
     kind = "systemd"
 
@@ -1118,11 +1169,11 @@ class SystemdSchedule:
     def timer_text(self) -> str:
         return "\n".join([
             "[Unit]",
-            f"Description=Run Project Observatory maintenance hourly for {self.base}",
+            f"Description=Run Project Observatory maintenance every 15 minutes for {self.base}",
             "",
             "[Timer]",
             # The user manager starts at login: the first pass, and so the first check,
-            # comes 90 seconds after it (LC-16), then hourly.
+            # comes 90 seconds after it (LC-16), then every 15 minutes.
             f"OnStartupSec={FIRST_CHECK_DELAY}s",
             f"OnUnitActiveSec={INTERVAL_SECONDS // 60}min",
             "Persistent=true",
@@ -1180,7 +1231,7 @@ class SystemdSchedule:
 
 
 class TaskSchedulerSchedule:
-    """A per-user Windows task: hourly, and 90 seconds after logon (LC-16), never a managed job;
+    """A per-user Windows task: every 15 minutes, and 90 seconds after logon (LC-16), never a managed job;
     the same pass the launchd agent and the systemd timer run, through `osschedule`."""
 
     kind = "task-scheduler"
@@ -1197,7 +1248,7 @@ class TaskSchedulerSchedule:
             interval_seconds=INTERVAL_SECONDS, at_login=True, first_delay_seconds=FIRST_CHECK_DELAY,
             # The pass is short; an update it starts runs in a process of its own, which ending
             # the task does not stop.
-            time_limit_seconds=INTERVAL_SECONDS - 60)
+            time_limit_seconds=PASS_TIME_LIMIT)
         self.job = osschedule.TaskSchedulerJob(job, **({"runner": runner} if runner else {}))
 
     def installed(self) -> bool:
@@ -1317,7 +1368,7 @@ def status(base: Path, *, schedule=None) -> dict:
              version=update.get("to"), step=step)
     if update.get("result") == "deferred":
         warn("deferred", f"release {update.get('to')} is ready and waits for a moment with no client "
-                         f"({update.get('detail')}); it is tried again the next hour",
+                         f"({update.get('detail')}); it is tried again on the next pass",
              version=update.get("to"), detail=str(update.get("detail") or ""))
     if update.get("result") == "needs-person":
         warn("needs-person", "the last automatic update needs a person: run `project-observatory full update`")
@@ -1331,7 +1382,7 @@ def status(base: Path, *, schedule=None) -> dict:
     if failure and (parse_iso(failure.get("at")) or now()) >= (parse_iso((state.get("snapshot") or {}).get("at"))
                                                               or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)):
         detail = str(failure.get("detail", ""))[:160]
-        warn("snapshot-failed", f"the last daily backup failed: {detail}; it is tried again the next hour",
+        warn("snapshot-failed", f"the last daily backup failed: {detail}; it is tried again on the next pass",
              detail=detail)
     phrase = state.get("passphrase") or {}
     if phrase.get("warning") or phrase.get("error"):

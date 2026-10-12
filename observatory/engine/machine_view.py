@@ -47,6 +47,34 @@ def journal(days: int = 7, limit: int = 200) -> list[dict]:
     return rows
 
 
+def guard_summaries(days: int = 7) -> list[dict]:
+    """The disk guard's one-row-per-run summaries (store/logs/disk-guard.jsonl), newest first.
+
+    The guard writes thousands of action rows a run; its summaries are what a view counts.
+    Reading the cleanup journal's newest 200 rows instead undercounted the week and pushed
+    the git tier's undo rows out of sight within one pass (review 2026-10-12)."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    try:
+        lines = (paths.STATE / "logs" / "disk-guard.jsonl").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out = []
+    for line in reversed(lines):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if row.get("kind") != "summary":
+            continue
+        try:
+            if datetime.strptime(row["at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) < since:
+                break
+        except (ValueError, KeyError):
+            continue
+        out.append(row)
+    return out
+
+
 def summary(explain_pid: int | None = None) -> dict:
     degraded = []
     machine, d1 = _load("machine.json", "machine")
@@ -77,7 +105,14 @@ def summary(explain_pid: int | None = None) -> dict:
         degraded += hygiene.get("degraded") or []
     if plan:
         out["cleanup"] = {"plannedAt": plan.get("planned_at"), "autoEnabled": plan.get("auto_enabled"),
-                          "counts": plan.get("counts"), "actions": plan.get("actions"), "journal": journal()}
+                          "counts": plan.get("counts"), "actions": plan.get("actions"), "journal": journal(),
+                          "level": plan.get("level", "normal")}
+    runs = guard_summaries()
+    if runs:
+        out.setdefault("cleanup", {"journal": journal()})
+        out["cleanup"]["guardRuns"] = runs[:50]
+        out["cleanup"]["guardTotals"] = {"runs": len(runs), "removed": sum(r.get("removed") or 0 for r in runs),
+                                         "freedMb": sum(max(0, r.get("freed_mb") or 0) for r in runs)}
     if guard:
         out["guard"] = {"at": guard.get("at"), "level": guard.get("level"), "acting": guard.get("acting"),
                         "autoEnabled": guard.get("auto_enabled"), "freeGbBefore": guard.get("free_gb_before"),

@@ -161,6 +161,27 @@ class Temp(Base):
         plan = self.g.plan_temp(cfg, "normal", self.free(), time.time())
         self.assertEqual([Path(a["target"]).name for a in plan], ["old-session"])
 
+    def test_a_root_with_its_own_hours_sweeps_old_runs_under_a_fresh_base(self):
+        """pytest's base is as fresh as its newest run, so as one entry of the temporary root
+        it never went; as its own root, each run goes by its own age, in hours."""
+        base = self.t1 / "pytest-of-someone"
+        for name, hours in (("pytest-1", 9), ("pytest-2", 3), ("pytest-3", 0)):
+            (base / name).mkdir(parents=True)
+            (base / name / "out").write_text("x" * 10)
+            age(base / name, hours / 24)
+        cfg = self.cfg(temp_roots=[{"path": str(self.t1), "depth": 1},
+                                   {"path": str(base), "depth": 1,
+                                    "hours": {"normal": 24, "low": 6, "critical": 2}}])
+        names = lambda level: sorted(Path(a["target"]).name
+                                     for a in self.g.plan_temp(cfg, level, self.free(), time.time()))
+        self.assertEqual(names("normal"), [])
+        self.assertEqual(names("low"), ["pytest-1"])
+        self.assertEqual(names("critical"), ["pytest-1", "pytest-2"])
+
+    def test_the_user_placeholder_is_the_login(self):
+        import getpass
+        self.assertEqual(self.g.expand("/x/pytest-of-{user}"), f"/x/pytest-of-{getpass.getuser()}")
+
     def test_a_root_with_a_level_is_swept_only_at_that_pressure(self):
         derived = self.base / "derived"
         (derived / "App-abc").mkdir(parents=True)
@@ -434,7 +455,7 @@ class Run(Base):
             doc = self.g.run(["--apply"])
         self.assertTrue((self.t1 / "old").exists())
         self.assertEqual(doc["planned"]["temp"], 0)
-        self.assertEqual(doc["degraded"][0]["source"], "lsof")
+        self.assertEqual(doc["degraded"][0]["source"], "holders")
 
     def test_apply_journals_each_action_with_the_guard_mode(self):
         (self.t1 / "old").mkdir()
@@ -446,7 +467,9 @@ class Run(Base):
                 patch.object(self.g.subprocess, "run", side_effect=OSError):
             doc = self.g.run(["--apply"])
         import paths
-        rows = [json.loads(l) for l in (paths.STATE / "logs" / "cleanup.jsonl").read_text().splitlines()]
+        rows = [json.loads(l) for l in (paths.STATE / "logs" / "disk-guard.jsonl").read_text().splitlines()]
+        self.assertEqual(rows[-1]["kind"], "summary", "every run ends with its summary row")
+        rows = [r for r in rows if r.get("kind") != "summary"]
         self.assertEqual(doc["results"]["removed"], 1)
         self.assertEqual(rows[-1]["mode"], "guard")
         self.assertIn("freed_mb", rows[-1])
@@ -482,7 +505,7 @@ class RunBudget(Base):
         self.assertTrue(all((self.t1 / n).exists() for n in "abc"))
         self.assertIn("act", [d["source"] for d in doc["degraded"]])
         self.assertEqual(ran, [], "no survey is refreshed on a spent budget")
-        self.assertEqual(doc["surveys"]["git-cleanup"], "skipped: the run budget is spent")
+        self.assertEqual(doc["surveys"]["git-cleanup"], {"result": "skipped", "reason": "the run budget is spent"})
         import paths
         self.assertTrue((paths.SCRATCH / "disk-guard.json").exists())
 
@@ -503,7 +526,8 @@ class RunBudget(Base):
             stack.enter_context(patch.object(self.g, "refresh", return_value="fresh"))
             with self.assertRaises(KeyboardInterrupt):
                 self.g.run(["--apply", "--budget", "600"])
-        rows = [json.loads(l) for l in (paths.STATE / "logs" / "cleanup.jsonl").read_text().splitlines()]
+        rows = [json.loads(l) for l in (paths.STATE / "logs" / "disk-guard.jsonl").read_text().splitlines()]
+        rows = [r for r in rows if r.get("kind") != "summary"]
         self.assertEqual(len(rows), 1, "the first removal is on the record before the second began")
         self.assertEqual(rows[0]["result"], "removed")
         report = json.loads((paths.SCRATCH / "disk-guard.json").read_text())
@@ -576,12 +600,15 @@ class GitTierPressure(Base):
         import importlib, cleanup, paths
         own = paths.config_file("cleanup.json")
         own.parent.mkdir(parents=True, exist_ok=True)
-        own.write_text(json.dumps({"auto": {"clean_worktree_idle_days": 5}, "manual": {}}))
+        own.write_text(json.dumps({"auto": {"clean_worktree_idle_days": 30, "merged_branch_idle_days": 7},
+                                   "manual": {}}))
         cleanup = importlib.reload(cleanup)
         cfg = cleanup.load_config()
-        self.assertEqual(cfg["auto"]["clean_worktree_idle_days"], 5, "the workspace's own value wins")
+        self.assertEqual(cfg["auto"]["clean_worktree_idle_days"], 30, "the workspace's own value wins")
         self.assertIn("critical", cfg.get("pressure") or {}, "a key added by a release reaches it")
-        self.assertEqual(cleanup.under_pressure(cfg, "critical")["auto"]["clean_worktree_idle_days"], 1)
+        lowered = cleanup.under_pressure(cfg, "critical")["auto"]
+        self.assertEqual(lowered["clean_worktree_idle_days"], 30, "a person's own threshold is not lowered")
+        self.assertEqual(lowered["merged_branch_idle_days"], 1, "a copied default is")
 
     def test_the_guard_hands_its_pressure_to_the_git_tier(self):
         seen = []
@@ -596,11 +623,174 @@ class GitTierPressure(Base):
                 patch.object(self.g.subprocess, "run", side_effect=fake_run):
             self.g.run(["--apply", "--level", "critical"])
         calls = [a for a in seen if a and str(a[1]).endswith("cleanup.py")]
-        self.assertTrue(calls and calls[0][-2:] == ["--level", "critical"], seen)
+        self.assertTrue(calls, seen)
+        argv = calls[0]
+        self.assertEqual(argv[argv.index("--level") + 1], "critical")
+        self.assertIn("--deadline-seconds", argv, "the git tier stops itself inside the guard's time")
 
 
 def pathlib_name(p) -> str:
     return Path(str(p)).name
+
+
+class SecondIteration(Base):
+    """The rules the three-tier review of 2026-10-12 set (docs/design/DISK-GUARD.md)."""
+
+    def test_a_target_touched_after_the_plan_is_kept(self):
+        old = self.t1 / "old"
+        old.mkdir()
+        (old / "f").write_text("x")
+        age(old, 9)
+        plan = self.g.plan_temp(self.cfg(), "normal", self.free(), time.time())
+        self.assertEqual(len(plan), 1)
+        (old / "written-since").write_text("now")
+        rec = self.g.act(plan[0], self.free())
+        self.assertEqual(rec["result"], "skipped")
+        self.assertIn("changed since the plan", rec["reason"])
+        self.assertTrue(old.exists())
+
+    def test_a_tree_holding_another_accounts_file_is_not_removable(self):
+        old = self.t1 / "mixed"
+        (old / "sub").mkdir(parents=True)
+        (old / "sub" / "root-owned").write_text("x")
+        age(old, 9)
+        real = self.g.osprivacy.owns
+        with patch.object(self.g.osprivacy, "owns",
+                          side_effect=lambda st: False if st.st_size == 1 and not stat_is_dir(st) else real(st)):
+            r = self.g.inspect(str(old))
+        self.assertFalse(r["complete"])
+        self.assertIn("another account", r["reason"])
+
+    def test_a_privacy_guarded_root_is_not_opened(self):
+        guarded = self.base / "Documents" / "caches"
+        (guarded / "tool").mkdir(parents=True)
+        age(guarded, 9)
+        degraded = []
+        cfg = self.cfg(cache_roots=[str(guarded)], cache_keep=[])
+        with patch("scan_machine.protected_place", return_value=True):
+            plan = self.g.plan_cache_dirs(cfg, "critical", self.free(), time.time(), None, degraded)
+        self.assertEqual(plan, [])
+        self.assertEqual(degraded[0]["source"], "privacy")
+
+    def test_a_held_lock_makes_the_run_a_busy_skip(self):
+        import cleanup_lock
+        (self.t1 / "old").mkdir()
+        age(self.t1 / "old", 9)
+        with cleanup_lock.held() as mine:
+            self.assertTrue(mine)
+            with patch.object(self.g, "load_config", return_value=self.cfg()), \
+                    patch.dict(os.environ, {"OBSERVATORY_CLEANUP_LOCK_HELD": ""}):
+                child = subprocess.run([sys.executable, str(ROOT / "tools" / "disk_guard.py"), "--apply", "--json"],
+                                       capture_output=True, text=True, timeout=120,
+                                       env={**os.environ, "OBSERVATORY_CLEANUP_LOCK_HELD": ""})
+        doc = json.loads(child.stdout.strip().splitlines()[-1])
+        self.assertTrue(doc["busy"])
+        self.assertTrue((self.t1 / "old").exists())
+
+    def test_cadence_is_measured_from_the_previous_start(self):
+        import paths
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        started = time.time() - 55 * 60                       # started 55 min ago, ended 50 min ago
+        stamp = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))  # noqa: E731
+        (paths.SCRATCH / "disk-guard.json").write_text(json.dumps(
+            {"started_at": stamp(started), "at": stamp(started + 300), "acting": True}))
+        settings = self.home / "config" / "settings.json"
+        doc = json.loads(settings.read_text())
+        doc.setdefault("features", {})["auto_cleanup"] = True
+        settings.write_text(json.dumps(doc))
+        with patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "free_bytes", return_value=100 * self.g.GB), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g.subprocess, "run", side_effect=OSError):
+            out = self.g.run(["--auto"])
+        self.assertFalse(out.get("not_due"), "55 minutes after the last START is due (tolerance 7.5 min)")
+
+    def test_a_whole_cache_clean_runs_at_most_once_a_day(self):
+        cfg = self.cfg(commands=[{"argv": ["python3", "-c", "pass"], "level": "low", "every_hours": 24}])
+        now_t = time.time()
+        recent = {"python3 -c pass": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now_t - 3600))}
+        self.assertEqual(self.g.plan_commands(cfg, "low", recent, now_t), [])
+        day_old = {"python3 -c pass": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now_t - 25 * 3600))}
+        self.assertEqual(len(self.g.plan_commands(cfg, "low", day_old, now_t)), 1)
+
+    def test_an_unreadable_process_table_skips_commands(self):
+        a = {"class": "cache-command", "target": "tool prune", "argv": [sys.executable, "-c", "pass"],
+             "busy_if": ["tool"], "needs": []}
+        with patch.object(self.g, "running", return_value=None):
+            rec = self.g.act(a, self.free())
+        self.assertEqual(rec["result"], "skipped")
+        self.assertIn("could not be read", rec["reason"])
+
+    def test_a_failed_removal_after_the_rename_puts_the_folder_back(self):
+        (self.t1 / "keep").mkdir()
+        (self.t1 / "keep" / "f").write_text("x")
+        with patch.object(self.g, "_remove_now", side_effect=OSError(5, "I/O error")):
+            with self.assertRaises(OSError):
+                self.g.remove(str(self.t1 / "keep"), probe=True)
+        self.assertTrue((self.t1 / "keep" / "f").exists())
+        self.assertFalse(list(self.t1.glob("*.observatory-removing")))
+
+
+class HoldersModule(unittest.TestCase):
+    def test_lsof_escapes_are_decoded(self):
+        import holders
+        self.assertEqual(holders._decode_escapes("/tmp/\\xd1\\x84.bin".replace("\\\\", "\\")), "/tmp/ф.bin")
+
+    def test_a_path_named_on_a_command_line_is_held(self):
+        import holders
+        h = holders.Holders(["/srv/cache/_npx/abc/node_modules/.bin/server"], "lsof")
+        self.assertTrue(h.busy("/srv/cache/_npx/abc"))
+        self.assertFalse(h.busy("/srv/cache/_npx/other"))
+        self.assertFalse(h.busy("/srv/cache/_npx/ab"), "a sibling with a shared prefix is free")
+
+
+class GitTierSafety(Base):
+    def test_a_clean_worktree_with_a_keeper_ignored_file_is_skipped(self):
+        import cleanup
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        (repo / ".gitignore").write_text(".env.local\nnode_modules/\n")
+        (repo / "a").write_text("x")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        (repo / ".env.local").write_text("LOCAL=1")
+        (repo / "node_modules").mkdir()
+        (repo / "node_modules" / "m.js").write_text("y")
+        keep = cleanup.ignored_keepers(str(repo), {"node_modules"})
+        self.assertEqual(keep, [".env.local"])
+        os.remove(repo / ".env.local")
+        self.assertEqual(cleanup.ignored_keepers(str(repo), {"node_modules"}), [])
+
+    def test_build_output_with_a_force_tracked_file_is_not_planned(self):
+        r = self.base / "forced"
+        r.mkdir()
+        git(r, "init", "-q")
+        (r / ".gitignore").write_text("dist/\n")
+        (r / "dist").mkdir()
+        (r / "dist" / "kept.txt").write_text("x")
+        git(r, "add", ".gitignore")
+        git(r, "add", "-f", "dist/kept.txt")
+        git(r, "commit", "-qm", "forced")
+        age(r, 30)
+        import paths
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"checkouts": [{"path": str(r), "worktrees": []}]}))
+        plan = self.g.plan_builds(self.g.load_config(), "critical", self.free(), time.time(), ["dist"])
+        self.assertEqual(plan, [])
+        # git check-ignore already calls such a folder not ignored; `_force_tracked` is the
+        # second line, asked directly so it is proven on its own.
+        self.assertTrue(self.g._force_tracked(str(r), str(r / "dist"), 30))
+        (r / "out").mkdir()
+        (r / "out" / "x").write_text("y")
+        self.assertFalse(self.g._force_tracked(str(r), str(r / "out"), 30))
+
+
+def stat_is_dir(st) -> bool:
+    import stat as _stat
+    return _stat.S_ISDIR(st.st_mode)
 
 
 class JsonLine(Base):
@@ -615,8 +805,8 @@ class JsonLine(Base):
         self.assertEqual(code, 0)
         self.assertEqual(len(lines), 1)
         doc = json.loads(lines[0])
-        self.assertEqual(set(doc), {"level", "acting", "free_gb_before", "free_gb_after", "freed_gb",
-                                    "planned", "results", "seconds"})
+        self.assertTrue({"level", "acting", "free_gb_before", "free_gb_after", "freed_gb", "planned", "results",
+                         "seconds", "not_due", "busy"} <= set(doc), sorted(doc))
 
 
 class LargeFiles(Base):

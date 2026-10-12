@@ -315,7 +315,6 @@
  "Team": "Команда",
  "Technology and documentation": "Технологии и документация",
  "Test fixtures left on disk": "Тестовые фикстуры остались на диске",
- "The auto tier loses nothing and runs on the tick when features.auto_cleanup is on; the manual tier archives first: project-observatory full cleanup --apply --include manual": "Автоматический уровень ничего не теряет и работает при каждом плановом запуске, если включён features.auto_cleanup; ручной уровень сначала архивирует: project-observatory full cleanup --apply --include manual",
  "The buttons copy commands for a terminal.": "Кнопки копируют команды для терминала.",
  "The buttons copy commands for a terminal; no values are shown here.": "Кнопки копируют команды для терминала; значения здесь не показаны.",
  "The buttons perform the stated action.": "Кнопки выполняют указанное действие.",
@@ -428,12 +427,6 @@
   "many": "очистка удалила {n} объектов за 24 часа",
   "one": "очистка удалила {n} объект за 24 часа",
   "other": "очистка удалила {n} объекта за 24 часа"
- },
- "cleanup removed {n} items in 24 hours, {gb} GB of build output": {
-  "few": "очистка удалила {n} объекта за 24 часа, {gb} ГБ результатов сборки",
-  "many": "очистка удалила {n} объектов за 24 часа, {gb} ГБ результатов сборки",
-  "one": "очистка удалила {n} объект за 24 часа, {gb} ГБ результатов сборки",
-  "other": "очистка удалила {n} объекта за 24 часа, {gb} ГБ результатов сборки"
  },
  "clicks/day": "кликов/сут",
  "clipboard unavailable": "буфер недоступен",
@@ -1930,7 +1923,6 @@
  "installed by themselves; not checked yet": "ставятся сами; ещё не проверялись",
  "full backup": "полная резервная копия",
  "newest {date}, encrypted outside the workspace": "последняя {date}, зашифрована и лежит вне рабочей папки",
- "none yet — the hourly job takes one a day": "пока нет — ежечасное задание делает её раз в день",
  "newest {date}, taken before the last update": "последняя {date}, сделана перед последним обновлением",
  "newest {date}, NOT encrypted, inside the workspace — set a passphrase": "последняя {date}, НЕ зашифрована и лежит в рабочей папке — задайте парольную фразу",
  "up to date": "актуальная версия",
@@ -2080,7 +2072,6 @@
  "Device": "Устройство",
  "Disk guard": "Страж диска",
  "Disk guard not running": "Страж диска не работает",
- "Every hour, from the maintenance job, when features.auto_cleanup is on; never anything a process holds open or works inside: project-observatory full disk-guard --apply": "Каждый час из задания обслуживания, если включён features.auto_cleanup; никогда не трогает то, что процесс держит открытым или где он работает: project-observatory full disk-guard --apply",
  "File": "Файл",
  "Largest files": "Самые большие файлы",
  "Modified": "Изменён",
@@ -2107,5 +2098,14 @@
  "pressure": "давление",
  "Estate spend near its monthly limit": "Расход хозяйства близок к месячному лимиту",
  "the estate has spent ${spent} of its ${limit} monthly limit": "хозяйство потратило ${spent} из месячного лимита ${limit}",
- "cache-dir": "кеш приложения"
+ "cache-dir": "кеш приложения",
+ "From the maintenance job when features.auto_cleanup is on: hourly while space is normal, every 15 minutes below the low line; never anything a process holds, maps, runs from or works inside: project-observatory full disk-guard --apply": "Из задания обслуживания, если включён features.auto_cleanup: раз в час, пока места достаточно, и каждые 15 минут ниже порога low; никогда не трогает то, что процесс держит открытым, отображает в память, запускает или где он работает: project-observatory full disk-guard --apply",
+ "The auto tier loses nothing; it runs on the tick and from the disk guard, which lowers its idle days under disk pressure. The manual tier archives first: project-observatory full cleanup --apply --include manual": "Автоматический уровень ничего не теряет; он работает при плановом запуске и из стража диска, который при нехватке места сокращает сроки простоя. Ручной уровень сначала архивирует: project-observatory full cleanup --apply --include manual",
+ "none yet — the maintenance job takes one a day": "пока нет — задание обслуживания делает её раз в день",
+ "cleanup removed {n} items in 24 hours and freed {gb} GB": {
+  "one": "очистка удалила {n} объект за 24 часа и освободила {gb} ГБ",
+  "few": "очистка удалила {n} объекта за 24 часа и освободила {gb} ГБ",
+  "many": "очистка удалила {n} объектов за 24 часа и освободила {gb} ГБ",
+  "other": "очистка удалила {n} объекта за 24 часа и освободила {gb} ГБ"
+ }
 }

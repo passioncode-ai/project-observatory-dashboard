@@ -58,14 +58,14 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
 
     # THE GUARD ITSELF. On 2026-10-11 the self-cleaning had not run for a day and nothing
     # said so: its steps were "not started" in a tick too long to reach them. A guard that
-    # should run hourly and has not reported for three hours is a finding of its own.
+    # should act at least hourly and has not reported for three hours is a finding of its own.
     if auto:
         age = _age_hours((guard or {}).get("at"), now)
         if age is None or age > config.get("guard_silent_hours", 3):
             out.append({"type": "machine.guard_idle", "subject": "machine", "severity": "warning",
                         **(titled("the disk guard has not run for {hours} hours", hours=f"{age:.0f}")
                            if age is not None else titled("the disk guard has never run")),
-                        "detail": ("features.auto_cleanup is on, and the hourly maintenance job runs the guard "
+                        "detail": ("features.auto_cleanup is on, and the maintenance job (every 15 minutes) runs the guard "
                                    "first in every pass; without it nothing frees space as the disk fills."),
                         "action": "`project-observatory full maintain status`; `full disk-guard --apply` runs it now"})
 
@@ -145,10 +145,21 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
     since = now - timedelta(hours=24)
     removed, freed, measured = 0, 0, 0
     try:
+        for line in (logs / "disk-guard.jsonl").read_text(encoding="utf-8").splitlines():
+            row = json.loads(line)
+            if row.get("kind") != "summary":
+                continue
+            at = datetime.strptime(row.get("at", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            if at >= since:
+                removed += int(row.get("removed") or 0)
+                measured += max(0, row.get("freed_mb") or 0) * 1024
+    except (OSError, ValueError):
+        pass
+    try:
         for line in (logs / "cleanup.jsonl").read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
             at = datetime.strptime(row.get("at", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-            if at >= since and row.get("result") in ("removed", "pruned"):
+            if at >= since and row.get("result") in ("removed", "pruned") and row.get("mode") != "guard":
                 removed += 1
                 # What the disk said (`freed_mb`, the guard's statvfs delta) outranks the
                 # estimate: `du` counts an APFS clone in full and frees nothing removing it.
@@ -161,11 +172,12 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
     freed += measured
     if removed:
         out.append({"type": "cleanup.done", "subject": "machine", "severity": "info",
-                    **(titled("cleanup removed {n} items in 24 hours, {gb} GB of build output", n=removed, gb=f"{freed / 1048576:.1f}")
+                    **(titled("cleanup removed {n} items in 24 hours and freed {gb} GB", n=removed, gb=f"{freed / 1048576:.1f}")
                        if freed else titled("cleanup removed {n} items in 24 hours", n=removed)),
                     "detail": "Only what loses nothing: merged or pushed branches, clean idle worktrees, "
                               "build output of idle checkouts, old temporary files, the cache tools' own cleanup. "
-                              "Each is a line in store/logs/cleanup.jsonl.",
+                              "The git tier's undo record is store/logs/cleanup.jsonl; the guard's actions "
+                              "and run summaries are store/logs/disk-guard.jsonl.",
                     "action": "nothing to do; the journal names every item and how to bring it back"})
     return out
 

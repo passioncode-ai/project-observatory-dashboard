@@ -287,6 +287,13 @@ def expand(raw: str) -> str:
         if not local:
             return ""                 # Windows only; elsewhere the root does not exist
         raw = raw.replace("{localappdata}", local)
+    if "{user}" in raw:
+        # pytest names its base by login (`pytest-of-<user>`), not by uid.
+        import getpass
+        try:
+            raw = raw.replace("{user}", getpass.getuser())
+        except (KeyError, OSError):
+            return ""
     return os.path.expanduser(raw.replace("{tmpdir}", tempfile.gettempdir().rstrip("/"))
                               .replace("{uid}", uid))
 
@@ -322,10 +329,15 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
     nested = {os.path.realpath(expand(r["path"])) for r in every}
     # A root with its own `level` (Xcode's DerivedData: rebuilding costs time) is swept
     # only at that pressure or above — and never as an entry of another root.
-    roots = [(expand(r["path"]), int(r.get("depth", 1))) for r in every
-             if LEVELS.index(r.get("level", "normal")) <= LEVELS.index(level)]
+    # A root may carry its own age in HOURS (`hours`: {level: h}): pytest's numbered run
+    # directories are dead the moment their run ends, but the base that holds them is never
+    # older than the newest run, so swept as one entry of the temporary root it never went
+    # (7 runs, 2.5 GB, on 2026-10-12 with 1.2 GB free).
+    roots = [(expand(r["path"]), int(r.get("depth", 1)),
+              at - by_level(r, "hours", level, days * 24) * 3600 if isinstance(r.get("hours"), dict) else cutoff)
+             for r in every if LEVELS.index(r.get("level", "normal")) <= LEVELS.index(level)]
     out = []
-    for root, depth in roots:
+    for root, depth, cutoff in roots:
         if guarded(root, degraded):
             continue
         level_dirs = [root]
@@ -546,7 +558,8 @@ def checkouts() -> list[str]:
 
 def _force_tracked(dirpath: str, full: str, timeout: float) -> bool:
     """Whether git tracks anything inside an ignored folder (`git add -f`): then the folder
-    holds somebody's file and is not build output."""
+    holds somebody's file and is not build output. `git check-ignore` usually already calls
+    such a folder not ignored; this is the second line, for the patterns where it does not."""
     try:
         p = safe_git.run(["ls-files", "-z", "--", full], repo=dirpath, timeout=max(5.0, timeout), text=False)
     except (OSError, subprocess.SubprocessError):

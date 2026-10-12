@@ -3,10 +3,6 @@
   "one": "cleanup removed {n} item in 24 hours",
   "other": "cleanup removed {n} items in 24 hours"
  },
- "cleanup removed {n} items in 24 hours, {gb} GB of build output": {
-  "one": "cleanup removed {n} item in 24 hours, {gb} GB of build output",
-  "other": "cleanup removed {n} items in 24 hours, {gb} GB of build output"
- },
  "findings@@heading": "findings",
  "in@@{n} accounts": {
   "one": "{n} account",
@@ -630,5 +626,9 @@
  "Disk guard ran {at}: free {before} → {after} GB, {n} removed": {
   "one": "Disk guard ran {at}: free {before} → {after} GB, {n} removed",
   "other": "Disk guard ran {at}: free {before} → {after} GB, {n} removed"
+ },
+ "cleanup removed {n} items in 24 hours and freed {gb} GB": {
+  "one": "cleanup removed {n} item in 24 hours and freed {gb} GB",
+  "other": "cleanup removed {n} items in 24 hours and freed {gb} GB"
  }
 }

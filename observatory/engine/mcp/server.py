@@ -536,7 +536,7 @@ def observatory_machine(
     what it freed by the disk's own count, the largest files, who holds the swap).
 
     Read-only. It never kills a process or deletes a file: the auto tier of the
-    cleanup and the disk guard run in the hourly maintenance job when the operator
+    cleanup and the disk guard run in the maintenance job (every 15 minutes) when the operator
     enabled features.auto_cleanup, and anything that
     holds unique work only through `full cleanup --apply --include manual`.
     A process is reported by executable and script, never by its environment or

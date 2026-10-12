@@ -204,7 +204,7 @@ ROOT_FILES = (
     'release_signature.py',
     # The meter and the delegation verifier (OBS-55).
     'delegation.py', 'meter.py',
-    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
+    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
 )

@@ -44,11 +44,36 @@ while the major version is 0, a minor release may change behaviour and says so h
   7 / 2 / 1 days — the folders a hand cleanup freed 10 GB from — keeping downloaded browsers and SDKs a tool does
   not fetch again by itself (`cache_keep`); and its per-class cap is 20,000, since the run budget bounds its time.
   Measured on one machine: free space fell from 6 GB to 0.3 GB inside one hourly gap.
-- **The disk guard finishes inside the hourly pass** (OBS-63): the first scheduled pass on 0.23.0 killed it at
-  the job's 1200 s ceiling, under launchd's background priority, and recorded only `exit 124` — no report, no
-  journal. The guard now stops itself at `--budget` (the job passes 1020 s; `run_budget_seconds`, 900 s, by
-  hand), acts before it refreshes any survey, writes each action to `store/logs/cleanup.jsonl` as it happens,
-  and always writes its report, naming what the budget left for the next pass.
+- **The disk guard finishes inside its pass** (OBS-63): the first scheduled pass on 0.23.0 killed it at the
+  job's 1200 s ceiling, under launchd's background priority, and recorded only `exit 124` — no report, no
+  journal. The job's ceiling is now 600 s and the guard stops itself at `--budget` (the job passes 480 s;
+  `run_budget_seconds`, 900 s, by hand), shares that time fairly between its classes, acts before it refreshes
+  any survey, writes each action to `store/logs/disk-guard.jsonl` as it happens, and always writes its report,
+  naming what the budget left for the next pass.
+- **The disk guard, second iteration** (OBS-63; design `docs/design/DISK-GUARD.md`): a review of the first one
+  found it could remove what a session still used, and could misreport what it did. Now:
+  - *Held* means open files, memory maps, executables, working and root directories and paths named on a
+    process's command line (`holders.py`: `lsof` with its escaped names decoded, `/proc` on Linux, a rename probe
+    on Windows), taken fresh for every class; every removal re-checks its target, still unheld and unchanged since
+    the plan, and a target that changed is skipped.
+  - Every cleanup takes one lock (`store/cleanup.lock`): the tick, the guard and `full cleanup` never act at
+    once, and a guard pass that finds the lock held is recorded as `busy`.
+  - A privacy-guarded folder is never opened, an entry another account owns is never touched, and a tracked
+    directory is never removed as build output.
+  - The git tier no longer removes a worktree holding ignored files that are not build output (`.env.local`, a
+    local database); pressure lowers only thresholds a person did not set; a run stopped at its deadline keeps its
+    undo journal; `full cleanup --level low` previews the tier at a pressure level.
+  - A workspace `config/cleanup.json` that only carries an older release's defaults no longer pins them.
+  - The pass records what happened — `ran`, `not-due`, `busy` or `failed` — not the previous run's numbers; the
+    guard's cadence counts from the previous start, with a 450 s tolerance; `uv cache clean` and `brew cleanup
+    --prune=all` run once a day, other cache commands every six hours.
+  - A failed daily backup is retried an hour later, not on every pass (each attempt stops the tick and server);
+    Windows ends a pass after 59 minutes instead of 14; an update that rewrote the schedule reloads it after the
+    pass instead of waiting for a session.
+  - Machine page and the `cleanup.done` finding count the guard's run summaries over the whole window.
+  - pytest's numbered run directories (`$TMPDIR/pytest-of-<user>/pytest-N`) go by their own age in hours
+    (24 / 6 / 2): their base is never older than the newest run, so the guard never reached them — 2.5 GB of
+    finished runs sat there on 2026-10-12 with 1.2 GB free. A temporary root may carry `hours` per level.
 
 - `_published_shape` follows local `$ref`s and cuts a `oneOf` by the branch whose required
   keys the value carries; before, such an answer passed through uncut.

@@ -96,10 +96,13 @@ def summary_html(m: dict, t: Translator) -> str:
     mem, disk = m.get("memory") or {}, (m.get("disk") or {}).get("volume") or {}
     procs = m.get("processes") or {}
     cleanup = m.get("cleanup") or {}
-    done = [r for r in cleanup.get("journal") or [] if r.get("result") in ("removed", "pruned")]
-    # The disk's own count (`freed_mb`, the guard's statvfs delta) where a row has one:
-    # `du` counts an APFS clone in full, and removing one frees nothing.
-    freed = sum(max(0, r["freed_mb"]) * 1024 if "freed_mb" in r else (r.get("kb") or 0) for r in done) / 1048576
+    done = [r for r in cleanup.get("journal") or [] if r.get("result") in ("removed", "pruned")
+            and r.get("mode") != "guard"]
+    totals = cleanup.get("guardTotals") or {}
+    # The git tier's own rows plus the guard's run summaries (the disk's own count, `freed_mb`:
+    # `du` counts an APFS clone in full, and removing one frees nothing).
+    freed = (sum(r.get("kb") or 0 for r in done) / 1048576) + (totals.get("freedMb") or 0) / 1024
+    done = done + [{}] * int(totals.get("removed") or 0)
     used = None
     if mem.get("total_mb") is not None and mem.get("free_mb") is not None:
         used = mem["total_mb"] - mem["free_mb"] - (mem.get("inactive_mb") or 0)
@@ -142,8 +145,9 @@ def guard_html(g: dict | None, t: Translator) -> str:
     parts.append(_table(t, "Disk guard", [("What", False), ("Planned", True)],
                         [[_word(t, c), t.number(planned[c])] for c in GUARD_CLASSES if planned.get(c)],
                         "Nothing to free at this pressure."))
-    parts.append(t.mark("Every hour, from the maintenance job, when features.auto_cleanup is on; never anything a "
-                        "process holds open or works inside: project-observatory full disk-guard --apply",
+    parts.append(t.mark("From the maintenance job when features.auto_cleanup is on: hourly while space is normal, every "
+                        "15 minutes below the low line; never anything a process holds, maps, runs from or works inside: "
+                        "project-observatory full disk-guard --apply",
                         tag="p", attrs=' class="machine-hint"'))
     files = ((g.get("largeFiles") or {}).get("files") or [])[:ROWS]
     parts.append(_table(t, "Largest files",
@@ -221,8 +225,8 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                                                                "worktree-clean", "build-artifacts") else t.mark("manual"), _e(v)]
                          for k, v in counts.items() if v],
                         "Nothing to clean." if cleanup else UNMEASURED_GIT))
-    parts.append(t.mark("The auto tier loses nothing and runs on the tick when features.auto_cleanup is on; "
-                        "the manual tier archives first: project-observatory full cleanup --apply --include manual",
+    parts.append(t.mark("The auto tier loses nothing; it runs on the tick and from the disk guard, which lowers its idle days"
+                        " under disk pressure. The manual tier archives first: project-observatory full cleanup --apply --include manual",
                         tag="p", attrs=' class="machine-hint"'))
     parts.append(_table(t, "Cleaned in the last 7 days",
                         [("When", False), ("What", False), ("Item", False), ("Result", False)],

@@ -30,6 +30,7 @@
    {"path": "{tmpdir}", "depth": 1},
    {"path": "/private/tmp", "depth": 1},
    {"path": "/private/tmp/claude-{uid}", "depth": 2},
+   {"path": "{tmpdir}/pytest-of-{user}", "depth": 1, "hours": {"normal": 24, "low": 6, "critical": 2}},
    {"path": "~/Library/Developer/Xcode/DerivedData", "depth": 1, "level": "low"},
   {"path": "~/Library/Logs/DiagnosticReports", "depth": 1, "level": "low"}
   ],

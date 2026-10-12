@@ -451,7 +451,7 @@ assistant's key and is used ahead of the key file (`key_source` then says `envir
 a personal key exported in your shell profile is spent by the assistant and the agent. On macOS the
 tick and server installers write workspace-specific jobs only after the scheduler
 is explicitly enabled; Linux can run `project-observatory full tick` under a
-supervisor chosen by the user. The hourly maintenance job (updates and the daily backup) is
+supervisor chosen by the user. The maintenance job (every 15 minutes: the disk guard, updates, the daily backup) is
 separate and scheduled by default: see [Staying in step](#staying-in-step). Do not create duplicate writers for one home.
 On macOS, `tools/serverd.py --install` also writes a `fabric-service/0.1`
 descriptor (`project-observatory.<instance>.json`, in
@@ -584,7 +584,7 @@ same summary.
   missing, in use, idle days) and branches (merged, patch-merged, pushed,
   unique).
 
-With `features.auto_cleanup` also on, the tick and the hourly disk guard (below) remove what loses nothing:
+With `features.auto_cleanup` also on, the tick and the disk guard (below) remove what loses nothing:
 branches merged into the default branch or identical to their upstream, clean
 worktrees nobody has touched for a week, stale worktree records, and git-ignored
 build output of projects idle for a month (thresholds and protected branch
@@ -635,8 +635,11 @@ Playwright, camoufox, puppeteer, cargo-xwin and others) and `uv`, which has its 
 Browser code-sign clones a crashed browser left behind go at any pressure, and
 the cleanup's own git auto tier runs after them — with its thresholds lowered by the same
 pressure (`pressure` in `config/cleanup.json`): a clean worktree or a merged branch nobody
-touched for 3 days at `low`, 1 day at `critical`, instead of 7. Only that tier moves; a
-worktree with uncommitted edits or a branch with unique commits never does. npx's package
+touched for 3 days at `low`, 1 day at `critical`, instead of 7 (pushed branches 14 and 7 days instead of 30,
+build output of idle projects 7 and 3 instead of 30). Only that tier moves, and only for a threshold you did not set
+yourself; a worktree with uncommitted edits, or with ignored files that are not build output (`.env.local`, a local
+database), and a branch with unique commits never do. `project-observatory full cleanup --level low` previews it.
+Every cleanup takes one lock, so the tick, the guard and you never act on the same thing at once. npx's package
 cache and macOS diagnostic reports are swept too.
 
 **On every system.** What a process holds is read with `lsof` on macOS and Linux, from
@@ -902,9 +905,12 @@ estate. On the new machine:
 
 ### Updates install themselves (0.17.0 and later)
 
-Nothing needs to be run after a release. One job per workspace runs every hour: launchd
+Nothing needs to be run after a release. One job per workspace runs every 15 minutes: launchd
 `org.project-observatory.<id>.maintain` on macOS, a systemd user timer
-`project-observatory-<id>-maintain.timer` on Linux. Each run does only what is due:
+`project-observatory-<id>-maintain.timer` on Linux, a Task Scheduler task on Windows. Each run does only what is due:
+
+- With `features.auto_cleanup` on, first the disk guard (see [The disk guard](#the-disk-guard)): hourly while space
+  is normal, on every pass below the `low` line.
 
 - Every six hours it runs `full update --check`; at login the first check waits 90 seconds
   after the job starts. When a newer **stable** release exists, it runs `full update --apply
@@ -918,7 +924,7 @@ Nothing needs to be run after a release. One job per workspace runs every hour: 
   version when you quit it or when it has had no window on screen and no input for 30 minutes.
 - Once a day it takes a full encrypted backup, `daily-*.obsnap`, the newest three kept. It
   briefly stops this workspace's tick and server for the copy and starts them again. When a
-  tick or an update is running, the backup waits for the next hour. Snapshots you take yourself
+  tick or an update is running, the backup waits for the next pass; a failed backup is tried again an hour later. Snapshots you take yourself
   (`snapshot-*`) rotate separately and are never removed by the daily ones. See
   [Encrypted backups off this disk](#encrypted-backups-off-this-disk).
 
@@ -979,7 +985,7 @@ at a safe point: when the local server has answered no page and no agent in the 
 minutes (a host's `/health` probe, the service document and the events feed do not count),
 no memory-http client has called in that time, and no tick or other workspace operation is
 running (the update would stop the tick half-way). Otherwise the release is recorded as
-`deferred`, `auto-update status` and Health show it as ready, and the next hourly pass tries
+`deferred`, `auto-update status` and Health show it as ready, and the next pass tries
 again. A `full update --apply` you run yourself installs at once.
 
 A running Claude Code session is never stopped by an update. Its MCP server
@@ -1134,7 +1140,7 @@ when collecting complete local socket evidence.
 
 ## Mac app
 
-From 0.17.0 the app updates itself: the hourly maintenance job replaces it with the engine's
+From 0.17.0 the app updates itself: the maintenance job replaces it with the engine's
 release once it is not running (see [Staying in step](#staying-in-step)). The replaced
 bundle is kept under `<home>/store/app-previous/`.
 

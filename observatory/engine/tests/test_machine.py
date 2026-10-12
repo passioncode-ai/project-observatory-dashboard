@@ -272,7 +272,12 @@ class Estate(Base):
         doc = json.loads((self.home / "config/settings.json").read_text())
         doc.setdefault("features", {})["auto_cleanup"] = auto_on
         (self.home / "config/settings.json").write_text(json.dumps(doc))
-        with patch("scan_machine.working_dirs", return_value=busy or {}):
+        import holders
+        # What processes hold comes from `holders.Holders.take` since 2026-10-12; a real listing
+        # here sees whatever indexes a fresh temporary checkout (Spotlight, an editor's watcher).
+        held = holders.Holders(list((busy or {}).values()))
+        with patch("scan_machine.working_dirs", return_value=busy or {}), \
+                patch.object(holders.Holders, "take", classmethod(lambda cls, timeout=120: held)):
             return cleanup.main(["cleanup.py", *args])
 
     def branches(self, repo):

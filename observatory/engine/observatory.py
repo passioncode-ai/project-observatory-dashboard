@@ -475,7 +475,7 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
                                --latest finds the newest backup a workspace at this path left
   auto-update status|on|off    install each new stable release by itself (on by default)
-  maintain run|ensure|uninstall|status  the hourly job: updates, the app, a daily encrypted backup
+  maintain run|ensure|uninstall|status  the job every 15 min: the disk guard, updates, the app, a daily encrypted backup
   maintain app                 the app step alone: swap a verified staged app (what the Mac
                                app's Restart to update runs after it quits)
   update [--version X.Y.Z] [--check|--apply]  move to a published release: verified,
