@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -403,19 +404,41 @@ class RotationRecord(unittest.TestCase):
             "scan-fs": "not a row", "leaks": {"started_at": "yesterday", "not_started_streak": "x"},
             "lifecycle": {"started_at": 50.0, "outcome": "ran", "not_started_streak": 0, "last_ran_at": 50.0}}}),
             encoding="utf-8")
-        ran, doc = self.run_tick(outcomes={"leaks": "not_started"})
+        ran, doc = self.run_tick(outcomes={"leaks": "not_started", "lifecycle": "not_started"})
         self.assertEqual(ran[0], "scan-fs", ran)
         self.assertEqual(doc["collectors"]["leaks"]["not_started_streak"], 1, "a bad streak is coerced to 0")
         self.assertIsNone(doc["collectors"]["leaks"]["started_at"])
-        self.assertGreater(doc["collectors"]["lifecycle"]["started_at"], 50.0, "the good row was read and moved on")
+        # The good row was READ: not started this tick, it keeps exactly what the record held.
+        self.assertEqual(doc["collectors"]["lifecycle"]["started_at"], 50.0)
+        self.assertEqual(doc["collectors"]["lifecycle"]["last_ran_at"], 50.0)
         self.assertTrue(any("scan-fs" in l and "skipped" in l for l in self.said), self.said)
 
-    def test_a_schema_it_does_not_know_is_unreadable(self):
-        self.record.write_text(json.dumps({"schema": 3, "collectors": {}}), encoding="utf-8")
-        ran, doc = self.run_tick()
+    def test_non_finite_numbers_are_not_times(self):
+        self.record.write_text('{"schema": 2, "collectors": {"leaks": {"started_at": Infinity, '
+                               '"not_started_streak": Infinity, "last_ran_at": NaN}}}', encoding="utf-8")
+        ran, doc = self.run_tick(outcomes={"leaks": "not_started"})
+        self.assertEqual(ran, ["scan-fs", "leaks", "lifecycle"], "the tick completes")
+        leaks = doc["collectors"]["leaks"]
+        self.assertIsNone(leaks["started_at"])
+        self.assertIsNone(leaks["last_ran_at"])
+        self.assertEqual(leaks["not_started_streak"], 1)
+
+    def test_a_schema_it_does_not_know_is_left_untouched(self):
+        """A newer engine's record survives a tick of this one byte for byte: a downgrade must not
+        erase it. The tick runs the planned order and says why."""
+        body = json.dumps({"schema": 3, "collectors": {"leaks": {"whatever": 1}}}) + "\n"
+        self.record.write_text(body, encoding="utf-8")
+        tick = self.tick.Tick(self.record.parent)
+        ran = []
+        tick.step = lambda name, *argv: ran.append(name) or "ran"
+        rotation = self.tick.Rotation(tick, self.record)
+        for name in ("scan-fs", "leaks", "lifecycle"):
+            rotation.step(name, "x.py")
+        rotation.run_in_turn()
         self.assertEqual(ran, ["scan-fs", "leaks", "lifecycle"])
+        self.assertEqual(self.record.read_text(encoding="utf-8"), body)
         self.assertTrue(any("unreadable" in l and "schema 3" in l for l in self.said), self.said)
-        self.assertEqual(doc["schema"], 2)
+        self.assertTrue(any("not rewritten" in l for l in self.said), self.said)
 
     def test_a_schema_1_record_is_read_and_rewritten_as_schema_2(self):
         self.record.write_text(json.dumps({"started": {"scan-fs": 300.0, "leaks": 100.0, "lifecycle": 200.0}}),
@@ -429,6 +452,36 @@ class RotationRecord(unittest.TestCase):
         self.assertEqual(doc["collectors"]["lifecycle"]["not_started_streak"], 1)
         self.assertEqual(doc["collectors"]["lifecycle"]["last_ran_at"], 200.0,
                          "the schema-1 time seeds the last run, so an upgrade does not read as starvation")
+
+
+class TailBail(unittest.TestCase):
+    """Verification round 2: merge, emit and validate bailed with a literal exit 1, so a merge the
+    watchdog stopped or never started read as `failed`/1. Their own exit and first line now decide."""
+
+    def bail_row(self, name, rc, out):
+        tick = load_tick()
+        import paths
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            t = tick.Tick(base)
+            t.step = lambda *a, **k: "ran"
+            t.bounded = lambda step, *argv: (rc, out) if step == name else (0 if step != "backup-due" else 1, "")
+            with mock.patch.object(paths, "STATE", base), self.assertRaises(SystemExit):
+                tick.steps(t, base, base / "page.html")
+            return json.loads((base / "tick.json").read_text(encoding="utf-8"))["failed_steps"]
+
+    def test_a_merge_past_its_limit_is_stopped(self):
+        self.assertEqual(self.bail_row("merge", 124, "half a merge\n"),
+                         [{"step": "merge", "exit": 124, "outcome": "stopped"}])
+
+    def test_a_merge_not_started_says_so(self):
+        self.assertEqual(self.bail_row("merge", 124, "not started — the tick's ceiling has been reached\n"),
+                         [{"step": "merge", "exit": 124, "outcome": "not_started"}])
+
+    def test_emit_and_validate_keep_their_exit(self):
+        self.assertEqual(self.bail_row("emit", 3, "REFUSED\n"), [{"step": "emit", "exit": 3, "outcome": "failed"}])
+        self.assertEqual(self.bail_row("validate", 137, ""),
+                         [{"step": "validate", "exit": 137, "outcome": "stopped"}])
 
 
 class TailOrder(unittest.TestCase):

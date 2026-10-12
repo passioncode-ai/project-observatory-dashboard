@@ -43,6 +43,7 @@ lease stand-down: another run holds the registry and the next tick is 30 minutes
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 import shutil
@@ -193,7 +194,11 @@ def _ago(seconds: float | None) -> str:
 
 
 def _epoch(value) -> float | None:
-    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    """A time from the record, or None: not a number, a bool, or not finite (JSON's Infinity, NaN)."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    value = float(value)
+    return value if math.isfinite(value) else None
 
 
 class Rotation:
@@ -211,13 +216,20 @@ class Rotation:
     previous `started_at` — null for one never started — and grows its `not_started_streak`, so it
     goes first next tick and a reader can tell starvation from rotation. `last_ran_at` is the start
     of the last attempt that ran to the end (`ran`): a failed or stopped attempt moves the collector
-    back without producing its output. Schema 1 (`{"started": {name: epoch}}`) is still read, its
-    times seeding `started_at` and `last_ran_at`; the first save writes schema 2. A bad row is
-    coerced or skipped, never the whole record; a schema neither 1 nor 2 is logged as unreadable."""
+    back without producing its output. `outcome` null with `finished_at` null means the step was
+    started and the tick was killed before it returned. Schema 1 (`{"started": {name: epoch}}`) is
+    still read, its times seeding `started_at` and `last_ran_at` — schema 1 kept no outcome, so a
+    seeded `last_ran_at` may belong to a run that failed —; the first save writes schema 2. A bad
+    row is coerced or skipped, never the whole record; a field that is not a finite number reads as
+    null. A schema neither 1 nor 2 (a newer engine's) is logged as unreadable and left untouched:
+    the planned order runs and nothing is written over it."""
 
     def __init__(self, t: "Tick", record: Path):
         self.t, self.record = t, record
         self.planned: list[tuple[str, tuple]] = []
+        #: True when the record holds a schema this engine does not know (a newer engine's): it is
+        #: then not rewritten this tick, so running an older engine never erases it.
+        self.foreign = False
 
     def step(self, name: str, *argv) -> None:
         self.planned.append((name, argv))
@@ -229,7 +241,7 @@ class Rotation:
             return None
         try:
             streak = max(int(row.get("not_started_streak") or 0), 0)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):       # "x", Infinity, NaN
             streak = 0
         return {"started_at": _epoch(row.get("started_at")),
                 "finished_at": _epoch(row.get("finished_at")),
@@ -260,7 +272,8 @@ class Rotation:
                                     "not_started_streak": 0, "last_ran_at": at}
                 return rows
             log(f"rotation: {self.record.name} unreadable (schema {doc.get('schema')!r}, neither 1 nor "
-                f"{ROTATION_SCHEMA}) — the planned order this tick")
+                f"{ROTATION_SCHEMA}) — the planned order this tick, and the record is not rewritten")
+            self.foreign = True
             return {}
         except FileNotFoundError:
             return {}
@@ -269,6 +282,8 @@ class Rotation:
             return {}
 
     def save(self, rows: dict[str, dict]) -> None:
+        if self.foreign:
+            return                      # a newer engine's record: kept as it is (said once, in load)
         try:
             import atomic
             atomic.write_json(self.record, {"schema": ROTATION_SCHEMA, "collectors": rows})
@@ -369,12 +384,13 @@ class Tick:
         except Exception:  # noqa: BLE001 — the report is best effort; the log says it is missing
             log("tick: could not record the step report")
 
-    def bail(self, name: str, rc: int, message: str) -> None:
+    def bail(self, name: str, rc: int, message: str, first: str | None = None) -> None:
         """Stop the tick at `name`, and leave the report that says so. Exits 0: a scheduler must
-        not retry a state that has been reported."""
+        not retry a state that has been reported. `first` is what the step printed (its first line
+        decides `not_started` from `stopped` under the watchdog's 124)."""
         log(message)
         self.failed.append((name, rc))
-        self.outcomes[name] = outcome_of(rc, None)
+        self.outcomes[name] = outcome_of(rc, (first or "").splitlines()[0] if first else None)
         self.write_report()
         log(f"tick stopped at {name}")
         raise SystemExit(0)
@@ -468,12 +484,18 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     step = t.step
 
     # THE TAIL. Every step from here on is in tick_lease.TAIL_STEPS, so it keeps its reserve.
-    if bounded("merge", PY, "collectors/merge.py", SCRATCH)[0] != 0:
-        t.bail("merge", 1, "merge failed — stopping, the registry is not rewritten")
-    if bounded("emit", PY, "collectors/emit_registry.py", SCRATCH)[0] != 0:
-        t.bail("emit", 1, "emit failed or REFUSED a wholesale change — the registry keeps the last good version")
-    if bounded("validate", PY, "tools/validate_registry.py")[0] != 0:
-        t.bail("validate", 1, "VALIDATOR RED — the registry is not projected and the agent is not called")
+    # Each bails with its OWN exit and first line, so a stopped or never-started merge is not
+    # reported as a failure (verification round 2: a literal 1 read every bail as `failed`).
+    rc, out = bounded("merge", PY, "collectors/merge.py", SCRATCH)
+    if rc != 0:
+        t.bail("merge", rc, "merge failed — stopping, the registry is not rewritten", first=out)
+    rc, out = bounded("emit", PY, "collectors/emit_registry.py", SCRATCH)
+    if rc != 0:
+        t.bail("emit", rc, "emit failed or REFUSED a wholesale change — the registry keeps the last good version",
+               first=out)
+    rc, out = bounded("validate", PY, "tools/validate_registry.py")
+    if rc != 0:
+        t.bail("validate", rc, "VALIDATOR RED — the registry is not projected and the agent is not called", first=out)
     if bounded("events", PY, "collectors/scan_events.py")[0] != 0:
         log("events degraded")
     if bounded("snapshot", PY, "collectors/compute_deltas.py", "snapshot")[0] != 0:

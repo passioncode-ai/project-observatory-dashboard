@@ -11,11 +11,15 @@ while the major version is 0, a minor release may change behaviour and says so h
   collector `started_at` (stamped before the step; schema 1 kept the time after it), `finished_at`, `outcome`
   (`ran`, `failed`, `stopped`, `not_started`), `not_started_streak` and `last_ran_at`; a collector never started
   keeps `started_at: null`. The start is saved before the step runs, so a tick killed inside a step still moves it
-  back. A schema-1 record is still read — its times seed `started_at` and `last_ran_at` — and rewritten as schema 2;
-  a bad row is coerced or skipped, not the whole record. Every `tick.json` `failed_steps` row gains `outcome` beside `exit`, so a step the
-  watchdog did not start is told from one it stopped at its limit (both exit 124). The tick log names a collector
-  not started for consecutive ticks at plan time. `rotation_order` no longer loops on a cycle in `READS_FROM`: it
-  names the cycle in the log and runs the planned order, and `tests/test_pipeline.py` asserts `READS_FROM` is acyclic.
+  back (`outcome` and `finished_at` null mean started and then killed). A schema-1 record is still read — its times
+  seed `started_at` and `last_ran_at`, which may therefore name a run that failed — and rewritten as schema 2; a bad
+  or non-finite row is coerced or skipped, not the whole record; a newer engine's schema is left untouched. Every
+  `tick.json` `failed_steps` row gains `outcome` beside `exit` — the bails at merge, emit and validate included,
+  which now keep their own exit instead of a literal 1 — so a step the watchdog did not start is told from one it
+  stopped at its limit (both exit 124). The distinction is in `tick.json` now; the board's `tick.step_failed`
+  titles use it with K-2's change. The tick log names a collector not started for consecutive ticks at plan time.
+  `rotation_order` no longer loops on a cycle in `READS_FROM`: it names the cycle in the log and runs the planned
+  order, and `tests/test_pipeline.py` asserts `READS_FROM` is acyclic.
 - **The demo's findings speak the page's language** (OBS-64): `tools/demo_estate.py` wrote its five findings as
   English sentences, so a Russian screenshot mixed two languages. Each title is now a rule's own message id with its
   arguments, built by `finding_types.titled` like a real finding, so the Russian page renders them from the same
