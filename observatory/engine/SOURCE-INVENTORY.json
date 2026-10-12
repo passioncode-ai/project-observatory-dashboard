@@ -2183,8 +2183,8 @@
       "path": "tests/test_backup_store.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "35726ced7f070e5cd8396b6d078bd394b02c9fd3052e61e0ea3df8a5bf18e49a",
-      "bytes": 7335
+      "export_sha256": "2177cfe28e335c503ad99170bee39ff362ea6f6f8a621efb2a9b69093864fd6b",
+      "bytes": 7601
     },
     {
       "path": "tests/test_backup_vault.py",

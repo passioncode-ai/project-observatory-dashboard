@@ -92,6 +92,10 @@ def test_the_newest_three_are_kept_and_the_rest_pruned_only_after_the_new_one_ex
           len(names) == bs.KEEP and f"{bs.PREFIX}2026-09-10T1000Z" not in names
           and any(n > f"{bs.PREFIX}2026-09-12" for n in names), str(names))
     p2 = run(db)
+    if p2.returncode == 0 and "already exists" not in p2.stdout:
+        # The minute turned between the two runs (CI, 2026-10-12T05:24Z): that pair took two
+        # stamps and proves nothing about one minute, so ask again inside the new one.
+        p2 = run(db)
     check("a second run inside the same minute takes nothing",
           p2.returncode == 0 and "already exists" in p2.stdout, p2.stdout[-120:])
 
