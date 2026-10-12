@@ -17,6 +17,10 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-12 — Russian copy pass](runs/2026-10-12-ru-copy-pass/README.md): the dashboard, Mac and
+desktop apps' Russian rewritten to one vocabulary and plain syntax, copy only. Next task there: a
+native reader confirms the terms the brand pack lacks.
+
 [2026-10-11 — OBS-65, one project under many names](runs/2026-10-11-identity-aliases/README.md):
 curated aliases, `known_as` edges, `project.resolve`. Next task there: aliases and conflicts on
 the dashboard.

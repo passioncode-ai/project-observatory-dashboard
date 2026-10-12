@@ -622,7 +622,7 @@
  "not ignored": "не игнорируется",
  "not in .gitignore": "не в .gitignore",
  "not in production": "нет в продакшене",
- "not in the scan": "нет в скане",
+ "not in the scan": "нет в результатах сканирования",
  "not in the store": "не в хранилище",
  "not listed": "не в списке",
  "not measured": "не измерено",

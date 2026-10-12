@@ -526,8 +526,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "555295ce8551946d612ede62713c2cfcee9606d0279cee8e9a0ce6e370a6d3ac",
-      "bytes": 164593
+      "export_sha256": "e061a1d7cafdd9cc5711ba04092ca8cf9a3e61b901277840b7f00bec6299c2f5",
+      "bytes": 164630
     },
     {
       "path": "dashboard/machine_page.py",
