@@ -2,6 +2,7 @@
 reading the invoking user's workspace: its OBSERVATORY_HOME is its own."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import json
 import os
 from pathlib import Path
@@ -104,6 +105,46 @@ class DemoEstate(unittest.TestCase):
             text = i18n.translate(msgid, "ru", **args)
             self.assertNotIn("{", text, text)
             self.assertNotEqual(text, i18n.translate(msgid, "en", **args))
+
+    def test_a_finding_that_says_n_days_ago_dates_its_detail_n_days_before_the_build(self):
+        """ENG-019: the leak finding's title counted 18 days back from the build while its
+        detail named the fixed date 2026-09-24, so the two agreed on one day only and a demo
+        built any other day contradicted itself. Built here under a clock that is not that
+        day: every finding that carries both a day count and a date must agree."""
+        import re
+        base = Path(tempfile.mkdtemp(prefix="observatory-demo-clock-")).resolve()
+        self.addCleanup(shutil.rmtree, base, True)
+        out = base / "demo"
+        env = {**os.environ, "HOME": str(base), "OBSERVATORY_HOME": str(base / "workspace")}
+        env.pop("OBSERVATORY_LOCALE", None)
+        # The real CLI path under a fixed clock: the module's `datetime` is replaced
+        # before `main` runs, so no flag is added to the tool for the test's sake.
+        driver = (
+            "import importlib.util, sys\n"
+            "from datetime import datetime, timezone\n"
+            "spec = importlib.util.spec_from_file_location('demo_estate', sys.argv[1])\n"
+            "demo = importlib.util.module_from_spec(spec); spec.loader.exec_module(demo)\n"
+            "class Fixed(datetime):\n"
+            "    @classmethod\n"
+            "    def now(cls, tz=None): return datetime(2026, 11, 3, 12, 0, 0, tzinfo=timezone.utc)\n"
+            "demo.datetime = Fixed\n"
+            "sys.exit(demo.main([sys.argv[2]]))\n")
+        done = subprocess.run([sys.executable, "-c", driver, str(ROOT / "tools/demo_estate.py"), str(out)],
+                              env=env, capture_output=True, text=True, timeout=300)
+        self.assertEqual(done.returncode, 0, done.stderr[-600:])
+        document = json.loads((out / "registry/findings.json").read_text(encoding="utf-8"))
+        self.assertEqual(document["built_at"][:10], "2026-11-03", "the fixed clock did not reach the demo")
+        built = datetime.strptime(document["built_at"][:10], "%Y-%m-%d")
+        checked = 0
+        for finding in document["findings"]:
+            n = finding.get("title_args", {}).get("n")
+            dates = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", finding.get("detail", ""))
+            if isinstance(n, int) and dates and "days ago" in finding.get("title", ""):
+                checked += 1
+                for date in dates:
+                    self.assertEqual(date, (built - timedelta(days=n)).strftime("%Y-%m-%d"),
+                                     f"{finding['type']}: title says {n} days ago, detail says {date}")
+        self.assertGreater(checked, 0, "no finding carries both a day count and a date; the check proved nothing")
 
 
 if __name__ == "__main__":
