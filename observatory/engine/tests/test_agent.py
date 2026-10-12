@@ -322,8 +322,16 @@ def test_three_guardrails_in_credits() -> None:
               "on this KEY is spent" in (pr.check_budget() or ""), str(pr.check_budget()))
 
         pr.provider_usage = lambda force=False: None
+        import service_identity
+        ledger = service_identity.usage_ledger()
+        before = len(ledger.receipts())
         stop = pr.charge("x/y", cfg["daily_ceiling"] + 1, 100, 50)
         check("charge() records and enforces in the same breath", stop is not None, str(stop))
+        receipts = ledger.receipts()
+        last = receipts[-1] if receipts else {}
+        check("and writes one usage receipt for the service's report (DEC-0021, OBS-53)",
+              len(receipts) == before + 1 and last.get("model") == "x/y" and last.get("inputTokens") == 100
+              and last.get("outputTokens") == 50 and last.get("costBasis") == "provider", str(last))
     finally:
         pr.provider_usage = real_usage
         pr.WALLET.unlink(missing_ok=True)

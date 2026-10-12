@@ -519,6 +519,22 @@ def check_budget(provider: str = "openrouter") -> str | None:
     return None
 
 
+def _usage_receipt(model_id: str, provider: str, cost: float, tokens_in: int, tokens_out: int,
+                   estimated: bool) -> None:
+    """One receipt for the service's usage report (contract DEC-0021, OBS-53): the provider's own counts, the
+    cost with its basis (`price-list` when estimated from the catalogue), never a prompt, an output or a caller.
+    A receipt that cannot be written costs the report one row, never the call: the wallet above stays the
+    enforcement record."""
+    try:
+        import service_identity
+        import fabric_service as fs
+        service_identity.usage_ledger().record(fs.make_usage_receipt(
+            provider, model_id, input_tokens=int(tokens_in), output_tokens=int(tokens_out),
+            cost_usd=float(cost), cost_basis="price-list" if estimated else "provider"))
+    except Exception as exc:  # noqa: BLE001 — the paid call already happened; the receipt is secondary
+        print(f"  usage receipt not written: {type(exc).__name__}", file=sys.stderr)
+
+
 def charge(model_id: str, cost: float, tokens_in: int, tokens_out: int,
            upstream: float | None = None, provider: str = "openrouter",
            estimated: bool = False) -> str | None:
@@ -526,6 +542,7 @@ def charge(model_id: str, cost: float, tokens_in: int, tokens_out: int,
 
     Recording and enforcing happen in the same breath on purpose.
     """
+    _usage_receipt(model_id, provider, cost, tokens_in, tokens_out, estimated)
     w = _wallet()
     day, month = now().strftime("%Y-%m-%d"), now().strftime("%Y-%m")
     w.setdefault("days", {})[day] = w.get("days", {}).get(day, 0.0) + cost

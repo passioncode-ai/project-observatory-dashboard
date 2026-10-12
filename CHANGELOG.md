@@ -14,6 +14,11 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **A usage report** (OBS-53; contract DEC-0021): the server declares `surfaces.usage` and answers
+  `GET /fabric/v1/usage` with the service token — the last 31 days of the assistant's paid model calls by provider
+  and model, from a receipt written at every charge (tokens and cost with its basis, never a prompt or a caller).
+  The fabric-service schemas are vendored again at contract `7931c1d`; the kit's conformance probe now runs
+  `usage.report`.
 - **`grant.check` is declared in `fabric-agent.json`** (OBS-67; manifest revision 9): effect `none`, its
   input and output schemas published at `v0.24.1`, a probe that a call carrying no delegation token is denied
   `principal-unproven`. Fabric's registry reads the meter from the service descriptor; the token-carrying call

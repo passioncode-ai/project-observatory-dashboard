@@ -1,0 +1,308 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/service-usage.schema.json",
+  "title": "Service usage report (fabric-service/0.1, DEC-0021, DEC-0027)",
+  "description": "What a service spent on model and paid-tool calls, self-reported from its own usage receipts, in UTC days. An unknown cost is null, never 0.",
+  "type": "object",
+  "required": [
+    "protocol",
+    "service",
+    "generatedAt",
+    "currency",
+    "days"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "fabric-service/0.1"
+    },
+    "service": {
+      "type": "object",
+      "required": [
+        "id",
+        "instance"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "service-common.schema.json#/$defs/serviceId"
+        },
+        "instance": {
+          "$ref": "service-common.schema.json#/$defs/instance"
+        }
+      },
+      "additionalProperties": false
+    },
+    "generatedAt": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "currency": {
+      "const": "USD"
+    },
+    "days": {
+      "type": "array",
+      "maxItems": 31,
+      "items": {
+        "$ref": "#/$defs/day"
+      }
+    },
+    "budget": {
+      "$ref": "#/$defs/budget"
+    },
+    "budgets": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/limit"
+      },
+      "description": "Every spending limit the service applies, enforced or not (DEC-0027). Ids are unique (FAC-SEM-031)."
+    },
+    "byGrant": {
+      "type": "array",
+      "description": "DEC-0037: spend in the report's window attributed to each grant that authorized it (grant check receipts).",
+      "items": {
+        "type": "object",
+        "required": [
+          "grantRef",
+          "calls",
+          "costUsd"
+        ],
+        "properties": {
+          "grantRef": {
+            "type": "string",
+            "minLength": 1
+          },
+          "calls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "costUsd": {
+            "oneOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "The grant-check receipts this spend settles."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "date": {
+      "type": "string",
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$"
+    },
+    "money": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "totals": {
+      "type": "object",
+      "required": [
+        "calls",
+        "unpricedCalls",
+        "inputTokens",
+        "outputTokens",
+        "costUsd"
+      ],
+      "properties": {
+        "calls": {
+          "$ref": "#/$defs/count"
+        },
+        "unpricedCalls": {
+          "$ref": "#/$defs/count"
+        },
+        "inputTokens": {
+          "$ref": "#/$defs/count"
+        },
+        "outputTokens": {
+          "$ref": "#/$defs/count"
+        },
+        "cacheReadTokens": {
+          "$ref": "#/$defs/count"
+        },
+        "cacheWriteTokens": {
+          "$ref": "#/$defs/count"
+        },
+        "costUsd": {
+          "$ref": "#/$defs/money"
+        }
+      }
+    },
+    "model": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/totals"
+        }
+      ],
+      "type": "object",
+      "required": [
+        "provider",
+        "model",
+        "costBasis"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "costBasis": {
+          "enum": [
+            "provider",
+            "price-list",
+            "mixed",
+            "unknown"
+          ]
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "day": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/totals"
+        }
+      ],
+      "type": "object",
+      "required": [
+        "date",
+        "byModel"
+      ],
+      "properties": {
+        "date": {
+          "$ref": "#/$defs/date"
+        },
+        "byModel": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/model"
+          }
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "budget": {
+      "type": "object",
+      "required": [
+        "period",
+        "limitUsd",
+        "spentUsd"
+      ],
+      "properties": {
+        "period": {
+          "enum": [
+            "day",
+            "month"
+          ]
+        },
+        "limitUsd": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "spentUsd": {
+          "$ref": "#/$defs/money"
+        }
+      },
+      "additionalProperties": false
+    },
+    "limit": {
+      "type": "object",
+      "description": "One spending limit and what was spent against it in its window (DEC-0027).",
+      "required": [
+        "id",
+        "scope",
+        "kind",
+        "limitUsd",
+        "spentUsd",
+        "enforced"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$"
+        },
+        "scope": {
+          "enum": [
+            "machine",
+            "project",
+            "pool",
+            "job"
+          ]
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "description": "Open vocabulary. Known values: per_job, approval, daily, monthly, velocity, pool, emergency. A reader shows an unknown kind generically and never rejects it."
+        },
+        "period": {
+          "enum": [
+            "day",
+            "month"
+          ]
+        },
+        "windowSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "since": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "limitUsd": {
+          "oneOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "spentUsd": {
+          "$ref": "#/$defs/money"
+        },
+        "enforced": {
+          "type": "boolean"
+        },
+        "tripped": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
