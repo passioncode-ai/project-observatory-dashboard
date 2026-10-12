@@ -21,14 +21,18 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
-- **A DigitalOcean door: database credentials to the vault, and a rotation that moves every consumer** (PLN-142):
+- **A DigitalOcean door: database credentials to the vault, and a rotation that moves every consumer you name** (PLN-142):
   `tools/digitalocean.py` over the operator's `doctl` context. `db list` names clusters and which are open to
   the internet; `db consumers CLUSTER` names the App Platform apps that bind one and the password keys they keep
-  in their own spec; `db credential CLUSTER USER --db NAME --to vault:<project>/<env>/<NAME>` delivers a
-  connection URL on stdin; `db rotate` reads every spec before the reset, resets once, writes the new password
-  into each `--spec-env APP:KEY` literal, redeploys each `--app`, retries every call but the reset and waits for
-  ACTIVE. Nothing prints a value. The handling-secrets skill names the provider MCP tools that return a
-  credential by design. Its suite now runs in the portable gate.
+  in their own spec, each marked `url` or `password`; `db credential CLUSTER USER --db NAME --to
+  vault:<project>/<env>/<NAME>` delivers a connection URL on stdin ("unchanged" when the slot holds it);
+  `db rotate` moves every consumer you name (`db consumers` lists the App Platform ones; services started with
+  `use_secret.py serve` are named for restart): it prints the doctl context and team, asks the vault for the
+  slot and reads every spec before the reset, resets once, writes the URL or the password into each
+  `--spec-env APP:KEY` literal as the key expects, redeploys each `--app`, retries every call but the reset and
+  waits for ACTIVE; a failure after the reset says the password WAS reset and names what is left. Nothing
+  prints a value. The handling-secrets skill names the provider MCP tools that return a credential by design.
+  Its suite runs in the portable gate.
 
 ## 0.24.4 — 2026-10-12
 

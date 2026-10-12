@@ -130,19 +130,23 @@ exposure and record it with `vault.py leak`. The design is
 answer by design, whatever you asked them for: DigitalOcean's `db-cluster-list`,
 `db-cluster-get`, `db-cluster-*-user`, `docr-docker-credentials`, `doks-get-kubeconfig`,
 `spaces-key-create`. The transcript keeps a tool result whole; it cannot be redacted
-afterwards. On 2026-10-10 one `db-cluster-list`, asked for names, printed five
-clusters' passwords. Do not call such a tool; get names from the provider CLI with an
+afterwards: a `db-cluster-list` call asked for names can return every cluster's
+passwords. Do not call such a tool; get names from the provider CLI with an
 explicit `--format`, and credentials through the door below. Record any sighting with
 `vault.py leak` and rotate.
 
 DigitalOcean managed databases go through `digitalocean.py` (the operator's `doctl`
-context). `db list` names clusters and says which are open to the internet;
-`db consumers CLUSTER` names the App Platform apps that bind one and the password keys
-they keep in their own spec. `db credential CLUSTER USER --db NAME --to
-vault:<project>/<env>/<NAME>` delivers a connection URL on stdin. `db rotate` resets a
-user and moves every consumer in one run: it reads every spec before the reset,
-writes the new password into each `--spec-env APP:KEY` literal, redeploys each `--app`,
-retries every call but the reset, and waits for ACTIVE. Nothing prints a value.
+context; `db rotate` prints the context and team first). `db list` names clusters and
+says which are open to the internet; `db consumers CLUSTER` names the App Platform apps
+that bind one and the keys they keep in their own spec, each marked `url` or `password`.
+`db credential CLUSTER USER --db NAME --to vault:<project>/<env>/<NAME>` delivers a
+connection URL on stdin ("unchanged" when the slot already holds it). `db rotate` resets
+a user and moves every consumer you name (`db consumers` lists the App Platform ones;
+services started with `use_secret.py serve` from the slot are named for restart): it asks
+the vault for the slot and reads every spec before the reset, writes the connection URL
+or the password into each `--spec-env APP:KEY` literal as the key expects, redeploys each
+`--app`, retries every call but the reset, and waits for ACTIVE. A failure after the
+reset says the password WAS reset and names what is left. Nothing prints a value.
 
 Cloudflare and OpenRouter have separate tools, `cloudflare.py` and
 `openrouter.py`. Check their installed `--help` and non-secret inventory first.

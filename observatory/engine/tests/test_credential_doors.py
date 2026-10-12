@@ -81,6 +81,24 @@ def test_the_ledgers_hold_no_values() -> None:
               '"value": value' not in code and "'value': value" not in code, "")
 
 
+def test_the_digitalocean_door_keeps_the_same_rules() -> None:
+    """`tools/digitalocean.py` (PLN-142): no value in argv or on stdout, a provider's stderr clipped.
+
+    It holds no admin credential of its own — doctl's context is the credential —
+    so its value goes to the vault on stdin rather than through `write_secret`."""
+    rel = "tools/digitalocean.py"
+    src = (ROOT / rel).read_text(encoding="utf-8")
+    code = source_reader.code_only(src)
+    check(f"{rel} hands a value to the vault on stdin only",
+          "input=value" in code and not source_reader.appears_in_code(src, '"--password"')
+          and not source_reader.appears_in_code(src, '"--token"'),
+          "a value in argv is in the shell history, ps and the transcript")
+    check(f"{rel} clips a provider's stderr to one line",
+          "splitlines()" in code and "[-1][:200]" in code and "[0][:300]" in code, "")
+    check(f"{rel} prints no password variable",
+          not any(f"print({v}" in code or f"{{{v}}}" in code for v in ("pw", "url", "value")), "")
+
+
 # ─────────────────────────── cloudflare ──────────────────────────────────────
 
 def cf():
@@ -2021,7 +2039,8 @@ def test_or_issue_for_policy_command_line() -> None:
 
 if __name__ == "__main__":
     print("the credential doors — stash, issue, rotate, revoke, and what they refuse\n")
-    for fn in (test_cf_a_token_this_call_created_is_deleted_when_the_issue_fails,
+    for fn in (test_the_digitalocean_door_keeps_the_same_rules,
+               test_cf_a_token_this_call_created_is_deleted_when_the_issue_fails,
                test_or_a_project_policy_gets_its_own_key_in_its_own_slot,
                test_or_a_policy_never_borrows_and_never_issues_an_unbounded_key,
                test_or_issue_for_policy_command_line,

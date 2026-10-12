@@ -309,6 +309,15 @@ limit local access; this is not a claim that the default files are encrypted at
 rest. Protect private backups just as carefully. A configured external store
 is not included in workspace backup snapshots.
 
+**A DigitalOcean managed database's password, into the vault and rotated without printing it.**
+`tools/digitalocean.py` uses `doctl`'s current context as its credential (`doctl auth init` first).
+`db list` and `db consumers CLUSTER` print names, ids, exposure and which App Platform apps keep the
+password or URL in their own spec; `db credential CLUSTER USER --db NAME --to vault:PROJECT/ENV/NAME`
+puts the connection URL in the vault on stdin; `db rotate … --app ID --spec-env ID:KEY` resets the
+password once and moves every consumer you name, after reading everything it needs and asking the
+vault for the slot, and prints the `use_secret.py serve` services that still need a restart. Do not
+ask a provider MCP tool for clusters: its answer can carry every cluster's passwords.
+
 Known-value scanning finds occurrences of values already known locally. It
 cannot prove the absence of unknown, encoded or previously deleted values.
 Rotation changes the local slot; provider revocation is a separate action.
