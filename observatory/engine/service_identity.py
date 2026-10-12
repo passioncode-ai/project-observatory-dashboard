@@ -91,6 +91,12 @@ def token_file() -> Path:
     return data_dir() / TOKEN_NAME
 
 
+def usage_ledger() -> "fs.JsonlUsageLedger":
+    """The usage receipts of this workspace's paid model calls (contract DEC-0021, OBS-53): written by the
+    assistant (`agent/providers.py` `charge`), read by the server's `GET /fabric/v1/usage`."""
+    return fs.JsonlUsageLedger(Path(paths.STATE) / "logs" / "fabric-usage.jsonl")
+
+
 def log_files() -> list[Path]:
     return [paths.STATE / "logs/serverd.err", paths.STATE / "logs/serverd.out"]
 
