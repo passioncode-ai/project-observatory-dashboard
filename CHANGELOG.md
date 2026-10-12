@@ -5,18 +5,7 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## 0.24.0 — 2026-10-12
 
-The disk guard keeps up with a disk that fills fast and frees more on every system: the maintenance pass runs
-every 15 minutes, under pressure the guard acts on every pass, clears application and tool caches and lowers the
-git tier's thresholds, and it knows what is held without `lsof`. One project answers to many names (aliases,
-`project.resolve`). The meter grows: the estate's month measured, `grant.check` declared, the keyserver trusting
-the delegation token. The companion plugin `observatory-log` is unchanged.
-
-### Added
-
-- **Cloudflare door: `--preset workers-routes --zone <zone>`** — Zone Read + Workers Routes Write on one zone,
-  into a vault slot, verified by listing the zone's routes with the new value. `workers-edit` deploys a script
-  but cannot route a hostname to it; this is that one zone right, without DNS. First use: checkmydata.ai
-  moving its static site to a Worker.
+The disk guard keeps up with a disk that fills fast and never removes what a session still uses: the maintenance pass runs every 15 minutes, under pressure the guard acts on every pass, and a fresh, shared listing of what processes hold — open files, maps, executables, command lines — is re-checked at every removal, under one lock for every cleanup. One project answers to many names (aliases, `project.resolve`). The doors grow: `claim` brings a key minted elsewhere under the OpenRouter door, a project's own key comes from its spend policy, and Cloudflare gains `workers-routes` and `redirect-rules`. The meter grows: the estate's month measured, `grant.check` declared, a usage report. The harness scan names plaintext credentials in agent tools' configs. The companion plugin `observatory-log` is unchanged.
 
 ### Changed
 
@@ -36,6 +25,11 @@ the delegation token. The companion plugin `observatory-log` is unchanged.
   person's agents (T2). Design: `docs/design/METER.md` M0.
 
 ### Added
+
+- **Cloudflare door: `--preset workers-routes --zone <zone>`** — Zone Read + Workers Routes Write on one zone,
+  into a vault slot, verified by listing the zone's routes with the new value. `workers-edit` deploys a script
+  but cannot route a hostname to it; this is that one zone right, without DNS. First use: checkmydata.ai
+  moving its static site to a Worker.
 - **`openrouter.py claim NAME --where PATH`, key on stdin** — brings an OpenRouter key this door did not mint (one
   made by hand in the dashboard) under the door, so `disable`, `limit` and `revoke` reach it. The value is hashed,
   never stored or printed; the provider's row is read by that hash, and a label alone (prefix plus three
