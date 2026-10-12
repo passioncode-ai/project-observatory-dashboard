@@ -32,6 +32,26 @@ while the major version is 0, a minor release may change behaviour and says so h
   costs about three times `du`'s time (6.3 GB of caches: 7.6 s against 24.7 s under load); one that does not
   finish leaves `du`'s number alone.
 
+### Added
+
+- **A manifest never pins a tag its release lacks** (ENG-018): 0.24.0 shipped `fabric-agent.json` with the
+  `grant.check` schemas at `/v0.24.1/`, a tag that did not exist until the next release, so a host admitting
+  0.24.0 read 404s. `observatory/engine/tools/check_manifest_urls.py` refuses a pinned tag newer than the release
+  and any moving ref (a commit sha is admitted); the release workflow's `manifest` job runs it, reads every URL
+  once on a publishing run, and `publish` waits for it.
+- **The board lint and the OBS id register**: `tools/check_backlog.py` (run by the root tests) refuses what is
+  false on the engine board once merged — duplicate or unreserved ids, statuses outside the vocabulary, "in this
+  PR"/"to follow"/"once … restarts", `done` with a remainder, a `done in X.Y.Z` with no such release here, rows
+  wider than the header, and private names in the board and this file (with the maintainer's local denylist).
+  `.claude/agent-sync.json` declares the `OBS` register, so a branch reserves its row's id before writing it.
+
+### Fixed
+
+- **The 0.24.1 notes name the rotation they shipped** (ENG-017): "The collectors take turns" (OBS-52, #231)
+  shipped in 0.24.1 but was missing from that release's notes, and the CHANGELOG packaged in 0.24.1–0.24.4 lists
+  it under 0.24.0. The published notes were corrected on 2026-10-12 (the release files are unchanged); this file
+  already lists it under 0.24.1.
+
 ## 0.24.4 — 2026-10-12
 
 Inside the disk guard the git tier plans branches and worktrees only and fits its deadline, so a scheduled pass under load reaches its removals. The companion plugin `observatory-log` is unchanged.
