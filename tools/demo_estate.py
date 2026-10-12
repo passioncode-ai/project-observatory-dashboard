@@ -51,20 +51,30 @@ SHAPES = {
 }
 # Each type is one a rule emits (`dashboard/finding_types.LABELS`), so the page labels it
 # as it would on a real estate; tests/test_demo_estate.py holds the list to that.
+# Each TITLE is a rule's own message id with its arguments, built by the same
+# `finding_types.titled` (OBS-64): a Russian demo shows Russian titles because the real
+# ones are translated, not because the demo carries its own copy. The detail and the
+# action stay in English, as a real rule writes them.
 FINDINGS = (
-    ("critical", "secret.leaked_unrotated", "project:atlas-billing", "A payment webhook secret appeared in an agent transcript",
+    ("critical", "secret.leaked_unrotated", "project:atlas-billing",
+     "{secret} was seen leaking {n} days ago and has no recorded settlement",
+     {"secret": "PAYMENTS_SIGNING_SECRET", "n": 18},
      "The value of PAYMENTS_SIGNING_SECRET was seen in a session log on 2026-09-24.",
      "Rotate the secret at the provider, then record the rotation with vault.py rotate."),
-    ("warning", "clone.ahead", "project:orbit-agents", "Eleven commits exist only on this machine",
+    ("warning", "clone.ahead", "project:orbit-agents", "{repo} holds commits that are on no remote",
+     {"repo": "northwind-labs/orbit-agents"},
      "orbit-agents is 11 commits ahead of its remote on branch triage-v2.",
      "Push the branch or record why it stays local."),
-    ("warning", "env.shared_secret", "env:harbor-web/.env", "One database password is shared by two projects",
+    ("warning", "env.shared_secret", "env:harbor-web/.env", "{n} credentials are held by more than one project",
+     {"n": 1},
      "DATABASE_URL in harbor-web and lumen-mobile has the same salted fingerprint.",
      "Split the credential so each project holds its own."),
-    ("info", "project.declared_alive_measured_dead", "project:tern-cli", "Declared active, no commit in 41 days",
+    ("info", "project.declared_alive_measured_dead", "project:tern-cli",
+     "{n} projects declare they are active and have not moved", {"n": 1},
      "No commit in 41 days while the project is marked active.",
      "Mark it paused, or pick the work back up."),
-    ("info", "domain.expiring", "domain:signal-docs.example", "A documentation domain expires in 38 days",
+    ("info", "domain.expiring", "domain:signal-docs.example", "{host} expires in {days} days",
+     {"host": "signal-docs.example", "days": 38},
      "Auto-renewal is off at the registrar.",
      "Turn auto-renewal on or let the name go deliberately."),
 )
@@ -176,10 +186,12 @@ def main(argv: list[str]) -> int:
                                                         "denomination": "credits"}))
     (root / "state/provider-health.json").write_text("{}")
     counts = {s: sum(1 for f in FINDINGS if f[0] == s) for s in ("critical", "warning", "info")}
+    sys.path.insert(0, str(ENGINE / "dashboard"))
+    from finding_types import titled
     (root / "registry/findings.json").write_text(json.dumps({"counts": counts, "built_at": stamp, "findings": [
-        {"id": f"finding:demo-{i}", "severity": sev, "type": kind, "subject": subject, "title": title,
+        {"id": f"finding:demo-{i}", "severity": sev, "type": kind, "subject": subject, **titled(msgid, **args),
          "detail": detail, "action": action, "evidence": ["demo"]}
-        for i, (sev, kind, subject, title, detail, action) in enumerate(FINDINGS)]}))
+        for i, (sev, kind, subject, msgid, args, detail, action) in enumerate(FINDINGS)]}))
     from collectors.env_registry import document
     files = [{"path": f"{project}/{'.env' if kind == 'env' else '.env.example'}", "project": project, "kind": kind,
               "git": "ignored", "mode": "600", "modified_on": stamp[:10], "unparsed_lines": 0,

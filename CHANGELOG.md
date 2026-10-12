@@ -55,6 +55,10 @@ The disk guard keeps up with a disk that fills fast and never removes what a ses
 
 ### Changed
 
+- **The demo's findings speak the page's language** (OBS-64): `tools/demo_estate.py` wrote its five findings as
+  English sentences, so a Russian screenshot mixed two languages. Each title is now a rule's own message id with its
+  arguments, built by `finding_types.titled` like a real finding, so the Russian page renders them from the same
+  catalog; the detail and the action stay in English, as a real rule writes them.
 - **The disk table says what a removal frees on APFS** (OBS-66): `du` counts an APFS clone in full — 19
   abandoned browser code-sign clones read as 13 GB and removing them freed nothing. On macOS a place of 512 MB
   or more is walked a second time, inside the same budget, for each file's private size
