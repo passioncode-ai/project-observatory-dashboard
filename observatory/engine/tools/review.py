@@ -277,7 +277,8 @@ def cmd_digest(conn, args) -> int:
             # row and printed a countdown for rows retention will never touch —
             # a deadline on the operator's attention that does not exist
             #.
-            left = _retention.days_left(r["owner"], "proposed", r["created_at"])
+            # AND BY KIND: a lesson waits 365 days for a second project, not 90.
+            left = _retention.days_left(r["owner"], "proposed", r["created_at"], kind=r["kind"])
             if left is None:
                 kept += 1
                 continue

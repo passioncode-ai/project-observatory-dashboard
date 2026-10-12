@@ -5,6 +5,34 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **A lesson is its own record kind, for every project** (`observatory_lesson`): a retro entry's class —
+  `classKey`, `title`, `trigger`, `check`, `nouns` — with its origin, the project's pseudonymous key
+  (`p-` and 12 hex digits of its root commit, never a `project:<slug>` id) and the evidence commit (kept as
+  `commit:<12 hex>`). The arguments are exactly what task-pipeline's `lessons.py emit-observatory --tool
+  observatory_lesson` prints; `tests/lesson_emitter_fixture.json` is a copy of that output and the published
+  schema is checked against it. One record per (classKey, project): a repeat revises it or writes nothing. A
+  path, a URL, an e-mail address or a line break is refused before any write (`invalid-lesson`, every reason
+  listed); credential shapes and known values are redacted. Written `proposed`, confidence 0.5, local stdio only.
+  The tool publishes its outputSchema.
+- **`observatory_search` and `observatory_recall` take `kinds`**, applied inside the candidate query before the
+  300-match window, and every hit names its `kind`; a lesson hit carries its fields as `lesson`. Across projects
+  the search abstained with the window full of per-session turn records (measured: `count 0, abstain: true`);
+  with `kinds: ["lesson"]` a lesson among 400 such rows is found.
+- **Lessons are corroborated by a second project**: `tools/corroborate.py` promotes a proposed lesson to
+  `observed` as `agent:lesson-corroborator` when another, distinct project holds the same `classKey` and neither
+  commit is contradicted — each is asked of git in the clone whose root commit gives its project key, or stands
+  on its resolvable form when no clone of that project is here. The same project twice is one witness;
+  `supported` stays the operator's. `corroboration.json` lists lessons apart from refusals (`lessons`).
+- **Lessons are kept 365 days while proposed, and for good once observed** (`retention.json` →
+  `ledger.kinds.lesson`); any kind can carry its own horizons there, and the review queue's countdown reads them.
+- **`tools/migrate_lessons.py`** converts lessons written earlier as `observatory_record` notes (`lesson:`
+  statements) into lesson records, as a new revision of the same record; `--dry-run` is the default.
+
+Lessons are agents' work memory and stay in Observatory; an export of project-grade lessons to Fabric project
+memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#lessons)).
+
 ### Changed
 
 - **The demo's findings speak the page's language** (OBS-64): `tools/demo_estate.py` wrote its five findings as

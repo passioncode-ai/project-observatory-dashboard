@@ -294,6 +294,11 @@ def append(
     #: it). It may change between revisions: a session can move to another
     #: workflow. Checkpoints and packs never come through here.
     workflow_id: str | None = None,
+    #: A structured body for a record that is not a workflow's: a lesson keeps its
+    #: lesson/1 fields here (classKey, trigger, check, nouns, origin), so a reader can
+    #: filter and corroborate on them without parsing `statement`, and the lexical index
+    #: stems them with the statement. None carries the prior revision's body forward.
+    body: dict | None = None,
 ) -> dict:
     """Append a revision. Returns the accepted revision and a consistency cursor.
 
@@ -397,7 +402,8 @@ def append(
         owner=owner, classification=classification, valid_from=valid_from,
         valid_to=valid_to, supersedes=supersedes, conflicts_with=conflicts_with or [],
         provenance=provenance or [], evidence=evidence or [], created_at=created,
-        **{**_carried(prior), **({"workflow_id": workflow_id} if workflow_id else {})}))
+        **{**_carried(prior), **({"workflow_id": workflow_id} if workflow_id else {}),
+           **({"body": body} if body is not None else {})}))
     return {"memoryId": mid, "revision": revision, "state": state, "owner": owner,
             "supersedes": supersedes, "consistencyCursor": cursor, "createdAt": created}
 
@@ -615,7 +621,8 @@ def _workflow_open(conn: sqlite3.Connection, workflow_id: str | None) -> bool:
 def live_count(conn: sqlite3.Connection, project_id: str | None = None,
                states: tuple[str, ...] = ("supported", "contested", "observed",
                                           "proposed"),
-               classes: tuple[str, ...] | None = None, validity: str = "all") -> int:
+               classes: tuple[str, ...] | None = None, validity: str = "all",
+               kinds: tuple[str, ...] | None = None) -> int:
     """How many live records the scope holds, ignoring any limit.
 
     A reader that returns fifty of a hundred and thirteen and reports `count: 50`
@@ -635,6 +642,7 @@ def live_count(conn: sqlite3.Connection, project_id: str | None = None,
     sql += f" AND l.state IN ({','.join('?' * len(states))})"
     args += list(states)
     sql, args = _only_classes(sql, args, classes)
+    sql, args = _only_kinds(sql, args, kinds)
     sql += _validity(validity)
     return conn.execute(sql, args).fetchone()[0]
 
@@ -657,6 +665,17 @@ def _validity(validity: str) -> str:
     return VALIDITY[validity]
 
 
+def _only_kinds(sql: str, args: list, kinds: tuple[str, ...] | None) -> tuple[str, list]:
+    """Keep only records of these kinds (`observatory_recall`/`_search` `kinds`), inside
+    the query, so a page or a count is never filled by kinds the caller did not ask for.
+    None keeps every kind; an empty tuple keeps none."""
+    if kinds is None:
+        return sql, args
+    if not kinds:
+        return sql + " AND 0", args
+    return sql + f" AND l.kind IN ({','.join('?' * len(kinds))})", args + list(kinds)
+
+
 def _only_classes(sql: str, args: list, classes: tuple[str, ...] | None) -> tuple[str, list]:
     """Keep only records of these classification values (a binding's visible set,
     `memory_access.visible_classes`). None keeps every class; an empty tuple keeps
@@ -671,7 +690,8 @@ def _only_classes(sql: str, args: list, classes: tuple[str, ...] | None) -> tupl
 def live(conn: sqlite3.Connection, project_id: str | None = None,
          states: tuple[str, ...] = ("supported", "contested", "observed", "proposed"),
          limit: int = 100, cursor: str | None = None,
-         classes: tuple[str, ...] | None = None, validity: str = "all") -> list[dict]:
+         classes: tuple[str, ...] | None = None, validity: str = "all",
+         kinds: tuple[str, ...] | None = None) -> list[dict]:
     """Current revisions, tombstoned records excluded.
 
     Conflicting records are returned TOGETHER: a `contested` row appears beside
@@ -691,6 +711,7 @@ def live(conn: sqlite3.Connection, project_id: str | None = None,
     sql += f" AND l.state IN ({','.join('?' * len(states))})"
     args += list(states)
     sql, args = _only_classes(sql, args, classes)
+    sql, args = _only_kinds(sql, args, kinds)
     sql += _validity(validity)
     # The cursor's key is the PAIR `(created_at, memory_id)`, because
     # `created_at` is second-resolution and therefore not unique: two records

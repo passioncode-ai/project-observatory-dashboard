@@ -363,6 +363,22 @@ claude mcp list | grep observatory     # Connected
 Restart open Claude Code sessions afterwards; they read their MCP servers at
 start.
 
+Agents keep their work memory here. `observatory_record` writes a note about one
+project and `observatory_learn` a lesson inside one project; `observatory_lesson`
+records a lesson for every project — a retro entry's class with the project's
+pseudonymous key (`p-` and 12 hex digits of its root commit, never its name) and
+the evidence commit. Every one is a proposal (confidence 0.5). A lesson becomes
+`observed` without you when a second, distinct project records the same class and
+both commits resolve: `tools/corroborate.py`, which the tick runs, checks each
+commit in the clone it belongs to. `supported` is yours, through `review.py`.
+Proposed lessons are kept 365 days (`retention.json` → `ledger.kinds.lesson`), and
+an observed one is never erased by age. An agent finds lessons with
+`observatory_search` and `kinds: ["lesson"]`, without a project. Lessons stay in
+this workspace: they are agents' memory, not the project's. Lessons recorded earlier
+as `lesson:` notes are converted once with
+`python "$(project-observatory full-path)/tools/migrate_lessons.py" --apply`
+(without `--apply` it lists what it would change and writes nothing).
+
 The optional `observatory-log` plugin adds Claude Code hooks; other hosts can
 use the CLI and MCP without those hooks.
 

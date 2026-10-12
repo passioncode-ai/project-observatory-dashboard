@@ -150,6 +150,8 @@ BOUNDARY += ('embedding_enforcement',)
 BOUNDARY += ('memory_access',)
 # Scope and validity filtered before the candidate window (PB-137 N-009).
 BOUNDARY += ('search_scope',)
+# A lesson as its own record kind, and search filtered by kind before the window (M-7).
+BOUNDARY += ('lesson', 'search')
 # Retrieval receipts, scoped explain, redaction on the way out (PB-137 N-012).
 BOUNDARY += ('retrieval_audit',)
 # Checkpoint prose with field/chunk provenance; replays resurrect nothing (PB-137 N-011).
@@ -190,6 +192,8 @@ HELPERS += (
     # language reads in the other (L10N-01).
     'relocalize.py',
 )
+# task-pipeline's lessons.py emit-observatory output, copied: observatory_lesson's arguments (M-7).
+HELPERS += ('lesson_emitter_fixture.json',)
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', 'tools')
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
