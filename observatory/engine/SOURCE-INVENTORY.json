@@ -2872,8 +2872,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cca159188d8ba64437fe57dd675f7ad490d6299be1472f036f94841acdeca983",
-      "bytes": 29005
+      "export_sha256": "9b3cb3f7220485bc20b884d4bc8395e85713ede0cd0e6008669388510f823acb",
+      "bytes": 29975
     },
     {
       "path": "tests/test_machine_mcp_inventory.py",
@@ -3972,8 +3972,8 @@
       "path": "tools/cleanup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4b5d344a57bc9102742459752f7870eb6373c63fb4cdb0b2f1dc99922935939b",
-      "bytes": 24917
+      "export_sha256": "a272f5c020fca25b33d83f5547c7c079f3c6b93e40a6a91cb6d07cbc95fab42e",
+      "bytes": 25626
     },
     {
       "path": "tools/cloudflare.py",

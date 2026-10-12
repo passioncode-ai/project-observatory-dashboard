@@ -299,6 +299,28 @@ class Estate(Base):
                 patch.object(holders.Holders, "take", classmethod(lambda cls, timeout=120: held)):
             return cleanup.main(["cleanup.py", *args])
 
+    def test_the_recheck_reuses_a_listing_younger_than_twenty_seconds(self):
+        """2026-10-12: a full listing per worktree, tens of seconds each under load, spent the
+        guard's whole git-tier share before the first removal."""
+        import cleanup
+        import holders
+        importlib.reload(cleanup)
+        taken = []
+        clock = [100.0]
+
+        def take(cls, timeout=120):
+            taken.append(clock[0])
+            return holders.Holders([])
+        with patch.object(holders.Holders, "take", classmethod(take)), \
+                patch.object(cleanup.time, "monotonic", lambda: clock[0]):
+            for _ in range(5):
+                cleanup.busy_now("/nowhere/a")
+                clock[0] += 3
+            self.assertEqual(len(taken), 1, "five re-checks within 15 s share one listing")
+            clock[0] += 30
+            cleanup.busy_now("/nowhere/a")
+            self.assertEqual(len(taken), 2, "an older listing is taken again")
+
     def branches(self, repo):
         return set(git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").split())
 

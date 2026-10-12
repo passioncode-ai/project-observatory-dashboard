@@ -3,6 +3,15 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Fixed
+
+- **The git tier's re-check takes one listing per 20 seconds, not one per worktree** (OBS-63): at load 300–700 each
+  full listing of what processes hold took tens of seconds, and on 0.24.x the guard's git tier spent its whole share
+  re-checking the first worktrees — no branch or worktree was removed by a scheduled pass. Run by hand on the same
+  machine, the tier removed 95 merged and 3 pushed branches and 7 clean worktrees.
+
 ## 0.24.2 — 2026-10-12
 
 A cache command never runs past its class's share, so the disk guard's git tier — merged and pushed branches, clean worktrees and their dependencies — keeps the time 0.24.1 set aside for it. The companion plugin `observatory-log` is unchanged.

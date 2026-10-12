@@ -262,7 +262,21 @@ def busy_now(path: str) -> bool:
     2026-10-12 only working directories counted, so a worktree whose files an editor or a dev
     server held open was removed. When the listing cannot be taken, everything is held."""
     import holders
-    return holders.Holders.take(60).busy(path)
+    global _LISTING
+    # ONE LISTING PER 20 SECONDS, not one per worktree: at load 300-700 on 2026-10-12 each full
+    # listing took tens of seconds, and the guard's git tier spent its whole share re-checking
+    # the first worktrees without removing anything. Twenty seconds old is still "right now"
+    # next to the hours a worktree has to be idle before it is planned at all.
+    taken, listing = _LISTING
+    if listing is None or time.monotonic() - taken > RECHECK_FRESH_SECONDS:
+        listing = holders.Holders.take(60)
+        _LISTING = (time.monotonic(), listing)
+    return listing.busy(path)
+
+
+#: How old a listing of what processes hold may be when a removal re-checks its target.
+RECHECK_FRESH_SECONDS = 20
+_LISTING: tuple = (0.0, None)
 
 
 def ignored_keepers(target: str, artifacts: set[str]) -> list[str]:
