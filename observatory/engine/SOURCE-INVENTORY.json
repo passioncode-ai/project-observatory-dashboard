@@ -3565,8 +3565,8 @@
       "path": "tests/test_tick_py.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "610d25a9bece40c90f0f91e23d2496be52a67006ca031e4766f01e8cc9a80749",
-      "bytes": 27316
+      "export_sha256": "e3869fce82e0b6280d2f43b6d72944b8bc867b1c01964d6d0bcc22c8f2a5c8ca",
+      "bytes": 28010
     },
     {
       "path": "tests/test_tick_repo.py",
@@ -4468,8 +4468,8 @@
       "path": "tools/tick.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1da83dff9083c24c32566ca9d5fed02906e99ff220d67efd4663a64dc6b1da33",
-      "bytes": 29295
+      "export_sha256": "5883eacc04f5d7f566ffbb16d7e9ee0301616dd4d5e75863bd6b448fbd7e9a78",
+      "bytes": 30017
     },
     {
       "path": "tools/tick.sh",

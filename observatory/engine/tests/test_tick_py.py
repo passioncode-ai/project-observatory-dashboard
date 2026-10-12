@@ -423,6 +423,16 @@ class RotationRecord(unittest.TestCase):
         self.assertIsNone(leaks["last_ran_at"])
         self.assertEqual(leaks["not_started_streak"], 1)
 
+    def test_an_unreadable_shape_that_is_not_a_newer_schema_is_rewritten(self):
+        """Confirming read of round 2: every unknown shape was pinned as a newer engine's record, so
+        `{}` or a string schema ran the planned order on every tick for ever. Only an int schema past
+        this engine's is kept; anything else is logged and the first save writes schema 2."""
+        for body in ({}, {"schema": "2", "collectors": {}}):
+            self.record.write_text(json.dumps(body), encoding="utf-8")
+            _, doc = self.run_tick()
+            self.assertEqual(doc["schema"], 2, body)
+            self.assertEqual(set(doc["collectors"]), {"scan-fs", "leaks", "lifecycle"}, body)
+
     def test_a_schema_it_does_not_know_is_left_untouched(self):
         """A newer engine's record survives a tick of this one byte for byte: a downgrade must not
         erase it. The tick runs the planned order and says why."""

@@ -221,8 +221,9 @@ class Rotation:
     still read, its times seeding `started_at` and `last_ran_at` — schema 1 kept no outcome, so a
     seeded `last_ran_at` may belong to a run that failed —; the first save writes schema 2. A bad
     row is coerced or skipped, never the whole record; a field that is not a finite number reads as
-    null. A schema neither 1 nor 2 (a newer engine's) is logged as unreadable and left untouched:
-    the planned order runs and nothing is written over it."""
+    null. A schema that is an int past 2 (a newer engine's) is logged and left untouched: the
+    planned order runs and nothing is written over it. Any other unreadable shape is logged and
+    rewritten as schema 2 by the first save."""
 
     def __init__(self, t: "Tick", record: Path):
         self.t, self.record = t, record
@@ -271,9 +272,17 @@ class Rotation:
                     rows[str(k)] = {"started_at": at, "finished_at": None, "outcome": None,
                                     "not_started_streak": 0, "last_ran_at": at}
                 return rows
-            log(f"rotation: {self.record.name} unreadable (schema {doc.get('schema')!r}, neither 1 nor "
-                f"{ROTATION_SCHEMA}) — the planned order this tick, and the record is not rewritten")
-            self.foreign = True
+            schema = doc.get("schema")
+            if isinstance(schema, int) and not isinstance(schema, bool) and schema > ROTATION_SCHEMA:
+                # A NEWER engine's record: kept as it is, so running an older engine never erases it.
+                log(f"rotation: {self.record.name} unreadable (schema {schema}, newer than {ROTATION_SCHEMA}) "
+                    f"— the planned order this tick, and the record is not rewritten")
+                self.foreign = True
+                return {}
+            # Any other shape ({}, a string schema, schema 1 without `started`) is damage, not a newer
+            # engine: pinning it would run the planned order every tick and starve the tail again.
+            log(f"rotation: {self.record.name} unreadable (schema {schema!r}) — the planned order this tick; "
+                f"it is rewritten as schema {ROTATION_SCHEMA}")
             return {}
         except FileNotFoundError:
             return {}
