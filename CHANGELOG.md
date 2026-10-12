@@ -19,6 +19,17 @@ while the major version is 0, a minor release may change behaviour and says so h
   costs about three times `du`'s time (6.3 GB of caches: 7.6 s against 24.7 s under load); one that does not
   finish leaves `du`'s number alone.
 
+### Added
+
+- **A DigitalOcean door: database credentials to the vault, and a rotation that moves every consumer** (PLN-142):
+  `tools/digitalocean.py` over the operator's `doctl` context. `db list` names clusters and which are open to
+  the internet; `db consumers CLUSTER` names the App Platform apps that bind one and the password keys they keep
+  in their own spec; `db credential CLUSTER USER --db NAME --to vault:<project>/<env>/<NAME>` delivers a
+  connection URL on stdin; `db rotate` reads every spec before the reset, resets once, writes the new password
+  into each `--spec-env APP:KEY` literal, redeploys each `--app`, retries every call but the reset and waits for
+  ACTIVE. Nothing prints a value. The handling-secrets skill names the provider MCP tools that return a
+  credential by design. Its suite now runs in the portable gate.
+
 ## 0.24.4 — 2026-10-12
 
 Inside the disk guard the git tier plans branches and worktrees only and fits its deadline, so a scheduled pass under load reaches its removals. The companion plugin `observatory-log` is unchanged.
