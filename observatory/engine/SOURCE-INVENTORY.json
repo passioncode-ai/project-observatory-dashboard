@@ -2013,8 +2013,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "f5e6cb4c4dc9246213b45df82d2a6bff7aa186a4ec0474175f2278bc405f4814",
-      "bytes": 23917,
+      "export_sha256": "c2fb4cf7a44bdffa62866953b012b9a6d9aebda7af010942e0ae4d2203f18df4",
+      "bytes": 23942,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2311,8 +2311,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "0ac4a58e4148965952f88dbe878843fe75524d1ae15ffea90ebf611d6f87bfa3",
-      "bytes": 147340,
+      "export_sha256": "8356e1721c1ccc2d82780d1e12ed307654c0218cb06017fb3d421821085db4ec",
+      "bytes": 162364,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,

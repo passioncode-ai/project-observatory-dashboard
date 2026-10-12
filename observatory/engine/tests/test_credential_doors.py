@@ -2513,6 +2513,282 @@ def test_or_policy_dry_run_resolves_the_issuing_account() -> None:
           outcomes == [True, True] and not p.keys and p.max_sum == 0.0, str(outcomes))
 
 
+# ─────────────────────────── round 4: the property, before any fix ─────────────
+
+#: The property test's seed: case i draws from random.Random(PROPERTY_SEED + i).
+PROPERTY_SEED = 20261012
+PROPERTY_CASES = 2000
+#: Seeds the property found failing on fc479fc, kept as named regression cases (run first).
+PROPERTY_REGRESSION_SEEDS: dict[int, str] = {
+    20261100: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261137: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261163: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261186: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261215: "(a)(b) a mint after a kill took the total past the limit",
+    20261291: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261379: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261383: "(a) a mint after a kill took the total past the limit",
+    20261388: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261401: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261426: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261490: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261503: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261537: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261595: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261598: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261624: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261675: "(a) a mint after a kill took the total past the limit",
+    20261697: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261755: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261756: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261840: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261910: "(a) a mint after a kill took the total past the limit",
+    20261912: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261999: "(a)(b) a mint after a kill took the total past the limit",
+    20262002: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262132: "(a) a mint after a kill took the total past the limit",
+    20262167: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262197: "(a) a mint after a kill took the total past the limit",
+    20262202: "(a) a mint after a kill took the total past the limit",
+    20262287: "(a) a mint after a kill took the total past the limit",
+    20262378: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262503: "(a) a mint after a kill took the total past the limit",
+    20262516: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262589: "(a) a mint after a kill took the total past the limit",
+    20262595: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262603: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262636: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262648: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262798: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262818: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262975: "(a) a mint after a kill took the total past the limit",
+    20263008: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+}
+
+
+class PropProvider(MaxProvider):
+    """The highest-total fake, plus what the property needs: failures injected at the n-th write of a
+    kind (lower, raise, mint, cleanup), a write count, and the check that matters — after every write
+    that RAISES the total (a mint, a ceiling moved up) the total in whole cents is within the limit
+    of the run in progress. A write that lowers the total never breaks the invariant."""
+
+    def __init__(self, unreachable, echo=lambda x: x):
+        super().__init__(unreachable, echo)
+        self.writes, self.fail, self.seen = 0, None, {}
+        self.limit_cents, self.violations = None, []
+
+    def cents(self):
+        total = 0
+        for r in self.keys.values():
+            if r["limit"] is None:
+                return math.inf
+            total += round(r["limit"] * 100)
+        return total
+
+    def _maybe_fail(self, kind):
+        self.seen[kind] = self.seen.get(kind, 0) + 1
+        if self.fail and self.fail[0] == kind and self.fail[1] == self.seen[kind]:
+            self.fail = None
+            raise RuntimeError(f"openrouter answered HTTP 500 (injected at {kind})")
+
+    def __call__(self, path, key, payload=None, method=None):
+        before = self.cents()
+        if path == "/keys" and payload:
+            self._maybe_fail("mint")
+        elif method == "DELETE":
+            self._maybe_fail("cleanup")
+        elif method == "PATCH" and payload and "limit" in payload:
+            h = path.rsplit("/", 1)[-1]
+            old = (self.keys.get(h) or {}).get("limit")
+            self._maybe_fail("lower" if old is None or payload["limit"] < old else "raise")
+        out = super().__call__(path, key, payload, method)
+        if (path == "/keys" and payload) or method in ("PATCH", "DELETE"):
+            self.writes += 1
+            after = self.cents()
+            if after > before and self.limit_cents is not None and after > self.limit_cents:
+                self.violations.append(f"{method or 'POST'} {path} took the total to {after} cents "
+                                       f"past {self.limit_cents}")
+        return out
+
+
+import math                                                         # noqa: E402
+import random                                                       # noqa: E402
+
+PROVIDER_FAILURES = ("lower", "raise", "mint", "cleanup")
+DOOR_FAILURES = ("deliver", "deliver-timeout", "kill", "ledger-save")
+
+
+def _prop_door(rng):
+    echo = rng.choice([lambda x: x, lambda x: x + 1e-9, lambda x: round(x, 2)])
+    m = orr()
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    m.ADMIN_STORE = d / "admin"
+    m.ADMIN_STORE.mkdir(parents=True)
+    private_io.write(m.ADMIN_STORE / "example", "prov\n")
+    m.LEDGER = d / "ledger.json"
+    m._project_folder = lambda project, env, name: {"a": "project-a"}.get(project, project)
+    m.vault_destination = lambda to: to
+    m._journal = lambda *a, **k: None
+    p = PropProvider(m.Unreachable, echo)
+    m._request = p
+    if rng.random() < 0.3:                          # an account that lists past PAGES_MAX
+        def too_long(admin, include_disabled=True):
+            raise m.ListingTooLong("past PAGES_MAX", [])
+        m._all_keys = too_long
+    door = {"deliver": None, "save": None}
+    real_save = m.save_ledger
+
+    def deliver(value, to, **k):
+        f = door["deliver"]
+        if f:
+            door["deliver"] = None
+            if f == "deliver":
+                raise OSError("the vault refused the put")
+            if f == "deliver-timeout":
+                raise __import__("subprocess").TimeoutExpired(["vault.py", "put"], 60)
+            raise KeyboardInterrupt                 # the run is killed between the mint and its record
+        return f"vault {to}"
+
+    def save(doc):
+        f = door["save"]
+        if f is not None:
+            f[0] -= 1
+            if f[0] == 0:
+                door["save"] = None
+                raise OSError("the disk refused the ledger write")
+        return real_save(doc)
+    m.deliver, m.save_ledger = deliver, save
+    return m, p, door
+
+
+def _prop_policy(rng, refs, limit_cents):
+    """A policy over `refs` and how it is split, with the whole-cent ceilings the door must plan, or
+    None where the door is right to refuse (less than a cent per key)."""
+    n = len(refs)
+    mode = rng.choice(["equal", "equal", "split", "limit"])
+    kw, planned = {}, None
+    if mode == "equal" and limit_cents // n >= 1:
+        planned = [limit_cents // n] * n
+    elif mode == "split" and limit_cents >= n:
+        cuts = sorted(rng.sample(range(1, limit_cents + 1), n)) if limit_cents > n else list(range(1, n + 1))
+        planned = [cuts[0]] + [b - a for a, b in zip(cuts, cuts[1:])]
+        if rng.random() < 0.5:                      # not always the whole limit
+            planned = [max(1, c - rng.randint(0, c - 1)) for c in planned]
+        kw["split"] = {r: c / 100 for r, c in zip(refs, planned)}
+    elif mode == "limit" and limit_cents // n >= 1:
+        c = rng.randint(1, limit_cents // n)
+        planned, kw["limit_override"] = [c] * n, c / 100
+    policy = {"kind": "spend-policy", "project": "urn:project:a", "mode": "limited",
+              "limitUsd": limit_cents / 100, "period": "month",
+              "credentialSources": [{"kind": "project-key", "ref": r} for r in refs]}
+    return policy, kw, planned
+
+
+def _prop_run(m, p, policy, kw, limit_cents):
+    p.limit_cents = limit_cents
+    start = p.cents()
+    p.max_sum = p.total()
+    try:
+        plan, err = m.issue_for_policy(policy, "example", dry_run=False, **kw), None
+    except KeyboardInterrupt:
+        plan, err = None, "killed"
+    except ValueError as exc:
+        plan, err = None, f"ValueError: {exc}"
+    except Exception as exc:                        # noqa: BLE001 — the property reads every outcome
+        plan, err = getattr(exc, "plan", None), f"{type(exc).__name__}: {exc}"
+    return plan, err, start
+
+
+def _prop_case(seed):
+    """One case: a first run, provider states and a policy edit, a run with one failure injected, a
+    clean re-run, and a run that must move nothing. Returns the properties it broke."""
+    rng = random.Random(seed)
+    broke = []
+    m, p, door = _prop_door(rng)
+    scale = rng.choice([100, 10_000, 100_000_000])          # $1, $100, $1e6
+    limit_cents = rng.randint(1, scale)
+    names = [f"vault:project-a/prod/K{j}" for j in range(12)]
+    refs = rng.sample(names, rng.randint(1, 12))
+    policy, kw, planned = _prop_policy(rng, refs, limit_cents)
+    plan, err, _ = _prop_run(m, p, policy, kw, limit_cents)
+    if planned is not None and sum(planned) <= limit_cents:
+        refused = err is not None or any(s.get("action") == "blocked" for s in plan or [])
+        if refused:
+            broke.append(f"(b) {sum(planned)} cents planned under a {limit_cents}-cent limit refused: "
+                         f"{err or [s.get('why') for s in plan if s.get('action') == 'blocked'][:1]}")
+    # Provider states the run did not cause.
+    for h in list(p.keys):
+        roll = rng.random()
+        if roll < 0.08:
+            p.unread.add(h)
+        elif roll < 0.14:
+            del p.keys[h]
+        elif roll < 0.22:
+            p.keys[h]["name"] = f"renamed-{h}"
+        elif roll < 0.27:
+            p.keys[h]["limit"] = None
+    # A policy edit: sources added or dropped, the limit changed.
+    refs = [r for r in refs if rng.random() > 0.25] or refs[:1]
+    refs += [r for r in rng.sample(names, rng.randint(0, 3)) if r not in refs]
+    limit_cents = max(1, min(scale, int(limit_cents * rng.choice([0.5, 1, 1, 2]))))
+    policy, kw, _ = _prop_policy(rng, refs, limit_cents)
+    kind = rng.choice(PROVIDER_FAILURES + DOOR_FAILURES)
+    if kind in PROVIDER_FAILURES:
+        p.fail = (kind, rng.randint(1, 2))
+    elif kind == "ledger-save":
+        door["save"] = [rng.randint(1, 3)]
+    else:
+        door["deliver"] = kind
+    _prop_run(m, p, policy, kw, limit_cents)
+    p.fail, door["deliver"], door["save"] = None, None, None
+    p.unread.clear()
+    _prop_run(m, p, policy, kw, limit_cents)                # the clean re-run
+    writes = p.writes
+    plan, err, _ = _prop_run(m, p, policy, kw, limit_cents)
+    if p.writes != writes:
+        broke.append(f"(c) the run after the clean re-run made {p.writes - writes} write(s): "
+                     f"{[s.get('action') for s in plan or []]} {err}")
+    if p.violations:
+        broke.append(f"(a) {p.violations[0]} (after a {kind} failure)")
+    return broke
+
+
+def test_or_policy_property_regression_seeds() -> None:
+    """The seeds the property found failing on fc479fc, each a named case."""
+    for seed, what in PROPERTY_REGRESSION_SEEDS.items():
+        broke = _prop_case(seed)
+        check(f"seed {seed} ({what})", not broke, "; ".join(broke)[:300])
+
+
+def test_or_policy_property() -> None:
+    """J-1's invariant as a property, PROPERTY_CASES seeded cases, no new dependency:
+
+    (a) no write a run makes that raises the provider's total (a mint, a ceiling moved up) leaves the
+        total, in whole cents, above the limit of the run — so a project within its limit stays
+        within it at every moment. **The documented exception** is `rotate` (and `rotate --leaked`):
+        it creates the successor before it deletes the predecessor, so for that window the slot holds
+        two live keys and the total can be up to twice the slot's ceiling. This property drives
+        `issue-for-policy` only; the window is named in docs/design/AGENT-SECRETS.md.
+    (b) a policy whose planned whole-cent ceilings sum to at most the limit, in integer cents, is
+        never refused or blocked as over it, on a project with no other keys;
+    (c) after any failure — at a lowering, a raise, a mint, a delivery (refused, timed out, killed),
+        a ledger write, a cleanup delete — a clean re-run converges and the run after it moves nothing.
+
+    Inputs: limits from $0.01 to $1e6, 1–12 sources, policy edits between runs, provider states
+    (unread, 404, renamed, null limit, a float echo or cents storage), an account listing past
+    PAGES_MAX."""
+    failing: dict[int, list[str]] = {}
+    for seed in [PROPERTY_SEED + i for i in range(PROPERTY_CASES)]:
+        broke = _prop_case(seed)
+        if broke:
+            failing[seed] = broke
+    for prop in ("(a)", "(b)", "(c)"):
+        seeds = sorted(s for s, b in failing.items() if any(x.startswith(prop) for x in b))
+        check(f"property {prop} holds over {PROPERTY_CASES} cases (seed {PROPERTY_SEED})", not seeds,
+              f"{len(seeds)} failing seeds, e.g. " + "; ".join(f"{s}: {next(x for x in failing[s] if x.startswith(prop))}"
+                                                             for s in seeds[:3]))
+
+
 if __name__ == "__main__":
     print("the credential doors — stash, issue, rotate, revoke, and what they refuse\n")
     for fn in (test_cf_a_token_this_call_created_is_deleted_when_the_issue_fails,
@@ -2530,6 +2806,8 @@ if __name__ == "__main__":
                test_or_policy_amounts_are_whole_cents_against_the_exact_limit,
                test_or_policy_never_leaves_a_live_untracked_key,
                test_or_policy_dry_run_resolves_the_issuing_account,
+               test_or_policy_property_regression_seeds,
+               test_or_policy_property,
                test_no_door_takes_or_prints_a_value_outside_stdin,
                test_the_ledgers_hold_no_values,
                test_cf_stash_refuses_an_admin_that_cannot_issue,
