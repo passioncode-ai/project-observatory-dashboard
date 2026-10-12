@@ -153,7 +153,7 @@ def test_every_route_answers_and_none_serves_a_value() -> None:
               and b"data-live" in agents, str(agents)[:160])
         code, agents_ru = get("/agents?locale=ru")
         check("and in the reader's language",
-              code == 200 and "Нужно вам".encode() in agents_ru, str(agents_ru)[:160])
+              code == 200 and "Требует решения".encode() in agents_ru, str(agents_ru)[:160])
         code, agents_bad = get("/agents?locale=xx")
         check("an unknown language falls back to English, not an error",
               code == 200 and b"Needs you" in agents_bad, str(agents_bad)[:120])

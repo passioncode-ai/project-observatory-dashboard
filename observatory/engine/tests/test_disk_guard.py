@@ -954,7 +954,7 @@ class Surfaces(Base):
         ru = machine_page.machine_html({"machine": summary}, Translator("ru"))
         for text in ("Disk guard", "Largest files", "/data/alpha-web/big.img", "Running simulators", "Phone A"):
             self.assertIn(text, en)
-        for text in ("Страж диска", "Самые большие файлы", "временные файлы", "Запущенные симуляторы", "мало места"):
+        for text in ("Контроль диска", "Самые большие файлы", "временные файлы", "Запущенные симуляторы", "мало места"):
             self.assertIn(text, ru)
         self.assertNotIn("&lt;span", en + ru, "a marked word passed as an argument prints its markup")
 

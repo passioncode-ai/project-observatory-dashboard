@@ -229,7 +229,7 @@ class AgentsPage(unittest.TestCase):
         self.assertIn('class="agents-events', en, "the lanes have an ordered list beside them")
         self.assertIn("details", en)
         ru = agents_page.agents_html({"agents": self.view}, Translator("ru"))
-        self.assertIn("Нужно вам", ru)
+        self.assertIn("Требует решения", ru)
         self.assertIn("лимит", ru, "a handoff reason in the reader's language")
         self.assertNotIn("каталог удалён", ru, "missing here is a key, not a deleted worktree")
 
