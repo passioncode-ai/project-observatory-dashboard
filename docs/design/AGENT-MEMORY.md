@@ -298,10 +298,13 @@ PB-137 N-014.
 ## Lessons
 
 A lesson is a retro entry's **class**, recorded so an agent in another project finds it before
-it repeats the mistake. Its writer is task-pipeline's `lessons.py` (`emit-observatory --tool
-observatory_lesson` prints the arguments); `observatory/engine/tests/lesson_emitter_fixture.json`
-holds a copy of that output, and `tests/test_lesson.py` checks the published input schema
-against it.
+it repeats the mistake. Its writer is task-pipeline's `lessons.py emit-observatory`, which has
+two routes: `--tool observatory_lesson` where the engine has this tool, and `observatory_record`
+otherwise (the bridge: a note whose statement starts `lesson:`, converted later by
+`tools/migrate_lessons.py`). `observatory/engine/tests/lesson_emitter_fixture.json` holds the
+shape the first route prints — hand-written from the emitter until task-pipeline re-adds the
+flag, then re-pinned to its real output — and `tests/test_lesson.py` checks the published input
+schema against it.
 
 - **Its own kind.** `observatory_lesson` writes `kind: lesson`, `function: experiential`,
   `scope: global`, no `project_id`, `state: proposed`, confidence 0.5. The lesson/1 fields
@@ -312,7 +315,9 @@ against it.
   project, and a repository's name can be a customer's. The commit is stored as
   `commit:<12 hex>`, the form the memory redactor keeps whole.
 - **What it may not carry** is refused before any write (`code: invalid-lesson`, every reason
-  listed): a path, a URL, an e-mail address, a line break, a field outside lesson/1's bounds.
+  listed): a path, a URL, an e-mail address, a line break, a field outside lesson/1's bounds,
+  and a `classKey` the redactor would change (a long hex or random run would stop being a slug
+  and stop matching another project's copy). The refusal's hint names both emitter routes.
   Credential shapes and the workspace's known values are redacted, as on every agent write,
   and the answer's `redacted.fields` says where.
 - **One record per (classKey, project).** A repeat from the same project revises that record
@@ -323,15 +328,21 @@ against it.
   per-session records filled the window and the search abstained over a store that held the
   answer (measured 2026-10-12). Every hit names its `kind`; a lesson hit carries its fields as
   `lesson`. `observatory_recall(kinds: [...])` filters the page and its `total` alike.
-- **Promoted by a second project.** `tools/corroborate.py` promotes a proposed lesson to
-  `observed` as `agent:lesson-corroborator` when another, distinct project holds the same
-  `classKey` and neither commit is contradicted: each origin's commit is asked of git in a
-  clone whose root commit gives that key (`resolves`), or, when no clone of that project is on
-  this machine, stands on its resolvable `commit:<hex>` form. A commit git cannot find in a
-  clone that is here blocks the promotion and is listed under `lessons.contradicted` in
-  `corroboration.json`. The same project twice is one witness. `supported` stays the
-  operator's. The rule is the operator's decision (two distinct projects, both commits
-  resolvable, no person needed); a third project is not required.
+- **Promoted by a second project, when both commits resolve here.** The rule is the operator's
+  decision (O2): two distinct projects record the classKey and both commits resolve, and then no
+  person is needed; `supported` stays the operator's. `tools/corroborate.py` applies it as
+  `agent:lesson-corroborator`, and "resolve" means in git, on this machine: each origin's
+  `p-` key must belong to a clone the registry knows (its root commit gives the key) and the
+  commit must be an object in that clone. Four outcomes, each listed in `corroboration.json`
+  under `lessons`:
+  - `promoted` — this lesson's commit and another project's commit of the same class resolve;
+  - `waiting` — no second project has recorded the class, or none of theirs resolves yet;
+  - `unresolvable` — "commit not resolvable here": no registered clone carries the key, so the
+    lesson stays `proposed` and witnesses for nobody (an invented key buys nothing);
+  - `contradicted` — the clone is here and git does not hold the commit.
+
+  The same project twice is one witness. `counts.proposed` counts only the rows the session
+  rule reads; lessons have their own `lessons_*` counts.
 - **Local only for now.** A binding over HTTP is refused (`local-only`): a lesson belongs to no
   one project, and a binding is scoped to its projects. A Fabric capability
   (`memory.lesson.record`) is a contract revision for later.

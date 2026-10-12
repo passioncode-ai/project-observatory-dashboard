@@ -6,9 +6,10 @@ repeats the mistake. Until this tool the only doors were `observatory_record` (a
 indistinguishable from thousands of turn records) and `observatory_learn` (a failure/fix
 pair inside one project, which a retro entry is not).
 
-* The published input schema is the emitter's: `lesson_emitter_fixture.json` is
-  task-pipeline's `lessons.py emit-observatory --tool observatory_lesson` output, copied,
-  and its arguments must validate against `tools/list` and record as they are.
+* The published input schema is the emitter's: `lesson_emitter_fixture.json` is the shape
+  task-pipeline's `lessons.py emit-observatory --tool observatory_lesson` prints (hand-written
+  until that flag is re-added; then re-pinned to the real output), and its arguments must
+  validate against `tools/list` and record as they are.
 * One record per (classKey, project): a repeat revises or changes nothing, never mints.
 * What a lesson may not carry — a path, a URL, an e-mail address, a `project:<slug>` id —
   is refused before any write; a credential shape is redacted, and the answer says where.
@@ -68,9 +69,10 @@ class Base(unittest.TestCase):
 
 
 class TheEmittersArguments(Base):
-    def test_the_fixture_is_the_emitters_output(self) -> None:
+    def test_the_fixture_is_the_emitters_shape(self) -> None:
         self.assertEqual(FIXTURE["output"]["tool"], "observatory_lesson")
         self.assertIn("lessons.py", FIXTURE["emitter"]["script"])
+        self.assertEqual(FIXTURE["emitter"]["provenance"], "hand-written")
 
     def test_the_published_input_schema_takes_exactly_the_emitted_arguments(self) -> None:
         schema = self.tool().input_schema
@@ -138,6 +140,18 @@ class WhatALessonMayNotCarry(Base):
         self.assert_refused(lesson(title="Ask someone@example.com before the gate runs"),
                             "an e-mail address")
         self.assert_refused(lesson(trigger="two\nlines"), "line break")
+
+    def test_a_class_key_the_redactor_would_change_is_refused(self) -> None:
+        # A slug may be a long hex run, and the redactor replaces such runs: the stored
+        # classKey would stop being a slug and stop matching the other project's copy.
+        self.assert_refused(lesson(classKey="check-" + "0123456789abcdef" * 2 + "-x"),
+                            "classKey")
+
+    def test_the_refusal_names_both_routes(self) -> None:
+        out = self.ws.srv.observatory_lesson(**lesson(projectId=ALPHA))
+        self.assertIn("observatory_lesson", out["hint"])
+        self.assertIn("observatory_record", out["hint"],
+                      "an engine without this tool takes the record bridge")
 
     def test_the_wire_refuses_a_malformed_origin_as_malformed_input(self) -> None:
         out = self.call(lesson(projectId=ALPHA))

@@ -421,7 +421,10 @@ def test_a_commit_git_cannot_find_blocks_the_promotion() -> None:
           json.dumps(receipt["lessons"]))
 
 
-def test_a_project_with_no_clone_here_carries_a_resolvable_form() -> None:
+def test_a_project_with_no_clone_here_is_not_a_witness() -> None:
+    """The operator's rule (O2): both commits must RESOLVE. A project with no clone in
+    the registry cannot be asked, so its lesson witnesses nothing and stays proposed, and
+    the receipt says why."""
     a, a1, _ = repo_with_history()
     d, sdb, L, LS = _lesson_store({"alpha": a})
     conn = sdb.connect()
@@ -430,11 +433,64 @@ def test_a_project_with_no_clone_here_carries_a_resolvable_form() -> None:
     conn.close()
     load_corroborator().main(["corroborate.py"])
     conn = sdb.connect()
-    check("a project nobody here can ask still witnesses by its commit form",
-          _state(conn, here["memoryId"]) == "observed" and _state(conn, away["memoryId"]) == "observed",
-          f"{_state(conn, here['memoryId'])}, {_state(conn, away['memoryId'])}")
+    check("a resolvable lesson with only an unknown project beside it stays proposed",
+          _state(conn, here["memoryId"]) == "proposed", _state(conn, here["memoryId"]))
+    check("and so does the lesson nobody here can ask",
+          _state(conn, away["memoryId"]) == "proposed", _state(conn, away["memoryId"]))
+    conn.close()
+    receipt = json.loads((d / "scratch/corroboration.json").read_text(encoding="utf-8"))
+    unres = receipt["lessons"].get("unresolvable", [])
+    check("the receipt lists it as not resolvable here, with the reason",
+          [u["memory_id"] for u in unres] == [away["memoryId"]]
+          and "commit not resolvable here" in unres[0]["why"], json.dumps(receipt["lessons"]))
+    check("and its count", receipt["counts"].get("lessons_unresolvable") == 1,
+          json.dumps(receipt["counts"]))
+
+
+def test_two_invented_keys_promote_nothing() -> None:
+    """One caller writing two made-up `p-` keys must not buy `observed`."""
+    d, sdb, L, LS = _lesson_store({})
+    conn = sdb.connect()
+    one = _write_lesson(conn, L, LS, "p-0123456789ab", "abcdef1234567")
+    two = _write_lesson(conn, L, LS, "p-ba9876543210", "1234567abcdef")
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    check("neither invented project is promoted",
+          {_state(conn, one["memoryId"]), _state(conn, two["memoryId"])} == {"proposed"},
+          f"{_state(conn, one['memoryId'])}, {_state(conn, two['memoryId'])}")
     conn.close()
 
+
+def test_the_project_threshold_is_the_one_constant() -> None:
+    """LESSON_PROJECTS is read, not decoration: at three, two projects promote nothing."""
+    a, a1, _ = repo_with_history()
+    b = _other_repo()
+    d, sdb, L, LS = _lesson_store({"alpha": a, "beta": b})
+    conn = sdb.connect()
+    la = _write_lesson(conn, L, LS, _key(a), a1)
+    _write_lesson(conn, L, LS, _key(b), git(b, "rev-parse", "HEAD"))
+    conn.close()
+    mod = load_corroborator()
+    mod.LESSON_PROJECTS = 3
+    mod.main(["corroborate.py"])
+    conn = sdb.connect()
+    check("with the threshold at three, two projects leave it proposed",
+          _state(conn, la["memoryId"]) == "proposed", _state(conn, la["memoryId"]))
+    conn.close()
+
+
+def test_the_proposed_count_is_the_rows_the_session_rule_looked_at() -> None:
+    a, a1, _ = repo_with_history()
+    d, sdb, L, LS = _lesson_store({"alpha": a})
+    conn = sdb.connect()
+    _write_lesson(conn, L, LS, _key(a), a1)
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    receipt = json.loads((d / "scratch/corroboration.json").read_text(encoding="utf-8"))
+    check("counts.proposed leaves out the lessons, which have their own counts",
+          receipt["counts"]["proposed"] == 0 and receipt["counts"]["lessons_waiting"] == 1,
+          json.dumps(receipt["counts"]))
 
 if __name__ == "__main__":
     print("the second witness — what it refuses, and who hears about it\n")
@@ -450,7 +506,10 @@ if __name__ == "__main__":
                test_two_projects_with_one_class_promote_each_other,
                test_one_project_twice_is_one_witness,
                test_a_commit_git_cannot_find_blocks_the_promotion,
-               test_a_project_with_no_clone_here_carries_a_resolvable_form):
+               test_a_project_with_no_clone_here_is_not_a_witness,
+               test_two_invented_keys_promote_nothing,
+               test_the_project_threshold_is_the_one_constant,
+               test_the_proposed_count_is_the_rows_the_session_rule_looked_at):
         fn()
     print()
     if FAILURES:

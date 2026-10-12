@@ -1181,9 +1181,11 @@ def observatory_lesson(
     (`observatory_search(kinds=["lesson"])`, no project). One record per (classKey,
     project): a repeat from the same project revises it, an identical repeat writes nothing.
     Written as a PROPOSAL with confidence 0.5. It becomes `observed` only when a second,
-    distinct project records the same classKey and both commits resolve (the corroborator,
-    `tools/corroborate.py`); `supported` is the operator's. Kept 365 days while proposed.
-    Refused: a path, a URL, an e-mail address, a line break, a `project:<slug>` id.
+    distinct project records the same classKey and both commits resolve in clones the
+    registry knows here (the corroborator, `tools/corroborate.py`; an unknown key witnesses
+    nothing); `supported` is the operator's. Kept 365 days while proposed.
+    Refused: a path, a URL, an e-mail address, a line break, a `project:<slug>` id, a
+    classKey the redactor would change.
     Credential shapes and known values are redacted. Local stdio only."""
     bad = _owner_error(owner)
     if bad:
@@ -1197,21 +1199,25 @@ def observatory_lesson(
     given = {"classKey": classKey, "title": title, "trigger": trigger, "check": check,
              "nouns": list(nouns),
              "origin": origin.model_dump() if isinstance(origin, BaseModel) else origin}
-    reasons = LS.validate(given)
-    if reasons:
+    def refuse(reasons: list[str]) -> dict[str, Any]:
         return {"error": "lesson refused", "code": "invalid-lesson",
                 "detail": RA.scrub_text("; ".join(reasons)),
                 "reasons": [RA.scrub_text(r) for r in reasons],
-                "hint": "a lesson is a class, not an incident: one line per field, no path, "
-                        "URL or e-mail address, the project as its pseudonymous key "
-                        "(task-pipeline's `lessons.py emit-observatory --tool "
-                        "observatory_lesson` builds these arguments)",
-                "degraded": []}
+                "hint": LS.HINT, "degraded": []}
+    reasons = LS.validate(given)
+    if reasons:
+        return refuse(reasons)
     body = LS.body_of(given)
     # THE REDACTOR RUNS ON EVERY TEXT FIELD, as on every agent write: a key pasted into
     # `check` is replaced before the first write. The commit is kept whole because its
     # stored form, `commit:<12 hex>`, is one the redactor keeps (memory_redact.KEEP).
     cleaned, report = memory_redact.Redactor().scrub(body)
+    # BUT NOT THE IDENTITY. A slug may be a long hex run, which the redactor replaces; the
+    # stored classKey would stop being a slug and stop matching another project's copy
+    # of the class, so the corroborator could never see the two together. Refused instead.
+    if cleaned["classKey"] != body["classKey"]:
+        return refuse(["classKey carries what the memory redactor replaces (a long hex or "
+                       "random run, or a known value); name the class in words"])
     try:
         L.check_text_bounds(LS.statement_of(cleaned), LS.why_of(cleaned))
     except Exception as exc:

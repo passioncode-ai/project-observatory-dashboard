@@ -369,11 +369,16 @@ records a lesson for every project — a retro entry's class with the project's
 pseudonymous key (`p-` and 12 hex digits of its root commit, never its name) and
 the evidence commit. Every one is a proposal (confidence 0.5). A lesson becomes
 `observed` without you when a second, distinct project records the same class and
-both commits resolve: `tools/corroborate.py`, which the tick runs, checks each
-commit in the clone it belongs to. `supported` is yours, through `review.py`.
+both commits resolve in clones the registry knows on this machine:
+`tools/corroborate.py`, which the tick runs, asks git for each commit in the clone
+whose root commit gives the project's key. A key no registered clone carries is not
+a witness; its lesson stays proposed and `corroboration.json` lists it as "commit not
+resolvable here". `supported` is yours, through `review.py`.
 Proposed lessons are kept 365 days (`retention.json` → `ledger.kinds.lesson`), and
 an observed one is never erased by age. An agent finds lessons with
-`observatory_search` and `kinds: ["lesson"]`, without a project. Lessons stay in
+`observatory_search` and `kinds: ["lesson"]`, without a project. task-pipeline
+writes them with `observatory_lesson` where the engine has it and as `lesson:`
+notes through `observatory_record` otherwise. Lessons stay in
 this workspace: they are agents' memory, not the project's. Lessons recorded earlier
 as `lesson:` notes are converted once with
 `python "$(project-observatory full-path)/tools/migrate_lessons.py" --apply`

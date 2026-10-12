@@ -2,10 +2,13 @@
 """A lesson as its own record kind: `kind = "lesson"`, one per (classKey, project).
 
 A lesson is a retro entry's CLASS, stated so an agent in another project can use it
-before it repeats the mistake. Its writer is task-pipeline's `scripts/lessons.py`
-(`emit-observatory --tool observatory_lesson`), whose arguments this module accepts
-field for field; `tests/test_lesson.py` holds a copy of that emitter's output and checks
-the published schema against it, so the two cannot drift apart silently.
+before it repeats the mistake. Its writer is task-pipeline's `scripts/lessons.py`, which
+has two routes: `emit-observatory --tool observatory_lesson` where the engine serves this
+tool, and the record bridge (`observatory_record`, a note whose statement starts
+`lesson:`) otherwise; `tools/migrate_lessons.py` turns bridge notes into lesson records.
+This module accepts the first route's arguments field for field; `tests/test_lesson.py`
+holds that emitter output's shape and checks the published schema against it, so the
+two cannot drift apart silently.
 
 What a lesson may carry, and why each rule exists:
 
@@ -51,6 +54,11 @@ TEXT = {"title": (8, 160), "trigger": (3, 200), "check": (3, 200)}
 NOUNS = (3, 8)
 NOUN = (2, 32)
 CLASS_KEY_MAX = 64
+#: What a refusal tells the writer to do, naming both routes of the emitter.
+HINT = ("a lesson is a class, not an incident: one line per field, no path, URL or e-mail "
+        "address, the project as its pseudonymous key. task-pipeline's `lessons.py "
+        "emit-observatory` builds the arguments: `--tool observatory_lesson` where the engine "
+        "has this tool, `observatory_record` (a `lesson:` note) otherwise")
 #: The arguments `observatory_lesson` takes, and nothing else.
 FIELDS = ("classKey", "title", "trigger", "check", "nouns", "origin")
 ORIGIN_FIELDS = ("projectId", "commit")

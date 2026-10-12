@@ -1,8 +1,10 @@
 {
- "_fixture": "The EMITTER'S OUTPUT, copied verbatim: task-pipeline `scripts/lessons.py emit-observatory L-<sha12> --tool observatory_lesson` (github.com/ssheleg/task-pipeline, branch feat/release-iteration at 9c5929d), run on a synthetic one-commit repository with one retro entry. tests/test_lesson.py checks observatory_lesson's published input schema against these arguments and records them through the tool, so a field renamed on either side fails here. Refresh it by running the emitter again; never edit the arguments by hand.",
+ "_fixture": "THE SHAPE task-pipeline's emitter prints for `--tool observatory_lesson` (re-added in ssheleg/task-pipeline#112's next cycle), HAND-WRITTEN from that emitter at 9c5929d: `scripts/lessons.py emit-observatory L-<sha12> --tool observatory_lesson` on a synthetic one-commit repository. Until the flag is back, the emitter's default is the record bridge (`observatory_record`, a `lesson:` note), which `tools/migrate_lessons.py` converts. tests/test_lesson.py checks observatory_lesson's published input schema against these arguments and records them through the tool, so a field renamed on either side fails here. Re-pin it to the real output once the flag lands; never change the arguments to make a test pass.",
  "emitter": {
   "repository": "ssheleg/task-pipeline",
   "ref": "9c5929d",
+  "provenance": "hand-written",
+  "repin": "the real output of --tool observatory_lesson after task-pipeline#112's next cycle",
   "script": "plugins/task-pipeline/skills/task-pipeline/scripts/lessons.py",
   "command": "emit-observatory --tool observatory_lesson"
  },
