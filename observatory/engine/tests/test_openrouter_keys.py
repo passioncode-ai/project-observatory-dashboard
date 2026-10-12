@@ -340,6 +340,113 @@ def test_a_key_minted_elsewhere_is_claimed_by_its_hash_and_never_guessed():
             setattr(door, k, v)
 
 
+def test_a_claimed_key_is_never_lost_skipped_or_guessed():
+    """Review of `claim` (2026-10-12), five defects:
+    A a bulk `rotate` died at the first claimed key; B `revoke` missed the consumer reading a
+    claimed key; C the label path accepted a match while a listing was incomplete, and two
+    unlimited keys "agreed" on a ceiling of None; D a rename at the provider read as a
+    deletion, so `revoke` dropped the row and left the key live; E two claims overwrote each
+    other."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import hashlib, importlib, io, contextlib, tempfile
+    door = importlib.import_module("openrouter")
+    value = "sk-or-v1-" + "abc" + "0" * 55 + "def"
+    digest = hashlib.sha256(value.encode()).hexdigest()
+    label = "sk-or-v1-abc...def"
+    state = {"issued": {}}
+    real = {k: getattr(door, k) for k in ("_request", "ledger", "save_ledger", "admins", "read_admin", "_journal",
+                                         "_all_keys")}
+    door.ledger = lambda: json.loads(json.dumps(state))
+    door.save_ledger = lambda doc: (state.clear(), state.update(json.loads(json.dumps(doc))))
+    door.admins = lambda: [("acct-a", pathlib.Path("/nonexistent/a"))]
+    door.read_admin = lambda label=None: (label or "acct-a", "admin-acct-a")
+    door._journal = lambda *a, **k: None
+    deleted = []
+    def by_hash(path, key, payload=None, method=None):
+        if method == "DELETE":
+            deleted.append(path)
+            return {}
+        if path == f"/keys/{digest}":
+            return {"data": {"hash": digest, "label": label, "name": state.get("_provider_name", "made-by-hand"),
+                             "limit": 500}}
+        raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+    try:
+        door._request = by_hash
+        door.claim_key("old-tool", value, where="a plaintext file")
+        # D: renamed at the provider, still found by its hash, and revoke deletes it there.
+        state["_provider_name"] = "renamed-in-dashboard"
+        check("D: a claimed key renamed at the provider is still found",
+              door.find_key("admin-acct-a", "old-tool") is not None)
+        # A: a bulk rotation names the claimed key and does not die.
+        err, code = io.StringIO(), None
+        try:
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                code = door.cmd_rotate(None, False)
+        except Exception as exc:                                       # noqa: BLE001
+            err.write(repr(exc))
+        check("A: a bulk rotation survives a claimed key", code == 1 and "claimed" in err.getvalue(),
+              err.getvalue())
+        # B: a consumer reading the claimed key (by its label) stops revoke.
+        with tempfile.TemporaryDirectory() as tmp:
+            real_scratch = door.paths.SCRATCH
+            door.paths.SCRATCH = pathlib.Path(tmp)
+            try:
+                (pathlib.Path(tmp) / "openrouter.json").write_text(json.dumps(
+                    {"keys": [{"label": label, "name": "renamed-in-dashboard", "serves": "an agent"}]}))
+                try:
+                    door.revoke_key("old-tool")
+                    check("B: revoke refuses a claimed key a consumer reads", False, "revoked")
+                except ValueError as exc:
+                    check("B: revoke refuses a claimed key a consumer reads", "reading right now" in str(exc), str(exc))
+                (pathlib.Path(tmp) / "openrouter.json").write_text(json.dumps({"keys": []}))
+                door.revoke_key("old-tool")
+                check("D: revoking a renamed claimed key deletes it at the provider",
+                      deleted == [f"/keys/{digest}"] and "old-tool" not in state["issued"], f"{deleted}")
+            finally:
+                door.paths.SCRATCH = real_scratch
+        # C: a listing that is not whole refuses the label path; so does a key with no ceiling.
+        state["issued"].clear()
+        def label_only(path, key, payload=None, method=None):
+            if path.startswith("/keys/"):
+                raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+            if path == "/key":
+                return {"data": {"label": label, "limit": state.get("_own_limit", 500)}}
+            return {"data": []}
+        door._request = label_only
+        def too_long(admin, include_disabled=True):
+            raise door.ListingTooLong("too many", [{"hash": "h0", "label": "other", "limit": 500}])
+        door._all_keys = too_long
+        try:
+            door.claim_key("old-tool", value)
+            check("C: an incomplete listing refuses the label path", False, "claimed")
+        except ValueError as exc:
+            check("C: an incomplete listing refuses the label path", "more keys" in str(exc), str(exc))
+        door._all_keys = lambda admin, include_disabled=True: [{"hash": "h1", "label": label, "limit": None}]
+        state["_own_limit"] = None
+        try:
+            door.claim_key("old-tool", value)
+            check("C: no ceiling, no label claim", False, "claimed an unlimited key by label")
+        except ValueError as exc:
+            check("C: no ceiling, no label claim", "no ceiling" in str(exc), str(exc))
+        # E: a claim that lands while this one talks to the provider is not overwritten.
+        state.pop("_own_limit", None)
+        door._all_keys = lambda admin, include_disabled=True: [{"hash": "h1", "label": label, "limit": 500,
+                                                                 "name": "x"}]
+        def racing(path, key, payload=None, method=None):
+            if path == "/key":
+                state["issued"]["old-tool"] = {"hash": "someone-else", "account": "acct-a"}
+            return label_only(path, key, payload, method)
+        door._request = racing
+        try:
+            door.claim_key("old-tool", value)
+            check("E: a concurrent claim is not overwritten", False, "overwrote")
+        except ValueError:
+            check("E: a concurrent claim is not overwritten", state["issued"]["old-tool"]["hash"] == "someone-else")
+    finally:
+        for k, v in real.items():
+            setattr(door, k, v)
+
+
 if __name__ == "__main__":
     print("openrouter keys — three characters were not an identifier\n")
     for fn in (test_the_label_is_derivable_without_asking,
@@ -351,7 +458,8 @@ if __name__ == "__main__":
                test_absent_provisioning_is_a_degradation_not_an_empty_estate,
                test_the_step_is_reachable,
                test_the_door_reads_every_page_of_keys,
-               test_a_key_minted_elsewhere_is_claimed_by_its_hash_and_never_guessed):
+               test_a_key_minted_elsewhere_is_claimed_by_its_hash_and_never_guessed,
+               test_a_claimed_key_is_never_lost_skipped_or_guessed):
         fn()
     print()
     if FAILURES:
