@@ -190,6 +190,97 @@ class DiskBudget(Base):
             self.assertIsNone(sm.size_kb(Path("/x"), 5))
 
 
+class ApfsFrees(DiskBudget):
+    """OBS-66: `du` counts an APFS clone in full. 19 abandoned browser code-sign clones read as
+    13 GB and removing them freed nothing (2026-10-11). A place is walked a second time for the
+    private size of its files, and the row says what a removal gives back at least."""
+
+    def tree(self):
+        root = self.base / "place"
+        (root / "nested").mkdir(parents=True)
+        for name in ("clone-a", "clone-b", "own"):
+            (root / name).write_bytes(b"x" * 300_000)
+        (root / "nested" / "deep").write_bytes(b"y" * 200_000)
+        os.link(root / "own", root / "own-link")                 # a hard link: counted once
+        os.symlink(root / "own", root / "own-symlink")           # a symlink: not followed
+        return root
+
+    def test_the_sum_is_each_files_private_size_and_unread_files_count_in_full(self):
+        import scan_machine as sm
+        root = self.tree()
+        private = {"clone-a": 0, "clone-b": 0, "own": 300_000, "own-link": 300_000}
+        reader = lambda path: private.get(Path(path).name)      # `deep` unread: counts as du would
+        blocks = os.lstat(root / "nested" / "deep").st_blocks * 512
+        self.assertEqual(sm.private_kb(root, 30, reader=reader), (300_000 + blocks) // 1024)
+
+    def test_no_file_answering_is_not_measured_rather_than_zero(self):
+        import scan_machine as sm
+        self.assertIsNone(sm.private_kb(self.tree(), 30, reader=lambda path: None))
+
+    def test_a_walk_past_its_time_is_not_measured(self):
+        import scan_machine as sm
+        root = self.base / "many"
+        root.mkdir()
+        for i in range(600):
+            (root / f"f{i}").write_bytes(b"z")
+        ticks = iter(range(0, 10_000, 5))
+        with patch.object(sm.time, "monotonic", side_effect=lambda: next(ticks)):
+            self.assertIsNone(sm.private_kb(root, 2, reader=lambda path: 0))
+
+    @unittest.skipUnless(sys.platform == "darwin", "APFS private size is a macOS attribute")
+    def test_a_real_clone_frees_nothing_on_apfs(self):
+        import scan_machine as sm
+        root = self.base / "clones"
+        root.mkdir()
+        (root / "original").write_bytes(os.urandom(4_000_000))
+        made = subprocess.run(["cp", "-c", str(root / "original"), str(root / "clone")], capture_output=True)
+        if made.returncode:
+            self.skipTest("clonefile is refused here: the temporary directory is not on APFS")
+        # cp -c worked, so this IS APFS: a reader that answers nothing is a defect, not a skip.
+        reader = sm._private_size_reader()
+        self.assertIsNotNone(reader)
+        self.assertEqual(reader(str(root / "original")), 0)
+        # A third file outside the place shares the original's blocks, so neither file in the place
+        # is private: the walk reads ~0 where `du` reads 8 MB.
+        subprocess.run(["cp", "-c", str(root / "original"), str(self.base / "outside")], check=True)
+        self.assertLess(sm.private_kb(root, 30), 64)
+        self.assertGreater(sm.size_kb(root, 30), 7000)
+
+    def test_the_row_says_what_a_removal_frees_and_keeps_it_when_carried(self):
+        import scan_machine as sm
+        self.config(disk_budget_seconds=30)
+        with patch.object(sm, "size_kb", return_value=2 * 1048576), \
+                patch.object(sm, "private_kb", return_value=209715) as walked:
+            out = sm.survey_disk(None, force=False)
+        self.assertEqual(walked.call_count, 3)
+        row = out["locations"][0]
+        self.assertEqual((row["gb"], row["frees_at_least_gb"], row["clone_shared_gb"], row["clones_matter"]),
+                         (2.0, 0.2, 1.8, True))
+        with patch.object(sm, "size_kb") as again:               # inside every_hours: nothing re-measured
+            carried = sm.survey_disk({"disk": out}, force=False)["locations"][0]
+        again.assert_not_called()
+        self.assertEqual(carried["frees_at_least_gb"], 0.2)
+        self.assertTrue(carried["clones_matter"])
+
+    def test_a_small_place_or_an_unfinished_walk_keeps_dus_number_alone(self):
+        import scan_machine as sm
+        self.config(disk_budget_seconds=30)
+        with patch.object(sm, "size_kb", return_value=100 * 1024), patch.object(sm, "private_kb") as walked:
+            row = sm.survey_disk(None, force=False)["locations"][0]
+        walked.assert_not_called()
+        self.assertNotIn("frees_at_least_gb", row)
+        with patch.object(sm, "size_kb", return_value=2 * 1048576), patch.object(sm, "private_kb", return_value=None):
+            row = sm.survey_disk(None, force=True)["locations"][0]
+        self.assertNotIn("frees_at_least_gb", row)
+
+    def test_clones_are_named_only_when_they_hold_enough(self):
+        import scan_machine as sm
+        self.assertTrue(sm.frees(2 * 1048576, 0)["clones_matter"])
+        self.assertFalse(sm.frees(2 * 1048576, 2 * 1048576 - 1024)["clones_matter"])     # 1 MB shared
+        self.assertFalse(sm.frees(600 * 1024, 500 * 1024)["clones_matter"])              # under 0.1 GB
+        self.assertEqual(sm.frees(1048576, None), {})
+
+
 class Estate(Base):
     """One repository with every class the hygiene survey knows."""
 
@@ -437,6 +528,21 @@ class Findings(Base):
         self.assertIn("git.idle_unique_branches", out)
         self.assertNotIn("machine.stale", out)
 
+    def test_disk_low_names_what_a_clone_heavy_place_really_frees(self):
+        import machine_findings as mf
+        now = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
+        self.write("machine.json", {"measured_at": "2026-01-01T11:30:00Z", "memory": {}, "processes": {},
+                                    "disk": {"volume": {"free_gb": 4, "free_percent": 2},
+                                             "locations": [{"label": "Browser clones", "gb": 13.0,
+                                                            "frees_at_least_gb": 0.0, "clone_shared_gb": 13.0,
+                                                            "clones_matter": True},
+                                                           {"label": "Caches", "gb": 3.0}]}})
+        detail = {f["type"]: f for f in mf.findings(self.home / "store/raw", self.home / "store/logs",
+                                                    {"free_space_warning_percent": 15}, now)}["machine.disk_low"]["detail"]
+        self.assertIn("Browser clones 13.0 GB, of which removal frees at least 0.0 GB (APFS clones)", detail)
+        self.assertIn("; Caches 3.0 GB.", detail)
+        self.assertEqual(detail.count("APFS clones"), 1)
+
     def test_silent_before_any_survey(self):
         import machine_findings as mf
         self.assertEqual(mf.findings(self.home / "store/raw", self.home / "store/logs", {}), [])
@@ -467,6 +573,33 @@ class Page(Base):
         # L10N-01: a page built in one language and read in the other says what
         # the page built in the reader's language says — every word, size and
         # date is marked for the page script.
+        sys.path.insert(0, str(ROOT / "tests"))
+        import relocalize
+        for built, reader in (("en", "ru"), ("ru", "en")):
+            got = relocalize.relocalize({"en": en, "ru": ru}[built], reader)
+            want = {"en": en, "ru": ru}[reader]
+            self.assertTrue(got == want, f"{built}→{reader}: " + relocalize.first_difference(got, want))
+
+
+class PageFrees(Base):
+    """OBS-66 on the page: a clone-heavy place says what removing it gives back."""
+
+    def test_the_size_cell_names_the_floor_in_both_languages(self):
+        import machine_view, machine_page
+        from i18n import Translator
+        (self.home / "store/raw/machine.json").write_text(json.dumps({
+            "measured_at": "2026-01-01T00:00:00Z", "memory": {}, "processes": {},
+            "disk": {"volume": {"free_gb": 4, "free_percent": 2, "total_gb": 250},
+                     "locations": [{"path": "~/clones", "label": "Clones", "kind": "cache", "reclaim": "regenerable",
+                                    "gb": 13.0, "frees_at_least_gb": 0.4, "clone_shared_gb": 12.6, "clones_matter": True},
+                                   {"path": "~/x", "label": "X cache", "kind": "cache", "reclaim": "regenerable",
+                                    "gb": 1.5, "frees_at_least_gb": 1.5, "clone_shared_gb": 0.0, "clones_matter": False}]}}))
+        summary = machine_view.summary()
+        en = machine_page.machine_html({"machine": summary}, Translator("en"))
+        ru = machine_page.machine_html({"machine": summary}, Translator("ru"))
+        self.assertIn("removing it frees at least 0.4 GB; APFS clones share 12.6 GB", en)
+        self.assertIn("удаление освободит не меньше 0,4 ГБ; клоны APFS делят 12,6 ГБ", ru)
+        self.assertEqual(en.count(">removing it frees at least"), 1)   # only the place clones dominate
         sys.path.insert(0, str(ROOT / "tests"))
         import relocalize
         for built, reader in (("en", "ru"), ("ru", "en")):

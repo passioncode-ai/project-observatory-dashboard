@@ -349,8 +349,8 @@
       "path": "collectors/scan_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5efa330bc25cd1ff871f1ff3cc5b8ccb3c6685fb0ff83d6eb7ada90953c17144",
-      "bytes": 25058
+      "export_sha256": "ea1e4c9fccb353beee9f11ddbd1fd8a350c52ecc64db0fef703dd00c81876c62",
+      "bytes": 30722
     },
     {
       "path": "collectors/scan_mcp.py",
@@ -526,15 +526,15 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6fa0e6ce286b9b466c2a5228cb3f49835d2c1b6cb73e69b5309f031d1619aa88",
-      "bytes": 159830
+      "export_sha256": "6011f7c473f88542019e65575903efb9adf2c68381237684827491826daf1314",
+      "bytes": 160013
     },
     {
       "path": "dashboard/machine_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2cf91ab75ae5bd0534750b120ff144e7788724c42b51ba0a827c166711c01fa2",
-      "bytes": 17675
+      "export_sha256": "2f979342f6315788c8c61a43899d6f757792f2eb7b029c96000a0d930d4590a0",
+      "bytes": 18271
     },
     {
       "path": "dashboard/shell.py",
@@ -807,8 +807,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c3dd3f1f8a4d4ed187b11cab95bb496def5a4b26b536a1c652722c4c7f64d98a",
-      "bytes": 77335,
+      "export_sha256": "2560abba140cecaefb1eb4c9af26e149b14d9650e48834dadebda1cdb47cf013",
+      "bytes": 77599,
       "upstream_modified": true
     },
     {
@@ -2872,8 +2872,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e38d50d6ae87ba0d804b73316a53668e03a1424e5b67af52756d96b15686056f",
-      "bytes": 30828
+      "export_sha256": "6e89816dce6e4d82940aaa8bacd98c518724e9c73130850202a9fb10b398bc90",
+      "bytes": 38940
     },
     {
       "path": "tests/test_machine_mcp_inventory.py",
@@ -4185,8 +4185,8 @@
       "path": "tools/machine_findings.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7c5f0f92def5416e68c882e0af3e15f0af5765f684c8f7558efe3fe5da2276e4",
-      "bytes": 12272
+      "export_sha256": "53198a2f5e60c368a94a3a78894c5822621f35432cabcd2e158e12c00ad4638f",
+      "bytes": 12569
     },
     {
       "path": "tools/maintain.py",

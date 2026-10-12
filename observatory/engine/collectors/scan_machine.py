@@ -371,6 +371,103 @@ def size_kb(path: pathlib.Path, timeout: float) -> int | None:
         return None
 
 
+# --- what a removal frees on APFS (OBS-66) ---------------------------------------
+
+#: Below this, a place is not walked a second time: its clones cannot matter on the page.
+PRIVATE_MIN_KB = 512 * 1024
+#: The share of `du` that clones must hold before the page says so (and 100 MB at least).
+CLONE_NOTE_SHARE = 0.10
+CLONE_NOTE_GB = 0.1
+ATTR_CMN_RETURNED_ATTRS = 0x80000000
+ATTR_CMNEXT_PRIVATESIZE = 0x00000008
+FSOPT_NOFOLLOW = 0x00000001
+FSOPT_ATTR_CMN_EXTENDED = 0x00000020
+
+
+def _private_size_reader():
+    """`getattrlist(ATTR_CMNEXT_PRIVATESIZE)` on macOS — the bytes of a file that no APFS clone
+    shares, which is what deleting it gives back — or None where the call does not exist."""
+    if sys.platform != "darwin":
+        return None
+    import ctypes
+    import ctypes.util
+    import struct
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    except OSError:
+        return None
+
+    class AttrList(ctypes.Structure):
+        _fields_ = [("bitmapcount", ctypes.c_ushort), ("reserved", ctypes.c_uint16),
+                    ("commonattr", ctypes.c_uint32), ("volattr", ctypes.c_uint32), ("dirattr", ctypes.c_uint32),
+                    ("fileattr", ctypes.c_uint32), ("forkattr", ctypes.c_uint32)]
+    request = AttrList(5, 0, ATTR_CMN_RETURNED_ATTRS, 0, 0, 0, ATTR_CMNEXT_PRIVATESIZE)
+    buf = ctypes.create_string_buffer(64)
+
+    def read(path: str) -> int | None:
+        if libc.getattrlist(os.fsencode(path), ctypes.byref(request), buf, len(buf),
+                            FSOPT_NOFOLLOW | FSOPT_ATTR_CMN_EXTENDED) != 0:
+            return None
+        # attribute_set_t after the length: common, vol, dir, file, fork(= extended common)
+        if not struct.unpack_from("5I", buf, 4)[4] & ATTR_CMNEXT_PRIVATESIZE:
+            return None          # not APFS: the file system keeps no such number
+        return struct.unpack_from("q", buf, 24)[0]
+    return read
+
+
+def private_kb(path: pathlib.Path, timeout: float, reader=None) -> int | None:
+    """What deleting `path` would give back AT LEAST, in KB: the sum of every file's private
+    size (OBS-66). `du` counts an APFS clone in full, so 19 browser code-sign clones read as
+    13 GB and their removal freed nothing (2026-10-11); this sum reads them as ~0.
+
+    A lower bound, not the exact figure: two clones of each other INSIDE the place are each
+    private-free, yet removing both frees their shared blocks. One file system only (like
+    `du -x`), symlinks not followed, a hard link counted once. A file whose number cannot be
+    read counts in full, as `du` would. None — not measured — when the walk does not finish
+    within `timeout`, or where the file system keeps no private size."""
+    reader = reader or _private_size_reader()
+    if reader is None:
+        return None
+    deadline = time.monotonic() + max(1.0, timeout)
+    try:
+        root = os.lstat(path)
+    except OSError:
+        return None
+    total, seen, stack, visited, files, read = 0, set(), [str(path)], 0, 0, 0
+    while stack:
+        try:
+            entries = os.scandir(stack.pop())
+        except OSError:
+            continue
+        with entries:
+            for entry in entries:
+                visited += 1
+                if visited % 256 == 0 and time.monotonic() > deadline:
+                    return None
+                try:
+                    st = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                if st.st_dev != root.st_dev:
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append(entry.path)
+                    continue
+                if st.st_nlink > 1:
+                    if (st.st_dev, st.st_ino) in seen:
+                        continue
+                    seen.add((st.st_dev, st.st_ino))
+                if entry.is_symlink() or not entry.is_file(follow_symlinks=False):
+                    continue
+                size = reader(entry.path)
+                files += 1
+                read += size is not None
+                total += st.st_blocks * 512 if size is None else size
+    if files and not read:
+        return None              # no file answered: not APFS, or nothing readable — not measured
+    return total // 1024
+
+
 def _stamp_age(stamp: str | None) -> float:
     try:
         return time.time() - datetime.strptime(stamp or "", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
@@ -411,6 +508,22 @@ def protected_place(path: pathlib.Path, home: pathlib.Path | None = None) -> boo
     return False
 
 
+#: The row fields `frees` writes; a carried row keeps them with its `gb`.
+FREES_FIELDS = ("frees_at_least_gb", "clone_shared_gb", "clones_matter")
+
+
+def frees(kb: int, private: int | None) -> dict:
+    """The row's removal figures from `du`'s KB and the private sum; nothing when unmeasured."""
+    if private is None:
+        return {}
+    private = min(private, kb)
+    shared = kb - private
+    # `clones_matter`: clones hold enough of the place that `du` alone would mislead. Decided on
+    # the KB, not the rounded GB: 0.098 GB rounds to the 0.1 GB line.
+    return {"frees_at_least_gb": round(private / 1048576, 2), "clone_shared_gb": round(shared / 1048576, 2),
+            "clones_matter": shared >= CLONE_NOTE_GB * 1048576 and shared >= CLONE_NOTE_SHARE * kb}
+
+
 def survey_disk(previous: dict | None, force: bool) -> dict:
     """Size the configured places within a time BUDGET per run.
 
@@ -421,6 +534,11 @@ def survey_disk(previous: dict | None, force: bool) -> dict:
     `disk_budget_seconds` is spent, and keeps every other place's last number
     with its own `measured_at`. A place that never fits is reported, not guessed.
     `--disk` (the operator, at a terminal) takes `disk_budget_seconds_manual`.
+
+    WHAT A REMOVAL FREES. `du` counts an APFS clone in full. On macOS a place of 512 MB or more
+    is walked a second time, inside the same budget, for the private size of its files
+    (`private_kb`): the row gains `frees_at_least_gb` and `clone_shared_gb`. A place whose walk
+    does not finish keeps `du`'s number alone (OBS-66).
 
     PROTECTED PLACES ARE MANUAL ONLY. Without `--disk` a place `protected_place`
     names is not sized, not even stat'ed: it is listed in `manual_only` with its
@@ -452,6 +570,9 @@ def survey_disk(previous: dict | None, force: bool) -> dict:
             degraded.append({"source": loc["path"], "reason": f"not sized within {min(per, left):.0f} s; the last number is kept"})
             continue
         measured[loc["path"]] = {"gb": round(kb / 1048576, 2), "measured_at": now()}
+        left = budget - (time.monotonic() - started)
+        if kb >= PRIVATE_MIN_KB and left > 1:
+            measured[loc["path"]].update(frees(kb, private_kb(path, min(per, left))))
     rows = []
     for loc, _path in wanted:
         base = {**{k: loc[k] for k in ("path", "kind", "label", "reclaim") if k in loc},
@@ -461,7 +582,8 @@ def survey_disk(previous: dict | None, force: bool) -> dict:
         elif loc["path"] in prev and "gb" in prev[loc["path"]]:
             old = prev[loc["path"]]
             rows.append({**base, "gb": old["gb"], "measured_at": old.get("measured_at") or
-                         ((previous or {}).get("disk") or {}).get("measured_at")})
+                         ((previous or {}).get("disk") or {}).get("measured_at"),
+                         **{k: old[k] for k in FREES_FIELDS if k in old}})
     swap = swap_on_disk()
     if swap and swap["gb"] > 0:
         rows.append({"path": swap["path"], "kind": "swap", "label": "Swap files (memory written to disk)",

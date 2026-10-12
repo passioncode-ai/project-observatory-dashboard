@@ -2120,5 +2120,6 @@
   "many": "{file} хранит открытым текстом учётные данные: {n}",
   "other": "{file} хранит открытым текстом учётные данные: {n}"
  },
- "Provider credential in a tool's config in plaintext": "Учётные данные провайдера открытым текстом в конфиге инструмента"
+ "Provider credential in a tool's config in plaintext": "Учётные данные провайдера открытым текстом в конфиге инструмента",
+ "removing it frees at least {size} GB; APFS clones share {shared} GB": "удаление освободит не меньше {size} ГБ; клоны APFS делят {shared} ГБ"
 }
