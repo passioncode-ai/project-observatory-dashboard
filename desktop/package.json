@@ -1,7 +1,7 @@
 {
   "name": "project-observatory-desktop",
   "private": true,
-  "version": "0.24.2",
+  "version": "0.24.3",
   "description": "Project Observatory for Windows and Linux: the dashboard window, its server and the app's own settings (docs/desktop/).",
   "license": "AGPL-3.0-only OR LicenseRef-PassionCode-Commercial",
   "scripts": {

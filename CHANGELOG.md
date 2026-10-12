@@ -3,7 +3,9 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.24.3 — 2026-10-12
+
+The disk guard's git tier removes merged and pushed branches and clean worktrees under load again: its re-check takes one listing of what processes hold per 20 seconds instead of one per worktree. The companion plugin `observatory-log` is unchanged.
 
 ### Fixed
 
