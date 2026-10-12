@@ -18,7 +18,8 @@ anything when the new backup failed — a rotation that prunes before it proves
 the replacement exists is how a backup set becomes empty.
 
     backup_store.py                          take one, prune to KEEP
-    backup_store.py --stamp 2026-10-12T0930Z take it as that minute (a past or present one)
+    backup_store.py --stamp 2026-10-12T0930Z take it as that minute (a past or present one;
+                                             one older than the copies kept is refused, exit 2)
     backup_store.py --list                   what exists, newest first
 
 `--stamp` exists so the rotation can be driven minute by minute without waiting for
@@ -111,6 +112,13 @@ def encrypted(db: pathlib.Path, secret: str, base: pathlib.Path, at: datetime | 
     if dest.exists():
         print(f"backup {dest.name} already exists")
         return 0
+    # A STAMP OLDER THAN THE KEPT WINDOW would be encrypted, rotated away in the same
+    # run, and then counted as the proof that lets the legacy copies go (F-1 on #250).
+    found = backup_vault.artifacts(root, backup_vault.DB_KIND, backup_vault.DB_SUFFIX)
+    if len(found) >= backup_vault.KEEP and dest.name < found[-backup_vault.KEEP].name:
+        print(f"backup_store: --stamp {when} is older than the {backup_vault.KEEP} copies kept; "
+              "its copy would be pruned at once, so nothing was copied", file=sys.stderr)
+        return 2
     plain = take(db, "encrypting-" + when)
     try:
         if plain.stat().st_size == 0:
@@ -215,6 +223,13 @@ def local(db: pathlib.Path, at: datetime | None = None) -> int:
     if (store / f"{PREFIX}{stamp}").exists():
         print(f"backup {stamp} already exists")
         return 0
+    # A STAMP OLDER THAN THE KEPT WINDOW would be taken and pruned in the same run while
+    # the line below still reported a backup (F-1 on #250). Only `--stamp` can name one.
+    kept = existing(store)
+    if len(kept) >= KEEP and f"{PREFIX}{stamp}" < kept[KEEP - 1].name:
+        print(f"backup_store: --stamp {stamp} is older than the {KEEP} copies kept; "
+              "its copy would be pruned at once, so nothing was copied", file=sys.stderr)
+        return 2
     dest = take(db, stamp)
     size = dest.stat().st_size
     if size == 0:

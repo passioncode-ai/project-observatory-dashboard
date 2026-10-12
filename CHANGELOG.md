@@ -51,6 +51,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   shipped in 0.24.1 but was missing from that release's notes, and the CHANGELOG packaged in 0.24.1–0.24.4 lists
   it under 0.24.0. The published notes were corrected on 2026-10-12 (the release files are unchanged); this file
   already lists it under 0.24.1.
+- **`tools/backup_store.py` takes `--stamp YYYY-MM-DDTHHMMZ`** (ENG-008): a past or present minute names the copy,
+  so the rotation's test no longer races the wall clock. A future minute, a malformed one, or one older than the
+  three copies kept is refused with exit 2 before anything is copied; the tick never passes the flag.
+- **The demo's leak finding dates its detail to the day its title counts back to**, instead of a fixed date that
+  drifted from the title as the demo aged.
 
 ## 0.24.4 — 2026-10-12
 

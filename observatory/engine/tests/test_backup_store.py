@@ -122,6 +122,26 @@ def test_a_stamp_that_is_not_a_past_minute_is_refused() -> None:
     check("--stamp with no value is refused", missing.returncode == 2, (missing.stdout + missing.stderr)[-200:])
 
 
+def test_a_stamp_older_than_the_kept_window_is_refused() -> None:
+    """A past `--stamp` older than every copy kept would take a copy and prune it in the
+    same run while printing success (round-1 seam finding F-1 on #250): the copy that
+    proves the rotation would be the one rotated away. It is refused before anything is
+    copied, and the kept copies stay as they were."""
+    bs = load()
+    db = planted()
+    for name in ("2026-09-10T1000Z", "2026-09-11T1000Z", "2026-09-12T1000Z"):
+        run(db, "--stamp", name)
+    before = [x.name for x in bs.existing(db.parent)]
+    stale = run(db, "--stamp", "2026-09-01T1000Z")
+    check("a stamp older than the kept window is refused with exit 2 and a reason",
+          stale.returncode == 2 and "older than" in stale.stderr, (stale.stdout + stale.stderr)[-200:])
+    check("and the kept copies are untouched", [x.name for x in bs.existing(db.parent)] == before,
+          str([x.name for x in bs.existing(db.parent)]))
+    between = run(db, "--stamp", "2026-09-11T1200Z")
+    check("a past stamp inside the window is still taken", between.returncode == 0
+          and f"backup {bs.PREFIX}2026-09-11T1200Z" in between.stdout, (between.stdout + between.stderr)[-200:])
+
+
 def test_a_missing_store_is_not_a_failure_and_list_names_what_exists() -> None:
     bs = load()
     d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-backup-"))
@@ -179,6 +199,7 @@ if __name__ == "__main__":
                test_companions_are_never_counted_as_backups,
                test_the_newest_three_are_kept_and_the_rest_pruned_only_after_the_new_one_exists,
                test_a_stamp_that_is_not_a_past_minute_is_refused,
+               test_a_stamp_older_than_the_kept_window_is_refused,
                test_a_missing_store_is_not_a_failure_and_list_names_what_exists,
                test_the_tick_takes_one_a_day):
         fn()
