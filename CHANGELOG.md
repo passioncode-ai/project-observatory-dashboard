@@ -113,8 +113,8 @@ The disk guard keeps up with a disk that fills fast and never removes what a ses
 
 - **Cloudflare door: `--preset workers-routes --zone <zone>`** — Zone Read + Workers Routes Write on one zone,
   into a vault slot, verified by listing the zone's routes with the new value. `workers-edit` deploys a script
-  but cannot route a hostname to it; this is that one zone right, without DNS. First use: checkmydata.ai
-  moving its static site to a Worker.
+  but cannot route a hostname to it; this is that one zone right, without DNS. First use: moving a
+  static site to a Worker.
 - **`openrouter.py claim NAME --where PATH`, key on stdin** — brings an OpenRouter key this door did not mint (one
   made by hand in the dashboard) under the door, so `disable`, `limit` and `revoke` reach it. The value is hashed,
   never stored or printed; the provider's row is read by that hash, and a label alone (prefix plus three
