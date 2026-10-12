@@ -28,8 +28,8 @@
     {
       "path": "agent/observe.py",
       "source_sha256": "aebe0cf5f8260da864b512a03c358a46d4e423cf762bbead97c9746a5746753a",
-      "export_sha256": "80a8f1276b5cb5f109c4595c79218ec6bd961562fd801fc93964dc0279436f10",
-      "bytes": 36375,
+      "export_sha256": "5d7d7a8503c42204c53b4ad808d7ee6cfb59131edf2b5d0313a49f1c5112d945",
+      "bytes": 37490,
       "python_comments_removed": 202,
       "python_docstrings_removed": 6,
       "tool_descriptions_retained": 0,
@@ -38,8 +38,8 @@
     {
       "path": "agent/providers.py",
       "source_sha256": "e2d88a03c47dc5985b106877fc894951b0b5972f37bed90df0a0e54dd03caaaf",
-      "export_sha256": "970be44b731e43462c6c8a42d005c3c065d86609d68f80b1d2e3a1588f76d19b",
-      "bytes": 55651,
+      "export_sha256": "76a6a052e134f91abfa89f65432b8f206f18b9e63bc502bee0ff1d89e6ef4e16",
+      "bytes": 60069,
       "python_comments_removed": 168,
       "python_docstrings_removed": 24,
       "tool_descriptions_retained": 0,
@@ -2013,8 +2013,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "98d078b404bad3436dfa2e29339270eca4a85ad1c957dba66860fa6141c02187",
-      "bytes": 23820,
+      "export_sha256": "f5e6cb4c4dc9246213b45df82d2a6bff7aa186a4ec0474175f2278bc405f4814",
+      "bytes": 23917,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2114,8 +2114,8 @@
       "path": "tests/test_agent_queue.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "623f6c4a57683968c75fffb48cb0ef3fb1ed6f1d5321dc894c6a4c86cb3c40b3",
-      "bytes": 14489
+      "export_sha256": "e78de744abac01f41a2ee45fa7b8bb3cbdcd639a245ee5aa935330e610fe34ba",
+      "bytes": 17098
     },
     {
       "path": "tests/test_agent_secrets.py",
@@ -3178,6 +3178,13 @@
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
       "upstream_modified": true
+    },
+    {
+      "path": "tests/test_provider_deadline.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "43e8f6cfbd58c9536cdfc5b32f30e024088341f6771affc81117cb3e14fb0ac9",
+      "bytes": 7899
     },
     {
       "path": "tests/test_provider_health.py",
@@ -4598,7 +4605,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 593,
+  "file_count": 594,
   "excluded": [
     "git-history",
     "operator-registries",

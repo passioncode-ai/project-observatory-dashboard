@@ -117,6 +117,8 @@ BOUNDARY += ('harness',)
 BOUNDARY += ('meter', 'meter_wire', 'spend')
 # docs/design/WINDOWS-LINUX.md W3: a whole tick, through tools/tick.py.
 BOUNDARY += ('tick_py',)
+# ENG-003: the agent's deadline reaches providers.complete().
+BOUNDARY += ('provider_deadline',)
 # One credential-shape heuristic for every door that judges typed text.
 BOUNDARY += ('credential_shape',)
 # PROJECT is the folder name; the registry id names the same folder.

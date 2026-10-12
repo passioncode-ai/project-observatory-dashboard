@@ -15,6 +15,14 @@ while the major version is 0, a minor release may change behaviour and says so h
   `held-disabled` and a deleted one `held-missing`, never `in-place`, and the command exits 1 naming the remedy.
   Ceilings that go down move before those that go up. A failure halfway exits 1 with `partial`, listing what was
   already issued or moved; a re-run does only what is missing. The plan prints the ceilings' total beside the limit.
+- **The agent's deadline reaches the model call** (ENG-003): `agent` started a project's call while 150 s were
+  left, but `providers.complete()` walks a chain of models, each attempt allowed 120 s, so three Retryable models
+  took 360 s and the watchdog killed a step that had paid for calls. `complete(…, deadline=)` now gets the step's
+  deadline: an attempt starts only while 30 s are left after a 20 s reserve for the report, its timeout is cut to
+  what is left, and otherwise it raises `providers.OutOfTime` having paid for nothing new; the catalogue fetch and
+  the key-usage read inside are cut the same way. The agent treats `OutOfTime` like its pre-call halt — deltas left,
+  `halted_by` names the deadline — and `store/raw/agent.json` gains `attempts_cut_by_deadline`. The pre-call reserve
+  is derived (50 s), not a constant. Without a deadline nothing changes.
 - **The demo's findings speak the page's language** (OBS-64): `tools/demo_estate.py` wrote its five findings as
   English sentences, so a Russian screenshot mixed two languages. Each title is now a rule's own message id with its
   arguments, built by `finding_types.titled` like a real finding, so the Russian page renders them from the same

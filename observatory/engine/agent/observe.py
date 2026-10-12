@@ -36,10 +36,12 @@ import providers
 import atomic
 import step_budget
 
-#: A model call may take `providers._post`'s 120 s and the run report a few more: a project's call is started
-#: only while more than this is left before the tick step's deadline (OBS-52). A call the watchdog kills is
-#: paid for and lost, and so is the report; one not started leaves its deltas for the next run.
-CALL_RESERVE_S = 150.0
+#: A project's call is started only while one attempt and the run report fit before the tick step's deadline
+#: (OBS-52). The deadline itself is handed to `providers.complete`, which cuts each attempt's timeout to what is
+#: left and raises `OutOfTime` before an attempt that would not fit (ENG-003): a fixed 150 s reserve covered one
+#: attempt of a chain that makes several. A call the watchdog kills is paid for and lost, and so is the report;
+#: one not started leaves its deltas for the next run.
+CALL_RESERVE_S = providers.MIN_ATTEMPT_S + providers.REPORT_RESERVE_S
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "collectors"))
 try:
     from compute_deltas import meaning_of as _meaning
@@ -269,7 +271,7 @@ def main() -> int:
                    bad: int = 0, mute: int = 0,
                    retired: list[str] | None = None,
                    handled: list[str] | None = None,
-                   waiting: list[str] | None = None, foreign: int = 0) -> None:
+                   waiting: list[str] | None = None, foreign: int = 0, cut: int = 0) -> None:
             """The run's outcome as a fact, on EVERY path.
 
             Written by a helper rather than at the end, because the degradations
@@ -300,6 +302,9 @@ def main() -> int:
                 "faults": faults,
                 "chain_retired": retired or [],
                 "halted_by": halted,
+                # Attempts `providers.complete` refused to start because the step's deadline would
+                # have cut them (ENG-003); their projects' deltas are in `unconsumed`.
+                "attempts_cut_by_deadline": cut,
                 "unconsumed": left["n"] if left else 0,
                 "projects_unconsumed": left["projects"] if left else 0,
                 "oldest_unconsumed_scan": (left["since"] if left else None),
@@ -411,12 +416,13 @@ def main() -> int:
             # loudly if it cannot. This is only for the report.
             print(f"  chain could not be resolved for the report: {exc}", file=sys.stderr)
         halted_by = None
+        cut_by_deadline = 0
         first_call = True
         for n, pid in enumerate(projects):
             if step_budget.remaining() < CALL_RESERVE_S:
                 left = len(projects) - n
                 halted_by = (f"step deadline: {left} project(s) not started, their deltas left for the next "
-                             f"run (a call needs up to {CALL_RESERVE_S:.0f} s)")
+                             f"run (a call needs at least {CALL_RESERVE_S:.0f} s)")
                 print(f"  {halted_by}", file=sys.stderr)
                 break
             prompt = build_prompt(pid, by_project[pid], project_facts(pid),
@@ -430,8 +436,17 @@ def main() -> int:
                     # The key and the chain are a property of the RUN, not of each
                     # project. Printed once, they are provenance; printed per
                     # project, they are noise that hides the results.
-                    log=(lambda m: print(m)) if first_call else (lambda m: None))
+                    log=(lambda m: print(m)) if first_call else (lambda m: None),
+                    deadline=step_budget.deadline())
                 first_call = False
+            except providers.OutOfTime as exc:
+                # The pre-call gate's halt, met inside the call: nothing new was paid for, no model is
+                # at fault, and this project's deltas stay with the rest of the queue's.
+                cut_by_deadline += 1
+                halted_by = (f"step deadline: {len(projects) - n} project(s) not finished, their deltas left "
+                             f"for the next run — {exc}")
+                print(f"  {halted_by}", file=sys.stderr)
+                break
             except providers.BudgetExceeded as exc:
                 print(f"  guardrail mid-run: {exc}; the rest stays unconsumed",
                       file=sys.stderr)
@@ -622,7 +637,7 @@ def main() -> int:
         # the estate's facts stayed current while its narrative silently stopped.
         report(halted_by, recorded, skipped, failed, malformed, unreasoned,
                retired_models, handled=list(projects), waiting=list(waiting),
-               foreign=foreign)
+               foreign=foreign, cut=cut_by_deadline)
         print(f"\nrecorded {recorded} · skipped {skipped} · failed {failed}")
         # THE FIGURES THAT DECIDED, which are this project's own.
         # This printed `w['today']` — the KEY's daily total — beside this
