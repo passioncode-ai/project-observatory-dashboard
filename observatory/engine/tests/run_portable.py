@@ -112,6 +112,9 @@ BOUNDARY += ('osproc',)
 # docs/design/WINDOWS-LINUX.md W2b: who the engine runs as, on every OS.
 BOUNDARY += ('osprivacy',)
 BOUNDARY += ('osschedule',)
+BOUNDARY += ('harness',)
+# OBS-55: the meter and the delegation verifier (contract DEC-0039).
+BOUNDARY += ('meter', 'meter_wire', 'spend')
 # docs/design/WINDOWS-LINUX.md W3: a whole tick, through tools/tick.py.
 BOUNDARY += ('tick_py',)
 # One credential-shape heuristic for every door that judges typed text.
@@ -122,6 +125,8 @@ BOUNDARY += ('vault_project',)
 BOUNDARY += ('lifecycle', 'lifecycle_watch')
 # Agent memory: checkpoints, one executor per workflow, handoff packs.
 BOUNDARY += ('workflow_memory',)
+# One project under many names: curated aliases, known_as edges, project.resolve.
+BOUNDARY += ('identifiers',)
 # The Agents page: workflows, handoffs and sessions, rendered.
 BOUNDARY += ('agents_page',)
 # Agents' credentials: the findings that report keys outside the vault.
@@ -161,6 +166,8 @@ BOUNDARY += ('facts_learning',)
 BOUNDARY += ('maintenance',)
 # The app step alone, which the Mac app's Restart to update runs after it quits (LC-16).
 BOUNDARY += ('maintain_app',)
+# The disk guard: pressure, the lsof rule, each class; synthetic roots only (2026-10-11).
+BOUNDARY += ('disk_guard',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -187,7 +194,7 @@ RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', '
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py',
-    'identity_map.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'workspace.py',
+    'identity_map.py', 'identifiers.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'log_policy.py', 'code_freshness.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
@@ -195,7 +202,9 @@ ROOT_FILES = (
     'maintenance.py', 'app_update.py', 'update_events.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
-    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
+    # The meter and the delegation verifier (OBS-55).
+    'delegation.py', 'meter.py',
+    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
 )
@@ -235,6 +244,7 @@ def copy_source(target: Path) -> None:
     selected.add(ROOT / 'fabric/FABRIC-CONFORMANCE.md')
     selected.add(ROOT / 'fabric/interop-schemas/README.md')
     selected.add(ROOT / 'fabric/memory-schemas/README.md')
+    selected.add(ROOT / 'fabric/delegation-schemas/README.md')
     selected.add(ROOT / 'fabric/memory-provider.json')
     selected.add(ROOT / 'store/schema.sql')
     # The agent-memory evaluation corpus (tools/memory_eval.py reads it).
@@ -247,7 +257,7 @@ def copy_source(target: Path) -> None:
                      and '__pycache__' not in p.parts}
     # The dashboard's catalogs and the vendored brand manifest are data it reads.
     for folder in ('defaults', 'plugins', 'fabric/fixtures', 'fabric/schemas', 'fabric/service-schemas',
-                   'fabric/interop-schemas', 'fabric/memory-schemas',
+                   'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas',
                    'dashboard/locales', 'dashboard/brand'):
         selected |= set((ROOT / folder).glob('*.json'))
     for source in sorted(selected):

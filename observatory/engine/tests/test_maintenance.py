@@ -902,6 +902,7 @@ class Pass(Base):
         self.assertNotIn("failures", M.read_state(self.home)["check"])
 
     def test_the_schedulers_first_check_waits_90_seconds_after_the_start(self):
+        # PROCESS_STARTED is wall-clock seconds; 90 - (started + 10 - started) is 80 only to float precision.
         order = []
         commands = FakeCommands(check=0)
         original = commands.full
@@ -911,16 +912,21 @@ class Pass(Base):
             return original(*args, **kw)
         commands.full = full
         report = M.run_pass(self.home, at=AT, commands=commands, services=None, store=self.store, app=NoApp(),
-                            sleep=lambda s: order.append(("sleep", s)), first_check_delay=90,
+                            sleep=lambda s: order.append(("sleep", round(s, 6))), first_check_delay=90,
                             clock=lambda: M.PROCESS_STARTED + 10)
         self.assertEqual(report["update"]["result"], "up-to-date")
-        self.assertEqual(order[:2], [("sleep", 80), "check"], "the check waits, then runs")
+        # The wait is 90 s minus the time since a FLOAT process start, so it is 80 only to
+        # within rounding — exact equality failed once as 80.00000000000003 (CI, 2026-10-12).
+        self.assertEqual([o if isinstance(o, str) else o[0] for o in order[:2]], ["sleep", "check"],
+                         "the check waits, then runs")
+        self.assertAlmostEqual(order[0][1], 80, places=6)
         order.clear()
         M.run_pass(self.home, at=AT + datetime.timedelta(hours=1), commands=commands, services=None,
-                   store=self.store, app=NoApp(), sleep=lambda s: order.append(("sleep", s)),
+                   store=self.store, app=NoApp(), sleep=lambda s: order.append(("sleep", round(s, 6))),
                    first_check_delay=90, clock=lambda: M.PROCESS_STARTED + 10)
         self.assertNotIn("check", order)
-        self.assertFalse([o for o in order if isinstance(o, tuple) and o[1] == 80], "no wait when no check is due")
+        self.assertFalse([o for o in order if isinstance(o, tuple) and abs(o[1] - 80) < 1e-6],
+                         "no wait when no check is due")
         code = M.parser().parse_args(["run", "--first-check-delay", "90"])
         self.assertEqual(code.first_check_delay, 90)
 
@@ -1162,6 +1168,99 @@ class Pass(Base):
         self.assertNotIn(SECRET_MARK, text)
 
 
+class Guard(Base):
+    """The disk guard runs first in every pass, only with features.auto_cleanup on."""
+
+    def set_cleanup(self, on: bool):
+        f = self.home / "config" / "settings.json"
+        doc = json.loads(f.read_text())
+        doc.setdefault("features", {})["auto_cleanup"] = on
+        f.write_text(json.dumps(doc))
+
+    def test_off_runs_nothing_and_says_so(self):
+        self.set_cleanup(False)
+        ran = []
+        report = M.step_guard(self.home, {}, AT, runner=lambda *a, **k: ran.append(a))
+        self.assertEqual(report, {"result": "off"})
+        self.assertEqual(ran, [])
+
+    def test_on_runs_the_auto_tier_and_records_the_disk(self):
+        self.set_cleanup(True)
+        seen = {}
+
+        def runner(argv, **kw):
+            seen["argv"], seen["env"], seen["timeout"] = argv, kw["env"], kw["timeout"]
+            out = json.dumps({"level": "low", "free_gb_after": 21.5, "freed_gb": 3.2, "results": {"removed": 4}})
+            return subprocess.CompletedProcess(argv, 0, out + "\n", "")
+        state = {}
+        report = M.step_guard(self.home, state, AT, runner=runner)
+        self.assertEqual(seen["argv"][-4:], ["--auto", "--json", "--budget", str(M.GUARD_TIMEOUT - M.GUARD_MARGIN)])
+        self.assertTrue(seen["argv"][-5].endswith("tools/disk_guard.py"))
+        self.assertLess(M.GUARD_TIMEOUT - M.GUARD_MARGIN, M.GUARD_TIMEOUT, "the guard stops before the job kills it")
+        self.assertEqual(seen["env"]["OBSERVATORY_HOME"], str(self.home))
+        self.assertEqual(seen["timeout"], M.GUARD_TIMEOUT)
+        self.assertEqual((report["result"], report["level"], report["freed_gb"]), ("ran", "low", 3.2))
+        self.assertEqual(state["guard"]["free_gb_after"], 21.5)
+
+    def test_the_record_says_what_happened(self):
+        self.set_cleanup(True)
+
+        def answering(doc, code=0):
+            return lambda argv, **kw: subprocess.CompletedProcess(argv, code, json.dumps(doc) + "\n", "")
+        self.assertEqual(M.step_guard(self.home, {}, AT, runner=answering({"not_due": True, "free_gb_before": 80,
+                                                                              "level": "normal"}))["result"], "not-due")
+        self.assertEqual(M.step_guard(self.home, {}, AT, runner=answering({"busy": True}))["result"], "busy")
+        ran = M.step_guard(self.home, {}, AT, runner=answering({"level": "low", "results": {"removed": 3, "failed": 1}}))
+        self.assertEqual(ran["result"], "ran", "one failed action is a count, not a failed pass")
+        self.assertEqual(M.step_guard(self.home, {}, AT, runner=answering({"error": "boom"}, 2))["result"], "failed")
+
+    def test_a_failed_snapshot_backs_off_an_hour(self):
+        state = {"snapshot_failure": {"at": M.iso(AT - datetime.timedelta(minutes=15))}}
+        self.assertEqual(M.step_snapshot(self.home, state, AT)["result"], "backing-off")
+
+    def test_windows_does_not_kill_a_pass_at_its_interval(self):
+        self.assertGreater(M.PASS_TIME_LIMIT, M.GUARD_TIMEOUT + 900, "the guard, a check and a snapshot fit")
+
+    def test_a_deferred_schedule_reload_happens_after_the_pass(self):
+        pending = self.home / "store" / "maintenance-reload-pending"
+        pending.parent.mkdir(parents=True, exist_ok=True)
+        started = []
+        self.assertIsNone(M._reload_after_pass(self.home, spawn=lambda *a, **k: started.append(a)))
+        pending.write_text("x")
+        with patch.object(M.sys, "platform", "darwin"):
+            got = M._reload_after_pass(self.home, spawn=lambda *a, **k: started.append(a))
+        self.assertEqual(got, "after this pass")
+        self.assertIn("ensure", started[0][0][2])
+
+    def test_a_guard_that_hangs_is_stopped_and_named(self):
+        self.set_cleanup(True)
+
+        def runner(argv, **kw):
+            raise subprocess.TimeoutExpired(argv, kw["timeout"])
+        report = M.step_guard(self.home, {}, AT, runner=runner)
+        self.assertEqual((report["result"], report["exit"]), ("failed", 124))
+        self.assertIn("stopped at", report["detail"])
+
+    def test_it_runs_before_the_update_and_a_crash_never_stops_the_pass(self):
+        order = []
+        commands = FakeCommands(check=0)
+        original = commands.full
+
+        def full(*args, **kw):
+            order.append("update-check")
+            return original(*args, **kw)
+        commands.full = full
+
+        def guard(base, state, at):
+            order.append("guard")
+            raise RuntimeError("synthetic")
+        report = M.run_pass(self.home, at=AT, commands=commands, services=None, store=self.store,
+                            app=NoApp(), sleep=lambda s: None, guard=guard)
+        self.assertEqual(order[:2], ["guard", "update-check"])
+        self.assertEqual(report["guard"]["result"], "error")
+        self.assertEqual(report["update"]["result"], "up-to-date")
+
+
 class NoApp:
     def step(self, state, at):
         return {"result": "not-installed"}
@@ -1179,13 +1278,13 @@ class RecordingApp:
 # --- R3: the schedule -------------------------------------------------------------------
 
 class Schedule(Base):
-    def test_the_launchd_job_runs_hourly_and_is_never_a_managed_job(self):
+    def test_the_launchd_job_runs_every_quarter_hour_and_is_never_a_managed_job(self):
         sched = M.LaunchdSchedule(self.home)
         doc = sched.document()
         self.assertTrue(doc["Label"].endswith(".maintain"))
         self.assertEqual(doc["ProgramArguments"][1:], [str(ROOT / "tools" / "maintain.py"), "run",
                                                        "--first-check-delay", "90"])
-        self.assertEqual((doc["StartInterval"], doc["RunAtLoad"]), (3600, True))
+        self.assertEqual((doc["StartInterval"], doc["RunAtLoad"]), (900, True))
         # No Background/LowPriorityIO throttling: it stretched a 2 s check past 600 s live.
         self.assertEqual(doc["ProcessType"], "Standard")
         self.assertNotIn("LowPriorityIO", doc)
@@ -1269,7 +1368,7 @@ class Schedule(Base):
             self.assertFalse(sched.install()["changed"], "a caller's PATH does not flip the job")
         self.assertEqual(plistlib.loads(sched.plist.read_bytes())["EnvironmentVariables"]["PATH"], first)
 
-    def test_the_systemd_timer_is_hourly_persistent_and_quoted(self):
+    def test_the_systemd_timer_runs_every_quarter_hour_persistent_and_quoted(self):
         calls = []
 
         def run(argv, **kw):
@@ -1284,7 +1383,7 @@ class Schedule(Base):
         self.assertIn(f'Environment="OBSERVATORY_HOME={self.home}"', service)
         # A stop or a logout must not take the detached update down with the pass (A03 review).
         self.assertIn("KillMode=process", service.splitlines())
-        self.assertIn("OnUnitActiveSec=60min", timer)
+        self.assertIn("OnUnitActiveSec=15min", timer)
         # LC-16: the first pass, and its check, 90 seconds after the user manager starts.
         self.assertIn("OnStartupSec=90s", timer.splitlines())
         self.assertNotIn("OnBootSec=10min", timer)

@@ -100,6 +100,50 @@ class LeakScan(unittest.TestCase):
         self.scan()
         self.assertNotIn(SECRET_A, L.STATE.read_text())
 
+    def with_deadline(self, seconds_left):
+        """Run a pass as a tick would, its deadline `seconds_left` away (OBS-52)."""
+        import os, time
+        saved = os.environ.get("OBSERVATORY_STEP_DEADLINE")
+        os.environ["OBSERVATORY_STEP_DEADLINE"] = f"{time.time() + seconds_left:.3f}"
+        try:
+            return self.scan()
+        finally:
+            if saved is None:
+                os.environ.pop("OBSERVATORY_STEP_DEADLINE", None)
+            else:
+                os.environ["OBSERVATORY_STEP_DEADLINE"] = saved
+
+    def test_a_pass_the_deadline_cuts_short_writes_what_it_read_and_names_the_rest(self):
+        base = Path(self.tmp.name).resolve()
+        files = []
+        for n in range(3):
+            f = base / f"t{n}.jsonl"
+            f.write_text(f"line {n} {SECRET_A}\n")
+            files.append(f)
+        L.targets = lambda days: (list(files), [])
+        out = self.with_deadline(L.FILE_RESERVE_S - 1)
+        self.assertTrue(out["partial"])
+        self.assertIn("after 0 of 3 targets", out["degraded"][0]["why"])
+        self.assertIn("UNMEASURED", out["degraded"][0]["effect"])
+        self.assertTrue(out["companion_store"]["read"], "the stores still fit in the time left")
+        self.assertEqual(json.loads(L.STATE.read_text())["offsets"], {}, "no offset moved for an unread file")
+        full = self.scan()
+        self.assertFalse(full["partial"])
+        self.assertEqual(full["degraded"], [])
+        self.assertEqual(sum(1 for h in full["hits"] if h["where"].endswith(".jsonl")), 3, "the next pass reads them all")
+
+    def test_a_store_the_deadline_reaches_is_unread_and_keeps_its_mark(self):
+        self.scan()
+        before = json.loads(L.STATE.read_text())["sqlite"]["stores"]
+        self.insert(f"new row {SECRET_A}")
+        out = self.with_deadline(L.STORE_RESERVE_S - 1)
+        self.assertFalse(out["companion_store"]["read"])
+        self.assertEqual(out["coverage"]["companion_store"], "unread")
+        self.assertTrue(any("before" in d["why"] and "mark did not move" in d["why"] for d in out["degraded"]))
+        self.assertEqual(json.loads(L.STATE.read_text())["sqlite"]["stores"], before, "the mark did not move")
+        later = self.scan()
+        self.assertTrue(any(h["where"].startswith(str(self.db)) for h in later["hits"]), "the row is read by the next pass")
+
 
 if __name__ == "__main__":
     unittest.main()

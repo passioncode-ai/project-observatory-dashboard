@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.0/observatory/engine/fabric/schemas/project-resolve-input.schema.json",
+  "title": "project.resolve — input",
+  "description": "Any name of a project or product: its registry id, another system's name for it (a store id, a hosting app, an agent's own slug), a repository id, a deployment id or a domain id. Matched exactly.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 300,
+      "pattern": "^\\S+$",
+      "description": "The name to resolve, e.g. `project:alpha-web`, `store:app:1000000001`, `repository:example-org/alpha-web`, `domain:alpha.example`."
+    }
+  }
+}

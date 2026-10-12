@@ -60,6 +60,17 @@ else:
     BINARY = os.O_BINARY
 
 
+def default_home(name: str, *, nt: bool | None = None) -> Path:
+    """Where a workspace lives when no OBSERVATORY_HOME names one (W7): `~/.local/share/<name>`;
+    on Windows `%LOCALAPPDATA%\\<name>` — local, not roaming — unless the place 0.21.0 used there,
+    `~\\.local\\share\\<name>`, already exists, which keeps that installation where it is."""
+    legacy = Path.home() / ".local" / "share" / name
+    if not (os.name == "nt" if nt is None else nt) or legacy.exists():
+        return legacy
+    base = os.environ.get("LOCALAPPDATA")
+    return (Path(base) if base else Path.home() / "AppData" / "Local") / name
+
+
 def _stat(target: Target, follow: bool = True) -> os.stat_result:
     if isinstance(target, int):
         return os.fstat(target)
@@ -120,6 +131,17 @@ if not WINDOWS:
         """Mode and owner, for a diagnostic, never a decision."""
         info = _stat(target)
         return f"mode {stat.S_IMODE(info.st_mode):04o}, uid {info.st_uid} (this account: {os.getuid()})"
+
+    def account() -> str:
+        """This account's id as text — the uid — for a path template such as a per-user
+        temporary root (`tools/disk_guard.py`); never an ownership decision."""
+        return str(os.getuid())
+
+    def owns(info: os.stat_result) -> bool:
+        """Whether this account owns what `info` (an lstat result) describes. The disk guard
+        asks it of every entry of a tree before removing the tree: a folder this account owns
+        can hold another account's files (one created with sudo), and those are not ours."""
+        return info.st_uid == os.getuid()
 
     def real_home() -> Path | None:
         """The home the password database records for this uid; None when it has none."""
@@ -385,6 +407,15 @@ else:  # pragma: no cover - exercised by the Windows CI job
     class _GUID(ctypes.Structure):
         _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD), ("Data3", wintypes.WORD),
                     ("Data4", ctypes.c_ubyte * 8)]
+
+    def account() -> str:
+        """This account's id as text — its SID — for a path template; never a decision."""
+        return user_sid()
+
+    def owns(info: os.stat_result) -> bool:
+        """Windows keeps no uid in a stat result; ownership there is the ACL's, and the guard's
+        rename probe (holders.py) refuses what another account holds."""
+        return True
 
     def real_home() -> Path | None:
         """The account's profile folder from the known-folder store; None when it cannot say."""

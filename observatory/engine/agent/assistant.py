@@ -274,11 +274,17 @@ def serve(wait=45.0):
     if state['server']=='other-workspace':raise AssistantError('dashboard-port-busy')
     try:
         if state['always_on']:
-            from tools import install_launchd
-            label=install_launchd.instance_label('server')
-            done=subprocess.run(['launchctl','kickstart','-k',f'gui/{os.getuid()}/{label}'],
-                                capture_output=True,timeout=15)
-            if done.returncode!=0:raise AssistantError('dashboard-start-failed')
+            if sys.platform=='darwin':
+                from tools import install_launchd
+                label=install_launchd.instance_label('server')
+                done=subprocess.run(['launchctl','kickstart','-k',f'gui/{os.getuid()}/{label}'],
+                                    capture_output=True,timeout=15)
+                if done.returncode!=0:raise AssistantError('dashboard-start-failed')
+            else:
+                # Task Scheduler or systemd (W4b): the job's own restart, never a second process.
+                import osschedule
+                ok,_=osschedule.handle('server',paths.HOME).restart()
+                if not ok:raise AssistantError('dashboard-start-failed')
             deadline=time.monotonic()+wait
             while dashboard_open.served_workspace(state['port'],timeout=3)!=str(paths.HOME):
                 if time.monotonic()>deadline:raise AssistantError('dashboard-start-failed')

@@ -91,6 +91,14 @@ it does not replace an existing installation. Configuration belongs in
 `project-observatory full-path` prints the immutable engine directory, useful
 for connecting scripts, hooks and MCP.
 
+**What else a project is called** — a store id, a hosting app, another agent's own slug — is
+curated in `config/identifiers.json` as `{"aliases": {"<system>:<value>": {"resolves_to":
+"project:…" or "product:…", "owner": …, "source": …, "since": "YYYY-MM-DD"}}}`; agents can propose
+rows with `observatory_propose` (`patch: {"aliases": [...]}`). One name has one target: two targets
+for one name, or a name that contradicts a measured repository, deployment or domain, is listed as
+a conflict in `registry/identifiers.json` and withheld. `project.resolve` answers any of these
+names with the one canonical id ([design](design/IDENTITY.md)).
+
 **Which environment an app serves** comes from the provider (a Heroku pipeline stage) or from you:
 `config/environments.json` holds `{"deployments": {"heroku:<app>": "production"}}`. The names
 `production`, `staging`, `review`, `development`, `test` and `local` are recognised (`prod` and
@@ -142,6 +150,7 @@ and token provisioning are different permissions.
 | `google` | Analytics property and search inventory | The user's service account files and resource grants |
 | `domains` | Domain observations | Explicit domain export and network access |
 | `mcp` | The MCP servers the agent configs on this machine declare (Claude Code, Cursor, OpenCode, Codex, Gemini CLI, Kiro), served as `machine.mcp.inventory` | Explicit `sources.mcp_config_root` |
+| `harness` | What every agent session loads before the first word: skills and their share of the skill listing, instruction files, the settings that load every MCP tool upfront, and deterministic security rules over skills ([design](design/HARNESS.md)) | Explicit `sources.harness_root` |
 | `sessions` | Local agent activity | Explicit `sources.sessions`; `sources.companion_db` is optional, set only where a memory companion (claude-mem) is installed |
 | `wiki` | Knowledge-base inventory | Explicit `sources.wiki` |
 | `openrouter` | Key and usage inventory | A locally supplied provider credential |
@@ -176,6 +185,7 @@ The `projects` source is the exception: the filesystem scan always runs, so a mi
 | `projects` | the directory that holds your project checkouts | filesystem scan, events, leak scan |
 | `sessions` | agent session transcripts, e.g. `~/.claude/projects` for Claude Code | `sessions` integration, leak scan |
 | `mcp_config_root` | the home directory whose agent configs declare MCP servers | `mcp` integration |
+| `harness_root` | the home directory whose `.claude` and `.codex` folders hold the skills, plugins and instruction files every session loads | `harness` integration |
 | `wiki` | a Markdown knowledge base, e.g. an Obsidian vault | `wiki` integration, `wiki_projection` |
 | `secret_store` | a private directory of provider credentials and project slots (`projects/`) | vault, OpenRouter, Google, Cloudflare analytics |
 | `companion_home`, `companion_db` | a memory companion's home and database file (claude-mem); optional, only where one is installed | `sessions` integration (`companion_db`, optional: an absent file is fine, a path that is not a file is a warning), leak scan (`companion_db`, when the file exists), `companion_remediation` (both required) |
@@ -441,7 +451,7 @@ assistant's key and is used ahead of the key file (`key_source` then says `envir
 a personal key exported in your shell profile is spent by the assistant and the agent. On macOS the
 tick and server installers write workspace-specific jobs only after the scheduler
 is explicitly enabled; Linux can run `project-observatory full tick` under a
-supervisor chosen by the user. The hourly maintenance job (updates and the daily backup) is
+supervisor chosen by the user. The maintenance job (every 15 minutes: the disk guard, updates, the daily backup) is
 separate and scheduled by default: see [Staying in step](#staying-in-step). Do not create duplicate writers for one home.
 On macOS, `tools/serverd.py --install` also writes a `fabric-service/0.1`
 descriptor (`project-observatory.<instance>.json`, in
@@ -480,7 +490,9 @@ dashboard: the collectors stop 5 minutes before it (at most a fifth of the
 ceiling), the tail's optional steps — plugins, rollup, the agent, the vector index,
 retention and review — stop 2 minutes before it (at most a twelfth), and the core
 from `findings` to the registry commit uses what is left. A step that did not run
-leaves the previous run's output in place. Each step is told its own deadline in
+leaves the previous run's output in place, and the collectors take turns: after the store check they
+run least recently started first, so one that was not started goes first on the next tick
+(`store/tick-rotation.json`; `tick.json` names the order and what was not started). Each step is told its own deadline in
 `OBSERVATORY_STEP_DEADLINE` (epoch seconds); the folder scan uses it to write what
 it measured and carry each folder it did not reach, marked `carried_from`.
 
@@ -568,13 +580,16 @@ same summary.
   `config/machine.json` — caches, simulators, VM disks, histories — each with
   how its space comes back. Each place is re-sized every `every_hours`, within
   `disk_budget_seconds` per tick (oldest first; the rest keep their last number),
-  and `du -x` never counts a mounted image as the host disk. Swap files are a row too: on
+  and `du -x` never counts a mounted image as the host disk. `du` counts an APFS clone in full, so
+  on macOS a place of 512 MB or more is walked a second time, inside the same budget, for the
+  private size of its files: where clones hold at least a tenth of it (and 100 MB), the row says
+  what removing it frees at least. Swap files are a row too: on
   macOS they share the disk's container, so memory pressure is disk pressure.
 - **Git hygiene**: every registered checkout's worktrees (clean, dirty,
   missing, in use, idle days) and branches (merged, patch-merged, pushed,
   unique).
 
-With `features.auto_cleanup` also on, the tick removes what loses nothing:
+With `features.auto_cleanup` also on, the tick and the disk guard (below) remove what loses nothing:
 branches merged into the default branch or identical to their upstream, clean
 worktrees nobody has touched for a week, stale worktree records, and git-ignored
 build output of projects idle for a month (thresholds and protected branch
@@ -593,6 +608,69 @@ of untracked files per worktree under `<home>/archive/cleanup/<date>/` before
 removing anything. A worktree's patch is re-applied, in check mode, to a scratch
 index of its HEAD first; if git cannot produce it or it does not apply, the
 worktree stays and the run reports it as failed with the reason.
+
+### The disk guard
+
+The tick is long on a busy machine, and its cleanup step comes late: on a loaded
+machine it can go unreached for hours, exactly when the disk is filling. So with
+`features.auto_cleanup` on, the maintenance job (`full maintain`, every 15 minutes) runs the
+**disk guard** first in its pass, before the update and the backup — once an hour while space is
+normal, on every pass once free space falls below the `low` line:
+
+```sh
+project-observatory full disk-guard                  # the plan at the current pressure; removes nothing
+project-observatory full disk-guard --apply          # act now
+project-observatory full disk-guard --level critical # plan as if the disk were nearly full
+```
+
+The guard reads free space and picks a pressure: `normal`, `low` (under 25 GB),
+`critical` (under 10 GB). Pressure moves every threshold in `config/cleanup.json`
+under `guard`:
+
+| What | normal | low | critical |
+|---|---|---|---|
+| The cache tools' own cleanup | `uv cache prune`, `pnpm store prune`, `brew cleanup --prune=14`, Docker build cache older than a week | also `npm cache verify`, `uv cache clean`, Go and Yarn caches, dangling Docker images | also `brew cleanup --prune=all` |
+| Git-ignored build and dependency output (`node_modules`, `.venv`, `dist`, …) of checkouts nobody worked in | 14 days | 3 days | 1 day |
+| Temporary entries untouched for | 3 days | 1 day | 1 day |
+| Trash items older than | 30 days | 30 days | 3 days |
+
+Application and tool cache folders (`~/Library/Caches`, `~/.cache`) untouched for 7 / 2 / 1 days go
+too, except the downloaded browsers and SDKs a tool does not fetch again by itself (`cache_keep`:
+Playwright, camoufox, puppeteer, cargo-xwin and others) and `uv`, which has its own command.
+Browser code-sign clones a crashed browser left behind go at any pressure, and
+the cleanup's own git auto tier runs after them — with its thresholds lowered by the same
+pressure (`pressure` in `config/cleanup.json`): a clean worktree or a merged branch nobody
+touched for 3 days at `low`, 1 day at `critical`, instead of 7 (pushed branches 14 and 7 days instead of 30,
+build output of idle projects 7 and 3 instead of 30). Only that tier moves, and only for a threshold you did not set
+yourself; a worktree with uncommitted edits, or with ignored files that are not build output (`.env.local`, a local
+database), and a branch with unique commits never do. `project-observatory full cleanup --level low` previews it.
+Every cleanup takes one lock, so the tick, the guard and you never act on the same thing at once. npx's package
+cache and macOS diagnostic reports are swept too.
+
+**On every system.** What a process holds is read with `lsof` on macOS and Linux, from
+`/proc` on a Linux without `lsof`, and on Windows by renaming the folder aside before
+removing it — Windows refuses to rename a folder something holds, so a refusal is a skip
+and nothing of it is deleted. The schedule is the same maintenance job everywhere: launchd,
+a systemd user timer, or a Task Scheduler task, every 15 minutes. "Nobody worked in" means no
+checkout or commit and no uncommitted file changed since — never the index,
+which every `git status` rewrites.
+
+What it never does: remove anything a process holds open or works inside (one
+`lsof` listing per run, re-checked at each removal; without it no path goes),
+follow a symlink, open a privacy-guarded folder, touch another user's file, stop a
+process, start an app (Docker commands run only while the daemon already runs),
+or run a cache command while that tool is running. Memory is reported, not
+freed: the Machine page names who holds the memory that swap writes to this disk,
+and each running simulator with the command that stops it.
+
+Freed space is what the disk reports before and after each action (`freed_mb` in
+`store/logs/cleanup.jsonl`), not a `du` estimate: `du` counts an APFS clone in
+full, and removing one can free nothing. The delta also counts whatever else wrote to
+the disk meanwhile, so a single row can read negative; a run's total (`freed_gb` in
+`store/raw/disk-guard.json`) is the figure to trust. The Machine page also lists the largest
+files under the home directory, walked once a day within a time budget, and never
+removes one. If the guard has not reported for three hours while
+`auto_cleanup` is on, the finding `machine.guard_idle` says so.
 
 ## Organizations and resources
 
@@ -832,9 +910,12 @@ estate. On the new machine:
 
 ### Updates install themselves (0.17.0 and later)
 
-Nothing needs to be run after a release. One job per workspace runs every hour: launchd
+Nothing needs to be run after a release. One job per workspace runs every 15 minutes: launchd
 `org.project-observatory.<id>.maintain` on macOS, a systemd user timer
-`project-observatory-<id>-maintain.timer` on Linux. Each run does only what is due:
+`project-observatory-<id>-maintain.timer` on Linux, a Task Scheduler task on Windows. Each run does only what is due:
+
+- With `features.auto_cleanup` on, first the disk guard (see [The disk guard](#the-disk-guard)): hourly while space
+  is normal, on every pass below the `low` line.
 
 - Every six hours it runs `full update --check`; at login the first check waits 90 seconds
   after the job starts. When a newer **stable** release exists, it runs `full update --apply
@@ -848,7 +929,7 @@ Nothing needs to be run after a release. One job per workspace runs every hour: 
   version when you quit it or when it has had no window on screen and no input for 30 minutes.
 - Once a day it takes a full encrypted backup, `daily-*.obsnap`, the newest three kept. It
   briefly stops this workspace's tick and server for the copy and starts them again. When a
-  tick or an update is running, the backup waits for the next hour. Snapshots you take yourself
+  tick or an update is running, the backup waits for the next pass; a failed backup is tried again an hour later. Snapshots you take yourself
   (`snapshot-*`) rotate separately and are never removed by the daily ones. See
   [Encrypted backups off this disk](#encrypted-backups-off-this-disk).
 
@@ -909,7 +990,7 @@ at a safe point: when the local server has answered no page and no agent in the 
 minutes (a host's `/health` probe, the service document and the events feed do not count),
 no memory-http client has called in that time, and no tick or other workspace operation is
 running (the update would stop the tick half-way). Otherwise the release is recorded as
-`deferred`, `auto-update status` and Health show it as ready, and the next hourly pass tries
+`deferred`, `auto-update status` and Health show it as ready, and the next pass tries
 again. A `full update --apply` you run yourself installs at once.
 
 A running Claude Code session is never stopped by an update. Its MCP server
@@ -1064,7 +1145,7 @@ when collecting complete local socket evidence.
 
 ## Mac app
 
-From 0.17.0 the app updates itself: the hourly maintenance job replaces it with the engine's
+From 0.17.0 the app updates itself: the maintenance job replaces it with the engine's
 release once it is not running (see [Staying in step](#staying-in-step)). The replaced
 bundle is kept under `<home>/store/app-previous/`.
 

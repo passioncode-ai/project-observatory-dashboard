@@ -192,6 +192,11 @@ def _name_unknown_arguments(result: Any, tool: Any, arguments: dict) -> Any:
     return result
 
 
+#: The meter's capability (OBS-55), declared in fabric-agent.json (OBS-67) and listed from it like every
+#: capability; its call is answered by `_grant_check`, which reads the delegation token from the channel.
+GRANT_CHECK = "grant.check"
+
+
 class InteropServer(MCPServer):
     """An MCPServer that also serves the manifest's capabilities as their own tools."""
 
@@ -227,7 +232,8 @@ class InteropServer(MCPServer):
 
     def missing_handlers(self) -> list[str]:
         """Capabilities the manifest declares that nothing here answers. Must be empty."""
-        return sorted(n for n, c in self._caps.items() if n not in self._handlers and not interop.is_job(c))
+        return sorted(n for n, c in self._caps.items()
+                      if n not in self._handlers and not interop.is_job(c))
 
     # ── listing ──────────────────────────────────────────────────────────────
     def interop_tools(self) -> list[Tool]:
@@ -274,6 +280,33 @@ class InteropServer(MCPServer):
         base = [t for t in await super().list_tools() if t.name not in own]
         return base + self.interop_tools() + self.memory_listing()
 
+    async def _grant_check(self, arguments: dict) -> CallToolResult:
+        """The meter (OBS-55, contract DL-21): the onward delegation token comes from the request's
+        `Authorization` or `Fabric-Delegation` header (the HTTP door puts it on the channel), never
+        from an argument. A stdio call carries no token and is denied `principal-unproven`. The
+        answer is the grant-check document, allowed or denied; a malformed request is isError."""
+        import meter
+        token = memory_access.delegation_token()
+        try:
+            out = await anyio.to_thread.run_sync(
+                lambda: meter.default_meter().check(token if token is not None else "", arguments))
+        except meter.RequestError as exc:
+            refused = {"error": "invalid-input", "code": "invalid-input", "detail": str(exc),
+                       "hint": "grant.check takes amountUsd, tokenJti, grantRef and purpose "
+                               "(grant-check-request); the token travels in a header",
+                       "degraded": []}
+            return CallToolResult(content=[_text(refused)], structured_content=refused, is_error=True)
+        except (OSError, ValueError) as exc:
+            refused = {"error": "unknown-state", "code": "unknown-state",
+                       "detail": f"the meter could not run: {type(exc).__name__}", "degraded": []}
+            return CallToolResult(content=[_text(refused)], structured_content=refused, is_error=True)
+        finally:
+            del token
+        if memory_access.delegation_token() is None and out.get("code") == "principal-unproven":
+            out = {**out, "reason": "a stdio call carries no delegation token; call grant.check over "
+                                    "the HTTP door with the onward token in Authorization"}
+        return CallToolResult(content=[_text(out)], structured_content=out)
+
     async def _memory_call(self, name: str, arguments: dict) -> CallToolResult:
         """A memory/0.1 call: the contract's input checked, the observatory tool run, the
         answer checked against the contract's output or refusal."""
@@ -304,6 +337,8 @@ class InteropServer(MCPServer):
         # ONE DOOR FOR EVERY TOOL (access-bindings/1, PB-137 N-008). The memory tools
         # authorize their own target inside; everything else serves the local stdio
         # agent only, and a binding is refused here before any handler runs.
+        if name == GRANT_CHECK:
+            return await self._grant_check(arguments or {})
         if name not in memory_access.TOOLS:
             refused = memory_access.local_only(name)
             if refused is not None:

@@ -150,13 +150,39 @@ def test_the_wire_refuses_a_scope_the_schema_permits_but_cannot_mean() -> None:
           str(mod._scope_error("estate", None)))
 
 
+def test_a_one_of_answer_is_cut_by_its_own_branch() -> None:
+    """`project.resolve` publishes a `oneOf` (answer | refusal), each closed. The shaper
+    once cut only `type: object` with `properties`, so a oneOf passed through uncut."""
+    import server
+    import jsonschema
+    out_schema = json.loads((ROOT / "fabric/schemas/project-resolve-output.schema.json").read_text(encoding="utf-8"))
+    answer = {"canonical": "project:alpha", "kind": "project", "name": "alpha", "matched": {"query": "x:1", "via": "alias"},
+              "members": [{"project": "project:alpha", "role": None, "repositories": [], "deployments": [],
+                           "domains": [], "planted": 1}],
+              "aliases": [], "domains": [], "degraded": [], "products": [], "planted": True}
+    dropped: set[str] = set()
+    cut = server._published_shape(out_schema, answer, dropped)
+    check("an extra key on the answer is dropped and named", "planted" not in cut and "planted" in dropped,
+          str(sorted(dropped)))
+    check("and inside a $ref'd member too", "planted" not in cut["members"][0] and "members.planted" in dropped,
+          str(sorted(dropped)))
+    errors = [e.message for e in jsonschema.Draft202012Validator(out_schema).iter_errors(cut)]
+    check("the cut answer validates against the published schema", not errors, str(errors)[:200])
+    refusal = {"error": "not-found", "query": "x:1", "hint": "h", "degraded": [], "planted": True}
+    dropped = set()
+    cut = server._published_shape(out_schema, refusal, dropped)
+    check("a refusal is cut by the refusal branch", "planted" not in cut and cut["error"] == "not-found",
+          str(cut))
+
+
 if __name__ == "__main__":
     print("wire inputs — what a host may send and the estate never has\n")
     for fn in (test_a_cursor_that_is_not_an_id_is_reported,
                test_a_well_formed_cursor_is_not_second_guessed,
                test_a_cursor_past_the_end_is_an_empty_page_not_an_error,
                test_an_unknown_subject_is_distinguishable_from_an_empty_one,
-               test_the_wire_refuses_a_scope_the_schema_permits_but_cannot_mean):
+               test_the_wire_refuses_a_scope_the_schema_permits_but_cannot_mean,
+               test_a_one_of_answer_is_cut_by_its_own_branch):
         fn()
     print()
     if FAILURES:

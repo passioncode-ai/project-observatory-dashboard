@@ -103,7 +103,7 @@ def state_path(value: str | None = None) -> Path:
     # Only resolved when a command runs, never at module import.
     base = value or os.environ.get("OBSERVATORY_HOME")
     path = refuse_home_inside_code(Path(base).expanduser().absolute() if base
-                                   else Path.home() / ".local" / "share" / "project-observatory")
+                                   else osprivacy().default_home("project-observatory"))
     # The README exports OBSERVATORY_HOME for the complete engine, and the 0.1
     # commands read the same variable: without this, `demo` wrote its own format
     # into the complete workspace. The two formats never share a folder.

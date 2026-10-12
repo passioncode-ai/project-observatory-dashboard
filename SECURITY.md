@@ -58,7 +58,12 @@ Integrations, paid interpretation, embeddings, scheduling, notifications,
 retention, memory remediation and projections require their documented opt-ins.
 One scheduled job is on by default since 0.17.0: the maintenance job, which
 `full init`, `install_launchd` and `full update` schedule (launchd on macOS, a
-systemd user timer on Linux; `maintenance.py`). It runs hourly. Every six hours it
+systemd user timer on Linux, Task Scheduler on Windows; `maintenance.py`). It runs every 15 minutes and does
+only what is due. With `features.auto_cleanup` on (off by default) it first runs the disk guard
+(`tools/disk_guard.py`, docs/design/DISK-GUARD.md), the one scheduled effect that deletes files: regenerable
+caches, git-ignored build output of idle checkouts, old temporary entries and Trash items, abandoned browser
+clones, the cache tools' own cleanup, and merged or pushed branches and clean worktrees whose branch stays —
+never anything a process holds, never a privacy-guarded folder, never another account's file. Every six hours it
 asks the GitHub releases API for a newer stable release and, when there is one,
 downloads, verifies and installs it (`full update --apply --unattended`; a release
 that declares a step needing a person is verified and held, not installed), and on

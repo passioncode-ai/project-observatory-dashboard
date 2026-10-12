@@ -10,7 +10,7 @@ description: >-
   provider permissions or choosing a project's authentication architecture.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
-  version: "0.21.0"
+  version: "0.22.0"
 compatibility: >-
   Requires an initialized full Project Observatory installation, Python 3.11+
   and local shell access on macOS or Linux. Provider operations additionally
@@ -30,7 +30,7 @@ names. Never ask the user to paste a credential into the conversation.
 2. Select the user's initialized `OBSERVATORY_HOME`. Run
    `project-observatory full doctor`. A missing workspace
    needs the documented onboarding before secret operations.
-3. Run `"$OBSERVATORY_PYTHON" "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.21.0`
+3. Run `"$OBSERVATORY_PYTHON" "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.22.0`
    (`full agent install` records that interpreter; the stock macOS `python3` is too old).
    If stale, read the installed skill once and follow its compatible commands.
    Do not turn an unavailable version check into a retry loop.
@@ -189,8 +189,11 @@ gets `cloudflare.py issue --preset email-send --account <slug> --vault
 group exists at account level only), verified by listing its suppressions.
 Adding an Email Routing rule in one zone — one address to a Worker — is
 `--preset email-routing --zone <zone>`, and deploying that Worker with its KV
-namespace is `--preset workers-edit --account <slug>`. Each is its own token in
-its own slot. When a preset's groups are unknown, `cloudflare.py groups
+namespace is `--preset workers-edit --account <slug>`; putting a Worker in front of
+a hostname (`example.com/*`) is the zone right `--preset workers-routes --zone <zone>`;
+sending one hostname to another at the edge (a Single Redirect, `www.` to the apex) is
+the zone right `--preset redirect-rules --zone <zone>`.
+Each is its own token in its own slot. When a preset's groups are unknown, `cloudflare.py groups
 --account <slug> --match "<words>"` lists the catalogue's names and levels,
 read-only and without ids.
 

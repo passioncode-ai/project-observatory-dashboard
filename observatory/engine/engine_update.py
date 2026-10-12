@@ -709,6 +709,16 @@ class Installer:
         if force:
             commands.append(self._base(name) + ["--no-deps", "--force-reinstall" if name == "pip" else "--reinstall", str(wheel)])
         done = []
+        aside = move_locked_launcher(self.python)
+        try:
+            done = self._run_all(commands, name, wheel)
+        except BaseException:
+            put_launcher_back(aside)
+            raise
+        return done
+
+    def _run_all(self, commands: list[list[str]], name: str, wheel: Path) -> list[dict]:
+        done = []
         for command in commands:
             try:
                 p = self.runner(command, capture_output=True, text=True, timeout=self.timeout,
@@ -746,6 +756,82 @@ class LaunchdServices:
 
     def restart(self, label: str) -> tuple[bool, str]:
         return self.launch.restart_job(label)
+
+
+class OsscheduleServices:
+    """This workspace's tick and server jobs under Task Scheduler (Windows) or systemd (Linux),
+    with the interface `LaunchdServices` has, so an update stops and restarts them the same way.
+    A job's `label` and `plist` are its name here."""
+
+    def __init__(self, home: Path | None = None):
+        import osschedule
+        import paths
+        self.osschedule, self.home = osschedule, Path(home or paths.HOME)
+
+    def _job(self, name: str):
+        return self.osschedule.handle(name, self.home)
+
+    def available(self) -> bool:
+        try:
+            self._job("tick")
+        except self.osschedule.ScheduleError:
+            return False
+        return shutil.which("schtasks" if sys.platform == "win32" else "systemctl") is not None
+
+    def managed(self) -> list[dict]:
+        return [{"name": n, "label": n, "plist": n} for n in ("tick", "server") if self._job(n).installed()]
+
+    def loaded(self, label: str) -> bool:
+        return self._job(label).loaded()
+
+    def stop(self, label: str) -> tuple[bool, str]:
+        return self._job(label).stop()
+
+    def start(self, plist: str) -> tuple[bool, str]:
+        return self._job(plist).start(run=plist == "server")
+
+    def restart(self, label: str) -> tuple[bool, str]:
+        return self._job(label).restart()
+
+    def fix(self, job: dict) -> str:
+        if sys.platform == "win32":
+            return f"schtasks /Change /TN \"{self._job(job['name']).path}\" /ENABLE"
+        return f"systemctl --user enable --now {self._job(job['name'])._target()}"
+
+
+def services_for():
+    """The job controller of this system: launchd, or Task Scheduler / systemd."""
+    return LaunchdServices() if sys.platform == "darwin" else OsscheduleServices()
+
+
+def move_locked_launcher(python: str = sys.executable, argv0: str | None = None, *, nt: bool | None = None) -> Path | None:
+    """Windows keeps a running .exe locked: `project-observatory.exe full update --apply` cannot
+    let pip replace the launcher it runs from. A running file can be renamed, so it is moved aside
+    (`<name>.exe.old`) and pip writes a new one; `put_launcher_back` restores it if the install
+    fails. Elsewhere, or when the update did not start from the launcher, nothing moves."""
+    if not (os.name == "nt" if nt is None else nt):
+        return None
+    running = Path(argv0 or sys.argv[0])
+    if running.suffix.lower() != ".exe":
+        running = running.with_suffix(".exe")
+    scripts = Path(python).parent
+    if not running.is_file() or running.parent.resolve() != scripts.resolve():
+        return None
+    aside = running.with_name(running.name + ".old")
+    try:
+        aside.unlink(missing_ok=True)       # a leftover of an earlier update, no longer running
+    except OSError:
+        aside = running.with_name(f"{running.name}.{os.getpid()}.old")
+    os.replace(running, aside)
+    return aside
+
+
+def put_launcher_back(aside: Path | None) -> None:
+    if aside is None:
+        return
+    original = aside.with_name(aside.name.split(".exe", 1)[0] + ".exe")
+    if not original.exists():
+        os.replace(aside, original)
 
 
 class NewEngine:
@@ -1080,8 +1166,9 @@ class Transaction:
                     self.step("restarted", service=job["name"])
                     continue
             if not ok:
-                failed.append({"service": job["name"], "detail": redact_tail(detail, 300),
-                               "fix": f"launchctl bootstrap gui/{os.getuid()} {job['plist']}"})
+                fix = (self.deps.services.fix(job) if hasattr(self.deps.services, "fix")
+                       else f"launchctl bootstrap gui/{os.getuid()} {job['plist']}")
+                failed.append({"service": job["name"], "detail": redact_tail(detail, 300), "fix": fix})
             self.step("started" if ok else "start-failed", service=job["name"])
         self.stopped = []
         return failed
@@ -1378,9 +1465,9 @@ def main(argv: list[str], deps: Dependencies | None = None) -> int:
         else:
             if deps.services is None and not args.writers_stopped:
                 try:
-                    deps.services = LaunchdServices()
+                    deps.services = services_for()
                 except Exception as exc:  # noqa: BLE001 — an unusable helper is a refusal, not a crash
-                    raise UpdateError(f"The launchd helpers could not be loaded ({type(exc).__name__}); "
+                    raise UpdateError(f"The job helpers could not be loaded ({type(exc).__name__}); "
                                       "stop the writers yourself and pass --writers-stopped") from None
             with update_lock(base):
                 code, result = Transaction(base, current, release, deps, args).run()

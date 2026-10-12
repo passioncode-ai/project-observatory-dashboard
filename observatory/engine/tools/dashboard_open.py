@@ -106,6 +106,13 @@ def _always_on() -> bool:
         from tools import install_launchd
     except ImportError:
         import install_launchd
+    if sys.platform != "darwin":
+        # A Task Scheduler task or a systemd unit restarts it the same way (W4b).
+        try:
+            import osschedule
+            return osschedule.handle("server", _paths().HOME).installed()
+        except Exception:  # noqa: BLE001 — no supervisor here means no always-on server
+            return False
     label = install_launchd.instance_label("server")
     return (Path.home() / "Library/LaunchAgents" / f"{label}.plist").is_file()
 

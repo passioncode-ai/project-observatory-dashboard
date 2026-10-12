@@ -24,6 +24,8 @@ import subprocess
 import time
 from typing import Callable, Sequence
 
+import osproc
+
 
 def _seconds(value: float) -> str:
     return f"{value:g}s"
@@ -60,7 +62,7 @@ def run(args: Sequence[str], *, timeouts: Sequence[float] = (25, 60), backoff: f
     pauses: list[float] = []
     for attempt, limit in enumerate(timeouts):
         try:
-            return subprocess.run(list(args), timeout=limit, **kwargs), ""
+            return subprocess.run(osproc.program(args), timeout=limit, **kwargs), ""
         except subprocess.TimeoutExpired:
             tried.append(limit)
             if attempt + 1 < len(timeouts):

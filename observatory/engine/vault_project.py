@@ -136,8 +136,9 @@ def resolve(text: str, projects: list[dict] | None = None, *, loaded: bool = Fal
     elif bare in folders:
         folder, how = bare, ways[0]
     else:
-        return Resolution(text, None, pid, "ambiguous", tuple(
-            f"{pid} keeps folders {', '.join(repr(f) for f in folders)}"))
+        # One candidate sentence, as a one-element tuple: `tuple(str)` would split it into characters.
+        return Resolution(text, None, pid, "ambiguous", (
+            f"{pid} keeps folders {', '.join(repr(f) for f in folders)}",))
     # The folder the string led to must not be ANOTHER project's folder too:
     # then one directory would hold two projects' keys.
     others = sorted(q["id"] for q in projects if q["id"] != pid and folder in _folders(q))

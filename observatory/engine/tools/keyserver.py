@@ -78,6 +78,7 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import osprivacy  # noqa: E402
+import delegation  # noqa: E402
 sys.path.insert(0, str(ROOT / "collectors"))
 import credential_shape
 import paths              
@@ -101,6 +102,20 @@ HEADER = "X-Observatory-Token"
 #: board's `secret.reveal_burst` rule then counts against it.
 CALLER_HEADER = "X-Observatory-Caller"
 _CALLER: contextvars.ContextVar[str] = contextvars.ContextVar("caller", default="unnamed")
+#: WHO IS ASKING, PROVEN (OBS-62, Fabric ADR-0144). An agent presents a Fabric delegation token in
+#: `Authorization: Bearer` or `Fabric-Delegation`, aud `project-observatory`, with the scope of the action
+#: it calls; then the journal names the token's outermost actor as the caller, `sub` as the principal, the
+#: chain and the grant, and `caller_verified` is true. The self-named header stays a label. The scopes and
+#: effects are Fabric's (fabric-b4, 2026-10-11). `reveal` is never served to a token: a value must not enter
+#: an agent's context, and `use_secret.py run` puts it in a child's environment instead.
+ACTION_SCOPES = {"mint": ("keys.mint", "charge"), "limit": ("keys.limit", "change-policy"),
+                 "disable": ("keys.disable", "change-policy"), "enable": ("keys.enable", "change-policy"),
+                 "rotate-key": ("keys.rotate", "change-policy"), "revoke": ("keys.revoke", "delete"),
+                 "leak": ("ledger.leak", "draft"), "annotate": ("ledger.annotate", "draft")}
+#: The contract's HTTP status per refusal code (DL-19); every other code is 403.
+REFUSAL_STATUS = {"unauthenticated": 401, "token-expired": 401, "principal-unproven": 401,
+                  "issuer-unavailable": 503, "unknown-state": 503}
+_IDENTITY: contextvars.ContextVar[dict | None] = contextvars.ContextVar("identity", default=None)
 
 
 def caller_name(raw: str | None) -> str:
@@ -202,6 +217,11 @@ def audit(action: str, subject: str, detail: dict) -> None:
            # `detail` so no action can overwrite it, and a later reader never
            # mistakes the label for a verified identity.
            "caller_verified": False, "principal": "local-token-holder"}
+    proven = _IDENTITY.get()
+    if proven:
+        # A verified delegation token: the caller is who the hub's signed chain says (OBS-62).
+        row.update({"label": row["caller"], "caller": proven["caller"], "caller_verified": True,
+                    "principal": proven["principal"], "chain": proven["chain"], "grant": proven["grant"]})
     # Free-text fields are not journalled. Scrub credential shapes in labels
     # and subjects too; a user can paste a credential into any textbox by
     # mistake. The shapes are `credential_shape`'s, the ones every door uses —
@@ -494,7 +514,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):                                   
         pass                                                                              
 
-    def _send(self, code: int, payload: dict) -> None:
+    def _send(self, code: int, payload: dict, headers: dict | None = None) -> None:
         # EVERY REFUSAL IS SCRUBBED ON THE WAY OUT. The sentences come from this
         # file, the vault, the signer and the provider door, and several quote
         # what the caller sent; a key pasted into the wrong field must not come
@@ -506,6 +526,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -553,6 +575,55 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(401, {"error": "bad or missing token"})
             return False
         _CALLER.set(caller_name(self.headers.get(CALLER_HEADER)))
+        return True
+
+    def _refuse(self, code: str, message: str, detail: str) -> bool:
+        """A contract refusal (DL-19): `{"error": {code, message, data}}` with the code's HTTP status."""
+        status = REFUSAL_STATUS.get(code, 403)
+        extra = {"WWW-Authenticate": 'Bearer error="invalid_token"'} if status == 401 else None
+        self._send(status, {"error": {"code": code, "message": message, "data": {"detail": detail}}}, extra)
+        return False
+
+    def _delegated(self, what: str) -> bool:
+        """Verify a delegation token when the request carries one; demand one from an agent in `agents` mode.
+
+        THE BOUNDARY, stated plainly (Fabric CO-090): any local process can send an `Origin` header and read
+        this workspace's 0600 token. `agents` mode stops accidental and confused borrowing — an agent calling
+        here with the operator's page's credentials by mistake — not a hostile process of the same user."""
+        _IDENTITY.set(None)
+        for name in ("Authorization", delegation.DELEGATION_HEADER):
+            if len(self.headers.get_all(name, [])) > 1:
+                return self._refuse("unauthenticated", f"send one {name} header", "duplicate-header")
+        carried = delegation.read_delegation_token(dict(self.headers.items()))
+        try:
+            import meter as meter_module
+            m = meter_module.default_meter()
+        except (OSError, ValueError) as exc:
+            if carried is None:
+                return True               # the operator's page keeps working with a broken meter config
+            return self._refuse("unknown-state", "the meter's configuration cannot be read", type(exc).__name__)
+        if carried is None:
+            if m.keyserver_mode == "agents" and not self.headers.get("Origin"):
+                return self._refuse("unauthenticated", "an agent calls the keyserver with a Fabric delegation "
+                                    "token (Authorization: Bearer) for this action's scope",
+                                    "delegation-required")
+            return True
+        if what == "reveal":
+            return self._refuse("scope-not-granted", "a value is never revealed to an agent: run the command "
+                                "with `use_secret.py run PROJECT NAME -- COMMAND`, which puts it in the "
+                                "child's environment", "reveal-is-the-operators")
+        if what not in ACTION_SCOPES:
+            return self._refuse("scope-not-granted", "this action takes no delegation token", "no-scope")
+        scope, effect = ACTION_SCOPES[what]
+        token = carried[0]
+        result = delegation.verify_delegation(
+            token, audience=m.audience, jwks=m.keys.get(meter_module._token_kid(token)),
+            now=int(datetime.now(timezone.utc).timestamp()), capability=scope, effect=effect, issuer=m.issuer)
+        del token, carried
+        if not result.ok:
+            return self._refuse(result.code, "the delegation token was refused", result.detail)
+        _IDENTITY.set({"caller": result.caller, "principal": result.principal, "chain": list(result.chain),
+                       "grant": list(result.claims["grant"])})
         return True
 
     def _page_for(self, route: str):
@@ -641,6 +712,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         fn = ACTIONS.get(what)
         if not fn:
             self._send(404, {"error": f"no action {credential_shape.echo(what)}"})
+            return
+        if not self._delegated(what):
             return
         lengths = self.headers.get_all("Content-Length", [])
         if self.headers.get("Transfer-Encoding") or len(lengths) != 1:

@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.24.0/observatory/engine/fabric/schemas/project-resolve-output.schema.json",
+  "title": "project.resolve — output",
+  "description": "The canonical project or product a name resolves to, with its members, their repositories, deployments and domains, and every other name it is known by; or a typed refusal. Exact matches only.",
+  "type": "object",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/answer"
+    },
+    {
+      "$ref": "#/$defs/refusal"
+    }
+  ],
+  "$defs": {
+    "answer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical",
+        "kind",
+        "matched",
+        "members",
+        "aliases",
+        "domains",
+        "degraded"
+      ],
+      "properties": {
+        "canonical": {
+          "type": "string",
+          "pattern": "^(project|product):\\S+$",
+          "description": "The Observatory id the name resolves to. Never another system's project id: which project a folder or repository belongs to in a host's own model is that host's decision."
+        },
+        "kind": {
+          "enum": [
+            "project",
+            "product"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "matched": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "query",
+            "via"
+          ],
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "via": {
+              "enum": [
+                "canonical",
+                "alias",
+                "repository",
+                "deployment",
+                "domain"
+              ],
+              "description": "canonical: the registry's own id. alias: a curated other name (config/identifiers.json). repository / deployment / domain: a name the registry measures."
+            }
+          }
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/member"
+          },
+          "description": "For a product, every member with its role; for a project, the project itself."
+        },
+        "products": {
+          "type": "array",
+          "description": "For a project: the curated products it is part of, with its role.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "role"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^product:\\S+$"
+              },
+              "role": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "aliases": {
+          "type": "array",
+          "description": "Every curated other name of the canonical id, with the system that owns it.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "owner"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "A product's own domains; empty for a project (its domains are on its member row)."
+        },
+        "degraded": {
+          "$ref": "#/$defs/degraded"
+        }
+      }
+    },
+    "refusal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error",
+        "query",
+        "hint",
+        "degraded"
+      ],
+      "properties": {
+        "error": {
+          "enum": [
+            "not-found",
+            "ambiguous",
+            "conflict"
+          ],
+          "description": "not-found: no exact match (no near match is offered). ambiguous: a measured name belongs to several projects. conflict: config/identifiers.json gives the name several targets."
+        },
+        "query": {
+          "type": "string",
+          "description": "The name asked for, or only its length when it looks like a credential."
+        },
+        "hint": {
+          "type": "string"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(project|product):\\S+$"
+          }
+        },
+        "degraded": {
+          "$ref": "#/$defs/degraded"
+        }
+      }
+    },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project",
+        "role",
+        "repositories",
+        "deployments",
+        "domains"
+      ],
+      "properties": {
+        "project": {
+          "type": "string",
+          "pattern": "^project:\\S+$"
+        },
+        "role": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The member's role in the product; null when the answer is the project itself."
+        },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Repository ids that implement the project (`implemented_by`)."
+        },
+        "deployments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Hosting applications the project is deployed to (`deployed_to`)."
+        },
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Public domains of the project (`public_domain_of`)."
+        }
+      }
+    },
+    "degraded": {
+      "type": "array",
+      "description": "What was not read, or what makes the answer weaker than a decision. An empty list asserts full coverage.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "reason"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

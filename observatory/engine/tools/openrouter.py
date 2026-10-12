@@ -10,6 +10,7 @@
     python "$T/openrouter.py" disable my-agent              # or enable
     python "$T/openrouter.py" rotate my-agent               # or --leaked
     python "$T/openrouter.py" revoke my-agent
+    python "$T/openrouter.py" claim old-tool --where PATH < key-file   # a key minted elsewhere, by hash
 
 PROJECT in a `vault:` destination is the project's folder name; its registry id
 is accepted and normalised to that folder before anything is minted.
@@ -43,6 +44,7 @@ attached to a file on disk.
 from __future__ import annotations
 import argparse
 import datetime
+import hashlib
 import json
 import math
 import os
@@ -367,6 +369,12 @@ def find_key(admin: str, name: str) -> dict | None:
             if "HTTP 404" in str(exc):
                 return None
             raise
+        # A CLAIMED key was found by the hash of its value, and that hash is the identity: a
+        # rename in the provider's dashboard must not read as a deletion — `revoke` would then
+        # drop the row and leave the key live (review 2026-10-12). An issued key carries the
+        # ledger's name.
+        if rec.get("claimed"):
+            return row
         return row if row and row.get("name") == name else None
     for row in _all_keys(admin):
         if row.get("name") == name:
@@ -475,6 +483,147 @@ def cmd_issue(name: str, limit: float, account: str | None, to: str,
           f"delivered to {r['delivered_to']}")
     if r.get("name_check"):
         print(f"note: {r['name_check']}", file=sys.stderr)
+    return 0
+
+
+# ─────────────────────────── a project's own key, from its spend policy ───────
+
+#: The spend policy's period (contract DEC-0037: `month` only) as the provider's ceiling reset.
+POLICY_RESET = {"month": "monthly"}
+
+
+def _project_folder(project: str, env: str, name: str) -> str:
+    """The vault folder a project name or registry id resolves to (`vault.project_folder`)."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import vault
+    try:
+        return vault.project_folder(project, env, name)[0]
+    except vault.VaultBoundaryError as exc:
+        raise ValueError(str(exc)) from None
+
+
+def _policy_project(uri: str) -> str:
+    """`urn:project:<slug>`, `project:<slug>` or a bare slug → the slug the vault resolves."""
+    text = str(uri or "")
+    for prefix in ("urn:project:", "project:"):
+        if text.startswith(prefix):
+            return text[len(prefix):]
+    if ":" in text or not text:
+        raise ValueError(f"the policy's project is {text!r}; this door reads urn:project:<slug>")
+    return text
+
+
+def policy_key_plan(policy: dict, limit_override: float | None = None) -> list[dict]:
+    """What a project's spend policy asks of this door, before anything is minted (OBS-58).
+
+    A policy (contract `spend-policy`, DEC-0037) names its credential sources. Each `project-key`
+    source whose `ref` is a vault slot (`vault:<project>/<env>/<NAME>`, or the bare
+    `<project>/<env>/<NAME>` the meter and `use_secret` read) gets a key issued FOR THAT PROJECT
+    into that slot. A slot of another project is a borrow, refused here as the registry refuses it
+    (contract spend-policy rule 1). The key's ceiling is the policy's project limit and resets with
+    its period; a policy with no project limit still needs a ceiling for the key, given explicitly —
+    a key without one is an unbounded liability, and L0 alone is not a key's ceiling.
+    """
+    if not isinstance(policy, dict) or policy.get("kind") != "spend-policy":
+        raise ValueError("not a spend policy (kind must be spend-policy)")
+    project = _policy_project(policy.get("project"))
+    mode = policy.get("mode")
+    if mode == "limited":
+        ceiling = policy.get("limitUsd")
+        if not isinstance(ceiling, (int, float)) or isinstance(ceiling, bool) or not math.isfinite(ceiling):
+            raise ValueError("a limited policy carries limitUsd")
+        if ceiling <= 0:
+            raise ValueError("the project limit is $0 — it spends nothing, so no key is issued")
+        if limit_override is not None:
+            if limit_override > ceiling:
+                raise ValueError(f"a key's ceiling (${limit_override:g}) cannot exceed the project's "
+                                 f"limit (${ceiling:g})")
+            ceiling = limit_override
+    elif mode == "no-project-limit":
+        if limit_override is None:
+            raise ValueError("the policy sets no project limit; the key still needs its own ceiling — give --limit")
+        ceiling = limit_override
+    else:
+        raise ValueError(f"unknown policy mode {mode!r}")
+    if not math.isfinite(ceiling) or ceiling <= 0:
+        raise ValueError("a positive ceiling is required")
+    reset = POLICY_RESET.get(policy.get("period"))
+    if reset is None:
+        raise ValueError(f"unknown policy period {policy.get('period')!r}")
+    sources = policy.get("credentialSources")
+    if not isinstance(sources, list) or not sources:
+        raise ValueError("the policy names no credential source")
+    plan = []
+    for source in sources:
+        if not isinstance(source, dict) or source.get("kind") != "project-key":
+            continue                    # a capability source spends another agent's wallet, not a key
+        ref = str(source.get("ref") or "")
+        slot = ref[len("vault:"):] if ref.startswith("vault:") else ref
+        parts = slot.split("/")
+        if len(parts) != 3 or not all(parts):
+            plan.append({"ref": ref, "action": "skipped",
+                         "why": "not a vault slot (vault:<project>/<env>/<NAME>); another door's key"})
+            continue
+        folder = _project_folder(parts[0], parts[1], parts[2])
+        own = _project_folder(project, parts[1], parts[2])
+        if folder != own:
+            raise ValueError(f"{ref} is a slot of {folder!r}, not of the policy's project {own!r}: "
+                             f"a project's key is never another's (spend-policy rule 1)")
+        plan.append({"ref": ref, "to": f"vault:{folder}/{parts[1]}/{parts[2]}",
+                     "name": slug(f"{folder}-{parts[1]}-{parts[2]}"), "project": folder,
+                     "limit": float(ceiling), "reset": reset})
+    if not any("to" in step for step in plan):
+        raise ValueError("the policy names no project-key source this door can issue into")
+    return plan
+
+
+def issue_for_policy(policy: dict, account: str | None = None, limit_override: float | None = None,
+                     dry_run: bool = False) -> list[dict]:
+    """Carries out `policy_key_plan`: issue where no key serves the slot, move the ceiling where
+    one does and differs, leave it where it matches. Idempotent: run it again and nothing moves."""
+    plan = policy_key_plan(policy, limit_override)
+    issued = ledger().get("issued", {})
+    for step in plan:
+        if "to" not in step:
+            continue
+        held = next(((n, r) for n, r in issued.items() if r.get("destination") == step["to"]), None)
+        if held is None:
+            step["action"] = "would-issue" if dry_run else "issued"
+            if not dry_run:
+                issue_key(step["name"], step["limit"], account, step["to"], step["project"], step["reset"])
+            continue
+        name, rec = held
+        step["name"] = name
+        if rec.get("limit_usd") == step["limit"] and (rec.get("limit_reset") or "monthly") == step["reset"]:
+            step["action"] = "in-place"
+        else:
+            step["action"] = "would-move-ceiling" if dry_run else "ceiling-moved"
+            step["previous"] = rec.get("limit_usd")
+            if not dry_run:
+                set_limit(name, step["limit"], step["reset"])
+    return plan
+
+
+def cmd_issue_for_policy(path: str, account: str | None, limit_override: float | None, dry_run: bool) -> int:
+    try:
+        policy = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"refused: cannot read the policy ({type(exc).__name__})", file=sys.stderr)
+        return 2
+    try:
+        plan = issue_for_policy(policy, account, limit_override, dry_run)
+    except ValueError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    except (RuntimeError, LookupError) as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    for step in plan:
+        if "to" not in step:
+            print(f"{step['ref']}: skipped — {step['why']}")
+            continue
+        extra = f" (was ${step['previous']:g})" if step.get("previous") is not None else ""
+        print(f"{step['ref']}: {step['action']} {step['name']!r}, ceiling ${step['limit']:g} {step['reset']}{extra}")
     return 0
 
 
@@ -597,6 +746,9 @@ def _delivery_failed(admin: str, row: dict) -> None:
 
 def rotate_one(name: str, doc: dict | None = None) -> dict:
     """Deliver and verify a successor before revoking the predecessor; keep recovery metadata."""
+    if ((doc or ledger()).get("issued", {}).get(name) or {}).get("claimed"):
+        raise ValueError(f"{name!r} was claimed, not issued: there is nowhere to deliver a successor; "
+                         f"`issue` its replacement to a destination, then `revoke {name}`")
     doc = doc if doc is not None else ledger()
     rec = doc["issued"].get(name)
     if not rec:
@@ -651,11 +803,18 @@ def cmd_rotate(name: str | None, leaked: bool) -> int:
             print("no open leak names an issued OpenRouter key")
             return 0
     bad = 0
+    if not name:
+        # A claimed key has nowhere to deliver a successor; a bulk run names it and goes on
+        # (review 2026-10-12: the first claimed key ended `rotate --leaked` with a traceback).
+        for n in [t for t in targets if (doc["issued"].get(t) or {}).get("claimed")]:
+            print(f"  {n}: claimed, not issued — `issue` its replacement, then `revoke {n}`", file=sys.stderr)
+            bad += 1
+        targets = [t for t in targets if not (doc["issued"].get(t) or {}).get("claimed")]
     for n in targets:
         try:
             r = rotate_one(n, doc)
             print(f"  {n}: rotated, successor delivered to {r['delivered_to']}, predecessor deleted")
-        except LookupError as exc:
+        except (LookupError, ValueError) as exc:
             print(f"  {n}: {exc}", file=sys.stderr)
             bad += 1
         except RuntimeError as exc:
@@ -681,6 +840,116 @@ def _leaked(name: str, rec: dict) -> bool:
                for r in rows)
 
 
+def _label_of(value: str) -> str:
+    """What the provider calls a key — prefix, ellipsis, three characters — from its value."""
+    sys.path.insert(0, str(ROOT / "collectors"))
+    from scan_openrouter import label_of
+    return label_of(value)
+
+
+def claim_key(name: str, value: str, account: str | None = None, where: str = "") -> dict:
+    """Bring a key this door did NOT mint under its control, so `disable`, `limit` and
+    `revoke` reach it — the door hashes the value and never stores or prints it.
+
+    WHY (2026-10-11). Agent tools on one machine kept OpenRouter keys made by hand in the
+    dashboard, in plaintext files. The door could issue replacements into the vault but
+    could not revoke the old keys: `revoke` finds a key by the ledger's name, and they had
+    no row. Revoking them at the dashboard is the manual step this door exists to remove.
+
+    HOW IT IS FOUND. The value arrives on stdin. The provider's row is read by the value's
+    SHA-256 (one request, exact). Only when no stashed account answers to the hash is the
+    listing searched by label — and a label is a prefix plus THREE characters, which collide
+    across thousands of keys (tests/test_openrouter_keys.py), so that path is accepted only
+    when exactly one key in every listing carries the label AND its ceiling is the one the
+    key reports for itself (`GET /key` with the value). Anything else is refused.
+    """
+    name = slug(name)
+    if not name:
+        raise ValueError("the key needs a name in this ledger")
+    value = (value or "").strip()
+    label = _label_of(value)
+    if not label:
+        raise ValueError("that is not an OpenRouter key")
+    doc = ledger()
+    if name in doc["issued"]:
+        raise ValueError(f"the ledger already has a key called {name!r}")
+    accounts = [(account, read_admin(account)[1])] if account else \
+        [(lbl, read_admin(lbl)[1]) for lbl, _p in admins()]
+    if not accounts:
+        raise RuntimeError("no provisioning key is stashed; `stash --as <label>` first")
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    if any(r.get("hash") == digest for r in doc["issued"].values()):
+        raise ValueError("this key is already in the ledger")
+    found: list[tuple[str, dict]] = []
+    for acct, admin in accounts:
+        try:
+            row = _request(f"/keys/{digest}", admin).get("data") or None
+        except RuntimeError as exc:
+            if "HTTP 404" in str(exc):
+                continue
+            raise
+        if row and row.get("label") == label:
+            found.append((acct, row))
+    how = "hash"
+    if not found:
+        how = "label"
+        own = _request("/key", value).get("data") or {}
+        if own.get("limit") is None:
+            # Without a ceiling there is no second fact to compare: `None == None` matched every
+            # unlimited dashboard key (review 2026-10-12).
+            raise ValueError("the key reports no ceiling, so a label match cannot be confirmed; set a ceiling "
+                             "on it in the provider's dashboard and claim again, or claim from the account "
+                             "that holds it by hash")
+        for acct, admin in accounts:
+            try:
+                rows = _all_keys(admin)
+            except ListingTooLong:
+                # "Exactly one key in EVERY listing" cannot be shown from a listing not read whole —
+                # a match past the pages read would be another key with the same label.
+                raise ValueError(f"{acct!r} lists more keys than this door reads, so a label match cannot be "
+                                 "shown to be the only one; refusing") from None
+            found += [(acct, r) for r in rows if r.get("label") == label]
+        if len(found) == 1 and found[0][1].get("limit") != own.get("limit"):
+            found = []
+    if len(found) != 1:
+        raise ValueError("no stashed account holds this key" if not found else
+                         f"{len(found)} keys carry this label; refusing to pick one")
+    acct, row = found[0]
+    place = f"external:{where or 'unrecorded'}"
+    doc = ledger()
+    # Re-checked on the ledger that is written: the provider calls above take seconds, and a
+    # second claim in the meantime would otherwise be overwritten (review 2026-10-12).
+    if name in doc["issued"]:
+        raise ValueError(f"the ledger already has a key called {name!r}")
+    if any(r.get("hash") == row.get("hash") for r in doc["issued"].values()):
+        raise ValueError("this key is already in the ledger")
+    doc["issued"][name] = {
+        "account": acct, "hash": row.get("hash"), "destination": place, "delivered_to": place,
+        "project": None, "limit_usd": row.get("limit"), "limit_reset": row.get("limit_reset"),
+        "issued_on": None, "claimed_on": today(), "claimed": True, "claimed_by": how,
+        "provider_name": row.get("name"), "label": label, "rotated_on": None, "rotations": 0}
+    save_ledger(doc)
+    _journal("claim", f"openrouter/{acct}/{name}", where=where, found_by=how)
+    return {"name": name, "account": acct, "label": label, "limit": row.get("limit"), "found_by": how}
+
+
+def cmd_claim(name: str, account: str | None, where: str) -> int:
+    if sys.stdin.isatty():
+        print("give the key on stdin, from the file that holds it — never as an argument", file=sys.stderr)
+        return 2
+    try:
+        r = claim_key(name, sys.stdin.read(), account, where)
+    except (ValueError, LookupError) as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    except RuntimeError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    print(f"claimed {r['name']!r} in {r['account']!r} ({r['label']}, ceiling ${r['limit'] or 0:g}, found by "
+          f"{r['found_by']}); `disable {r['name']}` stops it, `revoke {r['name']}` deletes it")
+    return 0
+
+
 def revoke_key(name_or_label: str) -> dict:
     """Delete at the provider, then clear the ledger row — in that order: a
     forgotten live key is worse than a stale row. REFUSED for a key something
@@ -691,7 +960,12 @@ def revoke_key(name_or_label: str) -> dict:
     if scan.is_file():
         try:
             for k in json.loads(scan.read_text(encoding="utf-8")).get("keys", []):
-                if k.get("serves") and (k.get("name") == name or k.get("label") == name_or_label):
+                names = {name, rec.get("provider_name")} - {None}
+                labels = {name_or_label, rec.get("label")} - {None}
+                # A claimed key carries the provider's name, not the ledger's, and the scan has no
+                # hash; its label (recorded at claim) is what a consumer is found by. A label two
+                # keys share refuses here too: a consumer that may be reading it is not taken down.
+                if k.get("serves") and (k.get("name") in names or k.get("label") in labels):
                     raise ValueError(f"{name} is what {k['serves']} is reading right now; "
                                      f"issue its replacement first, then revoke this one")
         except (OSError, ValueError) as exc:
@@ -819,6 +1093,13 @@ def main() -> int:
     p_is.add_argument("--project", help="the project this key serves")
     p_is.add_argument("--reset", choices=RESETS, default="monthly",
                       help="when the ceiling starts again (default monthly)")
+    p_ip = sub.add_parser("issue-for-policy",
+                          help="issue a project's own key from its spend policy (OBS-58)")
+    p_ip.add_argument("--policy", required=True, help="the project's spend-policy JSON (contract DEC-0037)")
+    p_ip.add_argument("--account", help="which stashed account to mint from")
+    p_ip.add_argument("--limit", type=float, help="the key's ceiling: required when the policy sets no "
+                      "project limit, at most the project limit otherwise")
+    p_ip.add_argument("--dry-run", action="store_true", help="say what would be issued or moved; mint nothing")
     sub.add_parser("list", help="what exists — names, ceilings, places; never values")
     sub.add_parser("ping", help="alive? spent how much of its ceiling?")
     p_li = sub.add_parser("limit", help="show or move a key's USD ceiling")
@@ -836,6 +1117,10 @@ def main() -> int:
                       help="rotate every issued key named in an open leak")
     p_re = sub.add_parser("revoke", help="delete at the provider, clear the ledger row")
     p_re.add_argument("name")
+    p_cl = sub.add_parser("claim", help="bring a key minted elsewhere under this door; value on stdin")
+    p_cl.add_argument("name", help="what the ledger will call it")
+    p_cl.add_argument("--account", help="the stashed account to look in (default: every one)")
+    p_cl.add_argument("--where", default="", help="where the copy was found: a path, never a value")
     a = ap.parse_args()
     if a.cmd == "stash":
         if sys.stdin.isatty():
@@ -846,6 +1131,8 @@ def main() -> int:
         return cmd_adopt(a.label)
     if a.cmd == "issue":
         return cmd_issue(a.name, a.limit, a.account, a.to, a.project, a.reset)
+    if a.cmd == "issue-for-policy":
+        return cmd_issue_for_policy(a.policy, a.account, a.limit, a.dry_run)
     if a.cmd == "list":
         return cmd_list()
     if a.cmd == "ping":
@@ -860,6 +1147,8 @@ def main() -> int:
         return cmd_rotate(a.name, a.leaked)
     if a.cmd == "revoke":
         return cmd_revoke(a.name)
+    if a.cmd == "claim":
+        return cmd_claim(a.name, a.account, a.where)
     return 2
 
 

@@ -6,10 +6,10 @@ button does after a press of the page's own `credAction()` (audit A46: the first
 alone asserted less than OSS-12 claims):
 
 - A refusal the server explained (400, and 502 for the provider's own) reads
-  "failed" ("не вышло"), the reason goes to the toast, and the button can be
+  "failed" ("не удалось"), the reason goes to the toast, and the button can be
   pressed again.
 - A server fault, an unreadable success, a dropped connection or a timeout reads
-  "outcome unknown · check" ("исход неизвестен · проверьте"), and the button
+  "outcome unknown · check" ("результат неизвестен · проверьте"), and the button
   stays locked.
 """
 import json
@@ -34,7 +34,7 @@ def check(name, ok, detail=""):
 
 REFUSED = {"refused": "limit must be a number", "provider refused": "the provider refused: HTTP 401"}
 UNCERTAIN = ("server fault", "unreadable success", "dropped", "timeout")
-LABELS = {"en": ("failed", "outcome unknown · check"), "ru": ("не вышло", "исход неизвестен · проверьте")}
+LABELS = {"en": ("failed", "outcome unknown · check"), "ru": ("не удалось", "результат неизвестен · проверьте")}
 
 
 def check_buttons(r: dict, locale: str) -> None:

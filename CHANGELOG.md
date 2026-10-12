@@ -7,6 +7,271 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Changed
 
+- **The demo's findings speak the page's language** (OBS-64): `tools/demo_estate.py` wrote its five findings as
+  English sentences, so a Russian screenshot mixed two languages. Each title is now a rule's own message id with its
+  arguments, built by `finding_types.titled` like a real finding, so the Russian page renders them from the same
+  catalog; the detail and the action stay in English, as a real rule writes them.
+- **The disk table says what a removal frees on APFS** (OBS-66): `du` counts an APFS clone in full — 19
+  abandoned browser code-sign clones read as 13 GB and removing them freed nothing. On macOS a place of 512 MB
+  or more is walked a second time, inside the same budget, for each file's private size
+  (`getattrlist(ATTR_CMNEXT_PRIVATESIZE)`); the row gains `frees_at_least_gb` and `clone_shared_gb`, and where
+  clones hold a tenth of the place (and 100 MB) the Machine page and `machine.disk_low` name the floor. The walk
+  costs about three times `du`'s time (6.3 GB of caches: 7.6 s against 24.7 s under load); one that does not
+  finish leaves `du`'s number alone.
+
+## 0.24.4 — 2026-10-12
+
+Inside the disk guard the git tier plans branches and worktrees only and fits its deadline, so a scheduled pass under load reaches its removals. The companion plugin `observatory-log` is unchanged.
+
+### Fixed
+
+- **Inside the guard, the git tier plans branches and worktrees only, inside its deadline** (OBS-63): on the first
+  0.24.3 pass it planned 116 actions and reached none — its listing of what processes hold and a walk for build
+  output (some 18,000 directories) took its whole share. The guard's own build-output class already covers that
+  walk, so the guard asks for `--git-only`; the listing is bounded by the deadline; the result names
+  `plan_seconds`.
+
+## 0.24.3 — 2026-10-12
+
+The disk guard's git tier removes merged and pushed branches and clean worktrees under load again: its re-check takes one listing of what processes hold per 20 seconds instead of one per worktree. The companion plugin `observatory-log` is unchanged.
+
+### Fixed
+
+- **The git tier's re-check takes one listing per 20 seconds, not one per worktree** (OBS-63): at load 300–700 each
+  full listing of what processes hold took tens of seconds, and on 0.24.x the guard's git tier spent its whole share
+  re-checking the first worktrees — no branch or worktree was removed by a scheduled pass. Run by hand on the same
+  machine, the tier removed 95 merged and 3 pushed branches and 7 clean worktrees.
+
+## 0.24.2 — 2026-10-12
+
+A cache command never runs past its class's share, so the disk guard's git tier — merged and pushed branches, clean worktrees and their dependencies — keeps the time 0.24.1 set aside for it. The companion plugin `observatory-log` is unchanged.
+
+### Fixed
+
+- **A cache command never runs past its class's share** (OBS-63): on 0.24.1 three cache commands, each inside its
+  own 90–300 s timeout, ran 271 s together and took the git tier's time again. A command's timeout is now what is
+  left of the share, and none starts with less than 30 s left; the rest waits for the next pass.
+
+## 0.24.1 — 2026-10-12
+
+The disk guard's git tier — merged and pushed branches, clean worktrees and their dependencies — gets its own
+share of every pass under disk pressure; on 0.24.0 the path classes could spend the whole run before it. The companion
+plugin `observatory-log` is unchanged.
+
+### Fixed
+
+- **The disk guard's git tier keeps its own share of the run** (OBS-63): the first scheduled 0.24.0 pass, at
+  `critical`, spent 425 of its 480 s on the six path classes and skipped the git tier — merged and pushed branches
+  and clean worktrees with their dependencies, where most of the space is. The tier now has `git_tier_seconds`
+  (120 s by default, at most a third of the run) kept back before the classes split the rest.
+
+### Changed
+
+- **The collectors take turns** (OBS-52): after `integrity`, the tick runs its collectors least recently started
+  first, not in a fixed order. Under load the collectors in front used the window and the ones at the back were
+  `not started` tick after tick: on one machine (load average 26–30) the leak scan and the lifecycle watch had not
+  run for two days. A step that was not started keeps its place at the front of the next tick; a collector that
+  reads another's output this tick still runs after it (`READS_FROM`, held equal to the artefact graph by
+  `tests/test_pipeline.py`). Start times are kept in `store/tick-rotation.json`; `tick.json` reports
+  `collector_order` and `not_started`.
+
+## 0.24.0 — 2026-10-12
+
+The disk guard keeps up with a disk that fills fast and never removes what a session still uses: the maintenance pass runs every 15 minutes, under pressure the guard acts on every pass, and a fresh, shared listing of what processes hold — open files, maps, executables, command lines — is re-checked at every removal, under one lock for every cleanup. One project answers to many names (aliases, `project.resolve`). The doors grow: `claim` brings a key minted elsewhere under the OpenRouter door, a project's own key comes from its spend policy, and Cloudflare gains `workers-routes` and `redirect-rules`. The meter grows: the estate's month measured, `grant.check` declared, a usage report. The harness scan names plaintext credentials in agent tools' configs. The companion plugin `observatory-log` is unchanged.
+
+### Changed
+
+- **`leaks`, `git-hygiene` and `agent` stop before their deadline instead of being killed** (OBS-52), reading
+  `OBSERVATORY_STEP_DEADLINE` as the folder scan, `integrity` and the plugins already do:
+  - `leaks` starts a file only while two minutes are left and a SQLite store only while one is. Offsets of what it
+    read are kept; what it did not read is named in `degraded` as unmeasured, never clean, and a store's mark does
+    not move.
+  - `git-hygiene` measures the least recently measured checkouts first. The ones it did not reach carry their last
+    measurement, marked `stale`, so no checkout starves.
+  - `agent` starts a model call only while a whole call (150 s) fits, so a paid answer is never lost. The run
+    report names the deadline, and the deltas wait for the next run.
+
+- **Trust tiers, written down** (Fabric ADR-0144 amendment 4): on the operator's own machines (T0, and enrolled
+  machines T1) the meter and the doors never demand a delegation token — `slotsRequireGrant: when-token` and
+  `keyserverRequiresDelegation: off` stay the settings there; the strict ones are for a machine that serves another
+  person's agents (T2). Design: `docs/design/METER.md` M0.
+
+### Added
+
+- **Cloudflare door: `--preset workers-routes --zone <zone>`** — Zone Read + Workers Routes Write on one zone,
+  into a vault slot, verified by listing the zone's routes with the new value. `workers-edit` deploys a script
+  but cannot route a hostname to it; this is that one zone right, without DNS. First use: checkmydata.ai
+  moving its static site to a Worker.
+- **`openrouter.py claim NAME --where PATH`, key on stdin** — brings an OpenRouter key this door did not mint (one
+  made by hand in the dashboard) under the door, so `disable`, `limit` and `revoke` reach it. The value is hashed,
+  never stored or printed; the provider's row is read by that hash, and a label alone (prefix plus three
+  characters, which collide) is accepted only when it is the single match in every listing and the ceiling the
+  key reports for itself agrees. A claimed key is revoked through the door, never rotated to nowhere.
+  A claimed key is identified by its hash, so a rename in the provider's dashboard never reads as a deletion; a
+  bulk `rotate` names it and goes on; `revoke` refuses it while a consumer reads its label; the label path needs
+  every listing whole and a ceiling to compare; a claim re-checks the ledger it writes.
+
+- **Cloudflare door: `--preset redirect-rules --zone <zone>`** — Zone Read + Dynamic URL Redirects Write (Single
+  Redirects) on one zone, into a vault slot, verified by reading the zone's `http_request_dynamic_redirect`
+  entrypoint with the new value. A zone with no redirect yet answers 404 there to a token that may read it and
+  403 to one that may not, so for this preset alone a 404 counts as the proof.
+- **A usage report** (OBS-53; contract DEC-0021): the server declares `surfaces.usage` and answers
+  `GET /fabric/v1/usage` with the service token — the last 31 days of the assistant's paid model calls by provider
+  and model, from a receipt written at every charge (tokens and cost with its basis, never a prompt or a caller).
+  The fabric-service schemas are vendored again at contract `7931c1d`; the kit's conformance probe now runs
+  `usage.report`.
+- **Plaintext credentials in agent tools' configs** (OBS-74): the harness scan names, per file, the credential-shaped
+  values kept by Hermes, opencode, Codex, Claude Code's MCP blocks, Gemini and Cursor — names only, never a value —
+  as `harness.plaintext_secret`, with the vault and `use_secret.py` as the remedy. Design: `docs/design/HARNESS.md`
+  H15.
+- **A project's own key, from its spend policy** (OBS-58): `openrouter.py issue-for-policy --policy FILE` reads a
+  contract `spend-policy` (DEC-0037) and issues, for each `project-key` source, a key for that project into the vault
+  slot the source names. The key's ceiling is the project limit, and it resets monthly. A slot of another project is
+  refused as a borrow (spend-policy rule 1). A policy with no project limit needs an explicit `--limit`, because a key
+  is never unbounded. A ceiling above the project limit is refused. A second run is idempotent: it only moves a
+  ceiling the policy changed.
+- **`grant.check` is declared in `fabric-agent.json`** (OBS-67; manifest revision 9): effect `none`, its
+  input and output schemas published at `v0.24.1`, a probe that a call carrying no delegation token is denied
+  `principal-unproven`. Fabric's registry reads the meter from the service descriptor; the token-carrying call
+  goes to the same tool on the memory-http door.
+- **The estate's month, measured** (OBS-56): the new step `scan-spend` sums this month's spend of every OpenRouter
+  account the door holds (`GET /activity`, per account, never a key) into `store/raw/spend.json`. The meter counts
+  it, plus open reservations, against L0 (USD 1,000 by default), and the finding `spend.estate_month` warns at
+  80 % and is critical at the limit. Measured on the operator's machine on 2026-10-11: $262.97 across four
+  accounts.
+- **The harness scan reads hooks and skill use** (OBS-61): every hook the user's settings and each enabled
+  plugin declare (event, matcher, source, program, a digest of the command and never the command), checked
+  against the skill rules, with the finding `harness.hook_risk`; and each skill's invocations over the last 30
+  days of transcripts, so the listing overflow names the unused skills first; and each project's own
+  `.claude/skills`, counted on top of the user level (`harness.project_listing_overflow` when they alone push a
+  session over the budget); and Codex's skills (`~/.codex/skills` and the shared `~/.agents/skills`). Design:
+  `docs/design/HARNESS.md` H11–H14.
+- One project under many names (OBS-65). The operator curates `config/identifiers.json`
+  (another system's name → the canonical `project:`/`product:` id, with the name's owner); the
+  emitter publishes `registry/identifiers.json` and one `known_as` relation per alias. A name
+  given two targets, or contradicting a measured repository, deployment or domain, is a
+  published conflict, never a silent pick. `project.resolve` (MCP `observatory_resolve`, Fabric
+  capability pinned at `v0.24.0`) answers any name with the one canonical id, exact match only;
+  an ambiguous or conflicted name is a typed refusal. Agents propose aliases through
+  `observatory_propose` (`aliases`); accepting one never rewrites an existing row.
+
+### Fixed
+- **The disk guard frees more, on any system** (OBS-63): its pressure now lowers the git auto tier's thresholds
+  (`pressure` in `config/cleanup.json`: clean worktrees and merged branches after 3 days at `low`, 1 day at
+  `critical`; the manual tier never moves), it sweeps npx's package cache and macOS diagnostic reports, and it
+  knows what is held on Linux without `lsof` (from `/proc`) and on Windows (a folder that cannot be renamed aside is
+  held, and nothing of it is removed) — before, without `lsof` it removed no path at all.
+- **The disk guard keeps up with a disk that fills fast** (OBS-63): the maintenance pass runs every 15 minutes
+  (it was hourly), and the guard acts on every pass once free space is below the `low` line (hourly while it is
+  normal); it now also clears application and tool cache folders (`~/Library/Caches`, `~/.cache`) untouched for
+  7 / 2 / 1 days — the folders a hand cleanup freed 10 GB from — keeping downloaded browsers and SDKs a tool does
+  not fetch again by itself (`cache_keep`); and its per-class cap is 20,000, since the run budget bounds its time.
+  Measured on one machine: free space fell from 6 GB to 0.3 GB inside one hourly gap.
+- **The disk guard finishes inside its pass** (OBS-63): the first scheduled pass on 0.23.0 killed it at the
+  job's 1200 s ceiling, under launchd's background priority, and recorded only `exit 124` — no report, no
+  journal. The job's ceiling is now 600 s and the guard stops itself at `--budget` (the job passes 480 s;
+  `run_budget_seconds`, 900 s, by hand), shares that time fairly between its classes, acts before it refreshes
+  any survey, writes each action to `store/logs/disk-guard.jsonl` as it happens, and always writes its report,
+  naming what the budget left for the next pass.
+- **The disk guard, second iteration** (OBS-63; design `docs/design/DISK-GUARD.md`): a review of the first one
+  found it could remove what a session still used, and could misreport what it did. Now:
+  - *Held* means open files, memory maps, executables, working and root directories and paths named on a
+    process's command line (`holders.py`: `lsof` with its escaped names decoded, `/proc` on Linux, a rename probe
+    on Windows), taken fresh for every class; every removal re-checks its target, still unheld and unchanged since
+    the plan, and a target that changed is skipped.
+  - Every cleanup takes one lock (`store/cleanup.lock`): the tick, the guard and `full cleanup` never act at
+    once, and a guard pass that finds the lock held is recorded as `busy`.
+  - A privacy-guarded folder is never opened, an entry another account owns is never touched, and a tracked
+    directory is never removed as build output.
+  - The git tier no longer removes a worktree holding ignored files that are not build output (`.env.local`, a
+    local database); pressure lowers only thresholds a person did not set; a run stopped at its deadline keeps its
+    undo journal; `full cleanup --level low` previews the tier at a pressure level.
+  - A workspace `config/cleanup.json` that only carries an older release's defaults no longer pins them.
+  - The pass records what happened — `ran`, `not-due`, `busy` or `failed` — not the previous run's numbers; the
+    guard's cadence counts from the previous start, with a 450 s tolerance; `uv cache clean` and `brew cleanup
+    --prune=all` run once a day, other cache commands every six hours.
+  - A failed daily backup is retried an hour later, not on every pass (each attempt stops the tick and server);
+    Windows ends a pass after 59 minutes instead of 14; an update that rewrote the schedule reloads it after the
+    pass instead of waiting for a session.
+  - Machine page and the `cleanup.done` finding count the guard's run summaries over the whole window.
+  - pytest's numbered run directories (`$TMPDIR/pytest-of-<user>/pytest-N`) go by their own age in hours
+    (24 / 6 / 2): their base is never older than the newest run, so the guard never reached them — 2.5 GB of
+    finished runs sat there on 2026-10-12 with 1.2 GB free. A temporary root may carry `hours` per level.
+
+- `_published_shape` follows local `$ref`s and cuts a `oneOf` by the branch whose required
+  keys the value carries; before, such an answer passed through uncut.
+
+## 0.23.0 — 2026-10-11
+
+The disk guard keeps free space by itself, every hour, without touching anything a process holds; the meter
+answers whether a delegated call may spend; a vault slot is released only under a grant that names it; and the
+harness scan reports what every agent session loads. Releases are now approved by checks, not by a click. The
+companion plugin `observatory-log` is unchanged.
+
+### Added
+
+- **The disk guard** (OBS-63): with `features.auto_cleanup` on, the hourly maintenance job runs
+  `tools/disk_guard.py` first in every pass, before the update and the backup — no longer only from the tick,
+  whose cleanup step a loaded machine could leave unreached for a day. Free space sets the pressure (`normal`,
+  `low` under 25 GB, `critical` under 10 GB) and the pressure moves every threshold: the cache tools' own cleanup
+  (`uv`, `pnpm`, Homebrew, Docker only while its daemon already runs; `npm cache verify`, `uv cache clean`, Go and
+  Yarn from `low`), git-ignored build output of checkouts idle 14 / 3 / 1 days (by checkout, commit or an
+  uncommitted file, never the index), temporary entries, Trash items older than 30 days (3 at `critical`),
+  abandoned browser code-sign clones, then the cleanup's git auto tier. Nothing a process holds open or works in
+  is removed: one `lsof` listing per run, re-checked at each removal, and without it no path goes. Freed space is
+  the disk's own before/after count (`freed_mb`), not `du`, which counts an APFS clone in full.
+  `full disk-guard [--apply] [--level L] [--large-files]` runs it by hand. The Machine page and
+  `observatory_machine` (`section: guard`) show the last run, the largest files under the home directory and the
+  running simulators with the command that stops each; `machine.guard_idle` warns when the guard has not reported
+  for three hours, and `machine.disk_low` names the guard's run, the swap holders and the largest files.
+  Configuration: `config/cleanup.json` → `guard`. Supersedes the Space-page draft (OBS-15).
+
+- **The meter** (OBS-55; Fabric ADR-0144 step 3, contract DEC-0037/0038/0039): `grant.check` on the memory-http
+  door answers whether a call may spend. The caller presents the onward delegation token Fabric's hub minted for
+  `project-observatory` in `Authorization` (never in an argument); the meter verifies it offline against the
+  estate's Ed25519 keys (`delegation.py`, the contract's verifier table DL-13), reads the grant from the hub's
+  grant directory, and reserves the amount against the grant's `call`, `task`, `total`, `project`, `day`, `week`
+  and `month` windows and the estate's monthly total (L0, USD 1,000 by default) and provider-key ceilings, in one
+  transaction. It answers a receipt, or a denial naming the code, the level and the window. `full grant --status`,
+  `--check` (token on stdin) and `--settle`. The ledger records no person and no chain. Configuration:
+  `config/meter.json`. Design: `docs/design/METER.md`.
+- **The meter reads the hub's grant projection strictly** (contract DEC-0041, `readProjectedGrant`): a projection
+  that is not the owner's alone (0700/0600), a link or FIFO (one `open` with `O_NOFOLLOW` and `O_NONBLOCK`), over
+  1 MiB, outside the standing-grant shape, with times that are not RFC 3339 with a zone, behind the token's
+  revision or of another grant is `unknown-state`; a revised grant is `no-grant`; Windows is `unknown-state` until
+  the profile covers it. A malformed `task` claim refuses the token. The contract schemas are vendored again at
+  `7931c1d` (the `call` window and the `task` claim are in them now).
+- **A vault slot only under a grant** (OBS-57): an agent hands `use_secret.py` its delegation token in
+  `FABRIC_DELEGATION_TOKEN` (scope `secret.use`). `run`, `serve` and `header` then release a slot only when a grant
+  the token names has `credentialSource {kind: project-key, ref: PROJECT/ENV/NAME}`, never read a `.env`, and
+  remove the token before the child starts. `slotsRequireGrant` in `config/meter.json`: `when-token` (default
+  on the operator's own machines; METER.md M0), `always`, `off`.
+- **The keyserver trusts the delegation token** (OBS-62): with a valid token for the action's scope (`keys.*`,
+  `ledger.*`), the journal names the hub's signed caller, principal, chain and grant (`caller_verified: true`).
+  `reveal` is never served to a token. `keyserverRequiresDelegation: agents` demands a token from non-page callers.
+- **The agent harness scan** (`integrations.harness`, `sources.harness_root`; off until turned on): what every
+  Claude Code and Codex session loads before the first word. It counts each skill's entry in the session's skill
+  listing against a budget (`OBSERVATORY_HARNESS_BUDGET_CHARS`, default 30,000 characters) and names the
+  descriptions that no longer fit, largest first; flags an instruction file over 200 lines and the settings that
+  load every MCP tool upfront; and runs deterministic rules over skill files — hidden Unicode, concealment
+  directives, download-and-execute, a credential read beside a send, opaque content — weighed by where the skill
+  comes from. Files are read, never run. A skill whose files change is reported until
+  `full harness --accept KEY`; an ack of a rule hit lapses when the skill changes. Design: `docs/design/HARNESS.md`.
+
+### Fixed
+
+- `full update` refusing with "the workspace changed while staged" now names the paths that moved, so the writer
+  to stop can be found (#200).
+
+## 0.22.0 — 2026-10-11
+
+Project Observatory on Windows and Linux: a desktop app with a signed Windows installer, the tick, the server
+and maintenance as per-user Task Scheduler tasks or systemd units, updates that work on Windows, and the backup
+passphrase in the Credential Manager. The Mac app is universal again for Intel Macs. The companion plugin
+`observatory-log` moves to 0.22.0.
+
+### Changed
+
 - **The vendored fabric-service kit is fabric-agent-adapter 0.8.2** (was 0.5.0): Windows and Linux support
   (contract DEC-0032, DEC-0033) — the instance lock, the token-file ACL rule, Task Scheduler and systemd in
   the descriptor — which the always-on server needs on Windows (W4b). `serverd --uninstall` relies on the
@@ -15,13 +280,31 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **The Windows and Linux app** (W8a, `desktop/`, Tauri 2): opens on this workspace's dashboard — live when its
+  server answers, else the built pages under a banner with «Start server», else «Build the dashboard»; Settings
+  for the program, the workspace and the language; first-run messages that name the install or `full init`
+  step; stays in the tray when its window closes. Built as an NSIS installer and an AppImage/.deb by
+  `.github/workflows/desktop.yml`; the release builds and Authenticode-signs it (W9). It updates itself from the
+  release's `latest.json`, each package minisign-signed: «Restart to update» in the menu and the tray (W8c). The
+  assistant window (Ctrl+Shift+A) asks the workspace's assistant, with each answer's evidence and Stop (W8b).
+- **Updates on Windows** (W6): `full update --apply` stops and restarts the tick and server tasks (systemd units
+  on Linux) around the install, and replaces the `project-observatory.exe` it may be running from — moved aside
+  first, put back if the install fails.
+- **The server's always-on state off macOS** (W4c): «Start server» in an app restarts the Task Scheduler task
+  or systemd unit of an installed server instead of calling `launchctl`; `server.silent` watches that
+  installation too.
+- **Windows paths and tools** (W7): the default workspace is `%LOCALAPPDATA%\project-observatory-full` (an
+  existing `~\.local\share` one stays); tools npm installs as `.cmd` (`heroku`, `claude`) start by name; the
+  CLI and the scheduled jobs write UTF-8. README → Install has the PowerShell steps.
 - **The backup passphrase in the Windows Credential Manager** (W5): a generic credential per workspace, kept
   for this account on this machine (`CredWriteW`/`CredReadW`, never roaming, the value never an argument);
   a store that does not answer is not an empty one. The file fallback is owner-only on Windows too (a
   protected ACL instead of mode bits).
 - **`osschedule`: background jobs under Windows Task Scheduler and systemd** (W4a). One job description, a
   per-user task created from XML (`InteractiveToken`, no stored password, `pythonw.exe` through
-  `tools/scheduled.py`, so no console window opens) or a systemd user unit. Not wired to `full init` yet (W4b).
+  `tools/scheduled.py`, so no console window opens) or a systemd user unit; `tools/install_launchd.py` and
+  `tools/serverd.py --install` use it off macOS, the server's fabric-service descriptor naming `task-scheduler`
+  or `systemd` (W4b).
 
 ### Fixed
 
@@ -153,8 +436,6 @@ update rolled back safely, and a second try installed it.
   the server stopped, something loaded it again; the update's own start was then refused as
   "already loaded", it asked a person to run `launchctl bootstrap`, and the server kept the code
   it had started with. A job found loaded is now restarted (`launchctl kickstart -k`).
-
-
 
 ## 0.19.3 — 2026-10-08
 

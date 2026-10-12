@@ -2,6 +2,7 @@
 reading the invoking user's workspace: its OBSERVATORY_HOME is its own."""
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import shutil
@@ -32,6 +33,8 @@ class DemoEstate(unittest.TestCase):
             self.assertEqual(done.returncode, 0, done.stderr[-600:])
             page = (out / "pages/index.html").read_text(encoding="utf-8")
             self.assertIn(f'<html lang="{locale}"', page)
+            findings = json.loads((out / "registry/findings.json").read_text(encoding="utf-8"))["findings"]
+            self.assertTrue(findings and all(f.get("title_id") for f in findings), "a demo title the page cannot translate")
             projects = (out / "pages/projects.html").read_text(encoding="utf-8")
             self.assertIn("Atlas Billing", projects)
             self.assertIn("northwind-labs", projects)
@@ -82,6 +85,25 @@ class DemoEstate(unittest.TestCase):
         import finding_types
         unknown = sorted({f[1] for f in demo.FINDINGS} - set(finding_types.LABELS))
         self.assertEqual(unknown, [], "demo finding types the engine does not know")
+
+    def test_every_demo_title_is_a_rule_id_with_a_russian_translation(self):
+        """OBS-64: the demo wrote its findings as English sentences, so a Russian screenshot mixed
+        two languages. Each title is now a rule's own message id, and every one renders in Russian
+        with no placeholder left over."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("demo_estate_titles", ROOT / "tools/demo_estate.py")
+        demo = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(demo)
+        sys.path.insert(0, str(ROOT / "observatory/engine/dashboard"))
+        import i18n
+        ru = json.loads((ROOT / "observatory/engine/dashboard/locales/ru.json").read_text(encoding="utf-8"))
+        engine = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "observatory/engine/tools").glob("*.py"))
+        for _sev, _kind, _subject, msgid, args, _detail, _action in demo.FINDINGS:
+            self.assertIn(msgid, ru, f"no Russian for {msgid!r}")
+            self.assertIn(msgid, engine, f"{msgid!r} is not a title any rule writes")
+            text = i18n.translate(msgid, "ru", **args)
+            self.assertNotIn("{", text, text)
+            self.assertNotEqual(text, i18n.translate(msgid, "en", **args))
 
 
 if __name__ == "__main__":

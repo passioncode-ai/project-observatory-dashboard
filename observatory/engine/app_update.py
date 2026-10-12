@@ -14,7 +14,7 @@ every one of these holds:
 - Gatekeeper (`spctl --assess --type execute`) accepts it.
 
 The swap happens only while the app is not running: a running app keeps working, the
-verified bundle waits under `<home>/store/app-update/`, and the next hourly pass installs
+verified bundle waits under `<home>/store/app-update/`, and the next maintenance pass installs
 it once the app has quit. The replaced bundle is kept under `<home>/store/app-previous/`
 (one copy). An app that is not installed, or lives somewhere this user cannot write, is
 named in the answer and left alone. An installed app that carries no team at all (a local

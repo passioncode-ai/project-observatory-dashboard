@@ -15,6 +15,16 @@ The [2026-10-01 quality run](runs/2026-10-01-organization-quality/README.md) con
 repository to the common workspace backlog and corrects the conformance suite's missing-lsof
 expectation. It changes test evidence and documentation, not the published engine version.
 
+## Latest run
+
+[2026-10-12 — Russian copy pass](runs/2026-10-12-ru-copy-pass/README.md): the dashboard, Mac and
+desktop apps' Russian rewritten to one vocabulary and plain syntax, copy only. Next task there: a
+native reader confirms the terms the brand pack lacks.
+
+[2026-10-11 — OBS-65, one project under many names](runs/2026-10-11-identity-aliases/README.md):
+curated aliases, `known_as` edges, `project.resolve`. Next task there: aliases and conflicts on
+the dashboard.
+
 ## Completed implementation
 
 - Complete source export under `observatory/engine/`; generic defaults, individual
@@ -59,6 +69,8 @@ CI, asset digests and deployment. The website-only fix did not change the wheel.
 This follow-up changes documentation only and does not imply another deployment.
 
 ## Next task and prerequisites
+
+**2026-10-11, release 0.22.0:** Windows and Linux complete (docs/design/WINDOWS-LINUX.md W4–W9): `osschedule` puts the tick, the server and maintenance under Task Scheduler/systemd (the server proven by its well-known identity; its descriptor names the supervisor, fabric-service DEC-0032), fabric-agent-adapter 0.8.2 vendored, the backup passphrase in the Credential Manager, updates that move the running launcher aside, `%LOCALAPPDATA%` homes, `.cmd` tools by name, UTF-8; the desktop app (`desktop/`, Tauri 2: dashboard window, saved pages, settings, tray, assistant, updater) built, Authenticode-signed through the organization's `windows-signing@v1` and published per OS by `release.yml`; the Mac app universal again. Open: OBS-53…OBS-59 (usage report, agents-first setup, spend policy per contract DEC-0037/0038).
 
 **2026-10-10, release 0.21.0:** the engine on Windows — `oslocks`, `osproc`, `osprivacy` and the tick in Python, each with a test that runs the same on every OS (docs/design/WINDOWS-LINUX.md, W0–W3; a whole tick runs on the `windows` CI job). Self-health from the live machine: smoke no longer reports a starved page script as a blank dashboard (a 5 s processor budget decides); the tail's cheap optional steps run before `plugins` and the agent; the integrity check runs fully once a day and stops at its deadline; a plugin keeps the rows it printed before its limit, and `disk-usage` walks each folder once (51 s). Next: W4 — Task Scheduler on Windows and systemd units on Linux.
 

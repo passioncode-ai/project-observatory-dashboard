@@ -39,11 +39,35 @@ def _age_hours(stamp: str | None, now: datetime) -> float | None:
         return None
 
 
-def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datetime | None = None) -> list[dict]:
+def _auto_cleanup() -> bool:
+    try:
+        import configuration
+        return configuration.enabled("auto_cleanup", "features")
+    except Exception:  # noqa: BLE001 — a finding never fails over a settings read
+        return False
+
+
+def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datetime | None = None,
+             auto_cleanup: bool | None = None) -> list[dict]:
     now = now or datetime.now(timezone.utc)
     out: list[dict] = []
     machine = _load(scratch / "machine.json")
     hygiene = _load(scratch / "git-hygiene.json")
+    guard = _load(scratch / "disk-guard.json")
+    auto = _auto_cleanup() if auto_cleanup is None else auto_cleanup
+
+    # THE GUARD ITSELF. On 2026-10-11 the self-cleaning had not run for a day and nothing
+    # said so: its steps were "not started" in a tick too long to reach them. A guard that
+    # should act at least hourly and has not reported for three hours is a finding of its own.
+    if auto:
+        age = _age_hours((guard or {}).get("at"), now)
+        if age is None or age > config.get("guard_silent_hours", 3):
+            out.append({"type": "machine.guard_idle", "subject": "machine", "severity": "warning",
+                        **(titled("the disk guard has not run for {hours} hours", hours=f"{age:.0f}")
+                           if age is not None else titled("the disk guard has never run")),
+                        "detail": ("features.auto_cleanup is on, and the maintenance job (every 15 minutes) runs the guard "
+                                   "first in every pass; without it nothing frees space as the disk fills."),
+                        "action": "`project-observatory full maintain status`; `full disk-guard --apply` runs it now"})
 
     if machine:
         age = _age_hours(machine.get("measured_at"), now)
@@ -59,7 +83,11 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
         crit = config.get("free_space_critical_percent", 5)
         if pct is not None and pct < warn:
             locs = (machine.get("disk") or {}).get("locations") or []
-            named = "; ".join(f"{l['label']} {l['gb']} GB" + (f" (`{l['command']}`)" if l.get("command") else "")
+            # A place full of APFS clones gives back far less than `du` says (OBS-66).
+            named = "; ".join(f"{l['label']} {l['gb']} GB"
+                              + (f", of which removal frees at least {l['frees_at_least_gb']} GB (APFS clones)"
+                                 if l.get("clones_matter") else "")
+                              + (f" (`{l['command']}`)" if l.get("command") else "")
                               for l in locs[:LISTED])
             swap = next((l for l in locs if l.get("kind") == "swap"), None)
             if swap and swap["gb"] >= 2:
@@ -69,7 +97,8 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
                         "severity": "critical" if pct < crit else "warning",
                         **titled("{gb} GB free on the disk ({pct}%)", gb=vol.get("free_gb"), pct=pct),
                         "detail": (f"Below the {crit if pct < crit else warn}% line in config/machine.json. "
-                                   f"Largest measured places outside the projects: {named or 'none measured yet'}."),
+                                   f"Largest measured places outside the projects: {named or 'none measured yet'}."
+                                   + _guard_detail(guard)),
                         "action": "review the Machine page's disk table; each row names how its space comes back"})
 
         mem = machine.get("memory") or {}
@@ -118,21 +147,61 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
                         "action": "push or merge what matters; `full cleanup --apply --include manual` bundles the rest before deleting"})
 
     since = now - timedelta(hours=24)
-    removed, freed = 0, 0
+    removed, freed, measured = 0, 0, 0
+    try:
+        for line in (logs / "disk-guard.jsonl").read_text(encoding="utf-8").splitlines():
+            row = json.loads(line)
+            if row.get("kind") != "summary":
+                continue
+            at = datetime.strptime(row.get("at", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            if at >= since:
+                removed += int(row.get("removed") or 0)
+                measured += max(0, row.get("freed_mb") or 0) * 1024
+    except (OSError, ValueError):
+        pass
     try:
         for line in (logs / "cleanup.jsonl").read_text(encoding="utf-8").splitlines():
             row = json.loads(line)
             at = datetime.strptime(row.get("at", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-            if at >= since and row.get("result") in ("removed", "pruned"):
+            if at >= since and row.get("result") in ("removed", "pruned") and row.get("mode") != "guard":
                 removed += 1
-                freed += row.get("kb") or 0
+                # What the disk said (`freed_mb`, the guard's statvfs delta) outranks the
+                # estimate: `du` counts an APFS clone in full and frees nothing removing it.
+                if "freed_mb" in row:
+                    measured += max(0, row["freed_mb"]) * 1024
+                else:
+                    freed += row.get("kb") or 0
     except (OSError, ValueError):
         pass
+    freed += measured
     if removed:
         out.append({"type": "cleanup.done", "subject": "machine", "severity": "info",
-                    **(titled("cleanup removed {n} items in 24 hours, {gb} GB of build output", n=removed, gb=f"{freed / 1048576:.1f}")
+                    **(titled("cleanup removed {n} items in 24 hours and freed {gb} GB", n=removed, gb=f"{freed / 1048576:.1f}")
                        if freed else titled("cleanup removed {n} items in 24 hours", n=removed)),
                     "detail": "Only what loses nothing: merged or pushed branches, clean idle worktrees, "
-                              "build output of idle projects. Each is a line in store/logs/cleanup.jsonl.",
+                              "build output of idle checkouts, old temporary files, the cache tools' own cleanup. "
+                              "The git tier's undo record is store/logs/cleanup.jsonl; the guard's actions "
+                              "and run summaries are store/logs/disk-guard.jsonl.",
                     "action": "nothing to do; the journal names every item and how to bring it back"})
     return out
+
+
+def _guard_detail(guard: dict | None) -> str:
+    """What the guard did last, who holds the memory that swap writes here, and the
+    largest files — the three things a person needs when the disk is low."""
+    if not guard:
+        return ""
+    parts = [f" The disk guard last ran at pressure {guard.get('level')}: "
+             f"{(guard.get('results') or {}).get('removed', 0)} item(s) removed, "
+             f"free {guard.get('free_gb_before')} → {guard.get('free_gb_after')} GB."]
+    mem = guard.get("memory") or {}
+    if (mem.get("swap_gb") or 0) >= 2:
+        holders = ", ".join(f"{h['origin']} {(h.get('rss_mb') or 0) / 1024:.1f} GB" for h in (mem.get("holders") or [])[:3])
+        parts.append(f" Swap holds {mem['swap_gb']} GB of this disk; memory is held by {holders}.")
+        sims = mem.get("simulators") or []
+        if sims:
+            parts.append(" Running simulators: " + "; ".join(f"`{x['command']}`" for x in sims[:LISTED]) + ".")
+    files = ((guard.get("large_files") or {}).get("files") or [])[:3]
+    if files:
+        parts.append(" Largest files: " + ", ".join(f"{f['path']} {f['gb']} GB" for f in files) + ".")
+    return "".join(parts)

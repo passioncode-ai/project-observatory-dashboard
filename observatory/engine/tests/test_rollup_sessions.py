@@ -339,7 +339,7 @@ def test_a_store_missing_the_columns_SAYS_SO() -> None:
     subprocess.run([PY, "dashboard/build_dashboard.py"], cwd=ROOT, env=env,
                    capture_output=True, text=True, timeout=900)
     text = (d / "page.html").read_text(encoding="utf-8")
-    check("the page reports the store as unreadable", "нечитаемо" in text,
+    check("the page reports the store as unreadable", "хранилище не читается" in text,
           "an empty sparkline for every project would be a measured zero")
     check("naming the column", "sessions" in text, text[:0])
     check("and it is not silent about it", "store_degraded" in text,

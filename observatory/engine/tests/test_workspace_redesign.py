@@ -279,7 +279,7 @@ class WorkspaceRedesignTests(unittest.TestCase):
         out = self.render("projects", {}, after, locale="ru")
         self.assertIn("×3", out["known"])
         self.assertEqual(out["known"].count("Same conclusion"), 1)
-        for word in ("папка в хранилище заметок", "активен", "другое", "наблюдение"):
+        for word in ("папка в хранилище заметок", "активен", "другое", "замечено"):
             self.assertIn(word, out["known"])
         for raw in (">vault-folder", "— other<", ">observed"):
             self.assertNotIn(raw, out["known"])
@@ -293,7 +293,7 @@ class WorkspaceRedesignTests(unittest.TestCase):
         stats = {"stats": {"projects": 3, "inactive_repos": 1, "creds_leaked": 24, "commits_7d": 5}}
         out = self.render("index", stats, after, locale="ru")
         self.assertIn("<b>5</b><span>коммитов за 7 дн</span>", out["work"])
-        self.assertIn("<b>1</b><span>неактивный репо</span>", out["rest"])
+        self.assertIn("<b>1</b><span>неактивный репозиторий</span>", out["rest"])
         self.assertIn("<b>24</b><span>ключа утекли</span>", out["rest"])
         self.assertEqual(out["count"], "−", "an open counter list shows no '+N'")
 

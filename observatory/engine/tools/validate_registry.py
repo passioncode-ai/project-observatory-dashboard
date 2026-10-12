@@ -193,6 +193,24 @@ def main():
                 if m.get("role") not in roles: errors.append(f"product member role unknown: {pr['id']} {m.get('role')}")
         t=pdoc.get("totals") or {}
         if t.get("products")!=len(prods): errors.append("products totals disagree with the list")
+    # ---- other names (identifiers.py) ----------------------------------
+    # One alias, one target, and only a target the registry holds. A conflict is
+    # published beside the aliases, never among them.
+    idoc=load("identifiers.json") if (INV/"identifiers.json").is_file() else {}
+    aliases=idoc.get("aliases") or []
+    ii=uniq(aliases,"id","identifiers",errors) if aliases else set()
+    folded={}
+    for a in aliases:
+        if a["id"].startswith(("project:","product:")): errors.append(f"alias is in a canonical namespace: {a['id']}")
+        if a.get("resolves_to") not in pi|pri: errors.append(f"alias names a target the registry does not hold: {a['id']} -> {a.get('resolves_to')}")
+        if not a.get("owner"): errors.append(f"alias names no owner: {a['id']}")
+        folded.setdefault(a["id"].casefold(),set()).add(a.get("resolves_to"))
+    for k,v in folded.items():
+        if len(v)>1: errors.append(f"alias has several targets (one name, however it is typed): {k}")
+    conflicted={s for c in idoc.get("conflicts") or [] for s in c.get("spellings") or [c["id"]]}
+    if conflicted & ii: errors.append(f"a conflicted name is published as an alias: {sorted(conflicted & ii)}")
+    it=idoc.get("totals") or {}
+    if idoc and it.get("aliases")!=len(aliases): errors.append("identifiers totals disagree with the list")
     zones=load("cloudflare-zones.json")["zones"] if (INV/"cloudflare-zones.json").is_file() else []
     if zones:
         uniq(zones,"id","cloudflare-zones",errors)
@@ -229,13 +247,19 @@ def main():
         if e["id"]!=f"environment:{e['project']}/{e['name']}": errors.append(f"environment id is not <project>/<name>: {e['id']}")
         if e["project"] not in pi: errors.append(f"environment names a project that does not exist: {e['id']}")
     ei={e["id"] for e in envs}
-    endpoints=di|pi|ri|hi|ci|pri|zi|ai|ei; types=set(rd["relation_types"])
+    endpoints=di|pi|ri|hi|ci|pri|zi|ai|ei|ii; types=set(rd["relation_types"])
     for r in relations:
         if r["type"] not in types: errors.append(f"undefined relation type: {r['type']}")
         if r.get("environment") and r["environment"] not in ei: errors.append(f"relation names an environment that does not exist: {r['id']}")
         if r.get("deployment") and r["deployment"] not in hi: errors.append(f"relation names a deployment that does not exist: {r['id']}")
         for side in ("from","to"):
             if r[side] not in endpoints: errors.append(f"unresolved relation endpoint: {r['id']} {side}={r[side]}")
+        if r["type"]=="known_as" and (r["to"] not in ii or not r.get("owner")):
+            errors.append(f"known_as edge without a published, owned alias: {r['id']}")
+    # The other direction: every published alias has its edge. The emitter drops a
+    # second edge whose id it has seen, so an id collision would lose a name silently.
+    for alias in sorted(ii-{r["to"] for r in relations if r["type"]=="known_as"}):
+        errors.append(f"published alias without its known_as edge: {alias}")
     for p in projects:
         if not p.get("source_refs") or set(p["source_refs"])-si: errors.append(f"project has missing or unresolved sources: {p['id']}")
         cp=p.get("canonical_page")

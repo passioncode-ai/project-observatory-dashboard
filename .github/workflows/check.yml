@@ -210,6 +210,12 @@ jobs:
         run: |
           cd observatory/engine
           python tests/test_maintenance.py -v Passphrase.test_the_real_credential_manager_round_trips Passphrase.test_windows_keeps_it_in_the_credential_manager
+      - id: updates
+        name: Updates replace the running launcher and drive the tasks (W6)
+        continue-on-error: true
+        run: |
+          cd observatory/engine
+          python tests/test_engine_update.py -v WindowsUpdates
       - id: jobs
         name: The server and the tick under Task Scheduler (W4b)
         continue-on-error: true
@@ -243,6 +249,7 @@ jobs:
             echo "| osprivacy | ${{ steps.osprivacy.outcome }} |"
             echo "| osschedule | ${{ steps.osschedule.outcome }} |"
             echo "| Credential Manager | ${{ steps.credentials.outcome }} |"
+            echo "| updates | ${{ steps.updates.outcome }} |"
             echo "| server and tick jobs | ${{ steps.jobs.outcome }} |"
             echo "| CLI | ${{ steps.cli.outcome }} |"
             echo "| A whole tick | ${{ steps.tick.outcome }} |"

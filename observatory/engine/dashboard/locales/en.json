@@ -3,10 +3,6 @@
   "one": "cleanup removed {n} item in 24 hours",
   "other": "cleanup removed {n} items in 24 hours"
  },
- "cleanup removed {n} items in 24 hours, {gb} GB of build output": {
-  "one": "cleanup removed {n} item in 24 hours, {gb} GB of build output",
-  "other": "cleanup removed {n} items in 24 hours, {gb} GB of build output"
- },
  "findings@@heading": "findings",
  "in@@{n} accounts": {
   "one": "{n} account",
@@ -622,5 +618,21 @@
   "one": "Show the newest {n}",
   "other": "Show the newest {n}"
  },
- "language@@System": "System"
+ "language@@System": "System",
+ "{n} skill descriptions do not fit the session's skill listing": {
+  "one": "{n} skill description does not fit the session's skill listing",
+  "other": "{n} skill descriptions do not fit the session's skill listing"
+ },
+ "Disk guard ran {at}: free {before} → {after} GB, {n} removed": {
+  "one": "Disk guard ran {at}: free {before} → {after} GB, {n} removed",
+  "other": "Disk guard ran {at}: free {before} → {after} GB, {n} removed"
+ },
+ "cleanup removed {n} items in 24 hours and freed {gb} GB": {
+  "one": "cleanup removed {n} item in 24 hours and freed {gb} GB",
+  "other": "cleanup removed {n} items in 24 hours and freed {gb} GB"
+ },
+ "{file} keeps {n} credentials in plaintext": {
+  "one": "{file} keeps {n} credential in plaintext",
+  "other": "{file} keeps {n} credentials in plaintext"
+ }
 }

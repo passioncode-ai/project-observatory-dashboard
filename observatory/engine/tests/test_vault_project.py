@@ -93,6 +93,8 @@ class ResolverTests(unittest.TestCase):
         self.assertIn("project:local-zeta", said)
         r = vault_project.resolve("project:gamma", PROJECTS)
         self.assertEqual(r.how, "ambiguous", "two folders of different names, neither named")
+        self.assertEqual(len(r.candidates), 1, r.candidates)
+        self.assertIn("project:gamma keeps folders", r.sentence(), "one sentence, not one character per entry")
         self.assertEqual(vault_project.resolve("gamma-two", PROJECTS).folder, "gamma-two")
 
     def test_unknown_is_kept_and_a_folderless_project_uses_its_slug(self):

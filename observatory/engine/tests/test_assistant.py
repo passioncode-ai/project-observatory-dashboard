@@ -98,10 +98,29 @@ class AssistantTests(unittest.TestCase):
              patch.object(dashboard_open,'start_server') as start:
             self.a.serve();start.assert_not_called()
 
+    def test_serve_restarts_an_installed_server_through_its_task_or_unit_off_macos(self):
+        # W4c: Task Scheduler or systemd restarts it; never a second process, never launchctl.
+        from tools import dashboard_open
+        import osschedule
+        home=str(self.a.paths.HOME);answers=iter([None,None,home,home]);restarted=[]
+        class Job:
+            def restart(self):restarted.append(True);return True,''
+        with patch.object(self.a.sys,'platform','linux'), \
+             patch.object(dashboard_open,'served_workspace',side_effect=lambda *a,**k:next(answers)), \
+             patch.object(dashboard_open,'_always_on',return_value=True), \
+             patch.object(dashboard_open,'start_server') as start, \
+             patch.object(osschedule,'handle',return_value=Job()), \
+             patch.object(self.a.subprocess,'run') as run, patch.object(self.a.time,'sleep'):
+            doc=self.a.serve()
+        start.assert_not_called();run.assert_not_called()
+        self.assertEqual(restarted,[True])
+        self.assertEqual(doc['server'],'verified')
+
     def test_serve_restarts_an_installed_server_through_launchd(self):
         from tools import dashboard_open
         home=str(self.a.paths.HOME);answers=iter([None,None,home,home])
-        with patch.object(dashboard_open,'served_workspace',side_effect=lambda *a,**k:next(answers)), \
+        with patch.object(self.a.sys,'platform','darwin'), \
+             patch.object(dashboard_open,'served_workspace',side_effect=lambda *a,**k:next(answers)), \
              patch.object(dashboard_open,'_always_on',return_value=True), \
              patch.object(dashboard_open,'start_server') as start, \
              patch.object(self.a.subprocess,'run') as run, patch.object(self.a.time,'sleep'):

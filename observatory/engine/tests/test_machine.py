@@ -7,6 +7,8 @@ anything on the machine running the test.
 """
 from __future__ import annotations
 import importlib
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -188,6 +190,97 @@ class DiskBudget(Base):
             self.assertIsNone(sm.size_kb(Path("/x"), 5))
 
 
+class ApfsFrees(DiskBudget):
+    """OBS-66: `du` counts an APFS clone in full. 19 abandoned browser code-sign clones read as
+    13 GB and removing them freed nothing (2026-10-11). A place is walked a second time for the
+    private size of its files, and the row says what a removal gives back at least."""
+
+    def tree(self):
+        root = self.base / "place"
+        (root / "nested").mkdir(parents=True)
+        for name in ("clone-a", "clone-b", "own"):
+            (root / name).write_bytes(b"x" * 300_000)
+        (root / "nested" / "deep").write_bytes(b"y" * 200_000)
+        os.link(root / "own", root / "own-link")                 # a hard link: counted once
+        os.symlink(root / "own", root / "own-symlink")           # a symlink: not followed
+        return root
+
+    def test_the_sum_is_each_files_private_size_and_unread_files_count_in_full(self):
+        import scan_machine as sm
+        root = self.tree()
+        private = {"clone-a": 0, "clone-b": 0, "own": 300_000, "own-link": 300_000}
+        reader = lambda path: private.get(Path(path).name)      # `deep` unread: counts as du would
+        blocks = os.lstat(root / "nested" / "deep").st_blocks * 512
+        self.assertEqual(sm.private_kb(root, 30, reader=reader), (300_000 + blocks) // 1024)
+
+    def test_no_file_answering_is_not_measured_rather_than_zero(self):
+        import scan_machine as sm
+        self.assertIsNone(sm.private_kb(self.tree(), 30, reader=lambda path: None))
+
+    def test_a_walk_past_its_time_is_not_measured(self):
+        import scan_machine as sm
+        root = self.base / "many"
+        root.mkdir()
+        for i in range(600):
+            (root / f"f{i}").write_bytes(b"z")
+        ticks = iter(range(0, 10_000, 5))
+        with patch.object(sm.time, "monotonic", side_effect=lambda: next(ticks)):
+            self.assertIsNone(sm.private_kb(root, 2, reader=lambda path: 0))
+
+    @unittest.skipUnless(sys.platform == "darwin", "APFS private size is a macOS attribute")
+    def test_a_real_clone_frees_nothing_on_apfs(self):
+        import scan_machine as sm
+        root = self.base / "clones"
+        root.mkdir()
+        (root / "original").write_bytes(os.urandom(4_000_000))
+        made = subprocess.run(["cp", "-c", str(root / "original"), str(root / "clone")], capture_output=True)
+        if made.returncode:
+            self.skipTest("clonefile is refused here: the temporary directory is not on APFS")
+        # cp -c worked, so this IS APFS: a reader that answers nothing is a defect, not a skip.
+        reader = sm._private_size_reader()
+        self.assertIsNotNone(reader)
+        self.assertEqual(reader(str(root / "original")), 0)
+        # A third file outside the place shares the original's blocks, so neither file in the place
+        # is private: the walk reads ~0 where `du` reads 8 MB.
+        subprocess.run(["cp", "-c", str(root / "original"), str(self.base / "outside")], check=True)
+        self.assertLess(sm.private_kb(root, 30), 64)
+        self.assertGreater(sm.size_kb(root, 30), 7000)
+
+    def test_the_row_says_what_a_removal_frees_and_keeps_it_when_carried(self):
+        import scan_machine as sm
+        self.config(disk_budget_seconds=30)
+        with patch.object(sm, "size_kb", return_value=2 * 1048576), \
+                patch.object(sm, "private_kb", return_value=209715) as walked:
+            out = sm.survey_disk(None, force=False)
+        self.assertEqual(walked.call_count, 3)
+        row = out["locations"][0]
+        self.assertEqual((row["gb"], row["frees_at_least_gb"], row["clone_shared_gb"], row["clones_matter"]),
+                         (2.0, 0.2, 1.8, True))
+        with patch.object(sm, "size_kb") as again:               # inside every_hours: nothing re-measured
+            carried = sm.survey_disk({"disk": out}, force=False)["locations"][0]
+        again.assert_not_called()
+        self.assertEqual(carried["frees_at_least_gb"], 0.2)
+        self.assertTrue(carried["clones_matter"])
+
+    def test_a_small_place_or_an_unfinished_walk_keeps_dus_number_alone(self):
+        import scan_machine as sm
+        self.config(disk_budget_seconds=30)
+        with patch.object(sm, "size_kb", return_value=100 * 1024), patch.object(sm, "private_kb") as walked:
+            row = sm.survey_disk(None, force=False)["locations"][0]
+        walked.assert_not_called()
+        self.assertNotIn("frees_at_least_gb", row)
+        with patch.object(sm, "size_kb", return_value=2 * 1048576), patch.object(sm, "private_kb", return_value=None):
+            row = sm.survey_disk(None, force=True)["locations"][0]
+        self.assertNotIn("frees_at_least_gb", row)
+
+    def test_clones_are_named_only_when_they_hold_enough(self):
+        import scan_machine as sm
+        self.assertTrue(sm.frees(2 * 1048576, 0)["clones_matter"])
+        self.assertFalse(sm.frees(2 * 1048576, 2 * 1048576 - 1024)["clones_matter"])     # 1 MB shared
+        self.assertFalse(sm.frees(600 * 1024, 500 * 1024)["clones_matter"])              # under 0.1 GB
+        self.assertEqual(sm.frees(1048576, None), {})
+
+
 class Estate(Base):
     """One repository with every class the hygiene survey knows."""
 
@@ -266,14 +359,76 @@ class Estate(Base):
         self.assertEqual(set(got), {"repository:example/app", "local:solo"})
         self.assertEqual([Path(w["path"]).name for w in got["local:solo"]["worktrees"]], ["wt-solo"])
 
+    def test_a_pass_the_deadline_cuts_short_carries_the_last_measurement_and_resumes(self):
+        # OBS-52: git-hygiene was stopped with nothing written 11 times in a day. Now it stops before its
+        # deadline, carries the checkouts it did not reach from the last answer (marked stale), says so, and
+        # the next pass starts with the least recently measured.
+        import scan_git_hygiene as h
+        self.build()
+        first = self.survey()
+        self.assertFalse(first["partial"])
+        self.assertTrue(first["checkouts"][0]["measured_at"])
+        with patch.dict(os.environ, {"OBSERVATORY_STEP_DEADLINE": f"{time.time() + h.RESERVE_S - 1:.3f}"}):
+            cut = self.survey()
+        self.assertTrue(cut["partial"])
+        self.assertEqual([c.get("stale") for c in cut["checkouts"]], [True], "the one checkout carries its last measurement")
+        self.assertEqual(cut["checkouts"][0]["measured_at"], first["checkouts"][0]["measured_at"])
+        self.assertTrue(any("time ran out after 0 of 1" in d["reason"] for d in cut["degraded"]), cut["degraded"])
+        again = self.survey()
+        self.assertFalse(again["partial"])
+        self.assertNotIn("stale", again["checkouts"][0])
+
     def run_cleanup(self, *args, auto_on=True, busy=None):
         import cleanup
         importlib.reload(cleanup)
         doc = json.loads((self.home / "config/settings.json").read_text())
         doc.setdefault("features", {})["auto_cleanup"] = auto_on
         (self.home / "config/settings.json").write_text(json.dumps(doc))
-        with patch("scan_machine.working_dirs", return_value=busy or {}):
+        import holders
+        # What processes hold comes from `holders.Holders.take` since 2026-10-12; a real listing
+        # here sees whatever indexes a fresh temporary checkout (Spotlight, an editor's watcher).
+        held = holders.Holders(list((busy or {}).values()))
+        with patch("scan_machine.working_dirs", return_value=busy or {}), \
+                patch.object(holders.Holders, "take", classmethod(lambda cls, timeout=120: held)):
             return cleanup.main(["cleanup.py", *args])
+
+    def test_the_recheck_reuses_a_listing_younger_than_twenty_seconds(self):
+        """2026-10-12: a full listing per worktree, tens of seconds each under load, spent the
+        guard's whole git-tier share before the first removal."""
+        import cleanup
+        import holders
+        importlib.reload(cleanup)
+        taken = []
+        clock = [100.0]
+
+        def take(cls, timeout=120):
+            taken.append(clock[0])
+            return holders.Holders([])
+        with patch.object(holders.Holders, "take", classmethod(take)), \
+                patch.object(cleanup.time, "monotonic", lambda: clock[0]):
+            for _ in range(5):
+                cleanup.busy_now("/nowhere/a")
+                clock[0] += 3
+            self.assertEqual(len(taken), 1, "five re-checks within 15 s share one listing")
+            clock[0] += 30
+            cleanup.busy_now("/nowhere/a")
+            self.assertEqual(len(taken), 2, "an older listing is taken again")
+
+    def test_git_only_plans_no_build_output_and_reports_its_planning_time(self):
+        """2026-10-12: inside the guard the walk for build output took the git tier's share."""
+        import cleanup
+        import holders
+        importlib.reload(cleanup)
+        walked = []
+        out = io.StringIO()
+        with patch.object(holders.Holders, "take", classmethod(lambda cls, timeout=120: holders.Holders([]))), \
+                patch.object(cleanup, "plan_artifacts", side_effect=lambda cfg, busy: walked.append(1) or []), \
+                contextlib.redirect_stdout(out):
+            cleanup.main(["cleanup.py", "--json", "--git-only"])
+        self.assertEqual(walked, [])
+        import paths
+        plan = json.loads((paths.SCRATCH / "cleanup-plan.json").read_text())
+        self.assertIn("plan_seconds", plan)
 
     def branches(self, repo):
         return set(git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").split())
@@ -373,6 +528,21 @@ class Findings(Base):
         self.assertIn("git.idle_unique_branches", out)
         self.assertNotIn("machine.stale", out)
 
+    def test_disk_low_names_what_a_clone_heavy_place_really_frees(self):
+        import machine_findings as mf
+        now = datetime(2026, 1, 1, 12, tzinfo=timezone.utc)
+        self.write("machine.json", {"measured_at": "2026-01-01T11:30:00Z", "memory": {}, "processes": {},
+                                    "disk": {"volume": {"free_gb": 4, "free_percent": 2},
+                                             "locations": [{"label": "Browser clones", "gb": 13.0,
+                                                            "frees_at_least_gb": 0.0, "clone_shared_gb": 13.0,
+                                                            "clones_matter": True},
+                                                           {"label": "Caches", "gb": 3.0}]}})
+        detail = {f["type"]: f for f in mf.findings(self.home / "store/raw", self.home / "store/logs",
+                                                    {"free_space_warning_percent": 15}, now)}["machine.disk_low"]["detail"]
+        self.assertIn("Browser clones 13.0 GB, of which removal frees at least 0.0 GB (APFS clones)", detail)
+        self.assertIn("; Caches 3.0 GB.", detail)
+        self.assertEqual(detail.count("APFS clones"), 1)
+
     def test_silent_before_any_survey(self):
         import machine_findings as mf
         self.assertEqual(mf.findings(self.home / "store/raw", self.home / "store/logs", {}), [])
@@ -403,6 +573,33 @@ class Page(Base):
         # L10N-01: a page built in one language and read in the other says what
         # the page built in the reader's language says — every word, size and
         # date is marked for the page script.
+        sys.path.insert(0, str(ROOT / "tests"))
+        import relocalize
+        for built, reader in (("en", "ru"), ("ru", "en")):
+            got = relocalize.relocalize({"en": en, "ru": ru}[built], reader)
+            want = {"en": en, "ru": ru}[reader]
+            self.assertTrue(got == want, f"{built}→{reader}: " + relocalize.first_difference(got, want))
+
+
+class PageFrees(Base):
+    """OBS-66 on the page: a clone-heavy place says what removing it gives back."""
+
+    def test_the_size_cell_names_the_floor_in_both_languages(self):
+        import machine_view, machine_page
+        from i18n import Translator
+        (self.home / "store/raw/machine.json").write_text(json.dumps({
+            "measured_at": "2026-01-01T00:00:00Z", "memory": {}, "processes": {},
+            "disk": {"volume": {"free_gb": 4, "free_percent": 2, "total_gb": 250},
+                     "locations": [{"path": "~/clones", "label": "Clones", "kind": "cache", "reclaim": "regenerable",
+                                    "gb": 13.0, "frees_at_least_gb": 0.4, "clone_shared_gb": 12.6, "clones_matter": True},
+                                   {"path": "~/x", "label": "X cache", "kind": "cache", "reclaim": "regenerable",
+                                    "gb": 1.5, "frees_at_least_gb": 1.5, "clone_shared_gb": 0.0, "clones_matter": False}]}}))
+        summary = machine_view.summary()
+        en = machine_page.machine_html({"machine": summary}, Translator("en"))
+        ru = machine_page.machine_html({"machine": summary}, Translator("ru"))
+        self.assertIn("removing it frees at least 0.4 GB; APFS clones share 12.6 GB", en)
+        self.assertIn("удаление освободит не меньше 0,4 ГБ; клоны APFS делят 12,6 ГБ", ru)
+        self.assertEqual(en.count(">removing it frees at least"), 1)   # only the place clones dominate
         sys.path.insert(0, str(ROOT / "tests"))
         import relocalize
         for built, reader in (("en", "ru"), ("ru", "en")):

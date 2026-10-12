@@ -153,7 +153,7 @@ def test_every_route_answers_and_none_serves_a_value() -> None:
               and b"data-live" in agents, str(agents)[:160])
         code, agents_ru = get("/agents?locale=ru")
         check("and in the reader's language",
-              code == 200 and "Нужно вам".encode() in agents_ru, str(agents_ru)[:160])
+              code == 200 and "Требует решения".encode() in agents_ru, str(agents_ru)[:160])
         code, agents_bad = get("/agents?locale=xx")
         check("an unknown language falls back to English, not an error",
               code == 200 and b"Needs you" in agents_bad, str(agents_bad)[:120])
@@ -213,6 +213,12 @@ def test_the_board_rule_fires_on_silence_and_only_with_the_plist() -> None:
     # process tree only.
     plist = (pathlib.Path.home() / "Library/LaunchAgents"
              / f"{install_launchd.instance_label('server')}.plist")
+    if sys.platform != "darwin":
+        # Off macOS an installed server is its systemd unit (W4b), in the sandbox's config folder.
+        import osschedule
+        import paths
+        unit = osschedule.handle("server", paths.HOME)
+        plist = unit.units / unit.unit
     check("the plist this rule looks for is not installed in the sandbox", not plist.exists(),
           str(plist))
     got = [f for f in board(work / "scratch") if f["type"] == "server.silent"]

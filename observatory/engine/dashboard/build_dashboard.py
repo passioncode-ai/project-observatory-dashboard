@@ -2266,7 +2266,7 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
     hb.push([T("maintenance"), text, cmd]);
   });
   const day = (MT.snapshot || "").slice(0, 10);
-  hb.push([T("full backup"), !MT.snapshot ? T("none yet — the hourly job takes one a day")
+  hb.push([T("full backup"), !MT.snapshot ? T("none yet — the maintenance job takes one a day")
     : MT.snapshot_kind === "before-upgrade" ? T("newest {date}, taken before the last update", {date: day})
     : MT.encrypted === false ? T("newest {date}, NOT encrypted, inside the workspace — set a passphrase", {date: day})
     : T("newest {date}, encrypted outside the workspace", {date: day}), fullCommand("backups status")]);

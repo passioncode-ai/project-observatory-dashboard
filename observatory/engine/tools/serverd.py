@@ -138,7 +138,9 @@ VERSION = configuration.VERSION
 #: Drain budget on SIGTERM. launchd's `ExitTimeOut` sits above it.
 EXIT_TIMEOUT = 30
 SURFACES = {"dashboard": {"path": "/", "login": False},
-            "events": {"path": "/fabric/v1/events"}}
+            "events": {"path": "/fabric/v1/events"},
+            # What the assistant's paid model calls cost, self-reported (contract DEC-0021, OBS-53).
+            "usage": {"path": "/fabric/v1/usage"}}
 
 
 def now_z() -> str:
@@ -557,6 +559,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         self._json(page)
 
+    def _usage(self):
+        """`GET /fabric/v1/usage` — the token, then the last 31 UTC days of usage receipts (DEC-0021)."""
+        rt = RUNTIME
+        if rt is None or not rt.token:
+            why = rt.token_problem if rt else "the service is starting"
+            self._json({"error": f"The usage report is unavailable: {why}"}, 503)
+            return
+        presented = self.headers.get_all("Authorization") or []
+        if len(presented) > 1:
+            self._json({"error": "Send one Authorization header."}, 400)
+            return
+        if not fs.token_matches(presented[0] if presented else None, rt.token):
+            body = json.dumps({"error": "The service token is required: "
+                               "Authorization: Bearer <token from the descriptor's tokenFile>."}).encode()
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", "Bearer")
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self._body(body)
+            return
+        try:
+            ledger = service_identity.usage_ledger()
+            ledger.prune()
+            self._json(ledger.report(service_id=service_identity.SERVICE_ID, instance=rt.instance))
+        except (OSError, ValueError) as exc:
+            self._json({"error": f"the usage receipts could not be read: {type(exc).__name__}"}, 503)
+
     def _agents(self) -> None:
         """The Agents page's section, rendered now from the store (read-only),
         in the reader's language: the page's live refresh. The same renderer as
@@ -641,6 +671,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._json(RUNTIME.well_known())
         elif route == "/fabric/v1/events":
             self._events()
+        elif route == "/fabric/v1/usage":
+            self._usage()
         elif route == "/health":
             # The published health document keeps its shape (fabric-service/0.1): the
             # `clients` field is the update job's input and stays in the receipt file.
@@ -657,7 +689,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json({"error": "no such route",
                         "routes": ["/", "/dashboard/<page>.html", "/health", "/remote",
                                    "/leaks", "/skills", "/agents", "/.well-known/fabric-service",
-                                   "/fabric/v1/events"]}, 404)
+                                   "/fabric/v1/events", "/fabric/v1/usage"]}, 404)
 
     def do_POST(self):                                    # noqa: N802
         self._json({"error": "GET only — this server changes nothing"}, 405)

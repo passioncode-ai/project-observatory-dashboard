@@ -360,6 +360,31 @@ def assess_mcp_inventory(data: dict, OUT_SCHEMA: dict) -> list[dict]:
     return a
 
 
+def assess_resolve(data: dict, OUT_SCHEMA: dict, requested: dict | None = None) -> list[dict]:
+    """`project.resolve` — one canonical id, matched exactly, coverage named."""
+    a: list[dict] = []
+
+    def say(text: str, ok: bool, note: str = "") -> None:
+        a.append({"assertion": text, "verdict": "PASS" if ok else "FAIL", "note": note})
+
+    clean = {k: v for k, v in data.items() if not k.startswith("_")}
+    try:
+        jsonschema.validate(clean, OUT_SCHEMA)
+        schema_ok, schema_note = True, ""
+    except jsonschema.ValidationError as exc:
+        schema_ok, schema_note = False, str(exc).splitlines()[0][:180]
+    say("result validates against project-resolve-output.schema.json", schema_ok, schema_note)
+    want = (requested or local_fixture(next(
+        p["inputFixture"] for cap in CAPS for p in cap["profile"]["probes"]
+        if p["id"] == "resolve-names-one-id-or-refuses")))["id"]
+    say("the requested registry id resolves to itself, matched as canonical",
+        clean.get("canonical") == want and (clean.get("matched") or {}).get("via") == "canonical",
+        f"{clean.get('canonical') or clean.get('error')} via {(clean.get('matched') or {}).get('via')}")
+    say("degraded is present, even when empty", isinstance(clean.get("degraded"), list),
+        str(type(clean.get("degraded")).__name__))
+    return a
+
+
 def assess(pid: str, data: dict, OUT_SCHEMA: dict, requested: dict | None = None) -> list[dict]:
     """One verdict per declared assertion, in declaration order."""
     a: list[dict] = []
@@ -482,7 +507,7 @@ async def probe_read_capability(session, cap: dict) -> list[dict]:
         later = (registry_fingerprint(), ledger_max_revision())
         if probe["id"] not in JOB_PROBES:
             assessor = READ_ASSESSORS[probe["id"]]
-            results = (assessor(data, out_schema, args) if assessor is assess_detail
+            results = (assessor(data, out_schema, args) if assessor in (assess_detail, assess_resolve)
                        else assessor(data, out_schema))
         # THE MANIFEST'S OWN WORDING, verbatim. The first version
         # appended a sentence of its own — "the call wrote nothing:
@@ -611,10 +636,32 @@ async def run_write_capability(cap: dict) -> tuple[list[dict], str]:
 #: `CAPS[0]` / `CAPS[1:]` did until rev-4 split one capability into three: the
 #: two new read capabilities would have been probed as WRITE capabilities,
 #: against a scratch store and an assessor for a different contract.
+def assess_grant_check(data: dict, OUT_SCHEMA: dict) -> list[dict]:
+    """`grant.check` — over stdio no delegation token travels, so the meter denies at no level."""
+    a: list[dict] = []
+
+    def say(text: str, ok: bool, note: str = "") -> None:
+        a.append({"assertion": text, "verdict": "PASS" if ok else "FAIL", "note": note})
+
+    clean = {k: v for k, v in data.items() if not k.startswith("_")}
+    try:
+        jsonschema.validate(clean, OUT_SCHEMA)
+        schema_ok, schema_note = True, ""
+    except jsonschema.ValidationError as exc:
+        schema_ok, schema_note = False, str(exc).splitlines()[0][:180]
+    say("result validates against grant-check-output.schema.json", schema_ok, schema_note)
+    say("a call carrying no delegation token is denied principal-unproven at no level",
+        clean.get("decision") == "denied" and clean.get("code") == "principal-unproven" and clean.get("level") is None,
+        f"{clean.get('decision')} {clean.get('code')} level={clean.get('level')}")
+    return a
+
+
 READ_ASSESSORS = {
+    "grant-check-unproven-is-denied": assess_grant_check,
     "detail-carries-every-section": assess_detail,
     "timeline-answers-in-camel-case-with-parsed-payloads": assess_timeline,
     "mcp-inventory-names-and-degrades": assess_mcp_inventory,
+    "resolve-names-one-id-or-refuses": assess_resolve,
 }
 
 

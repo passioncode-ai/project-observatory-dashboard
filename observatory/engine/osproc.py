@@ -30,6 +30,7 @@ from __future__ import annotations
 import _thread
 import contextlib
 import os
+import shutil
 import signal
 import subprocess
 import threading
@@ -37,6 +38,20 @@ import time
 from typing import Callable, Iterator
 
 WINDOWS = os.name == "nt"
+
+
+def program(argv):
+    """The argv with its program resolved the way a shell would on Windows (W7).
+
+    `subprocess` on Windows finds only `<name>.exe` on PATH; tools installed by npm — `heroku`,
+    `wrangler`, `claude`, `npx` — are `<name>.cmd` there, and a bare name does not start them.
+    `shutil.which` honours PATHEXT, so the first element becomes the full path it finds. A path,
+    an unknown name, and every other OS are left as they are."""
+    argv = list(argv)
+    if os.name != "nt" or not argv or os.sep in argv[0] or (os.altsep and os.altsep in argv[0]):
+        return argv
+    found = shutil.which(argv[0])
+    return [found, *argv[1:]] if found else argv
 
 
 def new_group(*, detached: bool = False) -> dict:

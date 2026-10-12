@@ -53,6 +53,11 @@ def tool_parameters() -> dict[str, list[str]]:
         if isinstance(node, ast.FunctionDef) and node.name.startswith("observatory_"):
             args = node.args
             out[node.name] = [a.arg for a in (args.posonlyargs + args.args + args.kwonlyargs)]
+    # `grant.check` is not a function of server.py: `InteropServer._grant_check` hands its arguments to
+    # the meter, and the names the meter accepts are `meter.REQUEST_FIELDS` (any other is refused).
+    sys.path.insert(0, str(ROOT))
+    import meter
+    out["grant.check"] = sorted(meter.REQUEST_FIELDS)
     return out
 
 
@@ -246,7 +251,8 @@ def test_the_served_instructions_describe_the_served_surface() -> None:
     # rather than the names because the instructions below are what an LLM client
     # reads to decide what to call, and a tool that exists while the string says
     # otherwise is the drift this test was written for.
-    check("the server serves twenty-two observatory tools (observatory_learn, N-014)", tools == 22, str(tools))
+    # Twenty-three with `observatory_resolve`, the tool `project.resolve` requires.
+    check("the server serves twenty-three observatory tools (observatory_resolve, OBS-65)", tools == 23, str(tools))
     manifest = json.loads((ROOT / "fabric-agent.json").read_text(encoding="utf-8"))
     served = set(re.findall(r'@server\.capability\("([^"]+)"\)', src))
     import interop

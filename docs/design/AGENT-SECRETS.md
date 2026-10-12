@@ -15,6 +15,7 @@ until someone inventories it, and survives the agent that needed it.
 | Step | Command or tool | Shipped |
 |---|---|---|
 | Issue a key from a provider straight into a slot | `cloudflare.py issue --vault PROJECT/ENV/NAME`, `openrouter.py issue --to vault:PROJECT/ENV/NAME` | yes |
+| Issue a project's own key from its spend policy (OBS-58): every `project-key` source becomes a key issued for that project into the slot it names, with the project limit as the key's monthly ceiling; another project's slot is refused as a borrow; a second run moves only a changed ceiling | `openrouter.py issue-for-policy --policy FILE [--limit USD] [--dry-run]` | yes |
 | Store a key the user has | `vault.py put PROJECT ENV NAME`, value on stdin | yes |
 | Find what exists | `observatory_credentials` (MCP) or `use_secret.py names PROJECT`; names only | yes |
 | Run with it, from the vault only | `use_secret.py run --vault-only [--env ENV] PROJECT NAME -- COMMAND` | yes (`--vault-only` new) |
@@ -22,6 +23,7 @@ until someone inventories it, and survives the agent that needed it.
 | Say what a workflow needs | checkpoint `credentials: [{project, env, name, purpose}]` | yes (new) |
 | Know before a handoff that a key is missing | the pack and the acceptance carry each credential's state and `credentialsMissing` | yes (new) |
 | Run a long-lived service with its keys | `use_secret.py serve [--env ENV] --consumer LABEL PROJECT NAME[,…] -- COMMAND`: vault only, then `exec` — the service is the process, gets launchd's signals and keeps its own output | yes (new) |
+| Release a slot only under a grant that names it | `FABRIC_DELEGATION_TOKEN` in the agent's environment: its token from Fabric's hub (aud `project-observatory`, scope `secret.use`); `run`, `serve` and `header` then release a vault slot only when a grant the token names has `credentialSource {kind: project-key, ref: PROJECT/ENV/NAME}`, never read a `.env`, and remove the token before the child starts (`docs/design/METER.md` M5) | yes (new; checked when a token is present; never demanded on the operator's machines, METER.md M0) |
 | Be told which services to restart after a rotation | `vault.py rotate` lists each recorded consumer with its `launchctl kickstart -k` command | yes (new) |
 
 ## Credentials in agent memory
@@ -58,6 +60,7 @@ A workflow declares the credentials it needs, by name:
 | Check | Status |
 |---|---|
 | `use_secret.py --vault-only` refuses a name held only in a `.env`, and says how to store it | `test_vault_only_refuses_a_project_env_file` |
+| a slot is released only under a grant naming it; another slot is `no-grant`, a capability source `credential-source-refused`, a revoked grant `grant-revoked`, another scope `principal-unproven`; the child does not inherit the token; `always` refuses without one; the journal names the verdict, never the token | `test_a_slot_is_released_only_under_a_grant` |
 | a credential address carrying a value is refused | `test_a_value_is_never_a_credential_address` |
 | a handoff reports `vault`, `env-only`, `missing`; acceptance re-reads the vault; an unreadable vault is `unknown` | `Credentials` cases in `tests/test_workflow_memory.py` |
 | a redaction marker names the slot | `test_redaction_names_the_slot_a_value_lives_in` |

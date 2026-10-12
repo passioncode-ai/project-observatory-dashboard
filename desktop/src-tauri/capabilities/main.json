@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The app's own pages (settings, first run, empty dashboard) may pick a file or folder; the dashboard's pages, served by the engine or from the workspace, get no IPC at all.",
+  "windows": [
+    "main",
+    "settings",
+    "assistant"
+  ],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open"
+  ]
+}

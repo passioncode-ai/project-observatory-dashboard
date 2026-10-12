@@ -70,6 +70,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import paths  # per-user configuration and private state
 import atomic                                                       # noqa: E402
+import osproc  # noqa: E402
 import osproc                                                       # noqa: E402
 
 HOME = paths.source_path("mcp_config_root", paths.HOME / "disabled/mcp")
@@ -378,7 +379,7 @@ def run_reaped(argv: list[str], timeout: float) -> tuple[int | None, str]:
     and then killing the group ends the probe the moment the CLI has answered."""
     import tempfile
     with tempfile.TemporaryFile() as sink:
-        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink,
+        proc = subprocess.Popen(osproc.program(argv), stdin=subprocess.DEVNULL, stdout=sink,
                                 stderr=subprocess.STDOUT, **osproc.new_group())
         try:
             code = proc.wait(timeout=timeout)

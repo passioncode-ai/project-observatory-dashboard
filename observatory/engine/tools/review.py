@@ -479,6 +479,32 @@ def cmd_proposal_accept(conn, args) -> int:
         # ignores — a decision with no effect, which is worse than a refusal.
         sys.exit(f"review: this proposal cannot be applied — {why}")
     prefix = next(p for p in proposals.LANDS_IN if row["target_id"].startswith(p))
+    provenance = {"why": args.why, "proposed_by": f"{row['id']} ({row['created_at']})", "evidence": evidence}
+    written = []
+    if "aliases" in patch:
+        # OTHER NAMES land in the table of names, not in the target's own row:
+        # `identifiers.py` reads that table, and an alias in an override row would
+        # be a field the emitter ignores. A name that already names something else
+        # is refused here — accepting it would make it ambiguous for every reader.
+        import identifiers
+        fi = paths.config_file(proposals.ALIASES_LAND_IN)
+        try:
+            current = identifiers.load_table(fi)
+            table = identifiers.merge_accepted(current, patch["aliases"], target=row["target_id"],
+                                               on=L._now()[:10], provenance=provenance)
+        except identifiers.AliasConflict as exc:
+            sys.exit(f"review: this proposal cannot be applied — {exc}")
+        except ValueError as exc:
+            sys.exit(f"review: {fi} could not be read: {exc}")
+        atomic.write_json(fi, table)
+        written.append(f"{fi} ({len(patch['aliases'])} alias(es))")
+        patch = {k: v for k, v in patch.items() if k != "aliases"}
+    if not patch:
+        _mark_accepted(conn, row, args.why)
+        print(f"accepted {row['id']}: aliases -> {', '.join(written)}")
+        print("The registry changes on the next emit, not now — `project-observatory full "
+              "emit` applies it, and the diff is what you commit.")
+        return 0
     name, key = proposals.LANDS_IN[prefix]
     f = paths.config_file(name)
     doc = json.loads(f.read_text(encoding="utf-8"))
@@ -495,22 +521,26 @@ def cmd_proposal_accept(conn, args) -> int:
     # when a person agreed — otherwise an override is a value with no argument
     # behind it, which is how a curated file becomes unmaintainable.
     merged["why"] = args.why
-    merged["proposed_by"] = f"{row['id']} ({row['created_at']})"
+    merged["proposed_by"] = provenance["proposed_by"]
     merged["evidence"] = evidence
     doc[key][row["target_id"]] = merged
     atomic.write_json(f, doc)
-    with conn:
-        conn.execute("UPDATE proposals SET status='accepted', decided_by=?,"
-                     " decided_note=?, decided_at=? WHERE id=?",
-                     (L.OPERATOR, args.why, L._now(), row["id"]))
+    _mark_accepted(conn, row, args.why)
     # The file actually written, not a checkout-relative name: curation lives in
     # the selected workspace, and a receipt naming another file sends the
     # operator to diff the wrong one.
     print(f"accepted {row['id']}: {', '.join(sorted(patch))} -> "
-          f"{f}#{row['target_id']}")
+          f"{f}#{row['target_id']}" + (f"; aliases -> {', '.join(written)}" if written else ""))
     print("The registry changes on the next emit, not now — `project-observatory full "
           "emit` applies it, and the diff is what you commit.")
     return 0
+
+
+def _mark_accepted(conn, row: dict, why: str) -> None:
+    with conn:
+        conn.execute("UPDATE proposals SET status='accepted', decided_by=?,"
+                     " decided_note=?, decided_at=? WHERE id=?",
+                     (L.OPERATOR, why, L._now(), row["id"]))
 
 
 def cmd_proposal_reject(conn, args) -> int:

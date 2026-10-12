@@ -12,10 +12,10 @@ def engine_path() -> Path:
 
 def full_home(explicit: str | None = None) -> Path:
     value = explicit or os.environ.get("OBSERVATORY_FULL_HOME") or os.environ.get("OBSERVATORY_HOME")
-    path = Path(value).expanduser() if value else Path.home() / ".local/share/project-observatory-full"
+    from .core import ObservatoryError, osprivacy, refuse_home_inside_code
+    path = Path(value).expanduser() if value else osprivacy().default_home("project-observatory-full")
     if not path.is_absolute():
         raise ValueError("Full workspace path must be absolute")
-    from .core import ObservatoryError, refuse_home_inside_code
     try:
         refuse_home_inside_code(path)
     except ObservatoryError as exc:

@@ -112,11 +112,11 @@ server = InteropServer(
         "findings, disk — a few KB.\n"
         "READ, paged with `limit` and `cursor` → `nextCursor`, totals over the whole "
         "scope: `observatory_status` (pass `limit` and `detail: summary`; unpaged is "
-        "every project, hundreds of KB); `observatory_findings` filters by `projectId`; "
+        "hundreds of KB); `observatory_findings` filters by `projectId`; "
         "`observatory_recall`. `limit` only: `observatory_project`, `observatory_timeline`. "
         "Also `observatory_machine` (`section` or `explainPid`); `observatory_assistant_status`; `observatory_assistant_conversation`.\n"
         "Fabric capabilities (fabric-interop/0.1) use their published schemas exactly: "
-        "`estate.survey`, `project.detail`, "
+        "`estate.survey`, `project.detail`, `project.resolve`, "
         "`project.timeline`, `project.record`, `machine.mcp.inventory`, `machine.mcp.refresh`."
     ),
 )
@@ -399,6 +399,52 @@ def observatory_project(
 
 
 @server.tool()
+def observatory_resolve(
+    id: Annotated[str, Field(min_length=3, max_length=300,
+                             description="Any name of a project or product: its registry id, another system's "
+                                         "name for it (a store id, a hosting app, an agent's own slug), or a "
+                                         "repository:, deployment or domain: id. Matched exactly.")],
+) -> dict[str, Any]:
+    """Any name of a project or product -> the ONE canonical Observatory id.
+
+    Agents name the same thing differently, and renaming any of them would break
+    the system that owns the name; so the registry keeps one canonical id and a
+    table of the other names (`config/identifiers.json`, each with its owner).
+    Exact matches only: a name measured on two projects is `ambiguous`, a name the
+    table gives two targets is `conflict`, anything else is `not-found` — a near
+    match is never offered, because acting on the wrong project is worse than "no".
+
+    Reads four registry documents. A missing `identifiers.json` is a registry the
+    current engine has not emitted yet: canonical and measured names still resolve,
+    and `degraded` says the curated table was not read rather than implying there
+    are no other names."""
+    import identifiers
+    degraded: list[dict[str, str]] = []
+
+    def doc(name: str, key: str) -> list[dict]:
+        try:
+            return json.loads((paths.REGISTRY / name).read_text(encoding="utf-8"))[key]
+        except FileNotFoundError:
+            degraded.append({"source": f"registry/{name}", "reason": "absent: the emit has not written it"})
+        except (OSError, ValueError, KeyError) as exc:
+            degraded.append({"source": f"registry/{name}", "reason": f"unreadable: {type(exc).__name__}"})
+        return []
+
+    projects, products, relations = (doc("projects.json", "projects"), doc("products.json", "products"),
+                                     doc("relations.json", "relations"))
+    try:
+        idoc = json.loads((paths.REGISTRY / "identifiers.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        idoc = {}
+        degraded.append({"source": "registry/identifiers.json",
+                         "reason": "absent: curated other names were not read; run `project-observatory full emit`"})
+    except (OSError, ValueError) as exc:
+        idoc = {}
+        degraded.append({"source": "registry/identifiers.json", "reason": f"unreadable: {type(exc).__name__}"})
+    return identifiers.resolve(id, identifiers.Registry(projects, products, relations, idoc, degraded))
+
+
+@server.tool()
 def observatory_credentials(
     projectId: Annotated[str, Field(validation_alias=AliasChoices("projectId", "project_id", "project"),
                                     description="A 'project:<slug>' id, its bare slug, or the "
@@ -479,17 +525,19 @@ def observatory_machine(
                                             description="A process id to explain: its origin, ancestry, and "
                                                         "witr's service/port detail when witr is installed. "
                                                         "The answer is then that explanation alone.")] = None,
-    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup"],
+    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup", "guard"],
                        Field(description="overview = totals and the top few of each (default); "
                                          "a named section = that section in full.")] = "overview",
 ) -> dict[str, Any]:
     """The machine this estate runs on: processes grouped by ORIGIN (agent
     session, launchd job, simulator, app, detached), memory and swap, free disk
     and the largest cache/VM/history locations, worktrees and branches by class,
-    and the cleanup plan with its journal.
+    the cleanup plan with its journal, and the disk guard's last run (pressure,
+    what it freed by the disk's own count, the largest files, who holds the swap).
 
     Read-only. It never kills a process or deletes a file: the auto tier of the
-    cleanup runs in the tick when the operator enabled it, and anything that
+    cleanup and the disk guard run in the maintenance job (every 15 minutes) when the operator
+    enabled features.auto_cleanup, and anything that
     holds unique work only through `full cleanup --apply --include manual`.
     A process is reported by executable and script, never by its environment or
     full command line, because either can carry a credential.
@@ -506,7 +554,7 @@ def observatory_machine(
     if section != "overview":
         return {**base, section: full.get(section)}
     out = {**base, "memory": full.get("memory"), "witr": full.get("witr", False),
-           "sections": ["memory", "processes", "disk", "git", "cleanup"]}
+           "sections": ["memory", "processes", "disk", "git", "cleanup", "guard"]}
     if full.get("processes"):
         procs = full["processes"]
         out["processes"] = {"count": procs.get("count"), "top": (procs.get("top") or [])[:MACHINE_TOP],
@@ -524,6 +572,11 @@ def observatory_machine(
         plan = full["cleanup"]
         out["cleanup"] = {"plannedAt": plan.get("plannedAt"), "autoEnabled": plan.get("autoEnabled"),
                           "counts": plan.get("counts"), "actions": len(plan.get("actions") or [])}
+    if full.get("guard"):
+        g = full["guard"]
+        out["guard"] = {k: g.get(k) for k in ("at", "level", "acting", "freeGbBefore", "freeGbAfter", "freedGb",
+                                              "planned", "plannedGb", "results")}
+        out["guard"]["largeFiles"] = ((g.get("largeFiles") or {}).get("files") or [])[:MACHINE_TOP]
     return out
 
 
@@ -1029,7 +1082,11 @@ def observatory_propose(
                                                        "\"properties/123\", \"account\": \"accounts/456\", \"url\": …, "
                                                        "\"note\": …}]}; it is appended, never replacing what "
                                                        "is recorded. `organization` names whose accounts the "
-                                                       "project uses.")],
+                                                       "project uses. To record another NAME a system uses for a "
+                                                       "project or product, send {\"aliases\": [{\"id\": "
+                                                       "\"<system>:<value>\", \"owner\": <who owns the name>, "
+                                                       "\"source\": <where it is used>}]}; project.resolve then "
+                                                       "answers it.")],
     evidence: Annotated[list[dict[str, Any]] | None,
                         Field(description="What justifies it. A patch with no evidence is a guess.")] = None,
 ) -> dict[str, Any]:
@@ -1059,6 +1116,11 @@ def observatory_propose(
             (paths.REGISTRY / "projects.json").read_text(encoding="utf-8"))["projects"]}
         registry_ids |= {r["id"] for r in json.loads(
             (paths.REGISTRY / "repositories.json").read_text(encoding="utf-8"))["repositories"]}
+        # Products are proposal subjects too (their other names), and an absent
+        # products document is a registry that has not grouped anything yet.
+        _products = paths.REGISTRY / "products.json"
+        if _products.is_file():
+            registry_ids |= {p["id"] for p in json.loads(_products.read_text(encoding="utf-8"))["products"]}
     except (OSError, ValueError, KeyError) as exc:
         # The registry is unreadable, so the subject cannot be checked. The
         # proposal is still accepted and the gap is NAMED: refusing every write
@@ -1382,27 +1444,44 @@ def observatory_handoff_get(
     return _scrub_workflow(out)
 
 
-def _published_shape(schema: dict, value: Any, dropped: set[str], path: str = "") -> Any:
+def _published_shape(schema: dict, value: Any, dropped: set[str], path: str = "", root: dict | None = None) -> Any:
     """`value` cut down to what a closed published schema lists, naming what went.
 
     The survey grew fields after v0.2.0 was published (`organization`,
     `resources`); the item schema is `additionalProperties: false`, so EVERY
     estate.survey answer on an estate that records an organization failed its
     own contract and reached the host as an error. The names come from the
-    bundled schema itself, never from a list kept here that would drift from it."""
-    if isinstance(value, dict) and schema.get("type") == "object":
+    bundled schema itself, never from a list kept here that would drift from it.
+
+    A local `$ref` (`#/$defs/...`) is followed, and a `oneOf` of objects is cut by
+    the branch whose `required` keys the value carries — `project.resolve` answers
+    with either an answer or a refusal, and cutting by neither cut nothing."""
+    root = root if root is not None else schema
+    ref = schema.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/$defs/"):
+        schema = (root.get("$defs") or {}).get(ref.rsplit("/", 1)[-1], {})
+    if isinstance(value, dict) and isinstance(schema.get("oneOf"), list):
+        for branch in schema["oneOf"]:
+            target = branch
+            bref = branch.get("$ref")
+            if isinstance(bref, str) and bref.startswith("#/$defs/"):
+                target = (root.get("$defs") or {}).get(bref.rsplit("/", 1)[-1], {})
+            if set(target.get("required") or []) <= set(value):
+                return _published_shape(target, value, dropped, path, root)
+        return value
+    if isinstance(value, dict) and (schema.get("type") == "object" or "properties" in schema):
         props = schema.get("properties", {})
         out = {}
         for k, v in value.items():
             if k in props:
-                out[k] = _published_shape(props[k], v, dropped, f"{path}{k}.")
+                out[k] = _published_shape(props[k], v, dropped, f"{path}{k}.", root)
             elif schema.get("additionalProperties") is False:
                 dropped.add(f"{path}{k}")
             else:
                 out[k] = v
         return out
     if isinstance(value, list) and isinstance(schema.get("items"), dict):
-        return [_published_shape(schema["items"], v, dropped, path) for v in value]
+        return [_published_shape(schema["items"], v, dropped, path, root) for v in value]
     return value
 
 
@@ -1439,6 +1518,24 @@ def capability_project_timeline(arguments: dict[str, Any], span: Any) -> dict[st
     out = observatory_timeline(projectId=arguments["projectId"], since=arguments.get("since"),
                                limit=arguments.get("limit", 100))
     schema = next(d["outputSchema"] for d in interop.tool_definitions() if d["name"] == "project.timeline")
+    return _published_shape(schema, out, set())
+
+
+@server.capability("grant.check")
+def capability_grant_check(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
+    """Registered so the manifest's capability has its handler. `InteropServer.call_tool` answers
+    `grant.check` first, in `_grant_check`, because the delegation token comes from the channel the
+    HTTP door built and never from the arguments; this path is never reached by a call."""
+    raise RuntimeError("grant.check is answered by InteropServer._grant_check")
+
+
+@server.capability("project.resolve")
+def capability_project_resolve(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
+    """The same answer as the MCP tool, cut to the published output schema like every
+    sibling capability. Read-only and ungated like `project.detail`: it returns only ids
+    and names the registry already publishes through `estate.survey`."""
+    out = observatory_resolve(id=arguments["id"])
+    schema = next(d["outputSchema"] for d in interop.tool_definitions() if d["name"] == "project.resolve")
     return _published_shape(schema, out, set())
 
 

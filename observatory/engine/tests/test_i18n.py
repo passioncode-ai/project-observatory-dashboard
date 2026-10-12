@@ -383,7 +383,7 @@ class FindingTitles(unittest.TestCase):
                              "title_id": "{host} expires in {days} days",
                              "title_args": {"host": "alpha.example.com", "days": 12}})
         self.assertEqual(i18n.translate(f["title_id"], "ru", **f["title_args"]),
-                         "alpha.example.com: домен истекает через 12 дн.")
+                         "alpha.example.com: регистрация домена истекает через 12 дн.")
         # A counted title takes its number's form, in English and in Russian.
         one = finding_types.titled("{n} MCP servers Claude could not reach", n=1)
         many = finding_types.titled("{n} MCP servers Claude could not reach", n=3)

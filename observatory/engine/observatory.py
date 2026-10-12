@@ -107,6 +107,10 @@ STEPS = {
     "heroku":    [PY, "collectors/scan_heroku.py", "store/raw/heroku.json"],
     "scan-cloudflare": [PY, "collectors/scan_cloudflare.py", "store/raw/cloudflare_zones.json"],
     "scan-mcp":  [PY, "collectors/scan_mcp.py", "store/raw/mcp.json"],
+    "scan-harness": [PY, "collectors/scan_harness.py", "store/raw/harness.json"],
+    "scan-spend": [PY, "collectors/scan_spend.py", "store/raw/spend.json"],
+    "harness":   [PY, "tools/harness.py"],
+    "grant":     [PY, "tools/grant.py"],
     "openrouter": [PY, "collectors/scan_openrouter.py", "store/raw/openrouter.json"],
     "env":       [PY, "collectors/scan_env.py", "store/raw/env.json"],
     # Gated to once a day inside the scan itself: every run pulls every
@@ -359,7 +363,7 @@ GROUPS = {
               "test", "test-ledger", "test-skill", "test-agent", "test-key", "test-install-key", "test-vault", "test-analytics", "test-doors", "test-surfaces", "test-mcp-inventory", "test-ack", "test-serverd", "test-skill-check", "test-index",
               "test-retention", "test-tick", "test-pipeline", "test-time", "test-events", "test-fingerprints", "test-export", "test-degradations", "test-emit", "test-ancestry", "test-provenance", "test-activity", "test-rollup", "test-plugins", "test-dashboard", "test-queue", "test-wire-contract", "docs-current", "test-docs", "test-dead-data", "test-projection", "test-tick-repo", "test-identity", "test-render", "test-sessions", "test-indexer-load", "test-corroboration", "test-tick-failures", "test-notification", "test-hook", "test-interpretation", "test-render-page", "test-recall", "test-validator", "test-domain-probe", "paths-current", "secrets", "test-secrets", "test-write-surface", "test-receipt", "test-interp-contract", "test-provider", "test-search", "test-mirror", "test-erasure-scope", "test-collector-state", "test-delivery", "test-freshness", "test-project-surface", "test-metric-series", "test-companion", "test-footprint", "test-budget", "test-agent-queue", "test-lost-projects", "test-estate-history", "test-cause", "test-clone-sync", "test-fixture-sweep", "test-unpublished", "test-checkout", "test-truncation", "test-key-shape", "test-identity-drift", "test-confidence", "test-standdown", "test-dark-cost", "test-stale-expected", "test-agent-faults", "test-integrity", "test-release", "test-portfolio", "test-omission", "test-ledger-ids", "test-provider-health", "test-store-faults", "test-heroku", "test-openrouter", "test-digitalocean", "test-credentials", "test-keyserver", "test-env", "test-remote-env", "test-google", "test-project-secrets", "test-reveals", "test-store-modes", "test-backup-store", "test-plugin-pair", "test-publish-contract", "test-scrub", "test-session-start", "test-recovery", "test-signature", "test-env-tab", "test-use-secret", "use", "test-gate-skips", "test-block", "test-lever", "test-queue-order", "test-residue", "test-stale-collapse", "test-labels", "test-work-tiles", "test-attribution", "test-handoff", "test-site-kinds", "test-at-stake", "test-shape", "test-unobservable", "test-blank-page", "test-witness", "test-horizon", "test-recount", "test-git-locale", "test-foreign", "test-rdap-keys", "test-wire-alive", "test-absent-fields", "test-wire-inputs", "test-atomic", "test-two-surfaces", "test-companion-faults", "test-fold", "test-remedy", "test-listings", "test-merge", "test-erasure", "test-rollup-sessions", "test-scan-ids", "trap-map", "test-trap-map", "test-trap-efficacy", "test-finding-rules", "test-tracer", "plugins-check", "test-plugin-report", "test-fs-scan", "validate-plugin", "test-wire",
               "probes-check", "contract"],
-    "all":   ["scan-fs", "scan-gh", "scan-vault", "scan-sessions", "remotes", "scan-bb", "domains", "heroku", "scan-cloudflare", "scan-mcp", "openrouter", "env", "remote-env", "google", "leaks", "scrub-companion", "merge", "emit", "validate",
+    "all":   ["scan-fs", "scan-gh", "scan-vault", "scan-sessions", "remotes", "scan-bb", "domains", "heroku", "scan-cloudflare", "scan-mcp", "scan-harness", "openrouter", "scan-spend", "env", "remote-env", "google", "leaks", "scrub-companion", "merge", "emit", "validate",
               "scan-events", "plugins", "rollup", "corroborate", "export-ledger", "lost",
               # `index` BEFORE the page, and the position is a measurement: it
               # charges the wallet through the provider boundary, and the page
@@ -447,7 +451,7 @@ PUBLIC_SOURCE_ONLY = {
     "all": "historical composite includes private development gates; use local or the opt-in tick",
 }
 WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migrate-local", "open", "agent",
-                      "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup",
+                      "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup", "disk-guard",
                       "update", "profile", "maintain", "auto-update"}
 PUBLIC_HELP = """Project Observatory full engine (public profile).
 
@@ -472,7 +476,7 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
                                --latest finds the newest backup a workspace at this path left
   auto-update status|on|off    install each new stable release by itself (on by default)
-  maintain run|ensure|uninstall|status  the hourly job: updates, the app, a daily encrypted backup
+  maintain run|ensure|uninstall|status  the job every 15 min: the disk guard, updates, the app, a daily encrypted backup
   maintain app                 the app step alone: swap a verified staged app (what the Mac
                                app's Restart to update runs after it quits)
   update [--version X.Y.Z] [--check|--apply]  move to a published release: verified,
@@ -483,6 +487,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                never sources, secrets or the registry
   machine [--disk] [--explain PID]   processes by origin, memory, disk; why one process runs
   cleanup [--apply [--include manual]]  plan, or remove what loses nothing; manual tier archives first
+  disk-guard [--apply] [--level L]  keep free space by pressure: temp, browser clones, Trash, cache
+                               tools, build output of idle checkouts; never what a process holds.
+                               Runs from `maintain` (every 15 min) when features.auto_cleanup is on
   tick                         configured cycle; scheduler must be explicitly enabled
   assistant ACTION             the app's JSON protocol (observatory-assistant/1) on stdin/stdout
   workflow list|show|handoff|close   agent workflows; handoff --force and close need a terminal
@@ -494,6 +501,15 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   forget MEMORY_ID --why TEXT  withdraw a record and erase its text, with a receipt per backend;
                                --plan reads only; erasing needs a terminal
   scan-mcp                     the MCP servers your agent configs declare (integration mcp)
+  scan-spend                   this month's provider spend across every account the doors hold, for the
+                               L0 limit and its 80 % warning (integration openrouter)
+  scan-harness                 the skills and instruction files every agent session loads, their
+                               listing budget and security rules (integration harness)
+  harness [--accept KEY|--accept-all]  the last harness scan; --accept records a changed skill's
+                               new digest as reviewed
+  grant --status | --check --amount USD --jti JTI [--grant-ref REF] < token | --settle RECEIPT --usd USD
+                               the meter: spend against grants and the estate's monthly limit (L0);
+                               the delegation token is read from stdin, never an argument
 
 `project-observatory full-path` (outside `full`) prints the engine directory, where the
 credential tools live: tools/vault.py, tools/use_secret.py, tools/install_key.py.
@@ -545,6 +561,14 @@ class CommandRefused(ValueError):
 #: A value an option forwards: a name, never a path. `--only` selects a plugin by
 #: its manifest id, and a value shaped like `../x` or `/x` has no business there.
 OPTION_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+#: A harness skill key, `plain/<folder>` or `plugin:<plugin>@<marketplace>/<folder>` (collectors/scan_harness.py).
+HARNESS_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}")
+#: The meter's values (tools/grant.py): an amount, a token jti, a grant ref `<id>#<revision>`, a receipt.
+USD = re.compile(r"\d{1,9}(\.\d{1,6})?")
+TOKEN_JTI = re.compile(r"[A-Za-z0-9._~-]{16,128}")
+GRANT_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:~/@+-]{0,250}#\d{1,9}")
+RECEIPT = re.compile(r"rcpt_[A-Za-z0-9_-]{8,64}")
+PURPOSE = re.compile(r"[^\x00-\x1f]{1,200}")
 
 #: OPTIONS A SINGLE STEP FORWARDS TO ITS TOOL: an allowlist, not a pass-through.
 #: A step's command is fixed and its positional arguments are already this
@@ -562,6 +586,16 @@ STEP_OPTIONS: dict[str, dict[str, tuple[str | None, re.Pattern | None, str]]] = 
     "google": {"--force": (None, None, "re-fetch inside the twelve-hour cache window")},
     "plugins": {"--only": ("ID", OPTION_NAME, "run one plugin, by its manifest id"),
                 "--force": (None, None, "ignore each plugin's age gate")},
+    "harness": {"--accept": ("KEY", HARNESS_KEY, "record a changed skill's current digest as reviewed"),
+                "--accept-all": (None, None, "the same for every changed skill")},
+    "grant": {"--status": (None, None, "the month, the keys and open reservations"),
+              "--check": (None, None, "one grant check; the token on stdin"),
+              "--amount": ("USD", USD, "--check: the amount to reserve"),
+              "--jti": ("JTI", TOKEN_JTI, "--check: the jti of the token the callee was called with"),
+              "--grant-ref": ("REF", GRANT_REF, "--check: which of the token's grants"),
+              "--purpose": ("TEXT", PURPOSE, "--check: one line a person can read"),
+              "--settle": ("RECEIPT", RECEIPT, "settle a receipt"),
+              "--usd": ("USD", USD, "--settle: what was spent")},
 }
 
 

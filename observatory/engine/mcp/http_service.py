@@ -21,6 +21,10 @@ design:
    logged, not stored, not passed upstream.
 3. **A rate limit per binding** (`--rate`, default 120 requests a minute). Over it, 429
    with the same envelope shape and a `Retry-After`.
+   A request carrying a Fabric delegation token instead (`Authorization: Bearer` of the
+   `fabric-delegation+jwt` type, or the hub's `Fabric-Delegation` header) skips the binding: it
+   runs on the delegation channel, which opens only the meter's `grant.check` (OBS-55), and
+   that tool verifies the token against the estate's keys itself.
 4. The request then runs inside `memory_access.channel(...)`, so every tool asks again
    for its own scope, project, effect and owner (N-008), and every memory tool outside
    the family is refused `local-only`.
@@ -126,6 +130,22 @@ class BindingGate:
                                              "detail": "a browser page of another origin may "
                                                        "not call the memory service"})
         peer = f"peer:{(scope.get('client') or ('?', 0))[0]}"
+        # A FABRIC DELEGATION TOKEN (contract DL-9/DL-10, OBS-55) is not a binding: it opens the
+        # meter's `grant.check` alone, which verifies it; every other tool refuses its channel.
+        # A present `Fabric-Delegation` header is the token even when invalid, never a fallthrough.
+        import delegation
+        carried = delegation.read_delegation_token(headers)
+        if carried is not None:
+            key = "delegation:" + hashlib.sha256(carried[0].encode("utf-8")).hexdigest()
+            allowed, wait = self.limiter.allow(key)
+            if not allowed:
+                return await _answer(send, 429, {"error": "rate-limited", "code": "rate-limited",
+                                                 "detail": "too many grant checks with one token",
+                                                 "degraded": []},
+                                     [(b"retry-after", str(wait).encode())])
+            with self.MA.channel(self.MA.delegation_channel(carried[0])):
+                del carried
+                return await self.app(scope, receive, send)
         raw = headers.get("authorization", "")
         presented = hashlib.sha256(raw.encode("latin-1")).hexdigest() if raw else None
         del raw

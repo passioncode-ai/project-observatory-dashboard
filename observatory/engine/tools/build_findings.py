@@ -2406,10 +2406,12 @@ def collect() -> list[dict]:
     # not installed — nothing, because off is a legitimate state the operator
     # chose with --uninstall.
     sys.path.insert(0, str(paths.ROOT / "tools"))
+    import dashboard_open   # launchd's plist, or the Task Scheduler task / systemd unit (W4b)
     import install_launchd
-    sd_plist = pathlib.Path.home() / "Library/LaunchAgents" / f"{install_launchd.instance_label('server')}.plist"
     sd = paths.SCRATCH / "serverd.json"
-    if sd_plist.is_file():
+    sd_plist = (pathlib.Path.home() / "Library/LaunchAgents" / f"{install_launchd.instance_label('server')}.plist"
+                if sys.platform == "darwin" else "the server's Task Scheduler task or systemd unit")
+    if dashboard_open._always_on():
         beat = None
         if sd.is_file():
             try:
@@ -2576,6 +2578,190 @@ def collect() -> list[dict]:
                            f"{paths.config_label('host_boundary.json')}, "
                            "or adopt the host onto a project when work begins here"),
                 "evidence": ["store/raw/plugins.json#note", paths.config_label("host_boundary.json")]})
+
+    # THE ESTATE'S MONTH AGAINST L0 (OBS-56; docs/design/METER.md M3). What the providers charged this month,
+    # summed over every account the doors hold (collectors/scan_spend.py), against the estate's monthly limit in
+    # config/meter.json (USD 1,000 by default): a warning at the alert ratio (80 %), critical at the limit, where
+    # the meter refuses every further reservation. A partial scan says which accounts it could not read.
+    _sf = paths.SCRATCH / "spend.json"
+    if _sf.is_file():
+        try:
+            _s = json.loads(_sf.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _s = {}
+        try:
+            _mc = json.loads(paths.config_file("meter.json").read_text(encoding="utf-8")) \
+                if paths.config_file("meter.json").is_file() else {}
+        except (OSError, ValueError):
+            _mc = {}
+        _limit = float(_mc.get("estateMonthUsd", 1000) or 1000)
+        _ratio = float(_mc.get("alertRatio", 0.8) or 0.8)
+        _spent = float(_s.get("total_usd") or 0)
+        if _s.get("month") and _spent >= _ratio * _limit:
+            _sev = "critical" if _spent >= _limit else "warning"
+            out.append({
+                "type": "spend.estate_month", "subject": f"spend:estate:{_s['month']}", "severity": _sev,
+                **titled("the estate has spent ${spent} of its ${limit} monthly limit", spent=f"{_spent:.2f}",
+                         limit=f"{_limit:g}"),
+                "detail": ("By account: " + ", ".join(f"{a.get('account')} ${float(a.get('usd') or 0):.2f}"
+                                                       for a in _s.get("accounts") or [])
+                           + (" (partial: " + ", ".join(d.get("source", "?") for d in _s.get("degraded") or [])
+                              + " not read)" if _s.get("partial") else "")
+                           + ". At the limit the meter refuses every further reservation until the month ends."),
+                "action": "see which keys spend with `project-observatory full grant --status` and the door's "
+                          "`openrouter.py list`; lower or disable a key's ceiling through the door, or raise "
+                          "`estateMonthUsd` in config/meter.json if the operator decided a higher limit",
+                "evidence": ["store/raw/spend.json"]})
+
+    # THE AGENT HARNESS (docs/design/HARNESS.md). What every session loads before the first word:
+    # loss of function first — skill descriptions over the listing budget are dropped and those skills
+    # can no longer be matched to a request — then instruction files every session reads whole, the
+    # setting that loads every MCP tool schema upfront, and the deterministic skill rules, weighted
+    # by provenance. A skill whose content changed since it was first seen is said until accepted.
+    _hf = paths.SCRATCH / "harness.json"
+    if _hf.is_file():
+        try:
+            _h = json.loads(_hf.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _h = {}
+        _drop = _h.get("dropped") or []
+        if _drop:
+            out.append({
+                "type": "harness.listing_overflow", "subject": "harness:claude-code", "severity": "warning",
+                **titled("{n} skill descriptions do not fit the session's skill listing", n=len(_drop)),
+                "detail": (f"{_h.get('skills_offered')} skills are offered to the model; their descriptions take "
+                           f"{_h.get('listing_chars')} characters against a listing budget of {_h.get('budget_chars')} "
+                           "(OBSERVATORY_HARNESS_BUDGET_CHARS). Over it, Claude Code drops descriptions, the least "
+                           "used first, and a skill without its description is no longer matched to a request. "
+                           + (f"{(_h.get('usage') or {}).get('unused_offered')} offered skills were not invoked in the "
+                              f"last {(_h.get('usage') or {}).get('days')} days of transcripts. "
+                              if (_h.get('usage') or {}).get('transcripts') else "")
+                           + "The first to go, unused and largest first: " + listed(_drop, 8) + "."),
+                "action": "set `disable-model-invocation: true` on skills used only by name, set rarely used ones "
+                          "name-only (`skillOverrides`), disable plugins this machine's projects do not use, and "
+                          "keep project skills in their project; `project-observatory full harness` lists the cost",
+                "evidence": ["store/raw/harness.json#dropped"]})
+        # PROVIDER CREDENTIALS IN PLAINTEXT in agent tools' own config files (OBS-74): names only.
+        for _t in _h.get("tool_plaintext") or []:
+            out.append({
+                "type": "harness.plaintext_secret", "subject": f"harness:plaintext:{_t.get('file')}",
+                "severity": "warning",
+                **titled("{file} keeps {n} credentials in plaintext", file=_t.get("file"), n=int(_t.get("count") or 0)),
+                "detail": ("Credential-shaped values under " + listed(_t.get("names") or [], 8) + ". Any process of "
+                           "this account reads that file, and a value there drifts from the vault on the first "
+                           "rotation."),
+                "action": "put each value in the vault (`vault.py put PROJECT ENV NAME` with the value on stdin), "
+                          "have the tool read it through `use_secret.py run` or its own secret helper, then delete "
+                          "the line; an OpenRouter key is reissued through the door instead",
+                "evidence": ["store/raw/harness.json#tool_plaintext"]})
+        for _p in _h.get("projects") or []:
+            if _p.get("pushes_over"):
+                out.append({
+                    "type": "harness.project_listing_overflow", "subject": f"harness:project:{_p.get('project')}",
+                    "severity": "warning",
+                    **titled("in {project}, its own skills push the skill listing over budget", project=_p.get("project")),
+                    "detail": (f"{_p.get('skills')} project skills add {_p.get('listing_chars')} characters to the "
+                               f"user-level listing, {_p.get('session_listing_chars')} in a session there against a "
+                               f"budget of {_h.get('budget_chars')}: descriptions start to drop only in that project."),
+                    "action": "set `disable-model-invocation: true` on the project's skills used only by name, or "
+                              "shorten their descriptions",
+                    "evidence": ["store/raw/harness.json#projects"]})
+        for _i in _h.get("instructions") or []:
+            if (_i.get("lines") or 0) > 200:
+                out.append({
+                    "type": "harness.instruction_long", "subject": f"harness:file:{_i.get('path')}",
+                    "severity": "warning" if _i["lines"] > 500 else "info",
+                    **titled("{path} is {lines} lines, and every session reads all of it",
+                             path=_i.get("path"), lines=_i["lines"]),
+                    "detail": (f"{_i.get('chars')} characters load into every session's context before the "
+                               "first word (about a quarter as many tokens). Anthropic's guidance is under 200 "
+                               "lines; past 500 the instructions crowd the task. Codex cuts AGENTS.md at 32 KiB "
+                               "without saying so."),
+                    "action": "move procedures into files the instructions name and load on demand; keep the "
+                              "rules that apply to every task",
+                    "evidence": ["store/raw/harness.json#instructions"]})
+        _md = _h.get("mcp_deferral") or {}
+        if _md.get("off"):
+            out.append({
+                "type": "harness.mcp_deferral_off", "subject": "harness:claude-code", "severity": "warning",
+                **titled("every MCP tool schema loads into each session upfront"),
+                "detail": ("Claude Code defers MCP tool definitions until a tool is needed, unless "
+                           + ("ANTHROPIC_BASE_URL points at " + str(_md.get("base_url_host")) if _md.get("base_url_host") else "")
+                           + (" and " if _md.get("base_url_host") and _md.get("betas_disabled") else "")
+                           + ("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS is set" if _md.get("betas_disabled") else "")
+                           + "; then every declared server's whole tool list is paid for in every session."),
+                "action": "remove the setting, or keep only the servers this work needs",
+                "evidence": ["store/raw/harness.json#mcp_deferral"]})
+        _rank = {"info": 0, "warning": 1, "critical": 2}
+        # The subject carries the skill's digest, so an ack (tools/ack.py) holds for the files that were read and
+        # the row speaks again when the skill changes (docs/design/HARNESS.md H10).
+        _digest = {}
+        for _s in _h.get("skills") or []:
+            _digest.setdefault(_s.get("name"), str(_s.get("digest") or "")[:12])
+        for _x in _h.get("security") or []:
+            if _x.get("digest"):
+                _digest.setdefault(_x.get("skill"), str(_x["digest"])[:12])
+        _groups: dict = {}
+        for _x in _h.get("security") or []:
+            _k = (_x.get("skill"), _x.get("rule"))
+            _g = _groups.setdefault(_k, {"files": [], "severity": "info", "hosts": set(), "tier": _x.get("tier")})
+            _g["files"].append(_x.get("file"))
+            _g["hosts"] |= {_x["host"]} if _x.get("host") else set()
+            if _rank.get(_x.get("severity"), 0) > _rank[_g["severity"]]:
+                _g["severity"] = _x["severity"]
+        for (_skill, _rule), _g in sorted(_groups.items()):
+            _host = ", ".join(sorted(_g["hosts"])) or "an unnamed host"
+            _base = {
+                "subject": f"harness:skill:{_skill}:{_rule}:{_digest.get(_skill, '')}",
+                "detail": (f"Rule `{_rule}` in " + listed(_g["files"], 5) + f"; provenance tier {_g['tier']} "
+                           "(1 this operator's own code, 2 a pinned marketplace, 3 anything else). A skill's text is "
+                           "a prompt and its scripts run with this account's rights; a scan is an alert to read, "
+                           "not a verdict."),
+                "action": "read those lines; if the source is the vendor's own installer, record that with "
+                          "`ack.py` (it comes back if the skill changes); otherwise remove or replace the skill",
+                "evidence": ["store/raw/harness.json#security"]}
+            if _rule == "download-exec":
+                out.append({"type": "harness.skill_risk", "severity": _g["severity"], **_base, **titled("skill {skill} downloads and runs code ({host})", skill=_skill, host=_host)})
+            elif _rule == "credential-egress":
+                out.append({"type": "harness.skill_risk", "severity": _g["severity"], **_base, **titled("skill {skill} reads a credential and sends data out in one script", skill=_skill)})
+            elif _rule == "hidden-unicode":
+                out.append({"type": "harness.skill_risk", "severity": _g["severity"], **_base, **titled("skill {skill} carries hidden Unicode characters", skill=_skill)})
+            elif _rule == "concealment":
+                out.append({"type": "harness.skill_risk", "severity": _g["severity"], **_base, **titled("skill {skill} tells the agent to hide something or override its instructions",
+                                              skill=_skill)})
+            elif _rule == "opaque-content":
+                out.append({"type": "harness.skill_risk", "severity": _g["severity"], **_base, **titled("skill {skill} ships opaque or oversized files", skill=_skill)})
+        # A HOOK runs without asking, at every session start or on every tool call: the skill rules applied to
+        # its command and to the script it names. The command itself is never quoted (it can carry a token);
+        # the finding names the source, the event and the program.
+        for _k in _h.get("hook_security") or []:
+            _hb = {"subject": f"harness:hook:{_k.get('source')}:{_k.get('event')}:{_k.get('rule')}:{_k.get('command_sha')}",
+                   "detail": (f"A {_k.get('event')} hook from {_k.get('source')} starts `{_k.get('program')}`, and its "
+                              f"command or the script it runs matches the {_k.get('rule')} rule. Hooks run on their "
+                              "own, every time their event fires."),
+                   "action": "read the hook in its settings or the plugin's hooks/hooks.json; remove or disable the "
+                             "plugin if it is not trusted, or accept it with `ack.py`",
+                   "evidence": ["store/raw/harness.json#hook_security"]}
+            if _k.get("rule") == "download-exec":
+                out.append({"type": "harness.hook_risk", "severity": _k.get("severity", "warning"), **_hb,
+                            **titled("a {event} hook from {source} downloads and runs code", event=_k.get("event"),
+                                     source=_k.get("source"))})
+            elif _k.get("rule") == "credential-egress":
+                out.append({"type": "harness.hook_risk", "severity": _k.get("severity", "warning"), **_hb,
+                            **titled("a {event} hook from {source} reads a credential and sends data out",
+                                     event=_k.get("event"), source=_k.get("source"))})
+            else:
+                out.append({"type": "harness.hook_risk", "severity": _k.get("severity", "warning"), **_hb,
+                            **titled("a {event} hook from {source} carries hidden Unicode characters",
+                                     event=_k.get("event"), source=_k.get("source"))})
+        for _c in _h.get("changed") or []:
+            out.append({
+                "type": "harness.skill_changed", "subject": f"harness:changed:{_c.get('key')}", "severity": "info",
+                **titled("skill {skill} changed since it was first seen", skill=_c.get("skill")),
+                "detail": (f"Its files differ from the digest recorded on {_c.get('since')}. An update is usually "
+                           "the reason; a skill that changes after review is also how a trusted one turns hostile."),
+                "action": f"read the change, then `project-observatory full harness --accept {_c.get('key')}`",
+                "evidence": ["store/raw/harness.json#changed", "store/harness-pins.json"]})
 
     # THE MCP SERVERS THE AGENTS ARE TOLD TO REACH. The gateway
     # that held them is off; each agent's own config holds them now, and these

@@ -94,6 +94,7 @@ PATH_PREFIX_ALLOWLIST = {
 
 PATH_ALLOWLIST = {
     "store/scrub-watermark.json": "written into the workspace by tools/scrub_companion.py",
+    "store/tick-rotation.json": "written into the workspace by tools/tick.py, the collectors' start times",
     # Generated or volatile, and gitignored: a fresh clone has none of these.
     "store/observatory.db": "the store is gitignored and rebuilt",
     "store/observatory.db.backup-2026-09-06T2150Z": "a dated backup, gitignored",

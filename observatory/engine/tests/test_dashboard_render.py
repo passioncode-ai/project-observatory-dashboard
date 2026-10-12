@@ -377,7 +377,7 @@ def test_the_health_page_names_versions_kinds_and_dollars() -> None:
     check("the health page builds with updates off", p.returncode == 0, p.stderr[-300:])
     page = page_with_its_script(pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"]), "health", d)
     words = ("движок", "automatic updates are off", "the last daily backup failed", "synthetic disk full",
-             "От вас здесь ничего не требуется", "Команда: принять", "ждут решения",
+             "Здесь ничего не требует действий", "Команда: принять", "ждут решения",
              "Устанавливать обновления автоматически")
     n = {w: sum((render(page, count=w).get("counts") or {}).values()) for w in words}
     check("the installed versions show on every path", n["движок"] >= 1, str(n))
@@ -390,7 +390,7 @@ def test_the_health_page_names_versions_kinds_and_dollars() -> None:
     # Operator, 2026-10-06: the agents' records ask nothing of a person. The section says
     # so and offers no accept/reject button; nothing calls them "awaiting a decision".
     check("the agents' records say nothing here needs the person",
-          n["От вас здесь ничего не требуется"] >= 1 and n["Команда: принять"] == 0 and n["ждут решения"] == 0, str(n))
+          n["Здесь ничего не требует действий"] >= 1 and n["Команда: принять"] == 0 and n["ждут решения"] == 0, str(n))
 
 
 def test_the_mcp_page_says_how_to_probe_and_names_a_command_once() -> None:
