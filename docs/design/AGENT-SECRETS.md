@@ -16,6 +16,7 @@ until someone inventories it, and survives the agent that needed it.
 |---|---|---|
 | Issue a key from a provider straight into a slot | `cloudflare.py issue --vault PROJECT/ENV/NAME`, `openrouter.py issue --to vault:PROJECT/ENV/NAME` | yes |
 | Issue a project's own key from its spend policy (OBS-58): every `project-key` source becomes a key issued for that project into the slot it names, with the project limit as the key's monthly ceiling; another project's slot is refused as a borrow; a second run moves only a changed ceiling | `openrouter.py issue-for-policy --policy FILE [--limit USD] [--dry-run]` | yes |
+| Read what one issued OpenRouter key cost, by UTC day and model, from the provider's activity report (INB-019); the key's hash is sent, never printed; a refused report is an error, never $0 | `openrouter.py spend NAME [--date YYYY-MM-DD] [--json]` | no |
 | Store a key the user has | `vault.py put PROJECT ENV NAME`, value on stdin | yes |
 | Find what exists | `observatory_credentials` (MCP) or `use_secret.py names PROJECT`; names only | yes |
 | Run with it, from the vault only | `use_secret.py run --vault-only [--env ENV] PROJECT NAME -- COMMAND` | yes (`--vault-only` new) |

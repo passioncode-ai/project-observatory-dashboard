@@ -5,6 +5,15 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **What one issued OpenRouter key cost, by day and model** (INB-019): `openrouter.py spend NAME [--date
+  YYYY-MM-DD] [--json]` reads the provider's activity report through the management key that issued the key,
+  filtered by that key's hash — the last 30 completed UTC days, or one day. The hash goes to the provider only and
+  never to the output. A refused or unreadable report is said as such and is never printed as $0.
+  `read_activity()` is its own function, so a project's spend can call it. An agent whose provider call ended
+  without a request id can reconcile it from this record.
+
 ### Changed
 
 - **The demo's findings speak the page's language** (OBS-64): `tools/demo_estate.py` wrote its five findings as
