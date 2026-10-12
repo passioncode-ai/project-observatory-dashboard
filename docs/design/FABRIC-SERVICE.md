@@ -29,6 +29,7 @@ Observatory in advance.
 |---|---|---|
 | `GET /.well-known/fabric-service` | none; the Host/Origin/`Sec-Fetch-Site` guard applies | identity, build, pid, start time, status, `degraded`, up to six tiles, surfaces |
 | `GET /fabric/v1/events?after=&limit=` | `Authorization: Bearer <token>` | a page of events, oldest first, with a cursor |
+| `GET /fabric/v1/usage` | `Authorization: Bearer <token>` | the usage report (contract DEC-0021, `service-usage.schema.json`): the last 31 UTC days of the assistant's paid model calls by provider and model, from the receipts `agent/providers.py` writes at each charge into `store/logs/fabric-usage.jsonl` — tokens and cost with its basis (`provider`, or `price-list` when estimated), never a prompt, an output or a caller (OBS-53) |
 | `/`, `/dashboard/*`, `/health`, `/remote`, `/leaks`, `/skills` | none, as before | unchanged; `/health` still recomputes its answer on every request |
 
 The dashboard stays `login: false`: it is read-open to local pages and changes nothing, which is

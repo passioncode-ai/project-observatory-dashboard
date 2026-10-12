@@ -16,8 +16,9 @@
     },
     "localPath": {
       "type": "string",
-      "pattern": "^(~/|/)[^\\u0000]*$",
-      "maxLength": 1024
+      "pattern": "^(~[\\\\/]|/|[A-Za-z]:[\\\\/])[^\\u0000]*$",
+      "maxLength": 1024,
+      "description": "An absolute path or one under the home folder (~). POSIX: `/…` or `~/…`; Windows (DEC-0032): drive-absolute (`C:\\\\…`, `C:/…`) or `~\\\\…`. Never a network share. A host reads the grammar of its own operating system."
     },
     "originPath": {
       "type": "string",

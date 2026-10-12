@@ -2641,6 +2641,19 @@ def collect() -> list[dict]:
                           "name-only (`skillOverrides`), disable plugins this machine's projects do not use, and "
                           "keep project skills in their project; `project-observatory full harness` lists the cost",
                 "evidence": ["store/raw/harness.json#dropped"]})
+        # PROVIDER CREDENTIALS IN PLAINTEXT in agent tools' own config files (OBS-74): names only.
+        for _t in _h.get("tool_plaintext") or []:
+            out.append({
+                "type": "harness.plaintext_secret", "subject": f"harness:plaintext:{_t.get('file')}",
+                "severity": "warning",
+                **titled("{file} keeps {n} credentials in plaintext", file=_t.get("file"), n=int(_t.get("count") or 0)),
+                "detail": ("Credential-shaped values under " + listed(_t.get("names") or [], 8) + ". Any process of "
+                           "this account reads that file, and a value there drifts from the vault on the first "
+                           "rotation."),
+                "action": "put each value in the vault (`vault.py put PROJECT ENV NAME` with the value on stdin), "
+                          "have the tool read it through `use_secret.py run` or its own secret helper, then delete "
+                          "the line; an OpenRouter key is reissued through the door instead",
+                "evidence": ["store/raw/harness.json#tool_plaintext"]})
         for _p in _h.get("projects") or []:
             if _p.get("pushes_over"):
                 out.append({

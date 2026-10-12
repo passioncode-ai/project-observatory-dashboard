@@ -630,5 +630,9 @@
  "cleanup removed {n} items in 24 hours and freed {gb} GB": {
   "one": "cleanup removed {n} item in 24 hours and freed {gb} GB",
   "other": "cleanup removed {n} items in 24 hours and freed {gb} GB"
+ },
+ "{file} keeps {n} credentials in plaintext": {
+  "one": "{file} keeps {n} credential in plaintext",
+  "other": "{file} keeps {n} credentials in plaintext"
  }
 }

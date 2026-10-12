@@ -200,6 +200,28 @@ class Harness(unittest.TestCase):
         self.assertGreater(doc["codex"]["listing_chars"], 0)
         self.assertIn(("codex/shared-one", "download-exec"), {(h["skill"], h["rule"]) for h in doc["security"]})
 
+    def test_provider_keys_in_tool_configs_are_named_never_quoted(self):
+        """OBS-74: a credential-shaped value under a credential-like name in a tool's own config is named."""
+        key = "sk-" + "or-v1-" + "Pl4inT3xt" * 6
+        (self.home / ".hermes").mkdir()
+        (self.home / ".hermes" / ".env").write_text(f"TERMINAL_TIMEOUT=60\nOPENROUTER_API_KEY={key}\nMODEL_ID=abc\n")
+        share = self.home / ".local" / "share" / "opencode"
+        share.mkdir(parents=True)
+        (share / "auth.json").write_text(json.dumps({"openrouter": {"type": "api", "key": key}}))
+        (self.home / ".claude.json").write_text(json.dumps({"oauthAccount": {"accountUuid": "0f8fad5b-d9cb-469f-a165-70867728950e"},
+                                                             "mcpServers": {"x": {"headers": {"Authorization": f"Bearer {key}"}}}}))
+        doc = self.scan()
+        rows = {r["file"]: r["names"] for r in doc["tool_plaintext"]}
+        self.assertEqual(rows["~/.hermes/.env"], ["OPENROUTER_API_KEY"])
+        self.assertEqual(rows["~/.local/share/opencode/auth.json"], ["openrouter.key"])
+        self.assertEqual(rows["~/.claude.json"], ["mcpServers.x.headers.Authorization"],
+                         "only the MCP blocks of .claude.json are read")
+        self.assertNotIn(key, json.dumps(doc))
+        found = self.findings()
+        self.assertIn("harness:plaintext:~/.hermes/.env",
+                      {f["subject"] for f in found if f["type"] == "harness.plaintext_secret"})
+        self.assertNotIn(key, json.dumps(found))
+
     def test_instructions_and_the_deferral_setting_are_read(self):
         doc = self.scan()
         self.assertEqual(doc["instructions"][0]["path"], "~/.claude/CLAUDE.md")
