@@ -28,8 +28,8 @@
     {
       "path": "agent/observe.py",
       "source_sha256": "aebe0cf5f8260da864b512a03c358a46d4e423cf762bbead97c9746a5746753a",
-      "export_sha256": "492c847674b9258ac722a3c00e2f9fa20834698601157ee3f60f976674880fbd",
-      "bytes": 35636,
+      "export_sha256": "80a8f1276b5cb5f109c4595c79218ec6bd961562fd801fc93964dc0279436f10",
+      "bytes": 36375,
       "python_comments_removed": 202,
       "python_docstrings_removed": 6,
       "tool_descriptions_retained": 0,
@@ -291,8 +291,8 @@
       "path": "collectors/scan_git_hygiene.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "187802b632b67c5000dcb5f2592b0a846731d505001fbad5dcd518e11714ddb3",
-      "bytes": 10558
+      "export_sha256": "632b22850195c0453e3118188cff99257d4d36b03f80d8368671eaae1dc773b6",
+      "bytes": 12191
     },
     {
       "path": "collectors/scan_github.py",
@@ -2093,8 +2093,8 @@
       "path": "tests/test_agent_queue.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "498e4ab784acdc72529839bd59bc69d328e9de6caebdbbc76aef76038b988a7a",
-      "bytes": 13343
+      "export_sha256": "623f6c4a57683968c75fffb48cb0ef3fb1ed6f1d5321dc894c6a4c86cb3c40b3",
+      "bytes": 14489
     },
     {
       "path": "tests/test_agent_secrets.py",
@@ -2785,8 +2785,8 @@
       "path": "tests/test_leak_scan_incremental.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7030637d3ffe0d054e69b78f2f1b8c77df394d529cdc0a623cf5bb439f715fb1",
-      "bytes": 4428
+      "export_sha256": "71fbcbabaa0985543c2a78be17f68f09c38044ccbbd960134b45d9bb40502e2c",
+      "bytes": 6767
     },
     {
       "path": "tests/test_ledger.py",
@@ -2851,8 +2851,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "be242d59e9ad919f10c3ef0ff583a4fc66ac5ecdcb9c30570147012b3688a4f4",
-      "bytes": 27410
+      "export_sha256": "d1229c00b30472156d1dcdff9de359055ca1fac1e0c90bb3d2d5b7a1279bf3c7",
+      "bytes": 28626
     },
     {
       "path": "tests/test_machine_mcp_inventory.py",
@@ -4335,8 +4335,8 @@
     {
       "path": "tools/scan_leaks.py",
       "source_sha256": "a6dead1ccdd505ddbdb6efabe884d1cc2acc8be744930c70cf1b1223eb39bc1e",
-      "export_sha256": "786ba53325492cca789f7c172f5fa77fb7fbf66b7ebad7900c11d7f172838377",
-      "bytes": 27458,
+      "export_sha256": "8e5368d27f0134e885f04f7e4e7273c0ce9f8007c288969c449014bf2eb3f312",
+      "bytes": 29040,
       "python_comments_removed": 25,
       "python_docstrings_removed": 6,
       "tool_descriptions_retained": 0,

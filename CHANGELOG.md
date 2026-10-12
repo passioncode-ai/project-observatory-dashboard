@@ -14,6 +14,16 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Changed
 
+- **`leaks`, `git-hygiene` and `agent` stop before their deadline instead of being killed** (OBS-52), reading
+  `OBSERVATORY_STEP_DEADLINE` as the folder scan, `integrity` and the plugins already do:
+  - `leaks` starts a file only while two minutes are left and a SQLite store only while one is. Offsets of what it
+    read are kept; what it did not read is named in `degraded` as unmeasured, never clean, and a store's mark does
+    not move.
+  - `git-hygiene` measures the least recently measured checkouts first. The ones it did not reach carry their last
+    measurement, marked `stale`, so no checkout starves.
+  - `agent` starts a model call only while a whole call (150 s) fits, so a paid answer is never lost. The run
+    report names the deadline, and the deltas wait for the next run.
+
 - **Trust tiers, written down** (Fabric ADR-0144 amendment 4): on the operator's own machines (T0, and enrolled
   machines T1) the meter and the doors never demand a delegation token — `slotsRequireGrant: when-token` and
   `keyserverRequiresDelegation: off` stay the settings there; the strict ones are for a machine that serves another

@@ -63,6 +63,12 @@ import atomic
 import paths              
 import safe_git  # noqa: E402  — the engine's one git door
 import sqlite_scan  # noqa: E402  — when a store may be read from its last mark (PB-131)
+import step_budget  # noqa: E402  — the time this tick step has left (OBS-52)
+
+#: Seconds kept back from the step's deadline: the two SQLite stores, then the answer itself. A file is
+#: started only while more than FILE_RESERVE_S is left, a store only while more than STORE_RESERVE_S is.
+STORE_RESERVE_S = 60.0
+FILE_RESERVE_S = 2 * STORE_RESERVE_S
 
 # Direct scanner callers may use names; main uses a name and version pair.
 SecretRef = str | tuple[str, str | None]
@@ -483,7 +489,11 @@ def main(argv: list[str]) -> int:
     unreadable: list[dict] = []
     hits: dict[tuple[SecretRef, str], int] = {}
     read_bytes = 0
-    for p in files:
+    cut_at = None                    # the index of the first target the deadline left unread (OBS-52)
+    for i, p in enumerate(files):
+        if step_budget.remaining() < FILE_RESERVE_S:
+            cut_at = i
+            break
         key = str(p)
         if key in home_paths:
             continue
@@ -513,23 +523,29 @@ def main(argv: list[str]) -> int:
     own = paths.DB
     marks = sqlite_mark.get("stores") or {}
     results = {}
+    stores_cut = []
     for store in (mem, own):
+        if step_budget.remaining() < STORE_RESERVE_S:
+            # Unread, not clean: the mark stays where it was, so the next pass reads what this one did not.
+            results[store] = ({}, None, None, 0)
+            stores_cut.append(str(store))
+            continue
         since = {} if full else marks.get(str(store))
         results[store] = scan_sqlite(store, pattern, by_value, since)
     new_mark = sqlite_scan.next_mark(
         sqlite_mark, digest, full, today,
-        {str(store): r[2] for store, r in results.items() if not r[1]},
-        not any(r[1] for r in results.values()))
+        {str(store): r[2] for store, r in results.items() if not r[1] and str(store) not in stores_cut},
+        not any(r[1] for r in results.values()) and not stores_cut)
     for store, (store_hits, problem, _high, _rows) in results.items():
         for (name, where_in), n in store_hits.items():
             hits[(name, f"{store}#{where_in}")] = hits.get((name, f"{store}#{where_in}"), 0) + n
         if problem:
             notes.append({"what": str(store), "why": f"a SQLite store that would not open: {problem}"})
     _hits, mem_problem, _high, mem_rows = results[mem]
-    companion = {"path": str(mem), "read": mem.is_file() and not mem_problem,
+    companion = {"path": str(mem), "read": mem.is_file() and not mem_problem and str(mem) not in stores_cut,
                  "mode": "full" if full else "incremental", "why": why, "rows_read": mem_rows}
     own_problem, own_rows = results[own][1], results[own][3]
-    own_store = {"path": str(own), "read": own.is_file() and not own_problem,
+    own_store = {"path": str(own), "read": own.is_file() and not own_problem and str(own) not in stores_cut,
                  "mode": "full" if full else "incremental", "rows_read": own_rows}
 
     atomic.write_json(STATE, {"updated_at": now, "offsets": state,
@@ -540,6 +556,14 @@ def main(argv: list[str]) -> int:
             for ((name, version), where), n in sorted(hits.items(), key=lambda kv: -kv[1])]
     rows, suppressed = apply_suppressions(rows, rules)
     notes = notes + unreadable
+    degraded = []
+    if cut_at is not None:
+        degraded.append({"why": f"the step's time ran out after {cut_at} of {len(files)} targets; the other "
+                                f"{len(files) - cut_at} resume from their offsets on the next pass",
+                         "effect": "those targets are UNMEASURED by this pass, not clean"})
+    for store in stores_cut:
+        degraded.append({"why": f"the step's time ran out before {store} was read; its mark did not move",
+                         "effect": "that store is UNMEASURED by this pass, not clean"})
     atomic.write_json(OUT, {
         "scanned_at": now,
         "known": len(values),
@@ -557,7 +581,8 @@ def main(argv: list[str]) -> int:
         "not_scanned": notes,
         "companion_store": companion,
         "observatory_store": own_store,
-        "degraded": [],
+        "partial": bool(degraded),
+        "degraded": degraded,
     })
     print(f"leaks: {len(values)} known value(s) against {len(files)} target(s), "
           f"{read_bytes/1e6:.1f} MB read, {len(rows)} sighting(s); companion store "
