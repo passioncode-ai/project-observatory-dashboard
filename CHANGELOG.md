@@ -19,6 +19,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   and model, from a receipt written at every charge (tokens and cost with its basis, never a prompt or a caller).
   The fabric-service schemas are vendored again at contract `7931c1d`; the kit's conformance probe now runs
   `usage.report`.
+- **Plaintext credentials in agent tools' configs** (OBS-74): the harness scan names, per file, the credential-shaped
+  values kept by Hermes, opencode, Codex, Claude Code's MCP blocks, Gemini and Cursor — names only, never a value —
+  as `harness.plaintext_secret`, with the vault and `use_secret.py` as the remedy. Design: `docs/design/HARNESS.md`
+  H15.
 - **`grant.check` is declared in `fabric-agent.json`** (OBS-67; manifest revision 9): effect `none`, its
   input and output schemas published at `v0.24.1`, a probe that a call carrying no delegation token is denied
   `principal-unproven`. Fabric's registry reads the meter from the service descriptor; the token-carrying call

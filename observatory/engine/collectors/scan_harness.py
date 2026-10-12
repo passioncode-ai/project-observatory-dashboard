@@ -395,6 +395,73 @@ def codex_skills(home: Path, roots: list[Path]) -> tuple[dict, list[dict]]:
     return {"skills": len(rows), "listing_chars": sum(rows)}, hits
 
 
+#: Where agent tools keep provider credentials of their own (OBS-74), and how each file is read. A tool's own login
+#: session (Codex's auth.json, Claude Code's OAuth) is not listed: it is the tool's to keep and refresh.
+TOOL_CONFIGS = (
+    (".hermes/.env", "env"),
+    (".local/share/opencode/auth.json", "json"),
+    (".config/opencode/opencode.json", "json"),
+    (".codex/config.toml", "toml"),
+    (".claude.json", "json-mcp"),
+    (".gemini/settings.json", "json"),
+    (".cursor/mcp.json", "json"),
+)
+#: Names under which a credential-shaped value is a credential and not an id that merely looks random.
+SECRET_NAME = re.compile(r"key|token|secret|password|passwd|auth|bearer|credential", re.I)
+
+
+def _walk(node, path: str = ""):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from _walk(v, f"{path}.{k}" if path else str(k))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from _walk(v, f"{path}[{i}]")
+    elif isinstance(node, str):
+        yield path, node
+
+
+def tool_plaintext(home: Path) -> list[dict]:
+    """Provider credentials kept in plaintext in agent tools' own config files: per file, the names (a key, or
+    a dotted path in JSON/TOML) whose value is credential-shaped under a credential-like name. Never a value;
+    never the file's other content. `.claude.json` is read only under `mcpServers` (env and headers)."""
+    import credential_shape
+    out = []
+    for rel, kind in TOOL_CONFIGS:
+        path = home / rel
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        pairs: list[tuple[str, str]] = []
+        if kind == "env":
+            for line in text.splitlines():
+                m = re.match(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$", line)
+                if m:
+                    pairs.append((m.group(1), m.group(2).strip().strip("'\"")))
+        else:
+            try:
+                if kind == "toml":
+                    import tomllib
+                    doc = tomllib.loads(text)
+                else:
+                    doc = json.loads(text)
+            except (ValueError, ImportError):
+                continue
+            if kind == "json-mcp":
+                doc = {"mcpServers": doc.get("mcpServers") or {},
+                       "projects": {p: {"mcpServers": (v or {}).get("mcpServers") or {}}
+                                    for p, v in (doc.get("projects") or {}).items() if isinstance(v, dict)}}
+            pairs = list(_walk(doc))
+        names = sorted({name for name, value in pairs
+                        if SECRET_NAME.search(name.rsplit(".", 1)[-1]) and credential_shape.shaped(value)})
+        if names:
+            out.append({"file": "~/" + rel, "names": names[:20], "count": len(names)})
+    return out
+
+
 def scan(home: Path, pins_file: Path, own_owners: set[str] | None = None) -> dict:
     own_owners = {o.lower() for o in (own_owners or {"passioncode-ai", "ssheleg"})}
     claude = home / ".claude"
@@ -486,6 +553,7 @@ def scan(home: Path, pins_file: Path, own_owners: set[str] | None = None) -> dic
         "instructions": instructions,
         "mcp_deferral": {"off": deferral_off, "base_url_host": base_host or None, "betas_disabled": betas_off},
         "projects": projects,
+        "tool_plaintext": tool_plaintext(home),
         "codex": codex,
         "hooks": hooks,
         "hook_security": hooks_found,
