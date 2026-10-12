@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """The DigitalOcean door against a fake `doctl` and a scratch vault.
 
-Each check is a way the 2026-10-10 rotation went wrong or could have:
+Each check is a way a rotation by hand goes wrong:
 1. a value in stdout/stderr — the door exists because the API's answer leaks;
-2. a 503 from App Platform between the reset and the redeploy left a live site on a
-   dead password for five minutes — every call but the reset is retried;
+2. a 503 from App Platform between the reset and the redeploy leaves a live site on a
+   dead password — every call but the reset is retried;
 3. a literal `DB_PASSWORD` in an app's own spec is not refreshed by a redeploy — it is
    written into the spec in the same run;
 4. a precondition that fails AFTER the reset strands the consumers — everything the
@@ -45,7 +45,11 @@ key = " ".join(args[:3])
 if s["flaky"].get(key, 0) > 0:
     s["flaky"][key] -= 1; fail("Error: 503 Service Unavailable")
 c = s["cluster"]
+if args[:2] == ["auth", "list"]:
+    st.write_text(json.dumps(s)); print("default\nexample-context (current)"); sys.exit(0)
 if args[:2] == ["account", "get"]:
+    if s.get("account_fails"):
+        fail("Error: unable to get account")
     out({"email": "operator@example.invalid", "team": {"name": "example-team"}})
 if args[:2] == ["databases", "list"]:
     out([c])
@@ -157,6 +161,7 @@ def main() -> int:
         check("credential delivers without printing", r.returncode == 0 and OLD not in r.stdout + r.stderr, r.stderr)
 
     review_round_one()
+    review_round_two()
     print(f"{len(FAILURES)} failed" if FAILURES else "all passed")
     return 1 if FAILURES else 0
 
@@ -289,10 +294,86 @@ def review_round_one() -> None:
             os.environ.clear(); os.environ.update(saved)
         state = json.loads((tmp / "state.json").read_text())
         check("a vault failure after the reset says the password WAS reset and gives the next step",
-              rc == 2 and "WAS reset" in err.getvalue() and "db credential shop-db doadmin" in err.getvalue(),
+              rc == 3 and "WAS reset" in err.getvalue() and "db credential shop-db doadmin" in err.getvalue(),
               err.getvalue()[-400:])
         check("and the apps were still moved to the new password",
               any(c[:3] == ["apps", "create-deployment", "app-bind"] for c in state["calls"]))
+
+
+def review_round_two() -> None:
+    """Round 2 (PLN-142): nothing after the reset may strand a consumer, unnamed."""
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp)
+        put(env, "shop", "DATABASE_URL", "postgresql://old@example.invalid/x")
+        (tmp / "vault" / "shop" / "prod" / "DATABASE_URL").chmod(0o644)
+        r = run(env, "db", "rotate", "shop-db", "doadmin", "--to", "vault:shop/prod/DATABASE_URL", "--wait", "5")
+        state = json.loads((tmp / "state.json").read_text())
+        check("a slot the vault will not read stops the rotation before the reset",
+              r.returncode == 1 and "nothing was reset" in r.stderr and "Traceback" not in r.stderr
+              and not any(c[:3] == ["databases", "user", "reset"] for c in state["calls"]), r.stderr[-300:])
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        pool = "postgresql://pooluser:" + OLD + "@shop-db-pool.example:25061/shop-pool?sslmode=require"
+        env = setup(tmp)
+        st = json.loads((tmp / "state.json").read_text())
+        st["specs"]["app-pool"] = {"name": "pool", "envs": [{"key": "DATABASE_URL", "value": pool}]}
+        st["deps"]["app-pool"] = [{"id": "dep-old-p", "phase": "ACTIVE"}]
+        (tmp / "state.json").write_text(json.dumps(st))
+        r = run(env, "db", "rotate", "shop-db", "doadmin", "--to", "vault:shop/prod/DATABASE_URL",
+                "--spec-env", "app-pool:DATABASE_URL", "--wait", "5")
+        got = json.loads((tmp / "state.json").read_text())["specs"]["app-pool"]["envs"][0]["value"]
+        check("a plain URL literal keeps its own user, host, port, path and query; only the password changes",
+              r.returncode == 0 and got == pool.replace(OLD, NEW), (r.stdout + r.stderr)[-300:])
+        check("and the run names where that URL points", "shop-db-pool.example:25061/shop-pool" in r.stdout, r.stdout[-300:])
+        check("nothing printed holds either password", OLD not in r.stdout + r.stderr and NEW not in r.stdout + r.stderr)
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp)
+        r = run(env, "db", "rotate", "shop-db", "doadmin", "--to", "vault:shop/prod/DATABASE_URL",
+                "--spec-env", "app-lit:DATABASE_URL", "--wait", "5")
+        state = json.loads((tmp / "state.json").read_text())
+        check("an encrypted URL literal without --db is refused before the reset",
+              r.returncode == 1 and "--db" in r.stderr and "nothing was reset" in r.stderr
+              and not any(c[:3] == ["databases", "user", "reset"] for c in state["calls"]), r.stderr[-300:])
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp, flaky={"apps update app-lit": 99})
+        r = run(env, "db", "rotate", "shop-db", "doadmin", "--to", "vault:shop/prod/DATABASE_URL",
+                "--app", "app-bind", "--spec-env", "app-lit:DB_PASSWORD", "--wait", "5")
+        state = json.loads((tmp / "state.json").read_text())
+        check("a failed literal update still redeploys the bindings",
+              any(c[:3] == ["apps", "create-deployment", "app-bind"] for c in state["calls"]), r.stderr[-300:])
+        check("names done and left across both kinds, with its own exit code",
+              r.returncode == 4 and "left: app-lit" in r.stderr and "done: app-bind" in r.stderr, r.stderr[-400:])
+        check("and never advises rerunning db rotate after a reset",
+              "rerun" not in r.stderr.lower() and "db credential" in r.stderr, r.stderr[-400:])
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp, account_fails=True)
+        r = run(env, "db", "rotate", "shop-db", "doadmin", "--to", "vault:shop/prod/DATABASE_URL", "--wait", "5")
+        check("the real doctl context is named, and a failed account read is 'team unknown'",
+              r.returncode == 0 and "doctl context: example-context" in r.stdout and "team unknown" in r.stdout,
+              (r.stdout + r.stderr)[-300:])
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp)
+        st = json.loads((tmp / "state.json").read_text())
+        st["apps"].append({"id": "app-cache", "spec": {"name": "cache", "databases": [{"name": "db", "cluster_name": "shop-db"}],
+                                                        "envs": [{"key": "REDIS_URL", "value": "EV[1:x]", "type": "SECRET"},
+                                                                 {"key": "SENTRY_DSN", "value": "EV[1:y]", "type": "SECRET"}]}})
+        (tmp / "state.json").write_text(json.dumps(st))
+        r = run(env, "db", "consumers", "shop-db")
+        check("consumers knows the URL keys (REDIS_URL, *_DSN) and says it sees only binding apps",
+              "REDIS_URL (url)" in r.stdout and "SENTRY_DSN (url)" in r.stdout and "binds this cluster" in r.stdout,
+              r.stdout)
+        r = run(env, "db", "rotate", "--help")
+        check("rotate's help says consumers are down between the reset and ACTIVE", "down" in r.stdout, r.stdout[-300:])
 
 
 if __name__ == "__main__":

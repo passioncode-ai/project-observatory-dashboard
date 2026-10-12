@@ -145,8 +145,12 @@ a user and moves every consumer you name (`db consumers` lists the App Platform 
 services started with `use_secret.py serve` from the slot are named for restart): it asks
 the vault for the slot and reads every spec before the reset, writes the connection URL
 or the password into each `--spec-env APP:KEY` literal as the key expects, redeploys each
-`--app`, retries every call but the reset, and waits for ACTIVE. A failure after the
-reset says the password WAS reset and names what is left. Nothing prints a value.
+`--app`, retries every call but the reset, and waits for ACTIVE; the consumers are down
+between the reset and ACTIVE. A failure after the reset says the password WAS reset,
+keeps moving the other apps, names what is left and never asks you to rerun `db rotate`.
+Exit codes: 0 done; 1 refused before the reset, nothing changed; after the reset 2 a
+deployment not ACTIVE, 3 the vault did not take the value, 4 an app not updated or
+redeployed, 5 the reset returned no password. Nothing prints a value.
 
 Cloudflare and OpenRouter have separate tools, `cloudflare.py` and
 `openrouter.py`. Check their installed `--help` and non-secret inventory first.

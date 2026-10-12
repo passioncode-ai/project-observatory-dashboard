@@ -24,6 +24,7 @@ until someone inventories it, and survives the agent that needed it.
 | Know before a handoff that a key is missing | the pack and the acceptance carry each credential's state and `credentialsMissing` | yes (new) |
 | Run a long-lived service with its keys | `use_secret.py serve [--env ENV] --consumer LABEL PROJECT NAME[,…] -- COMMAND`: vault only, then `exec` — the service is the process, gets launchd's signals and keeps its own output | yes (new) |
 | Release a slot only under a grant that names it | `FABRIC_DELEGATION_TOKEN` in the agent's environment: its token from Fabric's hub (aud `project-observatory`, scope `secret.use`); `run`, `serve` and `header` then release a vault slot only when a grant the token names has `credentialSource {kind: project-key, ref: PROJECT/ENV/NAME}`, never read a `.env`, and remove the token before the child starts (`docs/design/METER.md` M5) | yes (new; checked when a token is present; never demanded on the operator's machines, METER.md M0) |
+| Put a DigitalOcean database's connection URL in a slot, and rotate its password with every named consumer | `digitalocean.py db credential CLUSTER USER --db NAME --to vault:PROJECT/ENV/NAME`; `digitalocean.py db rotate … --app ID --spec-env ID:KEY` (doctl's current context is the credential; `db consumers CLUSTER` lists the App Platform apps that bind the cluster) | yes (new) |
 | Be told which services to restart after a rotation | `vault.py rotate` lists each recorded consumer with its `launchctl kickstart -k` command | yes (new) |
 
 ## Credentials in agent memory

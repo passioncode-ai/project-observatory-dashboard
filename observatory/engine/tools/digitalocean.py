@@ -129,8 +129,22 @@ def plan(to: str) -> dict:
     if not os.access(folder, os.W_OK | os.X_OK) or (exists and not os.access(slot, os.W_OK)):
         raise DoorError(f"the vault cannot write vault:{project}/{env}/{name} (its folder is not "
                         f"writable by this user)")
+    held = None
+    if exists:
+        # READ IT NOW, through the vault's own reader: a slot readable beyond its
+        # owner, or one that will not read, is refused here rather than after the
+        # reset, where the same error stranded every consumer (review round 2).
+        held = _read_slot(slot, f"{project}/{env}/{name}")
     return {"project": project, "env": env, "name": name, "slot": slot,
-            "verb": "rotate" if exists else "put"}
+            "verb": "rotate" if exists else "put", "held": held}
+
+
+def _read_slot(slot: pathlib.Path, target: str) -> str:
+    try:
+        return private_files._read_private(slot).strip()
+    except (private_files.VaultBoundaryError, OSError) as e:
+        raise DoorError(f"the vault will not read vault:{target} ({type(e).__name__}: "
+                        f"{str(e).splitlines()[0][:200] if str(e) else 'no reason given'})") from None
 
 
 def deliver(value: str, where: dict) -> str:
@@ -139,11 +153,14 @@ def deliver(value: str, where: dict) -> str:
     Returns what the vault said, which for `rotate` includes the services started
     from the slot that still hold the old value — the list a person restarts."""
     target = f"{where['project']}/{where['env']}/{where['name']}"
-    if where["verb"] == "rotate" and private_files._read_private(where["slot"]).strip() == value:
+    if where["verb"] == "rotate" and _read_slot(where["slot"], target) == value:
         return f"vault {target}: unchanged (it already holds this value)"
     vault = [sys.executable, str(ROOT / "tools" / "vault.py")]
-    p = subprocess.run([*vault, where["verb"], where["project"], where["env"], where["name"]],
-                       input=value, capture_output=True, text=True)
+    try:
+        p = subprocess.run([*vault, where["verb"], where["project"], where["env"], where["name"]],
+                           input=value, capture_output=True, text=True)
+    except OSError as e:
+        raise DoorError(f"vault {where['verb']} {target} could not run: {type(e).__name__}") from None
     if p.returncode != 0:
         # THE FIRST LINE is the vault's reason; the tail of stderr was a hint.
         first = (p.stderr.strip().splitlines() or ["no reason given"])[0][:300]
@@ -168,7 +185,10 @@ def cmd_list() -> int:
     return 0
 
 
-URLISH = ("_URL", "DATABASE_URL", "_DSN", "_URI")
+#: Keys that hold a connection URL rather than a bare password.
+URL_KEYS = ("DATABASE_URL", "REDIS_URL", "_URL", "_DSN", "_URI")
+#: Keys that hold a database credential an app may keep in its own spec.
+CREDENTIAL_KEYS = ("PASSWORD", "DB_PASS", "DATABASE_URL", "REDIS_URL", "_DSN", "_URI")
 
 
 def literal_form(key: str, value: str) -> str:
@@ -177,9 +197,27 @@ def literal_form(key: str, value: str) -> str:
     A SECRET's value is encrypted in the spec (`EV[…]`), so the name decides
     unless the value is plain and itself a URL. Writing a bare password where
     the app expects `postgresql://…` breaks the app as surely as the old one."""
-    if any(k in key.upper() for k in URLISH) or "://" in value:
+    if key.upper().endswith(URL_KEYS) or any(k in key.upper() for k in URL_KEYS[:2]) or "://" in value:
         return "url"
     return "password"
+
+
+def with_password(url: str, password: str) -> str:
+    """The app's OWN URL with only the password replaced: its user, host, port
+    (a pool listens on its own), path and query are kept (review round 2)."""
+    parts = urllib.parse.urlsplit(url)
+    if not parts.username or "@" not in parts.netloc:
+        raise DoorError("a URL literal carries no user@ to put the password beside")
+    host = parts.netloc.rsplit("@", 1)[1]
+    netloc = f"{parts.username}:{urllib.parse.quote(password, safe='')}@{host}"
+    return urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def url_place(url: str) -> str:
+    """host:port/db of a URL — where it points, never who or with what."""
+    parts = urllib.parse.urlsplit(url)
+    host = parts.netloc.rsplit("@", 1)[-1]
+    return f"{host}{parts.path or ''}"
 
 
 def consumers(c: dict) -> list[dict]:
@@ -194,7 +232,7 @@ def consumers(c: dict) -> list[dict]:
         for scope in [spec, *[x for k in ("services", "workers", "jobs") for x in spec.get(k) or []]]:
             for e in scope.get("envs") or []:
                 v = str(e.get("value", ""))
-                if "${" not in v and any(s in e["key"] for s in ("PASSWORD", "DATABASE_URL", "DB_PASS")):
+                if "${" not in v and any(s in e["key"].upper() for s in CREDENTIAL_KEYS):
                     literals.append(f"{scope.get('name', 'app')}:{e['key']} ({literal_form(e['key'], v)})")
         out.append({"app": app["id"], "name": spec.get("name"),
                     "binds": [(d.get("name"), d.get("db_user") or "default") for d in bound],
@@ -207,8 +245,10 @@ def cmd_consumers(ref: str) -> int:
     found = consumers(c)
     for x in found:
         print(f"{x['name']:28} {x['app']} binds={x['binds']} own-literals={x['literals'] or '-'}")
+    print("only App Platform apps whose spec binds this cluster are listed; an app that reaches it by "
+          "a URL alone, a droplet, a Worker or a laptop is not visible here")
     if not found:
-        print("no App Platform app binds this cluster (droplets, Workers and laptops are not visible here)")
+        print("no App Platform app binds this cluster")
     print(f"exposure: {exposure(c['id'])}")
     return 0
 
@@ -229,12 +269,30 @@ def cmd_credential(ref: str, user: str, db: str | None, to: str) -> int:
     return 0
 
 
+def current_context() -> str:
+    """doctl's context by name: `DIGITALOCEAN_CONTEXT` when set (doctl reads it), else
+    the one `doctl auth list` marks `(current)`."""
+    if os.environ.get("DIGITALOCEAN_CONTEXT"):
+        return os.environ["DIGITALOCEAN_CONTEXT"]
+    try:
+        p = subprocess.run([DOCTL, "auth", "list"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    for line in p.stdout.splitlines():
+        if "(current)" in line:
+            return line.replace("(current)", "").strip() or "unknown"
+    return "unknown"
+
+
 def context_line() -> str:
     """Which DigitalOcean account the reset will act in — names, never the email."""
-    acct = doctl("account", "get") or {}
-    team = ((acct.get("team") or {}).get("name") if isinstance(acct, dict) else None) or "personal account"
-    ctx = os.environ.get("DIGITALOCEAN_CONTEXT") or "current"
-    return f"doctl context: {ctx}; team: {team}"
+    try:
+        acct = doctl("account", "get", tries=1) or {}
+        team = ((acct.get("team") or {}).get("name") if isinstance(acct, dict) else None) or "personal account"
+        team_text = f"team: {team}"
+    except DoorError:
+        team_text = "team unknown (doctl account get failed)"
+    return f"doctl context: {current_context()}; {team_text}"
 
 
 def deployments(app: str) -> set[str]:
@@ -253,94 +311,135 @@ def wait_new(app: str, before: set[str], timeout: float) -> str:
     return f"? still {phase} after {int(timeout)} s"
 
 
+#: Exit codes of `db rotate`. 1 is a refusal before the reset: nothing changed.
+#: Every other non-zero code is a failure AFTER the reset; when several happen the
+#: largest is returned, and each is named on stderr with its next step.
+EXIT_NOT_ACTIVE = 2       # a deployment did not reach ACTIVE
+EXIT_VAULT = 3            # the vault did not take the new value
+EXIT_APP = 4              # an app could not be updated or redeployed
+EXIT_RESET = 5            # the reset answered without a password
+
+
 def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
                spec_envs: list[str], wait: float) -> int:
     # 1. everything we need, before anything changes
     try:
         where = plan(to)
+        print(context_line())
+        c = cluster(ref)
+        literal: dict[str, list[str]] = {}
+        for item in spec_envs:
+            app, _, key = item.partition(":")
+            if not key:
+                raise DoorError(f"--spec-env is APP_ID:KEY, got {item!r}")
+            literal.setdefault(app, []).append(key)
+        specs = {app: doctl("apps", "spec", "get", app, "--format", "json") for app in literal}
+        for app, keys in literal.items():
+            envs = {e["key"]: e for e in specs[app].get("envs") or []} | {
+                e["key"]: e for k in ("services", "workers", "jobs") for x in specs[app].get(k) or []
+                for e in x.get("envs") or []}
+            missing = [k for k in keys if k not in envs]
+            if missing:
+                raise DoorError(f"app {app} has no env {missing}")
+            for k in keys:
+                v = str(envs[k].get("value", ""))
+                if literal_form(k, v) == "url":
+                    if "://" in v:
+                        with_password(v, "x")          # a URL we cannot rewrite is refused now
+                    elif not db:
+                        raise DoorError(f"app {app} keeps {k} as an encrypted URL; its database cannot be "
+                                        f"read from the spec, so give --db NAME")
+        every = list(dict.fromkeys([*apps, *literal]))
+        before = {app: deployments(app) for app in every}
     except DoorError as e:
         raise DoorError(f"{e}: nothing was reset") from None
-    print(context_line())
-    c = cluster(ref)
-    literal = {}
-    for item in spec_envs:
-        app, _, key = item.partition(":")
-        if not key:
-            raise DoorError(f"--spec-env is APP_ID:KEY, got {item!r}")
-        literal.setdefault(app, []).append(key)
-    specs = {app: doctl("apps", "spec", "get", app, "--format", "json") for app in literal}
-    for app, keys in literal.items():
-        present = {e["key"] for e in specs[app].get("envs") or []} | {
-            e["key"] for k in ("services", "workers", "jobs") for x in specs[app].get(k) or []
-            for e in x.get("envs") or []}
-        missing = [k for k in keys if k not in present]
-        if missing:
-            raise DoorError(f"app {app} has no env {missing}: nothing was reset")
-    every = list(dict.fromkeys([*apps, *literal]))
-    before = {app: deployments(app) for app in every}
     # 2. the reset — once
     reset = one(doctl("databases", "user", "reset", c["id"], user, tries=1))
     pw = (reset or {}).get("password")
     if not pw:
-        raise DoorError("the reset answered without a password; check the user in the console")
+        print(f"digitalocean: the reset of {user} on {c['name']} answered without a password; the password "
+              f"may have changed. Next: `digitalocean.py db credential {ref} {user} --to {to}`, then move each "
+              f"consumer by hand", file=sys.stderr)
+        return EXIT_RESET
     print(f"reset {c['name']} user {user}")
     url = connection_url(c, user, pw, db)
+    code = 0
+    vault_failed = False
     # 3. the vault — a refusal now does not stop the apps from moving
-    vault_failed = None
     try:
         print(deliver(url, where))
     except DoorError as e:
-        vault_failed = str(e)
+        code, vault_failed = max(code, EXIT_VAULT), True
         print(f"digitalocean: the password of {user} on {c['name']} WAS reset, but the vault did not take "
               f"it ({e}); moving the apps anyway so none sits on a dead password", file=sys.stderr)
-    # 4. literals → apps update (redeploys)
+    # 4. literals → apps update (redeploys); 5. bindings → redeploy. A failure is
+    # recorded and the rest still move: stopping would leave them on a dead password.
     done: list[str] = []
+    left: list[str] = []
     for app, keys in literal.items():
         spec = specs[app]
         for scope in [spec, *[x for k in ("services", "workers", "jobs") for x in spec.get(k) or []]]:
             for e in scope.get("envs") or []:
                 if e["key"] in keys:
-                    form = literal_form(e["key"], str(e.get("value", "")))
-                    e["value"], e["type"] = (url if form == "url" else pw), "SECRET"
+                    old_value = str(e.get("value", ""))
+                    if literal_form(e["key"], old_value) == "password":
+                        e["value"] = pw
+                    elif "://" in old_value:
+                        e["value"] = with_password(old_value, pw)
+                    else:
+                        e["value"] = url
+                    if literal_form(e["key"], old_value) == "url":
+                        print(f"  app {app}: {e['key']} → {url_place(e['value'])}")
+                    e["type"] = "SECRET"
         fd, path = tempfile.mkstemp(suffix=".json")
         try:
             os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w") as f:
                 json.dump(spec, f)
             doctl("apps", "update", app, "--spec", path)
+            done.append(app)
+            print(f"  app {app}: {', '.join(keys)} replaced in its spec")
         except DoorError as e:
-            left = [a for a in literal if a not in done]
-            raise DoorError(f"{e}. The password WAS reset; apps done: {', '.join(done) or 'none'}; apps left: "
-                            f"{', '.join(left)} — those still hold the OLD password. Next: rerun this command "
-                            f"with only their --spec-env, or set the key in each app by hand") from None
+            left.append(app)
+            print(f"digitalocean: app {app} was not updated: {e}", file=sys.stderr)
         finally:
             os.remove(path)
-        done.append(app)
-        print(f"  app {app}: {', '.join(keys)} replaced in its spec")
     del pw, url
-    # 5. bindings → redeploy
     for app in apps:
-        if app not in literal:
+        if app in literal:
+            continue
+        try:
             doctl("apps", "create-deployment", app)
+            done.append(app)
+        except DoorError as e:
+            left.append(app)
+            print(f"digitalocean: app {app} was not redeployed: {e}", file=sys.stderr)
+    if left:
+        code = max(code, EXIT_APP)
+        print(f"The password WAS reset. apps done: {', '.join(done) or 'none'}; apps left: {', '.join(left)} — "
+              f"those still hold the OLD password. Next: `digitalocean.py db credential {ref} {user}"
+              + (f" --db {db}" if db else "") + f" --to {to}` puts the current value in the vault; then set "
+              f"each left app's key by hand (`doctl apps update APP --spec FILE`) or redeploy it "
+              f"(`doctl apps create-deployment APP`)", file=sys.stderr)
     # 6. wait
     failed = []
-    for app in every:
+    for app in [a for a in every if a not in left]:
         state = wait_new(app, before[app], wait)
         if not state.endswith("ACTIVE"):
             failed.append(app)
         print(f"  app {app} deployment {state}")
-    project, env, name = where["project"], where["env"], where["name"]
     if failed:
+        code = max(code, EXIT_NOT_ACTIVE)
         print("A consumer did not reach ACTIVE: its running copy still holds the OLD password. Fix it now: "
               + "; ".join(f"`doctl apps logs {app} --type deploy`" for app in failed), file=sys.stderr)
-    if vault_failed:
+    if vault_failed and not left:
         print(f"next: put the current password in the vault — `digitalocean.py db credential {ref} {user}"
               + (f" --db {db}" if db else "") + f" --to {to}` — it reads the reset value from the API",
               file=sys.stderr)
-    if failed or vault_failed:
-        return 2
-    print(f"next: verify each consumer's health, then `vault.py settle {project} {env} {name} "
-          "--how … --revocation-evidence … --consumer-evidence …` if this closes a leak")
+    if code:
+        return code
+    print(f"next: verify each consumer's health, then `vault.py settle {where['project']} {where['env']} "
+          f"{where['name']} --how … --revocation-evidence … --consumer-evidence …` if this closes a leak")
     return 0
 
 
@@ -352,8 +451,12 @@ def main(argv: list[str] | None = None) -> int:
     p = db.add_parser("consumers", help="apps that bind a cluster")
     p.add_argument("cluster")
     for name, text in (("credential", "deliver a user's connection URL to the vault"),
-                       ("rotate", "reset a user's password and move every consumer you name to it")):
-        p = db.add_parser(name, help=text)
+                       ("rotate", "reset a user's password and move every consumer you name to it; the consumers are "
+                                 "down between the reset and their new deployment reaching ACTIVE. Exit 0 done, "
+                                 "1 refused before the reset (nothing changed), after the reset: 2 a deployment "
+                                 "not ACTIVE, 3 the vault did not take the value, 4 an app not updated or "
+                                 "redeployed, 5 the reset returned no password")):
+        p = db.add_parser(name, help=text, description=text)
         p.add_argument("cluster")
         p.add_argument("user")
         p.add_argument("--db", help="database name in the URL (pg/mysql); default defaultdb")

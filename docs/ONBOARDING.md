@@ -315,8 +315,12 @@ is not included in workspace backup snapshots.
 password or URL in their own spec; `db credential CLUSTER USER --db NAME --to vault:PROJECT/ENV/NAME`
 puts the connection URL in the vault on stdin; `db rotate … --app ID --spec-env ID:KEY` resets the
 password once and moves every consumer you name, after reading everything it needs and asking the
-vault for the slot, and prints the `use_secret.py serve` services that still need a restart. Do not
-ask a provider MCP tool for clusters: its answer can carry every cluster's passwords.
+vault for the slot, and prints the `use_secret.py serve` services that still need a restart. `db
+consumers` lists only App Platform apps whose spec binds the cluster; an app that reaches it by a URL
+alone, a droplet, a Worker or a laptop is yours to name. The consumers are down between the reset and
+their new deployment reaching ACTIVE. A folder you filled with `vault.py inject` keeps the old value
+until you run `vault.py inject` for it again. Exit codes: exit 0 done; 1 refused before the reset, nothing changed; after the reset 2 a deployment not ACTIVE, 3 the vault did not take the value, 4 an app not updated or redeployed, 5 the reset returned no password (several: the largest). Do not ask a provider MCP
+tool for clusters: its answer can carry every cluster's passwords.
 
 Known-value scanning finds occurrences of values already known locally. It
 cannot prove the absence of unknown, encoded or previously deleted values.
