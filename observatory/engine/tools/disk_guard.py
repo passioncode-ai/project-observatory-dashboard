@@ -1,50 +1,41 @@
 #!/usr/bin/env python3
-"""The disk guard: keep free space without breaking anybody's work, every hour.
+"""The disk guard: keep free space without breaking anybody's work, on every system.
 
-WHY. On 2026-10-11 the operator's disk fell to 1.7 GB free while the self-cleaning
-had not run for a day: `machine` and `cleanup` sit in the middle of the tick, after
-the slow collectors, and a loaded machine spends the tick's whole window before
-reaching them ("not started — the last 300 s … are kept", hour after hour). The
-fuller the disk, the slower the machine, the less the cleanup ran. So the guard is
-not a tick step: the hourly maintenance job (`maintain run`, launchd/systemd, always
-on) runs it FIRST, before the backup that itself needs space, and a person can run it
-at once with `project-observatory full disk-guard [--apply]`.
+WHY. On 2026-10-11 the operator's disk fell to 0.3 GB free and the machine shut down while
+the self-cleaning starved in a tick too long to reach it. The guard runs from the
+maintenance job instead (`maintain run`: launchd, a systemd user timer or Task Scheduler,
+every 15 minutes), FIRST in its pass, before the update and the backup that need space; a
+person runs it at once with `project-observatory full disk-guard [--apply]`. It acts hourly
+while space is normal and on every pass below the `low` line.
 
-PRESSURE DECIDES HOW FAR IT GOES. `free_gb` below `levels.low` or `levels.critical`
-(config/cleanup.json → guard) moves the thresholds of every class: build output of a
-checkout idle 14 days at `normal`, 3 at `low`, 1 at `critical`; temporary entries
-older than 3 days, then 1; cache tools' gentle prune, then their full clean.
+The rules — and the review that set them — are docs/design/DISK-GUARD.md. In short:
 
-WHAT IT NEVER DOES — the reason every class looks the same before it acts:
-  * removes a path a process has open or works inside: ONE `lsof` listing per run
-    (open files and working directories); when that listing cannot be taken, no
-    path is removed at all and the run says so;
-  * opens a privacy-guarded place (`scan_machine.protected_place`), follows a
-    symlink, or touches another user's file;
-  * stops, signals or restarts a process: memory and swap are REPORTED, with the
-    command that would free them (operator decision 2026-10-11);
-  * starts an app: a cache command whose tool needs a daemon (docker) runs only when
-    that daemon is already running;
-  * runs a cache command while the same tool is running (a prune under an install).
+  * NOTHING A PROCESS HOLDS: open, mapped, executed from, worked inside, or named on its
+    command line (holders.py). The listing is taken again for every class, and every
+    removal re-checks its target right before it happens: still unheld, still old.
+  * ONLY WHAT LOSES NOTHING: caches, build output git ignores, temporary entries, old
+    Trash, abandoned browser clones, the tools' own cache commands; then the cleanup's git
+    tier (merged or pushed branches, clean worktrees whose branch stays).
+  * NO PRIVACY-GUARDED PLACE is opened (`scan_machine.protected_place`), no symlink
+    followed, no tree removed that holds another account's file, no process stopped, no
+    daemon started.
+  * PRESSURE moves every threshold: `normal`, `low` (< 25 GB free), `critical` (< 10 GB).
+  * IT FINISHES INSIDE ITS BUDGET and always writes what it did — ran, not due, busy — with
+    the free-space delta the disk reports (`du` counts an APFS clone in full).
 
-THE NUMBER IT REPORTS IS THE ONE THE DISK SAYS. `du` counts an APFS clone in full
-(measured 2026-10-11: 19 abandoned Chrome code-sign clones, "13 GB" by `du`, freed
-0 MB), so every action is journalled with the free-space delta read from `statvfs`
-before and after it, beside the estimate.
-
-Every action is one line in store/logs/cleanup.jsonl (`mode: guard`); the run's
-report is store/raw/disk-guard.json, which the Machine page and findings read.
+Its rows go to store/logs/disk-guard.jsonl (one per action, one summary per run); the git
+tier keeps its undo record in store/logs/cleanup.jsonl. The report is store/raw/disk-guard.json.
 
     disk_guard.py                plan only: what would go at the current pressure
     disk_guard.py --apply        act now (a person, or an agent on their word)
-    disk_guard.py --auto         act when features.auto_cleanup is on (maintenance job)
+    disk_guard.py --auto         act when features.auto_cleanup is on (the maintenance job)
     disk_guard.py --level L      plan/act as if pressure were L (normal|low|critical)
     disk_guard.py --json         print the run's summary as one JSON line (the maintenance job)
     disk_guard.py --budget S     stop by itself after S seconds (default `run_budget_seconds`)
 """
 from __future__ import annotations
 
-import bisect
+import contextlib
 import fnmatch
 import json
 import os
@@ -60,54 +51,85 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "collectors"))
+sys.path.insert(0, str(ROOT / "tools"))
 import configuration  # noqa: E402
 import osprivacy  # noqa: E402
 import paths  # noqa: E402
 import safe_git  # noqa: E402
+from holders import Holders, running  # noqa: E402,F401  (re-exported: tests patch `disk_guard.running`)
 
 LEVELS = ("normal", "low", "critical")
 GB = 1024 ** 3
 #: Where a cache tool lives when the job's PATH (launchd's minimal one) does not say.
 EXTRA_PATH = ("/opt/homebrew/bin", "/usr/local/bin", "~/.local/bin", "~/.cargo/bin", "~/go/bin")
-#: An entry tree larger than this is not walked to its end; it is treated as fresh.
+#: An entry tree larger than this is not walked to its end; it is treated as not removable.
 WALK_LIMIT = 50_000
+#: The class order of a run. Paths first, the tools' commands last (a lock wait in one
+#: command once spent a whole run with nothing removed).
+CLASSES = ("cache-dir", "build-output", "temp", "trash", "browser-clone", "cache-command")
+#: Set by the guard for the cleanup it starts, which then does not take the lock again.
+LOCK_HELD_ENV = "OBSERVATORY_CLEANUP_LOCK_HELD"   # = cleanup_lock.HELD_ENV
 
 
 def now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def parse_stamp(value) -> float | None:
+    try:
+        return datetime.strptime(str(value or ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
 # --- configuration -------------------------------------------------------------
 
-def load_config() -> dict:
-    """The guard section: the shipped defaults with the workspace's own keys on top.
+def _read(f) -> dict:
+    try:
+        doc = json.loads(pathlib.Path(f).read_text(encoding="utf-8"))
+        return doc if isinstance(doc, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
-    A workspace's config/cleanup.json predates the guard and carries no `guard` key;
-    reading it alone would leave the guard with no thresholds at all."""
-    def read(f):
-        try:
-            return json.loads(pathlib.Path(f).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
-    shipped = (read(ROOT / "defaults" / "cleanup.json").get("guard") or {})
-    own = (read(paths.config_file("cleanup.json")).get("guard") or {})
-    merged = {**shipped, **own}
-    for key in ("levels", "temp_days", "build_idle_days", "trash_days"):
-        if isinstance(shipped.get(key), dict) and isinstance(own.get(key), dict):
-            merged[key] = {**shipped[key], **own[key]}
+
+def _previous_defaults() -> list[dict]:
+    """The guard sections earlier releases shipped (defaults/cleanup-history.json): a
+    workspace value equal to one of them is a copy taken at init, not a person's choice."""
+    doc = _read(ROOT / "defaults" / "cleanup-history.json")
+    return [v for v in (doc.get("guard") or {}).values() if isinstance(v, dict)]
+
+
+def load_config() -> dict:
+    """The guard section: the shipped defaults, with the keys a PERSON set on top.
+
+    `full init` copies defaults/cleanup.json into the workspace, so a workspace made on
+    0.23.0 held that release's values as its own and never saw a later default
+    (measured in review, 2026-10-12). A workspace value equal to what any release shipped
+    for that key is read as unset; anything else is a choice and wins."""
+    shipped = _read(ROOT / "defaults" / "cleanup.json").get("guard") or {}
+    own = _read(paths.config_file("cleanup.json")).get("guard") or {}
+    previous = _previous_defaults()
+    merged = dict(shipped)
+    for key, value in own.items():
+        if key.startswith("_") or value == shipped.get(key) or any(value == p.get(key) for p in previous):
+            continue
+        if isinstance(value, dict) and isinstance(shipped.get(key), dict):
+            merged[key] = {**shipped[key], **value}
+        else:
+            merged[key] = value
     return merged
 
 
 def artifact_names() -> list[str]:
+    own = _read(paths.config_file("cleanup.json")).get("artifact_dirs")
+    return list(own or _read(ROOT / "defaults" / "cleanup.json").get("artifact_dirs") or [])
+
+
+def _number(value, default: float) -> float:
     try:
-        own = json.loads(paths.config_file("cleanup.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        own = {}
-    try:
-        shipped = json.loads((ROOT / "defaults" / "cleanup.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        shipped = {}
-    return list(own.get("artifact_dirs") or shipped.get("artifact_dirs") or [])
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 # --- the disk ------------------------------------------------------------------
@@ -119,176 +141,131 @@ def free_bytes(path: str | os.PathLike | None = None) -> int:
 def level_for(free: int, cfg: dict) -> str:
     """normal | low | critical, from free bytes and the configured lines (GB)."""
     levels = cfg.get("levels") or {}
-    if free < float((levels.get("critical") or {}).get("free_gb", 10)) * GB:
+    if free < _number((levels.get("critical") or {}).get("free_gb"), 10) * GB:
         return "critical"
-    if free < float((levels.get("low") or {}).get("free_gb", 25)) * GB:
+    if free < _number((levels.get("low") or {}).get("free_gb"), 25) * GB:
         return "low"
     return "normal"
 
 
 def by_level(cfg: dict, key: str, level: str, default: float) -> float:
-    table = cfg.get(key) or {}
-    try:
-        return float(table.get(level, default))
-    except (TypeError, ValueError):
-        return default
+    return _number((cfg.get(key) or {}).get(level, default), default)
 
 
-# --- who holds what ------------------------------------------------------------
-
-class Holders:
-    """Every path a process has open or works inside, from ONE `lsof` listing.
-
-    `known` is False when the listing could not be taken (no lsof, a timeout): then
-    nothing is known to be free, and `busy()` answers True for every path — the guard
-    removes no path rather than guess."""
-
-    def __init__(self, names: list[str] | None):
-        self.known = names is not None
-        # lsof already prints the path the kernel resolved (`/private/var/…`); resolving
-        # 170,000 names again cost a minute a run. The TARGET is resolved instead.
-        self.names = sorted({n for n in names or [] if n.startswith("/")})
-
-    #: How busy() was decided: "lsof", "proc" (Linux without lsof) or "rename" (Windows, where
-    #: a folder something holds cannot be renamed — the removal itself is the probe).
-    mode = "lsof"
-
-    @classmethod
-    def take(cls, timeout: int = 120) -> "Holders":
-        if sys.platform == "win32":
-            h = cls([])
-            h.mode = "rename"
-            return h
-        if not shutil.which("lsof"):
-            if os.path.isdir("/proc/self/fd"):
-                h = cls(proc_holders())
-                h.mode = "proc"
-                return h
-            return cls(None)
-        try:
-            p = subprocess.run(["lsof", "-n", "-P", "-w", "-Fn"], capture_output=True, text=True,
-                               timeout=timeout, errors="replace")
-        except (OSError, subprocess.SubprocessError):
-            return cls(None)
-        # lsof exits 1 when one process could not be read and still lists the rest.
-        if p.returncode not in (0, 1) or not p.stdout:
-            return cls(None)
-        return cls([line[1:] for line in p.stdout.splitlines() if line.startswith("n/")])
-
-    def busy(self, path: str | os.PathLike) -> bool:
-        if not self.known:
-            return True
-        real = os.path.realpath(str(path))
-        i = bisect.bisect_left(self.names, real)
-        if i < len(self.names) and self.names[i] == real:
-            return True
-        j = bisect.bisect_left(self.names, real + "/")
-        return j < len(self.names) and self.names[j].startswith(real + "/")
-
-
-def proc_holders() -> list[str]:
-    """Every path this account's processes hold open or work in, from /proc (Linux without
-    lsof). A process another account owns is unreadable and is not ours to protect."""
-    found: list[str] = []
-    for pid in os.listdir("/proc"):
-        if not pid.isdigit():
-            continue
-        base = f"/proc/{pid}"
-        for link in ("cwd", "root"):
-            try:
-                found.append(os.readlink(f"{base}/{link}"))
-            except OSError:
-                pass
-        try:
-            fds = os.listdir(f"{base}/fd")
-        except OSError:
-            continue
-        for fd in fds:
-            try:
-                found.append(os.readlink(f"{base}/fd/{fd}"))
-            except OSError:
-                pass
-    return [p for p in found if p.startswith("/") and p != "/"]
-
-
-def running(names: list[str]) -> bool:
-    """True when a process with one of these executable basenames runs now."""
-    try:
-        out = subprocess.run(["ps", "-axo", "comm="], capture_output=True, text=True, timeout=20).stdout
-    except (OSError, subprocess.SubprocessError):
-        return True                       # cannot tell — assume busy, skip the command
-    have = {os.path.basename(line.strip()) for line in out.splitlines()}
-    return any(n in have for n in names)
-
+# --- time ------------------------------------------------------------------------
 
 class Budget:
-    """Seconds a run may spend planning. A class that runs out stops between items and
-    says so in `degraded`; what it did not reach is first next pass (oldest first)."""
+    """Seconds a phase may spend. A class that runs out stops between items and says so in
+    `degraded`; what it did not reach is first next pass (oldest first)."""
 
     def __init__(self, seconds: float, degraded: list):
-        self.end, self.degraded, self.hit = time.monotonic() + seconds, degraded, set()
+        self.end, self.degraded, self.hit = time.monotonic() + max(0.0, seconds), degraded, set()
+
+    def left(self) -> float:
+        return self.end - time.monotonic()
 
     def out(self, what: str) -> bool:
         if time.monotonic() < self.end:
             return False
         if what not in self.hit:
             self.hit.add(what)
-            self.degraded.append({"source": what, "reason": "planning stopped at its time budget; "
+            self.degraded.append({"source": what, "reason": "stopped at its time budget; "
                                   "the rest is looked at next pass, oldest first"})
         return True
 
 
 # --- walking ---------------------------------------------------------------------
 
-def newest_and_size(root: str, limit: int = WALK_LIMIT) -> tuple[float, int, bool]:
-    """(newest mtime, apparent bytes, complete) for a path, symlinks not followed.
+def inspect(root: str, cutoff: float | None = None, deadline: float | None = None,
+            limit: int = WALK_LIMIT) -> dict:
+    """What a path is, without following a link: {newest, size, complete, reason}.
 
-    `complete` is False when the tree held a socket or more than `limit` entries:
-    a socket is somebody's live endpoint, and a tree too large to finish cannot be
-    shown to be old, so both read as "do not touch"."""
+    `complete` False means "do not touch", and `reason` says why: an entry newer than
+    `cutoff` (somebody used it), a socket (a live endpoint), an entry another account owns,
+    more entries than `limit`, or the `deadline` reached. The walk stops at the first of
+    them, so a large tree in use costs one entry, not two hundred thousand."""
+    out = {"newest": 0.0, "size": 0, "complete": False, "reason": ""}
     try:
         st = os.lstat(root)
     except OSError:
-        return 0.0, 0, False
-    newest, size, seen = st.st_mtime, (st.st_size if stat.S_ISREG(st.st_mode) else 0), 0
-    if stat.S_ISSOCK(st.st_mode):
-        return newest, 0, False
+        out["reason"] = "gone"
+        return out
+
+    def refuse(s: os.stat_result) -> str:
+        if stat.S_ISSOCK(s.st_mode):
+            return "a socket inside"
+        if not osprivacy.owns(s):
+            return "another account owns an entry"
+        if cutoff is not None and s.st_mtime >= cutoff:
+            return "used since the cutoff"
+        return ""
+
+    why = refuse(st)
+    out["newest"] = st.st_mtime
+    if why:
+        out["reason"] = why
+        return out
     if not stat.S_ISDIR(st.st_mode):
-        return newest, size, True
-    stack = [root]
+        out.update(size=st.st_size if stat.S_ISREG(st.st_mode) else 0, complete=True)
+        return out
+    seen, stack = 0, [root]
     while stack:
         d = stack.pop()
         try:
             entries = list(os.scandir(d))
         except OSError:
-            return newest, size, False
+            out["reason"] = "unreadable inside"
+            return out
         for e in entries:
             seen += 1
             if seen > limit:
-                return newest, size, False
+                out["reason"] = f"more than {limit} entries"
+                return out
+            if deadline is not None and seen % 2000 == 0 and time.monotonic() > deadline:
+                out["reason"] = "the time ran out"
+                return out
             try:
                 s = e.stat(follow_symlinks=False)
             except OSError:
                 continue
-            if stat.S_ISSOCK(s.st_mode):
-                return newest, size, False
-            newest = max(newest, s.st_mtime)
+            why = refuse(s)
+            if why:
+                out["reason"] = why
+                return out
+            out["newest"] = max(out["newest"], s.st_mtime)
             if stat.S_ISDIR(s.st_mode):
                 stack.append(e.path)
             elif stat.S_ISREG(s.st_mode):
-                size += s.st_size
-    return newest, size, True
+                out["size"] += s.st_size
+    out["complete"] = True
+    return out
+
+
+def newest_and_size(root: str, limit: int = WALK_LIMIT) -> tuple[float, int, bool]:
+    """(newest mtime, bytes, complete) — the shape a caller without a cutoff wants."""
+    r = inspect(root, limit=limit)
+    return r["newest"], r["size"], r["complete"]
 
 
 def remove(path: str, probe: bool = False) -> None:
-    """Remove a path. With `probe` (Windows), rename it aside first: Windows refuses to rename a
-    folder while any process holds a file in it, so a refusal is the "busy" answer lsof gives
-    elsewhere, and nothing has been deleted when it comes."""
+    """Remove a path. With `probe` (Windows), rename it aside first: Windows refuses to rename
+    a folder while a file in it is open, so a refusal is "held" and nothing has been deleted.
+    A removal that fails after the rename puts the folder back under its name."""
     p = pathlib.Path(path)
     if probe:
         aside = p.with_name(p.name + ".observatory-removing")
         os.rename(p, aside)            # PermissionError: something holds it — the caller skips
-        p = aside
+        try:
+            _remove_now(aside)
+        except OSError:
+            with contextlib.suppress(OSError):
+                os.rename(aside, p)
+            raise
+        return
+    _remove_now(p)
+
+
+def _remove_now(p: pathlib.Path) -> None:
     if p.is_symlink() or p.is_file():
         p.unlink()
     else:
@@ -314,22 +291,43 @@ def expand(raw: str) -> str:
                               .replace("{uid}", uid))
 
 
+def _scan(d: str) -> list:
+    try:
+        return list(os.scandir(d))
+    except OSError:
+        return []
+
+
+def guarded(path: str, degraded: list | None = None) -> bool:
+    """A privacy-guarded place (Documents, Desktop, other apps' containers…): the scheduled
+    job must not even stat it (lifecycle LC-06). Named in `degraded` once per place."""
+    from scan_machine import protected_place
+    if protected_place(pathlib.Path(path)):
+        if degraded is not None and not any(d.get("path") == path for d in degraded):
+            degraded.append({"source": "privacy", "path": path,
+                             "reason": "a privacy-guarded place; the guard does not open it"})
+        return True
+    return False
+
+
 # --- the classes -------------------------------------------------------------------
 
-def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget | None = None) -> list[dict]:
+def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget | None = None,
+              degraded: list | None = None) -> list[dict]:
     """Entries of the temporary roots nobody touched for `temp_days`, held by nobody."""
     days = by_level(cfg, "temp_days", level, 3)
+    cutoff = at - days * 86400
     keep = cfg.get("temp_keep") or []
-    out, nested = [], set()
     every = [r for r in cfg.get("temp_roots") or [] if isinstance(r, dict) and r.get("path") and expand(r["path"])]
-    for r in every:
-        nested.add(os.path.realpath(expand(r["path"])))
-    # A root with its own `level` (Xcode's DerivedData: rebuilding costs time) is
-    # swept only at that pressure or above — but it is never swept as an entry of
-    # another root either, so it stays in `nested` regardless.
+    nested = {os.path.realpath(expand(r["path"])) for r in every}
+    # A root with its own `level` (Xcode's DerivedData: rebuilding costs time) is swept
+    # only at that pressure or above — and never as an entry of another root.
     roots = [(expand(r["path"]), int(r.get("depth", 1))) for r in every
              if LEVELS.index(r.get("level", "normal")) <= LEVELS.index(level)]
+    out = []
     for root, depth in roots:
+        if guarded(root, degraded):
+            continue
         level_dirs = [root]
         for _ in range(depth - 1):
             level_dirs = [e.path for d in level_dirs if os.path.isdir(d) and not os.path.islink(d)
@@ -337,14 +335,11 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
         for d in level_dirs:
             entries = []
             for e in _scan(d):
-                try:
+                with contextlib.suppress(OSError):
                     entries.append((e.stat(follow_symlinks=False).st_mtime, e))
-                except OSError:
-                    continue
-            # OLDEST FIRST, and an entry whose own time is recent is not walked at all:
-            # creating or removing anything at its top level made it fresh.
+            # OLDEST FIRST; an entry whose own time is recent is not walked at all.
             for top, e in sorted(entries, key=lambda x: x[0]):
-                if (at - top) / 86400 < days:
+                if top >= cutoff:
                     break
                 if budget and budget.out("temp"):
                     return out
@@ -352,19 +347,11 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
                 if (os.path.realpath(full) in nested or any(fnmatch.fnmatch(e.name, k) for k in keep)
                         or e.is_symlink() or not owned(full)):
                     continue
-                newest, size, complete = newest_and_size(full)
-                age = (at - newest) / 86400
-                if complete and age >= days and not holders.busy(full):
-                    out.append({"class": "temp", "target": full, "bytes": size,
-                                "why": f"untouched {age:.1f} days, nobody holds it"})
+                r = inspect(full, cutoff, time.monotonic() + max(1.0, budget.left()) if budget else None)
+                if r["complete"] and not holders.busy(full):
+                    out.append({"class": "temp", "target": full, "bytes": r["size"], "cutoff": cutoff,
+                                "why": f"untouched {(at - r['newest']) / 86400:.1f} days, nobody holds it"})
     return out
-
-
-def _scan(d: str) -> list:
-    try:
-        return list(os.scandir(d))
-    except OSError:
-        return []
 
 
 def clone_root() -> pathlib.Path | None:
@@ -376,58 +363,57 @@ def clone_root() -> pathlib.Path | None:
     return pathlib.Path(tempfile.gettempdir()).parent / "X"
 
 
-def plan_cache_dirs(cfg: dict, level: str, holders: Holders, at: float, budget: "Budget | None" = None) -> list[dict]:
+def plan_cache_dirs(cfg: dict, level: str, holders: Holders, at: float, budget: Budget | None = None,
+                    degraded: list | None = None) -> list[dict]:
     """Applications' and tools' own cache folders nobody touched for `cache_days`.
 
-    WHY (2026-10-11). The hand cleanup of 2026-10-10 freed about 10 GB from `~/Library/Caches`
-    and `~/.cache` alone; the first guard left both to the tools' own commands and freed far
-    less, and the disk ran out again. A cache folder is regenerable by definition — except the
-    downloaded browsers and SDKs a tool does NOT fetch again by itself (`cache_keep`), which
-    stay. A folder anyone holds open, or touched recently anywhere inside, stays too."""
+    The hand cleanup of 2026-10-10 freed about 10 GB here. A cache folder is regenerable —
+    except the downloaded browsers and SDKs a tool does NOT fetch again by itself
+    (`cache_keep`), which stay. Anything held or used recently stays too."""
     days = by_level(cfg, "cache_days", level, 7)
+    cutoff = at - days * 86400
     keep = cfg.get("cache_keep") or []
     out = []
     for root in (expand(r) for r in cfg.get("cache_roots") or []):
-        if not root:
-            continue                  # a root of another OS ({localappdata} on macOS)
+        if not root or guarded(root, degraded):
+            continue
         entries = []
         for e in _scan(root):
-            try:
+            with contextlib.suppress(OSError):
                 entries.append((e.stat(follow_symlinks=False).st_mtime, e))
-            except OSError:
-                continue
         for _top, e in sorted(entries, key=lambda x: x[0]):
             if budget and budget.out("cache-dir"):
                 return out
             if any(fnmatch.fnmatch(e.name, k) for k in keep) or e.is_symlink() or not owned(e.path):
                 continue
-            newest, size, complete = newest_and_size(e.path, limit=200_000)
-            age = (at - newest) / 86400
-            if complete and age >= days and not holders.busy(e.path):
-                out.append({"class": "cache-dir", "target": e.path, "bytes": size,
-                            "why": f"a cache untouched {age:.1f} days, nobody holds it"})
+            r = inspect(e.path, cutoff, time.monotonic() + max(1.0, budget.left()) if budget else None,
+                        limit=200_000)
+            if r["complete"] and not holders.busy(e.path):
+                out.append({"class": "cache-dir", "target": e.path, "bytes": r["size"], "cutoff": cutoff,
+                            "why": f"a cache untouched {(at - r['newest']) / 86400:.1f} days, nobody holds it"})
     return out
 
 
 def plan_clones(cfg: dict, holders: Holders, at: float) -> list[dict]:
-    """Code-sign clones a Chromium browser left behind (macOS): one per launch, removed
-    by the browser only on a clean exit. A clone a running browser uses is held open."""
+    """Code-sign clones a Chromium browser left behind (macOS): one per launch, removed by
+    the browser only on a clean exit. A clone a running browser uses is held open."""
     base = clone_root()
     if base is None:
         return []
-    hours = float(cfg.get("clone_min_age_hours", 1))
+    hours = _number(cfg.get("clone_min_age_hours", 1), 1)
+    cutoff = at - hours * 3600
     out = []
     for holder in _scan(str(base)):
         if not holder.name.endswith(".code_sign_clone") or not holder.is_dir(follow_symlinks=False):
             continue
         for e in _scan(holder.path):
             try:
-                age = (at - e.stat(follow_symlinks=False).st_mtime) / 3600
+                mtime = e.stat(follow_symlinks=False).st_mtime
             except OSError:
                 continue
-            if e.name.startswith("code_sign_clone.") and age >= hours and not holders.busy(e.path):
+            if e.name.startswith("code_sign_clone.") and mtime < cutoff and not holders.busy(e.path):
                 out.append({"class": "browser-clone", "target": e.path, "bytes": 0,
-                            "why": f"left by a browser {age:.0f} h ago, no process uses it"})
+                            "why": f"left by a browser {(at - mtime) / 3600:.0f} h ago, no process uses it"})
     return out
 
 
@@ -441,8 +427,8 @@ def trash_dirs() -> list[str]:
 
 
 def plan_trash(cfg: dict, level: str, at: float, degraded: list) -> list[dict]:
-    """What has been in the Trash longer than `trash_days` — by the moment it was put
-    there (ctime: moving a file changes it), not by when it was last edited."""
+    """What has been in the Trash longer than `trash_days` — by the moment it was put there
+    (ctime: moving a file changes it), not by when it was last edited."""
     days = by_level(cfg, "trash_days", level, 30)
     if days <= 0:
         return []
@@ -466,9 +452,10 @@ def plan_trash(cfg: dict, level: str, at: float, degraded: list) -> list[dict]:
             except OSError:
                 continue
             if age >= days:
-                _, size, _ = newest_and_size(e.path)
-                out.append({"class": "trash", "target": e.path, "bytes": size,
-                            "why": f"in the Trash {age:.0f} days"})
+                r = inspect(e.path)
+                if r["complete"]:
+                    out.append({"class": "trash", "target": e.path, "bytes": r["size"],
+                                "why": f"in the Trash {age:.0f} days"})
     return out
 
 
@@ -483,9 +470,12 @@ def find_tool(name: str) -> str | None:
     return None
 
 
-def plan_commands(cfg: dict, level: str) -> list[dict]:
-    """Cache tools' own cleanup, each at the lowest pressure it is allowed at."""
+def plan_commands(cfg: dict, level: str, last: dict | None = None, at: float | None = None) -> list[dict]:
+    """Cache tools' own cleanup, each at the lowest pressure it is allowed at, and no more
+    often than its `every_hours` (a whole-cache clean four times an hour re-downloads every
+    environment's packages)."""
     rank = LEVELS.index(level)
+    at = time.time() if at is None else at
     out = []
     for c in cfg.get("commands") or []:
         if LEVELS.index(c.get("level", "normal")) > rank:
@@ -494,19 +484,23 @@ def plan_commands(cfg: dict, level: str) -> list[dict]:
         tool = find_tool(argv[0]) if argv else None
         if not tool:
             continue
-        out.append({"class": "cache-command", "target": " ".join(argv), "argv": [tool, *argv[1:]],
+        target = " ".join(argv)
+        every = _number(c.get("every_hours", cfg.get("command_every_hours", 6)), 6)
+        ran = parse_stamp((last or {}).get(target))
+        if ran is not None and at - ran < every * 3600:
+            continue
+        out.append({"class": "cache-command", "target": target, "argv": [tool, *argv[1:]],
                     "busy_if": c.get("busy_if") or [], "needs": c.get("needs_running") or [],
                     "busy_output": c.get("busy_output") or "",
-                    "timeout": c.get("timeout_seconds") or cfg.get("command_timeout_seconds", 90),
+                    "timeout": _number(c.get("timeout_seconds") or cfg.get("command_timeout_seconds", 90), 90),
                     "bytes": 0, "why": c.get("why") or "the tool's own cleanup"})
     return out
 
 
-def checkout_idle_days(root: str, at: float) -> float | None:
-    """Days since anybody worked in a checkout: the newest of its last checkout or
-    commit (`logs/HEAD`, `HEAD`) and of the files it holds uncommitted. NOT the index:
-    every `git status` — the observatory's own survey included — rewrites it, so by
-    that measure every checkout on the machine was "used today" (measured 2026-10-11)."""
+def checkout_idle_days(root: str, at: float, timeout: float = 60) -> float | None:
+    """Days since anybody worked in a checkout: the newest of its last checkout or commit
+    (`logs/HEAD`, `HEAD`) and of the files it holds uncommitted. NOT the index: every
+    `git status` — the observatory's own survey included — rewrites it (measured 2026-10-11)."""
     gitdir = pathlib.Path(root) / ".git"
     if gitdir.is_file():
         try:
@@ -521,58 +515,68 @@ def checkout_idle_days(root: str, at: float) -> float | None:
         return 0.0                           # git is working in it right now
     stamps = []
     for f in (gitdir / "logs" / "HEAD", gitdir / "HEAD"):
-        try:
+        with contextlib.suppress(OSError):
             stamps.append(f.stat().st_mtime)
-        except OSError:
-            pass
     try:
-        # Through safe_git, the engine's one git door: no hooks, no external diff driver,
-        # and no optional index lock taken in somebody's working checkout.
-        p = safe_git.run(["ls-files", "-m", "-o", "--exclude-standard", "-z"], repo=root, timeout=60,
-                         text=False, extra_env={"LC_ALL": "C", "GIT_OPTIONAL_LOCKS": "0"})
+        # Through safe_git, the engine's one git door: no hooks, no external diff driver, and
+        # no optional index lock taken in somebody's working checkout.
+        p = safe_git.run(["ls-files", "-m", "-o", "--exclude-standard", "-z"], repo=root,
+                         timeout=max(5.0, timeout), text=False,
+                         extra_env={"LC_ALL": "C", "GIT_OPTIONAL_LOCKS": "0"})
     except (OSError, subprocess.SubprocessError):
         return None
     if p.returncode:
         return None
     for name in p.stdout.decode("utf-8", "replace").split("\0")[:5000]:
         if name:
-            try:
+            with contextlib.suppress(OSError):
                 stamps.append(os.lstat(os.path.join(root, name)).st_mtime)
-            except OSError:
-                pass
     return (at - max(stamps)) / 86400 if stamps else None
 
 
 def checkouts() -> list[str]:
-    """Every checkout and worktree the git survey knows, plus the projects' folders."""
+    """Every checkout and worktree the git survey knows."""
     found: list[str] = []
-    try:
-        hygiene = json.loads((paths.SCRATCH / "git-hygiene.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        hygiene = {}
+    hygiene = _read(paths.SCRATCH / "git-hygiene.json")
     for c in hygiene.get("checkouts") or []:
         found.append(c.get("path") or "")
         found += [w.get("path") or "" for w in c.get("worktrees") or [] if w.get("state") != "missing"]
     return sorted({os.path.realpath(p) for p in found if p and os.path.isdir(p)})
 
 
+def _force_tracked(dirpath: str, full: str, timeout: float) -> bool:
+    """Whether git tracks anything inside an ignored folder (`git add -f`): then the folder
+    holds somebody's file and is not build output."""
+    try:
+        p = safe_git.run(["ls-files", "-z", "--", full], repo=dirpath, timeout=max(5.0, timeout), text=False)
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return p.returncode != 0 or bool(p.stdout.strip(b"\0"))
+
+
 def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[str],
-                budget: Budget | None = None) -> list[dict]:
+                budget: Budget | None = None, degraded: list | None = None) -> list[dict]:
     """Regenerable build and dependency output of checkouts nobody worked in for
-    `build_idle_days`. Only directories git ignores (or outside git), never inside
-    `.git`, never under another checkout of the list (it is judged on its own)."""
+    `build_idle_days`: a folder git ignores, tracks nothing inside, nobody holds, and that
+    holds no socket and no other account's file. Never inside `.git`, never in a checkout
+    nested in another (that one is judged on its own), never in a privacy-guarded place."""
     days = by_level(cfg, "build_idle_days", level, 14)
     roots = checkouts()
     wanted = set(names)
     out = []
+    left = (lambda: budget.left()) if budget else (lambda: 3600.0)  # noqa: E731
     for root in roots:
         if budget and budget.out("build-output"):
             break
-        idle = checkout_idle_days(root, at)
+        if guarded(root, degraded):
+            continue
+        idle = checkout_idle_days(root, at, min(60.0, left()))
         if idle is None or idle < days or holders.busy(root):
             continue
         others = [r for r in roots if r != root and r.startswith(root + "/")]
         for dirpath, dirnames, _ in os.walk(root):
+            if budget and budget.out("build-output"):
+                return out
             if any(dirpath == o or dirpath.startswith(o + "/") for o in others):
                 dirnames[:] = []
                 continue
@@ -583,12 +587,13 @@ def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[
                 if d == ".git" or os.path.islink(full):
                     continue
                 if d in wanted:
-                    ignored = safe_git.run(["check-ignore", "-q", full], repo=dirpath,
-                                           timeout=30).returncode == 0
-                    if ignored and not holders.busy(full):
-                        _, size, _ = newest_and_size(full, limit=500_000)
-                        out.append({"class": "build-output", "target": full, "bytes": size,
-                                    "why": f"git-ignored {d}; checkout idle {idle:.0f} days"})
+                    t = min(30.0, max(1.0, left()))
+                    ignored = safe_git.run(["check-ignore", "-q", full], repo=dirpath, timeout=t).returncode == 0
+                    if ignored and not holders.busy(full) and not _force_tracked(dirpath, full, t):
+                        r = inspect(full, None, time.monotonic() + max(1.0, left()), limit=500_000)
+                        if r["complete"]:
+                            out.append({"class": "build-output", "target": full, "bytes": r["size"],
+                                        "why": f"git-ignored {d}; checkout idle {idle:.0f} days"})
                     continue
                 if depth < 5:
                     keep.append(d)
@@ -599,26 +604,19 @@ def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[
 # --- reports that act on nothing -------------------------------------------------
 
 def large_files(cfg: dict, previous: dict | None, force: bool) -> dict | None:
-    """The largest files under the home directory, daily, within a time budget.
-
-    Reported, never removed: a big file is somebody's until they say otherwise. The
-    walk skips privacy-guarded places, symlinks and other file systems, and stops at
-    its budget, saying so."""
-    every = float(cfg.get("large_files_every_hours", 24)) * 3600
+    """The largest files under the home directory, daily, within a time budget. Reported,
+    never removed: a big file is somebody's until they say otherwise."""
+    every = _number(cfg.get("large_files_every_hours", 24), 24) * 3600
     last = (previous or {}).get("large_files") or {}
-    try:
-        age = time.time() - datetime.strptime(last.get("measured_at", ""), "%Y-%m-%dT%H:%M:%SZ") \
-            .replace(tzinfo=timezone.utc).timestamp()
-    except ValueError:
-        age = float("inf")
-    if not force and age < every:
+    stamp = parse_stamp(last.get("measured_at"))
+    if not force and stamp is not None and time.time() - stamp < every:
         return last or None
     from scan_machine import protected_place
     home = pathlib.Path.home()
-    floor = float(cfg.get("large_file_min_mb", 1024)) * 1024 * 1024
-    budget = float(cfg.get("large_files_budget_seconds", 120))
+    floor = _number(cfg.get("large_file_min_mb", 1024), 1024) * 1024 * 1024
+    budget = _number(cfg.get("large_files_budget_seconds", 120), 120)
     skip = set(cfg.get("large_files_skip") or [])
-    top = int(cfg.get("large_files_top", 30))
+    top = int(_number(cfg.get("large_files_top", 30), 30))
     started, found, complete = time.monotonic(), [], True
     dev = os.lstat(home).st_dev
     stack = [str(home)]
@@ -647,9 +645,8 @@ def large_files(cfg: dict, previous: dict | None, force: bool) -> dict | None:
 
 def memory_report() -> dict | None:
     """Who holds the memory that swap writes to this disk, from the machine survey."""
-    try:
-        machine = json.loads((paths.SCRATCH / "machine.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    machine = _read(paths.SCRATCH / "machine.json")
+    if not machine:
         return None
     mem = machine.get("memory") or {}
     groups = (machine.get("processes") or {}).get("groups") or []
@@ -661,8 +658,6 @@ def memory_report() -> dict | None:
                             "command": f"xcrun simctl shutdown \"{g['origin'].split(':', 1)[1]}\""} for g in sims],
             "detached_mb": round(sum(g.get("rss_mb") or 0 for g in detached), 1)}
 
-
-# --- surveys the guard keeps fresh ------------------------------------------------
 
 def refresh(script: str, out: pathlib.Path, hours: float, timeout: int, args: tuple = ()) -> str:
     """Run a survey when its file is older than `hours`; the outcome as a word."""
@@ -691,25 +686,26 @@ def act(a: dict, holders: Holders) -> dict:
         rec["kb"] = int(a["bytes"] / 1024)
     before = free_bytes()
     if a["class"] == "cache-command":
-        if a.get("needs") and not running(a["needs"]):
-            return {**rec, "result": "skipped", "reason": "its daemon is not running; the guard starts nothing"}
-        if a.get("busy_if") and running(a["busy_if"]):
-            return {**rec, "result": "skipped", "reason": "the tool is running now"}
+        needs = running(a["needs"]) if a.get("needs") else True
+        if needs is not True:
+            return {**rec, "result": "skipped",
+                    "reason": "its daemon is not running; the guard starts nothing" if needs is False
+                    else "whether its daemon runs could not be read"}
+        busy = running(a["busy_if"]) if a.get("busy_if") else False
+        if busy is not False:
+            return {**rec, "result": "skipped",
+                    "reason": "the tool is running now" if busy else "whether the tool runs could not be read"}
         try:
-            # SHORT, and a wait is not a fault (2026-10-11): `uv cache prune` waits on the lock a
-            # long-running `uv tool run` server holds, and one such wait spent five minutes of a
-            # ten-minute run while sixteen thousand removals waited behind it.
+            # SHORT, and a wait is not a fault (2026-10-11): `uv cache prune` waits on the lock
+            # a long-running `uv tool run` server holds, and one such wait spent half a run.
             p = subprocess.run(a["argv"], capture_output=True, text=True,
-                               timeout=float(a.get("timeout") or 90), stdin=subprocess.DEVNULL)
+                               timeout=_number(a.get("timeout"), 90), stdin=subprocess.DEVNULL)
         except subprocess.TimeoutExpired:
             return {**rec, "result": "skipped", "reason": "held up past its time — something else holds the tool's cache"}
         except (OSError, subprocess.SubprocessError) as exc:
             return {**rec, "result": "failed", "reason": f"{type(exc).__name__}"}
         said = (p.stderr or p.stdout or "").strip()
         if p.returncode and a.get("busy_output") and a["busy_output"] in said:
-            # The tool refused because something uses its cache now (measured 2026-10-11:
-            # a long-running `uv tool run` server holds uv's lock). That is "busy", not a
-            # fault: a failure here would read as a broken guard every hour.
             return {**rec, "result": "skipped", "reason": f"its cache is in use: {said[:120]}"}
         rec["result"] = "removed" if p.returncode == 0 else "failed"
         if p.returncode:
@@ -720,6 +716,12 @@ def act(a: dict, holders: Holders) -> dict:
             return {**rec, "result": "skipped", "reason": "already gone"}
         if holders.busy(target):
             return {**rec, "result": "skipped", "reason": "a process holds it now"}
+        if a.get("cutoff") is not None:
+            # STILL OLD, right now: the plan may be minutes old, and reading or entering a
+            # folder does not change it, but writing anything in it does.
+            r = inspect(target, a["cutoff"], time.monotonic() + 30)
+            if not r["complete"]:
+                return {**rec, "result": "skipped", "reason": f"changed since the plan: {r['reason']}"}
         try:
             remove(target, probe=holders.mode == "rename")
             rec["result"] = "removed"
@@ -733,10 +735,14 @@ def act(a: dict, holders: Holders) -> dict:
     return rec
 
 
+def journal_file() -> pathlib.Path:
+    return paths.STATE / "logs" / "disk-guard.jsonl"
+
+
 def journal(rows: list[dict]) -> None:
     if not rows:
         return
-    log = paths.STATE / "logs" / "cleanup.jsonl"
+    log = journal_file()
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "a", encoding="utf-8") as f:
         for r in rows:
@@ -744,194 +750,226 @@ def journal(rows: list[dict]) -> None:
     os.chmod(log, 0o600)
 
 
-def planners(cfg: dict, level: str, holders: Holders, at: float, degraded: list) -> list[tuple[str, object]]:
-    """Each class's planner, in the order a run takes them.
-
-    PATHS FIRST, THE TOOLS' COMMANDS LAST (2026-10-11). With the commands first, `uv cache
-    prune` waiting on a lock spent half a run, and the eight commands together spent the rest
-    while sixteen thousand removals that take a second each waited behind them. Within a class
-    the largest go first."""
+def planners(cfg: dict, level: str, holders: Holders, at: float, degraded: list,
+             last_commands: dict | None = None) -> list[tuple[str, object]]:
+    """Each class's planner, in the order a run takes them. Each takes a Budget; within a
+    class the largest go first."""
     big = lambda xs: sorted(xs, key=lambda a: -(a.get("bytes") or 0))  # noqa: E731
     return [
-        ("cache-dir", lambda b: big(plan_cache_dirs(cfg, level, holders, at, b))),
-        ("build-output", lambda b: big(plan_builds(cfg, level, holders, at, artifact_names(), b))),
-        ("temp", lambda b: big(plan_temp(cfg, level, holders, at, b))),
+        ("cache-dir", lambda b: big(plan_cache_dirs(cfg, level, holders, at, b, degraded))),
+        ("build-output", lambda b: big(plan_builds(cfg, level, holders, at, artifact_names(), b, degraded))),
+        ("temp", lambda b: big(plan_temp(cfg, level, holders, at, b, degraded))),
         ("trash", lambda b: big(plan_trash(cfg, level, at, degraded))),
         ("browser-clone", lambda b: plan_clones(cfg, holders, at)),
-        ("cache-command", lambda b: plan_commands(cfg, level)),
+        ("cache-command", lambda b: plan_commands(cfg, level, last_commands, at)),
     ]
 
 
 def build_plan(cfg: dict, level: str, holders: Holders, at: float, degraded: list) -> list[dict]:
     """Every action at this pressure, in the order a run takes them (plan only)."""
-    budget = Budget(float(cfg.get("plan_budget_seconds", 300)), degraded)
+    budget = Budget(_number(cfg.get("plan_budget_seconds", 300), 300), degraded)
     out: list[dict] = []
     for _name, planner in planners(cfg, level, holders, at, degraded):
         out += planner(budget)
     return out
 
 
-def run(argv: list[str]) -> dict:
-    """One guard run, inside its own time budget.
+def cleanup_lock():
+    """The lock every cleanup shares (cleanup_lock.py)."""
+    import cleanup_lock as lock
+    return lock.held()
 
-    WHY A RUN BUDGET (2026-10-11). The first scheduled pass on 0.23.0 killed the guard at
-    the maintenance job's 1200 s ceiling: under launchd's background priority the survey
-    refreshes, the plan and two thousand removals did not fit, and because the report and
-    the journal were written at the end, the pass recorded only "exit 124". Now the guard
-    stops itself at `--budget` (the job passes its ceiling minus a margin) or
-    `run_budget_seconds`, acts BEFORE it refreshes any survey (a slightly old survey plans
-    as well), journals every action as it happens, and always writes its report."""
-    cfg = load_config()
-    started = time.monotonic()
-    budget = float(cfg.get("run_budget_seconds", 900))
-    if "--budget" in argv:
-        try:
-            budget = float(argv[argv.index("--budget") + 1])
-        except (IndexError, ValueError):
-            pass
-    left = lambda: budget - (time.monotonic() - started)  # noqa: E731
+
+def _write_report(doc: dict) -> None:
     out_file = paths.SCRATCH / "disk-guard.json"
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out_file.with_suffix(".tmp")
+    tmp.write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, out_file)
+
+
+def _git_tier(apply: bool, level: str, seconds: float) -> dict:
+    """The cleanup's git tier, under the guard's lock and pressure, inside the time left."""
+    env = {**os.environ, LOCK_HELD_ENV: "1"}
     try:
-        previous = json.loads(out_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        previous = None
+        p = subprocess.run([sys.executable, str(ROOT / "tools" / "cleanup.py"), "--apply" if apply else "--auto",
+                            "--level", level, "--deadline-seconds", str(int(max(10, seconds - 15))), "--json"],
+                           capture_output=True, text=True, timeout=max(20.0, seconds), cwd=str(ROOT), env=env)
+    except subprocess.TimeoutExpired:
+        return {"result": "stopped", "reason": f"past {seconds:.0f} s"}
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"result": "failed", "reason": type(exc).__name__}
+    line = (p.stdout.strip().splitlines() or [""])[-1]
+    try:
+        doc = json.loads(line) if line.startswith("{") else {}
+    except ValueError:
+        doc = {}
+    return doc or {"result": "failed" if p.returncode else "ran", "reason": line[:200]}
+
+
+def run(argv: list[str]) -> dict:
+    """One guard run: lock, level, cadence, then the classes one at a time — each with a fresh
+    holders listing, a fair share of the time and a re-check at every removal — then the git
+    tier, the surveys, and the report, which is written whatever happens."""
+    cfg = load_config()
+    started, started_at = time.monotonic(), now()
+    budget = _number(cfg.get("run_budget_seconds", 900), 900)
+    if "--budget" in argv[:-1]:
+        budget = _number(argv[argv.index("--budget") + 1], budget)
+    left = lambda: budget - (time.monotonic() - started)  # noqa: E731
+    previous = _read(paths.SCRATCH / "disk-guard.json") or None
     auto, apply = "--auto" in argv, "--apply" in argv
     enabled = configuration.enabled("auto_cleanup", "features")
     acting = apply or (auto and enabled)
+    level = None
+    if "--level" in argv[:-1]:
+        level = argv[argv.index("--level") + 1]
+    free0 = free_bytes()
+    level = level if level in LEVELS else level_for(free0, cfg)
+    base = {"schema_version": 2, "at": now(), "started_at": started_at, "level": level, "acting": acting,
+            "auto_enabled": enabled, "free_gb_before": round(free0 / GB, 1), "free_gb_after": round(free0 / GB, 1),
+            "freed_gb": 0.0, "results": {"removed": 0, "skipped": 0, "failed": 0}, "not_due": False, "busy": False}
+    # HOW OFTEN: at `normal` once per `normal_every_minutes`, measured from the previous
+    # run's START with half an interval's tolerance; below `low`, every pass.
+    if auto and level == "normal" and previous and previous.get("acting"):
+        since = time.time() - (parse_stamp(previous.get("started_at") or previous.get("at")) or 0)
+        gap = _number(cfg.get("normal_every_minutes", 60), 60) * 60 - _number(cfg.get("due_tolerance_seconds", 450), 450)
+        if since < gap:
+            return {**base, "not_due": True, "acting": False}
     degraded: list[dict] = []
     surveys: dict = {}
     phases: dict = {}
     plan: list[dict] = []
     rows: list[dict] = []
     found = (previous or {}).get("large_files")
-    free0 = free_bytes()
-    level = next((a.split("=", 1)[1] for a in argv if a.startswith("--level=")), None)
-    if "--level" in argv:
-        level = argv[argv.index("--level") + 1]
-    level = level if level in LEVELS else level_for(free0, cfg)
-    # HOW OFTEN. The maintenance pass runs every 15 minutes; at `normal` pressure the guard
-    # acts once per `normal_every_minutes` (60), and below the `low` line on EVERY pass —
-    # on 2026-10-11 the disk went from 6 GB to 0.3 GB inside one hour while the guard waited.
-    if auto and level == "normal" and previous:
+    last_commands = dict((previous or {}).get("commands_last") or {})
+    holders_mode = "unknown"
+    with cleanup_lock() as mine:
+        if not mine:
+            return {**base, "busy": True, "acting": False,
+                    "degraded": [{"source": "lock", "reason": "another cleanup is running; this pass skips"}]}
         try:
-            since = time.time() - datetime.strptime(previous.get("at", ""), "%Y-%m-%dT%H:%M:%SZ") \
-                .replace(tzinfo=timezone.utc).timestamp()
-        except ValueError:
-            since = float("inf")
-        if since < float(cfg.get("normal_every_minutes", 60)) * 60 and previous.get("acting"):
-            return {**previous, "not_due": True, "results": {"removed": 0, "skipped": 0, "failed": 0},
-                    "seconds": 0, "acting": False}
-    try:
-        holders = Holders.take()
-        if not holders.known:
-            degraded.append({"source": "lsof", "reason": "open files could not be listed; no path is removed"})
-        at = time.time()
-        phases["lsof"] = round(time.monotonic() - started)
-        mark = time.monotonic()
-        reserve = float(cfg.get("run_reserve_seconds", 60))
-        plan_cap = float(cfg.get("plan_budget_seconds", 300))
-        cap = int(cfg.get("max_actions_per_class", 20000))
-        stopped = False
-        # ONE CLASS AT A TIME: plan it (at most half of what is left), act on it, then the next.
-        # Planning everything before acting let a slow plan and slow commands spend a whole
-        # run with nothing removed (2026-10-11).
-        for name, planner in planners(cfg, level, holders, at, degraded):
-            if stopped or left() < reserve:
-                if acting and not stopped:
-                    degraded.append({"source": "act", "reason": f"stopped at the run budget before {name}; "
-                                                                f"the rest is looked at next pass"})
-                stopped = True
-                continue
-            actions = planner(Budget(max(0.0, min(plan_cap, (left() - reserve) / 2)), degraded))
-            plan += actions
-            if not acting:
-                continue
-            for n, a in enumerate(actions[:cap]):
-                if left() < reserve:
-                    degraded.append({"source": "act", "reason": f"stopped at the run budget in {name}; "
-                                                                f"{len(actions) - n} action(s) are looked at again next pass"})
-                    stopped = True
+            reserve = _number(cfg.get("run_reserve_seconds", 60), 60)
+            plan_cap = _number(cfg.get("plan_budget_seconds", 300), 300)
+            cap = int(_number(cfg.get("max_actions_per_class", 20000), 20000))
+            at = time.time()
+            classes = list(CLASSES)
+            for n, name in enumerate(classes):
+                share = (left() - reserve) / (len(classes) - n)
+                if share <= 1:
+                    if acting:
+                        degraded.append({"source": "act", "reason": f"stopped at the run budget before {name}; "
+                                                                    f"the rest is looked at next pass"})
                     break
-                try:
-                    row = act(a, holders)
-                except (OSError, subprocess.SubprocessError) as exc:
-                    row = {"at": now(), "class": a["class"], "target": a["target"], "mode": "guard",
-                           "result": "failed", "reason": f"{type(exc).__name__}: {exc}"[:200]}
-                rows.append(row)
-                journal([row])               # as it happens: a run stopped from outside keeps its record
-        phases["plan+act"] = round(time.monotonic() - mark)
-        mark = time.monotonic()
-        if acting:
-            if left() > 2 * reserve:
-                # The git tier: merged/pushed branches, clean idle worktrees — the cleanup's own
-                # rules and re-checks, journalled by it.
-                try:
-                    p = subprocess.run([sys.executable, str(ROOT / "tools" / "cleanup.py"),
-                                        "--apply" if apply else "--auto", "--level", level],
-                                       capture_output=True, text=True,
-                                       timeout=max(30, min(900, left() - reserve)), cwd=str(ROOT))
-                    surveys["git-cleanup"] = (p.stdout.strip().splitlines() or [f"exit {p.returncode}"])[-1][:200]
-                except (OSError, subprocess.SubprocessError) as exc:
-                    surveys["git-cleanup"] = f"failed: {type(exc).__name__}"
-            else:
-                surveys["git-cleanup"] = "skipped: the run budget is spent"
-        if acting or "--refresh" in argv:
-            # Surveys LAST: the git survey feeds the next plan's checkout list, the machine survey
-            # the Machine page and the memory report. Each gets only the time that is left.
-            for name, script, hours, cap_s in (
-                    ("git-hygiene", "collectors/scan_git_hygiene.py", cfg.get("git_survey_every_hours", 6), 600),
-                    ("machine", "collectors/scan_machine.py", cfg.get("machine_survey_every_hours", 2), 300)):
-                room = left() - reserve / 2
-                surveys[name] = (refresh(script, paths.SCRATCH / f"{name}.json", float(hours), int(min(cap_s, room)))
-                                 if room > 30 else "skipped: the run budget is spent")
-        mark = time.monotonic()
-        room = left() - reserve / 2
-        if room > 30 or "--large-files" in argv:
-            found = large_files({**cfg, "large_files_budget_seconds":
-                                 min(float(cfg.get("large_files_budget_seconds", 120)), max(room, 30))},
-                                previous, "--large-files" in argv)
-        phases["large-files"] = round(time.monotonic() - mark)
-    finally:
-        free1 = free_bytes()
-        doc = {"schema_version": 1, "at": now(), "level": level, "acting": acting, "auto_enabled": enabled,
-               "free_gb_before": round(free0 / GB, 1), "free_gb_after": round(free1 / GB, 1),
-               "freed_gb": round((free1 - free0) / GB, 2), "seconds": round(time.monotonic() - started),
-               "budget_seconds": round(budget), "phases": phases,
-               "planned": {cls: sum(1 for a in plan if a["class"] == cls) for cls in
-                           ("browser-clone", "temp", "trash", "cache-command", "cache-dir", "build-output")},
-               "planned_gb": round(sum(a.get("bytes") or 0 for a in plan) / GB, 1),
-               "results": {r: sum(1 for x in rows if x["result"] == r) for r in ("removed", "skipped", "failed")},
-               "actions": [{k: a[k] for k in ("class", "target", "why") if k in a}
-                           | {"gb": round((a.get("bytes") or 0) / GB, 2)} for a in plan[:200]],
-               "surveys": surveys, "large_files": found,
-               "memory": memory_report(), "degraded": degraded}
-        out_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = out_file.with_suffix(".tmp")
-        tmp.write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, out_file)
+                mark = time.monotonic()
+                # A FRESH LISTING for every class: one taken at the start was minutes old by the
+                # time the last removal used it (review, 2026-10-12).
+                holders = (Holders([], "none") if name == "cache-command"      # a command needs no listing
+                           else Holders.take(min(120.0, max(5.0, share / 2))))
+                holders_mode = holders.mode
+                if not holders.known and name != "cache-command":
+                    if not any(d.get("source") == "holders" for d in degraded):
+                        degraded.append({"source": "holders", "reason": "what processes hold could not be read; "
+                                                                        "no path is removed"})
+                    continue
+                planner = dict(planners(cfg, level, holders, at, degraded, last_commands))[name]
+                actions = planner(Budget(min(plan_cap, share / 2), degraded))
+                plan += actions
+                if acting:
+                    class_end = mark + share
+                    for i, a in enumerate(actions[:cap]):
+                        if time.monotonic() > class_end or left() < reserve:
+                            degraded.append({"source": name, "reason": f"its share of the run ended; "
+                                                                       f"{len(actions) - i} action(s) wait for next pass"})
+                            break
+                        try:
+                            row = act(a, holders)
+                        except (OSError, subprocess.SubprocessError) as exc:
+                            row = {"at": now(), "class": a["class"], "target": a["target"], "mode": "guard",
+                                   "result": "failed", "reason": f"{type(exc).__name__}: {exc}"[:200]}
+                        rows.append(row)
+                        journal([row])           # as it happens: a run stopped from outside keeps its record
+                        if a["class"] == "cache-command" and row["result"] == "removed":
+                            last_commands[a["target"]] = row["at"]
+                phases[name] = round(time.monotonic() - mark)
+            if acting:
+                surveys["git-cleanup"] = (_git_tier(apply, level, left() - reserve / 2)
+                                          if left() > 2 * reserve else {"result": "skipped", "reason": "the run budget is spent"})
+            if acting or "--refresh" in argv:
+                for name, script, hours, cap_s in (
+                        ("git-hygiene", "collectors/scan_git_hygiene.py", cfg.get("git_survey_every_hours", 6), 600),
+                        ("machine", "collectors/scan_machine.py", cfg.get("machine_survey_every_hours", 2), 300)):
+                    room = left() - reserve / 2
+                    surveys[name] = (refresh(script, paths.SCRATCH / f"{name}.json", _number(hours, 6), int(min(cap_s, room)))
+                                     if room > 30 else "skipped: the run budget is spent")
+            room = left() - reserve / 2
+            if room > 30 or "--large-files" in argv:
+                mark = time.monotonic()
+                found = large_files({**cfg, "large_files_budget_seconds":
+                                     min(_number(cfg.get("large_files_budget_seconds", 120), 120), max(room, 30))},
+                                    previous, "--large-files" in argv)
+                phases["large-files"] = round(time.monotonic() - mark)
+        finally:
+            free1 = free_bytes()
+            results = {r: sum(1 for x in rows if x["result"] == r) for r in ("removed", "skipped", "failed")}
+            doc = {**base, "at": now(), "free_gb_after": round(free1 / GB, 1),
+                   "freed_gb": round((free1 - free0) / GB, 2), "seconds": round(time.monotonic() - started),
+                   "budget_seconds": round(budget), "phases": phases, "holders": holders_mode,
+                   "planned": {cls: sum(1 for a in plan if a["class"] == cls) for cls in CLASSES},
+                   "planned_gb": round(sum(a.get("bytes") or 0 for a in plan) / GB, 1),
+                   "results": results, "commands_last": last_commands,
+                   "actions": [{k: a[k] for k in ("class", "target", "why") if k in a}
+                               | {"gb": round((a.get("bytes") or 0) / GB, 2)} for a in plan[:200]],
+                   "surveys": surveys, "large_files": found, "memory": memory_report(), "degraded": degraded}
+            if acting:
+                journal([{"at": doc["at"], "kind": "summary", "mode": "guard", "level": level, **results,
+                          "freed_mb": round((free1 - free0) / 1048576), "seconds": doc["seconds"],
+                          "git": surveys.get("git-cleanup")}])
+            _write_report(doc)
     return doc
 
 
+def summary_line(doc: dict) -> dict:
+    """What the maintenance job records: never an earlier run's numbers as this run's."""
+    git = (doc.get("surveys") or {}).get("git-cleanup")
+    return {**{k: doc.get(k) for k in ("level", "acting", "free_gb_before", "free_gb_after", "freed_gb",
+                                       "planned", "results", "seconds", "not_due", "busy")},
+            **({"git": git} if isinstance(git, dict) else {})}
+
+
 def main(argv: list[str]) -> int:
-    doc = run(argv)
+    try:
+        doc = run(argv)
+    except Exception as exc:  # noqa: BLE001 — the job must get a line, never a silent crash
+        if "--json" in argv:
+            print(json.dumps({"error": f"{type(exc).__name__}: {str(exc)[:200]}"}))
+        else:
+            print(f"disk guard: failed — {type(exc).__name__}: {str(exc)[:200]}", file=sys.stderr)
+        return 2
     if "--json" in argv:
         # The maintenance job reads this line instead of the report file: the file's
         # directory can be moved (OBSERVATORY_SCRATCH), the process's own answer cannot.
-        print(json.dumps({k: doc[k] for k in ("level", "acting", "free_gb_before", "free_gb_after", "freed_gb",
-                                              "planned", "results", "seconds")}))
-        return 1 if doc["results"]["failed"] else 0
+        print(json.dumps(summary_line(doc)))
+        return 0
+    if doc.get("not_due"):
+        print(f"disk guard: {doc['free_gb_before']} GB free, pressure normal; not due (it acts hourly while "
+              f"space is normal)")
+        return 0
+    if doc.get("busy"):
+        print("disk guard: another cleanup is running; nothing done")
+        return 0
     p = doc["planned"]
     planned = ", ".join(f"{k} {v}" for k, v in p.items() if v) or "nothing"
     if not doc["acting"]:
-        why = " (features.auto_cleanup is off)" if "--auto" in argv else ""
+        why = " (features.auto_cleanup is off)" if "--auto" in argv and not doc.get("auto_enabled") else ""
         print(f"disk guard: {doc['free_gb_before']} GB free, pressure {doc['level']}; plan only{why} — "
               f"{planned}. `--apply` acts now.")
         return 0
     r = doc["results"]
     print(f"disk guard: pressure {doc['level']}; {r['removed']} done, {r['skipped']} skipped on re-check, "
           f"{r['failed']} failed; free {doc['free_gb_before']} → {doc['free_gb_after']} GB")
-    return 1 if r["failed"] else 0
+    return 0
 
 
 if __name__ == "__main__":

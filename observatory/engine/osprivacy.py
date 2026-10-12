@@ -137,6 +137,12 @@ if not WINDOWS:
         temporary root (`tools/disk_guard.py`); never an ownership decision."""
         return str(os.getuid())
 
+    def owns(info: os.stat_result) -> bool:
+        """Whether this account owns what `info` (an lstat result) describes. The disk guard
+        asks it of every entry of a tree before removing the tree: a folder this account owns
+        can hold another account's files (one created with sudo), and those are not ours."""
+        return info.st_uid == os.getuid()
+
     def real_home() -> Path | None:
         """The home the password database records for this uid; None when it has none."""
         import pwd
@@ -405,6 +411,11 @@ else:  # pragma: no cover - exercised by the Windows CI job
     def account() -> str:
         """This account's id as text — its SID — for a path template; never a decision."""
         return user_sid()
+
+    def owns(info: os.stat_result) -> bool:
+        """Windows keeps no uid in a stat result; ownership there is the ACL's, and the guard's
+        rename probe (holders.py) refuses what another account holds."""
+        return True
 
     def real_home() -> Path | None:
         """The account's profile folder from the known-folder store; None when it cannot say."""

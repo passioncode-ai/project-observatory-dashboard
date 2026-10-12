@@ -70,7 +70,13 @@ def load_config() -> dict:
             return doc if isinstance(doc, dict) else {}
         except (OSError, ValueError):
             return {}
-    return {**read(ROOT / "defaults" / "cleanup.json"), **read(paths.config_file("cleanup.json"))}
+    shipped, own = read(ROOT / "defaults" / "cleanup.json"), read(paths.config_file("cleanup.json"))
+    cfg = {**shipped, **own}
+    # Which auto thresholds a PERSON set: a value equal to the shipped one is the copy init
+    # made. Pressure lowers only the others (review 2026-10-12: it overrode a person's 30).
+    base_auto = shipped.get("auto") or {}
+    cfg["_own_auto"] = sorted(k for k, v in (own.get("auto") or {}).items() if base_auto.get(k) != v)
+    return cfg
 
 
 def git(repo: str, *args: str, timeout: int = 120, text: bool = True, input: bytes | None = None,
@@ -154,7 +160,8 @@ def plan_git(hygiene: dict, cfg: dict) -> list[dict]:
                             "why": "its directory no longer exists"})
             elif w["state"] == "clean" and idle >= auto.get("clean_worktree_idle_days", 7):
                 out.append({**base, "class": "worktree-clean", "tier": "auto", "target": w["path"],
-                            "branch": w.get("branch"), "why": f"no uncommitted change, idle {idle} days"})
+                            "branch": w.get("branch"), "artifacts": list(cfg.get("artifact_dirs") or []),
+                            "why": f"no uncommitted change, idle {idle} days"})
             elif w["state"] == "dirty" and idle >= manual.get("dirty_worktree_idle_days", 7):
                 out.append({**base, "class": "worktree-dirty", "tier": "manual", "target": w["path"],
                             "branch": w.get("branch"), "why": f"{w.get('dirty_files')} uncommitted file(s), idle {idle} days"})
@@ -200,7 +207,9 @@ def plan_artifacts(cfg: dict, busy: set[str]) -> list[dict]:
                     if d in names:
                         ignored = git(dirpath, "check-ignore", "-q", full).returncode == 0
                         in_repo = git(dirpath, "rev-parse", "--git-dir").returncode == 0
-                        if (ignored or not in_repo) and not any(b == full or b.startswith(full + "/") for b in busy):
+                        held = busy.busy(full) if hasattr(busy, "busy") else \
+                            any(b == full or b.startswith(full + "/") for b in busy)
+                        if (ignored or not in_repo) and not held:
                             out.append({"class": "build-artifacts", "tier": "auto", "target": full,
                                         "project": p["id"], "why": f"{'git-ignored' if in_repo else 'outside git'} "
                                                                    f"build output; project idle {p['idle_days']} days"})
@@ -248,8 +257,28 @@ def still_safe_branch(a: dict) -> str:
 
 
 def busy_now(path: str) -> bool:
-    from scan_machine import working_dirs
-    return any(b == path or b.startswith(path + "/") for b in working_dirs().values())
+    """Whether a process holds anything under `path` RIGHT NOW: a fresh listing of open
+    files, maps, executables, command lines and working directories (holders.py). Before
+    2026-10-12 only working directories counted, so a worktree whose files an editor or a dev
+    server held open was removed. When the listing cannot be taken, everything is held."""
+    import holders
+    return holders.Holders.take(60).busy(path)
+
+
+def ignored_keepers(target: str, artifacts: set[str]) -> list[str]:
+    """Ignored files in a worktree that are NOT build output (`.env.local`, a local database,
+    `.wrangler/state`): `git worktree remove` deletes them with the worktree, and they exist
+    nowhere else. A worktree holding any is not "clean" for this tier."""
+    out = git(target, "status", "--porcelain", "--ignored=matching", "--untracked-files=normal", "-z")
+    if out.returncode:
+        return ["(git status could not be read)"]
+    keep = []
+    for entry in out.stdout.split("\0"):
+        if entry.startswith("!! "):
+            rel = entry[3:].rstrip("/")
+            if not any(part in artifacts for part in rel.split("/")):
+                keep.append(rel)
+    return keep
 
 
 def act(a: dict, archive: pathlib.Path) -> dict:
@@ -285,6 +314,12 @@ def act(a: dict, archive: pathlib.Path) -> dict:
             return {**rec, "result": "skipped", "reason": "git status could not be read"}
         if cls == "worktree-clean" and status.stdout.strip():
             return {**rec, "result": "skipped", "reason": "it has uncommitted changes now"}
+        if cls == "worktree-clean":
+            keepers = ignored_keepers(target, set(a.get("artifacts") or []))
+            if keepers:
+                return {**rec, "result": "skipped",
+                        "reason": f"it holds {len(keepers)} ignored file(s) that are not build output, "
+                                  f"e.g. {keepers[0][:60]}"}
         rec["head"] = git(target, "rev-parse", "HEAD").stdout.strip()
         if cls == "worktree-dirty":
             # NOTHING IS REMOVED UNLESS THE ARCHIVE IS PROVEN: every refusal below
@@ -348,50 +383,82 @@ def under_pressure(cfg: dict, level: str | None) -> dict:
     if not lowered:
         return cfg
     auto = dict(cfg.get("auto") or {})
+    mine = set(cfg.get("_own_auto") or [])
     for key, value in lowered.items():
-        if key in auto and isinstance(value, (int, float)):
+        if key in auto and key not in mine and isinstance(value, (int, float)):
             auto[key] = min(auto[key], value)
     return {**cfg, "auto": auto}
 
 
 def main(argv: list[str]) -> int:
-    cfg = load_config()
-    if "--level" in argv[:-1]:
-        cfg = under_pressure(cfg, argv[argv.index("--level") + 1])
-    from scan_machine import working_dirs
-    busy = set(working_dirs().values())
-    plan = build_plan(cfg, busy)
-    out = paths.SCRATCH / "cleanup-plan.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(plan, indent=1, ensure_ascii=False), encoding="utf-8")
-    os.chmod(out, 0o600)
-    counts = ", ".join(f"{k} {v}" for k, v in plan["counts"].items() if v) or "nothing"
-    if "--auto" in argv and not plan["auto_enabled"]:
-        print(f"cleanup: plan only (features.auto_cleanup is off) — {counts}")
-        return 0
-    if "--auto" not in argv and "--apply" not in argv:
-        print(f"cleanup plan: {counts}. Nothing removed; `--apply` removes the auto tier, "
-              f"`--apply --include manual` also archives and removes the manual tier.")
-        return 0
-    tiers = {"auto"} | ({"manual"} if "--apply" in argv and "manual" in argv else set())
-    chosen = [a for a in plan["actions"] if a["tier"] in tiers][: int(cfg.get("max_actions_per_run", 200))]
-    archive = configuration.home() / "archive" / "cleanup" / datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    rows = []
-    for a in chosen:
-        try:
-            rows.append(act(a, archive))
-        except (OSError, subprocess.SubprocessError) as exc:
-            rows.append({"at": now(), "class": a["class"], "target": a["target"], "result": "failed",
-                         "reason": f"{type(exc).__name__}: {exc}"[:200]})
-    journal([{**r, "mode": "auto" if "--auto" in argv else "manual"} for r in rows])
-    done = sum(1 for r in rows if r["result"] in ("removed", "pruned"))
-    skipped = sum(1 for r in rows if r["result"] == "skipped")
-    failed = sum(1 for r in rows if r["result"] == "failed")
-    freed = sum(r.get("kb") or 0 for r in rows) / 1048576
-    print(f"cleanup: {done} removed, {skipped} skipped on re-check, {failed} failed"
-          + (f"; {freed:.1f} GB of build output freed" if freed else ""))
-    return 1 if failed else 0
+    """Plan, or act on the auto tier (and the manual one when asked), under the cleanup lock.
 
+    `--level L` lowers the auto tier's thresholds by disk pressure; `--deadline-seconds N`
+    stops between actions before N seconds; every action is journalled as it happens, so a
+    run stopped from outside keeps its undo record; `--json` prints one summary line."""
+    import cleanup_lock
+    level = argv[argv.index("--level") + 1] if "--level" in argv[:-1] else None
+    deadline = None
+    if "--deadline-seconds" in argv[:-1]:
+        try:
+            deadline = time.monotonic() + float(argv[argv.index("--deadline-seconds") + 1])
+        except ValueError:
+            deadline = None
+    as_json = "--json" in argv
+
+    def say(summary: dict, text: str, code: int = 0) -> int:
+        print(json.dumps(summary) if as_json else text)
+        return code
+
+    with cleanup_lock.held() as mine:
+        if not mine:
+            return say({"result": "busy"}, "cleanup: another cleanup is running; nothing done")
+        cfg = under_pressure(load_config(), level)
+        import holders
+        busy = holders.Holders.take(120)
+        plan = build_plan(cfg, busy)
+        plan["level"] = level or "normal"
+        out = paths.SCRATCH / "cleanup-plan.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_suffix(".tmp")
+        tmp.write_text(json.dumps(plan, indent=1, ensure_ascii=False), encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, out)
+        counts = ", ".join(f"{k} {v}" for k, v in plan["counts"].items() if v) or "nothing"
+        if "--auto" in argv and not plan["auto_enabled"]:
+            return say({"result": "plan-only", "counts": plan["counts"]},
+                       f"cleanup: plan only (features.auto_cleanup is off) — {counts}")
+        if "--auto" not in argv and "--apply" not in argv:
+            return say({"result": "plan-only", "counts": plan["counts"]},
+                       f"cleanup plan{' at ' + level if level else ''}: {counts}. Nothing removed; `--apply` removes "
+                       f"the auto tier, `--apply --include manual` also archives and removes the manual tier.")
+        tiers = {"auto"} | ({"manual"} if "--apply" in argv and "manual" in argv else set())
+        chosen = [a for a in plan["actions"] if a["tier"] in tiers][: int(cfg.get("max_actions_per_run", 200))]
+        archive = configuration.home() / "archive" / "cleanup" / datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        rows, stopped = [], 0
+        mode = "auto" if "--auto" in argv else "manual"
+        for n, a in enumerate(chosen):
+            if deadline is not None and time.monotonic() > deadline:
+                stopped = len(chosen) - n
+                break
+            try:
+                row = act(a, archive)
+            except (OSError, subprocess.SubprocessError) as exc:
+                row = {"at": now(), "class": a["class"], "target": a["target"], "result": "failed",
+                       "reason": f"{type(exc).__name__}: {exc}"[:200]}
+            row = {**row, "mode": mode, **({"level": level} if level else {})}
+            rows.append(row)
+            journal([row])                   # as it happens: the sha of a deleted branch is its undo
+        done = sum(1 for r in rows if r["result"] in ("removed", "pruned"))
+        skipped = sum(1 for r in rows if r["result"] == "skipped")
+        failed = sum(1 for r in rows if r["result"] == "failed")
+        freed = sum(r.get("kb") or 0 for r in rows) / 1048576
+        summary = {"result": "ran", "removed": done, "skipped": skipped, "failed": failed,
+                   "stopped": stopped, "level": level or "normal"}
+        text = (f"cleanup: {done} removed, {skipped} skipped on re-check, {failed} failed"
+                + (f"; {freed:.1f} GB of build output freed" if freed else "")
+                + (f"; {stopped} left for the next run (deadline)" if stopped else ""))
+        return say(summary, text, 1 if failed and not as_json else 0)
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))

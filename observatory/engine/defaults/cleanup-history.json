@@ -1,0 +1,205 @@
+{
+ "_why": "The guard sections earlier releases shipped. `full init` copies defaults/cleanup.json into a workspace, so a value equal to one of these is that copy, not a person's choice: the guard reads it as unset and takes the current default (tools/disk_guard.py load_config).",
+ "guard": {
+  "0.23.0": {
+   "_why": "tools/disk_guard.py, run by the hourly maintenance job before the backup. Free space below levels.low / levels.critical (GB) moves every threshold below it. It removes only what nobody holds open or works inside (one lsof listing per run), never a privacy-guarded place, never a symlink target, never another user's file; it stops no process. Every action is journalled with the free-space delta the disk reports.",
+   "levels": {
+    "low": {
+     "free_gb": 25
+    },
+    "critical": {
+     "free_gb": 10
+    }
+   },
+   "temp_days": {
+    "normal": 3,
+    "low": 1,
+    "critical": 1
+   },
+   "build_idle_days": {
+    "normal": 14,
+    "low": 3,
+    "critical": 1
+   },
+   "trash_days": {
+    "normal": 30,
+    "low": 30,
+    "critical": 3
+   },
+   "clone_min_age_hours": 1,
+   "temp_roots": [
+    {
+     "path": "{tmpdir}",
+     "depth": 1
+    },
+    {
+     "path": "/private/tmp",
+     "depth": 1
+    },
+    {
+     "path": "/private/tmp/claude-{uid}",
+     "depth": 2
+    },
+    {
+     "path": "~/Library/Developer/Xcode/DerivedData",
+     "depth": 1,
+     "level": "low"
+    }
+   ],
+   "temp_keep": [
+    "cc-socks",
+    "*.sock",
+    "*.socket",
+    "tmux-*",
+    "com.apple.*",
+    "launchd*",
+    "powerlog",
+    ".X*",
+    "*.pid",
+    "*.lock"
+   ],
+   "commands": [
+    {
+     "argv": [
+      "uv",
+      "cache",
+      "prune"
+     ],
+     "level": "normal",
+     "busy_output": "in-use",
+     "why": "uv: entries no environment uses (it takes uv's own lock)"
+    },
+    {
+     "argv": [
+      "pnpm",
+      "store",
+      "prune"
+     ],
+     "level": "normal",
+     "busy_if": [
+      "pnpm"
+     ],
+     "why": "pnpm: packages no project references"
+    },
+    {
+     "argv": [
+      "brew",
+      "cleanup",
+      "--prune=14"
+     ],
+     "level": "normal",
+     "busy_if": [
+      "brew"
+     ],
+     "why": "Homebrew: old versions and downloads older than 14 days"
+    },
+    {
+     "argv": [
+      "docker",
+      "builder",
+      "prune",
+      "-f",
+      "--filter",
+      "until=168h"
+     ],
+     "level": "normal",
+     "needs_running": [
+      "OrbStack",
+      "OrbStack Helper",
+      "com.docker.backend",
+      "dockerd"
+     ],
+     "why": "Docker: build cache unused for a week (only while the daemon already runs)"
+    },
+    {
+     "argv": [
+      "npm",
+      "cache",
+      "verify"
+     ],
+     "level": "low",
+     "why": "npm: garbage-collects the cache; safe beside a running npm"
+    },
+    {
+     "argv": [
+      "uv",
+      "cache",
+      "clean"
+     ],
+     "level": "low",
+     "busy_if": [
+      "uv"
+     ],
+     "busy_output": "in-use",
+     "why": "uv: the whole cache, re-downloaded on demand"
+    },
+    {
+     "argv": [
+      "go",
+      "clean",
+      "-cache"
+     ],
+     "level": "low",
+     "busy_if": [
+      "go"
+     ],
+     "why": "Go: the build cache"
+    },
+    {
+     "argv": [
+      "yarn",
+      "cache",
+      "clean"
+     ],
+     "level": "low",
+     "busy_if": [
+      "yarn"
+     ],
+     "why": "Yarn: the package cache"
+    },
+    {
+     "argv": [
+      "docker",
+      "image",
+      "prune",
+      "-f"
+     ],
+     "level": "low",
+     "needs_running": [
+      "OrbStack",
+      "OrbStack Helper",
+      "com.docker.backend",
+      "dockerd"
+     ],
+     "why": "Docker: dangling images only"
+    },
+    {
+     "argv": [
+      "brew",
+      "cleanup",
+      "--prune=all",
+      "-s"
+     ],
+     "level": "critical",
+     "busy_if": [
+      "brew"
+     ],
+     "why": "Homebrew: every cached download"
+    }
+   ],
+   "large_file_min_mb": 1024,
+   "large_files_every_hours": 24,
+   "large_files_budget_seconds": 120,
+   "large_files_top": 30,
+   "large_files_skip": [
+    "node_modules",
+    ".Trash",
+    "OrbStack"
+   ],
+   "git_survey_every_hours": 6,
+   "machine_survey_every_hours": 2,
+   "plan_budget_seconds": 300,
+   "max_actions_per_class": 2000
+  }
+ }
+}
