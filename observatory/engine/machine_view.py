@@ -75,6 +75,15 @@ def guard_summaries(days: int = 7) -> list[dict]:
     return out
 
 
+def _carried(rows: list) -> dict | None:
+    """Checkouts the hygiene survey carried from an earlier pass, and the oldest of their measurements."""
+    stale = [c for c in rows if c.get("stale")]
+    if not stale:
+        return None
+    stamps = [c["measured_at"] for c in stale if c.get("measured_at")]
+    return {"checkouts": len(stale), "measured_at": min(stamps) if stamps else None}
+
+
 def summary(explain_pid: int | None = None) -> dict:
     degraded = []
     machine, d1 = _load("machine.json", "machine")
@@ -101,6 +110,10 @@ def summary(explain_pid: int | None = None) -> dict:
                          for cls in ("merged", "patch-merged", "pushed", "unique")},
             "uniqueBranches": [{"repository": c["repository"], **b} for c in rows
                                for b in c.get("branches") or [] if b["class"] == "unique"],
+            # A pass the deadline cut short (ENG-009): how many rows are carried, and from when.
+            # Their auto actions wait for a fresh pass (tools/cleanup.py `carried`).
+            "partial": bool(hygiene.get("partial")),
+            "carried": _carried(rows),
         }
         degraded += hygiene.get("degraded") or []
     if plan:

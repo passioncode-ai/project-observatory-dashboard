@@ -1290,8 +1290,8 @@
       "path": "machine_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "44fa1ca529668d382a4e8d9b306b8204e7a04c89546ed8e7e547d18f35d6565b",
-      "bytes": 6168
+      "export_sha256": "4f1274f16ff68bf4c1ef7957ba7a834ce9ecbd54547d132708bd308e913deb50",
+      "bytes": 6834
     },
     {
       "path": "maintenance.py",
@@ -2426,8 +2426,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a50bf8c307de06a65a28862c282e22e6d4961cd6e0662bda75646bcc4e7a08cf",
-      "bytes": 51090
+      "export_sha256": "945ffa10c88876ff69260be45f02f42a56a3b1ee2b91f325350590cf17d25704",
+      "bytes": 55160
     },
     {
       "path": "tests/test_docs_current.py",
@@ -3972,8 +3972,8 @@
       "path": "tools/cleanup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "344d7544bd333b609cfadeee84d7a763f7ef2e09f059e49818302d7ceaef9a22",
-      "bytes": 26326
+      "export_sha256": "28c7777fb9ff9aae1d4ba8a32349250ef238158b8287e57422444ea172256abf",
+      "bytes": 27936
     },
     {
       "path": "tools/cloudflare.py",

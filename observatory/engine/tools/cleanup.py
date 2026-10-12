@@ -132,20 +132,40 @@ def protected(name: str, cfg: dict) -> bool:
 
 # --- the plan -----------------------------------------------------------------
 
+def carried(hygiene: dict) -> dict | None:
+    """The checkouts a cut-short hygiene pass carried from an earlier one (`stale: true`), and the
+    oldest measurement among them; None when every row is fresh."""
+    rows = [c for c in hygiene.get("checkouts") or [] if c.get("stale")]
+    if not rows:
+        return None
+    stamps = [c["measured_at"] for c in rows if c.get("measured_at")]
+    return {"checkouts": len(rows), "measured_at": min(stamps) if stamps else None}
+
+
 def plan_git(hygiene: dict, cfg: dict) -> list[dict]:
+    """Auto and manual actions from the hygiene survey's rows.
+
+    A CARRIED ROW PLANS NO AUTO ACTION (ENG-009). A pass the deadline cut short keeps its
+    unreached checkouts' last rows marked `stale`; the act-time re-checks cover merge state,
+    holders and cleanliness but not how old the row is, and the auto tier acts with no person
+    present, so it waits for a fresh pass. A manual action only proposes: it stays, marked
+    `stale` with the row's `measured_at`, so the person sees the age."""
     auto, manual = cfg.get("auto") or {}, cfg.get("manual") or {}
     out = []
     for c in hygiene.get("checkouts") or []:
         repo, default = c["path"], c["default_branch"]
         base = {"repository": c["repository"], "repo": repo, "default_branch": default}
+        fresh = not c.get("stale")
+        if not fresh:
+            base.update(stale=True, measured_at=c.get("measured_at"))
         for b in c.get("branches") or []:
             if protected(b["name"], cfg):
                 continue
             idle = b.get("idle_days") or 0
-            if b["class"] in ("merged", "patch-merged") and idle >= auto.get("merged_branch_idle_days", 7):
+            if fresh and b["class"] in ("merged", "patch-merged") and idle >= auto.get("merged_branch_idle_days", 7):
                 out.append({**base, "class": "branch-merged", "tier": "auto", "target": b["name"],
                             "why": f"{b['class']}, idle {idle} days"})
-            elif b["class"] == "pushed" and idle >= auto.get("pushed_branch_idle_days", 30):
+            elif fresh and b["class"] == "pushed" and idle >= auto.get("pushed_branch_idle_days", 30):
                 out.append({**base, "class": "branch-pushed", "tier": "auto", "target": b["name"],
                             "why": f"identical to {b.get('upstream')}, idle {idle} days"})
             elif b["class"] == "unique" and idle >= manual.get("unique_branch_idle_days", 14):
@@ -155,10 +175,10 @@ def plan_git(hygiene: dict, cfg: dict) -> list[dict]:
             if w.get("locked") or w.get("busy"):
                 continue
             idle = w.get("idle_days") or 0
-            if w["state"] == "missing":
+            if fresh and w["state"] == "missing":
                 out.append({**base, "class": "worktree-missing", "tier": "auto", "target": w["path"],
                             "why": "its directory no longer exists"})
-            elif w["state"] == "clean" and idle >= auto.get("clean_worktree_idle_days", 7):
+            elif fresh and w["state"] == "clean" and idle >= auto.get("clean_worktree_idle_days", 7):
                 out.append({**base, "class": "worktree-clean", "tier": "auto", "target": w["path"],
                             "branch": w.get("branch"), "artifacts": list(cfg.get("artifact_dirs") or []),
                             "why": f"no uncommitted change, idle {idle} days"})
@@ -227,6 +247,7 @@ def build_plan(cfg: dict, busy: set[str], artifacts: bool = True) -> dict:
         hygiene = {}
     actions = plan_git(hygiene, cfg) + (plan_artifacts(cfg, busy) if artifacts else [])
     return {"schema_version": 1, "planned_at": now(), "survey_at": hygiene.get("measured_at"),
+            "survey_partial": bool(hygiene.get("partial")), "carried": carried(hygiene),
             "auto_enabled": configuration.enabled("auto_cleanup", "features"),
             "counts": {k: sum(1 for a in actions if a["class"] == k) for k in AUTO_CLASSES + MANUAL_CLASSES},
             "actions": actions}
@@ -446,6 +467,11 @@ def main(argv: list[str]) -> int:
         os.chmod(tmp, 0o600)
         os.replace(tmp, out)
         counts = ", ".join(f"{k} {v}" for k, v in plan["counts"].items() if v) or "nothing"
+        held_back = plan.get("carried")
+        if held_back:
+            # Said on every path, so a run that removes nothing does not read as "nothing to do".
+            print(f"cleanup: {held_back['checkouts']} checkouts carried from {held_back['measured_at']}; "
+                  "their auto actions wait for a fresh pass", file=sys.stderr if as_json else sys.stdout)
         if "--auto" in argv and not plan["auto_enabled"]:
             return say({"result": "plan-only", "counts": plan["counts"]},
                        f"cleanup: plan only (features.auto_cleanup is off) — {counts}")

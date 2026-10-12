@@ -690,6 +690,69 @@ def pathlib_name(p) -> str:
     return Path(str(p)).name
 
 
+class StaleRows(Base):
+    """ENG-009: a git-hygiene pass the deadline cut short carries its unreached checkouts with
+    `stale: true`, and the cleanup planned auto actions from them as from fresh rows. The act-time
+    re-checks cover merge state, holders and cleanliness, not recency; the auto tier acts with
+    no person present, so it waits for a fresh pass. The manual tier only proposes: its rows
+    stay, marked with the age a person needs to see."""
+
+    def hygiene(self, stale: bool) -> dict:
+        row = {"repository": "example-org/alpha-web", "path": str(self.base / "alpha-web"),
+               "default_branch": "main", "measured_at": "2026-10-01T09:00:00Z",
+               "branches": [{"name": "old-feature", "class": "merged", "idle_days": 40},
+                            {"name": "spike", "class": "unique", "ahead": 2, "idle_days": 40}],
+               "worktrees": [{"path": str(self.base / "wt-gone"), "state": "missing", "idle_days": 40},
+                             {"path": str(self.base / "wt-clean"), "state": "clean", "branch": "x", "idle_days": 40},
+                             {"path": str(self.base / "wt-dirty"), "state": "dirty", "branch": "y",
+                              "dirty_files": 3, "idle_days": 40}]}
+        return {"measured_at": "2026-10-12T09:00:00Z", "partial": stale,
+                "checkouts": [{**row, "stale": True} if stale else row]}
+
+    def test_a_stale_checkout_yields_no_auto_action_and_marked_manual_ones(self):
+        import cleanup
+        cfg = cleanup.load_config()
+        fresh = cleanup.plan_git(self.hygiene(stale=False), cfg)
+        self.assertEqual(sorted(a["class"] for a in fresh if a["tier"] == "auto"),
+                         ["branch-merged", "worktree-clean", "worktree-missing"], "the fixture must plan auto work")
+        plan = cleanup.plan_git(self.hygiene(stale=True), cfg)
+        self.assertEqual([a for a in plan if a["tier"] == "auto"], [], "an auto action from a carried row")
+        manual = [a for a in plan if a["tier"] == "manual"]
+        self.assertEqual(sorted(a["class"] for a in manual), ["branch-unique", "worktree-dirty"])
+        for a in manual:
+            self.assertIs(a.get("stale"), True)
+            self.assertEqual(a.get("measured_at"), "2026-10-01T09:00:00Z")
+        self.assertTrue(all("stale" not in a for a in fresh), "a fresh row is not marked")
+
+    def test_the_plan_and_the_auto_run_say_what_waits_for_a_fresh_pass(self):
+        import paths
+        settings = self.home / "config" / "settings.json"
+        doc = json.loads(settings.read_text())
+        doc.setdefault("features", {})["auto_cleanup"] = True
+        settings.write_text(json.dumps(doc))
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps(self.hygiene(stale=True)))
+        done = subprocess.run([sys.executable, str(ROOT / "tools/cleanup.py"), "--auto", "--git-only"],
+                              cwd=ROOT, env={**os.environ}, capture_output=True, text=True, timeout=300)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn("cleanup: 1 checkouts carried from 2026-10-01T09:00:00Z; their auto actions wait for a fresh pass",
+                      done.stdout)
+        self.assertIn("0 removed", done.stdout)
+        plan = json.loads((paths.SCRATCH / "cleanup-plan.json").read_text())
+        self.assertEqual(plan["carried"], {"checkouts": 1, "measured_at": "2026-10-01T09:00:00Z"})
+        self.assertIs(plan["survey_partial"], True)
+
+    def test_the_machine_view_shows_the_partial_survey_and_its_carried_count(self):
+        import paths
+        import machine_view
+        importlib.reload(machine_view)
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps(self.hygiene(stale=True)))
+        git_view = machine_view.summary()["git"]
+        self.assertIs(git_view["partial"], True)
+        self.assertEqual(git_view["carried"], {"checkouts": 1, "measured_at": "2026-10-01T09:00:00Z"})
+
+
 class SecondIteration(Base):
     """The rules the three-tier review of 2026-10-12 set (docs/design/DISK-GUARD.md)."""
 
