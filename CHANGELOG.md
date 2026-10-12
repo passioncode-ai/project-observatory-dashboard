@@ -3,7 +3,9 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.24.4 — 2026-10-12
+
+Inside the disk guard the git tier plans branches and worktrees only and fits its deadline, so a scheduled pass under load reaches its removals. The companion plugin `observatory-log` is unchanged.
 
 ### Fixed
 
