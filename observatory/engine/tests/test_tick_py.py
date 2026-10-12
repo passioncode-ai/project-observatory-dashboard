@@ -370,6 +370,53 @@ class RotationRecord(unittest.TestCase):
         self.assertIsNone(rows["leaks"]["last_ran_at"])
         self.assertIsNotNone(rows["scan-fs"]["started_at"])
 
+    def test_a_collector_never_started_keeps_a_null_start(self):
+        """Verification round 1: a collector the watchdog never started was given `started_at: 0.0`,
+        which reads as a start in 1970. It keeps null and its streak; only the ordering treats null as
+        oldest, and the log says "never started"."""
+        self.run_tick(outcomes={"leaks": "not_started"})
+        _, doc = self.run_tick(outcomes={"leaks": "not_started"})
+        leaks = doc["collectors"]["leaks"]
+        self.assertIsNone(leaks["started_at"])
+        self.assertEqual(leaks["not_started_streak"], 2)
+        self.assertIsNone(leaks["last_ran_at"])
+        self.assertTrue(any("leaks (never started)" in l for l in self.said), self.said)
+
+    def test_the_start_is_kept_before_the_step_runs(self):
+        """A tick killed inside a step must still move that step back: a provisional row (its start,
+        no outcome yet) is saved before the step is called."""
+        seen = {}
+        tick = self.tick.Tick(self.record.parent)
+
+        def step(name, *argv):
+            seen[name] = json.loads(self.record.read_text(encoding="utf-8"))["collectors"][name]
+            return "ran"
+        tick.step = step
+        rotation = self.tick.Rotation(tick, self.record)
+        rotation.step("leaks", "x.py")
+        rotation.run_in_turn()
+        self.assertIsNotNone(seen["leaks"]["started_at"])
+        self.assertIsNone(seen["leaks"]["outcome"])
+
+    def test_a_bad_row_is_skipped_not_the_whole_record(self):
+        self.record.write_text(json.dumps({"schema": 2, "collectors": {
+            "scan-fs": "not a row", "leaks": {"started_at": "yesterday", "not_started_streak": "x"},
+            "lifecycle": {"started_at": 50.0, "outcome": "ran", "not_started_streak": 0, "last_ran_at": 50.0}}}),
+            encoding="utf-8")
+        ran, doc = self.run_tick(outcomes={"leaks": "not_started"})
+        self.assertEqual(ran[0], "scan-fs", ran)
+        self.assertEqual(doc["collectors"]["leaks"]["not_started_streak"], 1, "a bad streak is coerced to 0")
+        self.assertIsNone(doc["collectors"]["leaks"]["started_at"])
+        self.assertGreater(doc["collectors"]["lifecycle"]["started_at"], 50.0, "the good row was read and moved on")
+        self.assertTrue(any("scan-fs" in l and "skipped" in l for l in self.said), self.said)
+
+    def test_a_schema_it_does_not_know_is_unreadable(self):
+        self.record.write_text(json.dumps({"schema": 3, "collectors": {}}), encoding="utf-8")
+        ran, doc = self.run_tick()
+        self.assertEqual(ran, ["scan-fs", "leaks", "lifecycle"])
+        self.assertTrue(any("unreadable" in l and "schema 3" in l for l in self.said), self.said)
+        self.assertEqual(doc["schema"], 2)
+
     def test_a_schema_1_record_is_read_and_rewritten_as_schema_2(self):
         self.record.write_text(json.dumps({"started": {"scan-fs": 300.0, "leaks": 100.0, "lifecycle": 200.0}}),
                                encoding="utf-8")
@@ -380,6 +427,8 @@ class RotationRecord(unittest.TestCase):
         self.assertEqual(doc["collectors"]["lifecycle"]["started_at"], 200.0,
                          "a step not started keeps its old start, so it goes first next tick")
         self.assertEqual(doc["collectors"]["lifecycle"]["not_started_streak"], 1)
+        self.assertEqual(doc["collectors"]["lifecycle"]["last_ran_at"], 200.0,
+                         "the schema-1 time seeds the last run, so an upgrade does not read as starvation")
 
 
 class TailOrder(unittest.TestCase):

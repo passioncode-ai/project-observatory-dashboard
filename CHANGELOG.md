@@ -9,8 +9,10 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 - **The tick says how each collector ended** (ENG-005, ENG-007): `store/tick-rotation.json` is schema 2 — per
   collector `started_at` (stamped before the step; schema 1 kept the time after it), `finished_at`, `outcome`
-  (`ran`, `failed`, `stopped`, `not_started`), `not_started_streak` and `last_ran_at`. A schema-1 record is still
-  read and rewritten as schema 2. Every `tick.json` `failed_steps` row gains `outcome` beside `exit`, so a step the
+  (`ran`, `failed`, `stopped`, `not_started`), `not_started_streak` and `last_ran_at`; a collector never started
+  keeps `started_at: null`. The start is saved before the step runs, so a tick killed inside a step still moves it
+  back. A schema-1 record is still read — its times seed `started_at` and `last_ran_at` — and rewritten as schema 2;
+  a bad row is coerced or skipped, not the whole record. Every `tick.json` `failed_steps` row gains `outcome` beside `exit`, so a step the
   watchdog did not start is told from one it stopped at its limit (both exit 124). The tick log names a collector
   not started for consecutive ticks at plan time. `rotation_order` no longer loops on a cycle in `READS_FROM`: it
   names the cycle in the log and runs the planned order, and `tests/test_pipeline.py` asserts `READS_FROM` is acyclic.

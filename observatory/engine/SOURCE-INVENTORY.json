@@ -3565,8 +3565,8 @@
       "path": "tests/test_tick_py.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "be1b45ee9fa91d7b164d8b59c8162540a557383f6ea9b627717863960db261e6",
-      "bytes": 21387
+      "export_sha256": "523b9c4207c1578a6a43b276ff277a387ab1e004bbed93c5b237028cd4123cfd",
+      "bytes": 24294
     },
     {
       "path": "tests/test_tick_repo.py",
@@ -3931,8 +3931,8 @@
     {
       "path": "tools/check_docs.py",
       "source_sha256": "6070802532aabac8233f07023015e5d5b4e8e19f625a46001209ad251d65fcce",
-      "export_sha256": "2c1ffca462bd9c7231caec24921238cc063e14198b7ea8551c788d7d0c77cbe3",
-      "bytes": 33715,
+      "export_sha256": "0133d44b88f6c329b778a35c8b2d774255e60718c62105ce4995ab30e3d43a8a",
+      "bytes": 33769,
       "python_comments_removed": 148,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
@@ -4468,8 +4468,8 @@
       "path": "tools/tick.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3b775160f2374b7d084cb12c122f58cf17654258b6fe27b1dd73444b0b75c2e8",
-      "bytes": 26059
+      "export_sha256": "6b60534b79e5691bdaf9e92899dc1cd10a554032c84b4691daf2d08bc5d91705",
+      "bytes": 27834
     },
     {
       "path": "tools/tick.sh",

@@ -158,16 +158,19 @@ def rotation_order(planned: list[str], started: dict[str, float],
                    reads: dict[str, tuple[str, ...]] = READS_FROM) -> list[str]:
     """`planned` least recently started first; a step never started goes first, and ties keep the
     planned order. Then a writer that would run after a step reading its output is moved to just
-    before that reader, so the starved reader stays early and still reads this tick's output.
+    before that reader, so the starved reader stays early and still reads this tick's output. A
+    start of None (never started) sorts as the oldest; only this ordering reads it as 0.
 
     Bounded: a cycle in `reads` among the planned steps has no such order, and the loop that moved
     writers forward used to spin on it for ever (ENG-007). A cycle is named in the log and the
-    planned order runs; at most len(planned)² passes are made in any case."""
+    planned order runs. The len(planned)² cap on passes is a second guard that acyclic reads never
+    reach — each pass that moves a writer settles one edge for good — kept so no later change to the
+    loop can make it spin again."""
     cycle = reads_cycle(reads, planned)
     if cycle:
         log(f"rotation: READS_FROM has a cycle through {', '.join(cycle)} — the planned order this tick")
         return list(planned)
-    order = sorted(planned, key=lambda name: started.get(name, 0.0))
+    order = sorted(planned, key=lambda name: started.get(name) or 0.0)
     for _ in range(max(len(order), 1) ** 2):
         moved = False
         for reader, writers in reads.items():
@@ -203,12 +206,14 @@ class Rotation:
             "last_ran_at": epoch|null}}}
 
     `started_at` is stamped BEFORE the step (schema 1 kept the time after it, so a slow collector
-    looked recently started by its own duration); a step not started keeps its previous
-    `started_at` and grows its `not_started_streak`, so it goes first next tick and a reader can
-    tell starvation from rotation. `last_ran_at` is the start of the last attempt that ran to the
-    end (`ran`): a failed or stopped attempt moves the collector back without producing its output.
-    Schema 1 (`{"started": {name: epoch}}`) is still read, its times becoming `started_at`; the first
-    save writes schema 2."""
+    looked recently started by its own duration) and saved, provisionally, before the step is
+    called, so a tick killed inside a step still moves it back. A step not started keeps its
+    previous `started_at` — null for one never started — and grows its `not_started_streak`, so it
+    goes first next tick and a reader can tell starvation from rotation. `last_ran_at` is the start
+    of the last attempt that ran to the end (`ran`): a failed or stopped attempt moves the collector
+    back without producing its output. Schema 1 (`{"started": {name: epoch}}`) is still read, its
+    times seeding `started_at` and `last_ran_at`; the first save writes schema 2. A bad row is
+    coerced or skipped, never the whole record; a schema neither 1 nor 2 is logged as unreadable."""
 
     def __init__(self, t: "Tick", record: Path):
         self.t, self.record = t, record
@@ -217,6 +222,21 @@ class Rotation:
     def step(self, name: str, *argv) -> None:
         self.planned.append((name, argv))
 
+    def _row(self, name: str, row) -> dict | None:
+        """One schema-2 row, its fields coerced; None (skipped, and said) when it is not a row."""
+        if not isinstance(row, dict):
+            log(f"rotation: {self.record.name} row {name!r} is not a record — skipped")
+            return None
+        try:
+            streak = max(int(row.get("not_started_streak") or 0), 0)
+        except (TypeError, ValueError):
+            streak = 0
+        return {"started_at": _epoch(row.get("started_at")),
+                "finished_at": _epoch(row.get("finished_at")),
+                "outcome": row.get("outcome") if row.get("outcome") in OUTCOMES else None,
+                "not_started_streak": streak,
+                "last_ran_at": _epoch(row.get("last_ran_at"))}
+
     def load(self) -> dict[str, dict]:
         try:
             import json
@@ -224,22 +244,24 @@ class Rotation:
             if not isinstance(doc, dict):
                 raise TypeError("not an object")
             if doc.get("schema") == ROTATION_SCHEMA:
+                collectors = doc.get("collectors") or {}
+                if not isinstance(collectors, dict):
+                    raise TypeError("collectors is not an object")
+                rows = {str(name): self._row(str(name), row) for name, row in collectors.items()}
+                return {name: row for name, row in rows.items() if row is not None}
+            if "schema" not in doc and isinstance(doc.get("started"), dict):
+                # Schema 1: the time it kept was taken when a step RETURNED, and only for a step that
+                # was started — the nearest thing it holds to a start and to the last run, so it seeds
+                # both and an upgrade does not read as every collector starved.
                 rows = {}
-                for name, row in (doc.get("collectors") or {}).items():
-                    if not isinstance(row, dict) or _epoch(row.get("started_at")) is None:
-                        continue
-                    rows[str(name)] = {
-                        "started_at": float(row["started_at"]),
-                        "finished_at": _epoch(row.get("finished_at")),
-                        "outcome": row.get("outcome") if row.get("outcome") in OUTCOMES else None,
-                        "not_started_streak": int(row.get("not_started_streak") or 0),
-                        "last_ran_at": _epoch(row.get("last_ran_at"))}
+                for k, v in doc["started"].items():
+                    at = _epoch(v)
+                    rows[str(k)] = {"started_at": at, "finished_at": None, "outcome": None,
+                                    "not_started_streak": 0, "last_ran_at": at}
                 return rows
-            # Schema 1: the time recorded was taken when a step returned, and only for a step that
-            # was started — the nearest thing it holds to a start and to a run.
-            return {str(k): {"started_at": float(v), "finished_at": None, "outcome": None,
-                             "not_started_streak": 0, "last_ran_at": None}
-                    for k, v in (doc.get("started") or {}).items()}
+            log(f"rotation: {self.record.name} unreadable (schema {doc.get('schema')!r}, neither 1 nor "
+                f"{ROTATION_SCHEMA}) — the planned order this tick")
+            return {}
         except FileNotFoundError:
             return {}
         except (OSError, ValueError, TypeError, AttributeError) as exc:
@@ -267,24 +289,29 @@ class Rotation:
         if ahead:
             now = time.time()
             log("rotation: " + ", ".join(
-                f"{name} ({_ago(now - started[name] if name in started else None)})" for name in ahead)
-                + " first — the collectors started least recently run first")
+                f"{name} ({_ago(now - started[name] if started.get(name) is not None else None)})"
+                for name in ahead) + " first — the collectors started least recently run first")
         self.t.order = order
         for name in order:
-            before = time.time()
-            outcome = self.t.step(name, *argv_of[name])
-            after = time.time()
             row = rows.setdefault(name, {"started_at": None, "finished_at": None, "outcome": None,
                                          "not_started_streak": 0, "last_ran_at": None})
+            previous = dict(row)
+            before = time.time()
+            # A PROVISIONAL row first: a tick killed inside this step still moves it to the back
+            # next time, instead of running the same heavy step first for ever.
+            row.update(started_at=before, finished_at=None, outcome=None)
+            self.save(rows)
+            outcome = self.t.step(name, *argv_of[name])
+            after = time.time()
             row["outcome"] = outcome
             if outcome == "not_started":
-                # It keeps its old start, so it goes first next tick; a step never started has none,
-                # and 0 sorts it first just the same.
-                row["started_at"] = row["started_at"] if row["started_at"] is not None else 0.0
-                row["not_started_streak"] = int(row.get("not_started_streak") or 0) + 1
+                # It keeps the start it had — null for a collector never started — so it goes first
+                # next tick, and its streak says how long it has waited.
+                row.update(started_at=previous["started_at"], finished_at=previous["finished_at"],
+                           not_started_streak=int(previous.get("not_started_streak") or 0) + 1)
                 self.t.not_started.append(name)
             else:
-                row.update(started_at=before, finished_at=after, not_started_streak=0)
+                row.update(finished_at=after, not_started_streak=0)
                 if outcome == "ran":
                     row["last_ran_at"] = before
             self.save(rows)
