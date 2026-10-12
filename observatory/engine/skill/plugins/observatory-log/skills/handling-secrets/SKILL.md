@@ -149,8 +149,10 @@ or the password into each `--spec-env APP:KEY` literal as the key expects, redep
 between the reset and ACTIVE. A failure after the reset says the password WAS reset,
 keeps moving the other apps, names what is left and never asks you to rerun `db rotate`.
 Exit codes: 0 done; 1 refused before the reset, nothing changed; after the reset 2 a
-deployment not ACTIVE, 3 the vault did not take the value, 4 an app not updated or
-redeployed, 5 the reset returned no password. Nothing prints a value.
+deployment not ACTIVE (or not confirmed), 3 the vault did not take the value, 4 an app
+not updated or redeployed, 5 the reset returned no password; when several happen, the
+largest wins. Every post-reset failure says the password WAS reset. A URL literal for
+another user is refused before the reset. Nothing prints a value.
 
 Cloudflare and OpenRouter have separate tools, `cloudflare.py` and
 `openrouter.py`. Check their installed `--help` and non-secret inventory first.

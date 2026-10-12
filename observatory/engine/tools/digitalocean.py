@@ -63,6 +63,12 @@ class DoorError(RuntimeError):
     pass
 
 
+class NotJson(DoorError):
+    """doctl answered rc 0 with something that is not JSON (an HTML error page, a
+    banner). Before the reset it is a refusal like any other; after it, the phase
+    decides the exit code."""
+
+
 def doctl(*args: str, tries: int = 6) -> object:
     """JSON from doctl. stderr is reported by its last line only: doctl does not
     echo credentials there, but an HTML 503 page is long and says nothing."""
@@ -73,7 +79,10 @@ def doctl(*args: str, tries: int = 6) -> object:
         except FileNotFoundError:
             raise DoorError("doctl not found; install it and run `doctl auth init`") from None
         if p.returncode == 0:
-            return json.loads(p.stdout) if p.stdout.strip() else None
+            try:
+                return json.loads(p.stdout) if p.stdout.strip() else None
+            except ValueError:
+                raise NotJson(f"doctl {' '.join(args[:3])} answered with something that is not JSON") from None
         last = (p.stderr.strip().splitlines() or ["no stderr"])[-1][:200]
         if attempt + 1 < tries:
             time.sleep(RETRY_DELAY)
@@ -188,7 +197,18 @@ def cmd_list() -> int:
 #: Keys that hold a connection URL rather than a bare password.
 URL_KEYS = ("DATABASE_URL", "REDIS_URL", "_URL", "_DSN", "_URI")
 #: Keys that hold a database credential an app may keep in its own spec.
-CREDENTIAL_KEYS = ("PASSWORD", "DB_PASS", "DATABASE_URL", "REDIS_URL", "_DSN", "_URI")
+CREDENTIAL_KEYS = ("PASSWORD", "DB_PASS", "DATABASE_URL", "REDIS_URL", "DB_URL", "POSTGRES_URL")
+#: `*_DSN` and `*_URI` are any service's address (`SENTRY_DSN`): a database
+#: literal only when its plain value names a database scheme.
+DB_SCHEMES = ("postgres://", "postgresql://", "mysql://", "redis://", "rediss://", "mongodb://",
+              "mongodb+srv://", "valkey://")
+
+
+def credential_literal(key: str, value: str) -> bool:
+    k = key.upper()
+    if any(s in k for s in CREDENTIAL_KEYS):
+        return True
+    return k.endswith(("_DSN", "_URI")) and value.lower().startswith(DB_SCHEMES)
 
 
 def literal_form(key: str, value: str) -> str:
@@ -232,7 +252,7 @@ def consumers(c: dict) -> list[dict]:
         for scope in [spec, *[x for k in ("services", "workers", "jobs") for x in spec.get(k) or []]]:
             for e in scope.get("envs") or []:
                 v = str(e.get("value", ""))
-                if "${" not in v and any(s in e["key"].upper() for s in CREDENTIAL_KEYS):
+                if "${" not in v and credential_literal(e["key"], v):
                     literals.append(f"{scope.get('name', 'app')}:{e['key']} ({literal_form(e['key'], v)})")
         out.append({"app": app["id"], "name": spec.get("name"),
                     "binds": [(d.get("name"), d.get("db_user") or "default") for d in bound],
@@ -320,6 +340,27 @@ EXIT_APP = 4              # an app could not be updated or redeployed
 EXIT_RESET = 5            # the reset answered without a password
 
 
+def _scopes(spec: dict) -> list[dict]:
+    return [spec, *[x for k in ("services", "workers", "jobs") for x in spec.get(k) or []]]
+
+
+def check_literal(app: str, key: str, value: str, user: str, db: str | None) -> None:
+    """Refuse, before the reset, a literal this run could only get wrong."""
+    if literal_form(key, value) != "url":
+        return
+    if "://" in value:
+        with_password(value, "x")                    # a URL we cannot rewrite is refused now
+        owner = urllib.parse.urlsplit(value).username
+        if owner != user:
+            # ANOTHER USER'S URL (review round 3): writing the rotated user's new
+            # password beside `reporting` broke that app and was reported as done.
+            raise DoorError(f"app {app} keeps {key} for user {owner!r}, not {user!r}; leave it out of "
+                            f"--spec-env, or rotate {owner!r} on its own")
+    elif not db:
+        raise DoorError(f"app {app} keeps {key} as an encrypted URL; its database cannot be read from the "
+                        f"spec, so give --db NAME")
+
+
 def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
                spec_envs: list[str], wait: float) -> int:
     # 1. everything we need, before anything changes
@@ -335,31 +376,30 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
             literal.setdefault(app, []).append(key)
         specs = {app: doctl("apps", "spec", "get", app, "--format", "json") for app in literal}
         for app, keys in literal.items():
-            envs = {e["key"]: e for e in specs[app].get("envs") or []} | {
-                e["key"]: e for k in ("services", "workers", "jobs") for x in specs[app].get(k) or []
-                for e in x.get("envs") or []}
-            missing = [k for k in keys if k not in envs]
+            # EVERY LEVEL, not a merged view (review round 3): a key set at app
+            # AND service level is two literals, and step 4 writes both.
+            levels = [e for scope in _scopes(specs[app]) for e in scope.get("envs") or []]
+            missing = [k for k in keys if k not in {e["key"] for e in levels}]
             if missing:
                 raise DoorError(f"app {app} has no env {missing}")
-            for k in keys:
-                v = str(envs[k].get("value", ""))
-                if literal_form(k, v) == "url":
-                    if "://" in v:
-                        with_password(v, "x")          # a URL we cannot rewrite is refused now
-                    elif not db:
-                        raise DoorError(f"app {app} keeps {k} as an encrypted URL; its database cannot be "
-                                        f"read from the spec, so give --db NAME")
+            for e in levels:
+                if e["key"] in keys:
+                    check_literal(app, e["key"], str(e.get("value", "")), user, db)
         every = list(dict.fromkeys([*apps, *literal]))
         before = {app: deployments(app) for app in every}
     except DoorError as e:
         raise DoorError(f"{e}: nothing was reset") from None
     # 2. the reset — once
-    reset = one(doctl("databases", "user", "reset", c["id"], user, tries=1))
-    pw = (reset or {}).get("password")
+    try:
+        reset = one(doctl("databases", "user", "reset", c["id"], user, tries=1))
+    except NotJson:
+        reset = None                                  # it answered rc 0: the reset happened
+    pw = (reset or {}).get("password") if isinstance(reset, dict) else None
     if not pw:
-        print(f"digitalocean: the reset of {user} on {c['name']} answered without a password; the password "
-              f"may have changed. Next: `digitalocean.py db credential {ref} {user} --to {to}`, then move each "
-              f"consumer by hand", file=sys.stderr)
+        print(f"digitalocean: the password of {user} on {c['name']} WAS reset, but the answer carried no "
+              f"password, so no consumer was moved. Next: `digitalocean.py db credential {ref} {user}"
+              + (f" --db {db}" if db else "") + f" --to {to}` reads the new value into the vault; then set each "
+              f"consumer's key by hand and redeploy each app that binds the cluster", file=sys.stderr)
         return EXIT_RESET
     print(f"reset {c['name']} user {user}")
     url = connection_url(c, user, pw, db)
@@ -378,21 +418,22 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
     left: list[str] = []
     for app, keys in literal.items():
         spec = specs[app]
-        for scope in [spec, *[x for k in ("services", "workers", "jobs") for x in spec.get(k) or []]]:
-            for e in scope.get("envs") or []:
-                if e["key"] in keys:
-                    old_value = str(e.get("value", ""))
-                    if literal_form(e["key"], old_value) == "password":
-                        e["value"] = pw
-                    elif "://" in old_value:
-                        e["value"] = with_password(old_value, pw)
-                    else:
-                        e["value"] = url
-                    if literal_form(e["key"], old_value) == "url":
-                        print(f"  app {app}: {e['key']} → {url_place(e['value'])}")
-                    e["type"] = "SECRET"
-        fd, path = tempfile.mkstemp(suffix=".json")
+        path = None
         try:
+            for scope in _scopes(spec):
+                for e in scope.get("envs") or []:
+                    if e["key"] in keys:
+                        old_value = str(e.get("value", ""))
+                        if literal_form(e["key"], old_value) == "password":
+                            e["value"] = pw
+                        elif "://" in old_value:
+                            e["value"] = with_password(old_value, pw)
+                        else:
+                            e["value"] = url
+                        if literal_form(e["key"], old_value) == "url":
+                            print(f"  app {app}: {e['key']} → {url_place(e['value'])}")
+                        e["type"] = "SECRET"
+            fd, path = tempfile.mkstemp(suffix=".json")
             os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w") as f:
                 json.dump(spec, f)
@@ -403,7 +444,8 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
             left.append(app)
             print(f"digitalocean: app {app} was not updated: {e}", file=sys.stderr)
         finally:
-            os.remove(path)
+            if path:
+                os.remove(path)
     del pw, url
     for app in apps:
         if app in literal:
@@ -416,21 +458,28 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
             print(f"digitalocean: app {app} was not redeployed: {e}", file=sys.stderr)
     if left:
         code = max(code, EXIT_APP)
-        print(f"The password WAS reset. apps done: {', '.join(done) or 'none'}; apps left: {', '.join(left)} — "
-              f"those still hold the OLD password. Next: `digitalocean.py db credential {ref} {user}"
-              + (f" --db {db}" if db else "") + f" --to {to}` puts the current value in the vault; then set "
-              f"each left app's key by hand (`doctl apps update APP --spec FILE`) or redeploy it "
+        print(f"The database password WAS reset. apps done: {', '.join(done) or 'none'}; apps left: "
+              f"{', '.join(left)} — those still hold the OLD password. Next: `digitalocean.py db credential "
+              f"{ref} {user}" + (f" --db {db}" if db else "") + f" --to {to}` puts the current value in the "
+              f"vault; then, by hand, set each left app's key in its spec (`doctl apps update APP --spec FILE`; "
+              f"a redeploy alone keeps an old literal) and redeploy each left app that only binds the cluster "
               f"(`doctl apps create-deployment APP`)", file=sys.stderr)
     # 6. wait
     failed = []
     for app in [a for a in every if a not in left]:
-        state = wait_new(app, before[app], wait)
+        try:
+            state = wait_new(app, before[app], wait)
+        except DoorError as e:
+            # AFTER THE RESET a failed wait is not "nothing changed" (review round
+            # 3): it is this app unconfirmed, and the others are still checked.
+            state = f"unknown ({e})"
         if not state.endswith("ACTIVE"):
             failed.append(app)
         print(f"  app {app} deployment {state}")
     if failed:
         code = max(code, EXIT_NOT_ACTIVE)
-        print("A consumer did not reach ACTIVE: its running copy still holds the OLD password. Fix it now: "
+        print("The database password WAS reset, and a consumer is not confirmed ACTIVE: its running copy may "
+              "still hold the OLD password. Check it now: "
               + "; ".join(f"`doctl apps logs {app} --type deploy`" for app in failed), file=sys.stderr)
     if vault_failed and not left:
         print(f"next: put the current password in the vault — `digitalocean.py db credential {ref} {user}"
@@ -455,7 +504,7 @@ def main(argv: list[str] | None = None) -> int:
                                  "down between the reset and their new deployment reaching ACTIVE. Exit 0 done, "
                                  "1 refused before the reset (nothing changed), after the reset: 2 a deployment "
                                  "not ACTIVE, 3 the vault did not take the value, 4 an app not updated or "
-                                 "redeployed, 5 the reset returned no password")):
+                                 "redeployed, 5 the reset returned no password; several: the largest wins")):
         p = db.add_parser(name, help=text, description=text)
         p.add_argument("cluster")
         p.add_argument("user")

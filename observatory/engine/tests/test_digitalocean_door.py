@@ -44,6 +44,15 @@ def fail(msg):
 key = " ".join(args[:3])
 if s["flaky"].get(key, 0) > 0:
     s["flaky"][key] -= 1; fail("Error: 503 Service Unavailable")
+reset_done = s["password"] == s["next"]
+if args[:2] == ["apps", "list-deployments"] and reset_done and s.get("lists_fail_after_reset"):
+    fail("Error: 503 Service Unavailable")
+if any(" ".join(args[:len(g.split())]) == g for g in s.get("garbage", [])):
+    if args[:3] == ["databases", "user", "reset"]:
+        s["password"] = s["next"]
+    st.write_text(json.dumps(s)); print("<html>not json</html>"); sys.exit(0)
+if args[:3] == ["databases", "user", "reset"] and s.get("reset_no_password"):
+    s["password"] = s["next"]; out([{"name": args[4]}])
 c = s["cluster"]
 if args[:2] == ["auth", "list"]:
     st.write_text(json.dumps(s)); print("default\nexample-context (current)"); sys.exit(0)
@@ -162,6 +171,7 @@ def main() -> int:
 
     review_round_one()
     review_round_two()
+    review_round_three()
     print(f"{len(FAILURES)} failed" if FAILURES else "all passed")
     return 1 if FAILURES else 0
 
@@ -231,6 +241,7 @@ def review_round_one() -> None:
                 "--app", "app-bind", "--wait", "5")
         check("a deployment that fails names its own app in the logs command",
               r.returncode == 2 and "doctl apps logs app-bind --type deploy" in r.stderr, r.stderr[-300:])
+        check("and says the database password WAS reset", "WAS reset" in r.stderr, r.stderr[-300:])
 
     with tempfile.TemporaryDirectory() as t:
         tmp = pathlib.Path(t).resolve()
@@ -315,7 +326,7 @@ def review_round_two() -> None:
 
     with tempfile.TemporaryDirectory() as t:
         tmp = pathlib.Path(t).resolve()
-        pool = "postgresql://pooluser:" + OLD + "@shop-db-pool.example:25061/shop-pool?sslmode=require"
+        pool = "postgresql://doadmin:" + OLD + "@shop-db-pool.example:25061/shop-pool?sslmode=require"
         env = setup(tmp)
         st = json.loads((tmp / "state.json").read_text())
         st["specs"]["app-pool"] = {"name": "pool", "envs": [{"key": "DATABASE_URL", "value": pool}]}
@@ -351,6 +362,8 @@ def review_round_two() -> None:
               r.returncode == 4 and "left: app-lit" in r.stderr and "done: app-bind" in r.stderr, r.stderr[-400:])
         check("and never advises rerunning db rotate after a reset",
               "rerun" not in r.stderr.lower() and "db credential" in r.stderr, r.stderr[-400:])
+        check("nor a redeploy for a literal (a redeploy keeps the old literal)",
+              "redeploy it" not in r.stderr and "by hand" in r.stderr, r.stderr[-400:])
 
     with tempfile.TemporaryDirectory() as t:
         tmp = pathlib.Path(t).resolve()
@@ -369,11 +382,113 @@ def review_round_two() -> None:
                                                                  {"key": "SENTRY_DSN", "value": "EV[1:y]", "type": "SECRET"}]}})
         (tmp / "state.json").write_text(json.dumps(st))
         r = run(env, "db", "consumers", "shop-db")
-        check("consumers knows the URL keys (REDIS_URL, *_DSN) and says it sees only binding apps",
-              "REDIS_URL (url)" in r.stdout and "SENTRY_DSN (url)" in r.stdout and "binds this cluster" in r.stdout,
-              r.stdout)
+        check("consumers knows the URL keys (REDIS_URL) and says it sees only binding apps",
+              "REDIS_URL (url)" in r.stdout and "binds this cluster" in r.stdout, r.stdout)
+        check("and a non-database DSN (SENTRY_DSN, encrypted) is not a database literal",
+              "SENTRY_DSN" not in r.stdout, r.stdout)
         r = run(env, "db", "rotate", "--help")
         check("rotate's help says consumers are down between the reset and ACTIVE", "down" in r.stdout, r.stdout[-300:])
+        check("and that the largest exit code wins", "largest" in r.stdout, r.stdout[-400:])
+
+
+def rotate(env: dict, *extra: str) -> subprocess.CompletedProcess:
+    return run(env, "db", "rotate", "shop-db", "doadmin", "--to", "vault:shop/prod/DATABASE_URL", "--wait", "5", *extra)
+
+
+def calls_of(tmp: pathlib.Path) -> list[list[str]]:
+    return json.loads((tmp / "state.json").read_text())["calls"]
+
+
+def reset_called(tmp: pathlib.Path) -> bool:
+    return any(c[:3] == ["databases", "user", "reset"] for c in calls_of(tmp))
+
+
+def with_spec(tmp: pathlib.Path, app: str, spec: dict) -> None:
+    st = json.loads((tmp / "state.json").read_text())
+    st["specs"][app] = spec
+    st["deps"][app] = [{"id": "dep-old-" + app, "phase": "ACTIVE"}]
+    (tmp / "state.json").write_text(json.dumps(st))
+
+
+def review_round_three() -> None:
+    """Round 3 (PLN-142): after the reset every failure says so and nothing stops early;
+    before it, every literal at every level is checked."""
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp, lists_fail_after_reset=True)
+        r = rotate(env, "--app", "app-bind", "--spec-env", "app-lit:DB_PASSWORD")
+        waits = [c for c in calls_of(tmp) if c[:2] == ["apps", "list-deployments"]]
+        check("a wait that fails after the reset is exit 2 with WAS reset, not 1",
+              r.returncode == 2 and "WAS reset" in r.stderr and "Traceback" not in r.stderr, r.stderr[-300:])
+        check("and the door keeps checking the other apps",
+              {c[2] for c in waits} >= {"app-bind", "app-lit"} and "app-bind" in r.stderr and "app-lit" in r.stderr,
+              r.stderr[-300:])
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp)
+        with_spec(tmp, "app-two", {"name": "two", "envs": [{"key": "DATABASE_URL", "value": "postgresql://host.example/db"}],
+                                   "services": [{"name": "api", "envs": [{"key": "DATABASE_URL",
+                                                 "value": "postgresql://doadmin:" + OLD + "@host.example:25060/db"}]}]})
+        r = rotate(env, "--spec-env", "app-two:DATABASE_URL")
+        check("a key at both app and service level is checked at every level before the reset",
+              r.returncode == 1 and "nothing was reset" in r.stderr and not reset_called(tmp), r.stderr[-300:])
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp)
+        with_spec(tmp, "app-rep", {"name": "rep", "envs": [{"key": "DATABASE_URL",
+                                   "value": "postgresql://reporting:" + OLD + "@host.example:25060/db"}]})
+        r = rotate(env, "--spec-env", "app-rep:DATABASE_URL")
+        got = json.loads((tmp / "state.json").read_text())["specs"]["app-rep"]["envs"][0]["value"]
+        check("a URL literal for another user is refused before the reset and left untouched",
+              r.returncode == 1 and "reporting" in r.stderr and not reset_called(tmp) and NEW not in got,
+              r.stderr[-300:])
+        check("and its password is not printed", OLD not in r.stdout + r.stderr)
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp, reset_no_password=True)
+        r = rotate(env, "--app", "app-bind")
+        check("a reset that answers without a password is exit 5 and says WAS reset",
+              r.returncode == 5 and "WAS reset" in r.stderr and "may have changed" not in r.stderr, r.stderr[-300:])
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp, garbage=["apps spec get"])
+        r = rotate(env, "--spec-env", "app-lit:DB_PASSWORD")
+        check("a non-JSON answer before the reset is exit 1, nothing reset, no traceback",
+              r.returncode == 1 and "nothing was reset" in r.stderr and "Traceback" not in r.stderr
+              and not reset_called(tmp), r.stderr[-300:])
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp, garbage=["apps create-deployment"])
+        r = rotate(env, "--app", "app-bind")
+        check("a non-JSON answer after the reset maps to its post-reset code (4)",
+              r.returncode == 4 and "WAS reset" in r.stderr and "Traceback" not in r.stderr, r.stderr[-300:])
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp, garbage=["databases user reset"])
+        r = rotate(env, "--app", "app-bind")
+        check("a non-JSON answer from the reset itself is exit 5 with WAS reset",
+              r.returncode == 5 and "WAS reset" in r.stderr and "Traceback" not in r.stderr, r.stderr[-300:])
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp)
+        st = json.loads((tmp / "state.json").read_text())
+        st["apps"].append({"id": "app-more", "spec": {"name": "more", "databases": [{"name": "db", "cluster_name": "shop-db"}],
+                                                       "envs": [{"key": "DB_URL", "value": "EV[1:a]", "type": "SECRET"},
+                                                                {"key": "POSTGRES_URL", "value": "EV[1:b]", "type": "SECRET"},
+                                                                {"key": "ANALYTICS_DSN",
+                                                                 "value": "postgresql://reader@host.example/db"}]}})
+        (tmp / "state.json").write_text(json.dumps(st))
+        r = run(env, "db", "consumers", "shop-db")
+        check("DB_URL, POSTGRES_URL and a database-scheme DSN are listed as literals",
+              "DB_URL (url)" in r.stdout and "POSTGRES_URL (url)" in r.stdout and "ANALYTICS_DSN (url)" in r.stdout,
+              r.stdout)
 
 
 if __name__ == "__main__":
