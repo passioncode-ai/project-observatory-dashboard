@@ -2900,8 +2900,8 @@
       "path": "tests/test_manifest_urls.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "265e553685fb1e865d03a4b638c76a14c83ab51259c1ad57d8cf57c07a055855",
-      "bytes": 6418
+      "export_sha256": "f3c028a2482be34912a4ef87c9d647e40503e5c81101066e7a05cc4d165fd498",
+      "bytes": 8169
     },
     {
       "path": "tests/test_mcp_inventory.py",
@@ -3949,8 +3949,8 @@
       "path": "tools/check_manifest_urls.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c4b63250540ba87ee1140f66e35b78ee8252c8bdb2585556cf6edd350f9b23b2",
-      "bytes": 5183
+      "export_sha256": "1223c7d6490230190234800b60624b770dc877cfb06bdbfb0d99c5e814e4abab",
+      "bytes": 6125
     },
     {
       "path": "tools/check_paths.py",

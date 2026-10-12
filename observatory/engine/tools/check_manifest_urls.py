@@ -8,9 +8,13 @@ release that ships the manifest answers 404 until some later release creates the
 
 - offline (the default, run by the engine suite): every `<ref>` is a `vX.Y.Z` tag no
   newer than `--release` (default: this engine's version), or a commit sha (7-40 hex).
-  A branch or any other moving ref is refused;
+  A branch or any other moving ref is refused. A hex ref is admitted by its SHAPE here:
+  offline there is no repository to ask, so a branch named like a sha would pass this
+  half — the resolve half is what proves the commit exists, because raw.githubusercontent
+  answers 404 for a ref the repository does not have;
 - `--resolve` (the release workflow, after the tag is pushed): every distinct URL is also
-  read once anonymously and must answer 200.
+  read anonymously and must answer 200, with two retries (1 s, 3 s) on a reset, a 429 or
+  a 5xx before it is reported unreachable.
 
 `tools/publish_contract.py --check` compares the published bytes with the bundled ones;
 this check is the narrower one a release can run before anything is published.
@@ -22,6 +26,7 @@ import json
 from pathlib import Path
 import re
 import sys
+import time
 from typing import Callable, Iterable
 import urllib.error
 import urllib.request
@@ -80,15 +85,28 @@ def check(doc, release: str) -> list[str]:
     return problems
 
 
-def fetch(url: str) -> int:
-    request = urllib.request.Request(url, method="GET", headers={"User-Agent": "observatory-manifest-check"})
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return response.status
-    except urllib.error.HTTPError as error:
-        return error.code
-    except OSError:
-        return 0
+#: Waits before the second and third try. A raw-CDN blip (a reset, a 5xx, a 429) must not
+#: block a publish; an answer such as 404 is not a blip and is never retried.
+BACKOFF = (1.0, 3.0)
+
+
+def fetch(url: str, opener=urllib.request.urlopen, sleep=time.sleep) -> int:
+    """The URL's HTTP status after at most 1 + len(BACKOFF) tries; 0 means unreachable."""
+    status = 0
+    for attempt in range(len(BACKOFF) + 1):
+        if attempt:
+            sleep(BACKOFF[attempt - 1])
+        request = urllib.request.Request(url, method="GET", headers={"User-Agent": "observatory-manifest-check"})
+        try:
+            with opener(request, timeout=20) as response:
+                status = response.status
+        except urllib.error.HTTPError as error:
+            status = error.code
+        except OSError:
+            status = 0
+        if status and status != 429 and status < 500:
+            return status
+    return status
 
 
 def resolve(doc, reader: Callable[[str], int] = fetch) -> list[str]:

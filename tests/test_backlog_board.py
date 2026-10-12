@@ -133,6 +133,31 @@ class BoardLint(unittest.TestCase):
         found = self.lint.check_board(board(CORRECTED), CHANGELOG + "\nmoved from /" + "Users/someone/x\n")
         self.assertTrue(any(p.startswith("CHANGELOG.md") and "personal-machine-path" in p for p in found), found)
 
+    def test_the_privacy_scan_sees_a_name_that_ends_a_sentence(self):
+        scan = self.lint._privacy().scan_text
+        for text in ("First use: quiet-heron-agent.", "quiet-heron-agent, then", "(quiet-heron-agent)",
+                     "quiet-heron-agent.git"):
+            self.assertEqual(scan(text, ["quiet-heron-agent"]), {"private-identifier": 1}, text)
+        for text in ("quiet-heron-agent.example.com", "quiet-heron-agent-two", "xquiet-heron-agent"):
+            self.assertEqual(scan(text, ["quiet-heron-agent"]), {}, text)
+
+    def test_a_denylisted_name_in_the_changelog_alone_fails(self):
+        # No shape pattern can see a name: only the denylist scan over CHANGELOG.md does.
+        planted = "quiet-heron-agent"
+        found = self.lint.check_board(board(CORRECTED), CHANGELOG + f"\nFirst use: {planted}.\n", deny=[planted])
+        self.assertEqual([p.split(":")[0] for p in found], ["CHANGELOG.md"], found)
+        self.assertIn("private-identifier", found[0])
+        self.assertFalse(any(planted in p for p in found), "the lint printed the private value")
+
+    def test_a_denylisted_name_in_the_board_prose_alone_fails(self):
+        # The header and notes outside the rows are public too.
+        planted = "quiet-heron-agent"
+        text = board(CORRECTED).replace("Canonical for OBS rows.", f"Canonical for OBS rows; see {planted}.")
+        found = self.problems(text, deny=[planted])
+        self.assertEqual(len(found), 1, found)
+        self.assertTrue(found[0].startswith("docs/backlog.md (outside the rows)"), found)
+        self.assertFalse(any(planted in p for p in found), "the lint printed the private value")
+
     def test_the_command_reads_a_denylist_file_and_exits_1(self):
         with tempfile.TemporaryDirectory() as tmp:
             b, c, d = Path(tmp, "backlog.md"), Path(tmp, "CHANGELOG.md"), Path(tmp, "deny.json")

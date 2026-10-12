@@ -123,13 +123,56 @@ def test_resolve_reads_every_url_once_and_names_what_did_not_answer() -> None:
           len(problems) == 1 and "404" in problems[0] and "grant-check-input.json" in problems[0], str(problems))
 
 
+class _Response:
+    def __init__(self, status: int) -> None:
+        self.status = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+
+def test_a_cdn_blip_is_retried_before_the_url_is_called_unreachable() -> None:
+    """One dropped connection or 5xx from the raw CDN must not block a publish."""
+    import urllib.error
+    m = load()
+    calls: list[str] = []
+    waits: list[float] = []
+
+    def opener(script):
+        def open_(request, timeout=None):
+            calls.append(request.full_url)
+            outcome = script.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return _Response(outcome)
+        return open_
+
+    url = f"{RAW}/v0.24.1/x.json"
+    status = m.fetch(url, opener=opener([OSError("reset"), 503, 200]), sleep=waits.append)
+    check("two failures then 200 resolves", status == 200 and len(calls) == 3, f"{status} after {len(calls)}")
+    check("with a short, growing backoff between tries", waits and len(waits) == 2 and waits[0] < waits[1] <= 5,
+          str(waits))
+    calls.clear(); waits.clear()
+    status = m.fetch(url, opener=opener([OSError("a"), OSError("b"), OSError("c")]), sleep=waits.append)
+    check("three failures report unreachable", status == 0 and len(calls) == 3, f"{status} after {len(calls)}")
+    calls.clear(); waits.clear()
+    err = urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+    status = m.fetch(url, opener=opener([err]), sleep=waits.append)
+    check("a 404 is an answer, not a blip: no retry", status == 404 and len(calls) == 1 and not waits,
+          f"{status} after {len(calls)}")
+
+
 if __name__ == "__main__":
     print("manifest URLs — no pin ahead of its release\n")
     for fn in (test_the_0_24_0_manifest_is_refused_for_the_0_24_0_release,
                test_the_same_manifest_passes_once_the_tag_exists,
                test_moving_refs_are_refused_and_shas_admitted,
                test_the_shipped_manifest_passes_against_the_engine_version,
-               test_resolve_reads_every_url_once_and_names_what_did_not_answer):
+               test_resolve_reads_every_url_once_and_names_what_did_not_answer,
+               test_a_cdn_blip_is_retried_before_the_url_is_called_unreachable):
         try:
             fn()
         except Exception as exc:                                    # a crash is a failure, named
