@@ -1942,7 +1942,8 @@ def _policy_door():
     m._request = fake
     # The provider reports the ceiling the door last set: the ledger's, as an honest provider would.
     m.find_key = lambda admin, name: {"hash": "h-1", "name": name, "label": "sk-or-v1-x...y",
-                                      "limit": (m.ledger()["issued"].get(name) or {}).get("limit_usd")}
+                                      "limit": (m.ledger()["issued"].get(name) or {}).get("limit_usd"),
+                                      "limit_reset": (m.ledger()["issued"].get(name) or {}).get("limit_reset")}
     m.deliver = lambda value, to: calls["delivered"].append(to) or f"vault {to[len('vault:'):]}"
     m._journal = lambda *a, **k: None
     return m, calls
@@ -2107,7 +2108,8 @@ def test_or_policy_lowers_ceilings_before_it_raises_one() -> None:
         "held-b": {"account": "example", "hash": "h-b", "destination": "vault:project-a/prod/OTHER_KEY",
                    "limit_usd": 35.0, "limit_reset": "monthly"}}})
     m.find_key = lambda admin, name: {"hash": {"held-a": "h-a", "held-b": "h-b"}[name], "name": name,
-                                      "limit": {"held-a": 5.0, "held-b": 35.0}[name], "disabled": False}
+                                      "limit": {"held-a": 5.0, "held-b": 35.0}[name], "limit_reset": "monthly",
+                                      "disabled": False}
     plan = m.issue_for_policy(_two_slots(), "example")
     check("both ceilings move to the equal split, the lowered one first",
           [p for p, _ in calls["patched"]] == ["/keys/h-b", "/keys/h-a"]
@@ -2126,7 +2128,7 @@ def test_or_policy_reads_held_keys_at_the_provider() -> None:
         m.find_key = lambda admin, name: row
         return m, calls
 
-    m, calls = door({"hash": "h-1", "name": "held", "limit": 40.0, "disabled": True})
+    m, calls = door({"hash": "h-1", "name": "held", "limit": 40.0, "limit_reset": "monthly", "disabled": True})
     plan = m.issue_for_policy(_policy(), "example")
     check("a disabled held key is held-disabled, never in-place",
           [s["action"] for s in plan if "to" in s] == ["held-disabled"] and not calls["posted"], str(plan))
@@ -2134,12 +2136,12 @@ def test_or_policy_reads_held_keys_at_the_provider() -> None:
     plan = m.issue_for_policy(_policy(), "example", dry_run=True)
     check("a held key the provider no longer has is held-missing, even in a dry run",
           [s["action"] for s in plan if "to" in s] == ["held-missing"] and not calls["posted"], str(plan))
-    m, calls = door({"hash": "h-1", "name": "held", "limit": None, "disabled": False})
+    m, calls = door({"hash": "h-1", "name": "held", "limit": None, "limit_reset": "monthly", "disabled": False})
     plan = m.issue_for_policy(_policy(), "example")
     check("a provider row with no ceiling is unbounded: the ceiling is moved, never taken from the ledger",
           [s["action"] for s in plan if "to" in s] == ["ceiling-moved"] and calls["patched"], str(plan))
 
-    m, calls = door({"hash": "h-1", "name": "held", "limit": 25.0, "disabled": False})
+    m, calls = door({"hash": "h-1", "name": "held", "limit": 25.0, "limit_reset": "monthly", "disabled": False})
     plan = m.issue_for_policy(_policy(), "example")
     check("a ceiling moved at the provider is read there, not from the ledger",
           [s["action"] for s in plan if "to" in s] == ["ceiling-moved"] and plan[-1]["previous"] == 25.0, str(plan))
@@ -2153,7 +2155,7 @@ def test_or_policy_reads_held_keys_at_the_provider() -> None:
     check("a provider answer that is not JSON is held-unread, not a crash",
           [s["action"] for s in plan if "to" in s] == ["held-unread"] and not calls["posted"], str(plan))
 
-    m, calls = door({"hash": "h-1", "name": "held", "limit": 40.0, "disabled": True})
+    m, calls = door({"hash": "h-1", "name": "held", "limit": 40.0, "limit_reset": "monthly", "disabled": True})
     d = pathlib.Path(tmpdir.mkdtemp()).resolve()
     (d / "p.json").write_text(json.dumps(_policy()), encoding="utf-8")
     import contextlib
@@ -2163,6 +2165,59 @@ def test_or_policy_reads_held_keys_at_the_provider() -> None:
         rc = m.cmd_issue_for_policy(str(d / "p.json"), "example", None, False)
     check("the command exits 1 while a slot is held by a key that does not serve it, and names the remedy",
           rc == 1 and "held-disabled" in out.getvalue() and "enable held" in out.getvalue(), f"{rc} {out.getvalue()}")
+
+
+def test_or_policy_round_two() -> None:
+    """Verification round 2 on ENG-002."""
+    try:
+        orr()._parse_split("vault:project-a/prod/A=10,vault:project-a/prod/B=10,vault:project-a/prod/A=30")
+        check("--split giving one spelling twice is refused", False, "parsed; the last value won")
+    except ValueError as exc:
+        check("--split giving one spelling twice is refused", "twice" in str(exc), str(exc))
+
+    m, calls = _policy_door()
+    m.save_ledger({"issued": {"held": {"account": "example", "hash": "h-1",
+                                       "destination": "vault:project-a/prod/MODEL_KEY",
+                                       "limit_usd": 40.0, "limit_reset": "monthly"}}})
+    m.find_key = lambda admin, name: {"hash": "h-1", "name": name, "limit": 40.0, "limit_reset": None,
+                                      "disabled": False}
+    plan = m.issue_for_policy(_policy(), "example")
+    check("a provider row with no reset period differs from a monthly policy: the ceiling is moved",
+          [s["action"] for s in plan if "to" in s] == ["ceiling-moved"]
+          and calls["patched"] and calls["patched"][-1][1] == {"limit": 40.0, "limit_reset": "monthly"}, str(plan))
+
+    # An unbounded held key is brought under the limit BEFORE a new key is minted, so a mint that
+    # fails leaves the unbounded key already bounded. The new slot is listed first, so only the
+    # lowering-first order puts the held key's move ahead of it.
+    m, calls = _policy_door()
+    m.save_ledger({"issued": {"held": {"account": "example", "hash": "h-held",
+                                       "destination": "vault:project-a/prod/OTHER_KEY",
+                                       "limit_usd": 40.0, "limit_reset": "monthly"}}})
+    m.find_key = lambda admin, name: {"hash": "h-held", "name": name, "limit": None, "limit_reset": "monthly",
+                                      "disabled": False}
+
+    def mint_fails(*a, **k):
+        raise RuntimeError("openrouter answered 500 for /keys")
+    m.issue_key = mint_fails
+    try:
+        m.issue_for_policy(_two_slots(), "example")
+        check("the partial run raises", False, "returned")
+    except m.PolicyPartial as exc:
+        check("the unbounded held key's ceiling was set before the mint failed",
+              [p for p, _ in calls["patched"]] == ["/keys/h-held"]
+              and [s["action"] for s in exc.plan] == ["failed", "ceiling-moved"], f"{calls['patched']} {exc.plan}")
+
+    m, calls = _policy_door()
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    (d / "p.json").write_text(json.dumps(_two_slots()), encoding="utf-8")
+    import contextlib
+    import io
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_for_policy(str(d / "p.json"), "example", None, True)
+    check("the plan prints the keyCeilingsUsd it implies for config/meter.json",
+          rc == 0 and '"vault:project-a/prod/MODEL_KEY": 20.0' in out.getvalue() and "keyCeilingsUsd" in out.getvalue(),
+          out.getvalue())
 
 
 def test_or_policy_partial_failure_names_what_was_done() -> None:
@@ -2210,6 +2265,7 @@ if __name__ == "__main__":
                test_or_policy_lowers_ceilings_before_it_raises_one,
                test_or_policy_reads_held_keys_at_the_provider,
                test_or_policy_partial_failure_names_what_was_done,
+               test_or_policy_round_two,
                test_no_door_takes_or_prints_a_value_outside_stdin,
                test_the_ledgers_hold_no_values,
                test_cf_stash_refuses_an_admin_that_cannot_issue,

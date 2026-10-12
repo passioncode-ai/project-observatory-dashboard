@@ -126,15 +126,21 @@ class BudgetExceeded(ProviderError):
 
 
 class OutOfTime(ProviderError):
-    """The caller's deadline does not leave room for the next attempt (ENG-003).
+    """The caller's deadline cut the call (ENG-003). Two cases, told apart by `sent`:
 
-    Raised BEFORE the attempt, so nothing new is paid for. Neither Retryable nor Fatal: the clock
-    refused the call, no model did, so no model is marked unhealthy and nothing should retry it
-    inside the same deadline. `attempts` is how many attempts were made before the cut."""
+    * `sent=False`: raised BEFORE an attempt, because what is left would not fit one; that attempt
+      was never sent and costs nothing.
+    * `sent=True`: an attempt whose timeout the deadline had clipped was sent and then timed out.
+      The provider may still have billed it; nothing more is sent.
 
-    def __init__(self, message: str, attempts: int = 0):
+    Neither Retryable nor Fatal: the clock ended the call, no model did, so no model is marked
+    unhealthy and nothing should retry it inside the same deadline. `attempts` is how many attempts
+    were sent in all, the cut one included when `sent`."""
+
+    def __init__(self, message: str, attempts: int = 0, sent: bool = False):
         super().__init__(message)
         self.attempts = attempts
+        self.sent = sent
 
 
 # ───────────────────────────── the caller's deadline ─────────────────────────
@@ -1047,8 +1053,10 @@ def complete(messages: list[dict], *, schema_name: str, schema: dict,
 
     `deadline` (epoch seconds; the tick step's, from `step_budget.deadline()`) bounds the whole
     call (ENG-003). Before each attempt the time left after `REPORT_RESERVE_S` is computed: under
-    `MIN_ATTEMPT_S` it raises OutOfTime having paid for nothing new, otherwise the attempt's
-    timeout is cut to it. The catalogue fetch and the key-usage read inside are cut the same way.
+    `MIN_ATTEMPT_S` it raises OutOfTime before sending anything (`sent=False`), otherwise the
+    attempt's timeout is cut to it; an attempt sent with a cut timeout that then times out raises
+    OutOfTime too (`sent=True`) — that one may have been billed. The catalogue fetch and the
+    key-usage read inside are cut the same way.
     None — a run by hand — keeps every timeout as it was.
     """
     with deadline_scope(deadline):
@@ -1111,8 +1119,9 @@ def _complete(messages: list[dict], *, schema_name: str, schema: dict,
                     # the call ends here, as any other deadline cut does.
                     log(f"  {model['id']} attempt {attempts}/{budget_attempts} timed out at the {timeout:.0f} s "
                         f"the deadline left")
-                    raise OutOfTime(f"step deadline: attempt {attempts} timed out at the {timeout:.0f} s the "
-                                    f"deadline left; the model is not marked", attempts=attempts) from exc
+                    raise OutOfTime(f"step deadline: attempt {attempts} was sent and timed out at the "
+                                    f"{timeout:.0f} s the deadline left — it may have been billed; the model "
+                                    f"is not marked", attempts=attempts, sent=True) from exc
                 last_retryable = exc
                 log(f"  {model['id']} attempt {attempts}/{budget_attempts} retryable: {exc}")
                 mark_unhealthy(model["id"], str(exc))

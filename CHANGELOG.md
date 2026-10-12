@@ -18,16 +18,23 @@ while the major version is 0, a minor release may change behaviour and says so h
   A provider row with no ceiling counts as unbounded and is brought under the limit first; a provider answer that
   cannot be read is `held-unread` (exit 1); the dry run now reads the provider too. Keys issued earlier keep their
   whole-limit ceilings until `issue-for-policy` runs again — `--dry-run` shows the moves it would make — and a key
-  lowered below what it has already spent this period stops spending until the period resets.
+  lowered below what it has already spent this period stops spending until the period resets. A provider row's
+  reset period is read from the provider alone (none there differs from a monthly policy, so the ceiling is moved),
+  and `--split` naming a slot twice — in one spelling or two — is refused. **Upgrade note:** the meter's L0 per key
+  is configured, not read from the provider: after `issue-for-policy` moves a ceiling, set `keyCeilingsUsd[ref]` in
+  `config/meter.json` to the same amount — the plan prints the values it implies. The dry run reads the provider, so
+  without a stashed admin for a slot's account its held slots read `held-unread` and it exits 1.
 - **The agent's deadline reaches the model call** (ENG-003): `agent` started a project's call while 150 s were
   left, but `providers.complete()` walks a chain of models, each attempt allowed 120 s, so three Retryable models
   took 360 s and the watchdog killed a step that had paid for calls. `complete(…, deadline=)` now gets the step's
   deadline: an attempt starts only while 30 s are left after a 20 s reserve for the report, its timeout is cut to
-  what is left, and otherwise it raises `providers.OutOfTime` having paid for nothing new; the catalogue fetch and
-  the key-usage read inside are cut the same way. The agent treats `OutOfTime` like its pre-call halt — deltas left,
-  `halted_by` names the deadline — and `store/raw/agent.json` gains `attempts_cut_by_deadline`. The pre-call reserve
-  is derived (50 s), not a constant. An attempt whose timeout the deadline cut, and which then timed out, ends the
-  call as `OutOfTime` without marking the model unhealthy. Without a deadline nothing changes.
+  what is left, and otherwise it raises `providers.OutOfTime` before sending anything; the catalogue fetch and the
+  key-usage read inside are cut the same way. An attempt sent with a cut timeout that then times out also ends the
+  call as `OutOfTime`, without marking the model unhealthy — that attempt was sent and may have been billed. The
+  agent treats `OutOfTime` like its pre-call halt — deltas left, `halted_by` names the deadline and says when the cut
+  attempt may have been billed — and `store/raw/agent.json` gains `attempts_refused_by_deadline` (never sent) and
+  `attempts_sent_and_cut_by_deadline` (sent, possibly billed). The pre-call reserve is derived (50 s), not a
+  constant. Without a deadline nothing changes.
 - **The demo's findings speak the page's language** (OBS-64): `tools/demo_estate.py` wrote its five findings as
   English sentences, so a Russian screenshot mixed two languages. Each title is now a rule's own message id with its
   arguments, built by `finding_types.titled` like a real finding, so the Russian page renders them from the same

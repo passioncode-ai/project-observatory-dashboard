@@ -654,11 +654,14 @@ HELD_NOT_SERVING = {"held-disabled": "`enable {name}` lets it spend again, or `r
                     "held-unread": "the provider could not be read; re-run when it answers"}
 
 
-def _held_state(step: dict, rec: dict) -> tuple[str | None, dict | None]:
-    """A held slot as the PROVIDER has it, read by hash (`find_key`). The ledger alone used to make
-    a disabled or deleted key read `in-place` (ENG-002). Returns (not-serving action or None, row)."""
+def _held_state(step: dict, rec: dict, account: str | None = None) -> tuple[str | None, dict | None]:
+    """A held slot as the PROVIDER has it, read by hash (`find_key`), with the account the ledger
+    recorded (else `--account`). The ledger alone used to make a disabled or deleted key read
+    `in-place` (ENG-002). Returns (not-serving action or None, row). No stashed admin for that
+    account — or a row naming none while several are stashed and no `--account` — reads
+    `held-unread`, in a dry run too."""
     try:
-        _label, admin = read_admin(rec.get("account"))
+        _label, admin = read_admin(rec.get("account") or account)
         row = find_key(admin, step["name"])
     except (RuntimeError, LookupError, OSError, ValueError) as exc:
         # ValueError: an answer that is not JSON. Unread is never in place.
@@ -694,7 +697,7 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
             continue
         name, rec = held
         step["name"] = name
-        state, row = _held_state(step, rec)
+        state, row = _held_state(step, rec, account)
         if state in ("held-missing", "held-unread"):
             step["action"] = state
             continue
@@ -702,7 +705,8 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
         # unbounded key is the first one to bring under the limit.
         limit = row.get("limit")
         current = float(limit) if isinstance(limit, (int, float)) and not isinstance(limit, bool) else None
-        period = row.get("limit_reset") or rec.get("limit_reset") or "monthly"
+        # The provider's period alone: null there means no reset, which differs from a monthly policy.
+        period = row.get("limit_reset")
         moves = current != step["limit"] or period != step["reset"]
         if not moves:
             step["action"] = state or "in-place"
@@ -745,6 +749,8 @@ def _parse_split(text: str | None) -> dict | None:
         ref, sep, usd = part.rpartition("=")
         if not sep or not ref:
             raise ValueError(f"--split takes ref=usd pairs separated by commas, not {part!r}")
+        if ref.strip() in out:
+            raise ValueError(f"--split names {ref.strip()!r} twice; give each slot one amount")
         try:
             out[ref.strip()] = float(usd)
         except ValueError:
@@ -790,6 +796,11 @@ def cmd_issue_for_policy(path: str, account: str | None, limit_override: float |
                   + HELD_NOT_SERVING[step["action"]].format(name=step["name"]))
     print(f"ceilings: ${round(total, 2):g} in all" + (f", project limit ${policy['limitUsd']:g}"
                                                      if policy.get("mode") == "limited" else ", no project limit (L0 binds)"))
+    # The meter's L0 per key (docs/design/METER.md M4) is configured, not read from the provider: once a
+    # ceiling moves here, `keyCeilingsUsd` in config/meter.json must say the same, by the policy's ref.
+    implied = {step["ref"]: step["limit"] for step in plan if "to" in step}
+    print("keyCeilingsUsd for config/meter.json (the meter's L0 per key; set it to match): "
+          + json.dumps(implied, ensure_ascii=False))
     if partial:
         print(partial)
         return 1
@@ -1271,10 +1282,15 @@ def main() -> int:
                       "project limit split equally, rounded down to the cent")
     p_ip.add_argument("--split", help="explicit ceilings, ref=usd,ref=usd — one per project-key source, "
                       "summing to at most the project limit")
-    p_ip.add_argument("--dry-run", action="store_true", help="say what would be issued or moved; mint nothing")
+    p_ip.add_argument("--dry-run", action="store_true",
+                      help="say what would be issued or moved; mint and move nothing. It still READS the provider "
+                      "for every held slot: with no stashed admin for a slot's account (or a row naming none while "
+                      "several are stashed and no --account), the slot reads held-unread and the run exits 1")
     sub.add_parser("list", help="what exists — names, ceilings, places; never values")
     sub.add_parser("ping", help="alive? spent how much of its ceiling?")
-    p_li = sub.add_parser("limit", help="show or move a key's USD ceiling")
+    p_li = sub.add_parser("limit", help="show or move a key's USD ceiling; for a key issued by a spend policy, "
+                          "raising it can take it past its share of the project limit until the next "
+                          "issue-for-policy run")
     p_li.add_argument("name")
     p_li.add_argument("--set", type=float, dest="set_to")
     p_li.add_argument("--reset", choices=RESETS, default=None,

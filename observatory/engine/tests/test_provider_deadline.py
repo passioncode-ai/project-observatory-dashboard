@@ -120,6 +120,13 @@ class DeadlineReachesTheCall(unittest.TestCase):
         self.assertEqual(self.timeouts, [80])
         self.assertEqual(self.unhealthy, [], "the clipped timeout is the deadline's, not the model's")
         self.assertEqual(cut.exception.attempts, 1)
+        self.assertTrue(cut.exception.sent, "the clipped attempt was sent and may have been billed")
+        self.assertIn("may have been billed", str(cut.exception))
+
+    def test_an_attempt_refused_before_it_starts_was_not_sent(self):
+        with self.assertRaises(P.OutOfTime) as cut:
+            self.call(T0 + 150)
+        self.assertFalse(cut.exception.sent)
 
     def test_a_timeout_at_the_full_120_s_still_marks_the_model(self):
         def stuck(base_url, key, body, timeout=120):

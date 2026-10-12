@@ -84,7 +84,7 @@ The amount is reserved against every window of the grant and every level above i
 | L3 | `call` | the grant's `perCallMaxUsd` (contract DEC-0041 adds `call` to the window enum) |
 | L2 | `task` | the grant's spend under one task: the token's `task` claim, else the first `act.session` from the outermost actor, else the whole grant (`grant:<ref>`, one window, closed). Never the request's `tokenJti`: it is not signed, so a caller choosing a fresh one per call would open a fresh window and walk past L2 (Fabric ADR-0144 amendment 2, contract DEC-0041) |
 | L1 | `total`, `project`, `day`, `week`, `month` | the grant's whole life, everything on its project, and calendar windows in UTC (a week starts on Monday) |
-| L0 | `month` | the estate's total across every provider key (`estateMonthUsd`, default USD 1,000) and the ceiling of the provider key the grant's `project-key` source names (`keyCeilingsUsd`) |
+| L0 | `month` | the estate's total across every provider key (`estateMonthUsd`, default USD 1,000) and the ceiling of the provider key the grant's `project-key` source names (`keyCeilingsUsd`, kept equal to the ceiling `issue-for-policy` set) |
 
 **What L0 counts.** `collectors/scan_spend.py` (step `scan-spend`, integration `openrouter`, every tick) sums this
 month's `GET /api/v1/activity` for every OpenRouter account the door holds a provisioning key for, into
@@ -116,7 +116,7 @@ chain** (DL-22): the mapping from a grant to who acted is in the hub's journal.
 | `jwks`, `grantsDir` | from `hubJson` | a JWK Set file and the grant directory, overriding `hubJson` |
 | `estateMonthUsd` | 1000 | L0, the estate's monthly total |
 | `alertRatio` | 0.8 | where `--status` raises `alert` |
-| `keyCeilingsUsd` | `{}` | L0 per provider key, by the `ref` of a `project-key` credential source |
+| `keyCeilingsUsd` | `{}` | L0 per provider key, by the `ref` of a `project-key` credential source. Configured, not read from the provider: after `openrouter.py issue-for-policy` moves a key's ceiling, set its entry to the same amount (the plan prints the values it implies) |
 | `reservationSeconds` | 3600 | how long an unsettled reservation holds |
 
 The keys are cached for ten minutes and re-read at most once a minute on an unknown `kid` (DL-15).

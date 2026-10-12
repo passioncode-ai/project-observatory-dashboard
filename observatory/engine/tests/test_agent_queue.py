@@ -106,9 +106,10 @@ ANSWERING = ("providers.complete = lambda *a, **k: {'parsed': ANSWER, 'model': '
              "                                      'stop': False, 'selection_level': 'stub'}\n")
 #: A `complete` that runs out of time whenever it is handed a deadline — what the real one does
 #: when the attempts it would start do not fit (ENG-003). Without a deadline it answers.
-CUT_BY_DEADLINE = ("def _complete(*a, deadline=None, **k):\n"
+CUT_BY_DEADLINE = ("SENT = False\n"
+                   "def _complete(*a, deadline=None, **k):\n"
                    "    if deadline is not None:\n"
-                   "        raise providers.OutOfTime('the step deadline leaves 12 s; an attempt needs 30 s', attempts=1)\n"
+                   "        raise providers.OutOfTime('the step deadline leaves 12 s; an attempt needs 30 s', attempts=1, sent=SENT)\n"
                    "    return {'parsed': ANSWER, 'model': 'stub/model', 'cost': 0.0, 'tokens_in': 0,\n"
                    "            'tokens_out': 0, 'attempts': 1, 'finish_reason': 'stop', 'stop': False,\n"
                    "            'selection_level': 'stub'}\n"
@@ -296,15 +297,23 @@ def test_a_call_the_deadline_cuts_inside_complete_leaves_its_deltas() -> None:
     check("the deadline reached complete(), and the report names the cut",
           "step deadline" in str(rep.get("halted_by")) and "2 project(s) not finished" in str(rep.get("halted_by")),
           str(rep.get("halted_by")))
-    check("the report counts the attempt the deadline refused", rep.get("attempts_cut_by_deadline") == 1,
-          str(rep.get("attempts_cut_by_deadline")))
+    check("the report counts the attempt the deadline refused before sending it",
+          rep.get("attempts_refused_by_deadline") == 1 and rep.get("attempts_sent_and_cut_by_deadline") == 0,
+          str(rep))
     check("no delta was consumed", unconsumed(db) == 2, str(unconsumed(db)))
     check("no project is counted as failed: the clock is not the model's fault", rep.get("failed") == 0,
           str(rep.get("failed")))
     rc, out = run(db, scratch, limit=5, complete=CUT_BY_DEADLINE)
     check("without a deadline nothing is cut and the next run drains them",
-          rc == 0 and unconsumed(db) == 0 and report_of(scratch).get("attempts_cut_by_deadline") == 0,
+          rc == 0 and unconsumed(db) == 0 and report_of(scratch).get("attempts_refused_by_deadline") == 0,
           f"{unconsumed(db)} left")
+    db, scratch = store_with(["project:a"])
+    rc, out = run(db, scratch, limit=5, complete=CUT_BY_DEADLINE.replace("SENT = False", "SENT = True"),
+                  env={"OBSERVATORY_STEP_DEADLINE": f"{time.time() + 600:.0f}"})
+    rep = report_of(scratch)
+    check("an attempt that was SENT and then cut is counted apart: it may have been billed",
+          rep.get("attempts_sent_and_cut_by_deadline") == 1 and rep.get("attempts_refused_by_deadline") == 0
+          and "may have been billed" in str(rep.get("halted_by")), str(rep))
 
 
 if __name__ == "__main__":
