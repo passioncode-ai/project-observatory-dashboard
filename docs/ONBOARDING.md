@@ -492,7 +492,10 @@ retention and review — stop 2 minutes before it (at most a twelfth), and the c
 from `findings` to the registry commit uses what is left. A step that did not run
 leaves the previous run's output in place, and the collectors take turns: after the store check they
 run least recently started first, so one that was not started goes first on the next tick
-(`store/tick-rotation.json`; `tick.json` names the order and what was not started). Each step is told its own deadline in
+(`store/tick-rotation.json` keeps, per collector, when it last started, how it ended — ran, failed, stopped or
+not started — how many ticks in a row it was not started and when it last ran; `tick.json` names the order, what was
+not started, and each failed step's `outcome` beside its exit). A cycle in the collectors' same-tick reads is named
+in the tick log and the planned order runs. Each step is told its own deadline in
 `OBSERVATORY_STEP_DEADLINE` (epoch seconds); the folder scan uses it to write what
 it measured and carry each folder it did not reach, marked `carried_from`.
 

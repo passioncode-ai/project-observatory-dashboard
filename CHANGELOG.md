@@ -7,6 +7,13 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Changed
 
+- **The tick says how each collector ended** (ENG-005, ENG-007): `store/tick-rotation.json` is schema 2 — per
+  collector `started_at` (stamped before the step; schema 1 kept the time after it), `finished_at`, `outcome`
+  (`ran`, `failed`, `stopped`, `not_started`), `not_started_streak` and `last_ran_at`. A schema-1 record is still
+  read and rewritten as schema 2. Every `tick.json` `failed_steps` row gains `outcome` beside `exit`, so a step the
+  watchdog did not start is told from one it stopped at its limit (both exit 124). The tick log names a collector
+  not started for consecutive ticks at plan time. `rotation_order` no longer loops on a cycle in `READS_FROM`: it
+  names the cycle in the log and runs the planned order, and `tests/test_pipeline.py` asserts `READS_FROM` is acyclic.
 - **The demo's findings speak the page's language** (OBS-64): `tools/demo_estate.py` wrote its five findings as
   English sentences, so a Russian screenshot mixed two languages. Each title is now a rule's own message id with its
   arguments, built by `finding_types.titled` like a real finding, so the Russian page renders them from the same
