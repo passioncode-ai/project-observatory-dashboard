@@ -196,6 +196,41 @@ class ReadsInsideTheCallAreCutToo(unittest.TestCase):
             self.assertIsNone(P.provider_usage(force=True))
         self.assertEqual(self.seen, [10])
 
+    def test_a_catalogue_fetch_the_deadline_cut_is_a_deadline_halt(self):
+        """Round 3: with nothing cached, a catalogue fetch the deadline cut read as Retryable
+        "catalogue unreachable", so the agent recorded every model unavailable. It is OutOfTime,
+        sent=False: no attempt was made."""
+        def slow(req, timeout=None):
+            self.seen.append(timeout)
+            self.clock.t += timeout
+            raise urllib.error.URLError(TimeoutError("timed out"))
+        with mock.patch.object(P.urllib.request, "urlopen", slow), \
+                mock.patch.object(P, "CATALOGUE", Path("/nonexistent/catalogue.json")), \
+                mock.patch.object(P, "config", lambda: {"base_url": "http://127.0.0.1:9/api/v1"}):
+            with P.deadline_scope(T0 + 60):
+                with self.assertRaises(P.OutOfTime) as cut:
+                    P.catalogue()
+            self.assertFalse(cut.exception.sent)
+            self.assertEqual(self.seen, [40])
+            with self.assertRaises(P.Retryable):       # outside a deadline it is the provider's
+                P.catalogue()
+
+    def test_a_connection_that_dies_mid_body_is_retryable(self):
+        import http.client
+
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                raise http.client.IncompleteRead(b"")
+        with mock.patch.object(P.urllib.request, "urlopen", lambda req, timeout=None: Resp()):
+            with self.assertRaises(P.Retryable):
+                P._post("http://127.0.0.1:9/api/v1", "stub", {"model": "x"}, timeout=10)
+
     def test_outside_a_deadline_they_keep_their_own_timeouts(self):
         with self.assertRaises(urllib.error.URLError):
             P._fetch_catalogue("http://127.0.0.1:9/api/v1")

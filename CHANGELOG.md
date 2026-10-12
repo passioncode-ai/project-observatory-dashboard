@@ -23,7 +23,18 @@ while the major version is 0, a minor release may change behaviour and says so h
   and `--split` naming a slot twice — in one spelling or two — is refused. **Upgrade note:** the meter's L0 per key
   is configured, not read from the provider: after `issue-for-policy` moves a ceiling, set `keyCeilingsUsd[ref]` in
   `config/meter.json` to the same amount — the plan prints the values it implies. The dry run reads the provider, so
-  without a stashed admin for a slot's account its held slots read `held-unread` and it exits 1.
+  without a stashed admin for a slot's account its held slots read `held-unread` and it exits 1. The total holds at
+  every moment, not only at the end: every key the ledger holds under `vault:<project>/` counts, including one the
+  policy no longer names (a removed source, a second key behind one slot), which is **not moved** — it is reported
+  `not-in-policy` with `revoke NAME` as the remedy and the run exits 1; a key that cannot be read counts at its
+  ledger ceiling (unbounded with none), only a provider 404 counts as gone, and a key renamed in the provider's
+  dashboard is still found by its hash (this applies to `limit`, `rotate` and `revoke` too). Lowerings run first;
+  raises and new keys run only when the project's total after the run fits the limit, otherwise they are `blocked`
+  and the run exits 1. One run at a time: a lock beside the ledger is held from the plan to the last write, a second
+  run waits up to 30 s and then refuses. Every amount is rounded down to whole cents and compared with the exact
+  limit; ceilings within half a cent of the target are not moved again; a limit past $1,000,000,000 is refused; two
+  slots whose key names differ only in case are refused; the issuing account of a new key is resolved before
+  anything moves, in a dry run too; a minted key whose delivery times out is deleted, never left live and untracked.
 - **The agent's deadline reaches the model call** (ENG-003): `agent` started a project's call while 150 s were
   left, but `providers.complete()` walks a chain of models, each attempt allowed 120 s, so three Retryable models
   took 360 s and the watchdog killed a step that had paid for calls. `complete(…, deadline=)` now gets the step's
@@ -33,8 +44,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   call as `OutOfTime`, without marking the model unhealthy — that attempt was sent and may have been billed. The
   agent treats `OutOfTime` like its pre-call halt — deltas left, `halted_by` names the deadline and says when the cut
   attempt may have been billed — and `store/raw/agent.json` gains `attempts_refused_by_deadline` (never sent) and
-  `attempts_sent_and_cut_by_deadline` (sent, possibly billed). The pre-call reserve is derived (50 s), not a
-  constant. Without a deadline nothing changes.
+  `attempts_sent_and_cut_by_deadline` (sent, possibly billed). A model catalogue fetch the deadline cut, with
+  nothing cached, is `OutOfTime` too rather than "every model unavailable"; a connection that dies mid-body
+  (`http.client.HTTPException`) is Retryable instead of crashing the run. The pre-call reserve is derived (50 s),
+  not a constant. Without a deadline nothing changes.
 - **The demo's findings speak the page's language** (OBS-64): `tools/demo_estate.py` wrote its five findings as
   English sentences, so a Russian screenshot mixed two languages. Each title is now a rule's own message id with its
   arguments, built by `finding_types.titled` like a real finding, so the Russian page renders them from the same

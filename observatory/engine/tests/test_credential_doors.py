@@ -2255,6 +2255,264 @@ def test_or_policy_partial_failure_names_what_was_done() -> None:
           [s["action"] for s in plan] == ["in-place", "issued"] and len(calls["posted"]) == 2, str(plan))
 
 
+# ─────────────────────────── round 3: the invariant at every moment ───────────
+
+class MaxProvider:
+    """A fake OpenRouter that records the HIGHEST total of every key's ceiling (disabled ones too;
+    none counts as unbounded) at every moment — the adversarial round's probe fake. A test asserts
+    `max_sum`, not only the ceilings a run ends with."""
+
+    def __init__(self, unreachable, echo=lambda x: x):
+        self.keys, self.n, self.max_sum, self.patches, self.echo = {}, 0, 0.0, 0, echo
+        self.unread, self.unreachable = set(), unreachable
+        self.lock = __import__("threading").Lock()
+        self.on_patch = None
+
+    def total(self):
+        return sum((r["limit"] if r["limit"] is not None else 1e9) for r in self.keys.values())
+
+    def __call__(self, path, key, payload=None, method=None):
+        with self.lock:
+            if path.startswith("/keys?"):
+                return {"data": [dict(r) for r in self.keys.values()]}
+            if path == "/keys" and payload:
+                self.n += 1
+                h = f"h{self.n}"
+                self.keys[h] = {"hash": h, "name": payload["name"], "limit": self.echo(payload["limit"]),
+                                "limit_reset": payload["limit_reset"], "disabled": False}
+                self.max_sum = max(self.max_sum, self.total())
+                return {"data": dict(self.keys[h]), "key": "sk-or-v1-" + "q" * 40}
+            h = path.rsplit("/", 1)[-1]
+            if h in self.unread and method is None:
+                raise self.unreachable("openrouter unreachable: TimeoutError")
+            if h not in self.keys:
+                raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+            if method == "DELETE":
+                del self.keys[h]
+                return {}
+            if method == "PATCH":
+                self.patches += 1
+                self.keys[h]["limit"] = self.echo(payload["limit"])
+                self.keys[h]["limit_reset"] = payload["limit_reset"]
+                self.max_sum = max(self.max_sum, self.total())
+            row = dict(self.keys[h])
+        if method == "PATCH" and self.on_patch:
+            hook, self.on_patch = self.on_patch, None
+            hook()
+        return {"data": row}
+
+    def start(self):
+        """Measure from now: the highest total this run reaches, the state it found included."""
+        self.max_sum = self.total()
+
+    def by_name(self, suffix):
+        return next(h for h, r in self.keys.items() if r["name"].endswith(suffix))
+
+
+def _r3_door(admins=("example",), echo=lambda x: x):
+    m = orr()
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    m.ADMIN_STORE = d / "admin"
+    m.ADMIN_STORE.mkdir(parents=True)
+    for a in admins:
+        private_io.write(m.ADMIN_STORE / a, "prov\n")
+    m.LEDGER = d / "ledger.json"
+    m._project_folder = lambda project, env, name: {"a": "project-a"}.get(project, project)
+    m.vault_destination = lambda to: to
+    m.deliver = lambda value, to: f"vault {to}"
+    m._journal = lambda *a, **k: None
+    p = MaxProvider(m.Unreachable, echo)
+    m._request = p
+    return m, p
+
+
+def _pol(n=None, refs=None, limit=10, **over):
+    refs = refs or [f"vault:project-a/prod/K{i}" for i in range(n)]
+    base = {"kind": "spend-policy", "project": "urn:project:a", "mode": "limited", "limitUsd": limit,
+            "period": "month", "credentialSources": [{"kind": "project-key", "ref": r} for r in refs]}
+    base.update(over)
+    return base
+
+
+def _cmd(m, policy, *args):
+    import contextlib
+    import io
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    (d / "p.json").write_text(json.dumps(policy), encoding="utf-8")
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_for_policy(str(d / "p.json"), *args)
+    return rc, out.getvalue()
+
+
+def test_or_policy_counts_every_key_of_the_project() -> None:
+    """Round 3, probe A: a source removed from the policy left its key live at its old ceiling, and
+    the remaining two were raised past it ([3.33, 5, 5] = $13.33 against $10). Every ledger row under
+    `vault:<project>/` counts; one the policy no longer names is not moved (refused, not lowered to
+    $0), it is named and the run exits 1. Probe K: a second key behind one slot is counted the same."""
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(3), "example")
+    p.start()
+    rc, out = _cmd(m, _pol(2), "example", None, False)
+    check("A: dropping a source never lifts the total past the limit, at any moment",
+          p.max_sum <= 10.0 and p.total() <= 10.0, f"max={p.max_sum} now={sorted(r['limit'] for r in p.keys.values())}")
+    check("A: the key the policy no longer names is reported and the run exits 1",
+          rc == 1 and "not-in-policy 'project-a-prod-k2'" in out and "revoke project-a-prod-k2" in out, f"{rc} {out}")
+    check("A: the raises it could not make are blocked, not made", out.count(": blocked ") == 2, out)
+
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(1), "example")
+    m.issue_key("hand-made", 7.0, "example", "vault:project-a/prod/K0", "project-a")
+    p.start()
+    plan = m.issue_for_policy(_pol(1), "example")
+    check("K: a second key behind one slot is counted and named; the run raises nothing",
+          p.max_sum == 17.0 and p.total() == 17.0 and [s["action"] for s in plan] == ["in-place", "not-in-policy"],
+          f"max={p.max_sum} {[s.get('action') for s in plan]}")
+
+
+def test_or_policy_raises_only_what_fits_beside_unread_or_renamed_keys() -> None:
+    """Round 3, probes B and C: K1 unread (or renamed in the provider's dashboard, which read as
+    missing) stayed live at $5 while K0 was raised to $8 — $13 at the highest. An unread key counts
+    at its ledger ceiling, so the raise is blocked; a renamed key is still found by its hash."""
+    split = {"vault:project-a/prod/K0": 8, "vault:project-a/prod/K1": 2}
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(2), "example")
+    p.unread.add(p.by_name("k1"))
+    p.start()
+    plan = m.issue_for_policy(_pol(2), "example", split=split)
+    check("B: beside an unread key the raise is blocked and the total never passes the limit",
+          p.max_sum <= 10.0 and [s["action"] for s in plan] == ["blocked", "held-unread"],
+          f"max={p.max_sum} {[s.get('action') for s in plan]}")
+
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(2), "example")
+    p.keys[p.by_name("k1")]["name"] = "renamed-in-dashboard"
+    p.start()
+    plan = m.issue_for_policy(_pol(2), "example", split=split)
+    check("C: a key renamed at the provider is live, lowered first, and the total stays within the limit",
+          p.max_sum <= 10.0 and sorted(r["limit"] for r in p.keys.values()) == [2.0, 8.0]
+          and [s["action"] for s in plan] == ["ceiling-moved", "ceiling-moved"],
+          f"max={p.max_sum} {[s.get('action') for s in plan]}")
+    p.keys.clear()
+    plan = m.issue_for_policy(_pol(2), "example", dry_run=True)
+    check("C: only a 404 reads held-missing", [s["action"] for s in plan] == ["held-missing", "held-missing"], str(plan))
+
+
+def test_or_policy_runs_one_at_a_time() -> None:
+    """Round 3, probe F2: two runs at once with opposite splits read each other's keys before either
+    moved them and ended both at $8 ($16 against $10). A run holds an exclusive lock beside the ledger
+    from plan to last write; the second waits, re-reads, and its own plan holds; a run that cannot
+    get the lock in time refuses before reading anything."""
+    import threading
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(2), "example")
+    p.start()
+    results = []
+
+    def second():
+        results.append(m.issue_for_policy(_pol(2), "example",
+                                          split={"vault:project-a/prod/K0": 2, "vault:project-a/prod/K1": 8}))
+    other = threading.Thread(target=second)
+
+    def start_the_other_run_mid_write():
+        other.start()
+        __import__("time").sleep(0.3)           # the other run is now waiting on the lock
+    p.on_patch = start_the_other_run_mid_write
+    results.append(m.issue_for_policy(_pol(2), "example",
+                                      split={"vault:project-a/prod/K0": 8, "vault:project-a/prod/K1": 2}))
+    other.join(10)
+    check("F2: opposite splits at once never total past the limit, and the later run's split holds",
+          p.max_sum <= 10.0 and len(results) == 2
+          and {r["name"][-2:]: r["limit"] for r in p.keys.values()} == {"k0": 2.0, "k1": 8.0},
+          f"max={p.max_sum} {[(r['name'], r['limit']) for r in p.keys.values()]}")
+
+    import oslocks
+    m.POLICY_LOCK_WAIT_S = 0.2
+    fd = __import__("os").open(m.LEDGER.parent / ".openrouter-policy.lock", __import__("os").O_RDWR)
+    oslocks.flock(fd, oslocks.LOCK_EX)
+    before = p.patches
+    try:
+        m.issue_for_policy(_pol(2), "example", split={"vault:project-a/prod/K0": 9, "vault:project-a/prod/K1": 1})
+        check("a run that cannot take the lock refuses", False, "ran")
+    except RuntimeError as exc:
+        check("a run that cannot take the lock refuses, having moved nothing",
+              "policy lock" in str(exc) and p.patches == before, str(exc))
+    finally:
+        oslocks.flock(fd, oslocks.LOCK_UN)
+        __import__("os").close(fd)
+
+
+def test_or_policy_amounts_are_whole_cents_against_the_exact_limit() -> None:
+    """Round 3, probes D, D2, H, J2, J3, I."""
+    m, p = _r3_door(echo=lambda x: x + 1e-9)
+    m.issue_for_policy(_pol(3), "example")
+    p.start()
+    before = p.patches
+    m.issue_for_policy(_pol(3), "example")
+    m.issue_for_policy(_pol(3), "example")
+    check("D: a provider echoing 3.330000001 is not re-PATCHed", p.patches == before and p.max_sum <= 10.0,
+          f"{p.patches - before} patches")
+    m, p = _r3_door(echo=lambda x: round(x, 2))
+    m.issue_for_policy(_pol(1), "example", split={"vault:project-a/prod/K0": 3.333})
+    before = p.patches
+    m.issue_for_policy(_pol(1), "example", split={"vault:project-a/prod/K0": 3.333})
+    check("D2: a --split amount is rounded down to the cent, so a provider storing cents is not re-PATCHed",
+          p.patches == before and [r["limit"] for r in p.keys.values()] == [3.33], f"{p.patches - before} patches")
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(3), "example", 3.3333334)
+    check("J2: --limit 3.3333334 x 3 is 3.33 each: the total never passes $10",
+          p.max_sum <= 10.0 and [r["limit"] for r in p.keys.values()] == [3.33] * 3, f"max={p.max_sum!r}")
+    m, p = _r3_door()
+    plan = m.issue_for_policy(_pol(1, limit=0.0299999996), "example")
+    check("J3: a share is rounded down from the exact limit (0.0299999996 -> 0.02)",
+          plan[0]["limit"] == 0.02 and p.max_sum <= 0.0299999996, f"{plan[0]['limit']} max={p.max_sum}")
+    for limit in (1e307, 1e300):
+        try:
+            m.issue_for_policy(_pol(3, limit=limit), "example", dry_run=True)
+            check(f"H: limitUsd {limit:g} is refused", False, "planned")
+        except ValueError as exc:
+            check(f"H: limitUsd {limit:g} is refused as a ValueError", "past" in str(exc), str(exc))
+    m, p = _r3_door()
+    try:
+        m.issue_for_policy(_pol(refs=["vault:project-a/prod/MODEL_KEY", "vault:project-a/prod/model_key"]), "example")
+        check("I: two slots one key name apart are refused up front", False, "planned")
+    except ValueError as exc:
+        check("I: two slots one key name apart are refused up front", "name the slots apart" in str(exc)
+              and not p.keys, str(exc))
+
+
+def test_or_policy_never_leaves_a_live_untracked_key() -> None:
+    """Round 3, probe G: a vault `put` that timed out after the mint left a live key no ledger knew."""
+    m, p = _r3_door()
+
+    def slow(value, to):
+        raise __import__("subprocess").TimeoutExpired(["vault.py", "put"], 60)
+    m.deliver = slow
+    p.start()
+    try:
+        m.issue_for_policy(_pol(1), "example")
+        check("G: the run is partial", False, "returned")
+    except m.PolicyPartial as exc:
+        check("G: a delivery that timed out deletes the minted key; nothing live is left untracked",
+              not p.keys and not m.ledger()["issued"] and p.max_sum <= 10.0
+              and [s["action"] for s in exc.plan] == ["failed"], f"keys={p.keys} max={p.max_sum}")
+
+
+def test_or_policy_dry_run_resolves_the_issuing_account() -> None:
+    """Round 3, probe N: with two stashed accounts and no --account the dry run planned an issue the
+    real run then failed. Both refuse now, before anything is read or moved."""
+    m, p = _r3_door(admins=("one", "two"))
+    outcomes = []
+    for dry in (True, False):
+        try:
+            m.issue_for_policy(_pol(1), None, dry_run=dry)
+            outcomes.append("planned")
+        except RuntimeError as exc:
+            outcomes.append("--account" in str(exc))
+    check("N: the dry run and the real run refuse alike, and nothing is minted",
+          outcomes == [True, True] and not p.keys and p.max_sum == 0.0, str(outcomes))
+
+
 if __name__ == "__main__":
     print("the credential doors — stash, issue, rotate, revoke, and what they refuse\n")
     for fn in (test_cf_a_token_this_call_created_is_deleted_when_the_issue_fails,
@@ -2266,6 +2524,12 @@ if __name__ == "__main__":
                test_or_policy_reads_held_keys_at_the_provider,
                test_or_policy_partial_failure_names_what_was_done,
                test_or_policy_round_two,
+               test_or_policy_counts_every_key_of_the_project,
+               test_or_policy_raises_only_what_fits_beside_unread_or_renamed_keys,
+               test_or_policy_runs_one_at_a_time,
+               test_or_policy_amounts_are_whole_cents_against_the_exact_limit,
+               test_or_policy_never_leaves_a_live_untracked_key,
+               test_or_policy_dry_run_resolves_the_issuing_account,
                test_no_door_takes_or_prints_a_value_outside_stdin,
                test_the_ledgers_hold_no_values,
                test_cf_stash_refuses_an_admin_that_cannot_issue,
