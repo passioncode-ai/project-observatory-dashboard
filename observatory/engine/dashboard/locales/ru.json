@@ -2113,5 +2113,12 @@
  "a {event} hook from {source} reads a credential and sends data out": "хук {event} из {source} читает учётные данные и отправляет данные наружу",
  "a {event} hook from {source} carries hidden Unicode characters": "хук {event} из {source} содержит скрытые символы Unicode",
  "Project skills that push the listing over budget": "Скиллы проекта, переполняющие список",
- "in {project}, its own skills push the skill listing over budget": "в {project} собственные скиллы проекта переполняют список скиллов"
+ "in {project}, its own skills push the skill listing over budget": "в {project} собственные скиллы проекта переполняют список скиллов",
+ "{file} keeps {n} credentials in plaintext": {
+  "one": "{file} хранит открытым текстом учётные данные: {n}",
+  "few": "{file} хранит открытым текстом учётные данные: {n}",
+  "many": "{file} хранит открытым текстом учётные данные: {n}",
+  "other": "{file} хранит открытым текстом учётные данные: {n}"
+ },
+ "Provider credential in a tool's config in plaintext": "Учётные данные провайдера открытым текстом в конфиге инструмента"
 }

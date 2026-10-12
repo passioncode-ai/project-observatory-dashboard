@@ -630,5 +630,9 @@
  "Disk guard ran {at}: free {before} → {after} GB, {n} removed": {
   "one": "Disk guard ran {at}: free {before} → {after} GB, {n} removed",
   "other": "Disk guard ran {at}: free {before} → {after} GB, {n} removed"
+ },
+ "{file} keeps {n} credentials in plaintext": {
+  "one": "{file} keeps {n} credential in plaintext",
+  "other": "{file} keeps {n} credentials in plaintext"
  }
 }

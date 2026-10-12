@@ -136,7 +136,7 @@ class VendoredKit(unittest.TestCase):
         names = {p.name for p in SCHEMAS.glob("*.schema.json")}
         self.assertEqual(names, {"common.schema.json", "service-common.schema.json",
                                  "service-descriptor.schema.json", "service-well-known.schema.json",
-                                 "service-events-page.schema.json"})
+                                 "service-events-page.schema.json", "service-usage.schema.json"})
 
 
 # --- identity ------------------------------------------------------------------------
@@ -830,6 +830,15 @@ class RunningServer(unittest.TestCase):
         conn.close()
         (cls.home / "registry/projects.json").write_text(json.dumps({"projects": [{"id": "project:alpha-web",
                                                                                     "name": "Alpha Web"}]}))
+        # Two receipts of the assistant's paid calls (contract DEC-0021, OBS-53), one estimated from a price list.
+        import fabric_service as fs_kit
+        ledger = fs_kit.JsonlUsageLedger(cls.home / "store" / "logs" / "fabric-usage.jsonl")
+        today = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        ledger.record(fs_kit.make_usage_receipt("openrouter", "deepseek/deepseek-v4-flash", input_tokens=1200,
+                                                output_tokens=300, cost_usd=0.0004, at=today))
+        ledger.record(fs_kit.make_usage_receipt("openrouter", "deepseek/deepseek-v4-flash", input_tokens=800,
+                                                output_tokens=100, cost_usd=0.0002, cost_basis="price-list",
+                                                at=today))
         cls.port = free_port()
         cls.proc = start_server(cls.env, cls.port)
         try:
@@ -863,7 +872,8 @@ class RunningServer(unittest.TestCase):
         self.assertEqual(doc["process"]["pid"], self.proc.pid)
         self.assertTrue(doc["service"]["build"].get("commit") or doc["service"]["build"].get("digest"))
         self.assertEqual(doc["surfaces"], {"dashboard": {"path": "/", "login": False},
-                                           "events": {"path": "/fabric/v1/events"}})
+                                           "events": {"path": "/fabric/v1/events"},
+                                           "usage": {"path": "/fabric/v1/usage"}})
         self.assertEqual({t["label"]: t["value"] for t in doc["summary"]}["Projects"], 1)
         self.assertLess(sorted(timings)[2], 100, f"median {sorted(timings)[2]:.1f} ms")
 
@@ -876,7 +886,7 @@ class RunningServer(unittest.TestCase):
                                                  "silent_after_s", "remote", "leaks", "skills", "tick"})
 
     def test_the_guard_covers_the_protocol_routes(self):
-        for path in ("/.well-known/fabric-service", "/fabric/v1/events"):
+        for path in ("/.well-known/fabric-service", "/fabric/v1/events", "/fabric/v1/usage"):
             for headers in ({"Host": "evil.example"}, {"Origin": "http://evil.example"},
                             {"Sec-Fetch-Site": "cross-site"}):
                 self.assertEqual(get(self.port, path, headers)[0], 403, (path, headers))
@@ -891,6 +901,20 @@ class RunningServer(unittest.TestCase):
         self.assertEqual(get(self.port, "/fabric/v1/events", {"Authorization": self.token})[0], 401,
                          "the scheme is Bearer")
         self.assertEqual(os.stat(self.home / "service.token").st_mode & 0o777, 0o600)
+
+    def test_usage_needs_the_token_and_reports_the_receipts(self):
+        """OBS-53: `surfaces.usage` answers the contract's usage report from the assistant's receipts."""
+        self.assertEqual(get(self.port, "/fabric/v1/usage")[0], 401)
+        self.assertEqual(get(self.port, "/fabric/v1/usage", self.bearer("x" * 43))[0], 401)
+        code, _h, body = get(self.port, "/fabric/v1/usage", self.bearer())
+        self.assertEqual(code, 200)
+        doc = json.loads(body)
+        self.assertEqual(schema_errors("service-usage.schema.json", doc), [])
+        day = doc["days"][-1]
+        self.assertEqual((day["calls"], day["inputTokens"], day["outputTokens"]), (2, 2000, 400))
+        self.assertAlmostEqual(day["costUsd"], 0.0006)
+        self.assertEqual(day["byModel"][0]["costBasis"], "mixed")
+        self.assertNotIn("prompt", body.decode() if isinstance(body, bytes) else body)
 
     def test_events_page_with_the_token(self):
         code, _h, body = get(self.port, "/fabric/v1/events?limit=5", self.bearer())
@@ -949,9 +973,9 @@ class RunningServer(unittest.TestCase):
                             "interop.well-known-capabilities", "interop.tools-match",
                             "interop.job-tools", "interop.unknown-job", "interop.trace-propagation",
                             # Kit 0.8.2: skipped with the other capability checks this server does
-                            # not declare, and the optional usage report (DEC-0021) it does not
-                            # offer yet (docs/backlog.md OBS-53).
-                            "interop.output-schema-object", "usage.report"}
+                            # not declare. The usage report (DEC-0021) is offered since OBS-53 and
+                            # must PASS, which `failed == {}` above already requires.
+                            "interop.output-schema-object"}
         if shutil.which("lsof", path=self.env.get("PATH")) is None:
             expected_not_run.add("network.loopback-only")
             self.assertEqual(verdicts["network.loopback-only"]["verdict"], "NOT_RUN")

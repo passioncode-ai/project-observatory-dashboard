@@ -120,6 +120,7 @@ LABELS: dict[str, str] = {
     "machine.stale": "Machine survey out of date",
     "harness.hook_risk": "Agent hook matching a security rule",
     "harness.instruction_long": "Instruction file read whole by every session",
+    "harness.plaintext_secret": "Provider credential in a tool's config in plaintext",
     "harness.project_listing_overflow": "Project skills that push the listing over budget",
     "harness.listing_overflow": "Skill descriptions over the listing budget",
     "harness.mcp_deferral_off": "MCP tool schemas load upfront",

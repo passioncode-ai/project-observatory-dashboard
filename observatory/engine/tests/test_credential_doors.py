@@ -1383,6 +1383,8 @@ def test_cf_email_presets_grant_exactly_what_the_email_service_needs() -> None:
          "/zones/z1/email/routing/rules", "rt-value-"),
         ("redirect-rules", "zone", ("Zone Read", "Dynamic URL Redirects Write"),
          "/zones/z1/rulesets/phases/http_request_dynamic_redirect/entrypoint", "rd-value-"),
+        ("workers-routes", "zone", ("Zone Read", "Workers Routes Write"),
+         "/zones/z1/workers/routes", "wr-value-"),
     ]
     for preset, level, groups, probe, prefix in cases:
         m = cf(); _cf_with_admin(m)
@@ -1421,9 +1423,10 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
     groups = {"email-send": ("Email Sending Write", "Email Sending Read"),
               "workers-edit": ("Workers Scripts Write", "Workers KV Storage Write"),
               "email-routing": ("Zone Read", "Email Routing Rules Write"),
-              "redirect-rules": ("Zone Read", "Dynamic URL Redirects Write")}
+              "redirect-rules": ("Zone Read", "Dynamic URL Redirects Write"),
+              "workers-routes": ("Zone Read", "Workers Routes Write")}
     level = {"email-send": "account", "workers-edit": "account", "email-routing": "zone",
-             "redirect-rules": "zone"}
+             "redirect-rules": "zone", "workers-routes": "zone"}
     for preset in groups:
         m = cf(); _cf_with_admin(m)
         log, delivered = [], []

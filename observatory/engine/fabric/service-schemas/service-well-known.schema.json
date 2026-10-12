@@ -203,6 +203,14 @@
               "items": {
                 "$ref": "common.schema.json#/$defs/capabilityName"
               }
+            },
+            "auth": {
+              "description": "DEC-0024, DEC-0039. descriptor (default): the MCP surface takes the descriptor's token in its header. own: it authenticates its callers with credentials of its own (a token per agent, a gateway's caller identity); the descriptor's token is the host's and is not an MCP credential. delegation: it takes only the estate's delegation tokens (auth.delegation), and the descriptor's token is not an MCP credential.",
+              "enum": [
+                "descriptor",
+                "own",
+                "delegation"
+              ]
             }
           },
           "additionalProperties": false
@@ -218,6 +226,57 @@
             },
             "stream": {
               "$ref": "service-common.schema.json#/$defs/originPath"
+            }
+          },
+          "additionalProperties": false
+        },
+        "usage": {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "$ref": "service-common.schema.json#/$defs/originPath"
+            }
+          },
+          "additionalProperties": false
+        },
+        "operatorChannel": {
+          "description": "DEC-0034. Where the service answers its operator-channel status (fabric-operator-channel/0.1); token-protected like the events feed.",
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "$ref": "service-common.schema.json#/$defs/originPath"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "auth": {
+      "description": "DEC-0039. How the service authenticates calls beyond the descriptor's token.",
+      "type": "object",
+      "properties": {
+        "delegation": {
+          "description": "The service accepts the estate's delegation tokens (fabric-delegation/0.1): Authorization: Bearer on a direct call, Fabric-Delegation on a call the hub forwards.",
+          "type": "object",
+          "required": [
+            "issuer",
+            "jwks"
+          ],
+          "properties": {
+            "issuer": {
+              "$ref": "common.schema.json#/$defs/uri",
+              "description": "The iss it trusts: the estate hub."
+            },
+            "jwks": {
+              "$ref": "common.schema.json#/$defs/uri",
+              "description": "Where it reads the estate's public keys (the hub's /.well-known/jwks.json, or the copy Fabric publishes)."
             }
           },
           "additionalProperties": false
@@ -248,5 +307,51 @@
       "$ref": "common.schema.json#/$defs/extensions"
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "surfaces"
+        ],
+        "properties": {
+          "surfaces": {
+            "type": "object",
+            "required": [
+              "mcp"
+            ],
+            "properties": {
+              "mcp": {
+                "type": "object",
+                "required": [
+                  "auth"
+                ],
+                "properties": {
+                  "auth": {
+                    "const": "delegation"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "auth"
+        ],
+        "properties": {
+          "auth": {
+            "type": "object",
+            "required": [
+              "delegation"
+            ],
+            "properties": {
+              "delegation": true
+            }
+          }
+        }
+      }
+    }
+  ]
 }

@@ -5,6 +5,13 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **Cloudflare door: `--preset workers-routes --zone <zone>`** — Zone Read + Workers Routes Write on one zone,
+  into a vault slot, verified by listing the zone's routes with the new value. `workers-edit` deploys a script
+  but cannot route a hostname to it; this is that one zone right, without DNS. First use: checkmydata.ai
+  moving its static site to a Worker.
+
 ### Changed
 
 - **Trust tiers, written down** (Fabric ADR-0144 amendment 4): on the operator's own machines (T0, and enrolled
@@ -18,6 +25,15 @@ while the major version is 0, a minor release may change behaviour and says so h
   Redirects) on one zone, into a vault slot, verified by reading the zone's `http_request_dynamic_redirect`
   entrypoint with the new value. A zone with no redirect yet answers 404 there to a token that may read it and
   403 to one that may not, so for this preset alone a 404 counts as the proof.
+- **A usage report** (OBS-53; contract DEC-0021): the server declares `surfaces.usage` and answers
+  `GET /fabric/v1/usage` with the service token — the last 31 days of the assistant's paid model calls by provider
+  and model, from a receipt written at every charge (tokens and cost with its basis, never a prompt or a caller).
+  The fabric-service schemas are vendored again at contract `7931c1d`; the kit's conformance probe now runs
+  `usage.report`.
+- **Plaintext credentials in agent tools' configs** (OBS-74): the harness scan names, per file, the credential-shaped
+  values kept by Hermes, opencode, Codex, Claude Code's MCP blocks, Gemini and Cursor — names only, never a value —
+  as `harness.plaintext_secret`, with the vault and `use_secret.py` as the remedy. Design: `docs/design/HARNESS.md`
+  H15.
 - **`grant.check` is declared in `fabric-agent.json`** (OBS-67; manifest revision 9): effect `none`, its
   input and output schemas published at `v0.24.1`, a probe that a call carrying no delegation token is denied
   `principal-unproven`. Fabric's registry reads the meter from the service descriptor; the token-carrying call
