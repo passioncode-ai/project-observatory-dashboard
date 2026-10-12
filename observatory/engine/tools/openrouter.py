@@ -5,6 +5,7 @@
     python "$T/openrouter.py" stash --as main < key-file   # provisioning key, labeled; a protected file
     python "$T/openrouter.py" adopt --as main               # take the legacy file in
     python "$T/openrouter.py" issue --name my-agent --limit 10 [--reset daily] --to vault:PROJECT/prod/OPENROUTER_API_KEY
+    python "$T/openrouter.py" issue-for-policy --policy FILE [--limit USD | --split REF=USD,…] [--dry-run]
     python "$T/openrouter.py" list | ping
     python "$T/openrouter.py" limit my-agent --set 25 [--reset daily]
     python "$T/openrouter.py" disable my-agent              # or enable
@@ -513,40 +514,102 @@ def _policy_project(uri: str) -> str:
     return text
 
 
-def policy_key_plan(policy: dict, limit_override: float | None = None) -> list[dict]:
+class PolicyPartial(RuntimeError):
+    """`issue_for_policy` stopped in the middle: some steps were carried out and one failed. `plan`
+    holds every step with its action — what was done, `failed` with its reason, `not-reached` — so
+    the caller can say which keys already exist. A RuntimeError, so a caller that only knew the
+    provider's refusals still exits 1; a re-run is idempotent and does only what is missing."""
+
+    def __init__(self, message: str, plan: list[dict]):
+        super().__init__(message)
+        self.plan = plan
+
+
+def _cents_down(usd: float) -> float:
+    """A share of a limit, rounded DOWN to the cent, so the shares never sum past the limit."""
+    return math.floor(round(usd * 100, 6)) / 100
+
+
+def _split_ceilings(slots: list[dict], mode: str, project_limit: float | None,
+                    limit_override: float | None, split: dict | None) -> list[float]:
+    """Each slot's ceiling, by the rule ENG-002 asks for: the ceilings of every key a policy touches
+    sum to at most the project limit. Equal shares rounded down to the cent by default; `split`
+    (ref → USD, the ref as the policy writes it or as its vault slot) gives explicit amounts;
+    `limit_override` is one ceiling PER KEY. With no project limit each key still needs its own
+    ceiling, explicit, and L0 bounds the sum."""
+    n = len(slots)
+    if split is not None and limit_override is not None:
+        raise ValueError("give --limit (one ceiling per key) or --split (an amount per slot), not both")
+    if split is not None:
+        by_slot: dict[str, float] = {}
+        names = {}
+        for s in slots:
+            names[s["ref"]] = s["to"]
+            names[s["to"]] = s["to"]
+            names[s["to"][len("vault:"):]] = s["to"]
+        for ref, usd in split.items():
+            if ref not in names:
+                raise ValueError(f"--split names {ref!r}, which is not a project-key source of this policy")
+            if not isinstance(usd, (int, float)) or isinstance(usd, bool) or not math.isfinite(usd) or usd <= 0:
+                raise ValueError(f"--split gives {ref!r} no positive ceiling")
+            by_slot[names[ref]] = float(usd)
+        missing = [s["ref"] for s in slots if s["to"] not in by_slot]
+        if missing:
+            raise ValueError(f"--split leaves {', '.join(missing)} with no ceiling; a key is never unbounded")
+        ceilings = [by_slot[s["to"]] for s in slots]
+        if project_limit is not None and round(sum(ceilings), 6) > project_limit:
+            raise ValueError(f"--split sums to ${sum(ceilings):g}, more than the project limit "
+                             f"(${project_limit:g})")
+        return ceilings
+    if limit_override is not None:
+        if not math.isfinite(limit_override) or limit_override <= 0:
+            raise ValueError("a positive ceiling is required")
+        if project_limit is not None and round(limit_override * n, 6) > project_limit:
+            raise ValueError(f"{n} key(s) at ${limit_override:g} each cannot exceed the project's limit "
+                             f"(${project_limit:g}); --limit is per key — give at most "
+                             f"${_cents_down(project_limit / n):g}, or --split")
+        return [float(limit_override)] * n
+    if mode == "no-project-limit":
+        raise ValueError("the policy sets no project limit; the key still needs its own ceiling — give --limit")
+    share = _cents_down(project_limit / n)
+    if share <= 0:
+        raise ValueError(f"a ${project_limit:g} limit over {n} keys leaves less than a cent for each; "
+                         "raise the limit or name fewer project-key sources")
+    return [share] * n
+
+
+def policy_key_plan(policy: dict, limit_override: float | None = None,
+                    split: dict | None = None) -> list[dict]:
     """What a project's spend policy asks of this door, before anything is minted (OBS-58).
 
     A policy (contract `spend-policy`, DEC-0037) names its credential sources. Each `project-key`
     source whose `ref` is a vault slot (`vault:<project>/<env>/<NAME>`, or the bare
     `<project>/<env>/<NAME>` the meter and `use_secret` read) gets a key issued FOR THAT PROJECT
     into that slot. A slot of another project is a borrow, refused here as the registry refuses it
-    (contract spend-policy rule 1). The key's ceiling is the policy's project limit and resets with
-    its period; a policy with no project limit still needs a ceiling for the key, given explicitly —
-    a key without one is an unbounded liability, and L0 alone is not a key's ceiling.
+    (contract spend-policy rule 1). The ceilings of all the policy's keys together are at most the
+    project limit (ENG-002: each key used to get the whole limit, N keys N times it) — an equal
+    split by default, explicit with `split`, or `limit_override` per key — and reset with the
+    policy's period. A policy with no project limit still needs a ceiling for each key, given
+    explicitly: a key without one is an unbounded liability, and L0 alone is not a key's ceiling.
     """
     if not isinstance(policy, dict) or policy.get("kind") != "spend-policy":
         raise ValueError("not a spend policy (kind must be spend-policy)")
     project = _policy_project(policy.get("project"))
     mode = policy.get("mode")
+    project_limit = None
     if mode == "limited":
-        ceiling = policy.get("limitUsd")
-        if not isinstance(ceiling, (int, float)) or isinstance(ceiling, bool) or not math.isfinite(ceiling):
+        project_limit = policy.get("limitUsd")
+        if (not isinstance(project_limit, (int, float)) or isinstance(project_limit, bool)
+                or not math.isfinite(project_limit)):
             raise ValueError("a limited policy carries limitUsd")
-        if ceiling <= 0:
+        if project_limit <= 0:
             raise ValueError("the project limit is $0 — it spends nothing, so no key is issued")
-        if limit_override is not None:
-            if limit_override > ceiling:
-                raise ValueError(f"a key's ceiling (${limit_override:g}) cannot exceed the project's "
-                                 f"limit (${ceiling:g})")
-            ceiling = limit_override
+        project_limit = float(project_limit)
     elif mode == "no-project-limit":
-        if limit_override is None:
+        if limit_override is None and split is None:
             raise ValueError("the policy sets no project limit; the key still needs its own ceiling — give --limit")
-        ceiling = limit_override
     else:
         raise ValueError(f"unknown policy mode {mode!r}")
-    if not math.isfinite(ceiling) or ceiling <= 0:
-        raise ValueError("a positive ceiling is required")
     reset = POLICY_RESET.get(policy.get("period"))
     if reset is None:
         raise ValueError(f"unknown policy period {policy.get('period')!r}")
@@ -569,62 +632,161 @@ def policy_key_plan(policy: dict, limit_override: float | None = None) -> list[d
         if folder != own:
             raise ValueError(f"{ref} is a slot of {folder!r}, not of the policy's project {own!r}: "
                              f"a project's key is never another's (spend-policy rule 1)")
-        plan.append({"ref": ref, "to": f"vault:{folder}/{parts[1]}/{parts[2]}",
-                     "name": slug(f"{folder}-{parts[1]}-{parts[2]}"), "project": folder,
-                     "limit": float(ceiling), "reset": reset})
-    if not any("to" in step for step in plan):
+        to = f"vault:{folder}/{parts[1]}/{parts[2]}"
+        if any(step.get("to") == to for step in plan):
+            plan.append({"ref": ref, "action": "skipped", "why": f"the same slot as an earlier source ({to})"})
+            continue
+        plan.append({"ref": ref, "to": to, "name": slug(f"{folder}-{parts[1]}-{parts[2]}"),
+                     "project": folder, "reset": reset})
+    slots = [step for step in plan if "to" in step]
+    if not slots:
         raise ValueError("the policy names no project-key source this door can issue into")
+    for step, ceiling in zip(slots, _split_ceilings(slots, mode, project_limit, limit_override, split)):
+        step["limit"] = ceiling
     return plan
 
 
+#: Held-row outcomes that leave a slot NOT served: the command exits 1 and names the remedy.
+HELD_NOT_SERVING = {"held-disabled": "`enable {name}` lets it spend again, or `revoke {name}` and re-run to issue anew",
+                    "held-missing": "`revoke {name}` clears the ledger row; re-run to issue anew",
+                    "held-unread": "the provider could not be read; re-run when it answers"}
+
+
+def _held_state(step: dict, rec: dict) -> tuple[str | None, dict | None]:
+    """A held slot as the PROVIDER has it, read by hash (`find_key`). The ledger alone used to make
+    a disabled or deleted key read `in-place` (ENG-002). Returns (not-serving action or None, row)."""
+    try:
+        _label, admin = read_admin(rec.get("account"))
+        row = find_key(admin, step["name"])
+    except (RuntimeError, LookupError, OSError) as exc:
+        step["why"] = f"read failed ({type(exc).__name__})"
+        return "held-unread", None
+    if not row:
+        return "held-missing", None
+    if row.get("disabled"):
+        return "held-disabled", row
+    return None, row
+
+
 def issue_for_policy(policy: dict, account: str | None = None, limit_override: float | None = None,
-                     dry_run: bool = False) -> list[dict]:
+                     dry_run: bool = False, split: dict | None = None) -> list[dict]:
     """Carries out `policy_key_plan`: issue where no key serves the slot, move the ceiling where
-    one does and differs, leave it where it matches. Idempotent: run it again and nothing moves."""
-    plan = policy_key_plan(policy, limit_override)
+    one does and differs, leave it where it matches. Idempotent: run it again and nothing moves.
+
+    A held slot is read at the provider, never taken from the ledger alone: a disabled key is
+    `held-disabled`, a key the provider no longer has `held-missing`, and neither counts as in place.
+    Ceilings that go DOWN move first, then those that go up and the new keys, so the sum of the
+    project's ceilings never passes its limit halfway through. A failure in the middle stops the
+    run and raises `PolicyPartial` carrying the plan: what was done, what failed, what was not reached.
+    """
+    plan = policy_key_plan(policy, limit_override, split)
     issued = ledger().get("issued", {})
+    work = []
     for step in plan:
         if "to" not in step:
             continue
         held = next(((n, r) for n, r in issued.items() if r.get("destination") == step["to"]), None)
         if held is None:
-            step["action"] = "would-issue" if dry_run else "issued"
-            if not dry_run:
-                issue_key(step["name"], step["limit"], account, step["to"], step["project"], step["reset"])
+            work.append((1, step, None))
             continue
         name, rec = held
         step["name"] = name
-        if rec.get("limit_usd") == step["limit"] and (rec.get("limit_reset") or "monthly") == step["reset"]:
-            step["action"] = "in-place"
-        else:
-            step["action"] = "would-move-ceiling" if dry_run else "ceiling-moved"
-            step["previous"] = rec.get("limit_usd")
-            if not dry_run:
+        state, row = _held_state(step, rec)
+        current = row.get("limit") if row and isinstance(row.get("limit"), (int, float)) else rec.get("limit_usd")
+        period = (row or {}).get("limit_reset") or rec.get("limit_reset") or "monthly"
+        moves = current != step["limit"] or period != step["reset"]
+        if state in ("held-missing", "held-unread"):
+            step["action"] = state
+            continue
+        if not moves:
+            step["action"] = state or "in-place"
+            continue
+        step["previous"] = current
+        step["held"] = state
+        lowering = isinstance(current, (int, float)) and step["limit"] < current
+        work.append((0 if lowering else 1, step, name))
+    for _order, step, name in sorted(work, key=lambda w: w[0]):
+        step["action"] = "not-reached"
+    for _order, step, name in sorted(work, key=lambda w: w[0]):
+        moving = name is not None
+        if dry_run:
+            step["action"] = step.pop("held", None) or ("would-move-ceiling" if moving else "would-issue")
+            continue
+        try:
+            if moving:
                 set_limit(name, step["limit"], step["reset"])
+            else:
+                issue_key(step["name"], step["limit"], account, step["to"], step["project"], step["reset"])
+        except (ValueError, RuntimeError, LookupError, OSError) as exc:
+            step.pop("held", None)
+            step["action"] = "failed"
+            step["why"] = str(exc) if isinstance(exc, (ValueError, LookupError)) else type(exc).__name__ + ": " + str(exc)
+            done = sum(1 for s in plan if s.get("action") in ("issued", "ceiling-moved", "in-place"))
+            raise PolicyPartial(f"partial: {done} of {len([s for s in plan if 'to' in s])} slots served before "
+                                f"{step['ref']} failed; a re-run does only what is missing", plan) from None
+        # A disabled key's ceiling still moves (it would spend that much once enabled), but the
+        # slot stays named as not served.
+        step["action"] = step.pop("held", None) or ("ceiling-moved" if moving else "issued")
     return plan
 
 
-def cmd_issue_for_policy(path: str, account: str | None, limit_override: float | None, dry_run: bool) -> int:
+def _parse_split(text: str | None) -> dict | None:
+    """`ref=usd,ref=usd` → {ref: usd}. A ref holds `:` and `/` but never `=` or `,`."""
+    if text is None:
+        return None
+    out: dict[str, float] = {}
+    for part in [p.strip() for p in text.split(",") if p.strip()]:
+        ref, sep, usd = part.rpartition("=")
+        if not sep or not ref:
+            raise ValueError(f"--split takes ref=usd pairs separated by commas, not {part!r}")
+        try:
+            out[ref.strip()] = float(usd)
+        except ValueError:
+            raise ValueError(f"--split gives {ref.strip()!r} {usd!r}, not an amount in USD") from None
+    if not out:
+        raise ValueError("--split is empty")
+    return out
+
+
+def cmd_issue_for_policy(path: str, account: str | None, limit_override: float | None, dry_run: bool,
+                         split: str | dict | None = None) -> int:
     try:
         policy = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         print(f"refused: cannot read the policy ({type(exc).__name__})", file=sys.stderr)
         return 2
+    partial = None
     try:
-        plan = issue_for_policy(policy, account, limit_override, dry_run)
+        amounts = _parse_split(split) if isinstance(split, str) else split
+        plan = issue_for_policy(policy, account, limit_override, dry_run, amounts)
+    except PolicyPartial as exc:
+        plan, partial = exc.plan, str(exc)
     except ValueError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
     except (RuntimeError, LookupError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
+    not_serving = False
+    total = 0.0
     for step in plan:
         if "to" not in step:
             print(f"{step['ref']}: skipped — {step['why']}")
             continue
-        extra = f" (was ${step['previous']:g})" if step.get("previous") is not None else ""
-        print(f"{step['ref']}: {step['action']} {step['name']!r}, ceiling ${step['limit']:g} {step['reset']}{extra}")
-    return 0
+        total += step["limit"]
+        extra = f" (was ${step['previous']:g})" if isinstance(step.get("previous"), (int, float)) else ""
+        why = f" — {step['why']}" if step.get("why") else ""
+        print(f"{step['ref']}: {step['action']} {step['name']!r}, ceiling ${step['limit']:g} {step['reset']}{extra}{why}")
+        if step["action"] in HELD_NOT_SERVING:
+            not_serving = True
+            print(f"  the slot is held by a key that does not serve it: "
+                  + HELD_NOT_SERVING[step["action"]].format(name=step["name"]))
+    print(f"ceilings: ${round(total, 2):g} in all" + (f", project limit ${policy['limitUsd']:g}"
+                                                     if policy.get("mode") == "limited" else ", no project limit (L0 binds)"))
+    if partial:
+        print(partial)
+        return 1
+    return 1 if not_serving else 0
 
 
 def resolve_issued(name_or_label: str) -> tuple[str, dict]:
@@ -1097,8 +1259,11 @@ def main() -> int:
                           help="issue a project's own key from its spend policy (OBS-58)")
     p_ip.add_argument("--policy", required=True, help="the project's spend-policy JSON (contract DEC-0037)")
     p_ip.add_argument("--account", help="which stashed account to mint from")
-    p_ip.add_argument("--limit", type=float, help="the key's ceiling: required when the policy sets no "
-                      "project limit, at most the project limit otherwise")
+    p_ip.add_argument("--limit", type=float, help="each key's ceiling: required when the policy sets no "
+                      "project limit (or --split); otherwise N keys x --limit may not exceed it. Default: the "
+                      "project limit split equally, rounded down to the cent")
+    p_ip.add_argument("--split", help="explicit ceilings, ref=usd,ref=usd — one per project-key source, "
+                      "summing to at most the project limit")
     p_ip.add_argument("--dry-run", action="store_true", help="say what would be issued or moved; mint nothing")
     sub.add_parser("list", help="what exists — names, ceilings, places; never values")
     sub.add_parser("ping", help="alive? spent how much of its ceiling?")
@@ -1132,7 +1297,7 @@ def main() -> int:
     if a.cmd == "issue":
         return cmd_issue(a.name, a.limit, a.account, a.to, a.project, a.reset)
     if a.cmd == "issue-for-policy":
-        return cmd_issue_for_policy(a.policy, a.account, a.limit, a.dry_run)
+        return cmd_issue_for_policy(a.policy, a.account, a.limit, a.dry_run, a.split)
     if a.cmd == "list":
         return cmd_list()
     if a.cmd == "ping":

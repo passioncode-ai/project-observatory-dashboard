@@ -7,6 +7,14 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Changed
 
+- **A spend policy's keys share its limit** (ENG-002): `openrouter.py issue-for-policy` gave every `project-key`
+  source the whole project limit, so a $40 project with two keys could spend $80. The ceilings of every key the plan
+  touches now sum to at most `limitUsd`: an equal split rounded down to the cent by default, `--split REF=USD,…` for
+  explicit amounts (refused over the limit, or with a slot left out), and `--limit` now one ceiling **per key**,
+  refused when N × limit exceeds the project limit. A held slot is read at the provider by hash: a disabled key is
+  `held-disabled` and a deleted one `held-missing`, never `in-place`, and the command exits 1 naming the remedy.
+  Ceilings that go down move before those that go up. A failure halfway exits 1 with `partial`, listing what was
+  already issued or moved; a re-run does only what is missing. The plan prints the ceilings' total beside the limit.
 - **The demo's findings speak the page's language** (OBS-64): `tools/demo_estate.py` wrote its five findings as
   English sentences, so a Russian screenshot mixed two languages. Each title is now a rule's own message id with its
   arguments, built by `finding_types.titled` like a real finding, so the Russian page renders them from the same

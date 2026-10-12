@@ -2019,12 +2019,178 @@ def test_or_issue_for_policy_command_line() -> None:
     check("a refused policy exits 2", m.cmd_issue_for_policy(str(good), "example", 99.0, False) == 2, "")
 
 
+def _two_slots(**over):
+    """A limited policy with two project-key sources of the same project."""
+    return _policy(credentialSources=[{"kind": "project-key", "ref": "vault:project-a/prod/MODEL_KEY"},
+                                      {"kind": "project-key", "ref": "vault:project-a/prod/OTHER_KEY"}], **over)
+
+
+def test_or_policy_ceilings_sum_to_the_project_limit() -> None:
+    """ENG-002: every project-key source used to get the WHOLE project limit, so two sources of a $40
+    project could spend $80. The ceilings of every key the plan touches now sum to at most `limitUsd`:
+    an equal split rounded down to the cent by default, `--split` for explicit amounts, and `--limit`
+    meaning per key, refused when N × limit exceeds the project limit."""
+    m, calls = _policy_door()
+    m.issue_for_policy(_two_slots(), "example")
+    ceilings = [p["limit"] for p in calls["posted"]]
+    check("two sources of a $40 project: ceilings sum to at most $40 (was $80)",
+          len(ceilings) == 2 and sum(ceilings) <= 40.0 and ceilings == [20.0, 20.0], str(ceilings))
+
+    m, calls = _policy_door()
+    m.issue_for_policy(_policy(limitUsd=10, credentialSources=[
+        {"kind": "project-key", "ref": f"vault:project-a/prod/K{i}"} for i in range(3)]), "example")
+    ceilings = [p["limit"] for p in calls["posted"]]
+    check("an equal split is rounded DOWN to the cent ($10 over three keys: $3.33 each)",
+          ceilings == [3.33, 3.33, 3.33] and sum(ceilings) <= 10.0, str(ceilings))
+
+    m, calls = _policy_door()
+    plan = m.issue_for_policy(_two_slots(), "example", split={"vault:project-a/prod/MODEL_KEY": 30.0,
+                                                               "project-a/prod/OTHER_KEY": 10.0})
+    check("--split gives explicit amounts; a ref is matched as written or as its vault slot",
+          [p["limit"] for p in calls["posted"]] == [30.0, 10.0], str(plan))
+
+    for name, kw, needle in [
+        ("--split over the limit", {"split": {"vault:project-a/prod/MODEL_KEY": 30.0,
+                                              "vault:project-a/prod/OTHER_KEY": 10.01}}, "more than the project limit"),
+        ("--split naming a slot the policy does not", {"split": {"vault:project-a/prod/MODEL_KEY": 10.0,
+                                                                 "vault:project-a/prod/NOPE": 10.0}}, "not a project-key source"),
+        ("--split leaving a slot without a ceiling", {"split": {"vault:project-a/prod/MODEL_KEY": 10.0}}, "no ceiling"),
+        ("--limit per key over the project limit", {"limit_override": 21.0}, "cannot exceed"),
+        ("--limit and --split together", {"limit_override": 5.0, "split": {"vault:project-a/prod/MODEL_KEY": 5.0}}, "not both"),
+    ]:
+        m, calls = _policy_door()
+        try:
+            m.issue_for_policy(_two_slots(), "example", **kw)
+            check(f"refused: {name}", False, "planned")
+        except ValueError as exc:
+            check(f"refused: {name}", needle in str(exc) and not calls["posted"], str(exc))
+
+    m, calls = _policy_door()
+    m.issue_for_policy(_two_slots(), "example", 15.0)
+    check("--limit is per key: two keys at $15 under a $40 limit",
+          [p["limit"] for p in calls["posted"]] == [15.0, 15.0], str(calls["posted"]))
+
+    m, calls = _policy_door()
+    try:
+        m.issue_for_policy(_policy(limitUsd=0.01, credentialSources=[
+            {"kind": "project-key", "ref": f"vault:project-a/prod/K{i}"} for i in range(2)]), "example")
+        check("a limit too small to give every key a cent is refused", False, "planned")
+    except ValueError as exc:
+        check("a limit too small to give every key a cent is refused", "cent" in str(exc), str(exc))
+
+    m, calls = _policy_door()
+    plan = m.issue_for_policy(_policy(mode="no-project-limit", limitUsd=None, credentialSources=[
+        {"kind": "project-key", "ref": f"vault:project-a/prod/K{i}"} for i in range(2)]), "example", 15.0)
+    check("with no project limit --limit stays each key's own ceiling",
+          [p["limit"] for p in calls["posted"]] == [15.0, 15.0], str(plan))
+
+    m, calls = _policy_door()
+    plan = m.issue_for_policy(_policy(credentialSources=[{"kind": "project-key", "ref": "vault:project-a/prod/MODEL_KEY"},
+                                                         {"kind": "project-key", "ref": "project-a/prod/MODEL_KEY"}]), "example")
+    check("one slot named twice is one key with the whole limit, the repeat named",
+          [p["limit"] for p in calls["posted"]] == [40.0] and [s.get("action") for s in plan] == ["issued", "skipped"],
+          str(plan))
+
+
+def test_or_policy_lowers_ceilings_before_it_raises_one() -> None:
+    """Moving an existing split must never let the sum pass the limit halfway: a ceiling that goes
+    down moves before one that goes up or a key that is issued."""
+    m, calls = _policy_door()
+    m.save_ledger({"issued": {
+        "held-a": {"account": "example", "hash": "h-a", "destination": "vault:project-a/prod/MODEL_KEY",
+                   "limit_usd": 5.0, "limit_reset": "monthly"},
+        "held-b": {"account": "example", "hash": "h-b", "destination": "vault:project-a/prod/OTHER_KEY",
+                   "limit_usd": 35.0, "limit_reset": "monthly"}}})
+    m.find_key = lambda admin, name: {"hash": {"held-a": "h-a", "held-b": "h-b"}[name], "name": name,
+                                      "limit": {"held-a": 5.0, "held-b": 35.0}[name], "disabled": False}
+    plan = m.issue_for_policy(_two_slots(), "example")
+    check("both ceilings move to the equal split, the lowered one first",
+          [p for p, _ in calls["patched"]] == ["/keys/h-b", "/keys/h-a"]
+          and [b["limit"] for _, b in calls["patched"]] == [20.0, 20.0], str(calls["patched"]))
+    check("and the plan says so", [s["action"] for s in plan] == ["ceiling-moved", "ceiling-moved"], str(plan))
+
+
+def test_or_policy_reads_held_keys_at_the_provider() -> None:
+    """A slot the ledger says is held used to read `in-place` without asking the provider, so a
+    disabled or deleted key counted as serving the project. Each held row is read by hash."""
+    def door(row):
+        m, calls = _policy_door()
+        m.save_ledger({"issued": {
+            "held": {"account": "example", "hash": "h-1", "destination": "vault:project-a/prod/MODEL_KEY",
+                     "limit_usd": 40.0, "limit_reset": "monthly"}}})
+        m.find_key = lambda admin, name: row
+        return m, calls
+
+    m, calls = door({"hash": "h-1", "name": "held", "limit": 40.0, "disabled": True})
+    plan = m.issue_for_policy(_policy(), "example")
+    check("a disabled held key is held-disabled, never in-place",
+          [s["action"] for s in plan if "to" in s] == ["held-disabled"] and not calls["posted"], str(plan))
+    m, calls = door(None)
+    plan = m.issue_for_policy(_policy(), "example", dry_run=True)
+    check("a held key the provider no longer has is held-missing, even in a dry run",
+          [s["action"] for s in plan if "to" in s] == ["held-missing"] and not calls["posted"], str(plan))
+    m, calls = door({"hash": "h-1", "name": "held", "limit": 25.0, "disabled": False})
+    plan = m.issue_for_policy(_policy(), "example")
+    check("a ceiling moved at the provider is read there, not from the ledger",
+          [s["action"] for s in plan if "to" in s] == ["ceiling-moved"] and plan[-1]["previous"] == 25.0, str(plan))
+
+    m, calls = door({"hash": "h-1", "name": "held", "limit": 40.0, "disabled": True})
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    (d / "p.json").write_text(json.dumps(_policy()), encoding="utf-8")
+    import contextlib
+    import io
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_for_policy(str(d / "p.json"), "example", None, False)
+    check("the command exits 1 while a slot is held by a key that does not serve it, and names the remedy",
+          rc == 1 and "held-disabled" in out.getvalue() and "enable held" in out.getvalue(), f"{rc} {out.getvalue()}")
+
+
+def test_or_policy_partial_failure_names_what_was_done() -> None:
+    """A provider failure in the middle of the run used to raise with no word of the keys already
+    minted. The run stops, the plan comes back with the done steps, the failed one and the ones not
+    reached, the command exits 1 saying `partial`, and a re-run issues only what is missing."""
+    m, calls = _policy_door()
+    real = m._request
+
+    def second_issue_fails(path, key, payload=None, method=None):
+        if path == "/keys" and payload and len(calls["posted"]) == 1:
+            raise RuntimeError("openrouter answered 500 for /keys")
+        return real(path, key, payload, method)
+    m._request = second_issue_fails
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    (d / "p.json").write_text(json.dumps(_two_slots()), encoding="utf-8")
+    import contextlib
+    import io
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_for_policy(str(d / "p.json"), "example", None, False)
+    said = out.getvalue()
+    check("exit 1, with partial said", rc == 1 and "partial" in said, f"{rc} {said}")
+    check("the key already minted is listed as issued", "MODEL_KEY: issued" in said, said)
+    check("the failing step is listed as failed", "OTHER_KEY: failed" in said, said)
+    try:
+        m.issue_for_policy(_two_slots(), "example")
+        check("the partial run raises PolicyPartial with the plan", False, "returned")
+    except m.PolicyPartial as exc:
+        check("the partial run raises PolicyPartial with the plan",
+              [s["action"] for s in exc.plan] == ["in-place", "failed"], str(exc.plan))
+    m._request = real
+    plan = m.issue_for_policy(_two_slots(), "example")
+    check("a re-run issues only the missing key",
+          [s["action"] for s in plan] == ["in-place", "issued"] and len(calls["posted"]) == 2, str(plan))
+
+
 if __name__ == "__main__":
     print("the credential doors — stash, issue, rotate, revoke, and what they refuse\n")
     for fn in (test_cf_a_token_this_call_created_is_deleted_when_the_issue_fails,
                test_or_a_project_policy_gets_its_own_key_in_its_own_slot,
                test_or_a_policy_never_borrows_and_never_issues_an_unbounded_key,
                test_or_issue_for_policy_command_line,
+               test_or_policy_ceilings_sum_to_the_project_limit,
+               test_or_policy_lowers_ceilings_before_it_raises_one,
+               test_or_policy_reads_held_keys_at_the_provider,
+               test_or_policy_partial_failure_names_what_was_done,
                test_no_door_takes_or_prints_a_value_outside_stdin,
                test_the_ledgers_hold_no_values,
                test_cf_stash_refuses_an_admin_that_cannot_issue,
