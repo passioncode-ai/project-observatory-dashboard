@@ -35,6 +35,17 @@ while the major version is 0, a minor release may change behaviour and says so h
   limit; ceilings within half a cent of the target are not moved again; a limit past $1,000,000,000 is refused; two
   slots whose key names differ only in case are refused; the issuing account of a new key is resolved before
   anything moves, in a dry run too; a minted key whose delivery times out is deleted, never left live and untracked.
+  Totals are kept in whole cents (planned ceilings exactly, provider ceilings rounded up, unbounded apart), so $0.30
+  over three keys is three $0.10 keys rather than a false block. `issue` writes a **pending** ledger row (name,
+  destination, ceiling) before it mints and records the key's hash and provider label the moment the provider
+  answers: a run killed between the mint and its record, or a cleanup delete that failed (the row is then kept as an
+  orphan), leaves a row that holds its slot — the next run mints nothing there, reads `held-pending` and names
+  `revoke` (or, with no hash, `claim` or a delete at the provider) — so an account listing past `PAGES_MAX` no
+  longer mints a second key. Whenever the total a run leaves is past the limit it prints `OVER LIMIT by $X now; it
+  ends after: revoke A, B` (`unbounded` when a key has no ceiling) and exits 1, a total past the limit only within
+  the half-cent tolerance included. `revoke` refuses a key a consumer reads, found by its hash in the scan or by the
+  label recorded at issue, whatever the key is now called at the provider. The one window in which a project's
+  keys can sum past its limit is `rotate`'s, while the successor and the predecessor are both live.
 - **The agent's deadline reaches the model call** (ENG-003): `agent` started a project's call while 150 s were
   left, but `providers.complete()` walks a chain of models, each attempt allowed 120 s, so three Retryable models
   took 360 s and the watchdog killed a step that had paid for calls. `complete(…, deadline=)` now gets the step's

@@ -2279,7 +2279,7 @@ class MaxProvider:
                 self.n += 1
                 h = f"h{self.n}"
                 self.keys[h] = {"hash": h, "name": payload["name"], "limit": self.echo(payload["limit"]),
-                                "limit_reset": payload["limit_reset"], "disabled": False}
+                                "limit_reset": payload["limit_reset"], "disabled": False, "label": f"label-{h}"}
                 self.max_sum = max(self.max_sum, self.total())
                 return {"data": dict(self.keys[h]), "key": "sk-or-v1-" + "q" * 40}
             h = path.rsplit("/", 1)[-1]
@@ -2366,7 +2366,9 @@ def test_or_policy_counts_every_key_of_the_project() -> None:
     p.start()
     plan = m.issue_for_policy(_pol(1), "example")
     check("K: a second key behind one slot is counted and named; the run raises nothing",
-          p.max_sum == 17.0 and p.total() == 17.0 and [s["action"] for s in plan] == ["in-place", "not-in-policy"],
+          p.max_sum == 17.0 and p.total() == 17.0
+          and [s["action"] for s in plan] == ["in-place", "not-in-policy", "over-limit"]
+          and "OVER LIMIT by $7.00 now" in plan[-1]["why"] and "revoke hand-made" in plan[-1]["why"],
           f"max={p.max_sum} {[s.get('action') for s in plan]}")
 
 
@@ -2511,6 +2513,89 @@ def test_or_policy_dry_run_resolves_the_issuing_account() -> None:
             outcomes.append("--account" in str(exc))
     check("N: the dry run and the real run refuse alike, and nothing is minted",
           outcomes == [True, True] and not p.keys and p.max_sum == 0.0, str(outcomes))
+
+
+def test_or_policy_round_four() -> None:
+    """Round 4's probes, each asserting the fake's highest total."""
+    # R6: $0.30 over three keys is three $0.10 keys; a float total read $0.30 as past $0.30.
+    m, p = _r3_door()
+    p.start()
+    rc, out = _cmd(m, _pol(3, limit=0.3), "example", None, False)
+    check("R6: $0.30 over 3 keys is issued in whole cents, never 'past its $0.30 limit'",
+          rc == 0 and len(p.keys) == 3 and p.max_sum <= 0.3 + 1e-9 and "past its $0.30" not in out, f"{rc} {out}")
+    m, p = _r3_door()
+    plan = m.issue_for_policy(_pol(2, limit=0.3), "example",
+                              split={"vault:project-a/prod/K0": 0.1, "vault:project-a/prod/K1": 0.2})
+    check("R6b: --split 0.10 + 0.20 under $0.30 is issued", [s["action"] for s in plan] == ["issued", "issued"]
+          and p.max_sum <= 0.3 + 1e-9, str(plan))
+    # R7: the provider holds 3.334 x 3 = $10.002: within half a cent each, but past the limit in all.
+    m, p = _r3_door(echo=lambda x: round(x + 0.004, 3))
+    m.issue_for_policy(_pol(3), "example")
+    p.start()
+    rc, out = _cmd(m, _pol(3), "example", None, False)
+    check("R7: a total past the limit with nothing blocked is named and exits 1",
+          rc == 1 and "OVER LIMIT by $0.02 now" in out and "limit project-a-prod-k0 --set 3.33" in out
+          and p.max_sum == p.total(), out)
+    # R2b / R3b: a key minted but never recorded, on an account listing past PAGES_MAX.
+    for what in ("killed", "cleanup failed"):
+        m, p = _r3_door()
+
+        def too_long(admin, include_disabled=True):
+            raise m.ListingTooLong("past PAGES_MAX", [])
+        m._all_keys = too_long
+        if what == "killed":
+            def interrupted(value, to):
+                raise KeyboardInterrupt
+            m.deliver = interrupted
+        else:
+            def timeout(value, to):
+                raise __import__("subprocess").TimeoutExpired(["vault.py", "put"], 60)
+            m.deliver = timeout
+            real = m._request
+
+            def no_delete(path, key, payload=None, method=None):
+                if method == "DELETE":
+                    raise RuntimeError("openrouter answered HTTP 502")
+                return real(path, key, payload, method)
+            m._request = no_delete
+        p.start()
+        try:
+            m.issue_for_policy(_pol(1), "example")
+        except (KeyboardInterrupt, m.PolicyPartial):
+            pass
+        rec = m.ledger()["issued"].get("project-a-prod-k0") or {}
+        m.deliver = lambda value, to: f"vault {to}"
+        m._request = p
+        rc, out = _cmd(m, _pol(1), "example", None, False)
+        check(f"R{'2b' if what == 'killed' else '3b'}: after a mint {what}, the pending row holds the slot: "
+              f"one key, nothing minted again, the run exits 1 naming revoke",
+              rec.get("pending") and rec.get("hash") and len(p.keys) == 1 and p.max_sum <= 10.0 and rc == 1
+              and "held-pending" in out and "revoke project-a-prod-k0" in out, f"{rec} {len(p.keys)} {out}")
+    m, p = _r3_door()
+    m.save_ledger({"issued": {"project-a-prod-k0": {"account": "example", "hash": None, "pending": True,
+                                                    "destination": "vault:project-a/prod/K0", "limit_usd": 10.0,
+                                                    "limit_reset": "monthly"}}})
+    p.start()
+    rc, out = _cmd(m, _pol(1), "example", None, False)
+    check("a pending row with no hash: nothing is minted, the remedy names claim or a provider delete",
+          rc == 1 and not p.keys and "claim project-a-prod-k0" in out and "at the provider" in out, out)
+    # R4: revoke must not delete a key a consumer reads, whatever its provider name.
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(1), "example")
+    h = next(iter(p.keys))
+    p.keys[h]["name"] = "billing-worker"
+    rec = m.ledger()["issued"]["project-a-prod-k0"]
+    scratch = pathlib.Path(tmpdir.mkdtemp())
+    m.paths.SCRATCH = scratch
+    for scan in ({"keys": [{"name": "billing-worker", "label": rec.get("label"), "serves": "billing-worker"}]},
+                 {"keys": [], "destination_hashes": {"billing-worker": {"label": "x", "hash": h}}}):
+        (scratch / "openrouter.json").write_text(json.dumps(scan), encoding="utf-8")
+        try:
+            m.revoke_key("project-a-prod-k0")
+            check("R4: revoke refuses a renamed key a consumer reads", False, "revoked")
+        except ValueError as exc:
+            check("R4: revoke refuses a renamed key a consumer reads (by recorded label, then by hash)",
+                  "reading right now" in str(exc) and h in p.keys and rec.get("label"), str(exc))
 
 
 # ─────────────────────────── round 4: the property, before any fix ─────────────
@@ -2715,7 +2800,7 @@ def _prop_case(seed):
         refused = err is not None or any(s.get("action") == "blocked" for s in plan or [])
         if refused:
             broke.append(f"(b) {sum(planned)} cents planned under a {limit_cents}-cent limit refused: "
-                         f"{err or [s.get('why') for s in plan if s.get('action') == 'blocked'][:1]}")
+                         f"{err} {[s.get('why') for s in plan or [] if s.get('action') in ('blocked', 'failed')][:1]}")
     # Provider states the run did not cause.
     for h in list(p.keys):
         roll = rng.random()
@@ -2806,6 +2891,7 @@ if __name__ == "__main__":
                test_or_policy_amounts_are_whole_cents_against_the_exact_limit,
                test_or_policy_never_leaves_a_live_untracked_key,
                test_or_policy_dry_run_resolves_the_issuing_account,
+               test_or_policy_round_four,
                test_or_policy_property_regression_seeds,
                test_or_policy_property,
                test_no_door_takes_or_prints_a_value_outside_stdin,
