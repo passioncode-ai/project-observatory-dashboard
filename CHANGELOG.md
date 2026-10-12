@@ -3,6 +3,15 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Fixed
+
+- **The disk guard's git tier keeps its own share of the run** (OBS-63): the first scheduled 0.24.0 pass, at
+  `critical`, spent 425 of its 480 s on the six path classes and skipped the git tier — merged and pushed branches
+  and clean worktrees with their dependencies, where most of the space is. The tier now has `git_tier_seconds`
+  (120 s by default, at most a third of the run) kept back before the classes split the rest.
+
 ## 0.24.0 — 2026-10-12
 
 The disk guard keeps up with a disk that fills fast and never removes what a session still uses: the maintenance pass runs every 15 minutes, under pressure the guard acts on every pass, and a fresh, shared listing of what processes hold — open files, maps, executables, command lines — is re-checked at every removal, under one lock for every cleanup. One project answers to many names (aliases, `project.resolve`). The doors grow: `claim` brings a key minted elsewhere under the OpenRouter door, a project's own key comes from its spend policy, and Cloudflare gains `workers-routes` and `redirect-rules`. The meter grows: the estate's month measured, `grant.check` declared, a usage report. The harness scan names plaintext credentials in agent tools' configs. The companion plugin `observatory-log` is unchanged.

@@ -601,8 +601,8 @@
       "path": "defaults/cleanup.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "07f8ca32d9687d092f142fca08531a58ccb57f4282eb1048144357ddd59246bc",
-      "bytes": 5369
+      "export_sha256": "4d48e98e741d197437b5626d03f5d9dd2eb62312f118f80c930c7a4422ccb322",
+      "bytes": 5396
     },
     {
       "path": "defaults/credential_annotations.json",
@@ -2426,8 +2426,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8b9b0cae4f5b3d44b9edad220bfd086671cac097855f2567c971c4717af3a9d0",
-      "bytes": 47257
+      "export_sha256": "a0a833330680ab69fe362f1d69eef38d48715e32ad4f4488ea34c4a690098947",
+      "bytes": 48752
     },
     {
       "path": "tests/test_docs_current.py",
@@ -4036,8 +4036,8 @@
       "path": "tools/disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "82f408db72bb2ca4e905d5331809672e84a12a796384039d07c426e5c4f10510",
-      "bytes": 47716
+      "export_sha256": "1ba87c610eaaa5f72d1b30679bc9c862daa1f35df51ff35c145bef65eb33c00d",
+      "bytes": 48258
     },
     {
       "path": "tools/embedding_policy_cli.py",

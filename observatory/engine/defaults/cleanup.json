@@ -63,6 +63,7 @@
   "cache_days": {"normal": 7, "low": 2, "critical": 1},
   "cache_keep": ["ms-playwright", "ms-playwright-go", "camoufox", "puppeteer", "hyperframes", "chrome-for-testing", "cargo-xwin", "codex-runtimes", "uv", "pnpm", "Homebrew", "com.apple.*", "CloudKit", "observatory*", "agent-chrome", "huggingface", "torch", "whisper*", "*-models"],
   "run_budget_seconds": 900,
+  "git_tier_seconds": 120,
   "run_reserve_seconds": 60,
   "max_actions_per_class": 20000
  }

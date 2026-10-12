@@ -509,6 +509,30 @@ class RunBudget(Base):
         import paths
         self.assertTrue((paths.SCRATCH / "disk-guard.json").exists())
 
+    def test_the_git_tier_keeps_its_share_when_the_classes_use_all_of_theirs(self):
+        """2026-10-12, the first scheduled 0.24.0 pass: six classes spent 425 of 480 s and the git
+        tier — worktrees and their dependencies — was skipped. It now has its own share."""
+        clock = [1000.0]
+        got = []
+
+        def busy_planner(b):
+            clock[0] += max(0.0, b.left()) * 2          # the class uses its whole share
+            return []
+        with contextlib.ExitStack() as stack:
+            for p in self.patched():
+                stack.enter_context(p)
+            stack.enter_context(patch.object(self.g, "load_config",
+                                             return_value=self.cfg(run_reserve_seconds=60, git_tier_seconds=120)))
+            stack.enter_context(patch.object(self.g.time, "monotonic", lambda: clock[0]))
+            stack.enter_context(patch.object(self.g, "refresh", return_value="x"))
+            stack.enter_context(patch.object(self.g, "planners", return_value=[
+                (name, busy_planner) for name in self.g.CLASSES]))
+            stack.enter_context(patch.object(self.g, "_git_tier",
+                                             side_effect=lambda apply, level, seconds: got.append(seconds) or {"result": "ran"}))
+            doc = self.g.run(["--apply", "--budget", "480", "--level", "critical"])
+        self.assertEqual(doc["surveys"]["git-cleanup"], {"result": "ran"})
+        self.assertTrue(got and got[0] >= 110, got)
+
     def test_the_journal_and_the_report_survive_a_run_stopped_midway(self):
         import paths
         calls = []

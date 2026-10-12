@@ -868,8 +868,14 @@ def run(argv: list[str]) -> dict:
             cap = int(_number(cfg.get("max_actions_per_class", 20000), 20000))
             at = time.time()
             classes = list(CLASSES)
+            # The git tier's own share, kept back before the classes split the rest: as the last
+            # comer it got only what they left, and on the first scheduled 0.24.0 pass (critical,
+            # 425 of 480 s) that was nothing — the worktrees and their dependencies, where most of
+            # the space is, were never reached (2026-10-12).
+            git_floor = (min(_number(cfg.get("git_tier_seconds", 120), 120), max(0.0, (left() - reserve) / 3))
+                         if acting else 0.0)
             for n, name in enumerate(classes):
-                share = (left() - reserve) / (len(classes) - n)
+                share = (left() - reserve - git_floor) / (len(classes) - n)
                 if share <= 1:
                     if acting:
                         degraded.append({"source": "act", "reason": f"stopped at the run budget before {name}; "
@@ -907,8 +913,9 @@ def run(argv: list[str]) -> dict:
                             last_commands[a["target"]] = row["at"]
                 phases[name] = round(time.monotonic() - mark)
             if acting:
-                surveys["git-cleanup"] = (_git_tier(apply, level, left() - reserve / 2)
-                                          if left() > 2 * reserve else {"result": "skipped", "reason": "the run budget is spent"})
+                room = left() - reserve / 2
+                surveys["git-cleanup"] = (_git_tier(apply, level, room)
+                                          if room > 30 else {"result": "skipped", "reason": "the run budget is spent"})
             if acting or "--refresh" in argv:
                 for name, script, hours, cap_s in (
                         ("git-hygiene", "collectors/scan_git_hygiene.py", cfg.get("git_survey_every_hours", 6), 600),
