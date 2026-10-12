@@ -2107,5 +2107,11 @@
  "pressure": "давление",
  "Estate spend near its monthly limit": "Расход хозяйства близок к месячному лимиту",
  "the estate has spent ${spent} of its ${limit} monthly limit": "хозяйство потратило ${spent} из месячного лимита ${limit}",
- "cache-dir": "кеш приложения"
+ "cache-dir": "кеш приложения",
+ "Agent hook matching a security rule": "Хук агента, подпадающий под правило безопасности",
+ "a {event} hook from {source} downloads and runs code": "хук {event} из {source} скачивает и запускает код",
+ "a {event} hook from {source} reads a credential and sends data out": "хук {event} из {source} читает учётные данные и отправляет данные наружу",
+ "a {event} hook from {source} carries hidden Unicode characters": "хук {event} из {source} содержит скрытые символы Unicode",
+ "Project skills that push the listing over budget": "Скиллы проекта, переполняющие список",
+ "in {project}, its own skills push the skill listing over budget": "в {project} собственные скиллы проекта переполняют список скиллов"
 }

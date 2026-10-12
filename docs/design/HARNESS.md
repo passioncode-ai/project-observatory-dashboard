@@ -29,15 +29,15 @@ hook output moved to a file), and only then **cost**.
 | H7 | Change, not presence: the first sight of a skill is recorded (its digest); a later change of the digest is `harness.skill_changed` until `full harness --accept KEY` records the new one; a change that adds a security hit is raised at that hit's severity | `test_harness` |
 | H8 | Never truncate the scan: a text file over 1 MB, or a binary or archive inside a skill, is itself reported (`opaque-content`) rather than skipped silently | `test_harness` |
 | H9 | Benign by default: scripts under a skill's own folder running local interpreters, git, installs into a local environment, credentials read through environment variables or the vault, network calls to the skill's own subject | the benign fixtures produce nothing |
+| H11 | Hooks (OBS-61): every hook the user's settings and each enabled plugin's `hooks/hooks.json` declare — event, matcher, source, the program it starts and a digest of the command, never the command (it can carry a token). The skill rules run on the command and on the script it names; a third party's download-and-run in a SessionStart, UserPromptSubmit or PreToolUse hook is critical, elsewhere a warning; the user's own hooks and this operator's plugins are tier 1. Finding `harness.hook_risk` | `test_harness`: planted third-party, own-plugin and user hooks; a command's token never reaches the record |
+| H12 | Usage (OBS-61): each skill's invocations over the last 30 days of transcripts (the Skill tool's `skill` and `/name` slash commands, `plugin:skill` counted for its skill); the overflow drops unused skills first, largest first, then the least used, and the finding says how many offered skills were never invoked | `test_harness`: planted transcripts |
+| H13 | Project skills (OBS-61): each project's own `.claude/skills` (one level under the configured projects folder) — its skills' listing characters on top of the user level, rule hits at tier 1 named `project/skill`. Finding `harness.project_listing_overflow` only when the user level fits and the project's skills push a session there over the budget | `test_harness`: a planted project |
+| H14 | Codex (OBS-61): the skills Codex loads from `~/.codex/skills` and the shared `~/.agents/skills`, a skill linked into both counted once — their count, description characters, and rule hits named `codex/skill` | `test_harness`: planted Codex and shared skills |
 | H10 | Operable: the tick runs the scan; `full harness` prints the summary (budget, top contributors, hits); suppressions go on the record through `ack.py` and come back when the digest changes | CLI test; the board shows the rows |
 
 ## Not decided here
 
-- **Hooks and project skills.** Hook declarations (what runs at SessionStart and on every tool call) and a
-  project's own `.claude/skills` are the next read; this scan covers the user-level harness.
-
-- **Usage.** Which skills a session actually invokes lives in transcripts; ranking pruning by cost × (1 − usage)
-  needs a usage reader and is the next step, not this one.
+- **Settings-page controls** for the listing budget and the rule severities: the next step.
 - **MCP schema cost.** Tool schemas are known only to a running server; this scan counts declared servers (from
   `scan_mcp`) and flags the setting that loads them all upfront, it does not start servers to measure them.
 - **A language model as a judge** of description-versus-behaviour mismatch: only as a demote-only adjudicator on

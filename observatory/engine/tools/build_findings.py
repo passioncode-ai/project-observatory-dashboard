@@ -2633,11 +2633,26 @@ def collect() -> list[dict]:
                            f"{_h.get('listing_chars')} characters against a listing budget of {_h.get('budget_chars')} "
                            "(OBSERVATORY_HARNESS_BUDGET_CHARS). Over it, Claude Code drops descriptions, the least "
                            "used first, and a skill without its description is no longer matched to a request. "
-                           "The largest entries: " + listed(_drop, 8) + "."),
+                           + (f"{(_h.get('usage') or {}).get('unused_offered')} offered skills were not invoked in the "
+                              f"last {(_h.get('usage') or {}).get('days')} days of transcripts. "
+                              if (_h.get('usage') or {}).get('transcripts') else "")
+                           + "The first to go, unused and largest first: " + listed(_drop, 8) + "."),
                 "action": "set `disable-model-invocation: true` on skills used only by name, set rarely used ones "
                           "name-only (`skillOverrides`), disable plugins this machine's projects do not use, and "
                           "keep project skills in their project; `project-observatory full harness` lists the cost",
                 "evidence": ["store/raw/harness.json#dropped"]})
+        for _p in _h.get("projects") or []:
+            if _p.get("pushes_over"):
+                out.append({
+                    "type": "harness.project_listing_overflow", "subject": f"harness:project:{_p.get('project')}",
+                    "severity": "warning",
+                    **titled("in {project}, its own skills push the skill listing over budget", project=_p.get("project")),
+                    "detail": (f"{_p.get('skills')} project skills add {_p.get('listing_chars')} characters to the "
+                               f"user-level listing, {_p.get('session_listing_chars')} in a session there against a "
+                               f"budget of {_h.get('budget_chars')}: descriptions start to drop only in that project."),
+                    "action": "set `disable-model-invocation: true` on the project's skills used only by name, or "
+                              "shorten their descriptions",
+                    "evidence": ["store/raw/harness.json#projects"]})
         for _i in _h.get("instructions") or []:
             if (_i.get("lines") or 0) > 200:
                 out.append({
@@ -2670,6 +2685,9 @@ def collect() -> list[dict]:
         _digest = {}
         for _s in _h.get("skills") or []:
             _digest.setdefault(_s.get("name"), str(_s.get("digest") or "")[:12])
+        for _x in _h.get("security") or []:
+            if _x.get("digest"):
+                _digest.setdefault(_x.get("skill"), str(_x["digest"])[:12])
         _groups: dict = {}
         for _x in _h.get("security") or []:
             _k = (_x.get("skill"), _x.get("rule"))
@@ -2700,6 +2718,29 @@ def collect() -> list[dict]:
                                               skill=_skill)})
             elif _rule == "opaque-content":
                 out.append({"type": "harness.skill_risk", "severity": _g["severity"], **_base, **titled("skill {skill} ships opaque or oversized files", skill=_skill)})
+        # A HOOK runs without asking, at every session start or on every tool call: the skill rules applied to
+        # its command and to the script it names. The command itself is never quoted (it can carry a token);
+        # the finding names the source, the event and the program.
+        for _k in _h.get("hook_security") or []:
+            _hb = {"subject": f"harness:hook:{_k.get('source')}:{_k.get('event')}:{_k.get('rule')}:{_k.get('command_sha')}",
+                   "detail": (f"A {_k.get('event')} hook from {_k.get('source')} starts `{_k.get('program')}`, and its "
+                              f"command or the script it runs matches the {_k.get('rule')} rule. Hooks run on their "
+                              "own, every time their event fires."),
+                   "action": "read the hook in its settings or the plugin's hooks/hooks.json; remove or disable the "
+                             "plugin if it is not trusted, or accept it with `ack.py`",
+                   "evidence": ["store/raw/harness.json#hook_security"]}
+            if _k.get("rule") == "download-exec":
+                out.append({"type": "harness.hook_risk", "severity": _k.get("severity", "warning"), **_hb,
+                            **titled("a {event} hook from {source} downloads and runs code", event=_k.get("event"),
+                                     source=_k.get("source"))})
+            elif _k.get("rule") == "credential-egress":
+                out.append({"type": "harness.hook_risk", "severity": _k.get("severity", "warning"), **_hb,
+                            **titled("a {event} hook from {source} reads a credential and sends data out",
+                                     event=_k.get("event"), source=_k.get("source"))})
+            else:
+                out.append({"type": "harness.hook_risk", "severity": _k.get("severity", "warning"), **_hb,
+                            **titled("a {event} hook from {source} carries hidden Unicode characters",
+                                     event=_k.get("event"), source=_k.get("source"))})
         for _c in _h.get("changed") or []:
             out.append({
                 "type": "harness.skill_changed", "subject": f"harness:changed:{_c.get('key')}", "severity": "info",

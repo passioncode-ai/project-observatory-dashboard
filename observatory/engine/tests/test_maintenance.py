@@ -902,6 +902,7 @@ class Pass(Base):
         self.assertNotIn("failures", M.read_state(self.home)["check"])
 
     def test_the_schedulers_first_check_waits_90_seconds_after_the_start(self):
+        # PROCESS_STARTED is wall-clock seconds; 90 - (started + 10 - started) is 80 only to float precision.
         order = []
         commands = FakeCommands(check=0)
         original = commands.full
@@ -911,7 +912,7 @@ class Pass(Base):
             return original(*args, **kw)
         commands.full = full
         report = M.run_pass(self.home, at=AT, commands=commands, services=None, store=self.store, app=NoApp(),
-                            sleep=lambda s: order.append(("sleep", s)), first_check_delay=90,
+                            sleep=lambda s: order.append(("sleep", round(s, 6))), first_check_delay=90,
                             clock=lambda: M.PROCESS_STARTED + 10)
         self.assertEqual(report["update"]["result"], "up-to-date")
         # The wait is 90 s minus the time since a FLOAT process start, so it is 80 only to
@@ -921,7 +922,7 @@ class Pass(Base):
         self.assertAlmostEqual(order[0][1], 80, places=6)
         order.clear()
         M.run_pass(self.home, at=AT + datetime.timedelta(hours=1), commands=commands, services=None,
-                   store=self.store, app=NoApp(), sleep=lambda s: order.append(("sleep", s)),
+                   store=self.store, app=NoApp(), sleep=lambda s: order.append(("sleep", round(s, 6))),
                    first_check_delay=90, clock=lambda: M.PROCESS_STARTED + 10)
         self.assertNotIn("check", order)
         self.assertFalse([o for o in order if isinstance(o, tuple) and abs(o[1] - 80) < 1e-6],
