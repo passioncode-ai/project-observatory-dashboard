@@ -7,6 +7,8 @@ anything on the machine running the test.
 """
 from __future__ import annotations
 import importlib
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -320,6 +322,22 @@ class Estate(Base):
             clock[0] += 30
             cleanup.busy_now("/nowhere/a")
             self.assertEqual(len(taken), 2, "an older listing is taken again")
+
+    def test_git_only_plans_no_build_output_and_reports_its_planning_time(self):
+        """2026-10-12: inside the guard the walk for build output took the git tier's share."""
+        import cleanup
+        import holders
+        importlib.reload(cleanup)
+        walked = []
+        out = io.StringIO()
+        with patch.object(holders.Holders, "take", classmethod(lambda cls, timeout=120: holders.Holders([]))), \
+                patch.object(cleanup, "plan_artifacts", side_effect=lambda cfg, busy: walked.append(1) or []), \
+                contextlib.redirect_stdout(out):
+            cleanup.main(["cleanup.py", "--json", "--git-only"])
+        self.assertEqual(walked, [])
+        import paths
+        plan = json.loads((paths.SCRATCH / "cleanup-plan.json").read_text())
+        self.assertIn("plan_seconds", plan)
 
     def branches(self, repo):
         return set(git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").split())

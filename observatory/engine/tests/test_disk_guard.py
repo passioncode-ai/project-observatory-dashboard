@@ -682,6 +682,8 @@ class GitTierPressure(Base):
         argv = calls[0]
         self.assertEqual(argv[argv.index("--level") + 1], "critical")
         self.assertIn("--deadline-seconds", argv, "the git tier stops itself inside the guard's time")
+        self.assertIn("--git-only", argv, "the guard's own build-output class walks build output; "
+                                          "the git tier must not spend its share walking it again")
 
 
 def pathlib_name(p) -> str:

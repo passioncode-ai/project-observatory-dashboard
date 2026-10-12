@@ -220,12 +220,12 @@ def plan_artifacts(cfg: dict, busy: set[str]) -> list[dict]:
     return out
 
 
-def build_plan(cfg: dict, busy: set[str]) -> dict:
+def build_plan(cfg: dict, busy: set[str], artifacts: bool = True) -> dict:
     try:
         hygiene = json.loads((paths.SCRATCH / "git-hygiene.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         hygiene = {}
-    actions = plan_git(hygiene, cfg) + plan_artifacts(cfg, busy)
+    actions = plan_git(hygiene, cfg) + (plan_artifacts(cfg, busy) if artifacts else [])
     return {"schema_version": 1, "planned_at": now(), "survey_at": hygiene.get("measured_at"),
             "auto_enabled": configuration.enabled("auto_cleanup", "features"),
             "counts": {k: sum(1 for a in actions if a["class"] == k) for k in AUTO_CLASSES + MANUAL_CLASSES},
@@ -429,9 +429,16 @@ def main(argv: list[str]) -> int:
             return say({"result": "busy"}, "cleanup: another cleanup is running; nothing done")
         cfg = under_pressure(load_config(), level)
         import holders
-        busy = holders.Holders.take(120)
-        plan = build_plan(cfg, busy)
+        started = time.monotonic()
+        # THE PLAN FITS THE DEADLINE (2026-10-12): under load the listing and the walk for build
+        # output took the git tier's whole share inside the guard, and 116 planned actions were
+        # never reached. The guard has its own build-output class, so it asks for the git plan
+        # only (`--git-only`), and the listing is bounded by what is left.
+        listing_s = 120.0 if deadline is None else max(5.0, min(120.0, (deadline - time.monotonic()) / 3))
+        busy = holders.Holders.take(listing_s)
+        plan = build_plan(cfg, busy, artifacts="--git-only" not in argv)
         plan["level"] = level or "normal"
+        plan["plan_seconds"] = round(time.monotonic() - started, 1)
         out = paths.SCRATCH / "cleanup-plan.json"
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(".tmp")
@@ -468,7 +475,7 @@ def main(argv: list[str]) -> int:
         failed = sum(1 for r in rows if r["result"] == "failed")
         freed = sum(r.get("kb") or 0 for r in rows) / 1048576
         summary = {"result": "ran", "removed": done, "skipped": skipped, "failed": failed,
-                   "stopped": stopped, "level": level or "normal"}
+                   "stopped": stopped, "level": level or "normal", "plan_seconds": plan["plan_seconds"]}
         text = (f"cleanup: {done} removed, {skipped} skipped on re-check, {failed} failed"
                 + (f"; {freed:.1f} GB of build output freed" if freed else "")
                 + (f"; {stopped} left for the next run (deadline)" if stopped else ""))

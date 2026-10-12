@@ -807,7 +807,8 @@ def _git_tier(apply: bool, level: str, seconds: float) -> dict:
     env = {**os.environ, LOCK_HELD_ENV: "1"}
     try:
         p = subprocess.run([sys.executable, str(ROOT / "tools" / "cleanup.py"), "--apply" if apply else "--auto",
-                            "--level", level, "--deadline-seconds", str(int(max(10, seconds - 15))), "--json"],
+                            "--level", level, "--deadline-seconds", str(int(max(10, seconds - 15))), "--json",
+                            "--git-only"],
                            capture_output=True, text=True, timeout=max(20.0, seconds), cwd=str(ROOT), env=env)
     except subprocess.TimeoutExpired:
         return {"result": "stopped", "reason": f"past {seconds:.0f} s"}

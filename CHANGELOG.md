@@ -3,6 +3,16 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Fixed
+
+- **Inside the guard, the git tier plans branches and worktrees only, inside its deadline** (OBS-63): on the first
+  0.24.3 pass it planned 116 actions and reached none — its listing of what processes hold and a walk for build
+  output (some 18,000 directories) took its whole share. The guard's own build-output class already covers that
+  walk, so the guard asks for `--git-only`; the listing is bounded by the deadline; the result names
+  `plan_seconds`.
+
 ## 0.24.3 — 2026-10-12
 
 The disk guard's git tier removes merged and pushed branches and clean worktrees under load again: its re-check takes one listing of what processes hold per 20 seconds instead of one per worktree. The companion plugin `observatory-log` is unchanged.
