@@ -309,11 +309,15 @@ class StoreCopies(Base):
 
     def test_encrypted_daily_copy_and_rotation(self):
         vault.set_passphrase(self.home, PASS)
+        # Each run names its own minute through `--stamp`, the CLI's path (ENG-008),
+        # rather than a patched `backup_vault.stamp`, which `encrypted()` no longer calls.
         for i in range(5):
-            with patch.object(vault, 'stamp', return_value=f'20260101T00{i:02d}00Z'):
-                self.assertEqual(self.run_backup(), 0)
+            self.assertEqual(self.run_backup('--stamp', f'2026-01-01T00{i:02d}Z'), 0)
+        self.assertEqual(self.run_backup('--stamp', '2026-01-01T0004Z'), 0)  # the same minute again: nothing taken
         kept = sorted(self.target().glob('observatory-db-*.obsdb'))
         self.assertEqual(len(kept), vault.KEEP)
+        self.assertEqual([p.name for p in kept],
+                         [f'observatory-db-20260101T00{i:02d}00Z.obsdb' for i in (2, 3, 4)])
         self.assertEqual(list((self.home / 'store').glob('observatory.db.backup-*')), [])
         out = self.base / 'copy.db'
         with out.open('wb') as stream:
