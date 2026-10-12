@@ -349,8 +349,8 @@
       "path": "collectors/scan_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ea1e4c9fccb353beee9f11ddbd1fd8a350c52ecc64db0fef703dd00c81876c62",
-      "bytes": 30722
+      "export_sha256": "9d54ed1c8194c7b5e9331bea027438b3a70efef4175c846fccc457832b9302f5",
+      "bytes": 33859
     },
     {
       "path": "collectors/scan_mcp.py",
@@ -695,8 +695,8 @@
       "path": "defaults/machine.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1fe4130f7c289cc05d409cd52572f3fa6045dfb262229ed4ceb0e9670edf05fc",
-      "bytes": 3878
+      "export_sha256": "fe73b49edeb45a95c80bdc3f266284448eaaeb61e39d21d3ec493e369eed5581",
+      "bytes": 4169
     },
     {
       "path": "defaults/models.json",
@@ -2872,8 +2872,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6e89816dce6e4d82940aaa8bacd98c518724e9c73130850202a9fb10b398bc90",
-      "bytes": 38940
+      "export_sha256": "0137b7c246ff0982605a5500e2b482149bbc358c4bf0f7d9d8d3a7c52fa0a77a",
+      "bytes": 44483
     },
     {
       "path": "tests/test_machine_mcp_inventory.py",
