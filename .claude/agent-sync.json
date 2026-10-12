@@ -6,7 +6,12 @@
   "leaseTtlSeconds": 2700,
   "renewIntervalSeconds": 300,
   "gated": true,
-  "idRegisters": {},
+  "idRegisters": {
+    "OBS": {
+      "file": "docs/backlog.md",
+      "pattern": "\\*\\*Next free ID:\\*\\* `OBS-(\\d+)`"
+    }
+  },
   "guardedFiles": [
     "CHANGELOG.md",
     "docs/HANDOFF.md",

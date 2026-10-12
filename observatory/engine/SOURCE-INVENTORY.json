@@ -2013,8 +2013,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "98d078b404bad3436dfa2e29339270eca4a85ad1c957dba66860fa6141c02187",
-      "bytes": 23820,
+      "export_sha256": "7a0e9e5795879e1c1b36d627c0f994006fff5efc71c7933292641ada954173f3",
+      "bytes": 23917,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2895,6 +2895,13 @@
       "upstream_modified": true,
       "export_sha256": "3b5a1febb0f024a8df434f8b00efdf8da829aae309b94f8bd485b743629100a3",
       "bytes": 122037
+    },
+    {
+      "path": "tests/test_manifest_urls.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "265e553685fb1e865d03a4b638c76a14c83ab51259c1ad57d8cf57c07a055855",
+      "bytes": 6418
     },
     {
       "path": "tests/test_mcp_inventory.py",
@@ -3939,6 +3946,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/check_manifest_urls.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "c4b63250540ba87ee1140f66e35b78ee8252c8bdb2585556cf6edd350f9b23b2",
+      "bytes": 5183
+    },
+    {
       "path": "tools/check_paths.py",
       "source_sha256": "1ed94dc6369e1d1f5b856136de2f0d43cddb67574e10ff286e7047f600d93a8f",
       "export_sha256": "9cdb2cecec76ee210232ba9cc36db8eb8f087d94c6082fb05facfce7fdea9bb3",
@@ -4598,7 +4612,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 593,
+  "file_count": 595,
   "excluded": [
     "git-history",
     "operator-registries",
