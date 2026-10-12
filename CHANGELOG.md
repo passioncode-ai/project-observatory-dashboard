@@ -55,6 +55,13 @@ The disk guard keeps up with a disk that fills fast and never removes what a ses
 
 ### Changed
 
+- **The disk table says what a removal frees on APFS** (OBS-66): `du` counts an APFS clone in full — 19
+  abandoned browser code-sign clones read as 13 GB and removing them freed nothing. On macOS a place of 512 MB
+  or more is walked a second time, inside the same budget, for each file's private size
+  (`getattrlist(ATTR_CMNEXT_PRIVATESIZE)`); the row gains `frees_at_least_gb` and `clone_shared_gb`, and where
+  clones hold a tenth of the place (and 100 MB) the Machine page and `machine.disk_low` name the floor. The walk
+  costs about three times `du`'s time (6.3 GB of caches: 7.6 s against 24.7 s under load); one that does not
+  finish leaves `du`'s number alone.
 - **`leaks`, `git-hygiene` and `agent` stop before their deadline instead of being killed** (OBS-52), reading
   `OBSERVATORY_STEP_DEADLINE` as the folder scan, `integrity` and the plugins already do:
   - `leaks` starts a file only while two minutes are left and a SQLite store only while one is. Offsets of what it

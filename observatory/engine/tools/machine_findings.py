@@ -83,7 +83,11 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
         crit = config.get("free_space_critical_percent", 5)
         if pct is not None and pct < warn:
             locs = (machine.get("disk") or {}).get("locations") or []
-            named = "; ".join(f"{l['label']} {l['gb']} GB" + (f" (`{l['command']}`)" if l.get("command") else "")
+            # A place full of APFS clones gives back far less than `du` says (OBS-66).
+            named = "; ".join(f"{l['label']} {l['gb']} GB"
+                              + (f", of which removal frees at least {l['frees_at_least_gb']} GB (APFS clones)"
+                                 if l.get("clones_matter") else "")
+                              + (f" (`{l['command']}`)" if l.get("command") else "")
                               for l in locs[:LISTED])
             swap = next((l for l in locs if l.get("kind") == "swap"), None)
             if swap and swap["gb"] >= 2:

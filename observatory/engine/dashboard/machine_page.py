@@ -62,6 +62,16 @@ def _size(mb, t: Translator) -> str:
     return _gigabytes(_gb(mb), t)
 
 
+def _frees(row: dict, t: Translator) -> str:
+    """What removing a place gives back, under its size, when APFS clones make `du` overstate it
+    (OBS-66): `du` counted 19 browser clones as 13 GB, and removing them freed nothing."""
+    if not row.get("clones_matter"):
+        return ""
+    return "<br>" + t.mark("removing it frees at least {size} GB; APFS clones share {shared} GB",
+                           attrs=' class="machine-hint"', size=round(row["frees_at_least_gb"], 1),
+                           shared=round(row["clone_shared_gb"], 1))
+
+
 def _word(t: Translator, msgid) -> str:
     """A value the engine writes as an English id (a disk kind, a worktree
     state, a cleanup class), marked so the language switch reaches it."""
@@ -194,7 +204,8 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     parts.append(_table(t, "Where the disk goes",
                         [("Place", False), ("Kind", False), ("Size", True), ("How it comes back", False)],
                         [[_word(t, l["label"]) + f'<br><span class="mono">{_e(l["path"])}</span>', _word(t, l["kind"]),
-                          _gigabytes(round(l["gb"], 1) if isinstance(l.get("gb"), (int, float)) else None, t),
+                          _gigabytes(round(l["gb"], 1) if isinstance(l.get("gb"), (int, float)) else None, t)
+                          + _frees(l, t),
                           _word(t, l.get("reclaim"))
                           + (f'<br><span class="mono">{_e(l["command"])}</span>' if l.get("command") else "")]
                          for l in disk.get("locations") or []],
