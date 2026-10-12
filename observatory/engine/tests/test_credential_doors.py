@@ -1381,6 +1381,8 @@ def test_cf_email_presets_grant_exactly_what_the_email_service_needs() -> None:
          "/accounts/a1/workers/scripts", "wk-value-"),
         ("email-routing", "zone", ("Zone Read", "Email Routing Rules Write"),
          "/zones/z1/email/routing/rules", "rt-value-"),
+        ("redirect-rules", "zone", ("Zone Read", "Dynamic URL Redirects Write"),
+         "/zones/z1/rulesets/phases/http_request_dynamic_redirect/entrypoint", "rd-value-"),
         ("workers-routes", "zone", ("Zone Read", "Workers Routes Write"),
          "/zones/z1/workers/routes", "wr-value-"),
     ]
@@ -1421,9 +1423,10 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
     groups = {"email-send": ("Email Sending Write", "Email Sending Read"),
               "workers-edit": ("Workers Scripts Write", "Workers KV Storage Write"),
               "email-routing": ("Zone Read", "Email Routing Rules Write"),
+              "redirect-rules": ("Zone Read", "Dynamic URL Redirects Write"),
               "workers-routes": ("Zone Read", "Workers Routes Write")}
     level = {"email-send": "account", "workers-edit": "account", "email-routing": "zone",
-             "workers-routes": "zone"}
+             "redirect-rules": "zone", "workers-routes": "zone"}
     for preset in groups:
         m = cf(); _cf_with_admin(m)
         log, delivered = [], []
@@ -1463,6 +1466,66 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
         m.deliver_to_vault = lambda value, p, e, n, d=delivered2: d.append(value)
         check(f"{preset}: a token that cannot do its read is not delivered",
               issue("proj/prod/CF_X") == 1 and not delivered2 and not delivered, str(delivered2))
+
+
+def test_cf_redirect_preset_proves_its_read_on_a_zone_without_redirects() -> None:
+    """A zone that has never had a Single Redirect has no
+    `http_request_dynamic_redirect` entrypoint, and Cloudflare answers 404 for it
+    to a token that MAY read it; a token without the group gets 403 (measured
+    2026-10-12 with a zone's DNS-only token). So 404 proves the grant and the
+    token is delivered; 403 does not, and the token created for the call is
+    deleted again. The 404 allowance is the redirect preset's alone."""
+    import contextlib, io
+    entry = "/zones/z1/rulesets/phases/http_request_dynamic_redirect/entrypoint"
+    for status, delivers in ((404, True), (403, False)):
+        m = cf(); _cf_with_admin(m)
+        log, delivered = [], []
+        _preset_fake(m, log, [("Zone Read", "zone"), ("Dynamic URL Redirects Write", "zone")],
+                     "/never", "rd-value-")
+        inner = m._request
+
+        def answer(path, token, payload=None, method=None, inner=inner, status=status):
+            if path.startswith(entry) and token.startswith("rd-value-"):
+                log.append(("GET", path, token, None))
+                raise RuntimeError(f"cloudflare answered HTTP {status}; provider response withheld")
+            return inner(path, token, payload, method)
+        m._request = answer
+        m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append((p, e, n))
+        m._journal = lambda *a, **k: None
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = m.cmd_issue_zone("redirect-rules", "example.com", "proj/prod/CF_REDIRECT", None, wait=0)
+        if delivers:
+            check("redirect-rules: a 404 entrypoint (no redirects yet) proves the read",
+                  rc == 0 and delivered == [("proj", "prod", "CF_REDIRECT")], f"{rc} {err.getvalue()}")
+            check("redirect-rules: the token is named after its zone and its slot",
+                  any(pl and pl.get("name") == "observatory-redirect-rules example.com proj/prod/CF_REDIRECT (managed)"
+                      for _m, p, _t, pl in log if p == "/accounts/a1/tokens"), str(log))
+        else:
+            check("redirect-rules: a 403 on the entrypoint is not a proof",
+                  rc == 1 and not delivered, f"{rc} {err.getvalue()}")
+            check("redirect-rules: the token that never proved its read is deleted",
+                  any(_m == "DELETE" and p == "/accounts/a1/tokens/t-new" for _m, p, _t, _pl in log)
+                  and "deleted again" in err.getvalue(), err.getvalue())
+        check(f"redirect-rules: no value printed ({status})",
+              "rd-value-" not in out.getvalue() + err.getvalue(), "")
+
+    # The allowance belongs to the redirect preset only: a 404 on DNS records is a failure.
+    m = cf(); _cf_with_admin(m)
+    log, delivered = [], []
+    _preset_fake(m, log, [("Zone Read", "zone"), ("DNS Write", "zone")], "/never", "dn-value-")
+    inner = m._request
+
+    def missing(path, token, payload=None, method=None, inner=inner):
+        if path.startswith("/zones/z1/dns_records") and token.startswith("dn-value-"):
+            raise RuntimeError("cloudflare answered HTTP 404; provider response withheld")
+        return inner(path, token, payload, method)
+    m._request = missing
+    m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append(value)
+    m._journal = lambda *a, **k: None
+    with contextlib.redirect_stderr(io.StringIO()):
+        rc = m.cmd_issue_zone("dns-edit", "example.com", "proj/prod/CF_DNS", None, wait=0)
+    check("a 404 proves nothing for a preset that did not declare it", rc == 1 and not delivered, str(rc))
 
 
 def test_cf_email_routing_token_is_one_per_slot() -> None:
@@ -1987,6 +2050,7 @@ if __name__ == "__main__":
                test_cf_groups_lists_names_and_levels_and_never_a_value,
                test_cf_email_presets_grant_exactly_what_the_email_service_needs,
                test_cf_email_presets_refuse_what_they_do_not_grant,
+               test_cf_redirect_preset_proves_its_read_on_a_zone_without_redirects,
                test_cf_email_routing_token_is_one_per_slot,
                test_cf_fabric_account_preset_grants_both_levels_on_one_account_into_the_vault,
                test_cf_fabric_presets_refuse_what_they_do_not_grant,

@@ -266,6 +266,25 @@ class Estate(Base):
         self.assertEqual(set(got), {"repository:example/app", "local:solo"})
         self.assertEqual([Path(w["path"]).name for w in got["local:solo"]["worktrees"]], ["wt-solo"])
 
+    def test_a_pass_the_deadline_cuts_short_carries_the_last_measurement_and_resumes(self):
+        # OBS-52: git-hygiene was stopped with nothing written 11 times in a day. Now it stops before its
+        # deadline, carries the checkouts it did not reach from the last answer (marked stale), says so, and
+        # the next pass starts with the least recently measured.
+        import scan_git_hygiene as h
+        self.build()
+        first = self.survey()
+        self.assertFalse(first["partial"])
+        self.assertTrue(first["checkouts"][0]["measured_at"])
+        with patch.dict(os.environ, {"OBSERVATORY_STEP_DEADLINE": f"{time.time() + h.RESERVE_S - 1:.3f}"}):
+            cut = self.survey()
+        self.assertTrue(cut["partial"])
+        self.assertEqual([c.get("stale") for c in cut["checkouts"]], [True], "the one checkout carries its last measurement")
+        self.assertEqual(cut["checkouts"][0]["measured_at"], first["checkouts"][0]["measured_at"])
+        self.assertTrue(any("time ran out after 0 of 1" in d["reason"] for d in cut["degraded"]), cut["degraded"])
+        again = self.survey()
+        self.assertFalse(again["partial"])
+        self.assertNotIn("stale", again["checkouts"][0])
+
     def run_cleanup(self, *args, auto_on=True, busy=None):
         import cleanup
         importlib.reload(cleanup)

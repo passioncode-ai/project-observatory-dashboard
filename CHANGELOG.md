@@ -14,6 +14,16 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Changed
 
+- **`leaks`, `git-hygiene` and `agent` stop before their deadline instead of being killed** (OBS-52), reading
+  `OBSERVATORY_STEP_DEADLINE` as the folder scan, `integrity` and the plugins already do:
+  - `leaks` starts a file only while two minutes are left and a SQLite store only while one is. Offsets of what it
+    read are kept; what it did not read is named in `degraded` as unmeasured, never clean, and a store's mark does
+    not move.
+  - `git-hygiene` measures the least recently measured checkouts first. The ones it did not reach carry their last
+    measurement, marked `stale`, so no checkout starves.
+  - `agent` starts a model call only while a whole call (150 s) fits, so a paid answer is never lost. The run
+    report names the deadline, and the deltas wait for the next run.
+
 - **Trust tiers, written down** (Fabric ADR-0144 amendment 4): on the operator's own machines (T0, and enrolled
   machines T1) the meter and the doors never demand a delegation token — `slotsRequireGrant: when-token` and
   `keyserverRequiresDelegation: off` stay the settings there; the strict ones are for a machine that serves another
@@ -21,6 +31,10 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Cloudflare door: `--preset redirect-rules --zone <zone>`** — Zone Read + Dynamic URL Redirects Write (Single
+  Redirects) on one zone, into a vault slot, verified by reading the zone's `http_request_dynamic_redirect`
+  entrypoint with the new value. A zone with no redirect yet answers 404 there to a token that may read it and
+  403 to one that may not, so for this preset alone a 404 counts as the proof.
 - **A usage report** (OBS-53; contract DEC-0021): the server declares `surfaces.usage` and answers
   `GET /fabric/v1/usage` with the service token — the last 31 days of the assistant's paid model calls by provider
   and model, from a receipt written at every charge (tokens and cost with its basis, never a prompt or a caller).

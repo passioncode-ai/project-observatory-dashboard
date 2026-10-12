@@ -34,6 +34,12 @@ import store_faults
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import providers
 import atomic
+import step_budget
+
+#: A model call may take `providers._post`'s 120 s and the run report a few more: a project's call is started
+#: only while more than this is left before the tick step's deadline (OBS-52). A call the watchdog kills is
+#: paid for and lost, and so is the report; one not started leaves its deltas for the next run.
+CALL_RESERVE_S = 150.0
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "collectors"))
 try:
     from compute_deltas import meaning_of as _meaning
@@ -406,7 +412,13 @@ def main() -> int:
             print(f"  chain could not be resolved for the report: {exc}", file=sys.stderr)
         halted_by = None
         first_call = True
-        for pid in projects:
+        for n, pid in enumerate(projects):
+            if step_budget.remaining() < CALL_RESERVE_S:
+                left = len(projects) - n
+                halted_by = (f"step deadline: {left} project(s) not started, their deltas left for the next "
+                             f"run (a call needs up to {CALL_RESERVE_S:.0f} s)")
+                print(f"  {halted_by}", file=sys.stderr)
+                break
             prompt = build_prompt(pid, by_project[pid], project_facts(pid),
                                   already_recorded(conn, pid))
             try:

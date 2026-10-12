@@ -193,13 +193,43 @@ def branches(repo: str, default: str, in_worktree: set[str], now: float) -> list
     return out
 
 
+#: Seconds kept back for writing the answer when the step's deadline nears (OBS-52).
+RESERVE_S = 20.0
+
+
+def _previous(out_path: pathlib.Path) -> dict[str, dict]:
+    """The last answer's rows by checkout path: what an unreached checkout carries, and the order of the next pass."""
+    try:
+        doc = json.loads(out_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {r["path"]: r for r in doc.get("checkouts", []) if isinstance(r, dict) and r.get("path")}
+
+
 def main(argv: list[str]) -> int:
     out_path = pathlib.Path(argv[1])
     from scan_machine import working_dirs
+    import step_budget
     busy = set(working_dirs().values())
     now = time.time()
-    rows, degraded = [], []
-    for c in checkouts():
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    before = _previous(out_path)
+    # The least recently measured first, so a pass the deadline cuts short resumes where the last one stopped
+    # instead of measuring the same checkouts every tick (OBS-52: stopped with nothing written 11 times in a day).
+    pending = sorted(checkouts(), key=lambda c: (before.get(c["path"]) or {}).get("measured_at") or "")
+    rows, degraded, carried = [], [], 0
+    for i, c in enumerate(pending):
+        if step_budget.remaining() < RESERVE_S:
+            for rest in pending[i:]:
+                old = before.get(rest["path"])
+                if old:
+                    rows.append({**old, "stale": True})
+                    carried += 1
+            degraded.append({"source": "git-hygiene", "reason": (
+                f"the step's time ran out after {i} of {len(pending)} checkouts; {carried} carry their last "
+                f"measurement (marked stale) and {len(pending) - i - carried} were never measured; the next pass "
+                f"starts with them")})
+            break
         default = default_branch(c["path"])
         if not default:
             degraded.append({"source": c["repository"], "reason": unresolved_reason(c["path"])})
@@ -208,9 +238,9 @@ def main(argv: list[str]) -> int:
         held = {w["branch"] for w in wts if w.get("branch")}
         current = (git(c["path"], "branch", "--show-current") or "").strip()
         held.add(current)
-        rows.append({**c, "default_branch": default, "worktrees": wts,
+        rows.append({**c, "default_branch": default, "worktrees": wts, "measured_at": stamp,
                      "branches": branches(c["path"], default, held, now)})
-    doc = {"schema_version": 1, "measured_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    doc = {"schema_version": 1, "measured_at": stamp, "partial": bool(carried) or any(d.get("source") == "git-hygiene" for d in degraded),
            "checkouts": rows, "degraded": degraded,
            "totals": {"checkouts": len(rows),
                       "worktrees": sum(len(r["worktrees"]) for r in rows),

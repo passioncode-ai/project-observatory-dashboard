@@ -100,7 +100,7 @@ def store_with(projects: list[str]) -> tuple[pathlib.Path, pathlib.Path]:
 
 
 def run(db: pathlib.Path, scratch: pathlib.Path, limit: int,
-        answer: dict = DECLINE) -> tuple[int, str]:
+        answer: dict = DECLINE, env: dict | None = None) -> tuple[int, str]:
     driver = scratch / "drive.py"
     driver.write_text(
         "import json, sys\n"
@@ -121,7 +121,7 @@ def run(db: pathlib.Path, scratch: pathlib.Path, limit: int,
     p = subprocess.run([PY, str(driver)], cwd=ROOT, capture_output=True, text=True,
                        timeout=900,
                        env=dict(os.environ, OBSERVATORY_DB=str(db),
-                                OBSERVATORY_SCRATCH=str(scratch)))
+                                OBSERVATORY_SCRATCH=str(scratch), **(env or {})))
     return p.returncode, p.stdout + p.stderr
 
 
@@ -253,12 +253,29 @@ def test_the_environment_warning_is_said_once_per_process() -> None:
           "_SHAPE_WARNED" in src, "a warning removed is not a warning deduplicated")
 
 
+def test_a_call_the_deadline_would_cut_is_never_started() -> None:
+    """OBS-52: the agent was stopped by its watchdog with nothing written, a model call already paid for.
+    Now a project's call starts only while a whole call fits before the step's deadline; past that the run
+    stops, writes its report naming why, and leaves the deltas for the next run."""
+    import time
+    db, scratch = store_with(["project:a", "project:b", "project:c"])
+    rc, out = run(db, scratch, limit=5, env={"OBSERVATORY_STEP_DEADLINE": f"{time.time() + 30:.0f}"})
+    check("the run ends cleanly", rc == 0, out[-300:])
+    rep = report_of(scratch)
+    check("the report is written and names the deadline", "step deadline: 3 project(s) not started"
+          in str(rep.get("halted_by")), str(rep.get("halted_by")))
+    check("no delta was consumed", unconsumed(db) == 3, str(unconsumed(db)))
+    rc, out = run(db, scratch, limit=5)
+    check("without a deadline the next run drains them", rc == 0 and unconsumed(db) == 0, f"{unconsumed(db)} left")
+
+
 if __name__ == "__main__":
     print("the agent's queue — served by arrival, not by alphabet\n")
     for fn in (test_the_oldest_delta_is_served_even_when_its_project_sorts_last,
                test_repeated_runs_drain_the_queue_completely,
                test_the_selection_is_not_alphabetical_in_the_source,
                test_a_drained_queue_reports_and_spends_nothing,
+               test_a_call_the_deadline_would_cut_is_never_started,
                test_the_summary_reports_the_figures_that_decided,
                test_the_environment_warning_is_said_once_per_process):
         fn()

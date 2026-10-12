@@ -14,6 +14,7 @@
         [--expire-days 92] [--lifecycle-rule staging/:2 ...]   # rules only, no key
     python "$T/cloudflare.py" issue --preset email-send --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset email-routing --zone example.com --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset redirect-rules --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-routes --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-server --account <slug> --vault PROJECT/ENV/NAME
@@ -176,6 +177,25 @@ PRESETS: dict[str, dict] = {
         "why": "edits Email Routing rules in one zone for the project named by the vault slot",
         "scope": "zone",
         "probe": "/zones/{zone_id}/email/routing/rules?per_page=1",
+    },
+    # SINGLE REDIRECTS, ONE ZONE, INTO THE VAULT. Sending one hostname to
+    # another at the edge (`www.example.com` → `example.com`, 301, query kept) is
+    # a rule in the zone's `http_request_dynamic_redirect` phase — Single
+    # Redirects in the dashboard, `Dynamic URL Redirects Write` in the catalogue
+    # (`groups --match redirect`, 2026-10-12). Not the account's Bulk Redirects,
+    # not DNS, not the zone's other rulesets. Verified by reading that phase's
+    # entrypoint with the NEW value. A zone that never had a Single Redirect has
+    # no entrypoint, and Cloudflare answers 404 to a token that may read it but
+    # 403 (code 10000) to one without the group — measured the same day with a
+    # zone's DNS-only token — so `probe_absent_ok` lets 404 count as the proof.
+    # Named after the zone AND the slot, like email-routing.
+    "redirect-rules": {
+        "name": "observatory-redirect-rules {zone} {slot} (managed)",
+        "groups": ("Zone Read", "Dynamic URL Redirects Write"),
+        "why": "edits Single Redirect rules in one zone for the project named by the vault slot",
+        "scope": "zone",
+        "probe": "/zones/{zone_id}/rulesets/phases/http_request_dynamic_redirect/entrypoint",
+        "probe_absent_ok": True,
     },
     # WORKER ROUTES, ONE ZONE, INTO THE VAULT. `workers-edit` deploys a script but
     # cannot put it in front of a hostname: a route (`example.com/*`) is a ZONE
@@ -831,7 +851,7 @@ def until_honoured(attempt, wait: float):
 
 def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
                    account_label: str | None, wait: float = 2.0) -> int:
-    """Issue a zone-scoped token (DNS edit, Email Routing rules) into a vault slot."""
+    """Issue a zone-scoped token (DNS edit, Email Routing rules, Single Redirects) into a vault slot."""
     preset = PRESETS[preset_key]
     if preset.get("scope") != "zone":
         print(f"refused: preset {preset_key!r} is not zone-scoped", file=sys.stderr)
@@ -867,6 +887,11 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
                 _request(probe, value)
                 return None
             except RuntimeError as exc:
+                # Only a preset that declared it: its probe reads a thing the zone may
+                # not have yet, and the provider tells "absent" (404) from "not
+                # allowed" (403) — see redirect-rules.
+                if preset.get("probe_absent_ok") and "HTTP 404" in str(exc):
+                    return None
                 return str(exc)
         if until_honoured(read_zone, wait) is not None:
             what = "the zone's analytics" if analytics else probe.split('?')[0].replace(zid, '<zone>')
