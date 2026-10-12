@@ -318,8 +318,8 @@
       "path": "collectors/scan_harness.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c30563d24912b03290df893c4be3a4ed3edeed17682f3d7cd982d2c66ee610bd",
-      "bytes": 25657
+      "export_sha256": "8f0b27ce70e53410cdbe32d129a8b110d31af86416d627f0b492e099642f20a6",
+      "bytes": 28616
     },
     {
       "path": "collectors/scan_heroku.py",
@@ -498,8 +498,8 @@
       "path": "dashboard/finding_types.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "920ae3edd6c009203af17cbc76e85b4012939ebd9941398e797ad36de60cef70",
-      "bytes": 12451
+      "export_sha256": "eb32a9bf0c6c1260d3159a89b66f26fc96b69c82f1970f09d9c9959155c15c90",
+      "bytes": 12538
     },
     {
       "path": "dashboard/i18n.py",
@@ -512,15 +512,15 @@
       "path": "dashboard/locales/en.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "be54311e236fff3f44cf16d05022849a7a73470ae1fa474e68f0c6537a08dd7a",
-      "bytes": 25495
+      "export_sha256": "0642a508a232ff005fca5808212c0bb4799b896f13c3fd38980b14cb306cbf0d",
+      "bytes": 25655
     },
     {
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2490ff3785d6c7461e5914c766df761a6f84a344a4017856693ce5d3cdf820ab",
-      "bytes": 158924
+      "export_sha256": "c1e6909c87828a6c6d143424fd249fd1a81eccb6fdc230801eb2c5c904c392ee",
+      "bytes": 159547
     },
     {
       "path": "dashboard/machine_page.py",
@@ -2642,8 +2642,8 @@
       "path": "tests/test_harness.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "256299fbac3c3ffa57230b3020d6fc8258ecd2a7b0f21adad5c8166457503327",
-      "bytes": 17235
+      "export_sha256": "a18fda82d7da3c37c045c3293cf9d6cdb89280b5f8b8baef1bd53a8e7de51230",
+      "bytes": 18785
     },
     {
       "path": "tests/test_heroku.py",
@@ -3900,8 +3900,8 @@
     {
       "path": "tools/build_findings.py",
       "source_sha256": "03136ce1f366d180307f7f0c17ab41a3de82631103750f081a6d79758569e0b3",
-      "export_sha256": "9d29f7b3cde89475dfaf0c0812f8eb30a682f3d2761cc4e7bb4773a0170914f3",
-      "bytes": 273466,
+      "export_sha256": "cf532b46d2ffd2d1f15ed37af1b272c962225d774538e8172fad43ce96a05979",
+      "bytes": 274573,
       "python_comments_removed": 996,
       "python_docstrings_removed": 28,
       "tool_descriptions_retained": 0,
