@@ -10,6 +10,7 @@
     python "$T/openrouter.py" disable my-agent              # or enable
     python "$T/openrouter.py" rotate my-agent               # or --leaked
     python "$T/openrouter.py" revoke my-agent
+    python "$T/openrouter.py" claim old-tool --where PATH < key-file   # a key minted elsewhere, by hash
 
 PROJECT in a `vault:` destination is the project's folder name; its registry id
 is accepted and normalised to that folder before anything is minted.
@@ -43,6 +44,7 @@ attached to a file on disk.
 from __future__ import annotations
 import argparse
 import datetime
+import hashlib
 import json
 import math
 import os
@@ -367,6 +369,12 @@ def find_key(admin: str, name: str) -> dict | None:
             if "HTTP 404" in str(exc):
                 return None
             raise
+        # A CLAIMED key was found by the hash of its value, and that hash is the identity: a
+        # rename in the provider's dashboard must not read as a deletion — `revoke` would then
+        # drop the row and leave the key live (review 2026-10-12). An issued key carries the
+        # ledger's name.
+        if rec.get("claimed"):
+            return row
         return row if row and row.get("name") == name else None
     for row in _all_keys(admin):
         if row.get("name") == name:
@@ -738,6 +746,9 @@ def _delivery_failed(admin: str, row: dict) -> None:
 
 def rotate_one(name: str, doc: dict | None = None) -> dict:
     """Deliver and verify a successor before revoking the predecessor; keep recovery metadata."""
+    if ((doc or ledger()).get("issued", {}).get(name) or {}).get("claimed"):
+        raise ValueError(f"{name!r} was claimed, not issued: there is nowhere to deliver a successor; "
+                         f"`issue` its replacement to a destination, then `revoke {name}`")
     doc = doc if doc is not None else ledger()
     rec = doc["issued"].get(name)
     if not rec:
@@ -792,11 +803,18 @@ def cmd_rotate(name: str | None, leaked: bool) -> int:
             print("no open leak names an issued OpenRouter key")
             return 0
     bad = 0
+    if not name:
+        # A claimed key has nowhere to deliver a successor; a bulk run names it and goes on
+        # (review 2026-10-12: the first claimed key ended `rotate --leaked` with a traceback).
+        for n in [t for t in targets if (doc["issued"].get(t) or {}).get("claimed")]:
+            print(f"  {n}: claimed, not issued — `issue` its replacement, then `revoke {n}`", file=sys.stderr)
+            bad += 1
+        targets = [t for t in targets if not (doc["issued"].get(t) or {}).get("claimed")]
     for n in targets:
         try:
             r = rotate_one(n, doc)
             print(f"  {n}: rotated, successor delivered to {r['delivered_to']}, predecessor deleted")
-        except LookupError as exc:
+        except (LookupError, ValueError) as exc:
             print(f"  {n}: {exc}", file=sys.stderr)
             bad += 1
         except RuntimeError as exc:
@@ -822,6 +840,116 @@ def _leaked(name: str, rec: dict) -> bool:
                for r in rows)
 
 
+def _label_of(value: str) -> str:
+    """What the provider calls a key — prefix, ellipsis, three characters — from its value."""
+    sys.path.insert(0, str(ROOT / "collectors"))
+    from scan_openrouter import label_of
+    return label_of(value)
+
+
+def claim_key(name: str, value: str, account: str | None = None, where: str = "") -> dict:
+    """Bring a key this door did NOT mint under its control, so `disable`, `limit` and
+    `revoke` reach it — the door hashes the value and never stores or prints it.
+
+    WHY (2026-10-11). Agent tools on one machine kept OpenRouter keys made by hand in the
+    dashboard, in plaintext files. The door could issue replacements into the vault but
+    could not revoke the old keys: `revoke` finds a key by the ledger's name, and they had
+    no row. Revoking them at the dashboard is the manual step this door exists to remove.
+
+    HOW IT IS FOUND. The value arrives on stdin. The provider's row is read by the value's
+    SHA-256 (one request, exact). Only when no stashed account answers to the hash is the
+    listing searched by label — and a label is a prefix plus THREE characters, which collide
+    across thousands of keys (tests/test_openrouter_keys.py), so that path is accepted only
+    when exactly one key in every listing carries the label AND its ceiling is the one the
+    key reports for itself (`GET /key` with the value). Anything else is refused.
+    """
+    name = slug(name)
+    if not name:
+        raise ValueError("the key needs a name in this ledger")
+    value = (value or "").strip()
+    label = _label_of(value)
+    if not label:
+        raise ValueError("that is not an OpenRouter key")
+    doc = ledger()
+    if name in doc["issued"]:
+        raise ValueError(f"the ledger already has a key called {name!r}")
+    accounts = [(account, read_admin(account)[1])] if account else \
+        [(lbl, read_admin(lbl)[1]) for lbl, _p in admins()]
+    if not accounts:
+        raise RuntimeError("no provisioning key is stashed; `stash --as <label>` first")
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    if any(r.get("hash") == digest for r in doc["issued"].values()):
+        raise ValueError("this key is already in the ledger")
+    found: list[tuple[str, dict]] = []
+    for acct, admin in accounts:
+        try:
+            row = _request(f"/keys/{digest}", admin).get("data") or None
+        except RuntimeError as exc:
+            if "HTTP 404" in str(exc):
+                continue
+            raise
+        if row and row.get("label") == label:
+            found.append((acct, row))
+    how = "hash"
+    if not found:
+        how = "label"
+        own = _request("/key", value).get("data") or {}
+        if own.get("limit") is None:
+            # Without a ceiling there is no second fact to compare: `None == None` matched every
+            # unlimited dashboard key (review 2026-10-12).
+            raise ValueError("the key reports no ceiling, so a label match cannot be confirmed; set a ceiling "
+                             "on it in the provider's dashboard and claim again, or claim from the account "
+                             "that holds it by hash")
+        for acct, admin in accounts:
+            try:
+                rows = _all_keys(admin)
+            except ListingTooLong:
+                # "Exactly one key in EVERY listing" cannot be shown from a listing not read whole —
+                # a match past the pages read would be another key with the same label.
+                raise ValueError(f"{acct!r} lists more keys than this door reads, so a label match cannot be "
+                                 "shown to be the only one; refusing") from None
+            found += [(acct, r) for r in rows if r.get("label") == label]
+        if len(found) == 1 and found[0][1].get("limit") != own.get("limit"):
+            found = []
+    if len(found) != 1:
+        raise ValueError("no stashed account holds this key" if not found else
+                         f"{len(found)} keys carry this label; refusing to pick one")
+    acct, row = found[0]
+    place = f"external:{where or 'unrecorded'}"
+    doc = ledger()
+    # Re-checked on the ledger that is written: the provider calls above take seconds, and a
+    # second claim in the meantime would otherwise be overwritten (review 2026-10-12).
+    if name in doc["issued"]:
+        raise ValueError(f"the ledger already has a key called {name!r}")
+    if any(r.get("hash") == row.get("hash") for r in doc["issued"].values()):
+        raise ValueError("this key is already in the ledger")
+    doc["issued"][name] = {
+        "account": acct, "hash": row.get("hash"), "destination": place, "delivered_to": place,
+        "project": None, "limit_usd": row.get("limit"), "limit_reset": row.get("limit_reset"),
+        "issued_on": None, "claimed_on": today(), "claimed": True, "claimed_by": how,
+        "provider_name": row.get("name"), "label": label, "rotated_on": None, "rotations": 0}
+    save_ledger(doc)
+    _journal("claim", f"openrouter/{acct}/{name}", where=where, found_by=how)
+    return {"name": name, "account": acct, "label": label, "limit": row.get("limit"), "found_by": how}
+
+
+def cmd_claim(name: str, account: str | None, where: str) -> int:
+    if sys.stdin.isatty():
+        print("give the key on stdin, from the file that holds it — never as an argument", file=sys.stderr)
+        return 2
+    try:
+        r = claim_key(name, sys.stdin.read(), account, where)
+    except (ValueError, LookupError) as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    except RuntimeError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    print(f"claimed {r['name']!r} in {r['account']!r} ({r['label']}, ceiling ${r['limit'] or 0:g}, found by "
+          f"{r['found_by']}); `disable {r['name']}` stops it, `revoke {r['name']}` deletes it")
+    return 0
+
+
 def revoke_key(name_or_label: str) -> dict:
     """Delete at the provider, then clear the ledger row — in that order: a
     forgotten live key is worse than a stale row. REFUSED for a key something
@@ -832,7 +960,12 @@ def revoke_key(name_or_label: str) -> dict:
     if scan.is_file():
         try:
             for k in json.loads(scan.read_text(encoding="utf-8")).get("keys", []):
-                if k.get("serves") and (k.get("name") == name or k.get("label") == name_or_label):
+                names = {name, rec.get("provider_name")} - {None}
+                labels = {name_or_label, rec.get("label")} - {None}
+                # A claimed key carries the provider's name, not the ledger's, and the scan has no
+                # hash; its label (recorded at claim) is what a consumer is found by. A label two
+                # keys share refuses here too: a consumer that may be reading it is not taken down.
+                if k.get("serves") and (k.get("name") in names or k.get("label") in labels):
                     raise ValueError(f"{name} is what {k['serves']} is reading right now; "
                                      f"issue its replacement first, then revoke this one")
         except (OSError, ValueError) as exc:
@@ -984,6 +1117,10 @@ def main() -> int:
                       help="rotate every issued key named in an open leak")
     p_re = sub.add_parser("revoke", help="delete at the provider, clear the ledger row")
     p_re.add_argument("name")
+    p_cl = sub.add_parser("claim", help="bring a key minted elsewhere under this door; value on stdin")
+    p_cl.add_argument("name", help="what the ledger will call it")
+    p_cl.add_argument("--account", help="the stashed account to look in (default: every one)")
+    p_cl.add_argument("--where", default="", help="where the copy was found: a path, never a value")
     a = ap.parse_args()
     if a.cmd == "stash":
         if sys.stdin.isatty():
@@ -1010,6 +1147,8 @@ def main() -> int:
         return cmd_rotate(a.name, a.leaked)
     if a.cmd == "revoke":
         return cmd_revoke(a.name)
+    if a.cmd == "claim":
+        return cmd_claim(a.name, a.account, a.where)
     return 2
 
 

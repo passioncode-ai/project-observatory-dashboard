@@ -30,6 +30,14 @@ while the major version is 0, a minor release may change behaviour and says so h
   person's agents (T2). Design: `docs/design/METER.md` M0.
 
 ### Added
+- **`openrouter.py claim NAME --where PATH`, key on stdin** — brings an OpenRouter key this door did not mint (one
+  made by hand in the dashboard) under the door, so `disable`, `limit` and `revoke` reach it. The value is hashed,
+  never stored or printed; the provider's row is read by that hash, and a label alone (prefix plus three
+  characters, which collide) is accepted only when it is the single match in every listing and the ceiling the
+  key reports for itself agrees. A claimed key is revoked through the door, never rotated to nowhere.
+  A claimed key is identified by its hash, so a rename in the provider's dashboard never reads as a deletion; a
+  bulk `rotate` names it and goes on; `revoke` refuses it while a consumer reads its label; the label path needs
+  every listing whole and a ceiling to compare; a claim re-checks the ledger it writes.
 
 - **Cloudflare door: `--preset redirect-rules --zone <zone>`** — Zone Read + Dynamic URL Redirects Write (Single
   Redirects) on one zone, into a vault slot, verified by reading the zone's `http_request_dynamic_redirect`

@@ -254,6 +254,199 @@ def test_the_door_reads_every_page_of_keys():
         door._request, door.ledger = real, real_ledger
 
 
+def test_a_key_minted_elsewhere_is_claimed_by_its_hash_and_never_guessed():
+    """`claim` (2026-10-11): plaintext copies of keys made by hand in the dashboard could be
+    replaced through the door but not revoked, because `revoke` reads the ledger. The value
+    is hashed, the provider row is read by that hash, and a label alone — prefix plus three
+    characters — is accepted only when it is the one label in every listing and the ceiling
+    agrees. A claimed key is revoked through the door; it is never "rotated" to nowhere."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import hashlib, importlib
+    door = importlib.import_module("openrouter")
+    value = "sk-or-v1-" + "abc" + "0" * 55 + "def"
+    digest = hashlib.sha256(value.encode()).hexdigest()
+    label = "sk-or-v1-abc...def"
+    state = {"issued": {}}
+    saved = {}
+    real = {k: getattr(door, k) for k in ("_request", "ledger", "save_ledger", "admins", "read_admin", "_journal")}
+    door.ledger = lambda: json.loads(json.dumps(state))
+    door.save_ledger = lambda doc: (state.clear(), state.update(doc), saved.update(doc))
+    door.admins = lambda: [("acct-a", pathlib.Path("/nonexistent/a")), ("acct-b", pathlib.Path("/nonexistent/b"))]
+    door.read_admin = lambda label=None: (label or "acct-a", "admin-" + (label or "acct-a"))
+    door._journal = lambda *a, **k: None
+    try:
+        # 1. By hash: only acct-b holds it.
+        def by_hash(path, key, payload=None, method=None):
+            if path == f"/keys/{digest}" and key == "admin-acct-b":
+                return {"data": {"hash": digest, "label": label, "name": "made-by-hand", "limit": 500}}
+            if path.startswith("/keys/"):
+                raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+            return {"data": []}
+        door._request = by_hash
+        r = door.claim_key("old-tool", value, where="a plaintext file")
+        rec = state["issued"].get("old-tool") or {}
+        check("a key is claimed by its hash in the account that holds it",
+              r["account"] == "acct-b" and r["found_by"] == "hash" and rec.get("hash") == digest, f"{r} {rec}")
+        check("the ledger never holds the value", value not in json.dumps(state))
+        check("the provider's own name is kept, so the door finds the key again",
+              door.find_key("admin-acct-b", "old-tool") is not None)
+        try:
+            door.claim_key("old-tool-again", value)
+            check("the same key cannot be claimed twice", False, "no refusal")
+        except ValueError:
+            check("the same key cannot be claimed twice", True)
+        try:
+            door.rotate_one("old-tool")
+            check("a claimed key is not rotated to nowhere", False, "no refusal")
+        except ValueError as exc:
+            check("a claimed key is not rotated to nowhere", "claimed" in str(exc), str(exc))
+        # 2. No hash match; two keys share the label in the listing: refused.
+        state["issued"].clear()
+        twin = [{"hash": "h1", "label": label, "name": "x", "limit": 500},
+                {"hash": "h2", "label": label, "name": "y", "limit": 500}]
+        def shared(path, key, payload=None, method=None):
+            if path.startswith("/keys/"):
+                raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+            if path == "/key":
+                return {"data": {"label": label, "limit": 500}}
+            return {"data": twin if key == "admin-acct-a" else []}
+        door._request = shared
+        try:
+            door.claim_key("old-tool", value)
+            check("a label two keys share is refused", False, "claimed one of two")
+        except ValueError as exc:
+            check("a label two keys share is refused", "2 keys" in str(exc), str(exc))
+        # 3. One label match whose ceiling disagrees with what the key says of itself: refused.
+        def wrong_limit(path, key, payload=None, method=None):
+            if path.startswith("/keys/"):
+                raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+            if path == "/key":
+                return {"data": {"label": label, "limit": 1000}}
+            return {"data": twin[:1] if key == "admin-acct-a" else []}
+        door._request = wrong_limit
+        try:
+            door.claim_key("old-tool", value)
+            check("a single label match with another ceiling is refused", False, "claimed")
+        except ValueError:
+            check("a single label match with another ceiling is refused", True)
+        check("nothing was written by a refusal", "old-tool" not in state["issued"])
+        try:
+            door.claim_key("x", "not-a-key")
+            check("a value that is not a key is refused", False, "claimed")
+        except ValueError:
+            check("a value that is not a key is refused", True)
+    finally:
+        for k, v in real.items():
+            setattr(door, k, v)
+
+
+def test_a_claimed_key_is_never_lost_skipped_or_guessed():
+    """Review of `claim` (2026-10-12), five defects:
+    A a bulk `rotate` died at the first claimed key; B `revoke` missed the consumer reading a
+    claimed key; C the label path accepted a match while a listing was incomplete, and two
+    unlimited keys "agreed" on a ceiling of None; D a rename at the provider read as a
+    deletion, so `revoke` dropped the row and left the key live; E two claims overwrote each
+    other."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import hashlib, importlib, io, contextlib, tempfile
+    door = importlib.import_module("openrouter")
+    value = "sk-or-v1-" + "abc" + "0" * 55 + "def"
+    digest = hashlib.sha256(value.encode()).hexdigest()
+    label = "sk-or-v1-abc...def"
+    state = {"issued": {}}
+    real = {k: getattr(door, k) for k in ("_request", "ledger", "save_ledger", "admins", "read_admin", "_journal",
+                                         "_all_keys")}
+    door.ledger = lambda: json.loads(json.dumps(state))
+    door.save_ledger = lambda doc: (state.clear(), state.update(json.loads(json.dumps(doc))))
+    door.admins = lambda: [("acct-a", pathlib.Path("/nonexistent/a"))]
+    door.read_admin = lambda label=None: (label or "acct-a", "admin-acct-a")
+    door._journal = lambda *a, **k: None
+    deleted = []
+    def by_hash(path, key, payload=None, method=None):
+        if method == "DELETE":
+            deleted.append(path)
+            return {}
+        if path == f"/keys/{digest}":
+            return {"data": {"hash": digest, "label": label, "name": state.get("_provider_name", "made-by-hand"),
+                             "limit": 500}}
+        raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+    try:
+        door._request = by_hash
+        door.claim_key("old-tool", value, where="a plaintext file")
+        # D: renamed at the provider, still found by its hash, and revoke deletes it there.
+        state["_provider_name"] = "renamed-in-dashboard"
+        check("D: a claimed key renamed at the provider is still found",
+              door.find_key("admin-acct-a", "old-tool") is not None)
+        # A: a bulk rotation names the claimed key and does not die.
+        err, code = io.StringIO(), None
+        try:
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                code = door.cmd_rotate(None, False)
+        except Exception as exc:                                       # noqa: BLE001
+            err.write(repr(exc))
+        check("A: a bulk rotation survives a claimed key", code == 1 and "claimed" in err.getvalue(),
+              err.getvalue())
+        # B: a consumer reading the claimed key (by its label) stops revoke.
+        with tempfile.TemporaryDirectory() as tmp:
+            real_scratch = door.paths.SCRATCH
+            door.paths.SCRATCH = pathlib.Path(tmp)
+            try:
+                (pathlib.Path(tmp) / "openrouter.json").write_text(json.dumps(
+                    {"keys": [{"label": label, "name": "renamed-in-dashboard", "serves": "an agent"}]}))
+                try:
+                    door.revoke_key("old-tool")
+                    check("B: revoke refuses a claimed key a consumer reads", False, "revoked")
+                except ValueError as exc:
+                    check("B: revoke refuses a claimed key a consumer reads", "reading right now" in str(exc), str(exc))
+                (pathlib.Path(tmp) / "openrouter.json").write_text(json.dumps({"keys": []}))
+                door.revoke_key("old-tool")
+                check("D: revoking a renamed claimed key deletes it at the provider",
+                      deleted == [f"/keys/{digest}"] and "old-tool" not in state["issued"], f"{deleted}")
+            finally:
+                door.paths.SCRATCH = real_scratch
+        # C: a listing that is not whole refuses the label path; so does a key with no ceiling.
+        state["issued"].clear()
+        def label_only(path, key, payload=None, method=None):
+            if path.startswith("/keys/"):
+                raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+            if path == "/key":
+                return {"data": {"label": label, "limit": state.get("_own_limit", 500)}}
+            return {"data": []}
+        door._request = label_only
+        def too_long(admin, include_disabled=True):
+            raise door.ListingTooLong("too many", [{"hash": "h0", "label": "other", "limit": 500}])
+        door._all_keys = too_long
+        try:
+            door.claim_key("old-tool", value)
+            check("C: an incomplete listing refuses the label path", False, "claimed")
+        except ValueError as exc:
+            check("C: an incomplete listing refuses the label path", "more keys" in str(exc), str(exc))
+        door._all_keys = lambda admin, include_disabled=True: [{"hash": "h1", "label": label, "limit": None}]
+        state["_own_limit"] = None
+        try:
+            door.claim_key("old-tool", value)
+            check("C: no ceiling, no label claim", False, "claimed an unlimited key by label")
+        except ValueError as exc:
+            check("C: no ceiling, no label claim", "no ceiling" in str(exc), str(exc))
+        # E: a claim that lands while this one talks to the provider is not overwritten.
+        state.pop("_own_limit", None)
+        door._all_keys = lambda admin, include_disabled=True: [{"hash": "h1", "label": label, "limit": 500,
+                                                                 "name": "x"}]
+        def racing(path, key, payload=None, method=None):
+            if path == "/key":
+                state["issued"]["old-tool"] = {"hash": "someone-else", "account": "acct-a"}
+            return label_only(path, key, payload, method)
+        door._request = racing
+        try:
+            door.claim_key("old-tool", value)
+            check("E: a concurrent claim is not overwritten", False, "overwrote")
+        except ValueError:
+            check("E: a concurrent claim is not overwritten", state["issued"]["old-tool"]["hash"] == "someone-else")
+    finally:
+        for k, v in real.items():
+            setattr(door, k, v)
+
+
 if __name__ == "__main__":
     print("openrouter keys — three characters were not an identifier\n")
     for fn in (test_the_label_is_derivable_without_asking,
@@ -264,7 +457,9 @@ if __name__ == "__main__":
                test_a_collision_is_reported_on_a_real_run,
                test_absent_provisioning_is_a_degradation_not_an_empty_estate,
                test_the_step_is_reachable,
-               test_the_door_reads_every_page_of_keys):
+               test_the_door_reads_every_page_of_keys,
+               test_a_key_minted_elsewhere_is_claimed_by_its_hash_and_never_guessed,
+               test_a_claimed_key_is_never_lost_skipped_or_guessed):
         fn()
     print()
     if FAILURES:
