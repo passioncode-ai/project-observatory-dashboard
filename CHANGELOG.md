@@ -23,6 +23,13 @@ while the major version is 0, a minor release may change behaviour and says so h
   it, plus open reservations, against L0 (USD 1,000 by default), and the finding `spend.estate_month` warns at
   80 % and is critical at the limit. Measured on the operator's machine on 2026-10-11: $262.97 across four
   accounts.
+- **The harness scan reads hooks and skill use** (OBS-61): every hook the user's settings and each enabled
+  plugin declare (event, matcher, source, program, a digest of the command and never the command), checked
+  against the skill rules, with the finding `harness.hook_risk`; and each skill's invocations over the last 30
+  days of transcripts, so the listing overflow names the unused skills first; and each project's own
+  `.claude/skills`, counted on top of the user level (`harness.project_listing_overflow` when they alone push a
+  session over the budget); and Codex's skills (`~/.codex/skills` and the shared `~/.agents/skills`). Design:
+  `docs/design/HARNESS.md` H11–H14.
 - One project under many names (OBS-65). The operator curates `config/identifiers.json`
   (another system's name → the canonical `project:`/`product:` id, with the name's owner); the
   emitter publishes `registry/identifiers.json` and one `known_as` relation per alias. A name

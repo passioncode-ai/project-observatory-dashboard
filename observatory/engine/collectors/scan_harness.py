@@ -218,6 +218,183 @@ def plugin_skill_dirs(claude: Path, degraded: list) -> list[tuple[str, Path, str
     return out
 
 
+#: Hook events that put text into every session's context (a speaker costs context each start) or run on every
+#: tool call (a hook there runs thousands of times a day).
+CONTEXT_EVENTS = {"SessionStart", "UserPromptSubmit"}
+USAGE_DAYS = 30
+
+
+def hook_rows(claude: Path, degraded: list) -> list[dict]:
+    """Every declared hook: the user's settings.json `hooks` and each ENABLED plugin's `hooks/hooks.json`.
+
+    A row keeps the event, the matcher, where it comes from, the program it starts (the command's first word,
+    its basename) and a digest of the command — never the command itself, which can carry a token."""
+    rows: list[dict] = []
+
+    markets = read_json(claude / "plugins" / "known_marketplaces.json")
+
+    def owner_of(key: str) -> str | None:
+        market = key.split("@", 1)[1] if "@" in key else ""
+        repo = ((markets.get(market) or {}).get("source") or {}).get("repo") or ""
+        return repo.split("/", 1)[0].lower() if "/" in repo else None
+
+    def take(doc: dict, source: str, tier_root: Path | None) -> None:
+        for event, groups in ((doc.get("hooks") or {}) if isinstance(doc.get("hooks"), dict) else {}).items():
+            for group in groups if isinstance(groups, list) else []:
+                for h in (group or {}).get("hooks") or []:
+                    command = str((h or {}).get("command") or "")
+                    if not command:
+                        continue
+                    words = command.strip().split()
+                    program = Path(words[0].strip("'\"")).name if words else ""
+                    rows.append({"event": event, "matcher": (group or {}).get("matcher") or "", "source": source,
+                                 "program": program[:80], "command_sha": hashlib.sha256(command.encode()).hexdigest()[:12],
+                                 "_command": command, "_root": tier_root,
+                                 "_owner": owner_of(source.split(":", 1)[1]) if source.startswith("plugin:") else None})
+
+    take(read_json(claude / "settings.json"), "user", None)
+    settings = read_json(claude / "settings.json")
+    enabled = {k for k, v in (settings.get("enabledPlugins") or {}).items() if v is True}
+    installed = read_json(claude / "plugins" / "installed_plugins.json").get("plugins") or {}
+    for key, records in installed.items():
+        if key not in enabled:
+            continue
+        record = records[0] if isinstance(records, list) and records else records
+        path = Path((record or {}).get("installPath") or "")
+        hooks_file = path / "hooks" / "hooks.json"
+        if hooks_file.is_file():
+            take(read_json(hooks_file), f"plugin:{key}", path)
+    return rows
+
+
+def hook_hits(rows: list[dict], roots: list[Path], own_owners: set[str] | None = None) -> list[dict]:
+    """The skill rules, applied to each hook's command and to the script it names when that script is a file the
+    plugin ships. A hook runs without asking, so a download-and-run there is never just "how a vendor installs"."""
+    out = []
+    for r in rows:
+        texts = [r["_command"]]
+        for word in r["_command"].replace("${CLAUDE_PLUGIN_ROOT}", str(r["_root"] or "")).split():
+            p = Path(word.strip("'\""))
+            if p.suffix.lower() in SCRIPT and p.is_file():
+                try:
+                    texts.append(p.read_text(encoding="utf-8", errors="replace")[:TEXT_MAX])
+                except OSError:
+                    pass
+        text = "\n".join(texts)
+        rules = []
+        if DOWNLOAD_EXEC.search(text):
+            rules.append("download-exec")
+        if CREDENTIAL_SOURCE.search(text) and EGRESS.search(text):
+            rules.append("credential-egress")
+        if HIDDEN.search(text):
+            rules.append("hidden-unicode")
+        # The user's own settings and this operator's own plugins (by marketplace owner or by living under the
+        # projects folder) are tier 1; a hook from anyone else runs code nobody here vouched for.
+        own = (r["source"] == "user" or (r.get("_owner") or "") in (own_owners or set())
+               or (r["_root"] is not None and any(root == r["_root"].resolve() or root in r["_root"].resolve().parents
+                                                  for root in roots)))
+        for rule in rules:
+            severity = SEVERITY[rule][0 if own else 2]
+            if rule == "download-exec" and not own:
+                severity = "critical" if r["event"] in CONTEXT_EVENTS or r["event"] == "PreToolUse" else "warning"
+            out.append({"source": r["source"], "event": r["event"], "program": r["program"], "rule": rule,
+                        "severity": severity, "command_sha": r["command_sha"]})
+    return out
+
+
+def skill_usage(claude: Path, days: int = USAGE_DAYS) -> tuple[dict[str, int], int]:
+    """How often each skill was invoked in the last `days`, from the session transcripts: the Skill tool's
+    `skill` argument and the `/name` slash commands. ({name: uses}, transcripts read). Only lines that mention
+    one of the two are parsed, so a large transcript costs a scan, not a parse."""
+    import time
+    since = time.time() - days * 86400
+    uses: dict[str, int] = {}
+    read = 0
+    for path in (claude / "projects").glob("*/*.jsonl"):
+        try:
+            if path.stat().st_mtime < since:
+                continue
+            fh = path.open("r", encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        read += 1
+        with fh:
+            for line in fh:
+                if '"Skill"' not in line and "<command-name>" not in line:
+                    continue
+                for m in re.finditer(r'"name":\s*"Skill",\s*"input":\s*\{[^}]*?"skill":\s*"([^"]{1,120})"', line):
+                    uses[m.group(1)] = uses.get(m.group(1), 0) + 1
+                for m in re.finditer(r"<command-name>/?([A-Za-z0-9:_.-]{1,120})</command-name>", line):
+                    uses[m.group(1)] = uses.get(m.group(1), 0) + 1
+    return uses, read
+
+
+def project_skills(roots: list[Path], user_listing: int, limit: int) -> tuple[list[dict], list[dict]]:
+    """A project's own `.claude/skills` load only when a session works in that project, on top of the user-level
+    listing. (Per project: name, its skills' listing characters, the session total; rule hits, tier 1 since the
+    projects folder is this operator's own.) One level under each projects folder; a project's folder named
+    like a worktree is still a project, so it is read the same way."""
+    projects, hits = [], []
+    seen: set[str] = set()
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for skills_dir in sorted(root.glob("*/.claude/skills")):
+            real = str(skills_dir.resolve())
+            if real in seen:
+                continue
+            seen.add(real)
+            project = skills_dir.parent.parent.name
+            rows = []
+            for skill in sorted(skills_dir.glob("*/SKILL.md")):
+                try:
+                    text = skill.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                meta = front_matter(text)
+                name = meta.get("name") or skill.parent.name
+                invocable = str(meta.get("disable-model-invocation", "")).lower() != "true"
+                rows.append({"name": name, "listing_chars": listing_chars(meta, name) if invocable else 0})
+                sha, _n, _s, files = digest(skill.parent)
+                for h in hits_for(name, skill.parent, files, meta, 1):
+                    hits.append({**h, "skill": f"{project}/{name}", "project": project, "digest": sha})
+            if not rows:
+                continue
+            own = sum(r["listing_chars"] for r in rows)
+            projects.append({"project": project, "skills": len(rows), "listing_chars": own,
+                             "session_listing_chars": user_listing + own,
+                             # Only the project's own skills can be blamed for an overflow the user level does not
+                             # already cause; otherwise every project would repeat the user-level finding.
+                             "pushes_over": user_listing <= limit < user_listing + own})
+    return projects, hits
+
+
+def codex_skills(home: Path, roots: list[Path]) -> tuple[dict, list[dict]]:
+    """Codex's harness: the skills it loads from `~/.codex/skills` and the shared `~/.agents/skills`. (Its listing
+    — skills and description characters, counted the way the Agent Skills standard truncates — and rule hits,
+    named `codex/skill`.) A skill linked into both folders is counted once."""
+    seen: set[str] = set()
+    rows, hits = [], []
+    for folder in (home / ".codex" / "skills", home / ".agents" / "skills"):
+        for skill in sorted(folder.glob("*/SKILL.md")):
+            real = str(skill.parent.resolve())
+            if real in seen:
+                continue
+            seen.add(real)
+            try:
+                text = skill.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            meta = front_matter(text)
+            name = meta.get("name") or skill.parent.name
+            rows.append(listing_chars(meta, name))
+            tier = tier_of(skill.parent, None, roots, set())
+            sha, _n, _s, files = digest(skill.parent)
+            for h in hits_for(name, skill.parent, files, meta, tier):
+                hits.append({**h, "skill": f"codex/{name}", "harness": "codex", "digest": sha})
+    return {"skills": len(rows), "listing_chars": sum(rows)}, hits
+
+
 def scan(home: Path, pins_file: Path, own_owners: set[str] | None = None) -> dict:
     own_owners = {o.lower() for o in (own_owners or {"passioncode-ai", "ssheleg"})}
     claude = home / ".claude"
@@ -250,18 +427,26 @@ def scan(home: Path, pins_file: Path, own_owners: set[str] | None = None) -> dic
                        "model_invocable": invocable, "files": n_files, "scripts": n_scripts, "digest": sha,
                        "key": f"{source}/{name}"})
         security += hits_for(skill_name, folder, files, meta, tier)
+    uses, transcripts = skill_usage(claude)
+    for s in skills:
+        plugin = s["source"].split(":", 1)[1].split("@", 1)[0] if s["source"].startswith("plugin:") else None
+        s["uses_30d"] = uses.get(s["name"], 0) + (uses.get(f"{plugin}:{s['name']}", 0) if plugin else 0)
     limit = budget()
     total = sum(s["listing_chars"] for s in skills)
     dropped: list[str] = []
     if total > limit:
-        # Which descriptions go is decided by usage the scan cannot see; the largest entries are named, since
-        # they are the cheapest place to win the budget back.
+        # The cheapest place to win the budget back: skills nobody invoked in the last 30 days, largest first,
+        # then the least used (cost × (1 − use), with use read from the transcripts).
         over = total - limit
-        for s in sorted(skills, key=lambda s: -s["listing_chars"]):
+        for s in sorted(skills, key=lambda s: (s["uses_30d"] > 0, s["uses_30d"], -s["listing_chars"])):
             if over <= 0:
                 break
             dropped.append(s["name"])
             over -= s["listing_chars"]
+    projects, project_hits = project_skills(roots, total, limit)
+    security += project_hits
+    codex, codex_hits = codex_skills(home, roots)
+    security += codex_hits
     pins = read_json(pins_file)
     changed = []
     stamp = now()
@@ -278,6 +463,11 @@ def scan(home: Path, pins_file: Path, own_owners: set[str] | None = None) -> dic
         if path.is_file():
             text = path.read_text(encoding="utf-8", errors="replace")
             instructions.append({"path": str(path).replace(str(home), "~", 1), "lines": text.count("\n") + 1, "chars": len(text)})
+    hooks = hook_rows(claude, degraded)
+    hooks_found = hook_hits(hooks, roots, own_owners)
+    for h in hooks:
+        for private in ("_command", "_root", "_owner"):
+            h.pop(private, None)
     settings = read_json(claude / "settings.json")
     env = settings.get("env") or {}
     base = str(env.get("ANTHROPIC_BASE_URL") or os.environ.get("ANTHROPIC_BASE_URL") or "")
@@ -295,6 +485,12 @@ def scan(home: Path, pins_file: Path, own_owners: set[str] | None = None) -> dic
         "changed": changed,
         "instructions": instructions,
         "mcp_deferral": {"off": deferral_off, "base_url_host": base_host or None, "betas_disabled": betas_off},
+        "projects": projects,
+        "codex": codex,
+        "hooks": hooks,
+        "hook_security": hooks_found,
+        "usage": {"days": USAGE_DAYS, "transcripts": transcripts,
+                  "unused_offered": sum(1 for s in skills if s["model_invocable"] and not s["uses_30d"])},
         "degraded": degraded,
     }
 
