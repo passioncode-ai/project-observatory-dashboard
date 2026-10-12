@@ -5,6 +5,13 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **Cloudflare door: `--preset workers-routes --zone <zone>`** — Zone Read + Workers Routes Write on one zone,
+  into a vault slot, verified by listing the zone's routes with the new value. `workers-edit` deploys a script
+  but cannot route a hostname to it; this is that one zone right, without DNS. First use: checkmydata.ai
+  moving its static site to a Worker.
+
 ### Changed
 
 - **Trust tiers, written down** (Fabric ADR-0144 amendment 4): on the operator's own machines (T0, and enrolled

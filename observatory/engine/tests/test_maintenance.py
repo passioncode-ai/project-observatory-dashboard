@@ -915,13 +915,18 @@ class Pass(Base):
                             sleep=lambda s: order.append(("sleep", round(s, 6))), first_check_delay=90,
                             clock=lambda: M.PROCESS_STARTED + 10)
         self.assertEqual(report["update"]["result"], "up-to-date")
-        self.assertEqual(order[:2], [("sleep", 80), "check"], "the check waits, then runs")
+        # The wait is 90 s minus the time since a FLOAT process start, so it is 80 only to
+        # within rounding — exact equality failed once as 80.00000000000003 (CI, 2026-10-12).
+        self.assertEqual([o if isinstance(o, str) else o[0] for o in order[:2]], ["sleep", "check"],
+                         "the check waits, then runs")
+        self.assertAlmostEqual(order[0][1], 80, places=6)
         order.clear()
         M.run_pass(self.home, at=AT + datetime.timedelta(hours=1), commands=commands, services=None,
                    store=self.store, app=NoApp(), sleep=lambda s: order.append(("sleep", round(s, 6))),
                    first_check_delay=90, clock=lambda: M.PROCESS_STARTED + 10)
         self.assertNotIn("check", order)
-        self.assertFalse([o for o in order if isinstance(o, tuple) and o[1] == 80], "no wait when no check is due")
+        self.assertFalse([o for o in order if isinstance(o, tuple) and abs(o[1] - 80) < 1e-6],
+                         "no wait when no check is due")
         code = M.parser().parse_args(["run", "--first-check-delay", "90"])
         self.assertEqual(code.first_check_delay, 90)
 
