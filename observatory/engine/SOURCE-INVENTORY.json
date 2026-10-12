@@ -800,7 +800,7 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "403d554765dedebd6677f2e32e1ad7ace5c52341a6e645e577ce3a42b116af24",
+      "export_sha256": "b7e7cdb13405e44b08ce2f9efb1f9d43b69d206f1a3f65f862bbd278a7deaa84",
       "bytes": 65089,
       "upstream_modified": true
     },
