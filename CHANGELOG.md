@@ -14,6 +14,10 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Cloudflare door: `--preset redirect-rules --zone <zone>`** — Zone Read + Dynamic URL Redirects Write (Single
+  Redirects) on one zone, into a vault slot, verified by reading the zone's `http_request_dynamic_redirect`
+  entrypoint with the new value. A zone with no redirect yet answers 404 there to a token that may read it and
+  403 to one that may not, so for this preset alone a 404 counts as the proof.
 - **`grant.check` is declared in `fabric-agent.json`** (OBS-67; manifest revision 9): effect `none`, its
   input and output schemas published at `v0.24.1`, a probe that a call carrying no delegation token is denied
   `principal-unproven`. Fabric's registry reads the meter from the service descriptor; the token-carrying call
