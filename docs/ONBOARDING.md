@@ -692,6 +692,12 @@ last probe requires `lsof`; without it the plan is available but path removal
 waits. Windows retains the rename probe. See [the preservation contract](design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
 and `tests/test_disk_guard.py::TargetRevalidation` / `FreshTargetProbe`.
 
+Build planning first refreshes explicit Git worktree registrations within a
+reserved budget. Root attempts rotate across passes with a persisted cursor and
+a five-second default quantum. Registration lists membership, not abandoned or
+safe-to-delete status. Failed path-holder readings remain visible per phase.
+See [registration and fairness](design/DISK-GUARD.md#registration-refresh-and-build-root-fairness-obs-87-subset).
+
 **On every system.** What a process holds is read with `lsof` on macOS and Linux, from
 `/proc` on a Linux without `lsof`, and on Windows by renaming the folder aside before
 removing it — Windows refuses to rename a folder something holds, so a refusal is a skip

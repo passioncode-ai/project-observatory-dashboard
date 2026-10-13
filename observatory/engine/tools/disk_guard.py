@@ -603,6 +603,7 @@ def checkout_idle_days(root: str, at: float, timeout: float = 60) -> float | Non
     """Days since anybody worked in a checkout: the newest of its last checkout or commit
     (`logs/HEAD`, `HEAD`) and of the files it holds uncommitted. NOT the index: every
     `git status` — the observatory's own survey included — rewrites it (measured 2026-10-11)."""
+    deadline = time.monotonic() + max(0.0, timeout)
     gitdir = pathlib.Path(root) / ".git"
     if gitdir.is_file():
         try:
@@ -633,6 +634,8 @@ def checkout_idle_days(root: str, at: float, timeout: float = 60) -> float | Non
     if len(names) > 5001:
         return None                         # a partial activity census cannot prove idle
     for name in names:
+        if time.monotonic() >= deadline:
+            return None
         if name:
             try:
                 stamps.append(os.lstat(os.path.join(root, name)).st_mtime)
@@ -641,14 +644,55 @@ def checkout_idle_days(root: str, at: float, timeout: float = 60) -> float | Non
     return (at - max(stamps)) / 86400 if stamps else None
 
 
-def checkouts() -> list[str]:
-    """Every checkout and worktree the git survey knows."""
+def checkouts(degraded: list | None = None) -> list[str]:
+    """Current explicit registration roots, or a dated pre-registration fallback.
+
+    Registration is discovery evidence only. Every action still independently
+    proves ignore rules, idle time, holders and target identity.
+    """
     found: list[str] = []
-    hygiene = _read(paths.SCRATCH / "git-hygiene.json")
-    for c in hygiene.get("checkouts") or []:
-        found.append(c.get("path") or "")
-        found += [w.get("path") or "" for w in c.get("worktrees") or [] if w.get("state") != "missing"]
-    return sorted({os.path.realpath(p) for p in found if p and os.path.isdir(p)})
+    registration_file = paths.SCRATCH / "worktree-registration.json"
+    registration = _read(registration_file)
+    if registration_file.exists():
+        if registration.get("schema_version") != 1 or registration.get("kind") != "worktree-registration":
+            if degraded is not None:
+                degraded.append({"source": "build-roots", "reason": "invalid registration receipt; no roots eligible"})
+            return []
+        excluded = 0
+        for row in registration.get("repositories") or []:
+            stamp = parse_stamp(row.get("registered_at"))
+            if row.get("stale") is not False or stamp is None or not 0 <= time.time() - stamp <= 6 * 3600:
+                excluded += 1
+                continue
+            found += [w.get("path") for w in row.get("worktrees") or []
+                      if not w.get("bare") and not w.get("prunable") and not w.get("locked")]
+        if (registration.get("partial") or excluded) and degraded is not None:
+            degraded.append({"source": "build-roots", "reason": "registration is partial; only current successful rows eligible",
+                             "measured_at": registration.get("measured_at"), "excluded_repositories": excluded})
+    else:
+        hygiene = _read(paths.SCRATCH / "git-hygiene.json")
+        stamp = parse_stamp(hygiene.get("measured_at") or hygiene.get("at"))
+        if stamp is not None and 0 <= time.time() - stamp <= 24 * 3600:
+            for row in hygiene.get("checkouts") or []:
+                row_stamp = parse_stamp(row.get("measured_at")) if row.get("measured_at") else stamp
+                if row.get("stale") or row_stamp is None or not 0 <= time.time() - row_stamp <= 24 * 3600:
+                    continue
+                found.append(row.get("path"))
+                found += [w.get("path") for w in row.get("worktrees") or [] if w.get("state") != "missing"]
+        if degraded is not None:
+            degraded.append({"source": "build-roots", "reason": "registration unavailable; using dated hygiene fallback only",
+                             "measured_at": hygiene.get("measured_at") or hygiene.get("at"), "max_age_hours": 24})
+    return sorted({os.path.realpath(p) for p in found if isinstance(p, str) and p and os.path.isdir(p)})
+
+
+def _build_attempt(root: str) -> None:
+    """Advance before expensive work so interruption cannot pin the next pass."""
+    path = paths.STATE / "disk-guard-build-cursor.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"schema_version": 1, "last_attempted": root, "attempted_at": now()}), encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
 
 
 def _force_tracked(dirpath: str, full: str, timeout: float) -> bool:
@@ -662,6 +706,29 @@ def _force_tracked(dirpath: str, full: str, timeout: float) -> bool:
     return p.returncode != 0 or bool(p.stdout.strip(b"\0"))
 
 
+def _build_walk(root: str, deadline: float, degraded: list | None):
+    """Bound directory enumeration itself, not only the work between os.walk yields."""
+    pending, count = [root], 0
+    while pending:
+        current, dirs = pending.pop(), []
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    count += 1
+                    if time.monotonic() >= deadline or count > WALK_LIMIT:
+                        if degraded is not None:
+                            degraded.append({"source": "build-output", "reason": "root enumeration budget spent; scan incomplete"})
+                        return
+                    if entry.is_dir(follow_symlinks=False):
+                        dirs.append(entry.name)
+        except OSError:
+            if degraded is not None:
+                degraded.append({"source": "build-output", "reason": "root directory could not be read; scan incomplete"})
+            continue
+        yield current, dirs, []
+        pending.extend(os.path.join(current, name) for name in reversed(dirs))
+
+
 def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[str],
                 budget: Budget | None = None, degraded: list | None = None) -> list[dict]:
     """Regenerable build and dependency output of checkouts nobody worked in for
@@ -669,38 +736,62 @@ def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[
     holds no socket and no other account's file. Never inside `.git`, never in a checkout
     nested in another (that one is judged on its own), never in a privacy-guarded place."""
     days = by_level(cfg, "build_idle_days", level, 14)
-    roots = checkouts()
+    roots = checkouts(degraded)
+    cursor = _read(paths.STATE / "disk-guard-build-cursor.json").get("last_attempted")
+    if cursor in roots:
+        offset = roots.index(cursor) + 1
+        roots = roots[offset:] + roots[:offset]
     import cleanup
     wanted = set(cleanup.artifact_names({"artifact_dirs": names}))
     out = []
-    left = (lambda: budget.left()) if budget else (lambda: 3600.0)  # noqa: E731
+    phase_left = (lambda: budget.left()) if budget else (lambda: 3600.0)
+    quantum = min(30.0, max(0.1, _number(cfg.get("build_root_quantum_seconds", 5), 5)))
     for root in roots:
         if budget and budget.out("build-output"):
             break
-        if guarded(root, degraded):
+        try:
+            _build_attempt(root)
+        except OSError:
+            if degraded is not None:
+                degraded.append({"source": "build-output", "reason": "attempt cursor could not be saved; scan skipped"})
+            break
+        root_end = time.monotonic() + min(quantum, max(0.0, phase_left()))
+        left = lambda: min(root_end - time.monotonic(), phase_left())
+        if guarded(root, degraded) or left() <= 0:
             continue
-        idle = checkout_idle_days(root, at, min(60.0, left()))
-        if idle is None or idle < days or holders.busy(root):
+        idle = checkout_idle_days(root, at, left())
+        if idle is None:
+            if degraded is not None:
+                degraded.append({"source": "build-output", "reason": "checkout activity unavailable or root quantum spent; preserved"})
             continue
-        others = [r for r in roots if r != root and r.startswith(root + "/")]
-        for dirpath, dirnames, _ in os.walk(root):
-            if budget and budget.out("build-output"):
-                return out
-            if any(dirpath == o or dirpath.startswith(o + "/") for o in others):
+        if idle < days or holders.busy(root):
+            continue
+        others = [r for r in roots if r != root and r.startswith(root + os.sep)]
+        for dirpath, dirnames, _ in _build_walk(root, root_end, degraded):
+            if left() <= 0:
+                if degraded is not None:
+                    degraded.append({"source": "build-output", "reason": "root quantum spent; cursor advances next pass"})
+                break
+            if any(dirpath == o or dirpath.startswith(o + os.sep) for o in others):
                 dirnames[:] = []
                 continue
             depth = dirpath[len(root):].count(os.sep)
             keep = []
             for d in dirnames:
+                if left() <= 0:
+                    break
                 full = os.path.join(dirpath, d)
                 if d in (".git", ".wrangler") or os.path.islink(full) or bare_repository_reason(full):
                     continue
                 if d in wanted:
-                    t = min(30.0, max(1.0, left()))
-                    ignored = safe_git.run(["check-ignore", "-q", full], repo=dirpath, timeout=t).returncode == 0
-                    if ignored and not holders.busy(full) and not _force_tracked(dirpath, full, t):
-                        r = inspect(full, at, time.monotonic() + max(1.0, left()), limit=500_000)
-                        if r["complete"]:
+                    try:
+                        ignored = safe_git.run(["check-ignore", "-q", full], repo=dirpath,
+                                               timeout=max(0.001, left())).returncode == 0
+                    except (OSError, subprocess.SubprocessError):
+                        ignored = False
+                    if ignored and left() > 0 and not holders.busy(full) and not _force_tracked(dirpath, full, left()):
+                        r = inspect(full, at, root_end, limit=500_000)
+                        if r["complete"] and left() > 0:
                             out.append({"class": "build-output", "target": full, "bytes": r["size"], "identity": r["identity"],
                                         "checkout": root, "idle_days": days, "cutoff": at,
                                         "why": f"git-ignored {d}; checkout idle {idle:.0f} days"})
@@ -708,6 +799,7 @@ def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[
                 if depth < 5:
                     keep.append(d)
             dirnames[:] = keep
+
     return out
 
 
@@ -805,7 +897,9 @@ def refresh(script: str, out: pathlib.Path, hours: float, timeout: int, args: tu
         return "fresh"
     try:
         p = subprocess.run([sys.executable, str(ROOT / script), str(out), *args], capture_output=True,
-                           text=True, timeout=timeout, cwd=str(ROOT))
+                           text=True, timeout=timeout, cwd=str(ROOT),
+                           env={**os.environ, "OBSERVATORY_STEP_DEADLINE":
+                                str(time.time() + max(0.01, timeout - min(1.0, timeout / 10)))})
     except subprocess.TimeoutExpired:
         return f"timeout after {timeout} s"
     except (OSError, subprocess.SubprocessError) as exc:
@@ -1029,6 +1123,7 @@ def run(argv: list[str]) -> dict:
     found = (previous or {}).get("large_files")
     last_commands = dict((previous or {}).get("commands_last") or {})
     holders_mode = "unknown"
+    holders_by_phase: dict = {}
     with cleanup_lock() as mine:
         if not mine:
             return {**base, "busy": True, "acting": False,
@@ -1037,6 +1132,11 @@ def run(argv: list[str]) -> dict:
             reserve = _number(cfg.get("run_reserve_seconds", 60), 60)
             plan_cap = _number(cfg.get("plan_budget_seconds", 300), 300)
             cap = int(_number(cfg.get("max_actions_per_class", 20000), 20000))
+            registration_room = min(20.0, max(0.0, (left() - reserve) / 4))
+            surveys["worktree-registration"] = (
+                refresh("collectors/scan_git_hygiene.py", paths.SCRATCH / "worktree-registration.json", 0,
+                        registration_room, ("--registrations-only", "--budget-seconds", str(max(0.1, registration_room - 1))))
+                if registration_room > 1 else "skipped: the run budget is spent")
             at = time.time()
             classes = list(CLASSES)
             # The git tier's own share, kept back before the classes split the rest: as the last
@@ -1057,11 +1157,14 @@ def run(argv: list[str]) -> dict:
                 # time the last removal used it (review, 2026-10-12).
                 holders = (Holders([], "none") if name == "cache-command"      # a command needs no listing
                            else Holders.take(min(120.0, max(5.0, share / 2))))
-                holders_mode = holders.mode
+                holders_by_phase[name] = {"mode": holders.mode, "known": holders.known, "measured_at": now()}
+                if name != "cache-command":
+                    holders_mode = "unavailable" if not holders.known or holders_mode == "unavailable" else holders.mode
                 if not holders.known and name != "cache-command":
                     if not any(d.get("source") == "holders" for d in degraded):
                         degraded.append({"source": "holders", "reason": "what processes hold could not be read; "
                                                                         "no path is removed"})
+                    phases[name] = round(time.monotonic() - mark)
                     continue
                 planner = dict(planners(cfg, level, holders, at, degraded, last_commands))[name]
                 actions = planner(Budget(min(plan_cap, share / 2), degraded))
@@ -1118,6 +1221,8 @@ def run(argv: list[str]) -> dict:
             doc = {**base, "at": now(), "free_gb_after": round(free1 / GB, 1),
                    "freed_gb": round((free1 - free0) / GB, 2), "seconds": round(time.monotonic() - started),
                    "budget_seconds": round(budget), "phases": phases, "holders": holders_mode,
+                   "holders_by_phase": holders_by_phase,
+                   "build_cursor": _read(paths.STATE / "disk-guard-build-cursor.json"),
                    "planned": {cls: sum(1 for a in plan if a["class"] == cls) for cls in CLASSES},
                    "planned_gb": round(sum(a.get("bytes") or 0 for a in plan) / GB, 1),
                    "results": results, "commands_last": last_commands,

@@ -129,3 +129,36 @@ The bounded MCP overview keeps `largeFiles` as a list for compatibility and adds
 and reason. The dashboard labels incomplete coverage even when some files were
 found. `test_disk_guard.py::CoverageTruth` covers these producer/consumer seams.
 This subset does not complete worktree discovery or survey scheduling fairness.
+
+## Registration refresh and build-root fairness (OBS-87 subset)
+
+Before splitting the class budgets, `run` reserves up to 20 seconds (at most a
+quarter of the time available after the run reserve) for the registration-only
+collector. It writes `worktree-registration.json`, not `git-hygiene.json`; it
+cannot refresh old cleanliness or branch evidence. `refresh` supplies its child
+with a new deadline just inside its subprocess timeout, rather than inheriting
+an expired step deadline.
+
+`checkouts` accepts only successful, nonstale registration rows measured within
+six hours, excluding bare, locked and prunable worktrees. If a registration
+receipt exists, failed or old rows never fall back to hygiene. Only when the
+receipt is absent may a dated, nonstale hygiene root measured within 24 hours be
+used, with a degradation entry naming its original measurement time. Membership
+alone never authorizes removal: checkout activity, ignored/tracked content,
+subtree protection, identity and holder checks still apply.
+
+`plan_builds` saves `disk-guard-build-cursor.json` before attempting each root.
+The next pass rotates after that root, including after an interruption. A root
+gets five seconds by default (`build_root_quantum_seconds`, capped at 30), bounded
+by the phase budget. Git calls, activity inspection and lazy directory enumeration
+share that deadline; enumeration also has the existing 50,000-entry limit.
+Unknown activity preserves the root; incomplete traversal reports partial
+coverage and only independently inspected candidates can be planned. This is fairness
+between registered roots, not resumable progress within one oversized root; such
+a root can remain incomplete. Individual blocked filesystem system calls cannot
+be preempted by these cooperative deadlines.
+
+`holders_by_phase` retains each phase's mode, known state and measurement time;
+the cache-command phase's `none` does not erase a failed path-holder probe.
+`RegistrationFairness` pins the refresh order, stale fallback, child deadline,
+pre-attempt cursor, per-root quantum and bounded enumeration.

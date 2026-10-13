@@ -153,3 +153,10 @@ OSS-22 target preservation: structural bare repositories and paths beneath them
 are preserved in temporary, cache and artifact inspections. Every path action
 requires its planned device/inode; a replacement requires a new plan. Regression:
 `test_disk_guard.py::SnapshotSafety` (including positive planner identity coverage).
+
+OSS-22 registration fairness: refresh explicit worktree membership before build
+planning, keep old hygiene timestamps unchanged, reject stale registration rows,
+and rotate the persisted last-attempted root after a bounded scan or interruption.
+Per-phase holder evidence retains failures even when cache commands need no probe.
+Regression: `test_disk_guard.py::RegistrationFairness`. Oversized roots are not
+resumed within the root; incomplete coverage remains visible.

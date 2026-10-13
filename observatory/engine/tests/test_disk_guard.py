@@ -375,7 +375,7 @@ class Builds(Base):
         import paths
         paths.SCRATCH.mkdir(parents=True, exist_ok=True)
         (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps(
-            {"checkouts": [{"path": str(r), "worktrees": []} for r in repos]}))
+            {"measured_at": self.g.now(), "checkouts": [{"path": str(r), "worktrees": []} for r in repos]}))
 
     def test_idle_checkouts_lose_ignored_output_and_busy_or_recent_ones_keep_it(self):
         idle, recent, held = self.repo("idle", 20), self.repo("recent", 2), self.repo("held", 20)
@@ -983,7 +983,7 @@ class GitTierSafety(Base):
         self.assertEqual(cleanup.ignored_keepers(str(repo), {".wrangler", "dist"}), [".wrangler"])
         age(repo, 30)
         paths.SCRATCH.mkdir(parents=True, exist_ok=True)
-        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"checkouts": [{"path": str(repo), "worktrees": []}]}))
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"measured_at": self.g.now(), "checkouts": [{"path": str(repo), "worktrees": []}]}))
         self.assertEqual(self.g.plan_builds(self.g.load_config(), "critical", self.free(),
                                           time.time(), [".wrangler"]), [])
         with patch.object(cleanup, "idle_projects", return_value=[{"id": "alpha-web", "folders": [str(repo)], "idle_days": 30}]):
@@ -1004,7 +1004,7 @@ class GitTierSafety(Base):
         self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), [".wrangler/state/dist"])
         age(repo, 30)
         paths.SCRATCH.mkdir(parents=True, exist_ok=True)
-        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"checkouts": [{"path": str(repo), "worktrees": []}]}))
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"measured_at": self.g.now(), "checkouts": [{"path": str(repo), "worktrees": []}]}))
         self.assertEqual(self.g.plan_builds(self.g.load_config(), "critical", self.free(),
                                           time.time(), ["dist"]), [])
         with patch.object(cleanup, "idle_projects", return_value=[{"id": "alpha-web", "folders": [str(repo)], "idle_days": 30}]):
@@ -1080,7 +1080,7 @@ class GitTierSafety(Base):
         age(r, 30)
         import paths
         paths.SCRATCH.mkdir(parents=True, exist_ok=True)
-        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"checkouts": [{"path": str(r), "worktrees": []}]}))
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"measured_at": self.g.now(), "checkouts": [{"path": str(r), "worktrees": []}]}))
         plan = self.g.plan_builds(self.g.load_config(), "critical", self.free(), time.time(), ["dist"])
         self.assertEqual(plan, [])
         # git check-ignore already calls such a folder not ignored; `_force_tracked` is the
@@ -1519,6 +1519,98 @@ class SnapshotSafety(Base):
         for action in plans:
             st = os.lstat(action["target"])
             self.assertEqual(action.get("identity"), {"dev": st.st_dev, "ino": st.st_ino})
+
+
+class RegistrationFairness(Base):
+    def test_current_registration_roots_replace_undated_hygiene(self):
+        import paths
+        roots = [self.t1 / n for n in ("fresh", "stale", "old")]
+        for root in roots:
+            root.mkdir()
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({
+            "checkouts": [{"path": str(roots[2])}]}))
+        (paths.SCRATCH / "worktree-registration.json").write_text(json.dumps({
+            "schema_version": 1, "kind": "worktree-registration", "partial": True,
+            "repositories": [{"path": str(root), "registered_at": self.g.now(),
+                "stale": i == 1, "worktrees": [{"path": str(root)}]} for i, root in enumerate(roots[:2])]}))
+        self.assertEqual(self.g.checkouts(), [str(roots[0])])
+
+    def test_undated_hygiene_is_not_current_registration(self):
+        import paths
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        out = paths.SCRATCH / "git-hygiene.json"
+        doc = {"checkouts": [{"path": str(self.t1)}]}
+        out.write_text(json.dumps(doc))
+        self.assertEqual(self.g.checkouts(), [])
+        doc["at"] = self.g.now()
+        out.write_text(json.dumps(doc))
+        self.assertEqual(self.g.checkouts(), [str(self.t1)])
+        doc["at"] = "2000-01-01T00:00:00Z"
+        out.write_text(json.dumps(doc))
+        self.assertEqual(self.g.checkouts(), [])
+
+    def test_refresh_child_gets_its_own_bounded_deadline(self):
+        with patch.dict(os.environ, {"OBSERVATORY_STEP_DEADLINE": "1"}), \
+                patch.object(self.g.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as call:
+            self.g.refresh("collectors/scan_git_hygiene.py", self.t1 / "out.json", 0, 20)
+        deadline = float(call.call_args.kwargs["env"]["OBSERVATORY_STEP_DEADLINE"])
+        self.assertGreater(deadline, time.time() + 17)
+        self.assertLessEqual(deadline, time.time() + 20)
+
+    def test_refresh_precedes_build_planning_and_holder_failure_survives_command_phase(self):
+        events = []
+        with patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "refresh", side_effect=lambda *a, **k: events.append(("refresh", a)) or "refreshed"), \
+                patch.object(self.g.Holders, "take", return_value=self.g.Holders(None)), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g, "planners", side_effect=lambda *a, **k: events.append(("plan", None)) or [(n, lambda b: []) for n in self.g.CLASSES]):
+            doc = self.g.run([])
+        self.assertEqual(events[0][0], "refresh")
+        self.assertIn("--registrations-only", events[0][1][4])
+        self.assertNotEqual(doc["holders"], "none")
+        self.assertFalse(doc["holders_by_phase"]["build-output"]["known"])
+        self.assertEqual(doc["holders_by_phase"]["cache-command"]["mode"], "none")
+
+    def test_cursor_is_persisted_before_expensive_scan_and_advances_next_pass(self):
+        import paths
+        roots = [str(self.t1 / n) for n in ("a", "b", "c")]
+        calls = []
+        def stop(root, at, timeout):
+            state = json.loads((paths.STATE / "disk-guard-build-cursor.json").read_text())
+            self.assertEqual(state["last_attempted"], root)
+            calls.append(root)
+            raise KeyboardInterrupt
+        with patch.object(self.g, "checkouts", return_value=roots), \
+                patch.object(self.g, "checkout_idle_days", side_effect=stop):
+            for _ in range(2):
+                with self.assertRaises(KeyboardInterrupt):
+                    self.g.plan_builds(self.cfg(), "critical", self.free(), time.time(), ["dist"])
+        self.assertEqual(calls, roots[:2])
+
+    def test_build_directory_enumeration_itself_has_an_entry_bound(self):
+        for name in ("a", "b", "c"):
+            (self.t1 / name).mkdir()
+        degraded = []
+        with patch.object(self.g, "WALK_LIMIT", 1):
+            rows = list(self.g._build_walk(str(self.t1), time.monotonic() + 2, degraded))
+        self.assertEqual(rows, [])
+        self.assertIn("incomplete", degraded[0]["reason"])
+
+    def test_each_root_gets_only_its_quantum(self):
+        roots = [str(self.t1 / n) for n in ("a", "b", "c")]
+        clock, calls = [100.0], []
+        def slow(root, at, timeout):
+            calls.append((root, timeout))
+            clock[0] += timeout
+            return None
+        with patch.object(self.g, "checkouts", return_value=roots), \
+                patch.object(self.g.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(self.g, "checkout_idle_days", side_effect=slow):
+            self.g.plan_builds(self.cfg(build_root_quantum_seconds=2), "critical", self.free(), time.time(),
+                               ["dist"], self.g.Budget(7, []))
+        self.assertEqual([row[0] for row in calls], roots)
+        self.assertTrue(all(0 < row[1] <= 2 for row in calls))
 
 
 if __name__ == "__main__":

@@ -814,15 +814,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "16173219f25f22bec2ce48eb75c088cba97e2d297ccfea4b7dfddc9b7fab4f9e",
-      "bytes": 81605,
+      "export_sha256": "9ca8a5ab4823dcc25b816c2085dc7bbc0608c5ed8be73cfd2ff30c1fa1f2cd5f",
+      "bytes": 82111,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "c8f9db96a7841d271e8f252d5cffed661ba9962aa7a147602e121ddaf87d71f3",
-      "bytes": 68904,
+      "export_sha256": "75b1076aaeca3cf1411b5e7d589eaf386e6287d27f85908622cd1585bea34ef3",
+      "bytes": 69374,
       "upstream_modified": true
     },
     {
@@ -2433,8 +2433,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f8e3b62747870f3cc3bf612f340733bc840739fdaa6ad8a05befae95f8a52b81",
-      "bytes": 81855
+      "export_sha256": "7b188477fac60bac714d217e29101795312f19c5628bd605a7a6e303c69addde",
+      "bytes": 86984
     },
     {
       "path": "tests/test_docs_current.py",
@@ -4057,8 +4057,8 @@
       "path": "tools/disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e19514b3cbbaf0504e93f03bd390391d3fe613a50205039e7623911791d0a10e",
-      "bytes": 58410
+      "export_sha256": "be110a985bcfebdf51d51faa73ed755709524015697875a77506e5ffab167bdc",
+      "bytes": 64544
     },
     {
       "path": "tools/embedding_policy_cli.py",
