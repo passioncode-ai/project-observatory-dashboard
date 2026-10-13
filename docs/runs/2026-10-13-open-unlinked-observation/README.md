@@ -23,3 +23,14 @@
 
 Implementation: `observatory/engine/open_unlinked.py`; behavior tests:
 `observatory/engine/tests/test_open_unlinked.py`.
+
+## Independent correction
+
+The independent reader found that an unknown file type was silently excluded,
+producing a false complete zero. A new regression failed first, then passed after
+unknown types became degraded. Twelve focused cases pass after this correction.
+Known nonregular types are explicitly excluded; unrecognized dialect types remain
+unknown. Field/type meanings were checked against the
+[upstream lsof manual](https://lsof.readthedocs.io/en/stable/manpage/).
+The initial candidate privacy gate passed990 files and13 introduced blobs with
+4055 effective private identifiers; the corrected head needs its own gate.

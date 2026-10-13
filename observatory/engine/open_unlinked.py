@@ -20,6 +20,10 @@ MAX_BYTES = 2 * 1024 * 1024
 MAX_RECORDS = 10000
 MAX_FIELDS = 100000
 PARSER_VERSION = 1
+# Recognized nonregular types are excluded. Other dialect types, including DEL
+# (deleted mapping with uncertain regular-file metadata), retain unknown coverage.
+NONREGULAR_TYPES = {'DIR', 'CHR', 'BLK', 'FIFO', 'PIPE', 'IPv4', 'IPv6', 'unix',
+                    'KQUEUE', 'EVENTFD', 'FSEVENTS', 'LINK'}
 
 
 def now():
@@ -91,6 +95,7 @@ def parse(raw, *, returncode=0, stderr_seen=False, truncated=False, max_records=
         seen_file = True
         if current.get('t') != 'REG':
             if 't' not in current: error('missing-file-type')
+            elif current['t'] not in NONREGULAR_TYPES: error('unknown-file-type')
             return
         if pid is None or not all(k in current for k in ('f', 'D', 'i')):
             error('incomplete-file'); return
