@@ -93,6 +93,22 @@ class PolicyAdmission(unittest.TestCase):
         self.assertNotIn('synthetic-private-marker',json.dumps(binding))
         self.assertNotIn('source',binding)
 
+    def test_legacy_alias_of_policy_identity_cannot_rotate_through_an_unmarked_row(self):
+        self.policy();doc=self.m.ledger();row=copy.deepcopy(doc['issued'][self.name]);row.pop('policy_binding')
+        doc['issued']['legacy-alias']=row;self.m.save_ledger(doc);calls=self.p.calls
+        with self.assertRaisesRegex(RuntimeError,'policy'):self.m.rotate_one('legacy-alias')
+        self.assertEqual(calls,self.p.calls)
+        self.assertEqual(doc,self.m.ledger())
+
+    def test_reserved_identity_alias_is_guarded_but_distinct_hash_is_not(self):
+        self.direct();doc=self.m.ledger();h=doc['issued'][self.name]['hash']
+        doc['issued']['marked']={'account':'example','hash':'different','successor_hash':h,'policy_binding':None}
+        self.m.save_ledger(doc);calls=self.p.calls
+        with self.assertRaisesRegex(RuntimeError,'policy'):self.m.rotate_one(self.name)
+        self.assertEqual(calls,self.p.calls)
+        doc['issued']['marked']['successor_hash']='unrelated';self.m.save_ledger(doc)
+        self.assertEqual(self.m.rotate_one(self.name)['rotations'],1)
+
     def test_only_explicitly_named_policy_source_is_attested(self):
         self.direct()
         self.m.issue_key('other',1,'example','vault:project-a/prod/OTHER','project-a')

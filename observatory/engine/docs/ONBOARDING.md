@@ -1522,7 +1522,9 @@ time. It stores no policy filename. `--dry-run` does not write this provenance.
 A later policy application updates the snapshot when the policy changes.
 
 `rotate NAME` and `rotate --leaked` refuse policy-marked rows before provider calls
-because no current aggregate headroom proof is implemented. The stored policy
+because no current aggregate headroom proof is implemented. The refusal also applies
+to an unmarked alias sharing an exact account/hash with a marked primary or reserved
+predecessor/successor identity. A different ledger name cannot bypass it. The stored policy
 snapshot does not authorize overlapping capacity; stale or malformed provenance
 also refuses. There is no force option or automatic recovery command. Re-applying
 a policy does not make its snapshot a live headroom proof.

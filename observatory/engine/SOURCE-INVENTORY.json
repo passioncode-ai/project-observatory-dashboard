@@ -828,8 +828,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "540fe3af667ef8b5952df550699a78dfa04d7c30819594f27a209bf464e3e0b5",
-      "bytes": 14037,
+      "export_sha256": "cbd01942c5a5b770d33720fb1aca053a033785f2f9c1a65f659ebaca75555447",
+      "bytes": 14221,
       "upstream_modified": true
     },
     {
@@ -849,15 +849,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "654c6ed723089b1cd7c5c2a3636c94b0d45da227ce2ad4c6aaf9d5b1eadcd4e8",
-      "bytes": 102781,
+      "export_sha256": "5fa717d79cd6f8a05a02ffcb03267ea62b3aedde841d7bacd59d2ae869b8c419",
+      "bytes": 102965,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "1457ac8eb97ddabb7442733634c7ef7910589579fbb39f52586372795061afb3",
-      "bytes": 79167,
+      "export_sha256": "56fe743312bfd4226f2edf6984c67c7e83a443810a60db0e63425087b79adbf7",
+      "bytes": 79312,
       "upstream_modified": true
     },
     {
@@ -3318,8 +3318,8 @@
       "path": "tests/test_policy_rotation_admission.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fc2d84276990ef3c5b4881da8b09ce1414cb1430a02ccea10ac0cc8762cd6a08",
-      "bytes": 5477
+      "export_sha256": "f1a1ebe949664b422e6b3bde83ef85efdf7807aaaff45d07f62bfebd124eb201",
+      "bytes": 6561
     },
     {
       "path": "tests/test_portable_mcp.py",
@@ -4512,8 +4512,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "8f83743104fda6285f753b703ed00e31d8b4cfebf3baf6180dc5d5a31e1533bd",
-      "bytes": 109304,
+      "export_sha256": "5f641c2333f7f6f701b5946f82d1f37e7652656b0ff08402a5dbd3a00edf2334",
+      "bytes": 109710,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
