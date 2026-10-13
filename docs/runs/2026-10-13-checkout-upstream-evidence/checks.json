@@ -1,5 +1,5 @@
 {
-  "status": "SCOPED_PASS_REVIEW_PENDING",
+  "status": "PASS_SCOPED_SOURCE",
   "base": "284bc398a482c226ed9776eaee629221939e8928",
   "source_hashes": {
     "checkout_graph.py": "ddc107eadbc38a13dc3ac887d94fbdba4ece6d728887112c6dd049a33ee4bb03",
@@ -86,5 +86,12 @@
       "malformed saved bindings could project counts"
     ],
     "reproduced_failing_outcomes": 6
+  },
+  "independent_review": {
+    "source": "52c40faa2f4e286e2935439b0174d934ae9299d0",
+    "verdict": "PASS_SCOPED_SOURCE",
+    "original_counterexamples_and_controls": 6,
+    "additional_controls": 21,
+    "limits": "No remote durability, lifecycle authority, installed or whole-system acceptance."
   }
 }
