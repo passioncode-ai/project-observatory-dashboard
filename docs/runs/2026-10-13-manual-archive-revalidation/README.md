@@ -83,3 +83,25 @@ privacy scanner's path/text rules over all seven follow-up files found zero
 matches. The previously recorded baseline full-tree privacy findings remain;
 this follow-up did not rescan history. Independent review on the exact follow-up
 commit remains the next task; no live removal ran.
+
+## Symbolic ref follow-up (IV12)
+
+Independent review found that plain expected-tip `update-ref -d` follows a
+symbolic branch ref. A synthetic alias to the checked-out main branch therefore
+removed its referent, both when present before eligibility and when injected at
+the deletion boundary. Tests against the previous commit reproduced one failure
+and one error (the main ref was missing).
+
+Eligibility now refuses symbolic targets and unknown ref types, validates literal
+branch names through `check-ref-format --branch` without accepting expanded
+shortcuts, and accepts only known cleanup classes. Deletion adds `--no-deref`;
+the real-Git late-alias test proves the referent survives. The existing expected-
+tip race regression still covers ordinary branch movement. These changes do not
+claim an atomic lock against another process attaching a worktree.
+
+IV12 verification under a temporary HOME: 56 git-hardening, 8 GitTierSafety,
+10 Estate and 6 document-copy tests passed (80 total). Document-copy sync,
+source-inventory and diff-whitespace checks passed. Scoped privacy path/text
+checks over seven changed files reported zero findings. No live cleanup or
+history scan ran; the previously recorded full-tree findings remain unchanged.
+Independent review of the follow-up commit is the next task.
