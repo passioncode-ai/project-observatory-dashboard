@@ -870,6 +870,40 @@ class CleanupNeverLosesWork(unittest.TestCase):
         self.assertEqual(rec["result"], "skipped", rec)
         self.assertIn("could not be read", rec["reason"])
 
+    def test_symbolic_branch_alias_cannot_delete_checked_out_referent(self):
+        bare(self.wt, "checkout", "--detach", "-q")
+        head = bare(self.repo, "rev-parse", "main").stdout.strip()
+        bare(self.repo, "symbolic-ref", "refs/heads/topic", "refs/heads/main")
+        rec = self._branch_action("branch-merged")
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "rev-parse", "--verify", "main").stdout.strip(), head)
+        self.assertEqual(bare(self.repo, "symbolic-ref", "refs/heads/topic").stdout.strip(), "refs/heads/main")
+
+    def test_late_symbolic_branch_alias_never_deletes_referent(self):
+        bare(self.wt, "checkout", "--detach", "-q")
+        head = bare(self.repo, "rev-parse", "main").stdout.strip()
+        original = self.cleanup.git
+        changed = []
+        def alias(repo, *args, **kwargs):
+            if args[:2] == ("update-ref", "-d"):
+                bare(self.repo, "symbolic-ref", "refs/heads/topic", "refs/heads/main")
+                changed.append(True)
+            return original(repo, *args, **kwargs)
+        with patch.object(self.cleanup, "git", side_effect=alias):
+            self._branch_action("branch-merged")
+        self.assertTrue(changed)
+        self.assertEqual(bare(self.repo, "rev-parse", "--verify", "main").stdout.strip(), head)
+
+    def test_invalid_branch_names_and_classes_do_not_reach_deletion(self):
+        for name, cls in [("HEAD", "branch-merged"), ("@{-1}", "branch-merged"),
+                          ("-D", "branch-unique"), ("bad..ref", "branch-unique"),
+                          ("topic", "branch-unsupported")]:
+            with self.subTest(name=name, cls=cls):
+                rec = self.cleanup.act({"class": cls, "tier": "auto", "repo": str(self.repo),
+                                        "target": name, "default_branch": "main"}, self.d / "archive")
+                self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "show-ref", "--verify", "--quiet", "refs/heads/main", check=False).returncode, 0)
+
 
 class RemoteReason(unittest.TestCase):
     """An unreachable remote is reported with git's CAUSE, not its boilerplate.

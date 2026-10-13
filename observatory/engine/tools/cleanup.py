@@ -460,9 +460,27 @@ def build_plan(cfg: dict, busy: set[str], artifacts: bool = True) -> dict:
 
 # --- acting, with a re-check ---------------------------------------------------
 
+def branch_name_reason(repo: str, name) -> str:
+    if not isinstance(name, str) or not name or name.startswith("-"):
+        return "branch name is invalid"
+    checked = git(repo, "check-ref-format", "--branch", name)
+    # --branch can expand shortcuts such as @{-1}; plans must name the literal branch.
+    if checked.returncode or checked.stdout.strip() != name:
+        return "branch name is invalid or not literal"
+    return ""
+
+
 def still_safe_branch(a: dict, expected: str | None = None) -> str:
     """Prove eligibility for a fixed tip and refuse unreadable checkout state."""
     repo, name, default = a["repo"], a["target"], a.get("default_branch")
+    why = branch_name_reason(repo, name)
+    if why:
+        return why
+    symbolic = git(repo, "symbolic-ref", "--quiet", "refs/heads/" + name)
+    if symbolic.returncode == 0:
+        return "symbolic branch refs are not cleanup targets"
+    if symbolic.returncode != 1:
+        return "branch ref type could not be read"
     tip = git(repo, "rev-parse", "--verify", "refs/heads/" + name)
     if tip.returncode or not tip.stdout.strip():
         return "branch no longer exists or could not be read"
@@ -587,7 +605,12 @@ def retain_worktree_head(repo: str, target: str, head: str) -> str:
 def act(a: dict, archive: pathlib.Path) -> dict:
     cls, repo, target = a["class"], a.get("repo"), a["target"]
     rec = {"at": now(), "class": cls, "tier": a["tier"], "target": target, **({"repository": a["repository"]} if "repository" in a else {})}
-    if cls.startswith("branch-"):
+    if cls in ("branch-merged", "branch-pushed", "branch-unique"):
+        why = branch_name_reason(repo, target)
+        if not why and cls in ("branch-merged", "branch-unique"):
+            why = branch_name_reason(repo, a.get("default_branch"))
+        if why:
+            return {**rec, "result": "skipped", "reason": why}
         tip = git(repo, "rev-parse", "--verify", "refs/heads/" + target)
         if tip.returncode or not tip.stdout.strip():
             return {**rec, "result": "skipped", "reason": "branch tip could not be read"}
@@ -613,7 +636,8 @@ def act(a: dict, archive: pathlib.Path) -> dict:
             return {**rec, "result": "skipped", "reason": why}
         # Expected-old-value deletion cannot remove a newer tip. Worktree attachment
         # is checked above; an unrelated checkout still has a final check/use race.
-        done = git(repo, "update-ref", "-d", "refs/heads/" + target, sha)
+        # A late symbolic-ref conversion must never redirect deletion to its referent.
+        done = git(repo, "update-ref", "-d", "--no-deref", "refs/heads/" + target, sha)
         return {**rec, "result": "removed" if done.returncode == 0 else "failed",
                 **({"reason": "branch changed or could not be deleted; nothing deleted"} if done.returncode else {})}
     if cls == "worktree-missing":

@@ -814,15 +814,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "0f9fcd260567f118b9b59a3fa0fe133ae5bcac3da688a891ddb7b9f137fddfbf",
-      "bytes": 83241,
+      "export_sha256": "926ed49ba95da9ec7972c80b72802966b8187bb0fd928d79c38d866a164f0f5d",
+      "bytes": 83489,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "bb15d867c61063ee983299b476ea4bea31878faa3b8ac656ac42f39ce18bb5fb",
-      "bytes": 69981,
+      "export_sha256": "93e7ac0381fd7f768ecf56dbc3cf8ae0d0d2b36455a71a8f7b0cd0dad4310953",
+      "bytes": 70082,
       "upstream_modified": true
     },
     {
@@ -2628,8 +2628,8 @@
       "path": "tests/test_git_hardening.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "64b553c16d872e8912ec545dbfdc1c67280ee0c3f65259caabe845981ad15d30",
-      "bytes": 47377
+      "export_sha256": "2a5c24e66cde6f43abd106b75c8976d40dd0ac2b52c995c04cfe08bcf4cf24c9",
+      "bytes": 49466
     },
     {
       "path": "tests/test_git_locale.py",
@@ -3993,8 +3993,8 @@
       "path": "tools/cleanup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b9dc46b80ce0bed0fefb07c96c6e1a4f0e6c92b29ec5f0c88321b5c70cae6285",
-      "bytes": 44518
+      "export_sha256": "fac3a4b748b6ec6c9a5de336b7dfc0f87bfd8c9644b63e02345108c01b67f4df",
+      "bytes": 45676
     },
     {
       "path": "tools/cloudflare.py",
