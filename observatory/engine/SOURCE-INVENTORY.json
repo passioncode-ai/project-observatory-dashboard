@@ -828,8 +828,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "a388b33f83d0f12aac1fe1f062705667d92bdcb62be1b586bd75ac6b563f5a2b",
-      "bytes": 14957,
+      "export_sha256": "e345012edcf35611532c1f71836780ecd4707bdf800b097cc2c5c1dcae5b1166",
+      "bytes": 15374,
       "upstream_modified": true
     },
     {
@@ -849,15 +849,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "d1ab07981cfd5bb22021044ea993b2bb0e3377759a0e98fc4ec75412c4f032f4",
-      "bytes": 104386,
+      "export_sha256": "7a1e290228aec6737a87534aa1abb3b7d0475d87d66f398e4ac2978d0d72cf6b",
+      "bytes": 104864,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "e2137dacc5eb2567ef7a8200558d184bcc44b0ddf75807bc14057f57f4b4e48d",
-      "bytes": 81785,
+      "export_sha256": "c9edbcb00d911cd900b8456de0aca93881b71f6cf333b63322f94e6fe727b2e5",
+      "bytes": 82775,
       "upstream_modified": true
     },
     {
@@ -1273,8 +1273,8 @@
       "path": "holders.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8961ffcb48e97200f90d0ab86edbde133c6c721010f802fc3610ef4db59e79bf",
-      "bytes": 9747
+      "export_sha256": "78717d5d7837b62cf3e48d1eed88b02e54bec401adbf198f59a3d715a0b06a34",
+      "bytes": 10581
     },
     {
       "path": "identifiers.py",
@@ -2580,8 +2580,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f5947df484a890827519b381b515bf20e75e976396afbb9cb48910b7775d2ec0",
-      "bytes": 108697
+      "export_sha256": "10cfcea41c808974e6c9824780bf9f91a30b67faeef479159e9f4612e5ed7e3e",
+      "bytes": 115643
     },
     {
       "path": "tests/test_docs_current.py",

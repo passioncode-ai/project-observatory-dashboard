@@ -296,3 +296,18 @@ rename, so a successful rename is not non-use evidence. Generic tool cleanup
 commands retain their separate policy and do not gain authority from this result.
 Acceptance: engine `tests/test_disk_guard.py::WindowsHolderUnknown`; its native
 shared-delete case is explicitly skipped outside Windows.
+
+### POSIX cleanup: rendered argv does not prove absence
+
+An operator or agent requests cleanup while a script has closed its source file.
+Spaced absolute paths, relative paths and symlink aliases can be absent from the
+lexical process-path list even while that script runs. The system preserves path
+targets when argv coverage is incomplete; positive holds remain useful, and an
+empty lsof listing never upgrades unmatched rendered ps to a free target. A stale
+synthetic free snapshot cannot bypass the final unknown refusal for disk paths
+or clean/archived dirty worktrees. A cache command with an unmatched nonempty
+busy-tool precondition executes no child. Commands without holder preconditions
+retain their separate configured policy. The user keeps the target pending a
+supported observation and owner lifecycle contract; repeated scans alone do not
+resolve unsupported completeness. Tests: `LossyArgvEvidence` and
+`LossyArgvAdmission` in `tests/test_disk_guard.py` (synthetic only).

@@ -139,10 +139,9 @@ jobs:
 
   windows:
     # docs/design/WINDOWS-LINUX.md, W0: what the engine does on Windows, measured on every
-    # change. Informative until W3 — each step runs whatever the one before it did, and the
-    # summary lists every outcome — so it is not one of the required checks yet.
+    # change. Historical informative steps remain explicitly allowed to fail.
+    # Holder safety is enforced at both step and job level; its failure fails this job.
     runs-on: windows-latest
-    continue-on-error: true
     defaults:
       run:
         shell: bash
