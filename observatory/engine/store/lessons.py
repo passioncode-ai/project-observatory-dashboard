@@ -160,6 +160,9 @@ def existing(conn: sqlite3.Connection, class_key: str, project_key: str) -> sqli
         " GROUP BY memory_id) m ON m.memory_id = l.memory_id AND m.r = l.revision"
         " LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
         " WHERE t.memory_id IS NULL AND l.kind = ?"
+        # A closed record is history, not this project's record of the class: a lesson
+        # archived because its commit changed has a successor (see `write`).
+        " AND l.state NOT IN ('rejected', 'archived', 'superseded')"
         " AND json_extract(l.body_json, '$.classKey') = ?"
         " AND json_extract(l.body_json, '$.origin.projectId') = ?"
         " ORDER BY l.created_at, l.memory_id LIMIT 1",
@@ -189,11 +192,20 @@ def write(conn: sqlite3.Connection, ledger: Any, *, owner: str, body: dict,
           provenance: list[dict]) -> dict:
     """Mint the lesson, or revise this project's record of the class.
 
-    An unchanged repeat writes nothing and answers with the current revision; a changed
-    one appends a revision under compare-and-swap, keeping the record's state (a
-    corroborated lesson stays corroborated: the witness checked the class and the
-    commit, not the wording). `ledger` is `store.ledger`, passed in so a caller that
-    reloaded it in a test uses one module."""
+    An unchanged repeat writes nothing and answers with the current revision. A change of
+    wording appends a revision under compare-and-swap and keeps the record's state: the
+    witness checked the class and the commit, not the wording.
+
+    **A NEW COMMIT IS A NEW CLAIM.** A corroboration vouched for the old commit, so a
+    promoted lesson that now cites another one cannot stay `observed`. The lifecycle has
+    no edge back to `proposed`, and none is added: the old record is ARCHIVED by its
+    author (`observed -> archived`, its history kept) and a new `proposed` record of the
+    class replaces it (`outcome: replaced`, `replaces: <id>@<rev>`). The corroborator
+    checks the new commit on its next pass and promotes it only once it resolves. A
+    proposed lesson whose commit changes is simply revised: nothing vouched for it yet.
+
+    `ledger` is `store.ledger`, passed in so a caller that reloaded it in a test uses one
+    module."""
     prior = existing(conn, body["classKey"], body["origin"]["projectId"])
     if prior is not None:
         same = (json.loads(prior["body_json"] or "{}") == body
@@ -202,6 +214,27 @@ def write(conn: sqlite3.Connection, ledger: Any, *, owner: str, body: dict,
             return {"memoryId": prior["memory_id"], "revision": prior["revision"],
                     "state": prior["state"], "owner": prior["owner"], "supersedes": [],
                     "createdAt": prior["created_at"], "outcome": "unchanged"}
+        prior_body = json.loads(prior["body_json"] or "{}")
+        new_commit = (prior_body.get("origin") or {}).get("commit") != body["origin"]["commit"]
+        if new_commit and prior["state"] != "proposed":
+            closed = ledger.append(
+                conn, owner=owner, kind=KIND, function=FUNCTION, scope=SCOPE,
+                memory_id=prior["memory_id"], expected_revision=prior["revision"],
+                statement=prior["statement"], why=prior["why"], state="archived",
+                confidence=prior["confidence"], evidence=json.loads(prior["evidence_json"] or "[]"),
+                body=prior_body,
+                provenance=json.loads(prior["provenance_json"] or "[]") + [
+                    {"source": "observatory_lesson",
+                     "archived": f"the evidence commit changed to {body['origin']['commit']}; "
+                                 f"the corroboration vouched for the old one"}])
+            replaces = f"{prior['memory_id']}@{closed['revision']}"
+            out = ledger.append(conn, owner=owner, kind=KIND, function=FUNCTION, scope=SCOPE,
+                                statement=statement_of(body), why=why_of(body),
+                                state="proposed", confidence=CONFIDENCE,
+                                evidence=evidence_of(body), body=body,
+                                provenance=provenance + [{"source": "observatory_lesson",
+                                                          "replaces": replaces}])
+            return {**out, "outcome": "replaced", "replaces": replaces}
         out = ledger.append(conn, owner=owner, kind=KIND, function=FUNCTION, scope=SCOPE,
                             memory_id=prior["memory_id"], expected_revision=prior["revision"],
                             statement=statement_of(body), why=why_of(body),

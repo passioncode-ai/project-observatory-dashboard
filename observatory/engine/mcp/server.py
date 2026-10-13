@@ -1118,10 +1118,14 @@ LESSON_OUTPUT: dict[str, Any] = {
              "revision": {"type": "integer", "minimum": 1},
              "state": {"enum": ["proposed", "observed", "supported", "contested", "stale"]},
              "owner": {"type": "string"},
-             "outcome": {"enum": ["created", "revised", "unchanged"],
+             "outcome": {"enum": ["created", "revised", "replaced", "unchanged"],
                          "description": "created: a new record; revised: this project's "
-                                        "record of the class got a new revision; unchanged: "
-                                        "an identical repeat, nothing written"},
+                                        "record of the class got a new revision; replaced: "
+                                        "a promoted record cited a new commit, so it was "
+                                        "archived and this new proposal replaces it; "
+                                        "unchanged: an identical repeat, nothing written"},
+             "replaces": {"type": "string", "pattern": "^mem:[^@]+@[0-9]+$",
+                          "description": "with `replaced`: the archived record and revision"},
              "classKey": {"type": "string"},
              "origin": {"type": "object", "additionalProperties": False,
                         "required": ["projectId", "commit"],
@@ -1179,7 +1183,8 @@ def observatory_lesson(
 ) -> dict[str, Any]:
     """Record a lesson — a retro entry's class — so agents in OTHER projects find it
     (`observatory_search(kinds=["lesson"])`, no project). One record per (classKey,
-    project): a repeat from the same project revises it, an identical repeat writes nothing.
+    project): a repeat from the same project revises it, an identical repeat writes nothing,
+    and a promoted lesson citing a new commit is archived and replaced by a new proposal.
     Written as a PROPOSAL with confidence 0.5. It becomes `observed` only when a second,
     distinct project records the same classKey and both commits resolve in clones the
     registry knows here (the corroborator, `tools/corroborate.py`; an unknown key witnesses

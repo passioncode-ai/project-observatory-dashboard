@@ -492,6 +492,46 @@ def test_the_proposed_count_is_the_rows_the_session_rule_looked_at() -> None:
           receipt["counts"]["proposed"] == 0 and receipt["counts"]["lessons_waiting"] == 1,
           json.dumps(receipt["counts"]))
 
+
+def test_a_promoted_lesson_whose_commit_changes_is_proposed_again() -> None:
+    """A revision that cites a different commit is a new claim: the corroboration was of
+    the old commit. It drops back to `proposed` and is promoted again only once the new
+    commit resolves."""
+    a, a1, _ = repo_with_history()
+    b = _other_repo()
+    d, sdb, L, LS = _lesson_store({"alpha": a, "beta": b})
+    conn = sdb.connect()
+    _write_lesson(conn, L, LS, _key(a), a1)
+    lb = _write_lesson(conn, L, LS, _key(b), git(b, "rev-parse", "HEAD"))
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    check("both start observed", _state(conn, lb["memoryId"]) == "observed",
+          _state(conn, lb["memoryId"]))
+
+    def bs_record():
+        row = LS.existing(conn, "absence-needs-its-own-check", _key(b))
+        return (row["memory_id"], row["state"]) if row is not None else (None, None)
+
+    moved = _write_lesson(conn, L, LS, _key(b), "deadbeefcafe")
+    check("a new commit after promotion is not kept as observed",
+          bs_record()[1] == "proposed", f"{moved.get('outcome')}: {bs_record()}")
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    check("and a commit git cannot find keeps it proposed", bs_record()[1] == "proposed",
+          str(bs_record()))
+    (b / "c.txt").write_text("more\n", encoding="utf-8")
+    git(b, "add", "-A")
+    git(b, "commit", "-qm", "the fix")
+    _write_lesson(conn, L, LS, _key(b), git(b, "rev-parse", "HEAD"))
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    check("it is promoted again once the new commit resolves", bs_record()[1] == "observed",
+          str(bs_record()))
+    conn.close()
+
 if __name__ == "__main__":
     print("the second witness — what it refuses, and who hears about it\n")
     for fn in (test_a_row_with_no_recorded_head_is_refused,
@@ -509,7 +549,8 @@ if __name__ == "__main__":
                test_a_project_with_no_clone_here_is_not_a_witness,
                test_two_invented_keys_promote_nothing,
                test_the_project_threshold_is_the_one_constant,
-               test_the_proposed_count_is_the_rows_the_session_rule_looked_at):
+               test_the_proposed_count_is_the_rows_the_session_rule_looked_at,
+               test_a_promoted_lesson_whose_commit_changes_is_proposed_again):
         fn()
     print()
     if FAILURES:

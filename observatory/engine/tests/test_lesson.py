@@ -121,6 +121,32 @@ class OnePerClassAndProject(Base):
         self.assertEqual(len({r["memory_id"] for r in self.rows()}), 2)
 
 
+class ANewCommitAfterPromotion(Base):
+    def test_the_promoted_record_is_archived_and_a_new_proposal_replaces_it(self) -> None:
+        first = self.ws.srv.observatory_lesson(**EMITTED)
+        from store import db as sdb
+        from store import ledger as L
+        conn = sdb.connect()
+        try:
+            L.corroborate(conn, first["memoryId"], by="agent:lesson-corroborator",
+                          check={"how": "two projects"}, expected_revision=1)
+        finally:
+            conn.close()
+        wording = self.ws.srv.observatory_lesson(**lesson(title="An absent input must fail "
+                                                                 "its own check, always"))
+        self.assertEqual((wording["outcome"], wording["state"]), ("revised", "observed"),
+                         "a change of wording keeps the corroboration")
+        out = self.ws.srv.observatory_lesson(**lesson(commit="0123456789abcdef"))
+        jsonschema.Draft202012Validator(self.tool().output_schema).validate(out)
+        self.assertEqual((out["outcome"], out["state"]), ("replaced", "proposed"), out)
+        self.assertEqual(out["replaces"], f"{first['memoryId']}@4", "created, corroborated, reworded, archived")
+        self.assertNotEqual(out["memoryId"], first["memoryId"])
+        states = {r["memory_id"]: r["state"] for r in self.rows()}
+        self.assertEqual(states[first["memoryId"]], "archived")
+        again = self.ws.srv.observatory_lesson(**lesson(commit="0123456789abcdef"))
+        self.assertEqual((again["memoryId"], again["outcome"]), (out["memoryId"], "unchanged"))
+
+
 class WhatALessonMayNotCarry(Base):
     def assert_refused(self, args: dict, words: str) -> None:
         before = len(self.rows())

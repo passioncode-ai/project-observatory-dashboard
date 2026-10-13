@@ -1167,7 +1167,7 @@ def _erasure_horizon(row: dict) -> str:
     try:
         sys.path.insert(0, str(ROOT / "store"))
         import retention
-        left = retention.days_left(owner, state, at)
+        left = retention.days_left(owner, state, at, kind=row.get("kind"))
     except Exception:                                                               
         return ""
     if left is None:

@@ -322,7 +322,12 @@ schema against it.
   and the answer's `redacted.fields` says where.
 - **One record per (classKey, project).** A repeat from the same project revises that record
   (`outcome: revised`) or writes nothing (`unchanged`); it never mints a second one, because
-  two records of one project would read as two witnesses.
+  two records of one project would read as two witnesses. **A new commit is a new claim:** a
+  promoted lesson that cites another commit cannot keep `observed`, since its corroboration
+  vouched for the old one. The lifecycle has no edge back to `proposed`, so the old record is
+  archived by its author and a new proposal replaces it (`outcome: replaced`,
+  `replaces: <id>@<rev>`); the corroborator promotes it again only once the new commit
+  resolves. A change of wording keeps the state.
 - **Found by kind.** `observatory_search(query, kinds: ["lesson"])` with no project filters by
   kind inside the candidate query, before the 300-match window. Without it, the companion's
   per-session records filled the window and the search abstained over a store that held the
