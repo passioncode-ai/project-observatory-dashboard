@@ -422,4 +422,28 @@ class DecreaseRepair(unittest.TestCase):
         self.assertEqual(self.record()['ceiling_repair']['status'], 'effect-unknown')
 
 
+
+    def test_hashless_held_identity_stays_unknown_without_provenance_change(self):
+        policy = A.T._pol(1, limit=9)
+        self.m.issue_for_policy(policy, 'example')
+        def alias(doc):
+            doc['issued']['protected'] = dict(doc['issued'][self.name], destination='vault:project-b/prod/K0')
+            doc['issued'][self.name].pop('hash')
+        self.tamper(alias)
+        original = self.m._request; self.p.echo = lambda x: 9
+        def lost(path, admin, payload=None, method=None):
+            result = original(path, admin, payload, method)
+            if method == 'PATCH': raise RuntimeError('synthetic unknown effect')
+            return result
+        self.m._request = lost
+        self.assertEqual(self.m.decrease_limit('protected', 8)['status'], 'effect-unknown')
+        self.m._request = original
+        before = (self.m.ledger(), self.p.writes)
+        state, row, reason = self.m._read_held(self.name, self.record(), 'example')
+        self.assertEqual(state, 'held-unread'); self.assertIsNone(row)
+        plan = self.m.issue_for_policy(policy, 'example')
+        self.assertEqual(plan[0]['action'], 'held-unread')
+        self.assertEqual((self.m.ledger(), self.p.writes), before)
+
+
 if __name__ == '__main__': unittest.main()

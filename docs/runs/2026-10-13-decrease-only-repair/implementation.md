@@ -130,3 +130,11 @@ same 115 prior safety assertions. The [initial receipt](implementation-focused.j
 remains the original source-bound snapshot, not a current verdict. Independent
 rereview of the correction is pending; no integration, push or full-model outcome
 is implied by these focused checks.
+
+A second independent pass confirmed those corrections and found a read-only alias
+seam: when policy provenance already matched, a hashless row could discover the
+protected key and report `in-place`. `_read_held` now guards the discovered hash as
+well, returning unknown exposure rather than a served slot. The counterexample
+was observed red and is retained. [Current focused receipt](held-alias-focused.json):
+28 repair tests and 115 prior safety assertions pass. Original receipt snapshots
+remain unchanged; independent rereview of this final correction is pending.

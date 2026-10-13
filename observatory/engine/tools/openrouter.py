@@ -848,6 +848,10 @@ def _read_held(name: str, rec: dict, account: str | None) -> tuple[str | None, d
         return "held-missing", None, ""
     if not isinstance(row, dict) or (rec.get("hash") and row.get("hash") != rec["hash"]):
         return "held-unread", None, "provider identity does not match the ledger"
+    try:
+        _guard_ceiling_repair(row)
+    except RuntimeError:
+        return "held-unread", None, "discovered identity has unresolved ceiling repair evidence"
     if rec.get("rotation_status") not in (None, "complete") or rec.get("predecessor_hash") or rec.get("successor_hash"):
         return "held-rotation", row, "rotation is unresolved; reconcile both identities and destination before another mutation"
     if rec.get("pending"):
