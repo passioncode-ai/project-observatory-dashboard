@@ -1,0 +1,9 @@
+{
+  "exit_code": 0,
+  "output": ".......................\n----------------------------------------------------------------------\nRan 23 tests in 0.745s\n\nOK\n",
+  "source_bindings": {
+    "observatory/engine/tests/adv_j1_property.py": "374eee9807585e7599771c23866026746c924f9f8c586abb4025bc5a068c1a6b",
+    "observatory/engine/tests/test_j3_adversary.py": "b013f4e1a57858a18ef0f696658ce74a2ec4daef8a133f62e337b6a2bbf5fa28",
+    "observatory/engine/tools/openrouter.py": "602d50bd7f594c74585c10eff3388bd68a16d90a0d5e26cb85c4c50e826e31ba"
+  }
+}
