@@ -414,6 +414,136 @@ class ApfsFrees(DiskBudget):
         self.assertEqual(sm.frees(1048576, None), {})
 
 
+class WorktreeRegistration(Base):
+    """Registration is cheap metadata, independent of the hygiene classification."""
+
+    def build(self, name="alpha-web", branch="main"):
+        root = self.data / name
+        subprocess.run(["git", "init", "-q", "-b", branch, str(root)], check=True)
+        commit(root, "source")
+        linked = self.base / (name + "-linked")
+        git(root, "worktree", "add", "-qb", "topic", str(linked))
+        return root, linked
+
+    def registry(self, roots):
+        (self.home / "registry/repositories.json").write_text(json.dumps({"repositories": [
+            {"id": "repository:example-org/" + p.name, "local": {"path": str(p)}} for p in roots]}))
+        (self.home / "registry/projects.json").write_text(json.dumps({"projects": []}))
+
+    def run_registration(self, budget=20):
+        import scan_git_hygiene as h
+        output = self.home / "store/raw/worktree-registration.json"
+        with patch.object(h, "default_branch", side_effect=AssertionError("not cheap")), \
+                patch.object(h, "branches", side_effect=AssertionError("not cheap")), \
+                patch("scan_machine.working_dirs", side_effect=AssertionError("no process scan")), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(h.main(["scan", str(output), "--registrations-only", "--budget-seconds", str(budget)]), 0)
+        return json.loads(output.read_text())
+
+    def test_linked_only_registry_lists_worktrees_without_expensive_calls(self):
+        root, linked = self.build()
+        self.registry([linked])
+        import scan_git_hygiene as h
+        self.assertEqual([row["path"] for row in h.checkouts()], [str(linked)])
+        doc = self.run_registration()
+        self.assertFalse(doc["partial"])
+        self.assertEqual(doc["kind"], "worktree-registration")
+        row = doc["repositories"][0]
+        self.assertFalse(row["stale"])
+        self.assertEqual({w["path"] for w in row["worktrees"]}, {str(root), str(linked)})
+        self.assertTrue(row["registered_at"])
+
+    def test_unresolved_default_does_not_hide_registered_worktrees(self):
+        root, linked = self.build(branch="trunk")
+        self.registry([root])
+        self.assertEqual(len(self.run_registration()["repositories"][0]["worktrees"]), 2)
+
+    def test_a_source_error_keeps_other_source_and_marks_partial(self):
+        root, linked = self.build()
+        self.registry([])
+        (self.home / "registry/repositories.json").write_text("invalid json")
+        (self.home / "registry/projects.json").write_text(json.dumps({"projects": [{"id": "project:alpha-web", "local_folders": [root.name]}]}))
+        doc = self.run_registration()
+        self.assertTrue(doc["partial"])
+        self.assertEqual(len(doc["repositories"][0]["worktrees"]), 2)
+        self.assertTrue(any(d["source"] == "repositories.json" for d in doc["degraded"]))
+
+    def test_short_pass_rotates_after_failed_root_and_bounds_each_call(self):
+        import scan_git_hygiene as h
+        roots = [self.build(name)[0] for name in ("alpha-web", "beta-api", "gamma-cli")]
+        self.registry(roots)
+        real_git = h.git
+        attempted = []
+        clock = [100.0]
+
+        def command(repo, *args, **kwargs):
+            self.assertLessEqual(kwargs.get("timeout", 60), 2)
+            if args[:2] == ("worktree", "list"):
+                attempted.append(repo)
+                clock[0] += 3
+                return None
+            return real_git(repo, *args, **kwargs)
+
+        for _ in range(3):
+            with patch.object(h.time, "monotonic", side_effect=lambda: clock[0]), patch.object(h, "git", side_effect=command):
+                doc = self.run_registration(budget=2)
+            self.assertTrue(doc["partial"])
+        self.assertEqual(attempted, [str(p) for p in roots])
+
+    def test_failed_repository_preserves_peer_registration_and_prior_time(self):
+        import scan_git_hygiene as h
+        alpha, _ = self.build("alpha-web")
+        beta, _ = self.build("beta-api")
+        self.registry([alpha, beta])
+        before = self.run_registration()
+        previous = {r["path"]: r for r in before["repositories"]}
+        real = h.worktree_records
+        with patch.object(h, "worktree_records", side_effect=lambda root, **kw: None if root == str(alpha) else real(root, **kw)):
+            after = self.run_registration()
+        rows = {r["path"]: r for r in after["repositories"]}
+        self.assertTrue(after["partial"])
+        self.assertTrue(rows[str(alpha)]["stale"])
+        self.assertEqual(rows[str(alpha)]["registered_at"], previous[str(alpha)]["registered_at"])
+        self.assertEqual(rows[str(alpha)]["worktrees"], previous[str(alpha)]["worktrees"])
+        self.assertFalse(rows[str(beta)]["stale"])
+
+    def test_cursor_checkpoint_survives_interruption_inside_git(self):
+        import scan_git_hygiene as h
+        roots = [self.build(name)[0] for name in ("alpha-web", "beta-api")]
+        self.registry(roots)
+        with patch.object(h, "worktree_records", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                self.run_registration()
+        output = self.home / "store/raw/worktree-registration.json"
+        interrupted = json.loads(output.read_text())
+        self.assertTrue(interrupted["partial"])
+        self.assertEqual(interrupted["cursor"]["last_attempted"], str(roots[0]))
+        called = []
+        real = h.worktree_records
+        with patch.object(h, "worktree_records", side_effect=lambda root, **kw: (called.append(root), real(root, **kw))[1]):
+            self.run_registration()
+        self.assertEqual(called, [str(roots[1]), str(roots[0])])
+
+    def test_step_deadline_shorter_than_local_budget_prevents_git(self):
+        root, _ = self.build()
+        self.registry([root])
+        import scan_git_hygiene as h
+        with patch("step_budget.remaining", return_value=0), patch.object(h, "git", side_effect=AssertionError("past deadline")):
+            result = self.run_registration()
+        self.assertTrue(result["partial"])
+        self.assertEqual(result["attempted"], 0)
+
+    def test_zero_budget_keeps_previous_registration_explicitly_stale(self):
+        root, linked = self.build()
+        self.registry([root])
+        before = self.run_registration()
+        after = self.run_registration(budget=0)
+        self.assertTrue(after["partial"])
+        self.assertTrue(after["repositories"][0]["stale"])
+        self.assertEqual(after["repositories"][0]["registered_at"], before["repositories"][0]["registered_at"])
+        self.assertEqual(after["repositories"][0]["worktrees"], before["repositories"][0]["worktrees"])
+
+
 class Estate(Base):
     """One repository with every class the hygiene survey knows."""
 

@@ -21,6 +21,11 @@ Idle age is the newest of the branch tip's commit and its reflog, because a
 freshly created branch sits on an old commit and would otherwise read as stale.
 
     scan_git_hygiene.py OUT.json
+    scan_git_hygiene.py REGISTRATION.json --registrations-only --budget-seconds 20
+
+Registration is a separate, bounded metadata pass. It does not classify branches,
+inspect working-tree changes or authorize cleanup. Its cursor survives an interrupted
+pass and each carried repository keeps its original registration time and stale flag.
 """
 from __future__ import annotations
 
@@ -39,51 +44,76 @@ import paths  # noqa: E402
 import safe_git  # noqa: E402
 
 
-def git(repo: str, *args: str, timeout: int = 60) -> str | None:
+def git(repo: str, *args: str, timeout: float = 60) -> str | None:
     """stdout, or None when git would not answer. A survey: through `safe_git`,
     which reads without taking optional locks and runs none of the programs the
     operator's or the repository's configuration names (signature display ran
     gpg here, and `status` in every worktree ran the fsmonitor)."""
     try:
         p = safe_git.run(args, repo=repo, timeout=timeout, extra_env={"LC_ALL": "C"})
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, UnicodeError):
         return None
     return p.stdout if p.returncode == 0 else None
 
 
+def checkout_seeds(degraded: list[dict] | None = None) -> list[dict]:
+    """Independent source reads: one corrupt registry never hides the other source.
+
+    These are candidate anchors, not repository classifications. Git itself
+    validates them when registration is requested; a linked worktree's .git file
+    must not be rejected just because it is not a directory.
+    """
+    errors = degraded if degraded is not None else []
+
+    def source(name: str, key: str) -> list:
+        try:
+            doc = json.loads((paths.REGISTRY / name).read_text(encoding="utf-8"))
+            if not isinstance(doc, dict) or not isinstance(doc.get(key), list):
+                raise ValueError("invalid registry shape")
+            return doc[key]
+        except (OSError, ValueError):
+            errors.append({"source": name, "reason": "registry could not be read"})
+            return []
+
+    found = []
+    for row in source("repositories.json", "repositories"):
+        if not isinstance(row, dict):
+            errors.append({"source": "repositories.json", "reason": "invalid repository row"})
+            continue
+        local = row.get("local")
+        path = local.get("path") if isinstance(local, dict) else None
+        if isinstance(path, str) and path and isinstance(row.get("id"), str):
+            found.append({"repository": row["id"], "path": os.path.realpath(path)})
+    for row in source("projects.json", "projects"):
+        if not isinstance(row, dict):
+            errors.append({"source": "projects.json", "reason": "invalid project row"})
+            continue
+        folders = row.get("local_folders") or []
+        if not isinstance(folders, list):
+            errors.append({"source": "projects.json", "reason": "invalid project folders"})
+            continue
+        for folder in folders:
+            if not isinstance(folder, str):
+                errors.append({"source": "projects.json", "reason": "invalid project folder"})
+                continue
+            path = os.path.realpath(os.path.join(str(paths.DATA), folder))
+            # A project's ordinary non-Git folder is not a failed Git source.
+            if os.path.lexists(os.path.join(path, ".git")):
+                found.append({"repository": f"local:{folder}", "path": path})
+    unique = {}
+    for row in found:
+        unique.setdefault(row["path"], row)
+    return list(unique.values())
+
+
 def checkouts() -> list[dict]:
-    """Every registered local checkout, by real path, once."""
-    try:
-        repos = json.loads((paths.REGISTRY / "repositories.json").read_text(encoding="utf-8"))["repositories"]
-    except (OSError, ValueError, KeyError):
-        return []
-    seen, out = set(), []
-    for r in repos:
-        path = (r.get("local") or {}).get("path")
-        if not path or not os.path.isdir(os.path.join(path, ".git")):
-            continue
-        real = os.path.realpath(path)
-        if real in seen:
-            continue
-        seen.add(real)
-        out.append({"repository": r["id"], "path": real})
-    # A git folder with NO remote has no repository row — only a project's local
-    # folder under the projects source. Without this the survey (and cleanup)
-    # reported "0 checkouts" beside it, and its worktrees went unseen.
-    try:
-        projects = json.loads((paths.REGISTRY / "projects.json").read_text(encoding="utf-8"))["projects"]
-    except (OSError, ValueError, KeyError):
-        projects = []
-    for p in projects:
-        for folder in (p.get("local_folders") or []) if isinstance(p, dict) else []:
-            path = os.path.join(str(paths.DATA), str(folder))
-            if not os.path.isdir(os.path.join(path, ".git")):
-                continue
-            real = os.path.realpath(path)
-            if real in seen:
-                continue
-            seen.add(real)
-            out.append({"repository": f"local:{folder}", "path": real})
+    """The full hygiene collector's validated anchors, including linked worktrees."""
+    out = []
+    for row in checkout_seeds():
+        marker = os.path.join(row["path"], ".git")
+        if os.path.isdir(marker) or (os.path.isfile(marker) and
+                                    git(row["path"], "rev-parse", "--git-dir") is not None):
+            out.append(row)
     return out
 
 
@@ -130,16 +160,27 @@ def unresolved_reason(repo: str) -> str:
             f"checkout records the remote's own choice")
 
 
-def worktrees(repo: str, busy: set[str], now: float) -> list[dict]:
+def worktree_records(repo: str, timeout: float = 60) -> list[dict] | None:
+    """Git's registration metadata only; no working-tree status, log or branch walk."""
+    text = git(repo, "worktree", "list", "--porcelain", timeout=timeout)
+    if text is None:
+        return None
     rows, cur = [], {}
-    for line in (git(repo, "worktree", "list", "--porcelain") or "").splitlines() + [""]:
+    for line in text.splitlines() + [""]:
         if not line:
             if cur:
+                if not isinstance(cur.get("worktree"), str) or not os.path.isabs(cur["worktree"]):
+                    return None             # ambiguous/quoted path is not a usable registration
                 rows.append(cur)
                 cur = {}
             continue
         key, _, value = line.partition(" ")
         cur[key] = value or True
+    return rows or None
+
+
+def worktrees(repo: str, busy: set[str], now: float) -> list[dict]:
+    rows = worktree_records(repo) or []
     out = []
     for w in rows[1:]:  # the first entry is the main checkout
         path = w["worktree"]
@@ -206,7 +247,91 @@ def _previous(out_path: pathlib.Path) -> dict[str, dict]:
     return {r["path"]: r for r in doc.get("checkouts", []) if isinstance(r, dict) and r.get("path")}
 
 
+def registrations_only(out_path: pathlib.Path, seconds: float) -> int:
+    """Publish cheap registration independently of the expensive hygiene survey.
+
+    The cursor is checkpointed before every Git call. A process killed at a slow
+    anchor therefore starts after that anchor next time. Carried rows stay stale;
+    registration says nothing about clean/dirty state or permission to delete.
+    """
+    import step_budget
+    end = time.monotonic() + min(seconds, max(0.0, step_budget.remaining()))
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        previous = json.loads(out_path.read_text(encoding="utf-8"))
+        if not isinstance(previous, dict) or previous.get("kind") != "worktree-registration":
+            previous = {}
+    except (OSError, ValueError):
+        previous = {}
+    degraded: list[dict] = []
+    seeds = sorted(checkout_seeds(degraded), key=lambda row: row["path"])
+    prior_rows = previous.get("repositories") or []
+    rows = {row["path"]: {**row, "stale": True} for row in prior_rows
+            if isinstance(row, dict) and isinstance(row.get("path"), str)}
+    if not degraded:
+        live = {row["path"] for row in seeds}
+        rows = {key: row for key, row in rows.items() if key in live}
+    for seed in seeds:
+        rows.setdefault(seed["path"], {**seed, "worktrees": [], "registered_at": None, "stale": True})
+    cursor = previous.get("cursor")
+    last = cursor.get("last_attempted") if isinstance(cursor, dict) else None
+    if isinstance(last, str):
+        seeds = [row for row in seeds if row["path"] > last] + [row for row in seeds if row["path"] <= last]
+    attempted = 0
+
+    def write(in_progress: bool = False) -> dict:
+        doc = {"schema_version": 1, "kind": "worktree-registration", "measured_at": stamp,
+               "repositories": sorted(rows.values(), key=lambda row: row["path"]),
+               "cursor": {"last_attempted": last}, "attempted": attempted,
+               "partial": in_progress or bool(degraded) or any(row.get("stale") for row in rows.values()),
+               "degraded": degraded}
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = out_path.with_name(out_path.name + f".{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, out_path)
+        return doc
+
+    for seed in seeds:
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            degraded.append({"source": "worktree-registration", "reason": "registration budget exhausted"})
+            break
+        key = seed["path"]
+        last = key
+        attempted += 1
+        rows[key] = {**rows[key], **seed, "attempted_at": stamp, "stale": True}
+        write(in_progress=True)
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            degraded.append({"source": "worktree-registration", "reason": "registration budget exhausted"})
+            break
+        registered = worktree_records(key, timeout=min(5.0, remaining))
+        if registered is None:
+            degraded.append({"source": seed["repository"], "reason": "worktree registration unavailable", "path": key})
+            continue
+        rows[key] = {**seed, "attempted_at": stamp, "registered_at": stamp, "stale": False,
+                     "worktrees": [{"path": row["worktree"], "head": row.get("HEAD"),
+                                    "branch": str(row.get("branch", "")).removeprefix("refs/heads/") or None,
+                                    "locked": "locked" in row, "prunable": "prunable" in row,
+                                    "bare": "bare" in row} for row in registered]}
+    doc = write()
+    print(json.dumps({key: doc[key] for key in ("kind", "partial", "attempted", "cursor", "degraded")}))
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if "--registrations-only" in argv:
+        import argparse
+        import math
+        parser = argparse.ArgumentParser(description="Cheap Git worktree registration; no cleanup is authorized")
+        parser.add_argument("output", type=pathlib.Path)
+        parser.add_argument("--registrations-only", action="store_true")
+        parser.add_argument("--budget-seconds", type=float, default=20)
+        args = parser.parse_args(argv[1:])
+        if not math.isfinite(args.budget_seconds) or args.budget_seconds < 0:
+            parser.error("budget-seconds must be finite and non-negative")
+        return registrations_only(args.output, args.budget_seconds)
     out_path = pathlib.Path(argv[1])
     from scan_machine import working_dirs
     import step_budget
