@@ -46,3 +46,7 @@ Next: independently review the exact correction, integrate by a fix-only commit,
 and measure the unchanged original suite on the combined source. Retain every
 new refusal as a convergence failure unless an authorized, verified remedy
 actually succeeds. No live provider operation or deployment was performed.
+
+The follow-up [unread-exposure correction](unread.md) closes the independently
+reproduced saved-ceiling admission gap. Its source and 47-assertion receipt are
+separate from the fractional correction above.

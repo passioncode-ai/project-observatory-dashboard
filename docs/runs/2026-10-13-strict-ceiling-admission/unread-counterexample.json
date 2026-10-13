@@ -1,0 +1,15 @@
+{
+  "source_commit": "f24b3ca",
+  "source_sha256": "1163d4f7c1b47cbf07b5301bcbfba2ae805d6ea2f59890020f77b32aa680cc0a",
+  "held_ledger_ceiling": 5,
+  "externally_changed_actual_ceiling": 8,
+  "provider_read": "unreachable",
+  "before": 8,
+  "after": 13.0,
+  "policy_cap": 10,
+  "posts": 1,
+  "actions": [
+    "held-unread",
+    "issued"
+  ]
+}

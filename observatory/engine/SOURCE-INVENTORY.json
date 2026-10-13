@@ -856,8 +856,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "38c6c9652d4db079b163dba79ad1755bceb91c718308af60ba177fe7d7d216a2",
-      "bytes": 82040,
+      "export_sha256": "9ab82f0565a59aaf739c549574076427d3eff5f07e48509a374cd415d7d75e6e",
+      "bytes": 82580,
       "upstream_modified": true
     },
     {
@@ -2451,8 +2451,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "f5102f1002910da717aace054c8c70774ec64610a3d2a2502edea143fc962b52",
-      "bytes": 178322,
+      "export_sha256": "2ff362e7e0be2b1fd48de40f50042302e1b29fd5576950996f0112e232e58915",
+      "bytes": 179864,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -4512,8 +4512,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "1163d4f7c1b47cbf07b5301bcbfba2ae805d6ea2f59890020f77b32aa680cc0a",
-      "bytes": 110202,
+      "export_sha256": "e18eae54e5ffddddf307e3b9d7132ec8858c334f24cfd4090b6948f5f3a8a60b",
+      "bytes": 110334,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,

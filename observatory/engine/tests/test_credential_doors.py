@@ -2398,8 +2398,8 @@ def test_or_policy_counts_every_key_of_the_project() -> None:
 
 def test_or_policy_raises_only_what_fits_beside_unread_or_renamed_keys() -> None:
     """Round 3, probes B and C: K1 unread (or renamed in the provider's dashboard, which read as
-    missing) stayed live at $5 while K0 was raised to $8 — $13 at the highest. An unread key counts
-    at its ledger ceiling, so the raise is blocked; a renamed key is still found by its hash."""
+    missing) stayed live at $5 while K0 was raised to $8 — $13 at the highest. An unread key's
+    current ceiling is unknown, so the raise is blocked; a renamed key is found by its hash."""
     split = {"vault:project-a/prod/K0": 8, "vault:project-a/prod/K1": 2}
     m, p = _r3_door()
     m.issue_for_policy(_pol(2), "example")
@@ -2407,7 +2407,7 @@ def test_or_policy_raises_only_what_fits_beside_unread_or_renamed_keys() -> None
     p.start()
     plan = m.issue_for_policy(_pol(2), "example", split=split)
     check("B: beside an unread key the raise is blocked and the total never passes the limit",
-          p.max_sum <= 10.0 and [s["action"] for s in plan] == ["blocked", "held-unread"],
+          p.max_sum <= 10.0 and [s["action"] for s in plan] == ["blocked", "held-unread", "over-limit"],
           f"max={p.max_sum} {[s.get('action') for s in plan]}")
 
     m, p = _r3_door()
@@ -2422,6 +2422,32 @@ def test_or_policy_raises_only_what_fits_beside_unread_or_renamed_keys() -> None
     p.keys.clear()
     plan = m.issue_for_policy(_pol(2), "example", dry_run=True)
     check("C: only a 404 reads held-missing", [s["action"] for s in plan] == ["held-missing", "held-missing"], str(plan))
+
+
+def test_or_policy_unread_exposure_is_not_saved_headroom() -> None:
+    """A mutable provider ceiling cannot be bounded by a stale local ledger."""
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(1, limit=5), "example")
+    handle = p.by_name("k0")
+    p.keys[handle]["limit"] = 8  # External change; the ledger still records 5.
+    p.unread.add(handle)
+    before = (p.n, p.patches, p.total())
+    plan = m.issue_for_policy(_pol(2, limit=10), "example")
+    check("unread current exposure refuses a new key without raising the below-cap total",
+          (p.n, p.patches, p.total()) == before
+          and [row["action"] for row in plan] == ["held-unread", "blocked", "over-limit"], str(plan))
+    check("unread counting stays unknown despite saved or supplied old ceiling",
+          m._counted("held-unread", None, {"limit_usd": 5}) is None
+          and m._counted("held-unread", {"limit": 5}, {"limit_usd": 5}) is None)
+    check("missing identity and pending mint reservation retain distinct semantics",
+          m._counted("held-missing", None, {"limit_usd": 5}) == 0
+          and m._counted("held-pending", None, {"limit_usd": 5}) == 500)
+    p.unread.clear()
+    p.start()
+    plan = m.issue_for_policy(_pol(2, limit=10), "example")
+    check("a fresh provider read permits lowering then issuance within the cap",
+          p.max_sum <= 10 and p.total() == 10
+          and [row["action"] for row in plan] == ["ceiling-moved", "issued"], str(plan))
 
 
 def test_or_policy_runs_one_at_a_time() -> None:
@@ -3080,6 +3106,7 @@ if __name__ == "__main__":
                test_or_policy_round_two,
                test_or_policy_counts_every_key_of_the_project,
                test_or_policy_raises_only_what_fits_beside_unread_or_renamed_keys,
+               test_or_policy_unread_exposure_is_not_saved_headroom,
                test_or_policy_runs_one_at_a_time,
                test_or_policy_counts_every_positive_provider_fraction,
                test_or_policy_amounts_are_whole_cents_against_the_exact_limit,

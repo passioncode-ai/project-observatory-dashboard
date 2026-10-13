@@ -871,11 +871,15 @@ def _cents_up(usd) -> int | None:
 
 def _counted(state: str | None, row: dict | None, rec: dict) -> int | None:
     """Cents a key the run will NOT move counts toward the project's total (None: unbounded): its
-    provider ceiling rounded up (none is unbounded), 0 for a key the provider no longer has, and for
-    one that could not be read, or whose minting is unknown, the ceiling the ledger last recorded —
-    unbounded when it recorded none."""
+    provider ceiling rounded up, 0 for a confirmed missing key, and unknown for
+    an unread provider identity. A saved ceiling is not a current upper bound
+    because another writer can change it. A pending mint retains its separate
+    recorded reservation; that does not establish current provider observation.
+    """
     if state == "held-missing":
         return 0
+    if state == "held-unread":
+        return None
     if row is None:
         return _cents_up(rec.get("limit_usd"))
     return _cents_up(_ceiling_of(row))

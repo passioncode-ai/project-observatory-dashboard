@@ -257,6 +257,14 @@ and `test_or_policy_amounts_are_whole_cents_against_the_exact_limit`.
 This does not establish an atomic provider snapshot or account for unobserved
 external changes; unresolved consumer and rotation reconciliation remains open.
 
+An existing key whose provider read fails is `held-unread`: its saved ledger
+ceiling is not current headroom. The policy planner keeps its exposure unknown
+and blocks new issuance or raises under a finite policy cap. The existing
+`unbounded` total is a conservative admission state, not a measured current
+spend value. Refreshing the provider observation can permit a verified lowering
+and subsequent issuance. Pending mint reservations remain a distinct unresolved
+state. Evidence: `test_or_policy_unread_exposure_is_not_saved_headroom`.
+
 An applied spend policy records its explicit origin and exact digest on new and
 selected existing key rows; dry-run preserves ledger state. Rotation of a marked
 row refuses before a provider request because current aggregate headroom is unknown.
