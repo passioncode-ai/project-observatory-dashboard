@@ -94,8 +94,8 @@
       "path": "checkout_state.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2b9bd4cfe1194fabbe57c7ed107b729f4d46cf396be24c643944094630bd59e5",
-      "bytes": 6347
+      "export_sha256": "c3e58cf4b7fe7b732789fbb77c5427037a58a6683380c2c418c2eff1bccccfed",
+      "bytes": 6790
     },
     {
       "path": "cleanup_lock.py",
@@ -2372,8 +2372,8 @@
       "path": "tests/test_checkout_state.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5a2c21a8753c033ccf58e736c9c58ad518b5e9587dff3d6971f4d801819e0a74",
-      "bytes": 6484
+      "export_sha256": "58176e04d942a62726dfbe0933947ea20b4610f5a5caa56aefb768e03d68ad52",
+      "bytes": 8066
     },
     {
       "path": "tests/test_checkout_subject.py",
