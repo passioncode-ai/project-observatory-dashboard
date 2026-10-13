@@ -220,15 +220,22 @@ def credential_literal(key: str, value: str) -> bool:
     k = key.upper()
     if any(s in k for s in CREDENTIAL_KEYS):
         return True
-    if not k.endswith(("_DSN", "_URI")):
-        return False
-    # An encrypted `DATABASE_DSN` or `DB_URI` cannot show its scheme; its name
-    # says database (review round 4). `SENTRY_DSN` says neither.
-    return k.startswith(DB_KEY_PREFIXES) or value.lower().startswith(DB_SCHEMES)
+    # An encrypted value cannot show its scheme, so the name decides: a database
+    # word and an address word, each a whole `_`-separated part, anywhere in the
+    # key (review rounds 4 and 5) — `APP_DATABASE_DSN`, `PRIMARY_DB_URI`. Parts,
+    # not substrings: `DBT_URI` and `DBX_DSN` are not databases, and `SENTRY_DSN`
+    # or `OTEL_…_URI` name no database at all.
+    parts = set(k.split("_"))
+    if parts & DB_NAME_PARTS and parts & ADDRESS_PARTS:
+        return True
+    return k.endswith(("_DSN", "_URI")) and value.lower().startswith(DB_SCHEMES)
 
 
-#: Names that say "this DSN/URI is a database's".
-DB_KEY_PREFIXES = ("DATABASE_", "DB_", "POSTGRES", "PG_", "MYSQL", "REDIS", "VALKEY", "MONGO")
+#: Name parts that say "a database's": one of them beside an address part.
+DB_NAME_PARTS = frozenset({"DATABASE", "DB", "PG", "POSTGRES", "POSTGRESQL", "MYSQL", "REDIS",
+                           "VALKEY", "MONGO", "MONGODB"})
+#: Name parts that say "an address": a connection URL, URI or DSN.
+ADDRESS_PARTS = frozenset({"URL", "URI", "DSN"})
 
 
 def literal_form(key: str, value: str) -> str:
@@ -302,8 +309,14 @@ def user_password(c: dict, user: str) -> str:
 
 
 def cmd_credential(ref: str, user: str, db: str | None, to: str) -> int:
+    checked_name(ref, "cluster")
+    checked_name(user, "database user")
     where = plan(to)
     c = cluster(ref)
+    # THE SAME CHECKS AS ROTATE (review round 5): rotate's exit-4/exit-5 hints send
+    # operators here, and a URL to a database that does not exist would be written
+    # into the vault as if valid. Checked before the password is even read.
+    validate_connection(c, user, db)
     pw = user_password(c, user)
     print(f"{c['name']} user {user}: {deliver(connection_url(c, user, pw, db), where)}")
     return 0
@@ -393,6 +406,14 @@ def checked_name(value: str, field: str) -> str:
     return value
 
 
+def _is_name(value: object) -> bool:
+    try:
+        checked_name(value, "name")
+    except DoorError:
+        return False
+    return True
+
+
 def validate_connection(c: dict, user: str, db: str | None) -> None:
     checked_name(c.get("id"), "cluster id")
     checked_name(c.get("name"), "cluster name")
@@ -402,12 +423,24 @@ def validate_connection(c: dict, user: str, db: str | None) -> None:
             or type(conn.get("port")) is not int or not 0 < conn["port"] < 65536):
         raise DoorError("unsupported or incomplete database connection metadata")
     if db is not None:
+        checked_name(db, "database")
         # `--db` NAMES ONE OF THE CLUSTER'S DATABASES (review round 4): a URL to a
         # database that does not exist would be delivered and written as if valid.
+        # Each refusal says what is known (review round 5): an engine without
+        # databases, a provider that listed none, or a list that lacks this one.
+        if c["engine"] in ("redis", "valkey"):
+            raise DoorError(f"--db does not apply to {c['engine']}; leave it out")
         names = c.get("db_names")
-        if not isinstance(names, list) or db not in names:
-            raise DoorError(f"--db {db} is not one of this cluster's databases"
-                            + (f" ({', '.join(str(n) for n in names)})" if isinstance(names, list) and names else ""))
+        if not isinstance(names, list) or not names:
+            raise DoorError(f"the provider listed no databases for this cluster, so --db {db} cannot be "
+                            "checked; read the cluster's databases with doctl before naming one")
+        # Printed names are identifiers only: the provider's list is untrusted.
+        shown = [n for n in names if _is_name(n)]
+        if not shown:
+            raise DoorError(f"the provider listed no readable database names for this cluster, so --db {db} "
+                            "cannot be checked")
+        if db not in shown:
+            raise DoorError(f"--db {db} is not one of this cluster's databases ({', '.join(shown)})")
     # Construct once before mutation so a malformed connection cannot strand apps.
     connection_url(c, user, "synthetic-preflight", db)
 
