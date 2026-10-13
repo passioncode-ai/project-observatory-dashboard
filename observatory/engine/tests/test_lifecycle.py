@@ -513,6 +513,70 @@ class OneRotationPolicy(Workspace):
         for p in self.logs.iterdir():
             self.assertEqual(p.stat().st_mode & 0o777, 0o600, p.name)
 
+    def test_broken_generation_link_never_redirects_copy_or_truncates_log(self):
+        f = self.logs / "serverd.err"
+        f.write_bytes(b"keep" * 100)
+        outside = self.base / "outside-secret"
+        generation = self.logs / "serverd.err.1"
+        generation.symlink_to(outside)
+        self.assertFalse(self.lp.rotate(f, max_bytes=100, generations=2))
+        self.assertFalse(outside.exists())
+        self.assertEqual(f.read_bytes(), b"keep" * 100)
+        self.assertTrue(generation.is_symlink())
+
+    def test_sweep_never_enters_a_symlink_directory(self):
+        outside = self.base / "outside-logs"
+        outside.mkdir()
+        f = outside / "tick.log"
+        f.write_bytes(b"keep" * 100)
+        linked = self.base / "linked-logs"
+        linked.symlink_to(outside, target_is_directory=True)
+        self.assertEqual(self.lp.sweep(linked, max_bytes=100), [])
+        self.assertEqual(f.read_bytes(), b"keep" * 100)
+        self.assertFalse((outside / "tick.log.1").exists())
+
+    def test_hardlinked_log_is_never_truncated_or_chmodded(self):
+        f = self.logs / "tick.log"
+        f.write_bytes(b"keep" * 100)
+        f.chmod(0o644)
+        other = self.base / "other-link"
+        os.link(f, other)
+        self.assertFalse(self.lp.rotate(f, max_bytes=100))
+        self.assertEqual(other.read_bytes(), b"keep" * 100)
+        self.assertEqual(other.stat().st_mode & 0o777, 0o644)
+
+    def test_explicit_log_beneath_linked_parent_is_preserved(self):
+        outside = self.base / "extra-logs"
+        outside.mkdir()
+        f = outside / "extra.log"
+        f.write_bytes(b"keep" * 100)
+        linked = self.base / "linked-extra"
+        linked.symlink_to(outside, target_is_directory=True)
+        self.assertEqual(self.lp.sweep(self.logs, files=(linked / "extra.log",), max_bytes=100), [])
+        self.assertEqual(f.read_bytes(), b"keep" * 100)
+
+    def test_hardlinked_small_file_and_generation_keep_permissions(self):
+        for name in ("small.log", "old.log.1"):
+            f = self.logs / name
+            f.write_bytes(b"keep")
+            f.chmod(0o644)
+            os.link(f, self.base / name)
+        self.lp.sweep(self.logs, max_bytes=100)
+        for name in ("small.log", "old.log.1"):
+            self.assertEqual((self.base / name).stat().st_mode & 0o777, 0o644)
+
+    def test_bad_late_generation_preserves_entire_chain(self):
+        f = self.logs / "tick.log"
+        f.write_bytes(b"keep" * 100)
+        first = self.logs / "tick.log.1"
+        first.write_bytes(b"old")
+        last = self.logs / "tick.log.3"
+        last.symlink_to(self.base / "missing")
+        self.assertFalse(self.lp.rotate(f, max_bytes=100, generations=3))
+        self.assertEqual(f.read_bytes(), b"keep" * 100)
+        self.assertEqual(first.read_bytes(), b"old")
+        self.assertTrue(last.is_symlink())
+
     def test_the_policy_is_the_lifecycle_default(self):
         self.assertEqual((self.lp.MAX_BYTES, self.lp.GENERATIONS), (5 * 1024 * 1024, 5))
 

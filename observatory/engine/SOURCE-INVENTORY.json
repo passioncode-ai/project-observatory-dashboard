@@ -1325,8 +1325,8 @@
       "path": "log_policy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0984315942b711df95e98b75a6146f59d0fad734c4f4ae738ced0259ee0d64a4",
-      "bytes": 4197
+      "export_sha256": "6b88aaab99aa469e9ac1192a4c6476b41efddcbbff8810592eae622e32ee2de5",
+      "bytes": 6016
     },
     {
       "path": "machine_view.py",
@@ -3019,8 +3019,8 @@
       "path": "tests/test_lifecycle.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a9193870a7b8e2899e3bdce1d6772f26518b79831ec7a700a6fbe97e2e206abd",
-      "bytes": 39309
+      "export_sha256": "c09e4c360eaa8ca0403a747fa3c847ff3589690ab16bf92ecce9f580c7fa5191",
+      "bytes": 42146
     },
     {
       "path": "tests/test_lifecycle_watch.py",
