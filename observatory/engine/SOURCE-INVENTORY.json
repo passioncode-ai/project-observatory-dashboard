@@ -2132,8 +2132,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "8ff21eb7249f0f45c2f3ddb2293350cc51d95528dbfcdaaeb714ab32a2424b29",
-      "bytes": 26708,
+      "export_sha256": "146795bf1a6fc128b2e64fd0308d7e098afdd18dd25060e4ddddf5575562e209",
+      "bytes": 26727,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2533,6 +2533,13 @@
       "upstream_modified": true,
       "export_sha256": "23bd1b48bc2334b4bff0e51fe39b8601659238563a25efff033ec2e74356014a",
       "bytes": 14286
+    },
+    {
+      "path": "tests/test_decrease_repair.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "1af91391b1c00020de8295384dcc8ddeaa6ea878b21ebae3c05d94a647e98e50",
+      "bytes": 25101
     },
     {
       "path": "tests/test_degradations.py",
@@ -4512,8 +4519,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "602d50bd7f594c74585c10eff3388bd68a16d90a0d5e26cb85c4c50e826e31ba",
-      "bytes": 115786,
+      "export_sha256": "892740d16cc4e9ad4e51382f03cafd5dc81f7247a5127e7e8aee876f5981b7ae",
+      "bytes": 136325,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
@@ -4892,7 +4899,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 635,
+  "file_count": 636,
   "excluded": [
     "git-history",
     "operator-registries",

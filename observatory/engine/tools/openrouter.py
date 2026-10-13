@@ -46,6 +46,7 @@ attached to a file on disk.
 from __future__ import annotations
 import argparse
 import contextlib
+import contextvars
 import datetime
 import decimal
 import hashlib
@@ -272,7 +273,12 @@ def ledger() -> dict:
     return doc
 
 
+_REPAIR_PUBLICATION = contextvars.ContextVar("ceiling_repair_publication", default=False)
+
+
 def save_ledger(doc: dict) -> None:
+    if not _REPAIR_PUBLICATION.get():
+        _guard_repair_publication(ledger(), doc)
     write_secret(LEDGER, json.dumps(doc, ensure_ascii=False, indent=2))
 
 
@@ -542,6 +548,7 @@ PENDING_REMEDY = ("its key was minted but never recorded as delivered — `revok
 
 def _forget(name: str) -> None:
     doc = ledger()
+    _guard_ceiling_repair(doc["issued"].get(name) or {})
     doc["issued"].pop(name, None)
     save_ledger(doc)
 
@@ -549,6 +556,8 @@ def _forget(name: str) -> None:
 def _undo_mint(admin: str, name: str, row: dict) -> None:
     """A minted key that was not delivered: delete it and drop its pending row; when the delete
     fails, keep the row marked `orphan`, so the key stays counted and named. Always raises."""
+    _guard_ceiling_repair(ledger()["issued"].get(name) or {})
+    _guard_ceiling_repair(row)
     if row.get("hash"):
         try:
             _request(f"/keys/{row['hash']}", admin, method="DELETE")
@@ -824,6 +833,10 @@ def _read_held(name: str, rec: dict, account: str | None) -> tuple[str | None, d
     still found by its hash —, or `held-unread` for anything that could not be read (no stashed admin
     for the account, an error, an answer that is not JSON), in a dry run too. Unread is never in
     place, and never counted as gone."""
+    try:
+        _guard_ceiling_repair(rec)
+    except RuntimeError:
+        return "held-unread", None, "ceiling repair is unresolved; refresh its evidence before another mutation"
     if rec.get("pending") and not rec.get("hash"):
         return "held-pending", None, "whether its key was minted is unknown (no hash was recorded)"
     try:
@@ -835,6 +848,10 @@ def _read_held(name: str, rec: dict, account: str | None) -> tuple[str | None, d
         return "held-missing", None, ""
     if not isinstance(row, dict) or (rec.get("hash") and row.get("hash") != rec["hash"]):
         return "held-unread", None, "provider identity does not match the ledger"
+    try:
+        _guard_ceiling_repair(row)
+    except RuntimeError:
+        return "held-unread", None, "discovered identity has unresolved ceiling repair evidence"
     if rec.get("rotation_status") not in (None, "complete") or rec.get("predecessor_hash") or rec.get("successor_hash"):
         return "held-rotation", row, "rotation is unresolved; reconcile both identities and destination before another mutation"
     if rec.get("pending"):
@@ -892,7 +909,8 @@ def _identity_refs(rec: dict) -> set[str]:
             if isinstance(value := rec.get(field), str) and value}
 
 
-def _require_resolved_rotation(rec: dict) -> None:
+def _require_resolved_rotation(rec: dict, *, repair_name: str | None = None) -> None:
+    _guard_ceiling_repair(rec, allow_name=repair_name)
     if rec.get("rotation_status") not in (None, "complete") or rec.get("predecessor_hash") or rec.get("successor_hash"):
         raise RuntimeError("Unresolved rotation: reconcile provider identities and destination before another mutation")
     refs = _identity_refs(rec)
@@ -1035,11 +1053,14 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
             doc = ledger()
             changed = False
             for selected in primary.values():
+                _guard_ceiling_repair(doc["issued"][selected])
+            for selected in primary.values():
                 rec = doc["issued"][selected]
                 prior = rec.get("policy_binding")
                 same = isinstance(prior, dict) and all(prior.get(k) == v for k, v in binding.items()
                                                       if k != "recorded_at")
                 if not same:
+                    _guard_repair_before_attestation(selected, rec)
                     rec["policy_binding"] = dict(binding)
                     changed = True
             if changed:
@@ -1294,6 +1315,309 @@ def resolve_issued(name_or_label: str) -> tuple[str, dict]:
     raise LookupError(f"no issued key called {name_or_label!r} — `list` shows what exists")
 
 
+REPAIR_RESOLVED = {"observed-satisfied", "observed-unmet", "superseded"}
+REPAIR_PENDING = {"intent", "effect-unknown", "observation-pending", "observation-unknown"}
+
+
+def _repair_now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _repair_context(rec: dict) -> dict:
+    context = {k: rec.get(k) for k in ("account", "hash", "destination", "limit_reset")}
+    if (any(not isinstance(context[k], str) or not context[k] for k in context)
+            or not re.fullmatch(r"[a-fA-F0-9]{64}", context["hash"])
+            or context["limit_reset"] not in RESETS):
+        raise RuntimeError("Ceiling repair identity context is incomplete")
+    binding = rec.get("policy_binding")
+    if "policy_binding" in rec and not isinstance(binding, dict):
+        raise RuntimeError("Ceiling repair policy context is malformed")
+    try:
+        raw = json.dumps(binding, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        if len(raw) > 16384: raise ValueError
+    except (TypeError, ValueError, RecursionError):
+        raise RuntimeError("Ceiling repair policy context is malformed") from None
+    context["policy_digest"] = hashlib.sha256(raw.encode()).hexdigest()
+    return context
+
+
+def _repair_digest(context: dict) -> str:
+    return hashlib.sha256(json.dumps(context, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _repair_stamp(value) -> bool:
+    try:
+        stamp = datetime.datetime.fromisoformat(value)
+        return stamp.tzinfo is not None and stamp <= datetime.datetime.now(datetime.timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _validate_repair(rec: dict) -> dict | None:
+    if "ceiling_repair" not in rec: return None
+    proof = rec["ceiling_repair"]
+    try:
+        if (not isinstance(proof, dict) or type(proof.get("schema_version")) is not int
+                or proof["schema_version"] != 1
+                or proof.get("status") not in REPAIR_RESOLVED | REPAIR_PENDING
+                or not isinstance(proof.get("attempt_id"), str)
+                or not re.fullmatch(r"[a-f0-9]{32}", proof["attempt_id"])
+                or not _repair_stamp(proof.get("attempted_at"))
+                or not isinstance(proof.get("context"), dict)
+                or proof.get("context_digest") != _repair_digest(proof["context"])
+                or _cents_up(proof.get("target")) is None or proof["target"] <= 0
+                or _cents_up(proof.get("before")) is None or proof["before"] <= proof["target"]):
+            raise ValueError
+        effect = proof.get("effect")
+        if not isinstance(effect, dict) or effect.get("status") not in ("unconfirmed", "observed"):
+            raise ValueError
+        if effect["status"] == "unconfirmed":
+            if effect.get("actual") is not None or effect.get("observed_at") is not None: raise ValueError
+        elif (_cents_up(effect.get("actual")) is None or not 0 < effect["actual"] <= proof["before"]
+              or not _repair_stamp(effect.get("observed_at"))):
+            raise ValueError
+        context = proof["context"]
+        if (set(context) != {"account", "hash", "destination", "limit_reset", "policy_digest"}
+                or any(not isinstance(v, str) or not v for v in context.values())
+                or not re.fullmatch(r"[a-fA-F0-9]{64}", context["hash"])
+                or not re.fullmatch(r"[a-f0-9]{64}", context["policy_digest"])
+                or context["limit_reset"] not in RESETS):
+            raise ValueError
+        if proof["status"] == "superseded":
+            if (not _repair_stamp(proof.get("superseded_at"))
+                    or proof.get("superseded_context") != _repair_context(rec)
+                    or proof.get("basis") != "historical-context"
+                    or not isinstance(proof.get("previous_observation"), dict)):
+                raise ValueError
+        elif proof["context"] != _repair_context(rec):
+            raise ValueError
+        if proof["status"] in ("observed-satisfied", "observed-unmet"):
+            if (_cents_up(proof.get("actual")) is None or proof["actual"] <= 0
+                    or not _repair_stamp(proof.get("observed_at"))
+                    or proof.get("basis") not in ("same-operation-response", "subsequent-current-read")
+                    or proof.get("reason") is not None
+                    or (proof["status"] == "observed-satisfied") != (proof["actual"] <= proof["target"])
+                    or (proof["basis"] == "same-operation-response" and
+                        (proof["actual"] > proof["before"] or effect["status"] != "observed"
+                         or effect.get("actual") != proof["actual"]
+                         or effect.get("observed_at") != proof["observed_at"]))
+                    or datetime.datetime.fromisoformat(proof["observed_at"]) < datetime.datetime.fromisoformat(proof["attempted_at"])):
+                raise ValueError
+        elif proof.get("actual") is not None or proof.get("observed_at") is not None:
+            raise ValueError
+        prior = proof.get("previous_observation")
+        if prior is not None and (not isinstance(prior, dict)
+                or _cents_up(prior.get("actual")) is None or prior["actual"] <= 0
+                or not _repair_stamp(prior.get("observed_at"))
+                or prior.get("basis") not in ("same-operation-response", "subsequent-current-read")):
+            raise ValueError
+        if prior and prior["basis"] == "same-operation-response" and (
+                effect["status"] != "observed" or effect.get("actual") != prior["actual"]
+                or effect.get("observed_at") != prior["observed_at"]):
+            raise ValueError
+    except (TypeError, ValueError, RuntimeError, RecursionError):
+        raise RuntimeError("Ceiling repair evidence is malformed or its identity context changed; no mutation is allowed") from None
+    return proof
+
+
+def _repair_refs(rec: dict) -> set[str]:
+    refs = _identity_refs(rec)
+    proof = rec.get("ceiling_repair")
+    context = proof.get("context") if isinstance(proof, dict) else None
+    if isinstance(context, dict) and isinstance(context.get("hash"), str): refs.add(context["hash"])
+    return refs
+
+
+def _guard_ceiling_repair(rec: dict, *, allow_name: str | None = None) -> None:
+    proof = _validate_repair(rec)
+    if proof and proof["status"] not in REPAIR_RESOLVED and allow_name is None:
+        raise RuntimeError("Ceiling repair is unresolved; refresh its status before another mutation")
+    refs = _repair_refs(rec)
+    for name, other in ledger()["issued"].items():
+        if not isinstance(other, dict) or not refs.intersection(_repair_refs(other)): continue
+        held = _validate_repair(other)
+        if held and held["status"] not in REPAIR_RESOLVED and name != allow_name:
+            raise RuntimeError("Identity belongs to an unresolved ceiling repair; no alias mutation is allowed")
+
+
+def _guard_repair_before_attestation(name: str, rec: dict) -> None:
+    # A legacy record with no hash has not yet disclosed its provider identity.
+    # When repair evidence exists, resolve that identity before local provenance
+    # publication too; a display name is not an alias-absence proof.
+    if rec.get("hash") or not any(isinstance(peer, dict) and "ceiling_repair" in peer
+                                 for peer in ledger()["issued"].values()):
+        return
+    try:
+        _, admin = read_admin(rec["account"])
+        row = find_key(admin, name)
+        if (not isinstance(row, dict) or not isinstance(row.get("hash"), str)
+                or not re.fullmatch(r"[a-fA-F0-9]{64}", row["hash"])):
+            raise RuntimeError
+        _require_resolved_rotation(row)
+    except (OSError, ValueError, RuntimeError, LookupError, subprocess.SubprocessError):
+        raise RuntimeError("Legacy identity is unresolved or protected; no policy provenance was published") from None
+
+
+def _guard_repair_publication(before: dict, after: dict) -> None:
+    """Check old evidence before any local identity/provenance publication."""
+    old, new = before["issued"], after["issued"]
+    changed = {n for n in old.keys() | new.keys() if old.get(n) != new.get(n)}
+    changed_refs = set()
+    for name in changed:
+        for rec in (old.get(name), new.get(name)):
+            if isinstance(rec, dict): changed_refs.update(_repair_refs(rec))
+    for name, rec in old.items():
+        if not isinstance(rec, dict) or "ceiling_repair" not in rec: continue
+        if name not in changed and not changed_refs.intersection(_repair_refs(rec)): continue
+        proof = _validate_repair(rec)
+        if proof["status"] not in REPAIR_RESOLVED:
+            raise RuntimeError("Ceiling repair blocks local identity or policy publication")
+        target = new.get(name)
+        if name in changed and target is not None and target.get("ceiling_repair") != proof:
+            raise RuntimeError("Ceiling repair evidence may only change through its repair door")
+        if name in changed and (target is None or _repair_context(target) != _repair_context(rec)):
+            _journal("ceiling-repair-superseded", f"openrouter/{rec['account']}/{name}",
+                     require_success=True, attempt_id=proof["attempt_id"])
+            if target is not None:
+                stale = dict(proof, status="superseded", actual=None, observed_at=None,
+                             superseded_at=_repair_now(), basis="historical-context")
+                stale["previous_observation"] = (proof["previous_observation"] if proof["status"] == "superseded"
+                                                  else {k: proof.get(k) for k in ("actual", "observed_at", "basis")})
+                stale["superseded_context"] = _repair_context(target)
+                target["ceiling_repair"] = stale
+    for name in changed:
+        if (isinstance(new.get(name), dict) and "ceiling_repair" in new[name]
+                and "ceiling_repair" not in (old.get(name) or {})):
+            raise RuntimeError("New ceiling repair evidence requires its repair door")
+
+
+def _persist_repair(doc: dict, name: str) -> None:
+    # Recheck the publication context after provider calls too. This is a local
+    # precheck under the writer lock, not a CAS against uncooperative writers.
+    current = ledger()
+    old, new = current["issued"], doc["issued"]
+    if (set(current) != set(doc) or any(current[k] != doc[k] for k in current if k != "issued")
+            or set(old) != set(new) or any(old[k] != new[k] for k in old if k != name)):
+        raise RuntimeError("Ledger changed during ceiling repair; no observation was published")
+    before, after = old.get(name), new.get(name)
+    if (not isinstance(before, dict) or not isinstance(after, dict)
+            or {k: v for k, v in before.items() if k not in ("ceiling_repair", "limit_usd")}
+               != {k: v for k, v in after.items() if k not in ("ceiling_repair", "limit_usd")}):
+        raise RuntimeError("Identity context changed during ceiling repair; no observation was published")
+    prior, proposed = _validate_repair(before), _validate_repair(after)
+    if proposed is None:
+        raise RuntimeError("Ceiling repair publication requires evidence")
+    if proposed["status"] == "intent":
+        if prior and prior["status"] not in REPAIR_RESOLVED:
+            raise RuntimeError("Another ceiling repair is unresolved")
+    elif (not prior or prior["attempt_id"] != proposed["attempt_id"]
+          or prior["status"] == "superseded"
+          or (proposed["status"] != "observation-pending" and prior["status"] not in ("intent", "observation-pending"))):
+        raise RuntimeError("Ceiling repair attempt changed before publication")
+    token = _REPAIR_PUBLICATION.set(True)
+    try: save_ledger(doc)
+    finally: _REPAIR_PUBLICATION.reset(token)
+
+
+def _repair_record(name: str) -> tuple[dict, dict]:
+    doc = ledger(); rec = doc["issued"].get(name)
+    if not isinstance(rec, dict): raise LookupError("Ceiling repair requires an exact issued name")
+    _repair_context(rec)
+    if rec.get("pending") or rec.get("orphan"):
+        raise RuntimeError("Issuance is unresolved; no ceiling repair is allowed")
+    return doc, rec
+
+
+def _repair_observation(row: dict | None, rec: dict) -> int | float:
+    amount = _ceiling_of(row) if isinstance(row, dict) else None
+    if (not isinstance(row, dict) or row.get("hash") != rec["hash"]
+            or row.get("limit_reset") != rec["limit_reset"] or amount is None or amount <= 0):
+        raise RuntimeError("Ceiling repair observation is unknown")
+    return amount
+
+
+def _repair_result(doc: dict, name: str, proof: dict, actual: int | float, basis: str) -> dict:
+    result = dict(proof, status="observed-satisfied" if actual <= proof["target"] else "observed-unmet",
+                  actual=actual, observed_at=_repair_now(), basis=basis, reason=None)
+    if basis == "same-operation-response":
+        result["effect"] = {"status": "observed", "actual": actual, "observed_at": result["observed_at"]}
+    rec = doc["issued"][name]
+    _journal("ceiling-repair-observed", f"openrouter/{rec['account']}/{name}",
+             require_success=True, attempt_id=proof["attempt_id"], actual=actual, basis=basis)
+    rec["ceiling_repair"], rec["limit_usd"] = result, actual
+    _persist_repair(doc, name)
+    return result
+
+
+def _repair_unknown(doc: dict, name: str, proof: dict, status: str, reason: str) -> dict:
+    result = dict(proof, status=status, actual=None, observed_at=None, reason=reason)
+    doc["issued"][name]["ceiling_repair"] = result
+    _persist_repair(doc, name)
+    return result
+
+
+def decrease_limit(name: str, limit: float) -> dict:
+    """One explicit observed decrease. The local lock cannot serialize external writers."""
+    if _cents_up(limit) is None or limit <= 0: raise ValueError("A supported positive ceiling is required")
+    with _policy_lock():
+        doc, rec = _repair_record(name)
+        _require_resolved_rotation(rec)
+        context = _repair_context(rec)
+        _, admin = read_admin(rec["account"])
+        row = find_key(admin, name)
+        before = _repair_observation(row, rec)
+        if limit > before: raise RuntimeError("Requested repair is no longer a decrease; no limit was changed")
+        if limit == before:
+            if ledger() != doc:
+                raise RuntimeError("Ledger context changed during ceiling observation; no repair was recorded")
+            _guard_ceiling_repair(rec)
+            return {"status": "observed-satisfied", "actual": before, "observed_at": _repair_now(),
+                    "basis": "subsequent-current-read", "target": limit}
+        proof = {"schema_version": 1, "attempt_id": os.urandom(16).hex(), "status": "intent",
+                 "attempted_at": _repair_now(), "context": context, "context_digest": _repair_digest(context),
+                 "target": limit, "before": before, "actual": None, "observed_at": None,
+                 "basis": "not-observed", "reason": "effect-not-observed",
+                 "effect": {"status": "unconfirmed", "actual": None, "observed_at": None}}
+        rec["ceiling_repair"] = proof
+        _persist_repair(doc, name)
+        _journal("ceiling-repair-intent", f"openrouter/{rec['account']}/{name}", require_success=True,
+                 attempt_id=proof["attempt_id"], target=limit, before=before)
+        try:
+            response = _request(f"/keys/{rec['hash']}", admin,
+                                {"limit": limit, "limit_reset": rec["limit_reset"]}, method="PATCH")
+            actual = _repair_observation(response.get("data") if isinstance(response, dict) else None, rec)
+            if actual > before: raise RuntimeError("Ceiling repair response exceeded the fresh bound")
+        except (OSError, ValueError, RuntimeError, LookupError, subprocess.SubprocessError):
+            return _repair_unknown(doc, name, proof, "effect-unknown", "provider-effect-unconfirmed")
+        return _repair_result(doc, name, proof, actual, "same-operation-response")
+
+
+def repair_status(name: str, *, refresh: bool = False) -> dict:
+    with _policy_lock():
+        doc, rec = _repair_record(name)
+        proof = _validate_repair(rec)
+        if proof is None: raise LookupError("No ceiling repair is recorded for this issued name")
+        if not refresh: return dict(proof)
+        if proof["status"] == "superseded":
+            raise RuntimeError("Repair belongs to a superseded context; start a new explicit repair")
+        _require_resolved_rotation(rec, repair_name=name)
+        previous = ({k: proof.get(k) for k in ("actual", "observed_at", "basis")}
+                    if proof.get("actual") is not None else proof.get("previous_observation"))
+        pending = dict(proof, status="observation-pending", attempted_at=_repair_now(), actual=None,
+                       observed_at=None, reason="not-observed-this-attempt", basis="not-observed")
+        if previous: pending["previous_observation"] = previous
+        rec["ceiling_repair"] = pending
+        _persist_repair(doc, name)
+        _journal("ceiling-repair-refresh", f"openrouter/{rec['account']}/{name}", require_success=True,
+                 attempt_id=proof["attempt_id"])
+        try:
+            _, admin = read_admin(rec["account"])
+            actual = _repair_observation(find_key(admin, name), rec)
+        except (OSError, ValueError, RuntimeError, LookupError, subprocess.SubprocessError):
+            return _repair_unknown(doc, name, pending, "observation-unknown", "provider-read-unavailable")
+        return _repair_result(doc, name, pending, actual, "subsequent-current-read")
+
+
 def set_limit(name_or_label: str, limit: float, reset: str | None = None) -> dict:
     with _policy_lock():
         return _set_limit_locked(name_or_label, limit, reset)
@@ -1313,6 +1637,7 @@ def _set_limit_locked(name_or_label: str, limit: float, reset: str | None = None
     if not row:
         raise LookupError(f"the ledger records {name!r} but {label!r} holds no such key — "
                           f"it was deleted at the provider; `revoke {name}` clears the row")
+    _require_resolved_rotation(row)
     if policy_ceiling_cents is not None and (not rec.get("hash") or row.get("hash") != rec["hash"]):
         raise RuntimeError("Policy ceiling identity is unresolved; no limit was changed")
     before_ceiling = _ceiling_of(row) if policy_ceiling_cents is not None else None
@@ -1352,7 +1677,23 @@ def _set_limit_locked(name_or_label: str, limit: float, reset: str | None = None
     return {"name": name, "label": row.get("label"), "limit": confirmed_limit, "limit_reset": reset}
 
 
-def cmd_limit(name: str, set_to: float | None, reset: str | None = None) -> int:
+def cmd_limit(name: str, set_to: float | None, reset: str | None = None, *,
+              decrease_only: bool = False, repair_status_only: bool = False, refresh: bool = False) -> int:
+    if decrease_only or repair_status_only or refresh:
+        if (reset is not None or (refresh and not repair_status_only)
+                or (decrease_only and (set_to is None or repair_status_only))
+                or (repair_status_only and set_to is not None)):
+            print("refused: use --decrease-only with --set, or --repair-status with optional --refresh", file=sys.stderr)
+            return 2
+        try:
+            result = decrease_limit(name, set_to) if decrease_only else repair_status(name, refresh=refresh)
+        except (ValueError, LookupError, RuntimeError):
+            print("Ceiling repair refused; inspect its status and reconcile identity or unresolved evidence before another mutation", file=sys.stderr)
+            return 1
+        actual = "unknown" if result.get("actual") is None else f"${result['actual']!s}"
+        status, time = result['status'], result.get('observed_at') or 'unknown'
+        print(f"{name}: recorded {status}; observed ceiling {actual}; observed at {time}")
+        return 0 if result['status'] == 'observed-satisfied' else 1
     if set_to is None and reset is not None:
         print("refused: --reset moves with a ceiling; give --set too", file=sys.stderr)
         return 2
@@ -1395,6 +1736,7 @@ def toggle_key(name: str, disabled: bool) -> dict:
     row = find_key(admin, name)
     if not row:
         raise LookupError(f"{name!r} is not at the provider any more")
+    _require_resolved_rotation(row)
     _request(f"/keys/{row['hash']}", admin, {"disabled": disabled}, method="PATCH")
     _journal("disable" if disabled else "enable", f"openrouter/{_label}/{name}")
     return {"name": name, "disabled": disabled}
@@ -1414,6 +1756,7 @@ def cmd_toggle(name: str, disabled: bool) -> int:
 
 
 def _delivery_failed(admin: str, row: dict) -> None:
+    _guard_ceiling_repair(row)
     successor = row.get("hash")
     if not successor:
         raise RuntimeError("Partial failure: delivery failed and successor identity is unavailable; inspect provider keys. Predecessor was not revoked")
@@ -1466,6 +1809,7 @@ def _rotate_one_locked(name: str) -> dict:
     old = find_key(admin, name)
     if not isinstance(old, dict) or not isinstance(old.get("hash"), str) or not old["hash"]:
         raise ValueError("Predecessor identity could not be established; nothing was minted")
+    _require_resolved_rotation(old)
     if not isinstance(rec.get("hash"), str) or old["hash"] != rec["hash"]:
         raise RuntimeError("Predecessor identity does not match the ledger; nothing was minted or changed")
     limit = old.get("limit")
@@ -1596,6 +1940,7 @@ def claim_key(name: str, value: str, account: str | None = None, where: str = ""
     if name in doc["issued"]:
         raise ValueError(f"the ledger already has a key called {name!r}")
     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    _guard_ceiling_repair({"hash": digest})
     if any(digest in _identity_refs(r) for r in doc["issued"].values()):
         raise ValueError("this key is already in the ledger")
     accounts = [(account, read_admin(account)[1])] if account else \
@@ -1686,6 +2031,7 @@ def forget_pending_key(name: str, reason: str) -> dict:
     rec = doc["issued"].get(name)
     if not rec:
         raise LookupError(f"no issued key called {name!r}")
+    _guard_ceiling_repair(rec)
     if not rec.get("pending") or rec.get("hash"):
         raise LookupError(f"{name!r} is not a pending row without a hash; `revoke {name}` deletes it by its hash")
     _journal("forget-pending-attested", f"openrouter/{rec.get('account')}/{name}",
@@ -1782,6 +2128,8 @@ def revoke_key(name_or_label: str) -> dict:
     _scan, receipt = _revoke_scan()
     _label, admin = read_admin(rec["account"])
     row = find_key(admin, name)
+    if row:
+        _require_resolved_rotation(row)
     # Never let an unrelated name lookup supply the deletion identity.
     if row and (not rec.get("hash") or row.get("hash") != rec["hash"]):
         raise RuntimeError("Recorded key identity is unresolved; no key was revoked")
@@ -2075,6 +2423,9 @@ def main() -> int:
                           "issue-for-policy run")
     p_li.add_argument("name")
     p_li.add_argument("--set", type=float, dest="set_to")
+    p_li.add_argument("--decrease-only", action="store_true", help="require a fresh known ceiling and record one non-increasing repair attempt")
+    p_li.add_argument("--repair-status", action="store_true", help="show the recorded ceiling repair without provider access")
+    p_li.add_argument("--refresh", action="store_true", help="with --repair-status: record a fresh observation attempt; never retry the mutation")
     p_li.add_argument("--reset", choices=RESETS, default=None,
                       help="with --set: the new period; without it the key keeps its own")
     p_di = sub.add_parser("disable", help="stop a key spending, reversibly")
@@ -2129,7 +2480,7 @@ def main() -> int:
             print("Activity report unavailable or identity unresolved; no figure. Check management-key access and reconcile pending rotation before retrying", file=sys.stderr)
             return 1
     if a.cmd == "limit":
-        return cmd_limit(a.name, a.set_to, a.reset)
+        return cmd_limit(a.name, a.set_to, a.reset, decrease_only=a.decrease_only, repair_status_only=a.repair_status, refresh=a.refresh)
     if a.cmd == "disable":
         return cmd_toggle(a.name, True)
     if a.cmd == "enable":
