@@ -16,9 +16,9 @@ How it is known, per system:
   lsof     macOS and Linux; run under a UTF-8 locale, and `\\xNN` escapes decoded, because
            without one lsof prints a non-ASCII name escaped and it matched nothing;
   proc     Linux without lsof: /proc/<pid>/{fd,cwd,root,exe,maps};
-  rename   Windows: nothing lists open files without a kernel driver, but Windows refuses
-           to rename a folder while a file in it is open, so the removal renames the folder
-           aside first and a refusal is the "held" answer — nothing of it deleted;
+  unknown  Windows: no supported holder inventory is implemented here. An open handle
+           may allow rename/delete through FILE_SHARE_DELETE, so rename success cannot
+           prove that a target is unused. Path removal therefore refuses unknown coverage;
   unknown  none of these: every path is held, and nothing is removed.
 
 Values never leave this module: a command line is cut to its absolute-path words, kept in
@@ -131,14 +131,14 @@ class Holders:
     """The paths held right now. `known` False means "cannot tell": every path is held."""
 
     def __init__(self, names: list[str] | None, mode: str = "lsof"):
-        self.known = names is not None
+        self.known = names is not None and mode != "rename"
         self.mode = mode if self.known else "unknown"
         self.names = sorted({os.path.normpath(n) for n in names or [] if n.startswith("/")})
 
     @classmethod
     def take(cls, timeout: float = 120) -> "Holders":
         if os.name == "nt":
-            return cls([], "rename")
+            return cls(None)
         files = lsof_paths(timeout)
         mode = "lsof"
         if files is None:
@@ -156,7 +156,7 @@ class Holders:
         if not self.known:
             return True
         if self.mode == "rename":
-            return False                     # the removal's rename is the check
+            return True                      # legacy rename state is not holder evidence
         real = os.path.normpath(os.path.realpath(str(path)))
         i = bisect.bisect_left(self.names, real)
         if i < len(self.names) and self.names[i] == real:
@@ -195,10 +195,11 @@ def fresh_busy(target: str, timeout: float = 5.0) -> bool | None:
     POSIX uses a bounded lsof query for this subtree plus fresh command paths. This
     avoids another full-machine open-file inventory per action. Missing lsof, warnings,
     partial output or timeout preserve the target; there is no unbounded /proc fallback.
-    Windows keeps the rename probe. This is a point-in-time check, not a filesystem lock.
+    Windows returns unknown until a supported holder inventory exists. This is a
+    point-in-time check, not a filesystem lock.
     """
     if os.name == "nt":
-        return False
+        return None
     tool = shutil.which("lsof")
     if not tool or timeout <= 0:
         return None

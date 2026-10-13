@@ -30,7 +30,7 @@ the design that replaces those patches with one set of rules. The run record is
 | The git tier checked only working directories; "clean" worktree removal deleted ignored files (`.env.local`, local databases) | The git tier uses **the same holders** (open files, maps, executables) and a worktree with **ignored files outside the artifact directories is not clean** |
 | Programs run from a cache folder (an `npx` MCP server) hold no file open | Holders include every running process's **executable and the absolute paths in its arguments** |
 | `lsof` printed non-ASCII names escaped without a UTF-8 locale | `lsof` runs under a UTF-8 locale and `\xNN` escapes are decoded |
-| `/proc` without `maps`/`exe`; Windows checkout not protected; a failed removal after the rename left `*.observatory-removing` | `/proc` reads fd, cwd, root, exe and maps; Windows renames aside and **renames back** when removal fails |
+| `/proc` without `maps`/`exe`; Windows checkout not protected; a failed removal after the rename left `*.observatory-removing` | `/proc` reads fd, cwd, root, exe and maps; historical rename rollback preserved a failed staged removal; superseded for Windows authorization by the unknown-holder refusal below |
 | Files of another account inside a folder this account owns | The walk refuses a tree with **any** entry another account owns |
 | Force-tracked files inside an ignored folder | Build output is removed only when `git ls-files -- <dir>` is empty |
 | The budget was not checked inside long walks; a SIGKILL repeated on every pass | Every walk, `lsof` and git call takes the **deadline**; the class order no longer lets one class starve the rest (**a fair share per class**) |
@@ -104,8 +104,8 @@ queries `lsof` for this target only, then refreshes command-line paths with `ps`
 sharing at most five seconds (and never beyond the action deadline). Warnings,
 partial output, a missing tool or timeout are unknown, so nothing is removed.
 There is deliberately no unbounded per-action `/proc` fallback: on a POSIX host
-without `lsof`, planning remains available but path actions skip. Windows keeps
-the rename probe. `FreshTargetProbe` pins the bounded and unknown outcomes.
+without `lsof`, planning remains available but path actions skip. Windows holder coverage is unknown and path deletion is refused; successful
+rename does not prove absence of open handles. `FreshTargetProbe` pins the bounded and unknown outcomes.
 
 The shared full listing accepts only exit-zero, diagnostic-free, decodable
 `lsof`/`ps` output. `lsof` warnings are no longer suppressed. A nonzero partial
@@ -124,8 +124,8 @@ held, unknown or exhausted observations preserve the worktree. The disk tier
 already used this strict final probe; the change closes the git tier's cached
 observation gap. `WorktreeFinalHolders` exercises both tiers with held, unknown,
 free and expired-budget outcomes. Worktree age remains a planning-time condition;
-this change does not add an action-time idle-age measurement. Windows keeps its
-existing removal behavior; the shared POSIX probe is not a new Windows proof.
+this change does not add an action-time idle-age measurement. Windows now preserves path targets because holder coverage is unknown;
+rename/delete sharing cannot supply the missing evidence.
 
 These checks reduce the planning-to-action race; they are not an exclusive
 filesystem lock against an arbitrary writer starting after the final probe.
@@ -191,3 +191,16 @@ flags must be booleans. Unknown flags never authorize a root. The dated hygiene
 fallback also rejects malformed nested rows. `RegistrationMalformed` exercises
 null/scalar collections, mixed valid/invalid peers, malformed metadata and the
 whole guard run continuing through later phases after a damaged receipt.
+
+## Windows holder coverage correction
+
+`FILE_SHARE_DELETE` permits an open Windows handle to coexist with rename/delete
+access. Therefore the old rename-probe convention cannot establish non-use.
+`holders.Holders.take()` returns unknown on Windows; `fresh_busy()` returns `None`.
+An old `rename` mode also refuses path actions. Generic cache commands keep their
+separate tool policy; this is not a claim that every Windows maintenance operation
+is disabled. Native inventory support remains unimplemented.
+
+Evidence: `WindowsHolderUnknown` and the legacy-mode case in engine
+`tests/test_disk_guard.py`; the native shared-delete control runs only on Windows.
+[Microsoft CreateFile sharing contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew).
