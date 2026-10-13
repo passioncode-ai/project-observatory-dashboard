@@ -575,8 +575,22 @@ ceiling below its 30-minute interval, and `store/raw/tick-run.json` records each
 run's start, end, outcome and reason (`store/raw/tick-runs.jsonl` the last 50). A
 stopped step is a failed step in the log and on the board, never a hung tick.
 
-The ceiling is shared out so the tick always ends with fresh findings and a fresh
-dashboard: the collectors stop 5 minutes before it (at most a fifth of the
+For stage diagnosis, `store/raw/tick.json` adds `progress`: a run ID and bounded
+stage rows with start, end, wall duration, exit and outcome. It includes silent
+tail commands such as merge and emit. During a run the top-level `finished_at`
+and failed-step report still describe the previous completed report. After the
+child stops, the supervisor copies only matching, validated stage metadata into
+`tick-run.json` and its history as `stage_progress`. Read `coverage` first:
+`unknown` means missing, stale or invalid evidence; `partial` includes a start
+without a terminal receipt or a failed receipt write. Such a stage has unknown
+outcome and no inferred exit or duration, even when the whole run timed out.
+`not_started` requires the watchdog's explicit budget refusal. A row's start and
+duration cover the watchdog call, including overhead; an absent row proves
+nothing about whether a stage ran. These fields contain no child output or
+command arguments. Receipt failures preserve the command's original exit.
+
+The ceiling reserves time for fresh findings and a fresh dashboard, without
+guaranteeing that those stages complete: the collectors stop 5 minutes before it (at most a fifth of the
 ceiling), the tail's optional steps — plugins, rollup, the agent, the vector index,
 retention and review — stop 2 minutes before it (at most a twelfth), and the core
 from `findings` to the registry commit uses what is left. A step that did not run
