@@ -27,10 +27,27 @@ digest after provider lookup. Missing, unread, malformed, changed or expired evi
 is unknown and prevents deletion. No provider error body or source contents appear
 in the refusal. No unread-evidence override is added.
 
+## Source-bound bounded replay
+
+The [after-correction receipt](raw/baseline-128.json) binds the same 128 seeds to
+source `23b4249f23d5b4ebc469fcdcc95b022c7deac0f8`: all completed, 28 PASS,
+100 FAIL, zero ERROR, exit 1. There are zero no-consumed-key-deletion violations.
+Seed 7000099 now preserves the consumer's key, but remains FAIL for convergence
+because its later remedy lacks current complete consumer evidence.
+
+All 36 prior strict-ceiling failures and all five representation failures remain
+on exactly the same seeds as the [before-correction baseline](../2026-10-13-j3-adversary-binding/raw/baseline-128.json).
+Seed 7000104 still records 0.034 against 0.03. The number of cases with convergence
+failures is now 99: the old model remedies do not provide the newly required survey,
+so unknown evidence prevents deletion. No seed, invariant or failure was removed.
+Full acceptance requires a genuinely evidenced recovery protocol, not assuming that
+missing evidence means an unused key.
+
 ## Verification and limits
 
-The dedicated twelve-case synthetic suite and eight model-binding tests pass under
+The [dedicated twelve-case synthetic suite](raw/focused-tests.json) and eight model-binding tests pass under
 `tests/run_portable.py --suite revoke_consumers --suite j3_adversary --jobs 1`.
+Sixteen existing round-four/fix-five compatibility assertions also pass.
 Tests include the known-unused positive deletion path, current and legacy holder
 witnesses, source shape/currentness, permission failure, FIFO, symlink, size limit,
 provider identity drift and receipt drift during lookup. All providers are in-memory

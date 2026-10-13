@@ -1,0 +1,922 @@
+{
+  "attempted": 128,
+  "cases": [
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (not-in-policy) -> 1"
+      ],
+      "seed": 7000000,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k2 (held-missing) -> 1"
+      ],
+      "seed": 7000001,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate None (rc=1) left the total 5453.537406, past the limit 4674.1 and above 4674.06 before it",
+        "(a-rot) rotate None (rc=1) left the total 6233.0148509505, past the limit 4674.1 and above 5453.537406 before it"
+      ],
+      "seed": 7000002,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate None (killed) left the total 8591.734788, past the limit 6443.65 and above 6443.64 before it"
+      ],
+      "seed": 7000003,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence"
+      ],
+      "seed": 7000004,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate None (rc=1) left the total 1.320099, past the limit 0.99 and above 0.99 before it"
+      ],
+      "seed": 7000005,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000006,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (held-missing) -> 1"
+      ],
+      "seed": 7000007,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000008,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'over-limit']",
+        "(a-rot) rotate project-a-prod-k3 (rc=0) left the total 2924.0004, past the limit 2924 and above 2924.0 before it"
+      ],
+      "seed": 7000009,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000010,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000011,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000012,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (held-missing) -> 1",
+        "(a-rot) rotate project-a-prod-k7 (rc=0) left the total 0.6004, past the limit 0.6 and above 0.60 before it"
+      ],
+      "seed": 7000013,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k0 (rc=1) left the total 88.5904, past the limit 80.34 and above 67.18 before it"
+      ],
+      "seed": 7000014,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate None (rc=1) left the total 90.797782, past the limit 77.84 and above 77.82 before it",
+        "(a-rot) rotate None (rc=1) left the total 90.8042676485, past the limit 77.84 and above 90.797782 before it"
+      ],
+      "seed": 7000015,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000016,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000017,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k6 (rc=1) left the total 1.036, past the limit 0.52 and above 0.52 before it"
+      ],
+      "seed": 7000018,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000019,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000020,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(L) live project key unknown to the ledger after rename: baafda29ac709901cf2095b1546e86a6c2f9ee80447c2d0f3a1a0c75d254693d(renamed-baafda29ac709901cf2095b1546e86a6c2f9ee80447c2d0f3a1a0c75d254693d, $0.012)",
+        "(L) live project key unknown to the ledger after subcent: baafda29ac709901cf2095b1546e86a6c2f9ee80447c2d0f3a1a0c75d254693d(renamed-baafda29ac709901cf2095b1546e86a6c2f9ee80447c2d0f3a1a0c75d254693d, $0.012)",
+        "(L) live project key unknown to the ledger after rotate-kill: baafda29ac709901cf2095b1546e86a6c2f9ee80447c2d0f3a1a0c75d254693d(renamed-baafda29ac709901cf2095b1546e86a6c2f9ee80447c2d0f3a1a0c75d254693d, $0.012)",
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k5 (not-in-policy) -> 1",
+        "(L) at rest: baafda29ac709901cf2095b1546e86a6c2f9ee80447c2d0f3a1a0c75d254693d(renamed-baafda29ac709901cf2095b1546e86a6c2f9ee80447c2d0f3a1a0c75d254693d, $0.012)"
+      ],
+      "seed": 7000021,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence"
+      ],
+      "seed": 7000022,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000023,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000024,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (held-missing) -> 1"
+      ],
+      "seed": 7000025,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate None (killed) left the total 0.3604, past the limit 0.3 and above 0.30 before it"
+      ],
+      "seed": 7000026,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k5 (rc=1) left the total 8839.02, past the limit 4419.51 and above 4419.51 before it"
+      ],
+      "seed": 7000027,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k2 (held-missing) -> 1",
+        "(a-rot) rotate project-a-prod-k2 (rc=1) left the total 72.1992, past the limit 36.1 and above 36.0996 before it"
+      ],
+      "seed": 7000028,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'over-limit']"
+      ],
+      "seed": 7000029,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k0 (held-missing) -> 1"
+      ],
+      "seed": 7000030,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k7 (killed) left the total 0.0304, past the limit 0.02 and above 0.02 before it"
+      ],
+      "seed": 7000031,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k3 (rc=1) left the total 48.926, past the limit 41.97 and above 41.94 before it"
+      ],
+      "seed": 7000032,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(L) live project key unknown to the ledger after rename: 5963446a776ad19649eac8523b897d97b2edc9786b1cbdad64d207255908533c(renamed-5963446a776ad19649eac8523b897d97b2edc9786b1cbdad64d207255908533c, $0.070000002)",
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(L) at rest: 5963446a776ad19649eac8523b897d97b2edc9786b1cbdad64d207255908533c(renamed-5963446a776ad19649eac8523b897d97b2edc9786b1cbdad64d207255908533c, $0.070000002)",
+        "(a-rot) rotate None (rc=1) left the total 0.350000004, past the limit 0.31 and above 0.28 before it"
+      ],
+      "seed": 7000033,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000034,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (not-in-policy) -> 1"
+      ],
+      "seed": 7000035,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate None (rc=1) left the total 10785.660000003, past the limit 8963.06 and above 8300.19 before it"
+      ],
+      "seed": 7000036,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000037,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (not-in-policy) -> 1"
+      ],
+      "seed": 7000038,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate None (killed) left the total 99.234, past the limit 90.88 and above 72.162 before it"
+      ],
+      "seed": 7000039,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000040,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate None (rc=1) left the total 9568.228, past the limit 7176.19 and above 7176.18 before it"
+      ],
+      "seed": 7000041,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (held-missing) -> 1"
+      ],
+      "seed": 7000042,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000043,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000044,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (not-in-policy) -> 1",
+        "(a-rot) rotate None (rc=1) left the total 59.166, past the limit 29.58 and above 47.32 before it"
+      ],
+      "seed": 7000045,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000046,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence"
+      ],
+      "seed": 7000047,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence"
+      ],
+      "seed": 7000048,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k2 (rc=1) left the total 70.9881, past the limit 59.17 and above 59.1541 before it"
+      ],
+      "seed": 7000049,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence"
+      ],
+      "seed": 7000050,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1",
+        "(a-rot) rotate None (killed) left the total 61.10, past the limit 59.39 and above 44.36 before it"
+      ],
+      "seed": 7000051,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k1 (rc=1) left the total 5278.8302, past the limit 3519.22 and above 3519.2201 before it"
+      ],
+      "seed": 7000052,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000053,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence"
+      ],
+      "seed": 7000054,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000055,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000056,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(L) live project key unknown to the ledger after rename: db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4(renamed-db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4, $17.448)",
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(L) at rest: db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4(renamed-db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4, $17.448)",
+        "(a-rot) rotate project-a-prod-k2 (rc=1) left the total 69.764, past the limit 52.32 and above 52.32 before it"
+      ],
+      "seed": 7000057,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k4 (rc=1) left the total 75.8701, past the limit 72.07 and above 63.9501 before it"
+      ],
+      "seed": 7000058,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (held-missing) -> 1"
+      ],
+      "seed": 7000059,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (not-in-policy) -> 1"
+      ],
+      "seed": 7000060,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000061,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (held-missing) -> 1"
+      ],
+      "seed": 7000062,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (not-in-policy) -> 1"
+      ],
+      "seed": 7000063,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000064,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k0 (rc=0) left the total 0.8204, past the limit 0.82 and above 0.82 before it",
+        "(a-rot) rotate project-a-prod-k1 (rc=1) left the total 1.2308, past the limit 0.82 and above 0.8204 before it"
+      ],
+      "seed": 7000065,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000066,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000067,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate None (rc=1) left the total 32.64, past the limit 27.23 and above 27.20 before it"
+      ],
+      "seed": 7000068,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000069,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k2 (held-missing) -> 1"
+      ],
+      "seed": 7000070,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000071,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (not-in-policy) -> 1"
+      ],
+      "seed": 7000072,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (held-missing) -> 1"
+      ],
+      "seed": 7000073,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000074,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence"
+      ],
+      "seed": 7000075,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k2 (held-missing) -> 1"
+      ],
+      "seed": 7000076,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000077,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k2 (held-missing) -> 1"
+      ],
+      "seed": 7000078,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (not-in-policy) -> 1"
+      ],
+      "seed": 7000079,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000080,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate None (rc=0) left the total 6332.4912, past the limit 6332.49 and above 6332.49 before it",
+        "(a-rot) rotate None (rc=0) left the total 6332.4924, past the limit 6332.49 and above 6332.4912 before it"
+      ],
+      "seed": 7000081,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence"
+      ],
+      "seed": 7000082,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k0 (held-pending) -> 1"
+      ],
+      "seed": 7000083,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000084,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000085,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (held-missing) -> 1"
+      ],
+      "seed": 7000086,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000087,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (held-missing) -> 1"
+      ],
+      "seed": 7000088,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000089,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000090,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000091,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (not-in-policy) -> 1"
+      ],
+      "seed": 7000092,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k2 (held-pending) -> 1"
+      ],
+      "seed": 7000093,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (held-missing) -> 1"
+      ],
+      "seed": 7000094,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'over-limit']"
+      ],
+      "seed": 7000095,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k0 (held-missing) -> 1"
+      ],
+      "seed": 7000096,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000097,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k7 (rc=1) left the total 7444.64, past the limit 6381.12 and above 6381.12 before it"
+      ],
+      "seed": 7000098,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000099,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(L) live project key unknown to the ledger after rename: 3bc6061380062cadc3640f933feb8a9e65404881f908eb36ba2068571de8f7fb(renamed-3bc6061380062cadc3640f933feb8a9e65404881f908eb36ba2068571de8f7fb, $4.002)",
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k7 (not-in-policy) -> 1",
+        "(L) at rest: 3bc6061380062cadc3640f933feb8a9e65404881f908eb36ba2068571de8f7fb(renamed-3bc6061380062cadc3640f933feb8a9e65404881f908eb36ba2068571de8f7fb, $4.002)"
+      ],
+      "seed": 7000100,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (not-in-policy) -> 1"
+      ],
+      "seed": 7000101,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence"
+      ],
+      "seed": 7000102,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000103,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(a-rot) rotate project-a-prod-k6 (rc=0) left the total 0.034, past the limit 0.03 and above 0.03 before it"
+      ],
+      "seed": 7000104,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence"
+      ],
+      "seed": 7000105,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate None (killed) left the total 7363.18, past the limit 4539.41 and above 3681.59 before it"
+      ],
+      "seed": 7000106,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (held-missing) -> 1"
+      ],
+      "seed": 7000107,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(L) live project key unknown to the ledger after subcent: 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8(project-a-prod-k3-next, $43.7301)",
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(L) at rest: 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8(project-a-prod-k3-next, $43.7301)",
+        "(a-rot) rotate None (rc=1) left the total 87.46000000099999, past the limit 43.73 and above 43.73 before it"
+      ],
+      "seed": 7000108,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k5 (rc=1) left the total 2.0, past the limit 1 and above 1.0 before it"
+      ],
+      "seed": 7000109,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k5 (held-missing) -> 1"
+      ],
+      "seed": 7000110,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k4 (rc=1) left the total 81.9104, past the limit 63.06 and above 61.23 before it",
+        "(a-rot) rotate None (rc=1) left the total 88.7116, past the limit 63.06 and above 61.23 before it"
+      ],
+      "seed": 7000111,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k0 (not-in-policy) -> 1"
+      ],
+      "seed": 7000112,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (held-missing) -> 1"
+      ],
+      "seed": 7000113,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k0 (rc=1) left the total 10751.650000001, past the limit 9215.72 and above 9215.70 before it",
+        "(a-rot) rotate project-a-prod-k3 (rc=0) left the total 10751.650000002, past the limit 9215.72 and above 10751.650000001 before it"
+      ],
+      "seed": 7000114,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k3 (rc=1) left the total 5533.566, past the limit 3689.04 and above 3689.046 before it"
+      ],
+      "seed": 7000115,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k1 (held-missing) -> 1"
+      ],
+      "seed": 7000116,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k4 (held-missing) -> 1"
+      ],
+      "seed": 7000117,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000118,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000119,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k5 (held-missing) -> 1"
+      ],
+      "seed": 7000120,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k3 (not-in-policy) -> 1"
+      ],
+      "seed": 7000121,
+      "status": "FAIL"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence",
+        "(a-rot) rotate project-a-prod-k5 (killed) left the total 44.304, past the limit 37.19 and above 22.15 before it"
+      ],
+      "seed": 7000122,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000123,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies: held-rotation: no implemented reconciliation remedy; reservation is not convergence"
+      ],
+      "seed": 7000124,
+      "status": "FAIL"
+    },
+    {
+      "issues": [],
+      "seed": 7000125,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000126,
+      "status": "PASS"
+    },
+    {
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k0 (not-in-policy) -> 1",
+        "(a-rot) rotate None (rc=1) left the total 3666.12, past the limit 3055.13 and above 3055.10 before it"
+      ],
+      "seed": 7000127,
+      "status": "FAIL"
+    }
+  ],
+  "completed": 128,
+  "requested": 128,
+  "schema": "synthetic-adversary/1",
+  "source_commit": "23b4249f23d5b4ebc469fcdcc95b022c7deac0f8",
+  "sources": [
+    {
+      "path": "observatory/engine/tests/adv_j1_property.py",
+      "sha256": "df0f0f03b178fae42a5219e7e90c0b571c1b7918f4249e041c4128f96eff98e6"
+    },
+    {
+      "path": "observatory/engine/tests/test_credential_doors.py",
+      "sha256": "cad91eb2029563733eab1cfdeac4d4aa487440aa240747deb44646c129cab079"
+    },
+    {
+      "path": "observatory/engine/tools/openrouter.py",
+      "sha256": "66edaec092bc714be6efa163063f4b358f88f9f25323238b48a3b57fb5ec3f1a"
+    },
+    {
+      "path": "observatory/engine/tests/adversarial_runner.py",
+      "sha256": "a70295a9bbea620f18d4fd1d39148667b69073a99dd6e356b0b7427e9aa425e6"
+    }
+  ],
+  "status": "FAIL",
+  "variant": "adv_j1_property"
+}
