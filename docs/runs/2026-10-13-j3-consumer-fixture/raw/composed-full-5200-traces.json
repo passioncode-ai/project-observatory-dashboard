@@ -1,0 +1,489 @@
+{
+  "source_commit": "e22b986e837125ce715a319bd7c47b5527081349",
+  "source_bindings": [
+    {
+      "path": "observatory/engine/tests/adv_j1_property.py",
+      "sha256": "059eeddcea7a08bbe4e92ffa496fc243d72915c1976bb39b3b923be6fb0b88a9"
+    },
+    {
+      "path": "observatory/engine/tests/test_credential_doors.py",
+      "sha256": "8959aeb83911ff285418dae2b8e9bfea4c095c47f019d0e0408fe1018d116a1f"
+    },
+    {
+      "path": "observatory/engine/tools/openrouter.py",
+      "sha256": "8c74363dca294ff62291df2bb8aac71e8fb7b9ca795db5f81bb0be6cc48b503b"
+    },
+    {
+      "path": "observatory/engine/collectors/scan_openrouter.py",
+      "sha256": "b146f9f331ca5ef4d24b3c328db46b860fa319797018ecdbe811fe4e1a307aae"
+    },
+    {
+      "path": "observatory/engine/tests/adversarial_runner.py",
+      "sha256": "a70295a9bbea620f18d4fd1d39148667b69073a99dd6e356b0b7427e9aa425e6"
+    }
+  ],
+  "selection": "All original and current strict violations/errors plus first seed per output category; no assertion/provider/RNG changes.",
+  "cases": [
+    {
+      "seed": 7000000,
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'blocked', 'blocked']"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': '+0.004', 'big': False, 'drift': 0, 'page': (5, 3), 'fillers': 4, 'newest_first': False}",
+        "run1 limit=4047 refs=5 kw={'limit_override': 5.54} -> None ['issued', 'issued', 'issued', 'issued', 'issued']",
+        "subcent 5963446a776ad19649eac8523b897d97b2edc9786b1cbdad64d207255908533c -> 5.548",
+        "  concurrent policy -> RuntimeError: another key writer has held the policy lock for 0 s; nothing was read or moved \u2014 run again when it is done",
+        "concurrent[policy] during policy -> PolicyPartial: partial: 4 of 5 slots served before vault:project-a/prod/K2 failed; a re-run does only what is missing",
+        "unread 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "edit limit=4047 refs=4 kw={'limit_override': 2.22}",
+        "edit limit=8094 refs=3 kw={}",
+        "converge#0 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k0 (not-in-policy) -> 0",
+        "  remedy revoke project-a-prod-k4 (not-in-policy) -> 0",
+        "converge#1 -> PolicyPartial: partial: 0 of 3 slots served before vault:project-a/prod/K6 failed; a re-run does only what is missing ['failed', 'not-reached', 'not-reached']",
+        "converge#2 -> None ['in-place', 'blocked', 'blocked']",
+        "converge#3 -> None ['in-place', 'blocked', 'blocked']",
+        "converge#4 -> None ['in-place', 'blocked', 'blocked']"
+      ]
+    },
+    {
+      "seed": 7000002,
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> PolicyPartial: partial: 0 of 6 slots served before vault:project-a/prod/K6 failed; a re-run does only what is missing ['failed', 'not-reached', 'not-reached', 'not-reached', 'not-reached', 'not-reached']"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'x1.0001', 'big': True, 'drift': -1, 'page': (3, 2), 'fillers': 9, 'newest_first': False}",
+        "run1 limit=467410 refs=6 kw={} -> None ['issued', 'issued', 'issued', 'issued', 'issued', 'issued']",
+        "failrun mint:unreach-after -> PolicyPartial: partial: 0 of 6 slots served before vault:project-a/prod/K6 failed; a re-run does only what is missing ['failed', 'not-reached', 'not-reached', 'not-reached', 'not-reached', 'not-reached']",
+        "rotate-kill project-a-prod-k1 fault=mint:unreach-after -> rc=1",
+        "rotate-kill project-a-prod-k6 fault=mint:502-after -> rc=1",
+        "converge#0 -> PolicyPartial: partial: 0 of 6 slots served before vault:project-a/prod/K6 failed; a re-run does only what is missing ['failed', 'not-reached', 'not-reached', 'not-reached', 'not-reached', 'not-reached']",
+        "converge#1 -> PolicyPartial: partial: 0 of 6 slots served before vault:project-a/prod/K6 failed; a re-run does only what is missing ['failed', 'not-reached', 'not-reached', 'not-reached', 'not-reached', 'not-reached']",
+        "converge#2 -> PolicyPartial: partial: 0 of 6 slots served before vault:project-a/prod/K6 failed; a re-run does only what is missing ['failed', 'not-reached', 'not-reached', 'not-reached', 'not-reached', 'not-reached']",
+        "converge#3 -> PolicyPartial: partial: 0 of 6 slots served before vault:project-a/prod/K6 failed; a re-run does only what is missing ['failed', 'not-reached', 'not-reached', 'not-reached', 'not-reached', 'not-reached']",
+        "converge#4 -> PolicyPartial: partial: 0 of 6 slots served before vault:project-a/prod/K6 failed; a re-run does only what is missing ['failed', 'not-reached', 'not-reached', 'not-reached', 'not-reached', 'not-reached']"
+      ]
+    },
+    {
+      "seed": 7000005,
+      "issues": [
+        "(c') no convergence after the door's own remedies:   explicit operator limit project-a-prod-k5 -> operator-applied"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'x1.0001', 'big': True, 'drift': 1, 'page': (4, 4), 'fillers': 20, 'newest_first': True}",
+        "run1 limit=99 refs=3 kw={} -> None ['issued', 'issued', 'issued']",
+        "rename 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "rotate-kill project-a-prod-k1 fault=deliver -> rc=1",
+        "failrun lower -> None ['in-place', 'in-place', 'in-place', 'over-limit']",
+        "failrun mint:500-before -> None ['in-place', 'in-place', 'in-place', 'over-limit']",
+        "converge#0 -> None ['in-place', 'in-place', 'in-place', 'over-limit']",
+        "  explicit operator limit project-a-prod-k1 -> operator-applied",
+        "  explicit operator limit project-a-prod-k0 -> operator-applied",
+        "  explicit operator limit project-a-prod-k5 -> operator-applied",
+        "converge#1 -> None ['in-place', 'in-place', 'in-place', 'over-limit']",
+        "  explicit operator limit project-a-prod-k1 -> operator-applied",
+        "  explicit operator limit project-a-prod-k0 -> operator-applied",
+        "  explicit operator limit project-a-prod-k5 -> operator-applied",
+        "converge#2 -> None ['in-place', 'in-place', 'in-place', 'over-limit']",
+        "  explicit operator limit project-a-prod-k1 -> operator-applied",
+        "  explicit operator limit project-a-prod-k0 -> operator-applied",
+        "  explicit operator limit project-a-prod-k5 -> operator-applied",
+        "converge#3 -> None ['in-place', 'in-place', 'in-place', 'over-limit']",
+        "  explicit operator limit project-a-prod-k1 -> operator-applied",
+        "  explicit operator limit project-a-prod-k0 -> operator-applied",
+        "  explicit operator limit project-a-prod-k5 -> operator-applied",
+        "converge#4 -> None ['in-place', 'in-place', 'in-place', 'over-limit']",
+        "  explicit operator limit project-a-prod-k1 -> operator-applied",
+        "  explicit operator limit project-a-prod-k0 -> operator-applied",
+        "  explicit operator limit project-a-prod-k5 -> operator-applied"
+      ]
+    },
+    {
+      "seed": 7000025,
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (held-missing) -> 1"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'x1.0001', 'big': True, 'drift': 0, 'page': (4, 4), 'fillers': 17, 'newest_first': False}",
+        "run1 limit=336 refs=5 kw={'split': {'vault:project-a/prod/K6': 1.45, 'vault:project-a/prod/K3': 0.73, 'vault:project-a/prod/K1': 0.83, 'vault:project-a/prod/K5': 0.08, 'vault:project-a/prod/K7': 0.11}} -> None ['issued', 'issued', 'issued', 'issued', 'issued']",
+        "consumer reads 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 by label (listed); revoke -> rc=1 still=True",
+        "consumer reads f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 by label (listed); revoke -> rc=1 still=True",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['held-missing', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k6 (held-missing) -> 1",
+        "converge#1 -> None ['held-missing', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k6 (held-missing) -> 1",
+        "converge#2 -> None ['held-missing', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k6 (held-missing) -> 1",
+        "converge#3 -> None ['held-missing', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k6 (held-missing) -> 1",
+        "converge#4 -> None ['held-missing', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k6 (held-missing) -> 1"
+      ]
+    },
+    {
+      "seed": 7000072,
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (not-in-policy) -> 1"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'id', 'big': True, 'drift': 1, 'page': (4, 4), 'fillers': 20, 'newest_first': True}",
+        "run1 limit=58 refs=2 kw={'limit_override': 0.05} -> None ['issued', 'issued']",
+        "edit limit=58 refs=3 kw={}",
+        "edit limit=100 refs=3 kw={'split': {'vault:project-a/prod/K2': 0.19, 'vault:project-a/prod/K4': 0.35, 'vault:project-a/prod/K5': 0.43}}",
+        "consumer reads 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 by label (unlisted); revoke -> rc=1 still=True",
+        "concurrent[policy] during policy -> None",
+        "converge#0 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1",
+        "converge#1 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1",
+        "converge#2 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1",
+        "converge#3 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1",
+        "converge#4 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1"
+      ]
+    },
+    {
+      "seed": 7000828,
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'blocked', 'in-place', 'in-place']"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': '+1e-9', 'big': True, 'drift': -1, 'page': (3, 2), 'fillers': 8, 'newest_first': False}",
+        "run1 limit=279232 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "rename 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 698.0801",
+        "converge#0 -> None ['in-place', 'held-missing', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k0 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'blocked', 'in-place', 'in-place']",
+        "converge#2 -> None ['in-place', 'blocked', 'in-place', 'in-place']",
+        "converge#3 -> None ['in-place', 'blocked', 'in-place', 'in-place']",
+        "converge#4 -> None ['in-place', 'blocked', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7000906,
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['blocked', 'in-place']"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': 1, 'page': (3, 2), 'fillers': 3, 'newest_first': False}",
+        "run1 limit=8380 refs=2 kw={} -> None ['issued', 'issued']",
+        "unread 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "concurrent[policy] during policy -> None",
+        "rotate project-a-prod-k4 fault=- -> rc=1",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 41.9001",
+        "failrun deliver-timeout -> None ['in-place', 'held-unread', 'over-limit']",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 41.906",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['held-missing', 'in-place']",
+        "  remedy revoke project-a-prod-k1 (held-missing) -> 0",
+        "converge#1 -> None ['blocked', 'in-place']",
+        "converge#2 -> None ['blocked', 'in-place']",
+        "converge#3 -> None ['blocked', 'in-place']",
+        "converge#4 -> None ['blocked', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7001212,
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> PolicyPartial: partial: 0 of 3 slots served before vault:project-a/prod/K2 failed; a re-run does only what is missing ['not-reached', 'failed', 'not-reached']"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'x1.0001', 'big': True, 'drift': 1, 'page': (3, 2), 'fillers': 9, 'newest_first': True}",
+        "run1 limit=172463 refs=2 kw={} -> None ['issued', 'issued']",
+        "edit limit=172463 refs=3 kw={'limit_override': 368.29}",
+        "rotate-kill project-a-prod-k1 fault=delete -> rc=1",
+        "failrun mint:502-after -> PolicyPartial: partial: 0 of 3 slots served before vault:project-a/prod/K1 failed; a re-run does only what is missing ['failed', 'not-reached', 'not-reached']",
+        "concurrent[issue] during rotate -> rc=1",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "rotate-kill project-a-prod-k1 fault=mint:unreach-after -> rc=1",
+        "failrun deliver-timeout -> PolicyPartial: partial: 0 of 3 slots served before vault:project-a/prod/K2 failed; a re-run does only what is missing ['held-missing', 'failed', 'not-reached']",
+        "converge#0 -> PolicyPartial: partial: 0 of 3 slots served before vault:project-a/prod/K2 failed; a re-run does only what is missing ['held-missing', 'failed', 'not-reached']",
+        "  remedy revoke project-a-prod-k1 (held-missing) -> 0",
+        "converge#1 -> PolicyPartial: partial: 0 of 3 slots served before vault:project-a/prod/K2 failed; a re-run does only what is missing ['not-reached', 'failed', 'not-reached']",
+        "converge#2 -> PolicyPartial: partial: 0 of 3 slots served before vault:project-a/prod/K2 failed; a re-run does only what is missing ['not-reached', 'failed', 'not-reached']",
+        "converge#3 -> PolicyPartial: partial: 0 of 3 slots served before vault:project-a/prod/K2 failed; a re-run does only what is missing ['not-reached', 'failed', 'not-reached']",
+        "converge#4 -> PolicyPartial: partial: 0 of 3 slots served before vault:project-a/prod/K2 failed; a re-run does only what is missing ['not-reached', 'failed', 'not-reached']"
+      ]
+    },
+    {
+      "seed": 7001367,
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'blocked', 'in-place']"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'round2', 'big': True, 'drift': 0, 'page': (3, 2), 'fillers': 8, 'newest_first': False}",
+        "run1 limit=388 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 0.9701",
+        "rotate project-a-prod-k3 fault=- -> rc=1",
+        "converge#0 -> None ['in-place', 'in-place', 'held-missing', 'in-place']",
+        "  remedy revoke project-a-prod-k5 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'in-place', 'blocked', 'in-place']",
+        "converge#2 -> None ['in-place', 'in-place', 'blocked', 'in-place']",
+        "converge#3 -> None ['in-place', 'in-place', 'blocked', 'in-place']",
+        "converge#4 -> None ['in-place', 'in-place', 'blocked', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7001538,
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'blocked', 'in-place']"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'id', 'big': True, 'drift': 0, 'page': (3, 2), 'fillers': 6, 'newest_first': False}",
+        "run1 limit=64 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "subcent db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4 -> 0.1601",
+        "rename db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4",
+        "unread db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4",
+        "converge#0 -> None ['in-place', 'in-place', 'held-missing', 'in-place']",
+        "  remedy revoke project-a-prod-k1 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'in-place', 'blocked', 'in-place']",
+        "converge#2 -> None ['in-place', 'in-place', 'blocked', 'in-place']",
+        "converge#3 -> None ['in-place', 'in-place', 'blocked', 'in-place']",
+        "converge#4 -> None ['in-place', 'in-place', 'blocked', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7001556,
+      "issues": [],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': -1, 'page': (5, 3), 'fillers': 3, 'newest_first': False}",
+        "run1 limit=225371 refs=1 kw={'limit_override': 1957.08} -> None ['issued']",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "failrun save -> None ['held-missing']",
+        "failrun mint:unreach-before -> None ['held-missing']",
+        "concurrent[issue] during policy -> None",
+        "remedy revoke project-a-prod-k0 -> 2",
+        "rotate project-a-prod-k0 fault=- -> rc=1",
+        "converge#0 -> None ['held-missing']",
+        "  remedy revoke project-a-prod-k0 (held-missing) -> 0",
+        "converge#1 -> None ['issued']"
+      ]
+    },
+    {
+      "seed": 7002311,
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'blocked', 'in-place', 'in-place']"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': 0, 'page': (3, 2), 'fillers': 3, 'newest_first': False}",
+        "run1 limit=389372 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 973.4301",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 973.4301",
+        "provider deleted 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "failrun mint:500-before -> None ['in-place', 'held-missing', 'in-place', 'in-place']",
+        "remedy revoke project-a-prod-k2 -> 0",
+        "rotate project-a-prod-k0 fault=- -> rc=1",
+        "unread 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['in-place', 'blocked', 'in-place', 'in-place']",
+        "converge#1 -> None ['in-place', 'blocked', 'in-place', 'in-place']",
+        "converge#2 -> None ['in-place', 'blocked', 'in-place', 'in-place']",
+        "converge#3 -> None ['in-place', 'blocked', 'in-place', 'in-place']",
+        "converge#4 -> None ['in-place', 'blocked', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7002478,
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'blocked']"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'id', 'big': True, 'drift': 0, 'page': (3, 2), 'fillers': 9, 'newest_first': True}",
+        "run1 limit=681060 refs=5 kw={} -> None ['issued', 'issued', 'issued', 'issued', 'issued']",
+        "failrun kill -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "failrun deliver -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 1362.1201",
+        "consumer reads db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4 by label (listed); revoke -> rc=1 still=True",
+        "provider deleted 5963446a776ad19649eac8523b897d97b2edc9786b1cbdad64d207255908533c",
+        "failrun kill -> None ['in-place', 'in-place', 'in-place', 'in-place', 'held-missing']",
+        "converge#0 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'held-missing']",
+        "  remedy revoke project-a-prod-k4 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'blocked']",
+        "converge#2 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'blocked']",
+        "converge#3 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'blocked']",
+        "converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'blocked']"
+      ]
+    },
+    {
+      "seed": 7002628,
+      "issues": [
+        "(c') no convergence after the door's own remedies:   explicit operator attestation project-a-prod-k2 -> refused"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': '-0.004', 'big': True, 'drift': 1, 'page': (3, 2), 'fillers': 10, 'newest_first': False}",
+        "run1 limit=88 refs=3 kw={'split': {'vault:project-a/prod/K7': 0.25, 'vault:project-a/prod/K0': 0.27, 'vault:project-a/prod/K5': 0.3}} -> None ['issued', 'issued', 'issued']",
+        "concurrent[policy] during policy -> None",
+        "edit limit=100 refs=4 kw={'split': {'vault:project-a/prod/K7': 0.16, 'vault:project-a/prod/K0': 0.34, 'vault:project-a/prod/K5': 0.12, 'vault:project-a/prod/K2': 0.33}}",
+        "consumer reads 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 by label (unlisted); revoke -> rc=1 still=True",
+        "failrun mint:502-after -> PolicyPartial: partial: 3 of 4 slots served before vault:project-a/prod/K2 failed; a re-run does only what is missing ['ceiling-moved', 'ceiling-moved', 'ceiling-moved', 'failed']",
+        "remedy revoke project-a-prod-k2 -> 1",
+        "converge#0 -> None ['in-place', 'in-place', 'in-place', 'held-pending', 'over-limit']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused",
+        "converge#1 -> None ['in-place', 'in-place', 'in-place', 'held-pending', 'over-limit']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused",
+        "converge#2 -> None ['in-place', 'in-place', 'in-place', 'held-pending', 'over-limit']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused",
+        "converge#3 -> None ['in-place', 'in-place', 'in-place', 'held-pending', 'over-limit']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused",
+        "converge#4 -> None ['in-place', 'in-place', 'in-place', 'held-pending', 'over-limit']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused"
+      ]
+    },
+    {
+      "seed": 7002785,
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'blocked', 'in-place', 'in-place']"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': 1, 'page': (3, 2), 'fillers': 0, 'newest_first': True}",
+        "run1 limit=95748 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 239.3701",
+        "converge#0 -> None ['in-place', 'held-missing', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k3 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'blocked', 'in-place', 'in-place']",
+        "converge#2 -> None ['in-place', 'blocked', 'in-place', 'in-place']",
+        "converge#3 -> None ['in-place', 'blocked', 'in-place', 'in-place']",
+        "converge#4 -> None ['in-place', 'blocked', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7002924,
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['blocked', 'in-place', 'in-place']"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': '+1e-9', 'big': True, 'drift': 1, 'page': (5, 3), 'fillers': 19, 'newest_first': False}",
+        "run1 limit=708237 refs=3 kw={} -> None ['issued', 'issued', 'issued']",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "failrun delete -> None ['held-missing', 'in-place', 'in-place']",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 2360.7901",
+        "failrun deliver -> None ['held-missing', 'in-place', 'in-place']",
+        "rotate-kill project-a-prod-k2 fault=delete -> rc=1",
+        "converge#0 -> None ['held-missing', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k2 (held-missing) -> 0",
+        "converge#1 -> None ['blocked', 'in-place', 'in-place']",
+        "converge#2 -> None ['blocked', 'in-place', 'in-place']",
+        "converge#3 -> None ['blocked', 'in-place', 'in-place']",
+        "converge#4 -> None ['blocked', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7003447,
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'blocked']"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'id', 'big': False, 'drift': -1, 'page': (3, 2), 'fillers': 3, 'newest_first': True}",
+        "run1 limit=1860 refs=5 kw={} -> None ['issued', 'issued', 'issued', 'issued', 'issued']",
+        "concurrent[limit] during policy -> None",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 3.7201",
+        "failrun deliver -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'over-limit']",
+        "provider deleted 5963446a776ad19649eac8523b897d97b2edc9786b1cbdad64d207255908533c",
+        "rotate project-a-prod-k4 fault=- -> rc=1",
+        "consumer reads 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 by label (unlisted); revoke -> rc=1 still=True",
+        "rotate project-a-prod-k5 fault=- -> rc=1",
+        "converge#0 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'held-missing']",
+        "  remedy revoke project-a-prod-k4 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'blocked']",
+        "converge#2 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'blocked']",
+        "converge#3 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'blocked']",
+        "converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'blocked']"
+      ]
+    },
+    {
+      "seed": 7003454,
+      "issues": [],
+      "error": null,
+      "trace": [
+        "shape {'echo': '-0.004', 'big': False, 'drift': 0, 'page': (4, 4), 'fillers': 3, 'newest_first': True}",
+        "run1 limit=264355 refs=2 kw={} -> None ['issued', 'issued']",
+        "rotate-kill project-a-prod-k7 fault=mint:unreach-after -> rc=1",
+        "consumer reads 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 by label (listed); revoke -> rc=1 still=True",
+        "rename 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "failrun save -> None ['in-place', 'in-place']",
+        "edit limit=528710 refs=2 kw={}",
+        "remedy revoke project-a-prod-k4 -> 2",
+        "unread 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['ceiling-moved', 'issued', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k4 (not-in-policy) -> 0",
+        "converge#1 -> None ['in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7003549,
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'blocked']"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': 'round2', 'big': True, 'drift': 0, 'page': (4, 4), 'fillers': 19, 'newest_first': False}",
+        "run1 limit=5910 refs=3 kw={} -> None ['issued', 'issued', 'issued']",
+        "unread f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "rename 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "provider deleted f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 19.7001",
+        "concurrent[rotate] during rotate -> rc=1",
+        "rotate project-a-prod-k6 fault=- -> rc=1",
+        "unread 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "converge#0 -> None ['in-place', 'in-place', 'held-missing']",
+        "  remedy revoke project-a-prod-k3 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'in-place', 'blocked']",
+        "converge#2 -> None ['in-place', 'in-place', 'blocked']",
+        "converge#3 -> None ['in-place', 'in-place', 'blocked']",
+        "converge#4 -> None ['in-place', 'in-place', 'blocked']"
+      ]
+    },
+    {
+      "seed": 7004446,
+      "issues": [
+        "(L) live project key unknown to the ledger after subcent: 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8(project-a-prod-k0, $11.132)"
+      ],
+      "error": null,
+      "trace": [
+        "shape {'echo': '-0.004', 'big': True, 'drift': -1, 'page': (5, 3), 'fillers': 16, 'newest_first': False}",
+        "run1 limit=1113 refs=1 kw={'split': {'vault:project-a/prod/K7': 10.1}} -> None ['issued']",
+        "rotate-kill project-a-prod-k7 fault=delete -> rc=1",
+        "rename 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "edit limit=2226 refs=2 kw={}",
+        "failrun mint:unreach-after -> PolicyPartial: partial: 0 of 2 slots served before vault:project-a/prod/K0 failed; a re-run does only what is missing ['held-missing', 'failed']",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 11.132",
+        "converge#0 -> None ['held-missing', 'held-pending', 'over-limit']",
+        "  remedy revoke project-a-prod-k7 (held-missing) -> 0",
+        "  remedy revoke project-a-prod-k0 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k0 -> operator-attested",
+        "converge#1 -> None ['issued', 'issued']"
+      ]
+    }
+  ]
+}

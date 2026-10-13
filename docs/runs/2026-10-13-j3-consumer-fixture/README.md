@@ -71,3 +71,9 @@ NOT_RUN status only for that exact source and retains every failed seed.
 The [separate CLI-boundary adapter](cli-boundary.md) reproduces the real
 entrypoint's error exit without rolling back modeled effects or skipping
 invariants. Its six bounded replays do not replace the full measurement.
+
+The [composed-source 5200-case measurement](composed-measurement.md) on
+`e22b986e837125ce715a319bd7c47b5527081349` completed all cases: 3501 PASS,
+1699 FAIL, 0 ERROR. No strict `(a)` or `(a-rot)` admission violation appeared;
+one `(L)` failure and 1698 convergence failures remain. Full acceptance is not
+met. The original failure matrix remains unchanged beside this new snapshot.

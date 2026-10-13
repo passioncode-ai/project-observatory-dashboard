@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "status": "FINISHED",
+  "checkout_before": "e22b986e837125ce715a319bd7c47b5527081349",
+  "source_before": {
+    "observatory/engine/tests/adv_j1_property.py": "059eeddcea7a08bbe4e92ffa496fc243d72915c1976bb39b3b923be6fb0b88a9",
+    "observatory/engine/tests/test_credential_doors.py": "8959aeb83911ff285418dae2b8e9bfea4c095c47f019d0e0408fe1018d116a1f",
+    "observatory/engine/tools/openrouter.py": "8c74363dca294ff62291df2bb8aac71e8fb7b9ca795db5f81bb0be6cc48b503b",
+    "observatory/engine/collectors/scan_openrouter.py": "b146f9f331ca5ef4d24b3c328db46b860fa319797018ecdbe811fe4e1a307aae",
+    "observatory/engine/tests/adversarial_runner.py": "a70295a9bbea620f18d4fd1d39148667b69073a99dd6e356b0b7427e9aa425e6"
+  },
+  "start_seed": 7000000,
+  "requested": 5200,
+  "jobs": 1,
+  "started_at": "2026-10-13T06:37:10.864557+00:00",
+  "timeout_seconds": 900,
+  "exit_code": 1,
+  "seconds": 330.37225766602205,
+  "checkout_after": "e22b986e837125ce715a319bd7c47b5527081349",
+  "source_after": {
+    "observatory/engine/tests/adv_j1_property.py": "059eeddcea7a08bbe4e92ffa496fc243d72915c1976bb39b3b923be6fb0b88a9",
+    "observatory/engine/tests/test_credential_doors.py": "8959aeb83911ff285418dae2b8e9bfea4c095c47f019d0e0408fe1018d116a1f",
+    "observatory/engine/tools/openrouter.py": "8c74363dca294ff62291df2bb8aac71e8fb7b9ca795db5f81bb0be6cc48b503b",
+    "observatory/engine/collectors/scan_openrouter.py": "b146f9f331ca5ef4d24b3c328db46b860fa319797018ecdbe811fe4e1a307aae",
+    "observatory/engine/tests/adversarial_runner.py": "a70295a9bbea620f18d4fd1d39148667b69073a99dd6e356b0b7427e9aa425e6"
+  },
+  "source_unchanged": true,
+  "remaining_owned_entries_after_harness_cleanup": 0,
+  "owned_temp_removed": true
+}
