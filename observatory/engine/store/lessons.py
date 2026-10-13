@@ -36,6 +36,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import time
 from typing import Any
 
 KIND = "lesson"
@@ -195,13 +196,60 @@ def current_lessons(conn: sqlite3.Connection,
     return out
 
 
+def has_support(conn: sqlite3.Connection, body: dict) -> bool:
+    """Two known, distinct roots with resolving commits; a shared five-second Git budget.
+
+    This is current evidence, not authentication of a local caller's declared identity.
+    """
+    from tools import corroborate as C
+    deadline = time.monotonic() + 5.0
+    keys = C.project_keys(deadline=deadline)
+    if C.resolve_origin(body.get("origin") or {}, keys, deadline=deadline)[0] is not True:
+        return False
+    mine = body["origin"]["projectId"]
+    projects = {mine}
+    for row in current_lessons(conn):
+        other = row["body"]
+        if other.get("classKey") != body.get("classKey"):
+            continue
+        origin = other.get("origin") or {}
+        if origin.get("projectId") in projects:
+            continue
+        if C.resolve_origin(origin, keys, deadline=deadline)[0] is True:
+            projects.add(origin["projectId"])
+            if len(projects) >= C.LESSON_PROJECTS:
+                return True
+    return False
+
+
+def revalidate(conn: sqlite3.Connection, ledger: Any, *, memory_id: str,
+               expected_revision: int) -> dict:
+    """Recheck the current observation without replaying a stale scan's body."""
+    with ledger.atomic_revisions(conn):
+        prior = ledger.current(conn, memory_id)
+        if prior is None or prior["revision"] != expected_revision:
+            raise ledger.RevisionConflict(memory_id, expected_revision,
+                                          prior["revision"] if prior else -1)
+        if prior["state"] != "observed" or prior["owner"] == ledger.OPERATOR:
+            raise ledger.LedgerError("only an agent-owned observation is mechanically revalidated")
+        return _write_locked(conn, ledger, owner=prior["owner"],
+                             body=json.loads(prior["body_json"]),
+                             provenance=[{"source": "lesson-evidence-revalidation"}])
+
+
 def write(conn: sqlite3.Connection, ledger: Any, *, owner: str, body: dict,
+          provenance: list[dict]) -> dict:
+    with ledger.atomic_revisions(conn):
+        return _write_locked(conn, ledger, owner=owner, body=body, provenance=provenance)
+
+
+def _write_locked(conn: sqlite3.Connection, ledger: Any, *, owner: str, body: dict,
           provenance: list[dict]) -> dict:
     """Mint the lesson, or revise this project's record of the class.
 
     An unchanged repeat writes nothing and answers with the current revision. A change of
-    wording appends a revision under compare-and-swap and keeps the record's state: the
-    witness checked the class and the commit, not the wording.
+    wording keeps an observation only while two distinct known projects still have
+    resolving evidence. Missing evidence also invalidates an unchanged repeat.
 
     **A NEW COMMIT IS A NEW CLAIM.** A corroboration vouched for the old commit, so a
     promoted lesson that now cites another one cannot stay `observed`. The lifecycle has
@@ -217,13 +265,14 @@ def write(conn: sqlite3.Connection, ledger: Any, *, owner: str, body: dict,
     if prior is not None:
         same = (json.loads(prior["body_json"] or "{}") == body
                 and prior["statement"] == statement_of(body) and prior["why"] == why_of(body))
-        if same:
+        unsupported = prior["state"] == "observed" and not has_support(conn, body)
+        if same and not unsupported:
             return {"memoryId": prior["memory_id"], "revision": prior["revision"],
                     "state": prior["state"], "owner": prior["owner"], "supersedes": [],
                     "createdAt": prior["created_at"], "outcome": "unchanged"}
         prior_body = json.loads(prior["body_json"] or "{}")
         new_commit = (prior_body.get("origin") or {}).get("commit") != body["origin"]["commit"]
-        if new_commit and prior["state"] != "proposed":
+        if (new_commit and prior["state"] != "proposed") or unsupported:
             closed = ledger.append(
                 conn, owner=owner, kind=KIND, function=FUNCTION, scope=SCOPE,
                 memory_id=prior["memory_id"], expected_revision=prior["revision"],
@@ -232,8 +281,7 @@ def write(conn: sqlite3.Connection, ledger: Any, *, owner: str, body: dict,
                 body=prior_body,
                 provenance=json.loads(prior["provenance_json"] or "[]") + [
                     {"source": "observatory_lesson",
-                     "archived": f"the evidence commit changed to {body['origin']['commit']}; "
-                                 f"the corroboration vouched for the old one"}])
+                     "archived": "current evidence no longer supports the observed claim"}])
             replaces = f"{prior['memory_id']}@{closed['revision']}"
             out = ledger.append(conn, owner=owner, kind=KIND, function=FUNCTION, scope=SCOPE,
                                 statement=statement_of(body), why=why_of(body),

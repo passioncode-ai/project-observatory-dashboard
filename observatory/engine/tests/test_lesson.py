@@ -26,6 +26,7 @@ import json
 import pathlib
 import sys
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
@@ -128,23 +129,175 @@ class ANewCommitAfterPromotion(Base):
         from store import ledger as L
         conn = sdb.connect()
         try:
-            L.corroborate(conn, first["memoryId"], by="agent:lesson-corroborator",
-                          check={"how": "two projects"}, expected_revision=1)
+            with patch("store.lessons.has_support", return_value=True):
+                L.corroborate(conn, first["memoryId"], by="agent:lesson-corroborator",
+                              check={"how": "two projects"}, expected_revision=1)
         finally:
             conn.close()
-        wording = self.ws.srv.observatory_lesson(**lesson(title="An absent input must fail "
-                                                                 "its own check, always"))
+        with patch("store.lessons.has_support", return_value=True):
+            wording = self.ws.srv.observatory_lesson(**lesson(title="An absent input must fail "
+                                                                     "its own check, always"))
         self.assertEqual((wording["outcome"], wording["state"]), ("revised", "observed"),
                          "a change of wording keeps the corroboration")
         out = self.ws.srv.observatory_lesson(**lesson(commit="0123456789abcdef"))
         jsonschema.Draft202012Validator(self.tool().output_schema).validate(out)
         self.assertEqual((out["outcome"], out["state"]), ("replaced", "proposed"), out)
-        self.assertEqual(out["replaces"], f"{first['memoryId']}@4", "created, corroborated, reworded, archived")
+        self.assertEqual(out["replaces"], f"{first['memoryId']}@4")
         self.assertNotEqual(out["memoryId"], first["memoryId"])
         states = {r["memory_id"]: r["state"] for r in self.rows()}
         self.assertEqual(states[first["memoryId"]], "archived")
         again = self.ws.srv.observatory_lesson(**lesson(commit="0123456789abcdef"))
         self.assertEqual((again["memoryId"], again["outcome"]), (out["memoryId"], "unchanged"))
+
+
+class EvidenceRevisionSafety(Base):
+    def test_a_lesson_cannot_inherit_an_ordinary_notes_promotion(self):
+        first = self.ws.srv.observatory_lesson(**EMITTED)
+        from store import db as sdb, ledger as L
+        conn = sdb.connect()
+        try:
+            body = json.loads(L.current(conn, first["memoryId"])["body_json"])
+            body["origin"]["projectId"] = OTHER_PROJECT
+            body["origin"]["commit"] = "commit:deadbeefcafe"
+            for state in ("observed",):
+                note = L.append(conn, owner="agent:synthetic", statement="An ordinary note")
+                if state == "observed":
+                    L.corroborate(conn, note["memoryId"], by="agent:checker",
+                                  check={"how": "A check of the ordinary note"}, expected_revision=1)
+                prior = dict(L.current(conn, note["memoryId"]))
+                with self.subTest(state=state), self.assertRaises(L.LedgerError):
+                    L.append(conn, owner=prior["owner"], statement=prior["statement"],
+                             kind="lesson", function="experiential", scope="global", state=state,
+                             memory_id=prior["memory_id"], expected_revision=prior["revision"], body=body)
+                self.assertEqual(dict(L.current(conn, note["memoryId"])), prior)
+        finally:
+            conn.close()
+
+    def promoted(self):
+        first = self.ws.srv.observatory_lesson(**EMITTED)
+        from store import db as sdb, ledger as L
+        conn = sdb.connect()
+        try:
+            # Seed formerly verified evidence; real Git promotion has separate coverage.
+            with patch("store.lessons.has_support", return_value=True):
+                L.corroborate(conn, first["memoryId"], by="agent:lesson-corroborator",
+                              check={"how": "synthetic independent evidence"}, expected_revision=1)
+        finally:
+            conn.close()
+        return first
+
+    def test_generic_promotion_cannot_claim_unknown_project_evidence(self):
+        first = self.ws.srv.observatory_lesson(**EMITTED)
+        from store import db as sdb, ledger as L
+        conn = sdb.connect()
+        try:
+            with self.assertRaises(L.LedgerError):
+                L.corroborate(conn, first["memoryId"], by="agent:other",
+                              check={"how": "claimed check"}, expected_revision=1)
+        finally:
+            conn.close()
+
+    def test_unchanged_repeat_also_revalidates_and_is_then_idempotent(self):
+        first = self.promoted()
+        out = self.ws.srv.observatory_lesson(**EMITTED)
+        again = self.ws.srv.observatory_lesson(**EMITTED)
+        self.assertEqual((out["outcome"], out["state"]), ("replaced", "proposed"))
+        self.assertEqual((again["outcome"], again["memoryId"]), ("unchanged", out["memoryId"]))
+
+    def test_stale_scan_cannot_replace_a_newer_revision(self):
+        first = self.promoted()
+        from store import db as sdb, ledger as L, lessons as LS
+        conn = sdb.connect()
+        try:
+            with patch.object(LS, "has_support", return_value=True):
+                body = json.loads(L.current(conn, first["memoryId"])["body_json"])
+                body["title"] = "A newer description is preserved"
+                newer = LS.write(conn, L, owner=EMITTED["owner"], body=body, provenance=[])
+            with self.assertRaises(L.RevisionConflict):
+                LS.revalidate(conn, L, memory_id=first["memoryId"], expected_revision=2)
+            self.assertEqual(L.current(conn, first["memoryId"])["revision"], newer["revision"])
+        finally:
+            conn.close()
+
+    def test_expired_git_budget_is_unknown_and_does_not_spawn(self):
+        import time
+        from tools import corroborate as C
+        origin = {"projectId": OTHER_PROJECT, "commit": "commit:deadbeefcafe"}
+        with patch.object(C.safe_git, "run") as run:
+            result, reason = C.resolve_origin(origin, {OTHER_PROJECT: ["unused"]},
+                                              deadline=time.monotonic() - 1)
+        self.assertIsNone(result)
+        self.assertIn("budget", reason)
+        run.assert_not_called()
+
+    def test_operator_supported_lesson_is_not_replaced_by_agent(self):
+        first = self.promoted()
+        from store import db as sdb, ledger as L, lessons as LS
+        conn = sdb.connect()
+        try:
+            L.transition(conn, first["memoryId"], owner="operator", to_state="supported",
+                         expected_revision=2)
+            prior = dict(L.current(conn, first["memoryId"]))
+            body = json.loads(prior["body_json"])
+            body["origin"]["commit"] = "commit:deadbeefcafe"
+            with self.assertRaises(L.OwnerRefused):
+                LS.write(conn, L, owner=EMITTED["owner"], body=body, provenance=[])
+            self.assertEqual(dict(L.current(conn, first["memoryId"])), prior)
+        finally:
+            conn.close()
+
+    def test_shared_revision_refuses_project_and_class_identity_mutation(self):
+        first = self.promoted()
+        from store import db as sdb, ledger as L
+        conn = sdb.connect()
+        try:
+            prior = L.current(conn, first["memoryId"])
+            for field in ("project", "class"):
+                body = json.loads(prior["body_json"])
+                if field == "project":
+                    body["origin"]["projectId"] = OTHER_PROJECT
+                else:
+                    body["classKey"] = "another-class"
+                with self.subTest(field=field), self.assertRaises(L.LedgerError):
+                    L.append(conn, owner=prior["owner"], statement=prior["statement"],
+                             kind="lesson", function="experiential", scope="global", state="observed",
+                             memory_id=prior["memory_id"], expected_revision=prior["revision"], body=body)
+        finally:
+            conn.close()
+
+    def test_failure_after_archive_rolls_back_ledger_outbox_and_index(self):
+        first = self.promoted()
+        from store import db as sdb, ledger as L, lessons as LS
+        conn = sdb.connect()
+        before = {table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                  for table in ("ledger", "outbox", "search_notes")}
+        prior = dict(L.current(conn, first["memoryId"]))
+        body = json.loads(prior["body_json"])
+        body["origin"]["commit"] = "commit:deadbeefcafe"
+        real, calls = L.insert_revision, []
+        def fail_second(c, row):
+            calls.append(row)
+            if len(calls) == 2:
+                raise RuntimeError("synthetic successor failure")
+            return real(c, row)
+        try:
+            with patch.object(L, "insert_revision", side_effect=fail_second), self.assertRaises(RuntimeError):
+                LS.write(conn, L, owner=prior["owner"], body=body, provenance=[])
+        finally:
+            conn.close()
+        conn = sdb.connect()
+        try:
+            self.assertEqual(dict(L.current(conn, first["memoryId"])), prior)
+            self.assertEqual({table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                              for table in before}, before)
+        finally:
+            conn.close()
+
+    def test_same_commit_without_resolvable_support_becomes_a_proposal_on_revision(self):
+        first = self.promoted()
+        out = self.ws.srv.observatory_lesson(**lesson(title="An absent source needs its own explicit check"))
+        self.assertEqual((out.get("outcome"), out.get("state")), ("replaced", "proposed"))
+        self.assertNotEqual(out["memoryId"], first["memoryId"])
 
 
 class WhatALessonMayNotCarry(Base):
@@ -237,6 +390,13 @@ class TheBridgeNotesMigrate(Base):
     """Lessons written before this tool, as `observatory_record` notes (the emitter's
     default `--tool observatory_record`), become lesson records: same id, a new revision."""
 
+    def setUp(self):
+        super().setUp()
+        # Workspace reloads store modules; the migration must share their transaction context.
+        import importlib
+        import migrate_lessons
+        importlib.reload(migrate_lessons)
+
     def bridge(self, commit: str) -> dict:
         a = EMITTED
         return self.ws.srv.observatory_record(
@@ -245,6 +405,131 @@ class TheBridgeNotesMigrate(Base):
             evidence=[{"kind": "commit", "sha": commit},
                       {"kind": "lesson", "id": "L-889956db5299", "classKey": a["classKey"],
                        "project": a["origin"]["projectId"], "nouns": a["nouns"]}])
+
+    def test_migration_serializes_identity_check_and_competing_lesson_write(self):
+        import sqlite3
+        from contextvars import Context
+        import migrate_lessons as M
+        from store import db as sdb, ledger as L, lessons as LS
+        note = self.bridge("commit:" + EMITTED["origin"]["commit"][:12])
+        conn, other = sdb.connect(), sdb.connect()
+        other.execute("PRAGMA busy_timeout=0")
+        body = LS.body_of({k: v for k, v in EMITTED.items() if k != "owner"})
+        real, attempts = LS.existing, []
+        def interleave(c, ck, pk):
+            result = real(c, ck, pk)
+            if c is conn and not attempts:
+                attempts.append("started")
+                try:
+                    Context().run(LS.write, other, L, owner=EMITTED["owner"], body=body, provenance=[])
+                except sqlite3.OperationalError:
+                    attempts.append("blocked")
+            return result
+        try:
+            with patch.object(LS, "existing", side_effect=interleave):
+                out = M.migrate(conn, apply=True)
+            self.assertEqual(attempts, ["started", "blocked"])
+            self.assertEqual(len(out["moved"]), 1)
+            again = LS.write(other, L, owner=EMITTED["owner"], body=body, provenance=[])
+            self.assertEqual((again["outcome"], again["memoryId"]), ("unchanged", note["memoryId"]))
+            self.assertEqual(len(LS.current_lessons(conn)), 1)
+        finally:
+            conn.close()
+            other.close()
+
+    def test_migration_rereads_candidate_revision_under_lock(self):
+        import migrate_lessons as M
+        from store import db as sdb, ledger as L
+        note = self.bridge("commit:" + EMITTED["origin"]["commit"][:12])
+        conn, other = sdb.connect(), sdb.connect()
+        real = M.candidates
+        def changed(c):
+            rows = real(c)
+            prior = L.current(other, note["memoryId"])
+            L.append(other, owner=prior["owner"], memory_id=prior["memory_id"],
+                     expected_revision=prior["revision"], statement="a newer note to preserve")
+            return rows
+        try:
+            with patch.object(M, "candidates", side_effect=changed):
+                out = M.migrate(conn, apply=True)
+            self.assertEqual(out["moved"], [])
+            self.assertIn("changed", out["skipped"][0]["why"])
+            self.assertEqual(L.current(conn, note["memoryId"])["statement"], "a newer note to preserve")
+        finally:
+            conn.close()
+            other.close()
+
+    def test_generic_revision_refuses_erasure_between_read_and_insert(self):
+        from store import db as sdb, ledger as L, lessons as LS
+        first = self.ws.srv.observatory_lesson(**EMITTED)
+        conn, other = sdb.connect(), sdb.connect()
+        prior = L.current(conn, first["memoryId"])
+        body = json.loads(prior["body_json"])
+        class InterleavedConnection:
+            def __enter__(self):
+                conn.__enter__()
+                return self
+            def __exit__(self, *args):
+                return conn.__exit__(*args)
+            def execute(self, sql, args=()):
+                cursor = conn.execute(sql, args)
+                if sql.startswith("SELECT revision FROM tombstones"):
+                    result = cursor.fetchone()
+                    other.execute("INSERT INTO tombstones VALUES (?, 1, 'fixture', 'operator', '2026-01-01')",
+                                  (first["memoryId"],))
+                    other.commit()
+                    class CapturedRead:
+                        def fetchone(self):
+                            return result
+                    return CapturedRead()
+                return cursor
+        try:
+            with self.assertRaises(L.LedgerError):
+                L.append(InterleavedConnection(), owner=prior["owner"], kind="lesson",
+                         function="experiential", scope="global", statement=prior["statement"],
+                         body=body, memory_id=first["memoryId"], expected_revision=1)
+            self.assertEqual(L.current(conn, first["memoryId"])["revision"], 1)
+        finally:
+            conn.close()
+            other.close()
+
+    def test_generic_new_and_converted_lessons_cannot_duplicate_active_identity(self):
+        from store import db as sdb, ledger as L, lessons as LS
+        self.ws.srv.observatory_lesson(**EMITTED)
+        note = self.bridge("commit:" + EMITTED["origin"]["commit"][:12])
+        conn = sdb.connect()
+        body = LS.body_of({k: v for k, v in EMITTED.items() if k != "owner"})
+        try:
+            for identity in ({}, {"memory_id": note["memoryId"], "expected_revision": 1}):
+                with self.subTest(identity=identity), self.assertRaises(L.LedgerError):
+                    L.append(conn, owner=EMITTED["owner"], kind="lesson", function="experiential",
+                             scope="global", statement=LS.statement_of(body), body=body, **identity)
+            self.assertEqual(len(LS.current_lessons(conn)), 1)
+            self.assertEqual(L.current(conn, note["memoryId"])["kind"], "note")
+        finally:
+            conn.close()
+
+    def test_migration_preserves_promoted_and_operator_owned_notes(self):
+        import migrate_lessons as M
+        from store import db as sdb, ledger as L
+        conn = sdb.connect()
+        try:
+            observed = self.bridge("commit:" + EMITTED["origin"]["commit"][:12])
+            L.corroborate(conn, observed["memoryId"], by="agent:checker",
+                          check={"how": "generic note check"}, expected_revision=1)
+            owned = self.bridge("commit:" + EMITTED["origin"]["commit"][:12])
+            p = L.current(conn, owned["memoryId"])
+            L.append(conn, owner=L.OPERATOR, memory_id=p["memory_id"], expected_revision=1,
+                     statement=p["statement"], why=p["why"], evidence=json.loads(p["evidence_json"]))
+            before = [tuple(row) for row in conn.execute("SELECT * FROM ledger ORDER BY memory_id, revision")]
+            for apply in (False, True):
+                out = M.migrate(conn, apply=apply)
+                self.assertEqual(out["moved"], [])
+                self.assertEqual({r["memory_id"] for r in out["skipped"]},
+                                 {observed["memoryId"], owned["memoryId"]})
+            self.assertEqual([tuple(row) for row in conn.execute("SELECT * FROM ledger ORDER BY memory_id, revision")], before)
+        finally:
+            conn.close()
 
     def test_a_note_becomes_a_lesson_and_a_dry_run_writes_nothing(self) -> None:
         import importlib

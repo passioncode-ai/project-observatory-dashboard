@@ -377,19 +377,25 @@ def test_a_lesson_is_kept_a_year_and_for_good_once_corroborated() -> None:
     """A lesson waits for a SECOND PROJECT, which takes longer than a review queue's 90
     days; once corroborated it is the estate's working memory and age never erases it."""
     conn, L, R = fresh()
-    body = {"schema": "lesson/1", "classKey": "a-class", "origin": {"projectId": "p-0123456789ab",
-                                                                    "commit": "commit:0123456"}}
+    body = {"schema": "lesson/1", "classKey": "a-class",
+            "title": "Keep bounded lesson evidence", "trigger": "A lesson awaits corroboration",
+            "check": "Retain the proposal for its configured horizon",
+            "nouns": ["lesson", "evidence", "retention"],
+            "origin": {"projectId": "p-0123456789ab", "commit": "commit:0123456"}}
     young = L.append(conn, owner="agent:task-pipeline", kind="lesson", function="experiential",
                      scope="global", statement="lesson: a-class — kept while it waits",
                      confidence=0.5, body=body)
     old = L.append(conn, owner="agent:task-pipeline", kind="lesson", function="experiential",
                    scope="global", statement="lesson: b-class — waited too long",
-                   confidence=0.5, body=body)
+                   confidence=0.5, body={**body, "classKey": "b-class"})
     seen = L.append(conn, owner="agent:task-pipeline", kind="lesson", function="experiential",
                     scope="global", statement="lesson: c-class — corroborated", confidence=0.5,
-                    body=body)
-    L.corroborate(conn, seen["memoryId"], by="agent:lesson-corroborator",
-                  check={"how": "two projects"}, expected_revision=1)
+                    body={**body, "classKey": "c-class"})
+    # Seed a previously corroborated persisted row: this case tests retention,
+    # not live Git evidence admission (covered by test_lesson/test_corroboration).
+    with conn:
+        conn.execute("UPDATE ledger SET state = 'observed' WHERE memory_id = ?",
+                     (seen["memoryId"],))
     note = L.append(conn, owner="agent:observer", statement="a note of the same age",
                     confidence=0.5, project_id="project:x")
     age(conn, young["memoryId"], 100)

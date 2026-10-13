@@ -75,6 +75,17 @@ def guard_summaries(days: int = 7) -> list[dict]:
     return out
 
 
+def carried(hygiene: dict) -> dict | None:
+    """The checkouts a cut-short git-hygiene pass carried from an earlier one (`stale: true`), and
+    the oldest of their measurements; None when every row is fresh (ENG-009). The one reader of
+    `stale`: `tools/cleanup.py` plans and logs from it, this summary and the page show it."""
+    stale = [c for c in hygiene.get("checkouts") or [] if c.get("stale")]
+    if not stale:
+        return None
+    stamps = [c["measured_at"] for c in stale if c.get("measured_at")]
+    return {"checkouts": len(stale), "measured_at": min(stamps) if stamps else None}
+
+
 def summary(explain_pid: int | None = None) -> dict:
     degraded = []
     machine, d1 = _load("machine.json", "machine")
@@ -92,6 +103,11 @@ def summary(explain_pid: int | None = None) -> dict:
         degraded += (machine.get("processes") or {}).get("degraded") or []
         degraded += (machine.get("memory") or {}).get("degraded") or []
         degraded += (machine.get("disk") or {}).get("degraded") or []
+    import memory_snapshot
+    fresh = memory_snapshot.read_sources(machine)
+    for section in ("memory", "processes"):
+        out[section] = fresh[section]
+        degraded += fresh[section]["degraded"]
     if hygiene:
         rows = hygiene.get("checkouts") or []
         out["git"] = {
@@ -101,6 +117,10 @@ def summary(explain_pid: int | None = None) -> dict:
                          for cls in ("merged", "patch-merged", "pushed", "unique")},
             "uniqueBranches": [{"repository": c["repository"], **b} for c in rows
                                for b in c.get("branches") or [] if b["class"] == "unique"],
+            # A pass the deadline cut short (ENG-009): how many rows are carried, and from when.
+            # Their auto actions wait for a fresh pass (tools/cleanup.py `carried`).
+            "partial": bool(hygiene.get("partial")),
+            "carried": carried(hygiene),
         }
         degraded += hygiene.get("degraded") or []
     if plan:

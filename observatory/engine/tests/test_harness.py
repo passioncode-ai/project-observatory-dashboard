@@ -88,19 +88,23 @@ class Harness(unittest.TestCase):
         (proj / "b.jsonl").write_text(json.dumps({"message": {"content": [
             {"type": "tool_use", "name": "Skill", "input": {"skill": "tool:installer"}}]}}) + "\n")
         (claude / "CLAUDE.md").write_text("rule\n" * 600, encoding="utf-8")
+        # Own the nested fixture workspace even under the isolated portable runner.
+        self.env = {k: v for k, v in os.environ.items() if k not in {
+            "OBSERVATORY_REGISTRY", "OBSERVATORY_DB", "OBSERVATORY_STATE", "OBSERVATORY_SCRATCH"}}
+        self.env.update(OBSERVATORY_HOME=str(self.ws), OBSERVATORY_SYSTEM_SETUP="0")
         init = subprocess.run([PY, str(ROOT / "observatory.py"), "init"], cwd=ROOT, capture_output=True, text=True,
-                              env={**os.environ, "OBSERVATORY_HOME": str(self.ws), "OBSERVATORY_SYSTEM_SETUP": "0"})
+                              env=self.env)
         self.assertEqual(init.returncode, 0, init.stderr[-600:])
         self.configure(["integrations", "harness", "true"], ["sources", "harness_root", str(self.home)])
 
     def configure(self, *settings):
         for setting in settings:
             p = subprocess.run([PY, str(ROOT / "observatory.py"), "configure", *setting], cwd=ROOT, capture_output=True,
-                               text=True, env={**os.environ, "OBSERVATORY_HOME": str(self.ws), "OBSERVATORY_SYSTEM_SETUP": "0"})
+                               text=True, env=self.env)
             self.assertEqual(p.returncode, 0, (setting, p.stdout[-400:], p.stderr[-400:]))
 
     def scan(self, budget: int = 100_000) -> dict:
-        env = {**os.environ, "OBSERVATORY_STATE": str(self.ws / "store"),
+        env = {**self.env, "OBSERVATORY_STATE": str(self.ws / "store"),
                "OBSERVATORY_HOME": str(self.ws),
                "OBSERVATORY_HARNESS_BUDGET_CHARS": str(budget)}
         env.pop("ANTHROPIC_BASE_URL", None)
@@ -221,6 +225,79 @@ class Harness(unittest.TestCase):
         self.assertIn("harness:plaintext:~/.hermes/.env",
                       {f["subject"] for f in found if f["type"] == "harness.plaintext_secret"})
         self.assertNotIn(key, json.dumps(found))
+
+    def test_malformed_tool_config_recovers_names_and_reports_degradation(self):
+        key = "sk-synthetic-" + "Ab3D" * 12
+        folder = self.home / ".codex"; folder.mkdir()
+        (folder / "config.toml").write_text('[mcp_servers.demo.http_headers]\nauth = "' + key + '"\n[mcp_servers.demo.http_headers]\n')
+        doc = self.scan()
+        row = next(r for r in doc["tool_plaintext"] if r["file"] == "~/.codex/config.toml")
+        self.assertFalse(row["parsed"])
+        self.assertIn("mcp_servers.demo.http_headers.auth", row["names"])
+        self.assertTrue(any(d["source"] == "tool-config:~/.codex/config.toml" for d in doc["degraded"]))
+        found = self.findings()
+        self.assertIn("harness.scan_degraded", {f["type"] for f in found})
+        self.assertNotIn(key, json.dumps([doc, found]))
+        self.assertNotIn("Cannot declare", json.dumps([doc, found]))
+
+    def test_project_headers_and_user_env_use_path_free_names(self):
+        key = "sk-synthetic-" + "Cd5E" * 12
+        project = self.home / "projects" / "alpha-app"; project.mkdir(parents=True)
+        self.configure(["sources", "projects", str(project.parent)])
+        (self.home / ".claude.json").write_text(json.dumps({"projects": {str(project): {"mcpServers": {"demo": {"headers": {"h": key}}}}}}))
+        settings = self.home / ".claude" / "settings.json"
+        doc = json.loads(settings.read_text()); doc["env"]["API_TOKEN"] = key; settings.write_text(json.dumps(doc))
+        doc = self.scan(); rows = {r["file"]: r for r in doc["tool_plaintext"]}
+        self.assertIn("project:alpha-app.mcpServers.demo.headers.h", rows["~/.claude.json"]["names"])
+        self.assertIn("env.API_TOKEN", rows["~/.claude/settings.json"]["names"])
+        self.assertNotIn(str(self.home), json.dumps(rows))
+        self.assertNotIn(key, json.dumps([doc, self.findings()]))
+
+    def test_tracked_project_config_is_critical(self):
+        key = "sk-synthetic-" + "Ef7G" * 12
+        project = self.home.parent / "projects" / "alpha-app"; project.mkdir(parents=True)
+        self.configure(["sources", "projects", str(project.parent)])
+        (project / ".mcp.json").write_text(json.dumps({"mcpServers": {"demo": {"headers": {"Authorization": key}}}}))
+        subprocess.run(["git", "init", "-q", str(project)], check=True)
+        subprocess.run(["git", "-C", str(project), "add", ".mcp.json"], check=True)
+        doc = self.scan()
+        row = next(r for r in doc["tool_plaintext"] if r["file"] == "project:alpha-app/.mcp.json")
+        self.assertTrue(row["tracked"])
+        finding = next(f for f in self.findings() if f["subject"] == "harness:plaintext:project:alpha-app/.mcp.json")
+        self.assertEqual(finding["severity"], "critical")
+        self.assertNotIn(key, json.dumps([doc, finding]))
+
+    def test_malformed_shape_and_unreadable_config_remain_degraded(self):
+        config = self.home / ".claude.json"
+        for value in ([], {"projects": []}, {"projects": {"alpha": {"mcpServers": []}}}):
+            with self.subTest(value=value):
+                config.write_text(json.dumps(value))
+                doc = self.scan()
+                self.assertTrue(any(d["source"] == "tool-config:~/.claude.json" for d in doc["degraded"]))
+        config.unlink(); config.mkdir()
+        doc = self.scan()
+        self.assertTrue(any(d["source"] == "tool-config:~/.claude.json" for d in doc["degraded"]))
+
+    def test_project_registry_id_is_used_for_exact_folder_match(self):
+        key = "sk-synthetic-" + "Hi9J" * 12
+        project = self.home / "projects" / "alpha-app"; project.mkdir(parents=True)
+        self.configure(["sources", "projects", str(project.parent)])
+        registry = self.ws / "registry" / "projects.json"
+        doc = json.loads(registry.read_text()); doc["projects"] = [{"id": "project:measured-alpha", "local_folders": ["alpha-app"]}]
+        registry.write_text(json.dumps(doc))
+        (self.home / ".claude.json").write_text(json.dumps({"projects": {str(project): {"mcpServers": {"demo": {"headers": {"h": key}}}}}}))
+        row = next(r for r in self.scan()["tool_plaintext"] if r["file"] == "~/.claude.json")
+        self.assertIn("project:measured-alpha.mcpServers.demo.headers.h", row["names"])
+
+    def test_deep_config_is_incomplete_and_preserves_sibling_credentials(self):
+        key = "sk-synthetic-" + "Kl1M" * 12
+        (self.home / ".claude.json").write_text('{"mcpServers":' + '{"a":' * 2000 + '0' + '}' * 2000 + '}')
+        folder = self.home / ".hermes"; folder.mkdir()
+        (folder / ".env").write_text('API_TOKEN=' + key)
+        doc = self.scan()
+        self.assertTrue(any(d["source"] == "tool-config:~/.claude.json" for d in doc["degraded"]))
+        self.assertTrue(any(r["file"] == "~/.hermes/.env" for r in doc["tool_plaintext"]))
+        self.assertNotIn(key, json.dumps(doc))
 
     def test_instructions_and_the_deferral_setting_are_read(self):
         doc = self.scan()

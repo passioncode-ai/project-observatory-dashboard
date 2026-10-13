@@ -5,6 +5,7 @@
     python "$T/openrouter.py" stash --as main < key-file   # provisioning key, labeled; a protected file
     python "$T/openrouter.py" adopt --as main               # take the legacy file in
     python "$T/openrouter.py" issue --name my-agent --limit 10 [--reset daily] --to vault:PROJECT/prod/OPENROUTER_API_KEY
+    python "$T/openrouter.py" issue-for-policy --policy FILE [--limit USD | --split REF=USD,…] [--dry-run]
     python "$T/openrouter.py" list | ping
     python "$T/openrouter.py" limit my-agent --set 25 [--reset daily]
     python "$T/openrouter.py" disable my-agent              # or enable
@@ -43,14 +44,18 @@ attached to a file on disk.
 """
 from __future__ import annotations
 import argparse
+import contextlib
 import datetime
+import decimal
 import hashlib
 import json
 import math
 import os
 import pathlib
 import re
+import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -65,6 +70,8 @@ SETTLE_HINT = ("the leaked values are dead; close each row the register names wi
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import oslocks
+import osprivacy
 import private_io
 import paths                                                                    
 
@@ -82,15 +89,18 @@ LEDGER = paths.source_path("secret_store", paths.SECRETS) / 'openrouter-issued.j
 NAMED_DESTINATIONS = ("observatory", "claude-mem")
 
 
-def _journal(event: str, secret: str, **detail) -> None:
+def _journal(event: str, secret: str, *, require_success: bool = False, **detail) -> None:
     """The vault's movements journal: every issue, rotation and
     revocation this door performs is on the record beside the vault's own.
-    Never raises — a journal failure must not undo a rotation that happened."""
+    Past external changes keep best-effort journaling. A pre-action attestation can
+    require success before local state is cleared."""
     try:
         sys.path.insert(0, str(ROOT / "tools"))
         import vault
         vault.journal(event, secret, tool="openrouter.py", **detail)
     except Exception as exc:                                                      
+        if require_success:
+            raise RuntimeError("attestation could not be journaled; pending row retained") from None
         print(f"  (movement not journaled: {type(exc).__name__})", file=sys.stderr)
 
 
@@ -369,13 +379,11 @@ def find_key(admin: str, name: str) -> dict | None:
             if "HTTP 404" in str(exc):
                 return None
             raise
-        # A CLAIMED key was found by the hash of its value, and that hash is the identity: a
-        # rename in the provider's dashboard must not read as a deletion — `revoke` would then
-        # drop the row and leave the key live (review 2026-10-12). An issued key carries the
-        # ledger's name.
-        if rec.get("claimed"):
-            return row
-        return row if row and row.get("name") == name else None
+        # The hash is the key's identity — the SHA-256 of its value, issued or claimed alike. A
+        # rename in the provider's dashboard must not read as a deletion: `revoke` would drop the
+        # row and leave the key live (review 2026-10-12), and `issue-for-policy` would count a live
+        # key as gone and raise its neighbours past the limit (round 3). Only a 404 is gone.
+        return row
     for row in _all_keys(admin):
         if row.get("name") == name:
             return row
@@ -438,27 +446,50 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     reset = _reset(reset)
     to = vault_destination(to)
     doc = ledger()
+    if (doc["issued"].get(name) or {}).get("pending"):
+        raise ValueError(f"an issue of {name!r} is recorded as pending: {PENDING_REMEDY.format(name=name)}")
     label, admin = read_admin(account)
     try:
         name_check = _name_check(admin, name)
     except ValueError as exc:
         raise ValueError(str(exc).replace(" already exists", f" already exists in {label!r}", 1)) from None
+    # A PENDING ROW before the mint (round 4): a run killed between the mint and its record, or a
+    # cleanup that failed, used to leave a live key no ledger knew — and on an account listing past
+    # PAGES_MAX the name check could not see it, so the next run minted a second. The row names the
+    # key, its slot and its ceiling, and gets the hash the moment the provider answers.
+    doc["issued"][name] = {"account": label, "hash": None, "destination": to, "project": project,
+                           "limit_usd": limit, "limit_reset": reset, "issued_on": today(), "pending": True}
+    save_ledger(doc)
     # A RESET, never a lifetime cap (trap T17): a lifetime cap works until the
     # total is reached and then stops — months later, with no warning. Found in
     # the audit that merged keyserver's mint into this door: it set the reset,
     # the door did not. Monthly unless the caller asks for daily or weekly.
-    d = _request("/keys", admin, {"name": name, "limit": limit, "limit_reset": reset})
+    try:
+        d = _request("/keys", admin, {"name": name, "limit": limit, "limit_reset": reset})
+    except RuntimeError as exc:
+        # Only a 4xx proves nothing was minted (the provider refused the request). A 5xx, a timeout
+        # or an unreachable provider does not: the key may exist, and on an account listing past
+        # PAGES_MAX nothing could find it again — the pending row stays and holds its slot (fix 5).
+        code = re.search(r"HTTP (\d{3})", str(exc))
+        if code and 400 <= int(code.group(1)) < 500:
+            _forget(name)
+        raise
     value = d.get("key") or (d.get("data") or {}).get("key")
     row = d.get("data") or d
-    if not value:
-        _delivery_failed(admin, row)
+    doc = ledger()
+    doc["issued"][name].update(hash=row.get("hash"), label=row.get("label"))
+    save_ledger(doc)
     try:
+        if not value:
+            raise RuntimeError("the provider answered without the key's value")
         place = deliver(value, to)
-    except (OSError, ValueError, RuntimeError):
-        _delivery_failed(admin, row)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        # SubprocessError: the vault's `put` timed out. A minted key that reached no slot is never
+        # left live and untracked: deleted, or kept in the ledger as an orphan when the delete fails.
+        _undo_mint(admin, name, row)
     doc = ledger()
     doc["issued"][name] = {
-        "account": label, "hash": row.get("hash"), "destination": to,
+        "account": label, "hash": row.get("hash"), "label": row.get("label"), "destination": to,
         "delivered_to": place, "project": project,
         "limit_usd": limit, "limit_reset": reset, "issued_on": today(),
         "rotated_on": None, "rotations": 0, "name_check": name_check}
@@ -467,6 +498,38 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     return {"name": name, "account": label, "label": row.get("label"),
             "limit": limit, "limit_reset": reset, "delivered_to": place,
             "name_check": name_check}
+
+
+#: What to do about a pending row (a key minted, or perhaps minted, whose delivery was never recorded).
+PENDING_REMEDY = ("its key was minted but never recorded as delivered — `revoke {name}` deletes it and clears the row, "
+                  "then issue again; if the ledger holds no hash for it, whether it was minted is unknown: `claim "
+                  "{name}` with its value if one reached the slot, or delete any key called {name!r} at the "
+                  "provider, then `revoke {name}` (past the listing, where the door cannot look the name up: "
+                  "`revoke {name} --forget-pending --reason \"…\"`)")
+
+
+def _forget(name: str) -> None:
+    doc = ledger()
+    doc["issued"].pop(name, None)
+    save_ledger(doc)
+
+
+def _undo_mint(admin: str, name: str, row: dict) -> None:
+    """A minted key that was not delivered: delete it and drop its pending row; when the delete
+    fails, keep the row marked `orphan`, so the key stays counted and named. Always raises."""
+    if row.get("hash"):
+        try:
+            _request(f"/keys/{row['hash']}", admin, method="DELETE")
+        except (OSError, ValueError, RuntimeError):
+            doc = ledger()
+            doc["issued"].setdefault(name, {})["orphan"] = True
+            save_ledger(doc)
+            raise RuntimeError("Partial failure: delivery failed and successor cleanup failed; the key is kept in "
+                               "the ledger as an orphan — `revoke " + name + "` deletes it") from None
+        _forget(name)
+        raise RuntimeError("Delivery failed; successor deleted. Predecessor was not revoked") from None
+    raise RuntimeError("Partial failure: delivery failed and successor identity is unavailable; the pending row "
+                       "stays — inspect provider keys")
 
 
 def cmd_issue(name: str, limit: float, account: str | None, to: str,
@@ -513,40 +576,134 @@ def _policy_project(uri: str) -> str:
     return text
 
 
-def policy_key_plan(policy: dict, limit_override: float | None = None) -> list[dict]:
+class PolicyPartial(RuntimeError):
+    """`issue_for_policy` stopped in the middle: some steps were carried out and one failed. `plan`
+    holds every step with its action — what was done, `failed` with its reason, `not-reached` — so
+    the caller can say which keys already exist. A RuntimeError, so a caller that only knew the
+    provider's refusals still exits 1; a re-run is idempotent and does only what is missing."""
+
+    def __init__(self, message: str, plan: list[dict]):
+        super().__init__(message)
+        self.plan = plan
+
+
+#: The largest amount, in USD, a policy limit or a key ceiling may name. Far past any real ceiling;
+#: what it refuses is a number whose cents do not fit a float (1e307 overflowed, round 3).
+MAX_USD = 1_000_000_000.0
+#: Two ceilings closer than this are the same ceiling: a provider that echoes 3.330000001 or stores
+#: cents must not be re-PATCHed on every run.
+SAME_CEILING_USD = 0.005
+#: How long a run waits for another `issue-for-policy` run to finish before it refuses.
+POLICY_LOCK_WAIT_S = 30.0
+
+
+def _cents(usd, what: str) -> int:
+    """`usd` in whole cents, rounded DOWN, from its exact decimal value (no float slack: 3.3333334
+    is 333 cents, 0.0299999996 is 2). Refuses what is not a positive finite amount up to MAX_USD."""
+    if not isinstance(usd, (int, float)) or isinstance(usd, bool) or not math.isfinite(usd) or usd <= 0:
+        raise ValueError(f"{what} is not a positive amount in USD")
+    if usd > MAX_USD:
+        raise ValueError(f"{what} (${usd:g}) is past ${MAX_USD:,.0f}; no provider ceiling is that large")
+    return int((decimal.Decimal(repr(float(usd))) * 100).to_integral_value(rounding=decimal.ROUND_FLOOR))
+
+
+def _usd(cents: int) -> float:
+    return cents / 100
+
+
+def _same(a: float | None, b: float | None) -> bool:
+    return a is not None and b is not None and abs(a - b) < SAME_CEILING_USD
+
+
+def _split_ceilings(slots: list[dict], mode: str, limit_cents: int | None,
+                    limit_override: float | None, split: dict | None) -> list[int]:
+    """Each slot's ceiling in cents, by the rule ENG-002 asks for: the ceilings of every key a
+    policy touches sum to at most the project limit. Equal shares rounded down to the cent by
+    default; `split` (ref → USD, the ref as the policy writes it or as its vault slot) gives explicit
+    amounts; `limit_override` is one ceiling PER KEY. Every amount is rounded down to the cent and
+    compared with the exact limit. With no project limit each key still needs its own ceiling,
+    explicit, and L0 bounds the sum."""
+    n = len(slots)
+    limit_text = f"${_usd(limit_cents):.2f}" if limit_cents is not None else ""
+    if split is not None and limit_override is not None:
+        raise ValueError("give --limit (one ceiling per key) or --split (an amount per slot), not both")
+    if split is not None:
+        by_slot: dict[str, int] = {}
+        names = {}
+        for s in slots:
+            names[s["ref"]] = s["to"]
+            names[s["to"]] = s["to"]
+            names[s["to"][len("vault:"):]] = s["to"]
+        for ref, usd in split.items():
+            if ref not in names:
+                raise ValueError(f"--split names {ref!r}, which is not a project-key source of this policy")
+            if names[ref] in by_slot:
+                raise ValueError(f"--split names {names[ref]} twice (as {ref!r} too); give each slot one amount")
+            cents = _cents(usd, f"--split's amount for {ref!r}")
+            if cents < 1:
+                raise ValueError(f"--split gives {ref!r} less than a cent")
+            by_slot[names[ref]] = cents
+        missing = [s["ref"] for s in slots if s["to"] not in by_slot]
+        if missing:
+            raise ValueError(f"--split leaves {', '.join(missing)} with no ceiling; a key is never unbounded")
+        ceilings = [by_slot[s["to"]] for s in slots]
+        if limit_cents is not None and sum(ceilings) > limit_cents:
+            raise ValueError(f"--split sums to ${_usd(sum(ceilings)):.2f}, more than the project limit ({limit_text})")
+        return ceilings
+    if limit_override is not None:
+        cents = _cents(limit_override, "--limit")
+        if cents < 1:
+            raise ValueError("--limit is less than a cent")
+        if limit_cents is not None and cents * n > limit_cents:
+            raise ValueError(f"{n} key(s) at ${_usd(cents):.2f} each cannot exceed the project's limit "
+                             f"({limit_text}); --limit is per key — give at most ${_usd(limit_cents // n):.2f}, "
+                             f"or --split")
+        return [cents] * n
+    if mode == "no-project-limit":
+        raise ValueError("the policy sets no project limit; the key still needs its own ceiling — give --limit")
+    share = limit_cents // n
+    if share < 1:
+        raise ValueError(f"a {limit_text} limit over {n} keys leaves less than a cent for each; "
+                         "raise the limit or name fewer project-key sources")
+    return [share] * n
+
+
+def _policy_limit_cents(policy: dict) -> int | None:
+    """The project limit in whole cents (rounded down), None for `no-project-limit`."""
+    if policy.get("mode") != "limited":
+        return None
+    limit = policy.get("limitUsd")
+    if not isinstance(limit, (int, float)) or isinstance(limit, bool) or not math.isfinite(limit):
+        raise ValueError("a limited policy carries limitUsd")
+    if limit <= 0:
+        raise ValueError("the project limit is $0 — it spends nothing, so no key is issued")
+    return _cents(limit, "the project limit")
+
+
+def policy_key_plan(policy: dict, limit_override: float | None = None,
+                    split: dict | None = None) -> list[dict]:
     """What a project's spend policy asks of this door, before anything is minted (OBS-58).
 
     A policy (contract `spend-policy`, DEC-0037) names its credential sources. Each `project-key`
     source whose `ref` is a vault slot (`vault:<project>/<env>/<NAME>`, or the bare
     `<project>/<env>/<NAME>` the meter and `use_secret` read) gets a key issued FOR THAT PROJECT
     into that slot. A slot of another project is a borrow, refused here as the registry refuses it
-    (contract spend-policy rule 1). The key's ceiling is the policy's project limit and resets with
-    its period; a policy with no project limit still needs a ceiling for the key, given explicitly —
-    a key without one is an unbounded liability, and L0 alone is not a key's ceiling.
+    (contract spend-policy rule 1). The ceilings of all the policy's keys together are at most the
+    project limit (ENG-002: each key used to get the whole limit, N keys N times it) — an equal
+    split by default, explicit with `split`, or `limit_override` per key, every amount in whole
+    cents — and reset with the policy's period. A policy with no project limit still needs a
+    ceiling for each key, given explicitly: a key without one is an unbounded liability, and L0
+    alone is not a key's ceiling.
     """
     if not isinstance(policy, dict) or policy.get("kind") != "spend-policy":
         raise ValueError("not a spend policy (kind must be spend-policy)")
     project = _policy_project(policy.get("project"))
     mode = policy.get("mode")
-    if mode == "limited":
-        ceiling = policy.get("limitUsd")
-        if not isinstance(ceiling, (int, float)) or isinstance(ceiling, bool) or not math.isfinite(ceiling):
-            raise ValueError("a limited policy carries limitUsd")
-        if ceiling <= 0:
-            raise ValueError("the project limit is $0 — it spends nothing, so no key is issued")
-        if limit_override is not None:
-            if limit_override > ceiling:
-                raise ValueError(f"a key's ceiling (${limit_override:g}) cannot exceed the project's "
-                                 f"limit (${ceiling:g})")
-            ceiling = limit_override
-    elif mode == "no-project-limit":
-        if limit_override is None:
-            raise ValueError("the policy sets no project limit; the key still needs its own ceiling — give --limit")
-        ceiling = limit_override
-    else:
+    if mode not in ("limited", "no-project-limit"):
         raise ValueError(f"unknown policy mode {mode!r}")
-    if not math.isfinite(ceiling) or ceiling <= 0:
-        raise ValueError("a positive ceiling is required")
+    limit_cents = _policy_limit_cents(policy)
+    if mode == "no-project-limit" and limit_override is None and split is None:
+        raise ValueError("the policy sets no project limit; the key still needs its own ceiling — give --limit")
     reset = POLICY_RESET.get(policy.get("period"))
     if reset is None:
         raise ValueError(f"unknown policy period {policy.get('period')!r}")
@@ -569,62 +726,348 @@ def policy_key_plan(policy: dict, limit_override: float | None = None) -> list[d
         if folder != own:
             raise ValueError(f"{ref} is a slot of {folder!r}, not of the policy's project {own!r}: "
                              f"a project's key is never another's (spend-policy rule 1)")
-        plan.append({"ref": ref, "to": f"vault:{folder}/{parts[1]}/{parts[2]}",
-                     "name": slug(f"{folder}-{parts[1]}-{parts[2]}"), "project": folder,
-                     "limit": float(ceiling), "reset": reset})
-    if not any("to" in step for step in plan):
+        to = f"vault:{folder}/{parts[1]}/{parts[2]}"
+        if any(step.get("to") == to for step in plan):
+            plan.append({"ref": ref, "action": "skipped", "why": f"the same slot as an earlier source ({to})"})
+            continue
+        name = slug(f"{folder}-{parts[1]}-{parts[2]}")
+        clash = next((step for step in plan if step.get("name") == name), None)
+        if clash:
+            raise ValueError(f"{ref} and {clash['ref']} would both be keys called {name!r} (names ignore case "
+                             f"and punctuation); name the slots apart")
+        plan.append({"ref": ref, "to": to, "name": name, "project": folder, "reset": reset})
+    slots = [step for step in plan if "to" in step]
+    if not slots:
         raise ValueError("the policy names no project-key source this door can issue into")
+    for step, cents in zip(slots, _split_ceilings(slots, mode, limit_cents, limit_override, split)):
+        step["limit"] = _usd(cents)
     return plan
+
+
+#: Held-row outcomes that leave a slot NOT served: the command exits 1 and names the remedy.
+HELD_NOT_SERVING = {"held-disabled": "`enable {name}` lets it spend again, or `revoke {name}` and re-run to issue anew",
+                    "held-missing": "`revoke {name}` clears the ledger row; re-run to issue anew",
+                    "held-unread": "the provider could not be read; re-run when it answers",
+                    "blocked": "the project's other keys leave no room under the limit; the lines above say which",
+                    "not-in-policy": "`revoke {name}` if nothing spends it, or name its slot in the policy",
+                    "held-pending": PENDING_REMEDY}
+
+
+@contextlib.contextmanager
+def _policy_lock():
+    """One `issue-for-policy` run at a time, across processes: an exclusive lock on a file beside the
+    ledger, held from the plan through the last provider write. Two runs at once each read the
+    other's keys before either moved them, and opposite splits ended both keys high (round 3: $16
+    against a $10 limit). A second run waits up to POLICY_LOCK_WAIT_S, then refuses."""
+    LEDGER.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = osprivacy.open(LEDGER.parent / ".openrouter-policy.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        give_up = time.monotonic() + POLICY_LOCK_WAIT_S
+        while True:
+            try:
+                oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= give_up:
+                    raise RuntimeError(f"another issue-for-policy run has held the policy lock for "
+                                       f"{POLICY_LOCK_WAIT_S:.0f} s; nothing was read or moved — run again "
+                                       f"when it is done") from None
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            oslocks.flock(fd, oslocks.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def _read_held(name: str, rec: dict, account: str | None) -> tuple[str | None, dict | None, str]:
+    """A ledger row's key as the PROVIDER has it, read by hash (`find_key`), with the account the
+    ledger recorded (else `--account`). Returns (state, row, why): state None for a live key,
+    `held-disabled`, `held-pending` for a key minted whose delivery was never recorded (or whose
+    minting is unknown: a pending row with no hash is not read at all), `held-missing` only for a
+    key the provider answers 404 for — a key renamed in the provider's dashboard is still live and
+    still found by its hash —, or `held-unread` for anything that could not be read (no stashed admin
+    for the account, an error, an answer that is not JSON), in a dry run too. Unread is never in
+    place, and never counted as gone."""
+    if rec.get("pending") and not rec.get("hash"):
+        return "held-pending", None, "whether its key was minted is unknown (no hash was recorded)"
+    try:
+        _label, admin = read_admin(rec.get("account") or account)
+        row = find_key(admin, name)
+    except (RuntimeError, LookupError, OSError, ValueError) as exc:
+        return "held-unread", None, f"read failed ({type(exc).__name__})"
+    if not row:
+        return "held-missing", None, ""
+    if rec.get("pending"):
+        return "held-pending", row, "minted, but its delivery was never recorded" + (
+            " (its cleanup delete failed)" if rec.get("orphan") else "")
+    if row.get("disabled"):
+        return "held-disabled", row, ""
+    return None, row, ""
+
+
+def _ceiling_of(row: dict | None) -> float | None:
+    limit = (row or {}).get("limit")
+    return float(limit) if isinstance(limit, (int, float)) and not isinstance(limit, bool) else None
+
+
+def _cents_up(usd) -> int | None:
+    """A ceiling the provider holds, in cents rounded UP (3.334 is 334), so a total never reads
+    lower than what can be spent. Float noise below a hundredth of a cent (an echo of 3.330000001)
+    is not a cent. None (no ceiling) is unbounded."""
+    if not isinstance(usd, (int, float)) or isinstance(usd, bool) or not math.isfinite(usd):
+        return None
+    exact = decimal.Decimal(repr(float(usd))) * 100 - decimal.Decimal("0.01")
+    return max(int(exact.to_integral_value(rounding=decimal.ROUND_CEILING)), 0)
+
+
+def _counted(state: str | None, row: dict | None, rec: dict) -> int | None:
+    """Cents a key the run will NOT move counts toward the project's total (None: unbounded): its
+    provider ceiling rounded up (none is unbounded), 0 for a key the provider no longer has, and for
+    one that could not be read, or whose minting is unknown, the ceiling the ledger last recorded —
+    unbounded when it recorded none."""
+    if state == "held-missing":
+        return 0
+    if row is None:
+        return _cents_up(rec.get("limit_usd"))
+    return _cents_up(_ceiling_of(row))
+
+
+class _Total:
+    """A total in whole cents with unbounded held apart (no float sums: $0.10 x 3 is $0.30)."""
+
+    def __init__(self):
+        self.cents, self.unbounded = 0, False
+
+    def add(self, cents: int | None) -> None:
+        if cents is None:
+            self.unbounded = True
+        else:
+            self.cents += cents
+
+    def over(self, limit_cents: int | None) -> bool:
+        return limit_cents is not None and (self.unbounded or self.cents > limit_cents)
+
+    def text(self) -> str:
+        return "unbounded" if self.unbounded else f"${_usd(self.cents):.2f}"
 
 
 def issue_for_policy(policy: dict, account: str | None = None, limit_override: float | None = None,
-                     dry_run: bool = False) -> list[dict]:
-    """Carries out `policy_key_plan`: issue where no key serves the slot, move the ceiling where
-    one does and differs, leave it where it matches. Idempotent: run it again and nothing moves."""
-    plan = policy_key_plan(policy, limit_override)
-    issued = ledger().get("issued", {})
-    for step in plan:
-        if "to" not in step:
-            continue
-        held = next(((n, r) for n, r in issued.items() if r.get("destination") == step["to"]), None)
-        if held is None:
-            step["action"] = "would-issue" if dry_run else "issued"
-            if not dry_run:
-                issue_key(step["name"], step["limit"], account, step["to"], step["project"], step["reset"])
-            continue
-        name, rec = held
-        step["name"] = name
-        if rec.get("limit_usd") == step["limit"] and (rec.get("limit_reset") or "monthly") == step["reset"]:
-            step["action"] = "in-place"
-        else:
-            step["action"] = "would-move-ceiling" if dry_run else "ceiling-moved"
-            step["previous"] = rec.get("limit_usd")
-            if not dry_run:
-                set_limit(name, step["limit"], step["reset"])
+                     dry_run: bool = False, split: dict | None = None) -> list[dict]:
+    """Carries out `policy_key_plan` so that the project's key ceilings never sum past its limit — not
+    at the end, and not at any moment in between (ENG-002, adversarial rounds 3 and 4):
+
+    * **Every key of the project counts**, in whole cents (planned ceilings exactly, provider
+      ceilings rounded up, unbounded held apart). Every ledger row whose destination is under
+      `vault:<project>/` is read at the provider, pending rows included. A key the policy no longer
+      names (a source removed from it, a second key behind one slot) is NOT moved — a $0 ceiling's
+      meaning at the provider is not something this door has verified, and `revoke` is the verb for
+      a key nobody names — it is counted at its provider ceiling, reported `not-in-policy` and the
+      run exits 1.
+    * **A key that could not be read counts at its last known ceiling** (the ledger's; unbounded if
+      none); one the provider answers 404 for counts 0; a renamed key is still live and is read.
+    * **A pending row** (a key minted whose delivery was never recorded, or whose minting is
+      unknown) holds its slot: nothing is minted there, the slot reads `held-pending` and the run
+      exits 1 naming `revoke` or `claim` (PENDING_REMEDY).
+    * **Lowerings first, raises only when they fit.** Ceilings that go down move first. Raises and
+      new keys follow only when the project's total after the run fits the limit; otherwise they
+      are `blocked`. Whenever the total the run leaves is past the limit, an `over-limit` line says
+      by how much and what ends it, and the run exits 1.
+    * **One run at a time** (`_policy_lock`), the ledger and the provider re-read under the lock.
+    * The issuing account for a new key is resolved before anything moves, in a dry run too.
+
+    The one window this door opens in which the total can pass the limit is `rotate`'s: the
+    successor is live before the predecessor is deleted (docs/design/AGENT-SECRETS.md).
+
+    A failure in the middle stops the run and raises `PolicyPartial` carrying the plan: what was
+    done, what failed, what was not reached. Idempotent: run it again and nothing moves.
+    """
+    plan = policy_key_plan(policy, limit_override, split)
+    limit_cents = _policy_limit_cents(policy)
+    slots = [step for step in plan if "to" in step]
+    folder = slots[0]["project"]
+    with _policy_lock():
+        issued = ledger().get("issued", {})
+        scope = {n: r for n, r in sorted(issued.items())
+                 if str(r.get("destination") or "").startswith(f"vault:{folder}/")}
+        primary: dict[str, str] = {}
+        for step in slots:
+            holders = [n for n, r in scope.items() if r.get("destination") == step["to"]]
+            if holders:
+                primary[step["to"]] = step["name"] if step["name"] in holders else holders[0]
+        if len(primary) < len(slots):
+            read_admin(account)         # the account a new key is minted from, resolved before anything moves
+        after, end = _Total(), _Total()  # the total if every planned write happens / what the run leaves
+        work, settle = [], []
+        named = set(primary.values())
+        for step in slots:
+            planned = _cents(step["limit"], "a planned ceiling")
+            name = primary.get(step["to"])
+            if name is None:
+                work.append((1, step, None, 0))
+                after.add(planned)
+                continue
+            rec = scope[name]
+            step["name"] = name
+            state, row, why = _read_held(name, rec, account)
+            if why:
+                step["why"] = why
+            if state in ("held-missing", "held-unread", "held-pending"):
+                step["action"] = state
+                counted = _counted(state, row, rec)
+                after.add(counted)
+                end.add(counted)
+                if state == "held-pending":
+                    settle.append(f"revoke {name}")
+                continue
+            current = _ceiling_of(row)
+            held = _cents_up(current)
+            if _same(current, step["limit"]) and row.get("limit_reset") == step["reset"]:
+                step["action"] = state or "in-place"
+                after.add(held)
+                end.add(held)
+                if held is not None and held > planned:
+                    settle.append(f"limit {name} --set {step['limit']:g}")
+                continue
+            step["previous"] = current
+            step["held"] = state
+            after.add(planned)
+            lowering = current is None or step["limit"] < current
+            work.append((0 if lowering else 1, step, name, held))
+        for name, rec in scope.items():
+            if name in named:
+                continue
+            state, row, why = _read_held(name, rec, account)
+            counted = _counted(state, row, rec)
+            after.add(counted)
+            end.add(counted)
+            if counted != 0:
+                settle.append(f"revoke {name}")
+            plan.append({"ref": rec.get("destination"), "name": name, "action": "not-in-policy",
+                         "counted": None if counted is None else _usd(counted),
+                         "why": (f"a key of this project the policy does not name, counted at "
+                                 + ("an unbounded ceiling" if counted is None else f"${_usd(counted):.2f}")
+                                 + (f" ({why})" if why else "") + "; not moved by this run")})
+        room = not after.over(limit_cents)
+        for _order, step, name, _held in sorted(work, key=lambda w: w[0]):
+            step["action"] = "not-reached"
+        for order, step, name, held in sorted(work, key=lambda w: w[0]):
+            moving = name is not None
+            if order == 1 and not room:
+                step.pop("held", None)
+                step["action"] = "blocked"
+                end.add(held if moving else 0)
+                step["why"] = (f"after this run the project's keys would total {after.text()}, past its "
+                               f"${_usd(limit_cents):.2f} limit; nothing is raised or issued")
+                continue
+            end.add(_cents(step["limit"], "a planned ceiling"))
+            if dry_run:
+                step["action"] = step.pop("held", None) or ("would-move-ceiling" if moving else "would-issue")
+                continue
+            try:
+                if moving:
+                    set_limit(name, step["limit"], step["reset"])
+                else:
+                    issue_key(step["name"], step["limit"], account, step["to"], step["project"], step["reset"])
+            except (ValueError, RuntimeError, LookupError, OSError, subprocess.SubprocessError) as exc:
+                step.pop("held", None)
+                step["action"] = "failed"
+                step["why"] = (str(exc) if isinstance(exc, (ValueError, LookupError))
+                               else type(exc).__name__ + ": " + str(exc))
+                if isinstance(exc, OSError) and exc.errno is not None:
+                    step["errno"] = exc.errno     # ENOSPC, EIO…: the machine's failure, named as such
+                done = sum(1 for s in plan if s.get("action") in ("issued", "ceiling-moved", "in-place"))
+                raise PolicyPartial(f"partial: {done} of {len(slots)} slots served before {step['ref']} failed; "
+                                    f"a re-run does only what is missing", plan) from None
+            # A disabled key's ceiling still moves (it would spend that much once enabled), but the
+            # slot stays named as not served.
+            step["action"] = step.pop("held", None) or ("ceiling-moved" if moving else "issued")
+        if end.over(limit_cents):
+            head = ("OVER LIMIT: unbounded now" if end.unbounded
+                    else f"OVER LIMIT by ${_usd(end.cents - limit_cents):.2f} now")
+            plan.append({"ref": f"vault:{folder}/", "name": folder, "action": "over-limit",
+                         "why": (f"{head} ({end.text()} against the ${_usd(limit_cents):.2f} limit); "
+                                 + ("it ends after: " + ", ".join(settle) if settle
+                                    else "it ends once the keys above are read and settled"))})
     return plan
 
 
-def cmd_issue_for_policy(path: str, account: str | None, limit_override: float | None, dry_run: bool) -> int:
+def _parse_split(text: str | None) -> dict | None:
+    """`ref=usd,ref=usd` → {ref: usd}. A ref holds `:` and `/` but never `=` or `,`."""
+    if text is None:
+        return None
+    out: dict[str, float] = {}
+    for part in [p.strip() for p in text.split(",") if p.strip()]:
+        ref, sep, usd = part.rpartition("=")
+        if not sep or not ref:
+            raise ValueError(f"--split takes ref=usd pairs separated by commas, not {part!r}")
+        if ref.strip() in out:
+            raise ValueError(f"--split names {ref.strip()!r} twice; give each slot one amount")
+        try:
+            out[ref.strip()] = float(usd)
+        except ValueError:
+            raise ValueError(f"--split gives {ref.strip()!r} {usd!r}, not an amount in USD") from None
+    if not out:
+        raise ValueError("--split is empty")
+    return out
+
+
+def cmd_issue_for_policy(path: str, account: str | None, limit_override: float | None, dry_run: bool,
+                         split: str | dict | None = None) -> int:
     try:
         policy = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         print(f"refused: cannot read the policy ({type(exc).__name__})", file=sys.stderr)
         return 2
+    partial = None
     try:
-        plan = issue_for_policy(policy, account, limit_override, dry_run)
+        amounts = _parse_split(split) if isinstance(split, str) else split
+        plan = issue_for_policy(policy, account, limit_override, dry_run, amounts)
+    except PolicyPartial as exc:
+        plan, partial = exc.plan, str(exc)
     except ValueError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
     except (RuntimeError, LookupError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
+    not_serving = False
+    total = 0.0
     for step in plan:
+        if step.get("action") == "over-limit":
+            not_serving = True
+            print(step["why"])
+            continue
+        if step.get("action") == "not-in-policy":
+            not_serving = True
+            total += step["counted"] if step["counted"] is not None else math.inf
+            print(f"{step['ref']}: not-in-policy {step['name']!r} — {step['why']}")
+            print("  " + HELD_NOT_SERVING["not-in-policy"].format(name=step["name"]))
+            continue
         if "to" not in step:
             print(f"{step['ref']}: skipped — {step['why']}")
             continue
-        extra = f" (was ${step['previous']:g})" if step.get("previous") is not None else ""
-        print(f"{step['ref']}: {step['action']} {step['name']!r}, ceiling ${step['limit']:g} {step['reset']}{extra}")
-    return 0
+        total += step["limit"]
+        extra = ((f" (was ${step['previous']:g})" if step["previous"] is not None else " (was unbounded)")
+                 if "previous" in step else "")
+        why = f" — {step['why']}" if step.get("why") else ""
+        print(f"{step['ref']}: {step['action']} {step['name']!r}, ceiling ${step['limit']:g} {step['reset']}{extra}{why}")
+        if step["action"] in HELD_NOT_SERVING:
+            not_serving = True
+            print(f"  the slot is not served as planned: " + HELD_NOT_SERVING[step["action"]].format(name=step["name"]))
+    print("ceilings: " + ("unbounded" if math.isinf(total) else f"${round(total, 2):g}") + " in all as planned" + (f", project limit ${policy['limitUsd']:g}"
+                                                                 if policy.get("mode") == "limited"
+                                                                 else ", no project limit (L0 binds)"))
+    # The meter's L0 per key (docs/design/METER.md M4) is configured, not read from the provider: once a
+    # ceiling moves here, `keyCeilingsUsd` in config/meter.json must say the same, by the policy's ref.
+    implied = {step["ref"]: step["limit"] for step in plan if "to" in step}
+    print("keyCeilingsUsd for config/meter.json (the meter's L0 per key; set it to match): "
+          + json.dumps(implied, ensure_ascii=False))
+    if partial:
+        print(partial)
+        return 1
+    return 1 if not_serving else 0
 
 
 def resolve_issued(name_or_label: str) -> tuple[str, dict]:
@@ -773,7 +1216,7 @@ def rotate_one(name: str, doc: dict | None = None) -> dict:
         place = deliver(value, rec["destination"], rotate=True)
     except (OSError, ValueError, RuntimeError):
         _delivery_failed(admin, new_row)
-    rec.update({"hash": new_row.get("hash"), "delivered_to": place,
+    rec.update({"hash": new_row.get("hash"), "label": new_row.get("label"), "delivered_to": place,
                 "rotated_on": today(), "rotations": rotations + 1,
                 "rotation_status": "successor-delivered-predecessor-pending",
                 "predecessor_hash": old.get("hash") if old else None})
@@ -950,6 +1393,31 @@ def cmd_claim(name: str, account: str | None, where: str) -> int:
     return 0
 
 
+def forget_pending_key(name: str, reason: str) -> dict:
+    """Clear a pending row with no hash WITHOUT reading the provider: the one remedy that works on an
+    account listing past PAGES_MAX, where the name cannot be looked up (fix 5). Only after the key
+    called NAME was deleted at the provider, or is known never to have been minted; `reason` says
+    which, and the journal keeps it. Refuses any other row — a row with a hash is revoked by hash."""
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValueError("--forget-pending needs --reason: what makes the key gone (deleted at the provider "
+                         "by name, or never minted)")
+    doc = ledger()
+    rec = doc["issued"].get(name)
+    if not rec:
+        raise LookupError(f"no issued key called {name!r}")
+    if not rec.get("pending") or rec.get("hash"):
+        raise LookupError(f"{name!r} is not a pending row without a hash; `revoke {name}` deletes it by its hash")
+    _journal("forget-pending-attested", f"openrouter/{rec.get('account')}/{name}",
+             require_success=True, reason=reason, destination=rec.get("destination"),
+             attestation_only=True)
+    doc["issued"].pop(name)
+    save_ledger(doc)
+    _journal("forget-pending", f"openrouter/{rec.get('account')}/{name}", reason=reason,
+             destination=rec.get("destination"))
+    return {"name": name, "forgotten": True}
+
+
 def revoke_key(name_or_label: str) -> dict:
     """Delete at the provider, then clear the ledger row — in that order: a
     forgotten live key is worse than a stale row. REFUSED for a key something
@@ -959,7 +1427,20 @@ def revoke_key(name_or_label: str) -> dict:
     scan = paths.SCRATCH / "openrouter.json"
     if scan.is_file():
         try:
-            for k in json.loads(scan.read_text(encoding="utf-8")).get("keys", []):
+            doc_scan = json.loads(scan.read_text(encoding="utf-8"))
+            # By HASH first (round 4): a key renamed in the provider's dashboard is still the key a
+            # consumer holds, and the scan records each consumer's key hash.
+            for dest, held in (doc_scan.get("destination_hashes") or {}).items():
+                if rec.get("hash") and isinstance(held, dict) and held.get("hash") == rec["hash"]:
+                    raise ValueError(f"{name} is what {dest} is reading right now; "
+                                     f"issue its replacement first, then revoke this one")
+            # A key past the listing appears in the scan only as the label a destination holds
+            # (`destinations`, fix 5). A label two keys share refuses too: the safe side.
+            for dest, lab in (doc_scan.get("destinations") or {}).items():
+                if rec.get("label") and lab == rec["label"]:
+                    raise ValueError(f"{name} is what {dest} is reading right now (by its label); "
+                                     f"issue its replacement first, then revoke this one")
+            for k in doc_scan.get("keys", []):
                 names = {name, rec.get("provider_name")} - {None}
                 labels = {name_or_label, rec.get("label")} - {None}
                 # A claimed key carries the provider's name, not the ledger's, and the scan has no
@@ -983,15 +1464,31 @@ def revoke_key(name_or_label: str) -> dict:
             "delivered_to": rec.get("delivered_to")}
 
 
-def cmd_revoke(name: str) -> int:
+def cmd_revoke(name: str, forget_pending: bool = False, reason: str | None = None) -> int:
+    if forget_pending:
+        try:
+            forget_pending_row = forget_pending_key(name, reason or "")
+        except ValueError as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 2
+        except (LookupError, RuntimeError) as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 1
+        print(f"forgot the pending row {forget_pending_row['name']!r} (journaled with its reason); "
+              f"nothing was read or deleted at the provider")
+        return 0
     try:
         r = revoke_key(name)
     except (ValueError, LookupError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
     except RuntimeError as exc:
+        rec = (ledger().get("issued", {}).get(name) or {}) if LEDGER.exists() else {}
+        hint = (f"\n  past the listing the name cannot be looked up: once the key called {name!r} is deleted at "
+                f"the provider (or was never minted), `revoke {name} --forget-pending --reason \"…\"` clears "
+                f"the row" if rec.get("pending") and not rec.get("hash") else "")
         print(f"refused: {exc}\n  the ledger row was kept — a forgotten live key "
-              f"is worse than a stale row", file=sys.stderr)
+              f"is worse than a stale row{hint}", file=sys.stderr)
         return 1
     print(f"revoked {r['name']!r}; note the delivered copy at {r['delivered_to']} is "
           f"now a dead value — the consumer will degrade at next use")
@@ -1094,15 +1591,26 @@ def main() -> int:
     p_is.add_argument("--reset", choices=RESETS, default="monthly",
                       help="when the ceiling starts again (default monthly)")
     p_ip = sub.add_parser("issue-for-policy",
-                          help="issue a project's own key from its spend policy (OBS-58)")
+                          help="issue a project's own keys from its spend policy (OBS-58): their ceilings together "
+                          "stay within the project limit at every moment — every key of the project counts, one the "
+                          "policy no longer names is reported not-in-policy and not moved, raises that would not fit "
+                          "are blocked (exit 1); one run at a time")
     p_ip.add_argument("--policy", required=True, help="the project's spend-policy JSON (contract DEC-0037)")
     p_ip.add_argument("--account", help="which stashed account to mint from")
-    p_ip.add_argument("--limit", type=float, help="the key's ceiling: required when the policy sets no "
-                      "project limit, at most the project limit otherwise")
-    p_ip.add_argument("--dry-run", action="store_true", help="say what would be issued or moved; mint nothing")
+    p_ip.add_argument("--limit", type=float, help="each key's ceiling: required when the policy sets no "
+                      "project limit (or --split); otherwise N keys x --limit may not exceed it. Default: the "
+                      "project limit split equally, rounded down to the cent")
+    p_ip.add_argument("--split", help="explicit ceilings, ref=usd,ref=usd — one per project-key source, "
+                      "summing to at most the project limit")
+    p_ip.add_argument("--dry-run", action="store_true",
+                      help="say what would be issued or moved; mint and move nothing. It still READS the provider "
+                      "for every held slot: with no stashed admin for a slot's account (or a row naming none while "
+                      "several are stashed and no --account), the slot reads held-unread and the run exits 1")
     sub.add_parser("list", help="what exists — names, ceilings, places; never values")
     sub.add_parser("ping", help="alive? spent how much of its ceiling?")
-    p_li = sub.add_parser("limit", help="show or move a key's USD ceiling")
+    p_li = sub.add_parser("limit", help="show or move a key's USD ceiling; for a key issued by a spend policy, "
+                          "raising it can take it past its share of the project limit until the next "
+                          "issue-for-policy run")
     p_li.add_argument("name")
     p_li.add_argument("--set", type=float, dest="set_to")
     p_li.add_argument("--reset", choices=RESETS, default=None,
@@ -1111,12 +1619,22 @@ def main() -> int:
     p_di.add_argument("name")
     p_en = sub.add_parser("enable", help="let a disabled key spend again")
     p_en.add_argument("name")
-    p_ro = sub.add_parser("rotate", help="create successor, deliver, delete predecessor")
+    p_ro = sub.add_parser("rotate", help="create successor, deliver, delete predecessor. While it runs the slot "
+                          "holds two live keys (the one window past a spend policy's limit). Until the J-3 change "
+                          "counts them, a rotate that FAILS can leave the successor NAME-next live and untracked, "
+                          "or the predecessor live and uncounted (the row then says rotation_status "
+                          "successor-delivered-predecessor-pending with its predecessor_hash): delete at the "
+                          "provider whichever of the two the slot does not hold, then run issue-for-policy, which "
+                          "names any total still past the limit")
     p_ro.add_argument("name", nargs="?")
     p_ro.add_argument("--leaked", action="store_true",
                       help="rotate every issued key named in an open leak")
     p_re = sub.add_parser("revoke", help="delete at the provider, clear the ledger row")
     p_re.add_argument("name")
+    p_re.add_argument("--forget-pending", action="store_true",
+                      help="clear a pending row with no hash without reading the provider — only once the key "
+                      "called NAME is deleted there or was never minted (an account listing past PAGES_MAX)")
+    p_re.add_argument("--reason", help="with --forget-pending: what makes the key gone; journaled")
     p_cl = sub.add_parser("claim", help="bring a key minted elsewhere under this door; value on stdin")
     p_cl.add_argument("name", help="what the ledger will call it")
     p_cl.add_argument("--account", help="the stashed account to look in (default: every one)")
@@ -1132,7 +1650,7 @@ def main() -> int:
     if a.cmd == "issue":
         return cmd_issue(a.name, a.limit, a.account, a.to, a.project, a.reset)
     if a.cmd == "issue-for-policy":
-        return cmd_issue_for_policy(a.policy, a.account, a.limit, a.dry_run)
+        return cmd_issue_for_policy(a.policy, a.account, a.limit, a.dry_run, a.split)
     if a.cmd == "list":
         return cmd_list()
     if a.cmd == "ping":
@@ -1146,7 +1664,7 @@ def main() -> int:
     if a.cmd == "rotate":
         return cmd_rotate(a.name, a.leaked)
     if a.cmd == "revoke":
-        return cmd_revoke(a.name)
+        return cmd_revoke(a.name, a.forget_pending, a.reason)
     if a.cmd == "claim":
         return cmd_claim(a.name, a.account, a.where)
     return 2

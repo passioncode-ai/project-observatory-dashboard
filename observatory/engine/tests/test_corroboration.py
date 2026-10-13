@@ -532,6 +532,40 @@ def test_a_promoted_lesson_whose_commit_changes_is_proposed_again() -> None:
           str(bs_record()))
     conn.close()
 
+def test_observation_is_revalidated_when_unchanged_commit_disappears() -> None:
+    a, a1, _ = repo_with_history()
+    b = _other_repo()
+    (b / "extra").write_text("evidence")
+    git(b, "add", "extra")
+    git(b, "commit", "-qm", "evidence")
+    evidence = git(b, "rev-parse", "HEAD")
+    d, sdb, L, LS = _lesson_store({"alpha": a, "beta": b})
+    conn = sdb.connect()
+    _write_lesson(conn, L, LS, _key(a), a1)
+    item = _write_lesson(conn, L, LS, _key(b), evidence)
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    prior = L.current(conn, item["memoryId"])
+    body = json.loads(prior["body_json"])
+    body["title"] = "A revised description with two resolving projects"
+    revised = LS.write(conn, L, owner=prior["owner"], body=body, provenance=[])
+    check("valid unchanged evidence keeps a wording revision observed", revised["state"] == "observed")
+    conn.close()
+    git(b, "reset", "--hard", "HEAD~1")
+    git(b, "reflog", "expire", "--expire=now", "--all")
+    git(b, "gc", "--prune=now")
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    try:
+        current = LS.existing(conn, "absence-needs-its-own-check", _key(b))
+        check("a vanished unchanged commit no longer carries observed promotion",
+              current is not None and current["state"] == "proposed", str(dict(current) if current else None))
+        check("the old observation remains archived history", _state(conn, item["memoryId"]) == "archived")
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     print("the second witness — what it refuses, and who hears about it\n")
     for fn in (test_a_row_with_no_recorded_head_is_refused,
@@ -550,7 +584,8 @@ if __name__ == "__main__":
                test_two_invented_keys_promote_nothing,
                test_the_project_threshold_is_the_one_constant,
                test_the_proposed_count_is_the_rows_the_session_rule_looked_at,
-               test_a_promoted_lesson_whose_commit_changes_is_proposed_again):
+               test_a_promoted_lesson_whose_commit_changes_is_proposed_again,
+               test_observation_is_revalidated_when_unchanged_commit_disappears):
         fn()
     print()
     if FAILURES:

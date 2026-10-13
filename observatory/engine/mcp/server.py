@@ -537,11 +537,15 @@ def observatory_machine(
     and the largest cache/VM/history locations, worktrees and branches by class,
     the cleanup plan with its journal, and the disk guard's last run (pressure,
     what it freed by the disk's own count, the largest files, who holds the swap).
+    Missing swap remains null with its reason/time; largest-file coverage carries
+    completeness and error counts even when the bounded file list is empty.
 
     Read-only. It never kills a process or deletes a file: the auto tier of the
     cleanup and the disk guard run in the maintenance job (every 15 minutes) when the operator
     enabled features.auto_cleanup, and anything that
     holds unique work only through `full cleanup --apply --include manual`.
+    Manual worktree removal skips ignored files: preserve or move them before
+    retrying. `.wrangler` local state is never classified as build output.
     A process is reported by executable and script, never by its environment or
     full command line, because either can carry a credential.
     """
@@ -560,7 +564,9 @@ def observatory_machine(
            "sections": ["memory", "processes", "disk", "git", "cleanup", "guard"]}
     if full.get("processes"):
         procs = full["processes"]
-        out["processes"] = {"count": procs.get("count"), "top": (procs.get("top") or [])[:MACHINE_TOP],
+        out["processes"] = {**{key: procs.get(key) for key in
+                              ("measured_at", "attempted_at", "source", "stale", "rss_semantics", "attribution", "projects_measured", "degraded")},
+                            "count": procs.get("count"), "top": (procs.get("top") or [])[:MACHINE_TOP],
                             "groups": sorted(procs.get("groups") or [], key=lambda g: -(g.get("rss_mb") or 0))[:MACHINE_TOP]}
     if full.get("disk"):
         disk = full["disk"]
@@ -570,7 +576,9 @@ def observatory_machine(
     if full.get("git"):
         git = full["git"]
         out["git"] = {"measuredAt": git.get("measuredAt"), "totals": git.get("totals"),
-                      "branches": git.get("branches"), "uniqueBranches": len(git.get("uniqueBranches") or [])}
+                      "branches": git.get("branches"), "uniqueBranches": len(git.get("uniqueBranches") or []),
+                      # A pass the deadline cut short: its carried checkouts plan no automatic removal.
+                      "partial": git.get("partial", False), "carried": git.get("carried")}
     if full.get("cleanup"):
         plan = full["cleanup"]
         out["cleanup"] = {"plannedAt": plan.get("plannedAt"), "autoEnabled": plan.get("autoEnabled"),
@@ -579,7 +587,12 @@ def observatory_machine(
         g = full["guard"]
         out["guard"] = {k: g.get(k) for k in ("at", "level", "acting", "freeGbBefore", "freeGbAfter", "freedGb",
                                               "planned", "plannedGb", "results")}
-        out["guard"]["largeFiles"] = ((g.get("largeFiles") or {}).get("files") or [])[:MACHINE_TOP]
+        coverage = g.get("largeFiles") or {}
+        out["guard"]["largeFiles"] = (coverage.get("files") or [])[:MACHINE_TOP]
+        out["guard"]["largeFilesCoverage"] = {k: coverage.get(k) for k in
+                                                ("measured_at", "complete", "errors", "budget_exhausted", "scope")}
+        memory = g.get("memory") or {}
+        out["guard"]["memory"] = {k: memory.get(k) for k in ("measured_at", "swap_gb", "swap_reason")}
     return out
 
 

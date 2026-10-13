@@ -367,14 +367,22 @@ def origin(text: str, *, https_only: bool = True) -> tuple[str, str, str]:
     """(origin `scheme://host[:port]`, the host as shown, the path that was dropped).
 
     THE BINDING IS AN ORIGIN, NOT A URL. `use_secret.py header` compares it with
-    the `CLAUDE_CODE_MCP_SERVER_URL` Claude Code hands its `headersHelper`, and
-    the question that comparison answers is "is this request going to the server
-    the operator meant", which scheme, host and port decide. A path is accepted
-    (an operator pastes the server's whole URL) and reported as not part of it.
+    the server URL its caller names (`CLAUDE_CODE_MCP_SERVER_URL`, or
+    `--server-url` for a client that does not export one), and the question that
+    comparison answers is "is this request going to the server the operator
+    meant", which scheme, host and port decide. A path is accepted (an operator
+    pastes the server's whole URL) and reported as not part of it.
 
     `https_only` is the binding's rule: a bearer bound to plain http would travel
-    readable on the wire. The header door parses the server's URL with it off,
-    so a plain-http server is named in the refusal rather than failing to parse.
+    readable on the wire. ONE EXCEPTION, LOOPBACK (PB-139): `http://` to a
+    loopback LITERAL (127.0.0.0/8 or `[::1]`) with an explicit port crosses no
+    network, and local MCP servers commonly listen there.
+    `localhost` stays refused: it is a name, and `/etc/hosts` can point it
+    anywhere. A loopback http origin always carries its port, so the binding and
+    a server URL that leaves port 80 implicit compare equal.
+
+    The header door parses the server's URL with `https_only` off, so a
+    plain-http server is named in the refusal rather than failing to parse.
     A bare host means https on the default port. Userinfo, a query and a
     fragment are refused: each is a place a credential rides in a URL.
     Messages name the rule, never the text, except the host — hosts are not
@@ -394,9 +402,6 @@ def origin(text: str, *, https_only: bool = True) -> tuple[str, str, str]:
     except ValueError:
         raise VaultBoundaryError("the address is not a URL or a host[:port]") from None
     scheme = parts.scheme.lower()
-    if https_only and scheme != "https":
-        raise VaultBoundaryError("only https is accepted: a bearer bound to plain http "
-                                 "would cross the network readable")
     if scheme not in ("https", "http"):
         raise VaultBoundaryError("the address must be an http(s) URL")
     if "@" in parts.netloc:
@@ -412,9 +417,24 @@ def origin(text: str, *, https_only: bool = True) -> tuple[str, str, str]:
         literal = None
     if not host or (literal is None and not _HOST.fullmatch(host)):
         raise VaultBoundaryError("the address names no valid host")
+    loopback = scheme == "http" and literal is not None and literal.is_loopback
+    if https_only and scheme != "https":
+        if host == "localhost" or host.endswith(".localhost"):
+            raise VaultBoundaryError("plain http is accepted only to a loopback literal, and "
+                                     "localhost is a name /etc/hosts can remap; give "
+                                     "http://127.0.0.1:<port> or http://[::1]:<port>")
+        if not loopback:
+            raise VaultBoundaryError("only https is accepted, or plain http to a loopback literal "
+                                     "(127.0.0.0/8, [::1]) with its port: a bearer bound to plain "
+                                     "http anywhere else would cross the network readable")
+        if port is None:
+            raise VaultBoundaryError("a loopback http binding names its port "
+                                     "(http://127.0.0.1:<port>); the server's port is part of it")
     shown = f"[{host}]" if literal is not None and literal.version == 6 else host
     default = 443 if scheme == "https" else 80
-    if port is not None and port != default:
+    if loopback:
+        shown = f"{shown}:{port if port is not None else default}"
+    elif port is not None and port != default:
         shown = f"{shown}:{port}"
     path = parts.path if parts.path not in ("", "/") else ""
     return f"{scheme}://{shown}", shown, path
@@ -898,7 +918,8 @@ def main(argv: list[str]) -> int:
     _slot_args(p)
     target = p.add_mutually_exclusive_group(required=True)
     target.add_argument("--header-for", metavar="URL_OR_HOST",
-                        help="the MCP server's https URL or host[:port]; a bare host means https")
+                        help="the MCP server's https URL or host[:port] (a bare host means https), "
+                             "or http://127.0.0.1:<port> / http://[::1]:<port> for a loopback server")
     target.add_argument("--clear", action="store_true", help="remove the binding")
     sub.add_parser("backup")
     a = ap.parse_args(argv[1:])

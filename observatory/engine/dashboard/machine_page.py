@@ -67,9 +67,14 @@ def _frees(row: dict, t: Translator) -> str:
     (OBS-66): `du` counted 19 browser clones as 13 GB, and removing them freed nothing."""
     if not row.get("clones_matter"):
         return ""
-    return "<br>" + t.mark("removing it frees at least {size} GB; APFS clones share {shared} GB",
+    hint = "<br>" + t.mark("removing it frees at least {size} GB; APFS clones share {shared} GB",
                            attrs=' class="machine-hint"', size=round(row["frees_at_least_gb"], 1),
                            shared=round(row["clone_shared_gb"], 1))
+    # Figures carried from an earlier private walk say when that walk ran (ENG-006).
+    walked = row.get("frees_measured_at")
+    if walked and walked != row.get("measured_at"):
+        hint += " " + t.mark("as of {date}", attrs=' class="machine-hint"', date=str(walked)[:10])
+    return hint
 
 
 def _word(t: Translator, msgid) -> str:
@@ -128,7 +133,7 @@ def summary_html(m: dict, t: Translator) -> str:
          t.mark("{percent}% of {total} GB", percent=disk.get("free_percent", "—"), total=total_gb)
          if isinstance(total_gb, (int, float)) else t.mark("{percent}% of {total}", percent=disk.get("free_percent", "—"),
                                                           total="—")),
-        (t.mark("Processes"), _e(procs.get("count", "—")),
+        (t.mark("Processes"), _e(procs.get("count") if procs.get("count") is not None else "—"),
          t.mark("{n} origins", n=len(procs.get("groups") or []))),
         (t.mark("Cleaned in 7 days"), _e(len(done)),
          auto + (" · " + _gigabytes(round(freed, 1), t) if freed else "")),
@@ -159,12 +164,22 @@ def guard_html(g: dict | None, t: Translator) -> str:
                         "15 minutes below the low line; never anything a process holds, maps, runs from or works inside: "
                         "project-observatory full disk-guard --apply",
                         tag="p", attrs=' class="machine-hint"'))
-    files = ((g.get("largeFiles") or {}).get("files") or [])[:ROWS]
+    coverage = g.get("largeFiles") or {}
+    files = (coverage.get("files") or [])[:ROWS]
+    measured = coverage.get("complete") is True
+    empty = "No file above the size line." if measured else "incomplete measurement" if coverage else "Not measured"
+    if coverage and not measured:
+        errors = coverage.get("errors")
+        count = (sum(n for n in errors.values() if isinstance(n, int) and n > 0)
+                 if isinstance(errors, dict) else None)
+        shown = t.number(count) if count is not None else t.mark("Not measured")
+        parts.append(f'<p class="machine-hint">{t.mark("incomplete measurement")} · '
+                     f'{_e(stamp(coverage.get("measured_at")))} · {t.mark("unreadable")}: {shown}</p>')
     parts.append(_table(t, "Largest files",
                         [("File", False), ("Size", True), ("Modified", False)],
                         [[f'<span class="mono">{_e(f["path"])}</span>', _gigabytes(f.get("gb"), t), t.date(f.get("modified"))]
                          for f in files],
-                        "No file above the size line."))
+                        empty))
     sims = (g.get("memory") or {}).get("simulators") or []
     if sims:
         parts.append(_table(t, "Running simulators",
@@ -181,11 +196,23 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     if m.get("measuredAt"):
         parts.append(t.mark("Machine surveyed {at}", tag="p", attrs=' class="machine-at"', at=stamp(m["measuredAt"])))
     parts.append(summary_html(m, t))
+    for section, label in (("memory", "Memory"), ("processes", "Processes")):
+        sample = m.get(section) or {}
+        if sample.get("source"):
+            state = t.mark("stale") if sample.get("stale") is True else (
+                t.mark("Not measured") if sample.get("stale") is None else "")
+            if sample.get("degraded"):
+                state += " · " + t.mark("incomplete measurement")
+            parts.append(f'<p class="machine-at">{t.mark(label)} · '
+                         f'{t.mark("as of {date}", date=stamp(sample.get("measured_at")))} · {state}</p>')
     procs = m.get("processes") or {}
+    if procs.get("rss_semantics"):
+        parts.append(t.mark("RSS totals may count shared pages more than once.", tag="p", attrs=' class="machine-hint"'))
     names = {r.get("id"): r.get("name") for r in payload.get("rows") or [] if isinstance(r, dict) and r.get("id")}
     parts.append(_table(t, "Memory by origin",
                         [("Origin", False), ("Processes", True), ("Sessions", True), ("Memory", True), ("CPU %", True)],
-                        [[_e(g["origin"]), _e(g["processes"]), _e(g["sessions"]), _size(g["rss_mb"], t), t.number(g["cpu"])]
+                        [[_e(g["origin"]), _e(g["processes"]), _e(g.get("sessions") if g.get("sessions") is not None else "—"), _size(g.get("rss_mb"), t),
+                          t.number(g["cpu"]) if g.get("cpu") is not None else "—"]
                          for g in (procs.get("groups") or [])[:ROWS]],
                         "No process survey yet."))
     parts.append(_table(t, "Largest processes",
@@ -212,6 +239,13 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                         "No disk location measured yet."))
     parts.append(guard_html(m.get("guard"), t))
     git = m.get("git") or {}
+    # A pass the deadline cut short carried some checkouts from an earlier one; their rows below
+    # are that old, and they plan no automatic removal until a fresh pass (ENG-009).
+    held = git.get("carried") or {}
+    if git.get("partial") and held.get("checkouts"):
+        parts.append(t.mark("partial survey: {n} checkouts carried from {date}", tag="p",
+                            attrs=' class="machine-hint"', n=held["checkouts"],
+                            date=str(held.get("measured_at") or "")[:10]))
     # Worth a look: a stale record, one git cannot read, or one nobody has touched
     # in a week. Uncommitted edits in a worktree someone works in today are work.
     idle = [w for w in git.get("worktrees") or []

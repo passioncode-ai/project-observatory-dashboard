@@ -132,3 +132,19 @@ nothing is created for it.
 ## Leak scan: suppression identity (0.10.0, PB-032 follow-up)
 
 Leak sightings gain an optional `version_id` (HMAC under the workspace fingerprint salt). Suppressions require this identifier and an exact location; 0.3.11 name/substring-only rules are refused with a warning until explicitly replaced. No existing suppression is broadened or silently migrated. Without the salt, detection still reports sightings and suppression is unavailable. File offsets are reset when known values change. Changes to effective suppression rules, including expiry, replay files and the companion database. The private state gains `values_digest` and `suppressions_digest`; old state causes a complete first pass.
+
+## Leak scan: coded degradations and coverage (ENG-001)
+
+Each entry of `store/raw/leak-scan.json` `degraded` gains `code` — `no-values` (the scan knew no
+values), `deadline-targets` or `deadline-store` (the step's deadline cut the pass), `source-unreadable`
+(a target or a store would not open) — plus `source` (`leak-scan:<code>`) and `reason` (the `why`), the
+fields `/health` and `collector.degraded` read. `coverage` gains `targets_read` (the targets the pass
+reached) and `stores_unread` (store labels, `~`-relative). `partial` now means a deadline cut only; an
+unreadable source alone no longer sets it. Readers: only a scan that knew no values is
+`secret.leak_scan_unmeasured`; every other document keeps its sightings, and a cut one adds
+`secret.leak_scan_partial`. Every coded entry, a `source-unreadable` hole included, holds `/health` as
+degraded: an unread source is unmeasured, not clean; the hole counts every `not_scanned` note marked
+`unreadable` (a session folder that will not list is one, named `~`-relative), every `skipped` entry marked
+`unreadable` (an env file or a vault slot that will not read) and every store that would not open. A document from an older scanner (no `code`, no `targets_read`) still reads:
+without `known` it is unmeasured as before; with `known` its sightings stand and the partial row says the
+scanner recorded no coverage rather than inventing a count.

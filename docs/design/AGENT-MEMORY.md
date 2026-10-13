@@ -321,13 +321,22 @@ schema against it.
   Credential shapes and the workspace's known values are redacted, as on every agent write,
   and the answer's `redacted.fields` says where.
 - **One record per (classKey, project).** A repeat from the same project revises that record
-  (`outcome: revised`) or writes nothing (`unchanged`); it never mints a second one, because
-  two records of one project would read as two witnesses. **A new commit is a new claim:** a
-  promoted lesson that cites another commit cannot keep `observed`, since its corroboration
-  vouched for the old one. The lifecycle has no edge back to `proposed`, so the old record is
-  archived by its author and a new proposal replaces it (`outcome: replaced`,
-  `replaces: <id>@<rev>`); the corroborator promotes it again only once the new commit
-  resolves. A change of wording keeps the state.
+  (`outcome: revised`) or writes nothing (`unchanged`). A changed evidence commit, or
+  an observation whose current evidence no longer resolves in two distinct known projects,
+  archives the old observation and creates a new proposal (`replaced`, `replaces: id@revision`).
+  The archive, successor, outbox and lexical index commit together. An unchanged repeat is
+  also revalidated. The project and class cannot change on an existing lesson, including
+  through generic ledger revisions. Operator-owned records remain protected.
+  Proof: `test_lesson.EvidenceRevisionSafety` and `ANewCommitAfterPromotion`.
+  Migration takes the write lock before re-reading both the candidate revision and the
+  active identity. A candidate changed since the scan is skipped; a dry run takes no
+  writer lock. The shared `insert_revision` uses one conditional SQL INSERT to exclude
+  an already active identity and a record-wide tombstone, including generic new lessons
+  and note conversions. No caller-held transaction is committed by this insert.
+  Proof: `TheBridgeNotesMigrate.test_migration_serializes_identity_check_and_competing_lesson_write`,
+  `test_migration_rereads_candidate_revision_under_lock`,
+  `test_generic_new_and_converted_lessons_cannot_duplicate_active_identity` and
+  `test_generic_revision_refuses_erasure_between_read_and_insert`.
 - **Found by kind.** `observatory_search(query, kinds: ["lesson"])` with no project filters by
   kind inside the candidate query, before the 300-match window. Without it, the companion's
   per-session records filled the window and the search abstained over a store that held the
@@ -338,13 +347,24 @@ schema against it.
   person is needed; `supported` stays the operator's. `tools/corroborate.py` applies it as
   `agent:lesson-corroborator`, and "resolve" means in git, on this machine: each origin's
   `p-` key must belong to a clone the registry knows (its root commit gives the key) and the
-  commit must be an object in that clone. Four outcomes, each listed in `corroboration.json`
+  commit must be an object in that clone. Five outcomes, each listed in `corroboration.json`
   under `lessons`:
   - `promoted` — this lesson's commit and another project's commit of the same class resolve;
   - `waiting` — no second project has recorded the class, or none of theirs resolves yet;
   - `unresolvable` — "commit not resolvable here": no registered clone carries the key, so the
     lesson stays `proposed` and witnesses for nobody (an invented key buys nothing);
-  - `contradicted` — the clone is here and git does not hold the commit.
+  - `contradicted` — the clone is here and git does not hold the commit;
+  - `invalidated` — an agent-owned observation lost its current evidence and was replaced
+    by a proposal, with the old revision preserved. A stale scan cannot overwrite a newer
+    revision. Dry runs only list the proposed invalidation.
+
+  `test_corroboration.test_observation_is_revalidated_when_unchanged_commit_disappears`
+  verifies promotion, a valid wording revision and loss of evidence using synthetic Git
+  repositories. Shared ledger promotion also checks the two known project identities;
+  a caller-supplied description of a check is insufficient. Write-time Git checks share
+  a five-second budget per validation; timeouts fail closed. This budget does not bound
+  SQLite lock acquisition or filesystem reads. Local stdio caller identity remains
+  self-declared; resolving two project roots is evidence, not caller authentication.
 
   The same project twice is one witness. `counts.proposed` counts only the rows the session
   rule reads; lessons have their own `lessons_*` counts.
@@ -353,9 +373,15 @@ schema against it.
   (`memory.lesson.record`) is a contract revision for later.
 - **Migration.** Lessons written before this tool are `observatory_record` notes whose
   statement starts `lesson:` (the emitter's bridge). `tools/migrate_lessons.py` (`--dry-run`
-  by default, `--apply` to write) turns each into a lesson record: a new revision of the same
+  by default, `--apply` to write) turns an agent-owned proposal into a lesson record: a new revision of the same
   record, by its author, with `migrated-from` in its provenance. A note whose commit the
   redactor already replaced (a full 40-digit id) is listed and left as it is.
+  Operator-owned and promoted notes are also left for explicit review. A generic
+  note's corroboration cannot transfer to a lesson: `ledger.append` permits this
+  kind conversion only from proposed to proposed with a valid lesson/1 body.
+  `test_lesson.EvidenceRevisionSafety.test_a_lesson_cannot_inherit_an_ordinary_notes_promotion`
+  and `TheBridgeNotesMigrate.test_migration_preserves_promoted_and_operator_owned_notes`
+  verify those boundaries.
 
 **The memory boundary.** Lessons are agents' work memory, and they stay in this store. A lesson
 that turns out to be project knowledge — something the project's people, not only its agents,

@@ -17,6 +17,8 @@ Three rules the rest of the system leans on:
 from __future__ import annotations
 import json, re, sqlite3, sys, pathlib, uuid
 from datetime import datetime, timezone
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from store import db as store_db                                                 
@@ -145,6 +147,30 @@ def _check_owner(prior: sqlite3.Row | None, writer: str) -> None:
             f"{prior['memory_id']} is owned by {prior['owner']}; {writer} may only correct its own")
 
 
+_revision_transaction = ContextVar("revision_transaction", default=None)
+
+
+@contextmanager
+def atomic_revisions(conn: sqlite3.Connection):
+    """Group guarded appends, including their indexes, without nested commits.
+
+    Take the writer lock before reading the current lesson, so concurrent repetitions
+    cannot mint two active records. An existing caller transaction is refused.
+    """
+    if conn.in_transaction or _revision_transaction.get() is not None:
+        raise LedgerError("atomic revisions require a fresh transaction")
+    conn.execute("BEGIN IMMEDIATE")
+    token = _revision_transaction.set(conn)
+    try:
+        yield
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        _revision_transaction.reset(token)
+
+
 def _commit_revision(conn: sqlite3.Connection, row: dict) -> int:
     """The one place a revision reaches disk — ledger and outbox, one transaction.
 
@@ -166,6 +192,8 @@ def _commit_revision(conn: sqlite3.Connection, row: dict) -> int:
     than accepting silently; a new conclusion about the same subject is a new
     record.
     """
+    if _revision_transaction.get() is conn:
+        return insert_revision(conn, row)
     with conn:
         return insert_revision(conn, row)
 
@@ -187,13 +215,35 @@ def insert_revision(conn: sqlite3.Connection, row: dict) -> int:
             f"{row['memory_id']} is tombstoned (from revision {tomb[0]}) and takes no "
             f"further revisions — every read joins tombstones on memory_id, so this "
             f"row would be written and never served. Append a new record instead.")
-    conn.execute(
+    # An active lesson identity is unique across every write door, not only the
+    # typed helper. The conditional INSERT checks under SQLite's write lock in the
+    # SAME statement: a SELECT before INSERT would race another connection.
+    # It also composes with a transaction already held by workflow/lesson callers.
+    identity_clause = " WHERE NOT EXISTS (SELECT 1 FROM tombstones WHERE memory_id = ?)"
+    identity_args = (row["memory_id"],)
+    if row["kind"] == "lesson" and row["state"] not in ("rejected", "archived", "superseded"):
+        from store import lessons as LS
+        body = row.get("body")
+        if (not isinstance(body, dict) or body.get("schema") != "lesson/1"
+                or LS.validate({k: v for k, v in body.items() if k != "schema"})):
+            raise LedgerError("an active lesson requires a valid lesson/1 body")
+        identity_clause += (
+            " AND NOT EXISTS (SELECT 1 FROM ledger l"
+            " JOIN (SELECT memory_id, MAX(revision) r FROM ledger GROUP BY memory_id) m"
+            " ON m.memory_id = l.memory_id AND m.r = l.revision"
+            " LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
+            " WHERE t.memory_id IS NULL AND l.kind = 'lesson'"
+            " AND l.state NOT IN ('rejected', 'archived', 'superseded')"
+            " AND l.memory_id != ? AND json_extract(l.body_json, '$.classKey') = ?"
+            " AND json_extract(l.body_json, '$.origin.projectId') = ?)")
+        identity_args += (row["memory_id"], body["classKey"], body["origin"]["projectId"])
+    inserted = conn.execute(
         "INSERT INTO ledger (memory_id, revision, kind, project_id, agent_id, run_id,"
         " session_id, function, scope, statement, why, state, confidence, owner,"
         " classification, valid_from, valid_to, supersedes_json,"
         " conflicts_with_json, provenance_json, evidence_json, created_at,"
         " workflow_id, step_id, executor_json, body_json)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?" + identity_clause,
         (row["memory_id"], row["revision"], row["kind"], row["project_id"],
          row["agent_id"], row["run_id"], row["session_id"], row["function"],
          row["scope"], row["statement"], row["why"], row["state"], row["confidence"],
@@ -204,7 +254,9 @@ def insert_revision(conn: sqlite3.Connection, row: dict) -> int:
          json.dumps(row["evidence"], ensure_ascii=False), row["created_at"],
          row.get("workflow_id"), row.get("step_id"),
          None if row.get("executor") is None else json.dumps(row["executor"], ensure_ascii=False),
-         None if row.get("body") is None else json.dumps(row["body"], ensure_ascii=False)))
+         None if row.get("body") is None else json.dumps(row["body"], ensure_ascii=False)) + identity_args)
+    if inserted.rowcount != 1:
+        raise LedgerError("record is tombstoned or another active lesson holds this class and project identity")
     # The version comes from the store's own vocabulary, not from a literal
     # here. This line held `1` while `store/indexer.py` filtered on its own
     # constant — two numbers that had to agree, in two files, with nothing
@@ -391,6 +443,29 @@ def append(
                 f"{mid}: {owner} may not promote a proposal; the operator reviews it "
                 f"(`review.py`) or an independent check corroborates it")
 
+    if prior is not None and prior["kind"] != "lesson" and kind == "lesson":
+        from store import lessons as LS
+        if prior["state"] != "proposed" or state != "proposed":
+            raise LedgerError("a lesson cannot inherit another record kind's promotion; submit a new proposal")
+        if (not isinstance(body, dict) or body.get("schema") != "lesson/1"
+                or LS.validate({k: v for k, v in body.items() if k != "schema"})):
+            raise LedgerError("a proposed lesson migration requires a valid lesson/1 body")
+
+    if prior is not None and prior["kind"] == "lesson":
+        from store import lessons as LS
+        old_body = json.loads(prior["body_json"] or "{}")
+        next_body = old_body if body is None else body
+        if not isinstance(next_body, dict) or not isinstance(next_body.get("origin"), dict):
+            raise LedgerError("a lesson revision requires its structured origin")
+        if (kind != "lesson" or next_body.get("classKey") != old_body.get("classKey")
+                or next_body.get("origin", {}).get("projectId") !=
+                old_body.get("origin", {}).get("projectId")):
+            raise LedgerError("a lesson's class and project identity cannot change")
+        if state == "observed" and prior["state"] == "observed":
+            if (next_body.get("origin", {}).get("commit") !=
+                    old_body.get("origin", {}).get("commit") or not LS.has_support(conn, next_body)):
+                raise LedgerError("lesson evidence no longer supports observation; submit a new proposal")
+
     revision = 1 if prior is None else prior["revision"] + 1
     supersedes = [] if prior is None else [f"{mid}@{prior['revision']}"]
     created = _now()
@@ -478,6 +553,11 @@ def corroborate(conn: sqlite3.Connection, memory_id: str, *, by: str, check: dic
         raise RevisionConflict(memory_id, expected_revision, prior["revision"])
     if not check or "how" not in check:
         raise LedgerError("check must describe how the claim was verified: {'how': ...}")
+
+    if prior["kind"] == "lesson":
+        from store import lessons as LS
+        if not LS.has_support(conn, json.loads(prior["body_json"] or "{}")):
+            raise LedgerError("lesson observation requires resolving evidence from distinct known projects")
 
     revision = prior["revision"] + 1
     created = _now()

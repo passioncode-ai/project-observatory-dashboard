@@ -43,7 +43,7 @@ WHAT CAN HONESTLY BE CORROBORATED, and what cannot:
     corroborate.py [--dry-run]
 """
 from __future__ import annotations
-import json, pathlib, subprocess, sys
+import json, pathlib, subprocess, sys, time
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -68,18 +68,22 @@ def repository_paths() -> list[pathlib.Path]:
     if not reg.is_file():
         return []
     try:
-        repos = json.loads(reg.read_text(encoding="utf-8")).get("repositories", [])
+        doc = json.loads(reg.read_text(encoding="utf-8"))
+        repos = doc.get("repositories", []) if isinstance(doc, dict) else []
+        if not isinstance(repos, list):
+            return []
     except (OSError, ValueError):
         return []
     out = []
     for r in repos:
-        p = (r.get("local") or {}).get("path") if isinstance(r, dict) else None
-        if p and pathlib.Path(p).is_dir():
+        local = r.get("local") if isinstance(r, dict) else None
+        p = local.get("path") if isinstance(local, dict) else None
+        if isinstance(p, str) and p and pathlib.Path(p).is_dir():
             out.append(pathlib.Path(p))
     return out
 
 
-def project_keys() -> dict[str, list[pathlib.Path]]:
+def project_keys(*, deadline: float | None = None) -> dict[str, list[pathlib.Path]]:
     """Pseudonymous project key -> the clones here that carry it.
 
     The key is `p-` and the first 12 hex digits of the repository's root commit (the
@@ -88,14 +92,17 @@ def project_keys() -> dict[str, list[pathlib.Path]]:
     holding the project's name."""
     keys: dict[str, list[pathlib.Path]] = {}
     for path in repository_paths():
-        code, out = git(path, "rev-list", "--max-parents=0", "HEAD")
+        if deadline is not None and time.monotonic() >= deadline:
+            break
+        code, out = git(path, "rev-list", "--max-parents=0", "HEAD", deadline=deadline)
         if code != 0 or not out.split():
             continue
         keys.setdefault("p-" + sorted(out.split())[0][:12], []).append(path)
     return keys
 
 
-def resolve_origin(origin: dict, keys: dict[str, list[pathlib.Path]]) -> tuple[bool | None, str]:
+def resolve_origin(origin: dict, keys: dict[str, list[pathlib.Path]], *,
+                   deadline: float | None = None) -> tuple[bool | None, str]:
     """Does this lesson's evidence commit resolve? Three answers, as for sessions.
 
     True: a clone of the project is here and git finds the commit. False: a clone is here
@@ -111,9 +118,14 @@ def resolve_origin(origin: dict, keys: dict[str, list[pathlib.Path]]) -> tuple[b
     if not clones:
         return None, (f"commit not resolvable here: no clone in the registry carries "
                       f"{project}, so commit:{sha} cannot be asked of git")
+    unavailable = False
     for path in clones:
-        if git(path, "cat-file", "-e", f"{sha}^{{commit}}")[0] == 0:
+        code = git(path, "cat-file", "-e", f"{sha}^{{commit}}", deadline=deadline)[0]
+        if code == 0:
             return True, f"commit:{sha} resolves in {project}'s clone"
+        unavailable = unavailable or code == 127
+    if unavailable:
+        return None, "commit verification unavailable or its time budget expired"
     return False, f"commit:{sha} is not an object in any clone of {project} here"
 
 
@@ -137,7 +149,7 @@ def corroborate_lessons(conn, dry: bool) -> dict:
         claimed.setdefault(r["body"].get("classKey"), set()).add(
             (r["body"].get("origin") or {}).get("projectId"))
     askable = any(len(claimed.get(r["body"].get("classKey"), ())) >= LESSON_PROJECTS
-                  for r in rows if r["state"] == "proposed")
+                  for r in rows if r["state"] in ("proposed", "observed"))
     keys = project_keys() if askable else {}
     resolution = {r["memory_id"]: resolve_origin((r["body"].get("origin") or {}), keys)
                   for r in rows}
@@ -146,13 +158,27 @@ def corroborate_lessons(conn, dry: bool) -> dict:
         ck = r["body"].get("classKey")
         if isinstance(ck, str) and ck:
             by_class.setdefault(ck, []).append(r)
-    promoted, waiting, unresolvable, contradicted = [], [], [], []
+    promoted, waiting, unresolvable, contradicted, invalidated = [], [], [], [], []
     for ck, members in sorted(by_class.items()):
         # Only a RESOLVED origin witnesses: a key no registered clone carries is not a
         # project this machine can vouch for.
         standing = [m for m in members if resolution[m["memory_id"]][0] is True]
         projects = {m["body"]["origin"]["projectId"] for m in standing}
         for m in members:
+            if m["state"] == "observed" and m["owner"] != L.OPERATOR:
+                if resolution[m["memory_id"]][0] is not True or len(projects) < LESSON_PROJECTS:
+                    if dry:
+                        invalidated.append({"memory_id": m["memory_id"], "dry_run": True})
+                    else:
+                        try:
+                            out = LS.revalidate(conn, L, memory_id=m["memory_id"],
+                                                expected_revision=m["revision"])
+                            if out["outcome"] == "replaced":
+                                invalidated.append({"memory_id": m["memory_id"], **out})
+                        except L.LedgerError as exc:
+                            waiting.append({"memory_id": m["memory_id"], "classKey": ck,
+                                            "reason": type(exc).__name__})
+                continue
             if m["state"] != "proposed":
                 continue
             if len(claimed.get(ck, ())) < LESSON_PROJECTS:
@@ -193,7 +219,7 @@ def corroborate_lessons(conn, dry: bool) -> dict:
                                      "why": f"{type(exc).__name__}: {exc}",
                                      "created_at": m["created_at"]})
     return {"classes": len(by_class), "promoted": promoted, "waiting": waiting,
-            "unresolvable": unresolvable, "contradicted": contradicted}
+            "unresolvable": unresolvable, "contradicted": contradicted, "invalidated": invalidated}
 
 
 def clone_path(nwo: str) -> pathlib.Path | None:
@@ -206,9 +232,12 @@ def clone_path(nwo: str) -> pathlib.Path | None:
     return None
 
 
-def git(path: pathlib.Path, *args: str) -> tuple[int, str]:
+def git(path: pathlib.Path, *args: str, deadline: float | None = None) -> tuple[int, str]:
     try:
-        r = safe_git.run(args, repo=path, timeout=20)
+        timeout = 20 if deadline is None else min(20, deadline - time.monotonic())
+        if timeout <= 0:
+            return 127, ""
+        r = safe_git.run(args, repo=path, timeout=timeout)
         return r.returncode, r.stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return 127, ""
@@ -417,7 +446,8 @@ def main(argv: list[str]) -> int:
                        "lessons_promoted": len(lessons["promoted"]),
                        "lessons_waiting": len(lessons["waiting"]),
                        "lessons_unresolvable": len(lessons["unresolvable"]),
-                       "lessons_contradicted": len(lessons["contradicted"])},
+                       "lessons_contradicted": len(lessons["contradicted"]),
+                       "lessons_invalidated": len(lessons["invalidated"])},
             # Lessons apart from `refused`: see `corroborate_lessons`.
             "lessons": lessons,
             "refused": [{"memory_id": mid, "why": why, "created_at": at,
@@ -450,7 +480,8 @@ def main(argv: list[str]) -> int:
     print(f"  lessons: {lessons['classes']} class(es) — {len(lessons['promoted'])} promoted, "
           f"{len(lessons['waiting'])} waiting for a second project, "
           f"{len(lessons['unresolvable'])} not resolvable here, "
-          f"{len(lessons['contradicted'])} contradicted by git")
+          f"{len(lessons['contradicted'])} contradicted by git, "
+          f"{len(lessons['invalidated'])} observations invalidated")
     for c in (lessons["unresolvable"] + lessons["contradicted"])[:6]:
         print(f"  - {c['memory_id']}  {c['why'][:96]}")
     if needs_person:

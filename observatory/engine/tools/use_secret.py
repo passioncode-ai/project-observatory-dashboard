@@ -7,8 +7,9 @@
     python "$T/use_secret.py" where [--env ENV] <project> <NAME>             which slot it would resolve
     python "$T/use_secret.py" serve [--env ENV] [--consumer LABEL] <project> <NAME>[,…] -- <service…>
                                                        a long-running service, vault only
-    python "$T/use_secret.py" header [--env ENV] [--name Authorization] [--scheme Bearer] <project> <NAME>
-                                                    one MCP server's headersHelper, vault only, bound slot only
+    python "$T/use_secret.py" header [--env ENV] [--name Authorization] [--scheme Bearer] [--server-url URL] <project> <NAME>
+                                                    one MCP server's headersHelper, vault only, bound slot only;
+                                                    --server-url for a client that exports no server URL (Codex)
 
 UNDER A GRANT (OBS-57). With `FABRIC_DELEGATION_TOKEN` in its environment — the agent's token from Fabric's
 hub, aud `project-observatory`, scope `secret.use` — `run`, `serve` and `header` release a vault slot only
@@ -714,13 +715,29 @@ def _header_value(args, url: str) -> tuple[str, str]:
                             "to look at a value")
     if not url:
         raise HeaderRefused("no-server-url", "refused: CLAUDE_CODE_MCP_SERVER_URL is unset or "
-                            "empty, so nothing says which MCP server would receive the header; "
-                            "Claude Code sets it when it runs a headersHelper")
+                            "empty and no --server-url was given, so nothing says which MCP "
+                            "server would receive the header; Claude Code sets the variable when "
+                            "it runs a headersHelper, and a client that does not (Codex's "
+                            "http_headers_helper) passes --server-url <the server's URL>")
     try:
         actual, actual_host, _ = private_files.origin(url, https_only=False)
     except private_files.VaultBoundaryError as exc:
-        raise HeaderRefused("bad-server-url", f"refused: CLAUDE_CODE_MCP_SERVER_URL is not a "
+        raise HeaderRefused("bad-server-url", f"refused: the server URL is not a "
                             f"usable server address ({exc})") from None
+    flag = (getattr(args, "server_url", None) or "").strip()
+    env_url = os.environ.get("CLAUDE_CODE_MCP_SERVER_URL", "").strip()
+    if flag and env_url:
+        # BOTH SET: they must name one server. Either could be the one a
+        # careless wrapper got wrong, and serving to the other would be a guess.
+        try:
+            other, _, _ = private_files.origin(flag, https_only=False)
+        except private_files.VaultBoundaryError as exc:
+            raise HeaderRefused("bad-server-url", f"refused: --server-url is not a usable server "
+                                f"address ({exc})") from None
+        if other != actual:
+            raise HeaderRefused("url-conflict", f"refused (url-conflict): CLAUDE_CODE_MCP_SERVER_URL "
+                                f"names {credential_shape.redact(actual)} and --server-url names "
+                                f"{credential_shape.redact(other)}; give one, or two that agree")
     slot, got_env = vault_slot(args.project, args.name, args.env)
     if slot is None:
         envs, held = _held_in(args.project, args.name)
@@ -735,7 +752,7 @@ def _header_value(args, url: str) -> tuple[str, str]:
     meta = private_files._read_meta(slot)
     bound_text = meta.get("header_for")
     command = (f"`{BIND} {args.project} {got_env} {args.name} --header-for "
-               f"<the server's https URL>`")
+               f"<the server's https URL, or http://127.0.0.1:<port> for a loopback server>`")
     if not bound_text:
         raise HeaderRefused("unbound", f"refused: {args.project}/{got_env}/{args.name} is bound "
                             f"to no MCP server, and an unbound slot is never printed; the "
@@ -744,10 +761,10 @@ def _header_value(args, url: str) -> tuple[str, str]:
         bound, bound_host, _ = private_files.origin(str(bound_text))
     except private_files.VaultBoundaryError:
         raise HeaderRefused("bad-binding", f"refused: the binding of {args.project}/{got_env}/"
-                            f"{args.name} does not read as an https origin; bind it again "
-                            f"with {command}") from None
+                            f"{args.name} does not read as an https origin or a loopback http "
+                            f"one; bind it again with {command}") from None
     if actual != bound:
-        raise HeaderRefused("server-mismatch", f"refused: CLAUDE_CODE_MCP_SERVER_URL names "
+        raise HeaderRefused("server-mismatch", f"refused: the server URL names "
                             f"{credential_shape.redact(actual)} (host {credential_shape.redact(actual_host)}), "
                             f"but {args.project}/{got_env}/{args.name} is bound to {bound} "
                             f"(host {bound_host}); a value is served only to the server it is "
@@ -770,9 +787,16 @@ def cmd_header(args) -> int:
     Every call is audited — served or refused, with the server's name and host
     and the parent process — before anything reaches stdout; an audit that
     cannot be written refuses the call (the caller's OSError branch)."""
-    url = os.environ.get("CLAUDE_CODE_MCP_SERVER_URL", "").strip()
+    env_url = os.environ.get("CLAUDE_CODE_MCP_SERVER_URL", "").strip()
+    flag = (getattr(args, "server_url", None) or "").strip()
+    # WHERE THE URL CAME FROM is who called (PB-139): Claude Code exports it to
+    # its headersHelper; Codex's http_headers_helper does not, so its command
+    # line carries --server-url. Self-reported like the variable itself — the
+    # binding decides, and the audit row says which door the request used.
+    url = env_url or flag
+    caller = "claude-headersHelper" if env_url else ("codex-helper" if flag else None)
     server = credential_shape.redact(os.environ.get("CLAUDE_CODE_MCP_SERVER_NAME", ""))[:120]
-    row = {"server": server or None, "parent": _parent_name()}
+    row = {"server": server or None, "parent": _parent_name(), "caller": caller}
     try:
         header_value, host = _header_value(args, url)
     except HeaderRefused as exc:
@@ -856,6 +880,11 @@ def main(argv: list[str]) -> int:
                    help="the header field (an RFC 7230 token); default Authorization")
     p.add_argument("--scheme", default="Bearer",
                    help="the auth scheme before the value; empty for the bare value")
+    p.add_argument("--server-url", dest="server_url", metavar="URL",
+                   help="the MCP server's URL, for a client that does not export "
+                        "CLAUDE_CODE_MCP_SERVER_URL (Codex's http_headers_helper); used only "
+                        "when that variable is unset, and refused (url-conflict) when both "
+                        "are set and name different servers")
     p.set_defaults(fn=cmd_header)
 
     p = sub.add_parser("pipe", help="value on stdin -> env NAME -> run, output scrubbed")
