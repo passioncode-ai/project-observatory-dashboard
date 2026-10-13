@@ -24,9 +24,13 @@ rotation extras provide no current headroom. A policy PATCH must confirm its
 identity, period and bounded ceiling before later increases, without a separate
 GET or automatic mutation retry. Synthetic producer/remedy fixtures
 and revoke replay now follow the actual CLI exception boundary. The original
-full measurement remains 4307 PASS / 891 FAIL / 2 ERROR, not acceptance; final
-combined replay and independent binding are next. Protected CI, merge, tagged
-assets and installed acceptance remain pending. No live provider work occurred.
+full measurement is retained at 4307 PASS / 891 FAIL / 2 ERROR. Final combined
+`e22b986` replay is 3501 PASS / 1699 FAIL / 0 ERROR; the broad credential suite
+is also red (518 PASS assertions / five FAIL). No strict (a) appeared in that
+finite model run; one (L) and convergence failures remain. Next: independently
+reconcile the red evidence and prove bounded recovery corrections. The release PR
+stays draft; protected CI readiness, merge, tagged assets and installed acceptance
+are not claimed. No live provider work occurred.
 
 [2026-10-13 — Final holder coverage and prune receipts](runs/2026-10-13-cleanup-holder-integration/README.md):
 partial or unreadable process evidence no longer declares an omitted target free;

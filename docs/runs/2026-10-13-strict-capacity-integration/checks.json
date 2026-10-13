@@ -29,7 +29,38 @@
   "diff_check": {
     "exit_code": 0
   },
-  "full_5200": "NOT_RUN_ON_COMPOSITION",
-  "final_credential_doors": "NOT_RUN_AT_FREEZE",
-  "final_source_checkpoint": "746cb228c2d20b8ca63a11db1dea5acef03110fd"
+  "full_5200": {
+    "source": "e22b986e837125ce715a319bd7c47b5527081349",
+    "exit_code": 1,
+    "pass": 3501,
+    "fail": 1699,
+    "error": 0,
+    "judged": 5200,
+    "duration_seconds": 330.37,
+    "new_failures": 820,
+    "new_passes": 14,
+    "receipt": "../2026-10-13-j3-consumer-fixture/raw/composed-full-5200-execution.json"
+  },
+  "final_credential_doors": {
+    "source": "e22b986e837125ce715a319bd7c47b5527081349",
+    "exit_code": 1,
+    "duration_seconds": 124.98,
+    "pass_assertions": 518,
+    "fail_assertions": 5,
+    "isolated_home": true,
+    "providers": "synthetic",
+    "temp_peak_observed_bytes": 13318102,
+    "peak_sampling_seconds": 0.5,
+    "source_sha256": {
+      "observatory/engine/tools/openrouter.py": "8c74363dca294ff62291df2bb8aac71e8fb7b9ca795db5f81bb0be6cc48b503b",
+      "observatory/engine/tests/adv_j1_property.py": "059eeddcea7a08bbe4e92ffa496fc243d72915c1976bb39b3b923be6fb0b88a9",
+      "observatory/engine/tests/test_credential_doors.py": "8959aeb83911ff285418dae2b8e9bfea4c095c47f019d0e0408fe1018d116a1f"
+    },
+    "source_unchanged": true,
+    "head_unchanged": true,
+    "clean_after": true
+  },
+  "final_source_checkpoint": "746cb228c2d20b8ca63a11db1dea5acef03110fd",
+  "acceptance": "RED_NOT_ACCEPTED",
+  "source_tree_unchanged": "58eb053d1240a722822ad5dde55d044f337a8e39"
 }
