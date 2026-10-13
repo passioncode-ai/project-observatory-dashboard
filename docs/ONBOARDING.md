@@ -1133,7 +1133,8 @@ scope receipts. Each scope has its attempt time, directory-entry count and
 counts of completed rotations, refusals and failures. Missing/unreadable scopes
 have unknown coverage and `observed_count: null`; an observed empty directory
 has zero entries. Action counts describe only attempted work, not remaining
-logs or reclaimed bytes. A failed scope does not suppress peer results.
+logs or reclaimed bytes. A lost whole-scope receipt also keeps action counts null,
+since effects may have occurred before the error. A failed scope does not suppress peer results.
 
 The receipt is saved in the workspace store as `maintenance.json`; its readers retain the original
 measurement time and mark evidence older than one hour stale. The Health page

@@ -11,7 +11,8 @@ was changed. This is separate from the prepared release candidate.
 
 `log_policy.sweep_report` reports the same rotation execution, with complete,
 partial or unknown scope coverage; directory-entry count; completed rotations;
-refusals/failures; and fixed reason counts. It never emits paths, file names,
+refusals/failures; and fixed reason counts. A lost whole-scope receipt keeps action counts null because effects may
+already have occurred. It never emits paths, file names,
 contents or external exception bodies. Missing/unreadable enumeration is unknown
 with null observed count, while a successfully listed empty directory is zero.
 Action counters report attempts made, not an estimate of missing data or bytes.
@@ -32,7 +33,7 @@ the same boundaries.
 
 Small real-file fixtures and isolated HOME/TMPDIR only:
 18 lifecycle tests (six new evidence cases plus twelve preserved log-policy
-cases), four maintenance persistence/reader/compatibility cases and three OS
+cases), five maintenance persistence/reader/compatibility cases and three OS
 privacy boundary tests passed. The new API's initial four-case baseline failed
 because it did not exist; an early peer-scope test correctly observed the absent
 updater directory as unknown, so the positive fixture now explicitly creates it.
@@ -41,7 +42,7 @@ No production behavior was weakened to satisfy that fixture.
 Coverage includes absent/empty/unreadable directories, linked directory,
 hardlinked log, invalid generation, copy and fsync faults, chmod failure,
 normal rotation, external same-name generation handling, independent scopes,
-stale/malformed/contradictory receipts and private-marker omission.
+stale/malformed/contradictory receipts, post-effect receipt loss and private-marker omission.
 [Structured check receipt](checks.json).
 
 ## Limits and next task

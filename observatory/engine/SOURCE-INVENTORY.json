@@ -863,8 +863,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "0b319ded2ad172c295f81041de517d5cff298b73264870b527e1d98af7437b6c",
-      "bytes": 110397,
+      "export_sha256": "3fb57eb05f062c3158503d3902effa76b01fa56b7512bef61064e4a3732d9738",
+      "bytes": 110505,
       "upstream_modified": true
     },
     {
@@ -1339,8 +1339,8 @@
       "path": "log_policy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "dd6841a99414fc056f08b6deda867566aa4939a5c5c45148f8ca33707ebaa90e",
-      "bytes": 9393
+      "export_sha256": "a627575c559ecff3fbecb56efb949b333754437011cb5c5d360f8f33c9cc9719",
+      "bytes": 9616
     },
     {
       "path": "machine_view.py",
@@ -1353,8 +1353,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b0f0f03669a2251d6974bacfa501564a930f4aae25ef7b4ef16d1c41237e08dc",
-      "bytes": 83304
+      "export_sha256": "f195740d78a8740ce623fb82dccdebfd31def2726da91de0e0f2635ca85f8e91",
+      "bytes": 83384
     },
     {
       "path": "mcp/capability_tools.py",
@@ -3117,8 +3117,8 @@
       "path": "tests/test_maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3d6f89fdf35a6425fec9231b594e145e261eca0dd57239b75275d243ef032bc3",
-      "bytes": 125772
+      "export_sha256": "5e6739f85a7b58d3d0ed7f0da2ce98a3327ff33c6563acd01cdc5e6344748815",
+      "bytes": 126818
     },
     {
       "path": "tests/test_manifest_urls.py",

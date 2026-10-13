@@ -139,8 +139,8 @@ REASONS = frozenset({"directory_unverified", "directory_read_failed", "file_unve
 
 
 def unknown_report(reason: str = "scope_failed") -> dict:
-    return {"status": "unknown", "observed_count": None, "rotated": 0,
-            "refused": 0, "failed": 0, "reasons": {reason: 1}}
+    return {"status": "unknown", "observed_count": None, "rotated": None,
+            "refused": None, "failed": None, "reasons": {reason: 1}}
 
 
 def _sweep(directory: Path, *, max_bytes=None, generations=None, files=(), detailed=False):
@@ -168,6 +168,9 @@ def _sweep(directory: Path, *, max_bytes=None, generations=None, files=(), detai
             report["observed_count"] = len(entries)
         except OSError:
             report = unknown_report("directory_read_failed")
+    # Enumeration failure happened before these actions; zero attempts is known.
+    # A lost whole-scope receipt instead uses unknown_report's null action counts.
+    report.update(rotated=0, refused=0, failed=0)
     candidates = sorted(set(files) | {p for p in entries if p.suffix in SUFFIXES})
     for path in candidates:
         observation = {}
