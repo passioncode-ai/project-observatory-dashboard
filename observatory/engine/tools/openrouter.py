@@ -55,6 +55,7 @@ import math
 import os
 import pathlib
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -1551,44 +1552,99 @@ def forget_pending_key(name: str, reason: str) -> dict:
     return {"name": name, "forgotten": True}
 
 
+def _revoke_scan() -> tuple[dict, str]:
+    """Read the collector's complete schema, bounded and fail closed.
+
+    This proves only the saved OpenRouter destination survey, not all live vault
+    or remote consumers. Its producer writes schema_version/scanned_at and the
+    three collections even for a known-empty survey; absent fields are unknown.
+    """
+    path = paths.SCRATCH / "openrouter.json"
+    maximum = 4 * 1024 * 1024
+    try:
+        with os.fdopen(osprivacy.open(path, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK), "rb") as stream:
+            before = os.fstat(stream.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_size > maximum:
+                raise ValueError
+            raw = stream.read(maximum + 1)
+            after = os.fstat(stream.fileno())
+        binding = lambda st: (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+        if len(raw) > maximum or binding(before) != binding(after) or binding(after) != binding(path.lstat()):
+            raise ValueError
+        doc = json.loads(raw)
+        if not isinstance(doc, dict) or type(doc.get("schema_version")) is not int or doc["schema_version"] != 1:
+            raise ValueError
+        stamp = doc.get("scanned_at")
+        if not isinstance(stamp, str):
+            raise ValueError
+        measured = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        if measured.tzinfo is None:
+            raise ValueError
+        age = (datetime.datetime.now(datetime.timezone.utc) - measured).total_seconds()
+        if not 0 <= age <= 36 * 3600:
+            raise ValueError
+        if doc.get("degraded") != []:
+            raise ValueError
+        keys, dests, hashes = (doc.get(k) for k in ("keys", "destinations", "destination_hashes"))
+        if not isinstance(keys, list) or not isinstance(dests, dict) or not isinstance(hashes, dict):
+            raise ValueError
+        if len(keys) + len(dests) + len(hashes) > 10000:
+            raise ValueError
+        for row in keys:
+            if not isinstance(row, dict) or not all(k in row for k in ("name", "label", "serves")):
+                raise ValueError
+            if any(row[k] is not None and not isinstance(row[k], str) for k in ("name", "label", "serves")):
+                raise ValueError
+        if any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in dests.items()):
+            raise ValueError
+        for dest, held in hashes.items():
+            if not isinstance(dest, str) or not dest or not isinstance(held, dict):
+                raise ValueError
+            if not isinstance(held.get("hash"), str) or not held["hash"]:
+                raise ValueError
+    except (OSError, ValueError, TypeError, OverflowError, RecursionError):
+        raise RuntimeError("Consumer evidence unavailable: OpenRouter scan is missing, unreadable, changed, malformed, degraded or outside its 36-hour window; refresh the scan before retrying; no key was revoked") from None
+    return doc, hashlib.sha256(raw).hexdigest()
+
+
+def _require_no_scan_holders(scan: dict, name: str, rec: dict, row: dict | None, alias: str) -> None:
+    # The provider row is bound to rec.hash by find_key. Rotation can leave a
+    # predecessor label in the legacy ledger: it is an extra refusal witness,
+    # never a substitute for the current provider label. Labels stay in memory.
+    row = row or {}
+    hashes = {h for h in (rec.get("hash"), row.get("hash")) if isinstance(h, str) and h}
+    labels = {v for v in (alias, rec.get("label"), row.get("label")) if isinstance(v, str) and v}
+    names = {v for v in (name, rec.get("provider_name"), row.get("name")) if isinstance(v, str) and v}
+    held = any(item["hash"] in hashes for item in scan["destination_hashes"].values())
+    held = held or any(label in labels for label in scan["destinations"].values())
+    held = held or any(k.get("serves") and (k.get("name") in names or k.get("label") in labels)
+                       for k in scan["keys"])
+    if held:
+        raise ValueError("A known consumer is reading right now from this key; deliver its replacement and refresh the OpenRouter scan before revocation")
+
+
 @_ledger_writer
 def revoke_key(name_or_label: str) -> dict:
-    """Delete at the provider, then clear the ledger row — in that order: a
-    forgotten live key is worse than a stale row. REFUSED for a key something
-    is reading right now (`serves` in the OpenRouter scan): revoking the key a
-    consumer holds takes the consumer down with no way back."""
+    """Refuse unknown consumer evidence and use current provider identity under lock.
+
+    Saved source identity is rechecked after provider lookup. This bounds source
+    drift across that read; it is not a transaction with external consumer writers.
+    Full vault and remote-holder evidence remains separate, unimplemented coverage.
+    """
     name, rec = resolve_issued(name_or_label)
     _require_resolved_rotation(rec)
-    scan = paths.SCRATCH / "openrouter.json"
-    if scan.is_file():
-        try:
-            doc_scan = json.loads(scan.read_text(encoding="utf-8"))
-            # By HASH first (round 4): a key renamed in the provider's dashboard is still the key a
-            # consumer holds, and the scan records each consumer's key hash.
-            for dest, held in (doc_scan.get("destination_hashes") or {}).items():
-                if rec.get("hash") and isinstance(held, dict) and held.get("hash") == rec["hash"]:
-                    raise ValueError(f"{name} is what {dest} is reading right now; "
-                                     f"issue its replacement first, then revoke this one")
-            # A key past the listing appears in the scan only as the label a destination holds
-            # (`destinations`, fix 5). A label two keys share refuses too: the safe side.
-            for dest, lab in (doc_scan.get("destinations") or {}).items():
-                if rec.get("label") and lab == rec["label"]:
-                    raise ValueError(f"{name} is what {dest} is reading right now (by its label); "
-                                     f"issue its replacement first, then revoke this one")
-            for k in doc_scan.get("keys", []):
-                names = {name, rec.get("provider_name")} - {None}
-                labels = {name_or_label, rec.get("label")} - {None}
-                # A claimed key carries the provider's name, not the ledger's, and the scan has no
-                # hash; its label (recorded at claim) is what a consumer is found by. A label two
-                # keys share refuses here too: a consumer that may be reading it is not taken down.
-                if k.get("serves") and (k.get("name") in names or k.get("label") in labels):
-                    raise ValueError(f"{name} is what {k['serves']} is reading right now; "
-                                     f"issue its replacement first, then revoke this one")
-        except (OSError, ValueError) as exc:
-            if isinstance(exc, ValueError) and "reading right now" in str(exc):
-                raise
+    _scan, receipt = _revoke_scan()
     _label, admin = read_admin(rec["account"])
     row = find_key(admin, name)
+    # Never let an unrelated name lookup supply the deletion identity.
+    if row and (not rec.get("hash") or row.get("hash") != rec["hash"]):
+        raise RuntimeError("Recorded key identity is unresolved; no key was revoked")
+    if row and (not isinstance(row.get("label"), str) or not row["label"]):
+        raise RuntimeError("Current provider consumer identity is unreadable; no key was revoked")
+    current, current_receipt = _revoke_scan()
+    if receipt != current_receipt:
+        raise RuntimeError("Consumer evidence changed during provider lookup; refresh the scan before retrying; no key was revoked")
+    _require_no_scan_holders(current, name, rec, row, name_or_label)
     if row:
         _request(f"/keys/{row['hash']}", admin, method="DELETE")
     doc = ledger()
@@ -1888,7 +1944,8 @@ def main() -> int:
     p_ro.add_argument("name", nargs="?")
     p_ro.add_argument("--leaked", action="store_true",
                       help="rotate every issued key named in an open leak")
-    p_re = sub.add_parser("revoke", help="delete at the provider, clear the ledger row")
+    p_re = sub.add_parser("revoke", help="delete only with current complete OpenRouter consumer evidence",
+                          description="Requires a complete OpenRouter scan no older than 36 hours and no known holder. Missing, stale, changed or degraded evidence refuses. This guard does not yet survey every vault or remote holder.")
     p_re.add_argument("name")
     p_re.add_argument("--forget-pending", action="store_true",
                       help="clear a pending row with no hash without reading the provider — only once the key "

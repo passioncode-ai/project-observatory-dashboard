@@ -177,7 +177,7 @@ BOUNDARY += ('maintain_app',)
 BOUNDARY += ('disk_guard',)
 # The DigitalOcean door against a fake `doctl` and a scratch vault (PLN-142).
 BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
-BOUNDARY += ('rotation_accounting', 'issued_spend', 'j3_adversary')
+BOUNDARY += ('rotation_accounting', 'issued_spend', 'j3_adversary', 'revoke_consumers')
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',

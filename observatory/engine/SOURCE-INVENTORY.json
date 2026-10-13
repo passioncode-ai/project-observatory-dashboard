@@ -828,8 +828,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "3c3ca3a5bc3861de6aae3231e45ef11b935b1d57c12b8985b6d7b877feb7c8e5",
-      "bytes": 11741,
+      "export_sha256": "78f06d4452125390a68208b9f12014d38c4a50386733a629238756c995f45009",
+      "bytes": 12810,
       "upstream_modified": true
     },
     {
@@ -849,15 +849,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "3a9a01da10779e3846e0cca685ab90c22e3576be458f8b6bc9b31e1216a98706",
-      "bytes": 100076,
+      "export_sha256": "68172bfceda1743ef32c639aac11c0a441f032612ef40050e7c752b5114f356d",
+      "bytes": 101145,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "768ba97717aaee59004757ee75ecc3e972bba435cb4a86eef6c20fdd4f801227",
-      "bytes": 76943,
+      "export_sha256": "9529fa8d3506af9ba1800e9e1af75ded1c57272a30730fa253d37083974da6a2",
+      "bytes": 77758,
       "upstream_modified": true
     },
     {
@@ -2125,8 +2125,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "a0b9b5585c4296516fe2ae908339a4eea762e050875c7247d613dd0a122a4af3",
-      "bytes": 26608,
+      "export_sha256": "03d728ef65104b900337864aeb258fcad4822dd0df5628a6edddaca96a162841",
+      "bytes": 26628,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2444,8 +2444,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "d8275235afd9343668187181f343de0e3417bee8f1e6bb79fba2f32385052d81",
-      "bytes": 175755,
+      "export_sha256": "cad91eb2029563733eab1cfdeac4d4aa487440aa240747deb44646c129cab079",
+      "bytes": 176029,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -3549,6 +3549,13 @@
       "bytes": 13040
     },
     {
+      "path": "tests/test_revoke_consumers.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "8fea27b936100f3185eea880330268ea7c008df95179e732565daee3718f3ed9",
+      "bytes": 5778
+    },
+    {
       "path": "tests/test_rollup.py",
       "source_sha256": "e10922fce2aeb03078c34b7e1a441f4db3f0b346592eb2d4a10ff9985efc3470",
       "export_sha256": "8e4d70c2f8eab49c095dd7a1f3ee5ace158a00cc86b32e2f70572eb35e93b050",
@@ -4484,8 +4491,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "68aa510b4127e80149bfb0630963d70f45da99797ef0780b82702132d51547b0",
-      "bytes": 103032,
+      "export_sha256": "b76935b0ef971da92ddf6f1124d0aa21abd73f265b9f47c0252db9844bd49d87",
+      "bytes": 106160,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
@@ -4864,7 +4871,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 631,
+  "file_count": 632,
   "excluded": [
     "git-history",
     "operator-registries",

@@ -132,3 +132,20 @@ identity only, excluding retired keys; do not call it a project spend total. Nul
 optional counters remain unknown. An unavailable/malformed report or changed identity
 returns no figure and nonzero exit, never a measured zero. See the
 [operator guide](ONBOARDING.md#spend-for-one-issued-openrouter-key) for bounds and recovery.
+
+## OpenRouter revocation evidence
+
+`openrouter.py revoke NAME` checks the provider identity by its recorded hash and
+refuses known consumers, including a successor seen only in the scan's destination
+labels. It requires a complete OpenRouter scan no older than 36 hours. Missing,
+unreadable, malformed, degraded, future-dated or changed evidence refuses before
+provider deletion and keeps the ledger row. Refresh the scan with the engine's
+`collectors/scan_openrouter.py OUTPUT` command, using the workspace's
+`store/raw/openrouter.json` as OUTPUT, then inspect the result before retrying.
+Refreshing is a provider read and uses the configured provisioning credential.
+
+The current provider label is used only in memory for matching. The guard does not
+yet prove that every live vault slot or remote environment is unused, and a saved
+scan is not a transaction with external consumer changes. There is no unread-evidence
+bypass. `--forget-pending --reason` remains a separate journaled operator attestation
+for a hashless pending row; it never deletes a provider key.

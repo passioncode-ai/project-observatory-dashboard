@@ -2620,7 +2620,11 @@ def test_or_policy_round_four() -> None:
         rec = m.ledger()["issued"]["project-a-prod-k0"]
         scratch = pathlib.Path(tmpdir.mkdtemp())
         m.paths.SCRATCH = scratch
-        (scratch / "openrouter.json").write_text(json.dumps(make(h, rec.get("label"))), encoding="utf-8")
+        scan = {"schema_version": 1, "scanned_at": __import__("datetime").datetime.now(
+                    __import__("datetime").timezone.utc).isoformat(), "keys": [],
+                "destinations": {}, "destination_hashes": {}, "degraded": []}
+        scan.update(make(h, rec.get("label")))
+        (scratch / "openrouter.json").write_text(json.dumps(scan), encoding="utf-8")
         try:
             m.revoke_key("project-a-prod-k0")
             check(f"R4: revoke refuses a renamed key a consumer reads ({what})", False,

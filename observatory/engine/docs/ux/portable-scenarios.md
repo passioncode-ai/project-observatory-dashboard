@@ -219,3 +219,15 @@ counters null. A valid empty report yields zero; invalid rows or unavailable sou
 produce no figure and a nonzero exit. A concurrent rotation refuses identity drift.
 No provider/vault/ledger mutation occurs. Synthetic coverage: `test_issued_spend.py`.
 Product outcome and live-provider acceptance remain unobserved.
+
+### OpenRouter consumer refusal (OSS-54, bounded repair)
+
+After rotation, `revoke NAME` matches the current hash-bound provider identity against
+all saved OpenRouter consumer witnesses, including destination labels beyond the
+provider listing. It refuses active witnesses and missing, unreadable, malformed,
+degraded, future or older-than-36-hour scans, preserving provider and ledger state.
+A scan changed during identity lookup also refuses. A current, complete known-unused
+survey permits deletion by the recorded hash. Full live vault and remote-holder
+coverage remains open; no force bypass is introduced. The CLI refusal and onboarding
+explain refreshing the configured scan. `tests/test_revoke_consumers.py` pins these
+boundaries, including actual rotate-to-successor followed by destination-only evidence.
