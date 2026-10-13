@@ -43,3 +43,12 @@ engine gate or live acceptance is claimed. The next developer slice must inspect
 generic temporary-directory deletion and act-time revalidation of build-output
 candidates; those paths are outside this narrowly scoped change. Preserve this
 branch while that slice stacks on it. The parent run owns backlog reconciliation.
+
+## Independent-review correction
+
+The first patch excluded only the `.wrangler` name. An ignored descendant named
+`.wrangler/state/dist` still matched the generic artifact name. The reviewer
+identified that gap; `test_artifact_names_below_local_state_never_make_it_disposable`
+failed with an empty keeper list before the correction. Both artifact walkers now
+prune `.wrangler` subtrees and ignored-file classification preserves any path under
+one. Focused `GitTierSafety`: 6 tests passed after this correction.

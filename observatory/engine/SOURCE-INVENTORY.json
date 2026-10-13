@@ -2426,8 +2426,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4cd6936670a31de6ff897fd1b188243950ce079c6de33430b4167e28459a8ab5",
-      "bytes": 61828
+      "export_sha256": "36a95b6ff36df729288819b2520a0f2beaaa3c2429ff905fd994d13f8ccd92e1",
+      "bytes": 63018
     },
     {
       "path": "tests/test_docs_current.py",
@@ -3986,8 +3986,8 @@
       "path": "tools/cleanup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3a52b97e843cc2cbde67d4ab93a82b7ca07d40069e8dcbb9689035e39229ead2",
-      "bytes": 29213
+      "export_sha256": "83c10cd509a8e38a47def1b73e73568828a6e90005c9bae62b897b0f23cf5d30",
+      "bytes": 29261
     },
     {
       "path": "tools/cloudflare.py",
@@ -4050,8 +4050,8 @@
       "path": "tools/disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "62de579fbb52fcd6583965a19512f8b2855f6a2a3b86c0662d432d74e422ab32",
-      "bytes": 49007
+      "export_sha256": "16a06ce3279f0bf695f96d4ea747eee312152ea16c8de2d1d67ba5251914cdf0",
+      "bytes": 49022
     },
     {
       "path": "tools/embedding_policy_cli.py",

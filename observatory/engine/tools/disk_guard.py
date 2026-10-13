@@ -598,7 +598,7 @@ def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[
             keep = []
             for d in dirnames:
                 full = os.path.join(dirpath, d)
-                if d == ".git" or os.path.islink(full):
+                if d in (".git", ".wrangler") or os.path.islink(full):
                     continue
                 if d in wanted:
                     t = min(30.0, max(1.0, left()))

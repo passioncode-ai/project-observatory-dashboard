@@ -227,7 +227,7 @@ def plan_artifacts(cfg: dict, busy: set[str]) -> list[dict]:
                 keep = []
                 for d in dirnames:
                     full = os.path.join(dirpath, d)
-                    if d == ".git" or os.path.islink(full):
+                    if d in (".git", ".wrangler") or os.path.islink(full):
                         continue
                     if d in names:
                         ignored = git(dirpath, "check-ignore", "-q", full).returncode == 0
@@ -317,7 +317,7 @@ def ignored_keepers(target: str, artifacts: set[str]) -> list[str]:
     for entry in out.stdout.split("\0"):
         if entry.startswith("!! "):
             rel = entry[3:].rstrip("/")
-            if not any(part in artifacts for part in rel.split("/")):
+            if ".wrangler" in rel.split("/") or not any(part in artifacts for part in rel.split("/")):
                 keep.append(rel)
     return keep
 

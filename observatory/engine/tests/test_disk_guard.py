@@ -980,6 +980,27 @@ class GitTierSafety(Base):
         with patch.object(cleanup, "idle_projects", return_value=[{"id": "alpha-web", "folders": [str(repo)], "idle_days": 30}]):
             self.assertEqual(cleanup.plan_artifacts({"artifact_dirs": [".wrangler"]}, self.free()), [])
 
+    def test_artifact_names_below_local_state_never_make_it_disposable(self):
+        import cleanup
+        import paths
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        (repo / ".gitignore").write_text(".wrangler/state/dist/\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        state = repo / ".wrangler" / "state" / "dist"
+        state.mkdir(parents=True)
+        (state / "database").write_text("unique local state")
+        self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), [".wrangler/state/dist"])
+        age(repo, 30)
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"checkouts": [{"path": str(repo), "worktrees": []}]}))
+        self.assertEqual(self.g.plan_builds(self.g.load_config(), "critical", self.free(),
+                                          time.time(), ["dist"]), [])
+        with patch.object(cleanup, "idle_projects", return_value=[{"id": "alpha-web", "folders": [str(repo)], "idle_days": 30}]):
+            self.assertEqual(cleanup.plan_artifacts({"artifact_dirs": ["dist"]}, self.free()), [])
+
     def test_a_clean_worktree_with_a_keeper_ignored_file_is_skipped(self):
         import cleanup
         repo = self.base / "repo"
