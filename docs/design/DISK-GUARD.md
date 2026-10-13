@@ -8,7 +8,7 @@ the design that replaces those patches with one set of rules. The run record is
 
 ## What the guard promises
 
-1. **Nothing a process holds is removed** — open, mapped, executed from, or worked inside — and
+1. **Observed holders refuse removal** — open, mapped, executed from, or worked inside — and
    the check is fresh when the removal happens, not when the run began.
 2. **Nothing that is somebody's only copy is removed.** Regenerable things only (caches, build
    output git ignores, temporary entries, old Trash), and the git tier that loses nothing (merged
