@@ -273,6 +273,7 @@ def _scan(out, roots, *, seconds=20, entries=250, depth=8, root_seconds=2):
         save()
     save()  # local-state publication survives every independent graph attempt
     import checkout_graph
+    graph_end = min(graph_end, time.monotonic() + graph_budget)
     graph_paths = sorted(candidates)
     graph_order = [p for p in graph_paths if not isinstance(graph_last, str) or p > graph_last] + [p for p in graph_paths if isinstance(graph_last, str) and p <= graph_last]
     for candidate in graph_order:

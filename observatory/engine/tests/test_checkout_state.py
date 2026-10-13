@@ -315,6 +315,7 @@ class GraphPhase(Base):
             path=root/name;path.mkdir();git(path,'init','-q');commit(path,'tracked')
         out=self.home/'store/raw/checkout-candidates.json';seen=[]
         def failure(path,seconds):
+            self.assertLessEqual(seconds,2)  # seconds=8 reserves at most a quarter for this phase
             published=json.loads(out.read_text())
             row=next(r for r in published['candidates'] if r['path']==str(path))
             self.assertEqual(row['local_state']['state'],'clean-observed')
@@ -339,8 +340,41 @@ class GraphPhase(Base):
         self.assertTrue(row['upstream']['complete'],row['upstream'])
         summary=coverage_view.upstream_summary(row['upstream'],datetime.now(timezone.utc),row)
         self.assertEqual((summary['ahead'],summary['behind']),(0,0))
+        for key in ('git_directory','common_directory','config_sha256','branch_sha256','upstream_ref_sha256'):
+            incomplete={**row['upstream'],'binding':{k:v for k,v in row['upstream']['binding'].items() if k!=key}}
+            with self.subTest(missing=key):
+                self.assertIsNone(coverage_view.upstream_summary(incomplete,datetime.now(timezone.utc),row)['ahead'])
+        for key in ('git_directory','common_directory','root','config_sha256'):
+            invalid={**row['upstream'],'binding':{**row['upstream']['binding'],key:True}}
+            self.assertIsNone(coverage_view.upstream_summary(invalid,datetime.now(timezone.utc),row)['ahead'])
+        import checkout_graph
+        with patch.object(checkout_graph,'source_hash',side_effect=OSError('PRIVATE SOURCE FAILURE')):
+            failed=coverage_view.upstream_summary(row['upstream'],datetime.now(timezone.utc),row)
+        self.assertIsNone(failed['ahead']);self.assertNotIn('PRIVATE SOURCE FAILURE',json.dumps(failed))
         changed={**row,'head':'0'*40}
         self.assertIsNone(coverage_view.upstream_summary(row['upstream'],datetime.now(timezone.utc),changed)['ahead'])
+
+    def test_phase_budget_cannot_borrow_discovery_time_and_cursor_is_fair(self):
+        import checkout_inventory,checkout_graph
+        clock=[0.0];seen=[];durations=[];roots=[]
+        for index in range(9):
+            root=self.data/str(index);root.mkdir();(root/'.git').mkdir();roots.append(root)
+        out=self.home/'store/raw/checkout-candidates.json'
+        def classify(path,seconds):
+            return {'classification':'clone','head':'a'*40,'local_state':{'state':'clean-observed'}}
+        def observe(path,seconds):
+            seen.append(path);durations.append(seconds);clock[0]+=seconds
+            return checkout_graph.unknown('synthetic-failure')
+        with patch.object(checkout_inventory.time,'monotonic',side_effect=lambda:clock[0]), \
+             patch.object(checkout_inventory,'classify',side_effect=classify), \
+             patch.object(checkout_graph,'observe',side_effect=observe):
+            first=checkout_inventory.scan(out,roots,seconds=20)
+            self.assertEqual(sum(durations),5)
+            last=first['upstream_cursor']['last_attempted'];count=len(seen)
+            second=checkout_inventory.scan(out,roots,seconds=20)
+            self.assertEqual(sum(durations),10)
+        self.assertGreater(seen[count],last)
+        self.assertTrue(all(r['local_state']['state']=='clean-observed' for r in second['candidates']))
 
     def test_graph_query_bounds_and_identity_drifts_stay_unknown(self):
         import checkout_graph

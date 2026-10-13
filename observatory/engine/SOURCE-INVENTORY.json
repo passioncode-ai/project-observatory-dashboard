@@ -94,8 +94,8 @@
       "path": "checkout_inventory.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a68439786b2ac9ad97d0bf22cba886875b3c925cbcd00415a2a8b8be13290336",
-      "bytes": 18009
+      "export_sha256": "431809f29b45cf199104f0b472e3d88743f359fd92ce6da3c81cedbf4c8371f0",
+      "bytes": 18073
     },
     {
       "path": "checkout_state.py",
@@ -492,8 +492,8 @@
       "path": "coverage_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bf002de661ddd746566f187f4f69a668feed12dc29df3c11f8c6c494ec071de6",
-      "bytes": 11779
+      "export_sha256": "1ce5a36c8a7db5b7ce17351759eafc73309bf5914156a57d931bdce075c80d13",
+      "bytes": 12574
     },
     {
       "path": "credential_shape.py",
@@ -2379,8 +2379,8 @@
       "path": "tests/test_checkout_state.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "db5cdd812f30d21801e8a2570b2900443c2c5373023b00d1e4f4e5de9d845090",
-      "bytes": 20840
+      "export_sha256": "280be5fd61fc68a203fac20e0367a62fa681811cd0278d13ded5956fd3663a43",
+      "bytes": 23313
     },
     {
       "path": "tests/test_checkout_subject.py",
