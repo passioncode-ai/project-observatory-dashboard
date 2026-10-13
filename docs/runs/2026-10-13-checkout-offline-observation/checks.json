@@ -1,6 +1,5 @@
 {
-  "status": "SCOPED_PASS_REVIEW_PENDING",
-  "git_version": "2.55.0",
+  "status": "PASS_SCOPED_SOURCE",
   "tests_first": {
     "cases": 17,
     "failed": 1,
@@ -38,12 +37,22 @@
   "docs_check_exit": 0,
   "inventory_check_exit": 0,
   "not_run": [
-    "older-Git-binary",
+    "Git-binary-predating-no-lazy-fetch",
     "native-Windows",
     "hosted-CI",
     "installed-runtime",
     "live-network",
     "cleanup-data-loss-reproduction",
     "upstream-graph-phase"
-  ]
+  ],
+  "git_versions": {
+    "standalone_reproduction": "2.55.0",
+    "isolated_author_fixtures": "2.54.0 (Apple Git-157)",
+    "independent_fixture": "2.55.0"
+  },
+  "independent_review": {
+    "source": "e23f5ae1d8aa6bd88656d5a5863d04102ba6e5e7",
+    "verdict": "PASS_SCOPED_OFFLINE_CHECKOUT_OBSERVATION",
+    "controls": 21
+  }
 }

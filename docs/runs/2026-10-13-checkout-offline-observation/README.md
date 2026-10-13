@@ -1,6 +1,6 @@
 # Offline Git checkout observation
 
-Status: bounded implementation; independent source review pending.
+Status: scoped independent source acceptance at `e23f5ae`; draft delivery pending.
 
 ## Reproduced boundary
 
@@ -18,7 +18,9 @@ The [Git 2.55 manual](https://git-scm.com/docs/git/2.55.0) documents
 `GIT_NO_LAZY_FETCH=1` as suppressing on-demand missing-object fetch, and
 `GIT_ALLOW_PROTOCOL` as an explicit transport allowlist. This implementation uses
 both: an empty transport allowlist also refuses the fallback if a Git version
-ignores the newer lazy-fetch setting. An actual older Git binary was not tested.
+ignores the newer lazy-fetch setting. The standalone reproduction and independent
+21-control review used Git 2.55.0; isolated regression fixtures used Apple Git
+2.54.0. A binary predating the lazy-fetch setting was not tested.
 
 ## Contract and scope
 
@@ -45,6 +47,11 @@ contents, unknown partial-checkout state, local positive behavior and unchanged
 explicit remote operations. Removing only the lazy-fetch environment variable
 still refuses transport and preserves objects on the tested Git binary.
 
-Next: independent exact-source review, current/history privacy, then a draft
-handoff stacked on the checkout-local-state branch. No release, installed
+Independent review at `e23f5ae` passed 21 real local Git controls, including
+missing tree/blob/graph refusal, ordinary available data, actual checkout child,
+transport fallback and configuration override attempts. This documentation-only
+successor keeps the reviewed runtime and test blobs identical.
+
+Next: current/history privacy for the delivery head, then a draft handoff
+stacked on the checkout-local-state branch. No release, installed
 observation, live remote or whole-system acceptance is claimed.
