@@ -40,6 +40,19 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
 
 ### Changed
 
+- **The tick says how each collector ended** (ENG-005, ENG-007): `store/tick-rotation.json` is schema 2 — per
+  collector `started_at` (stamped before the step; schema 1 kept the time after it), `finished_at`, `outcome`
+  (`ran`, `failed`, `stopped`, `not_started`), `not_started_streak` and `last_ran_at`; a collector never started
+  keeps `started_at: null`. The start is saved before the step runs, so a tick killed inside a step still moves it
+  back (`outcome` and `finished_at` null mean started and then killed). A schema-1 record is still read — its times
+  seed `started_at` and `last_ran_at`, which may therefore name a run that failed — and rewritten as schema 2; a bad
+  or non-finite row is coerced or skipped, not the whole record; a newer engine's schema is left untouched. Every
+  `tick.json` `failed_steps` row gains `outcome` beside `exit` — the bails at merge, emit and validate included,
+  which now keep their own exit instead of a literal 1 — so a step the watchdog did not start is told from one it
+  stopped at its limit (both exit 124). The distinction is in `tick.json` now; the board's `tick.step_failed`
+  titles use it with K-2's change. The tick log names a collector not started for consecutive ticks at plan time.
+  `rotation_order` no longer loops on a cycle in `READS_FROM`: it names the cycle in the log and runs the planned
+  order, and `tests/test_pipeline.py` asserts `READS_FROM` is acyclic.
 - **The demo's findings speak the page's language** (OBS-64): `tools/demo_estate.py` wrote its five findings as
   English sentences, so a Russian screenshot mixed two languages. Each title is now a rule's own message id with its
   arguments, built by `finding_types.titled` like a real finding, so the Russian page renders them from the same
@@ -51,6 +64,31 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
   clones hold a tenth of the place (and 100 MB) the Machine page and `machine.disk_low` name the floor. The walk
   costs about three times `du`'s time (6.3 GB of caches: 7.6 s against 24.7 s under load); one that does not
   finish leaves `du`'s number alone.
+
+### Added
+
+- **A manifest never pins a tag its release lacks** (ENG-018): 0.24.0 shipped `fabric-agent.json` with the
+  `grant.check` schemas at `/v0.24.1/`, a tag that did not exist until the next release, so a host admitting
+  0.24.0 read 404s. `observatory/engine/tools/check_manifest_urls.py` refuses a pinned tag newer than the release
+  and any moving ref (a commit sha is admitted); the release workflow's `manifest` job runs it, reads every URL
+  once on a publishing run, and `publish` waits for it.
+- **The board lint and the OBS id register**: `tools/check_backlog.py` (run by the root tests) refuses what is
+  false on the engine board once merged — duplicate or unreserved ids, statuses outside the vocabulary, "in this
+  PR"/"to follow"/"once … restarts", `done` with a remainder, a `done in X.Y.Z` with no such release here, rows
+  wider than the header, and private names in the board and this file (with the maintainer's local denylist).
+  `.claude/agent-sync.json` declares the `OBS` register, so a branch reserves its row's id before writing it.
+
+### Fixed
+
+- **The 0.24.1 notes name the rotation they shipped** (ENG-017): "The collectors take turns" (OBS-52, #231)
+  shipped in 0.24.1 but was missing from that release's notes, and the CHANGELOG packaged in 0.24.1–0.24.4 lists
+  it under 0.24.0. The published notes were corrected on 2026-10-12 (the release files are unchanged); this file
+  already lists it under 0.24.1.
+- **`tools/backup_store.py` takes `--stamp YYYY-MM-DDTHHMMZ`** (ENG-008): a past or present minute names the copy,
+  so the rotation's test no longer races the wall clock. A future minute, a malformed one, or one older than the
+  three copies kept is refused with exit 2 before anything is copied; the tick never passes the flag.
+- **The demo's leak finding dates its detail to the day its title counts back to**, instead of a fixed date that
+  drifted from the title as the demo aged.
 
 ## 0.24.4 — 2026-10-12
 
@@ -133,8 +171,8 @@ The disk guard keeps up with a disk that fills fast and never removes what a ses
 
 - **Cloudflare door: `--preset workers-routes --zone <zone>`** — Zone Read + Workers Routes Write on one zone,
   into a vault slot, verified by listing the zone's routes with the new value. `workers-edit` deploys a script
-  but cannot route a hostname to it; this is that one zone right, without DNS. First use: checkmydata.ai
-  moving its static site to a Worker.
+  but cannot route a hostname to it; this is that one zone right, without DNS. First use: moving a
+  static site to a Worker.
 - **`openrouter.py claim NAME --where PATH`, key on stdin** — brings an OpenRouter key this door did not mint (one
   made by hand in the dashboard) under the door, so `disable`, `limit` and `revoke` reach it. The value is hashed,
   never stored or printed; the provider's row is read by that hash, and a label alone (prefix plus three

@@ -17,11 +17,17 @@ WHAT IT REFUSES TO DO. It never deletes the newest copy, and it never deletes
 anything when the new backup failed — a rotation that prunes before it proves
 the replacement exists is how a backup set becomes empty.
 
-    backup_store.py            take one, prune to KEEP
-    backup_store.py --list     what exists, newest first
+    backup_store.py                          take one, prune to KEEP
+    backup_store.py --stamp 2026-10-12T0930Z take it as that minute (a past or present one;
+                                             one older than the copies kept is refused, exit 2)
+    backup_store.py --list                   what exists, newest first
+
+`--stamp` exists so the rotation can be driven minute by minute without waiting for
+the wall clock (ENG-008): the same-minute refusal and the turned-minute prune are
+both the CLI's own path, and the tick never passes it.
 """
 from __future__ import annotations
-import pathlib, sqlite3, sys
+import pathlib, re, sqlite3, sys
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -61,17 +67,58 @@ def take(db: pathlib.Path, stamp: str) -> pathlib.Path:
     return dest
 
 
-def encrypted(db: pathlib.Path, secret: str, base: pathlib.Path) -> int:
+#: The minute a local copy is named by, and the form `--stamp` takes.
+LOCAL_FORMAT = "%Y-%m-%dT%H%MZ"
+STAMP_SHAPE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{4}Z")
+#: The encrypted copies keep the backups root's own form, to the second
+#: (`backup_vault.stamp()`), so their names keep sorting in age order beside the
+#: copies taken before `--stamp` existed.
+ENCRYPTED_FORMAT = "%Y%m%dT%H%M%SZ"
+
+
+class StampRefused(ValueError):
+    """`--stamp` is malformed, missing, or names a minute that has not come yet."""
+
+
+def stamp_from(argv: list[str], now: datetime | None = None) -> datetime:
+    """The moment this run's copy is named by: `--stamp` when given, else now.
+
+    A stamp in the future is refused: its copy would sort after every real one
+    and keep a later, real copy out of the rotation until that future came."""
+    now = now or datetime.now(timezone.utc)
+    if "--stamp" not in argv:
+        return now
+    at = argv.index("--stamp")
+    value = argv[at + 1] if at + 1 < len(argv) else ""
+    if not STAMP_SHAPE.fullmatch(value):
+        raise StampRefused(f"--stamp wants a UTC minute such as 2026-10-12T0930Z, not {value!r}")
+    try:
+        when = datetime.strptime(value, LOCAL_FORMAT).replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise StampRefused(f"--stamp {value!r} is not a date") from None
+    if when > now:
+        raise StampRefused(f"--stamp {value} is in the future; name a past or present minute")
+    return when
+
+
+def encrypted(db: pathlib.Path, secret: str, base: pathlib.Path, at: datetime | None = None) -> int:
     """With a passphrase: copy via the SQLite backup API into the store, encrypt
     that copy into the backups root, drop the plaintext. The legacy plaintext
     copies beside the database go only after an encrypted one is proven."""
     import backup_vault
     root = backup_vault.root_info(base)["path"]
-    when = backup_vault.stamp()
+    when = (at or datetime.now(timezone.utc)).strftime(ENCRYPTED_FORMAT)
     dest = root / f"{backup_vault.DB_KIND}-{when}{backup_vault.DB_SUFFIX}"
     if dest.exists():
         print(f"backup {dest.name} already exists")
         return 0
+    # A STAMP OLDER THAN THE KEPT WINDOW would be encrypted, rotated away in the same
+    # run, and then counted as the proof that lets the legacy copies go (F-1 on #250).
+    found = backup_vault.artifacts(root, backup_vault.DB_KIND, backup_vault.DB_SUFFIX)
+    if len(found) >= backup_vault.KEEP and dest.name < found[-backup_vault.KEEP].name:
+        print(f"backup_store: --stamp {when} is older than the {backup_vault.KEEP} copies kept; "
+              "its copy would be pruned at once, so nothing was copied", file=sys.stderr)
+        return 2
     plain = take(db, "encrypting-" + when)
     try:
         if plain.stat().st_size == 0:
@@ -113,6 +160,11 @@ def main(argv: list[str]) -> int:
     import backup_vault
     import configuration
     base = configuration.home()
+    try:
+        at = stamp_from(argv)
+    except StampRefused as exc:
+        print(f"backup_store: {exc}; nothing was copied", file=sys.stderr)
+        return 2
     if "--due" in argv:  # the tick's question: exit 0 when a copy is due, 1 when not
         return 0 if (db.is_file() and due(db, base)) else 1
     if "--if-due" in argv and db.is_file() and not due(db, base):
@@ -128,12 +180,12 @@ def main(argv: list[str]) -> int:
         own = False
     if "--list" not in argv and db.is_file() and not own:
         print(f"{db} is not this workspace's store; its copy stays beside it", file=sys.stderr)
-        return local(db)
+        return local(db, at)
     if "--list" not in argv and db.is_file():
         secret = backup_vault.passphrase(base)
         if secret:
             try:
-                return encrypted(db, secret, base)
+                return encrypted(db, secret, base, at)
             except (OSError, backup_vault.BackupError) as exc:
                 # The root is unreachable — on macOS a background job is often
                 # refused ~/Documents by privacy controls (TCC). A day without any
@@ -143,7 +195,7 @@ def main(argv: list[str]) -> int:
                       "unencrypted copy instead. If this is a privacy refusal, grant the Python "
                       "that runs the tick access to the folder, or choose another root with "
                       "`full configure storage backups PATH`", file=sys.stderr)
-                local(db)
+                local(db, at)
                 return 1
     if "--list" in argv:
         rows = existing(store)
@@ -159,18 +211,25 @@ def main(argv: list[str]) -> int:
         # where nothing is wrong.
         print("no store to back up", file=sys.stderr)
         return 0
-    return local(db)
+    return local(db, at)
 
 
-def local(db: pathlib.Path) -> int:
+def local(db: pathlib.Path, at: datetime | None = None) -> int:
     """The unencrypted copy beside the database: no passphrase, or a root that failed."""
     store = db.parent
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%MZ")
+    stamp = (at or datetime.now(timezone.utc)).strftime(LOCAL_FORMAT)
     # SAME STAMP, SAME DAY: a second run inside one minute would otherwise take
     # a second copy and push a good one out of the window.
     if (store / f"{PREFIX}{stamp}").exists():
         print(f"backup {stamp} already exists")
         return 0
+    # A STAMP OLDER THAN THE KEPT WINDOW would be taken and pruned in the same run while
+    # the line below still reported a backup (F-1 on #250). Only `--stamp` can name one.
+    kept = existing(store)
+    if len(kept) >= KEEP and f"{PREFIX}{stamp}" < kept[KEEP - 1].name:
+        print(f"backup_store: --stamp {stamp} is older than the {KEEP} copies kept; "
+              "its copy would be pruned at once, so nothing was copied", file=sys.stderr)
+        return 2
     dest = take(db, stamp)
     size = dest.stat().st_size
     if size == 0:

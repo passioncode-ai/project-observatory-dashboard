@@ -1,4 +1,4 @@
-<!-- agent-sync:generated source=project-observatory-dashboard@1eecac3 cfg=f746b6a3c7a0 at=2026-10-01T16:25:46Z — regenerate with `agent_sync.py setup`, do not hand-edit -->
+<!-- agent-sync:generated source=project-observatory-dashboard@982f784 cfg=f628d4a127cf at=2026-10-12T19:32:42Z — regenerate with `agent_sync.py setup`, do not hand-edit -->
 
 # How documentation and coordination work in project-observatory-dashboard
 
@@ -23,7 +23,13 @@ them is the finding.** Reconcile before starting a task and after finishing it.
 
 ### Id registers — reserve before you write
 
-None declared here. Ids live in the parent repository; reserve them there.
+| Register | File | Reserve with |
+|---|---|---|
+| `OBS` | `docs/backlog.md` | `agent_sync.py reserve OBS` |
+
+Reading a *next free id* line is **not** reserving it — two agents read the same number.
+
+Ids are allocated by compare-and-swap on refs/agent-sync/ids/* at 'origin'.
 
 ### Guarded files — a live lease is required to write these
 

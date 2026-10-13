@@ -123,8 +123,11 @@ def _deny_pattern(deny: tuple[str, ...]) -> re.Pattern | None:
     for value in values:
         buckets.setdefault(len(value), []).append(value)
     alternatives = "|".join(factor(words) for words in buckets.values())
-    return re.compile(r"(?<![A-Za-z0-9_.-])(?:" + alternatives + r")(?:\.git)?(?![A-Za-z0-9_.-])",
-                      re.IGNORECASE)
+    # A `.` after the name blocks the match only when a name character follows it
+    # (`name.example`, `name.v2`): sentence punctuation (`… first use: name.`) does not,
+    # or every private name that ends a sentence passed the gate unseen.
+    return re.compile(r"(?<![A-Za-z0-9_.-])(?:" + alternatives + r")(?:\.git)?"
+                      r"(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9_-])", re.IGNORECASE)
 
 
 def scan_text(text: str, deny: list[str]) -> dict[str, int]:

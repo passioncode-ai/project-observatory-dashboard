@@ -309,11 +309,15 @@ class StoreCopies(Base):
 
     def test_encrypted_daily_copy_and_rotation(self):
         vault.set_passphrase(self.home, PASS)
+        # Each run names its own minute through `--stamp`, the CLI's path (ENG-008),
+        # rather than a patched `backup_vault.stamp`, which `encrypted()` no longer calls.
         for i in range(5):
-            with patch.object(vault, 'stamp', return_value=f'20260101T00{i:02d}00Z'):
-                self.assertEqual(self.run_backup(), 0)
+            self.assertEqual(self.run_backup('--stamp', f'2026-01-01T00{i:02d}Z'), 0)
+        self.assertEqual(self.run_backup('--stamp', '2026-01-01T0004Z'), 0)  # the same minute again: nothing taken
         kept = sorted(self.target().glob('observatory-db-*.obsdb'))
         self.assertEqual(len(kept), vault.KEEP)
+        self.assertEqual([p.name for p in kept],
+                         [f'observatory-db-20260101T00{i:02d}00Z.obsdb' for i in (2, 3, 4)])
         self.assertEqual(list((self.home / 'store').glob('observatory.db.backup-*')), [])
         out = self.base / 'copy.db'
         with out.open('wb') as stream:
@@ -321,6 +325,22 @@ class StoreCopies(Base):
         conn = sqlite3.connect(out)
         self.assertEqual(conn.execute("PRAGMA integrity_check").fetchone()[0], 'ok')
         conn.close()
+
+    def test_encrypted_stamp_older_than_the_kept_window_is_refused(self):
+        """Round-1 seam finding F-1 on #250: a stale `--stamp` used to encrypt a copy,
+        rotate it away and then delete the plaintext legacy copies as if it were proven."""
+        vault.set_passphrase(self.home, PASS)
+        for i in range(3):
+            self.assertEqual(self.run_backup('--stamp', f'2026-01-01T00{i:02d}Z'), 0)
+        before = sorted(p.name for p in self.target().glob('observatory-db-*.obsdb'))
+        legacy = self.home / 'store' / 'observatory.db.backup-2025-12-01T0000Z'
+        legacy.write_bytes(b'x')
+        err = io.StringIO()
+        with patch.object(sys, 'stderr', err):
+            self.assertEqual(self.run_backup('--stamp', '2025-12-31T2359Z'), 2)
+        self.assertIn('older than', err.getvalue())
+        self.assertEqual(sorted(p.name for p in self.target().glob('observatory-db-*.obsdb')), before)
+        self.assertTrue(legacy.exists())
 
     def test_if_due_skips_a_fresh_copy(self):
         vault.set_passphrase(self.home, PASS)
