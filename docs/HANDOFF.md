@@ -311,3 +311,10 @@ receipt. The canonical URL is unchanged. Social posts remain unpublished drafts.
 
 [2026-09-23 dashboard-site handoff](runs/2026-09-23-dashboard-site.md) is the entry
 point for the repository rename and prompt-first public website refresh.
+
+## Recovery evidence refresh, 2026-10-13
+
+[Board evidence and next task](runs/2026-10-13-recovery-evidence-board/README.md)
+links merged source and the separate draft follow-ups. OBS-84–90 remain open for
+their documented remaining gates. PR260 remains draft after failed full-model
+acceptance; no release or installed completion follows from scoped source reviews.
