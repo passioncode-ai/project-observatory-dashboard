@@ -13,6 +13,18 @@ release. A checkout has the lock at its root; a wheel carries it at
 extra against that file). Without `-c`, pip resolves newer transitive releases
 this release was not tested with.
 
+## Read verification results
+
+`project-observatory full check` keeps a process's `exit_code` separate from the
+checks it observed. A selected suite that exits zero without reporting executed
+tests is `ERROR`, not PASS. The JSON gives its `test_protocol`,
+`minimum_executed`, `executed_checks`, `skipped_checks` and reason code. Repair a
+missing test entry point or reporting contract and rerun the affected suite.
+An explicit full skip remains `SKIP`; reported failures remain `FAIL` even when
+the script exits zero. A trusted script can forge well-formed output, so this
+contract does not authenticate tests or establish complete coverage.
+The repository-root test module `test_runner_evidence.py` exercises these boundaries.
+
 ## SQLite runtime prerequisite
 
 The full engine requires Python 3.11+ with SQLite 3.37+ **and loadable SQLite
