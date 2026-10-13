@@ -21,7 +21,10 @@ expectation. It changes test evidence and documentation, not the published engin
 application 0.25.0 and companion plugin 0.22.1 combine independently reviewed waves
 four through seven: rotation identity/accounting, checkout/cache coverage and saved readers,
 scoped Heroku preservation, cleanup diagnostic privacy and read-only issued-key activity,
-plus current-consumer revocation refusal and validated cleanup child summaries.
+plus current-consumer revocation refusal, validated cleanup child summaries and
+[log-rotation link preservation](runs/2026-10-13-log-rotation-safety/README.md).
+The latter runs independently of auto-cleanup; copy/truncate concurrent-append and
+maintenance refusal-observability limits remain explicit.
 The corrected full-rotation model preserves a failed 128-case baseline (28 PASS /
 100 FAIL); this is evidence of remaining work, not full J3 acceptance.
 Source is prepared; no tag, published assets or installed acceptance is claimed. Next:

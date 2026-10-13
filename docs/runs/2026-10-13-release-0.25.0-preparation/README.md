@@ -89,6 +89,23 @@ version, manifest and document-copy cases. Inventory and whitespace checks pass.
 `checks.json` binds these results to source hashes. No tag, provider mutation,
 installed acceptance or automatic-cleanup enablement is claimed.
 
+## Log-rotation correction
+
+Independently accepted source `931c1d6` is integrated. The corrected log policy
+refuses linked directories, source/generation symlinks, nonregular files and
+hardlinks before rotation or permission repair. Copy/truncate verifies its source
+descriptor and exclusively creates its destination, syncing the copy before
+truncation. This maintenance path runs independently of automatic cleanup.
+The [source packet](../2026-10-13-log-rotation-safety/README.md) preserves the
+original synthetic failures and the remaining concurrent-append, external-directory
+race and refusal-observability limits. No live logs were changed by this validation.
+
+The lifecycle suite passes 60 cases (including 12 log-policy cases), and maintenance
+passes 142 cases with one skip. Four version cases and inventory/whitespace checks
+also pass. The receipts in `checks.json` cover this integrated source. The broader J3 model/provenance work belongs to a later wave and is excluded
+from this candidate. Full J3 acceptance remains red as recorded above. Final combined
+independent review and protected source checks precede readiness, merge or tagging.
+
 ## Initial preparation snapshot (superseded integration status)
 
 This is a local release-preparation candidate, not a published or installed release.

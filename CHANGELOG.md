@@ -18,7 +18,9 @@ is 0.22.1, with updated credential-handling guidance.
   staged and untracked content. Branch cleanup binds archive/proof and deletion to the
   same commit and refuses symbolic refs. Disk-guard actions recheck target identity and
   safety evidence before removal; the legacy unverified build-artifact action is refused.
-  External writers can still race the final filesystem check: use an idle workspace.
+  Log rotation also refuses symbolic links, linked directories and hardlinks before
+  rotating or changing permissions. External writers can still race the final filesystem
+  check: use an idle workspace. Copy/truncate can still lose a concurrent append.
 - **Survey gaps stay visible** (OBS-87): bounded checkout registration and fairer scans
   preserve older measurements with their dates. Unknown swap, failed file walks and
   incomplete registration are not reported as measured zero or fresh coverage.
