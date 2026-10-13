@@ -1167,6 +1167,9 @@ def _erasure_horizon(row: dict) -> str:
     try:
         sys.path.insert(0, str(ROOT / "store"))
         import retention
+        # BY KIND. No receipt lists a lesson today (corroboration.json keeps lessons in
+        # their own bucket), and a row without `kind` ages by the general horizon; a row
+        # that names its kind is told that kind's horizon (a proposed lesson: 365 days).
         left = retention.days_left(owner, state, at, kind=row.get("kind"))
     except Exception:                                                               
         return ""

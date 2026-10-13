@@ -807,8 +807,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "2155ea159587cc373652a73905dd649b0000e0edcbedbf7990c7a47d10c830d8",
-      "bytes": 79423,
+      "export_sha256": "ebe344c74061b64b21140c9c3ef7dd47f384945af3cedb21aac834cdcab88705",
+      "bytes": 79600,
       "upstream_modified": true
     },
     {
@@ -1790,8 +1790,8 @@
       "path": "store/lessons.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ef8c57786dc492d79633a2ea39de4d253709a631eab053845def6e7c1c1acf4c",
-      "bytes": 13412
+      "export_sha256": "0696360e137c75b94e1d1c32057d09785d06027e5294870ef3a5eb896833455e",
+      "bytes": 14021
     },
     {
       "path": "store/migrate.py",
@@ -3356,8 +3356,8 @@
       "path": "tests/test_review_queue.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e0b4b4aca1e84aa3f1a349fcf778b8667ecd55e92cedf09513267520e0c01a4f",
-      "bytes": 13040
+      "export_sha256": "a092fe32aaba5a5ce5c8379a119b7088d5cd1d5260317c2bbc23ca0b633731c4",
+      "bytes": 14271
     },
     {
       "path": "tests/test_rollup.py",
@@ -3956,8 +3956,8 @@
     {
       "path": "tools/build_findings.py",
       "source_sha256": "03136ce1f366d180307f7f0c17ab41a3de82631103750f081a6d79758569e0b3",
-      "export_sha256": "b4724062365fbd43a580b6cc3e72b1911d63a001bb8c152acce9e8ee82133c18",
-      "bytes": 277206,
+      "export_sha256": "d1b124e2a7fdc935d05b7e9530ab86198128b7dc10035a38f0016de3fb432d1b",
+      "bytes": 277472,
       "python_comments_removed": 996,
       "python_docstrings_removed": 28,
       "tool_descriptions_retained": 0,

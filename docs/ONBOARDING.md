@@ -373,7 +373,9 @@ both commits resolve in clones the registry knows on this machine:
 `tools/corroborate.py`, which the tick runs, asks git for each commit in the clone
 whose root commit gives the project's key. A key no registered clone carries is not
 a witness; its lesson stays proposed and `corroboration.json` lists it as "commit not
-resolvable here". `supported` is yours, through `review.py`.
+resolvable here". If a promoted lesson later cites a different commit, the observed
+record is archived and a new proposed one replaces it (`outcome: replaced`), so it
+must be corroborated again. `supported` is yours, through `review.py`.
 Proposed lessons are kept 365 days (`retention.json` → `ledger.kinds.lesson`), and
 an observed one is never erased by age. An agent finds lessons with
 `observatory_search` and `kinds: ["lesson"]`, without a project. task-pipeline
