@@ -171,7 +171,8 @@ def make_door(rng):
     m.LEDGER = d / "ledger.json"
     m._project_folder = lambda project, env, name: {"a": "project-a"}.get(project, project)
     m.vault_destination = lambda to: to
-    m._journal = lambda *a, **k: None
+    journal = []
+    m._journal = lambda *a, **k: journal.append((a,k))
     m.POLICY_LOCK_WAIT_S = 0.01
     scratch = d / "scratch"
     scratch.mkdir()
@@ -183,7 +184,7 @@ def make_door(rng):
     p = Prov(rng, m.Unreachable, echo, m.PAGE, m.PAGES_MAX, fillers, rng.choice([0, 0, -1, 1]),
              rng.random() < 0.5)
     m._request = p
-    door = {"deliver": None, "save": None, "on_deliver": None}
+    door = {"deliver": None, "save": None, "on_deliver": None, "journal": journal}
     real_save = m.save_ledger
 
     def deliver(value, to, **k):
@@ -316,6 +317,90 @@ def refresh_consumers(m, p, consumers, *, listed=True):
 def remedy_revoke(m, p, name, consumers):
     refresh_consumers(m, p, consumers)
     return revoke(m, name)
+
+
+
+def _fixture_digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, allow_nan=False).encode()).hexdigest()
+
+
+def limit_remedies(m, p, plan):
+    """Translate only the door's emitted decrease into a source-bound test proposal.
+
+    These checks are not a production CAS: there is no nested policy lock, and
+    external writers between the check and command remain outside this fixture.
+    Reported public metadata is authoritative here; never inspect hidden _asked.
+    """
+    import math, re
+    try:
+        doc = m.ledger(); ledger_digest = _fixture_digest(doc); plan_digest = _fixture_digest(plan)
+        if not isinstance(plan, list): return []
+        proposals = []
+        for warning in plan:
+            if warning.get('action') != 'over-limit': continue
+            tail = warning.get('why', '').partition('it ends after: ')[2]
+            for command in tail.split(', '):
+                match = re.fullmatch(r'limit ([a-z0-9_-]+) --set ([0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)', command)
+                if not match: continue
+                name, amount = match.group(1), float(match.group(2))
+                slots = [r for r in plan if r.get('name') == name and r.get('action') == 'in-place']
+                rec = doc['issued'].get(name); handle = rec.get('hash') if isinstance(rec, dict) else None
+                row = p.keys.get(handle)
+                if len(slots) != 1 or type(slots[0].get('limit')) not in (int,float) or slots[0]['limit'] != amount: continue
+                if not isinstance(handle,str) or not handle or not isinstance(row,dict) or row.get('hash') != handle: continue
+                current = row.get('limit')
+                if type(current) not in (int,float) or not math.isfinite(current) or not 0 < amount < current: continue
+                if not math.isfinite(amount): continue
+                proposal = {'kind':'emitted-limit-decrease','name':name,'hash':handle,'amount':amount,
+                            'ledger_digest':ledger_digest,'plan_digest':plan_digest}
+                if proposal not in proposals: proposals.append(proposal)
+        return proposals
+    except (ValueError,TypeError,KeyError,AttributeError): return []
+
+
+def apply_limit_remedy(m, p, plan, proposal):
+    if proposal not in limit_remedies(m,p,plan): return {'status':'refused'}
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = m.cmd_limit(proposal['name'],proposal['amount'],None)
+    except Exception:
+        return {'status':'unresolved'}
+    return {'status':'operator-applied' if rc == 0 else 'unresolved'}
+
+
+def pending_absence_attestation(m, p, name, consumers, *, complete):
+    """An explicit synthetic operator observation, never a bounded-lookup inference.
+
+    The finite model's complete inventory is an assumption for this operator
+    event only. Production accepts an attestation, not this simulated proof.
+    """
+    try:
+        doc = m.ledger(); rec = doc['issued'].get(name)
+        if complete is not True or consumers or not isinstance(consumers,dict): return None
+        if not isinstance(rec,dict) or rec.get('pending') is not True or rec.get('hash'): return None
+        if rec.get('predecessor_hash') or rec.get('successor_hash') or rec.get('rotation_status'): return None
+        if not isinstance(rec.get('account'),str) or not rec['account']: return None
+        if not isinstance(p.keys,dict) or len(p.keys) > 1000: return None
+        if any(not isinstance(row,dict) or not isinstance(row.get('name'),str) or
+               not isinstance(row.get('hash'),str) or row['hash'] != handle
+               for handle,row in p.keys.items()): return None
+        if any(row['name'] == name for row in p.keys.values()): return None
+        inventory = {handle:p.public(row) for handle,row in p.keys.items()}
+        return {'kind':'synthetic-operator-absence','name':name,'account':rec['account'],
+                'ledger_digest':_fixture_digest(doc),'inventory_digest':_fixture_digest(inventory),
+                'reason':'Synthetic operator observed complete finite inventory after manual cleanup; matching identity absent'}
+    except (ValueError,TypeError,KeyError,AttributeError): return None
+
+
+def apply_pending_attestation(m, p, name, consumers, proof, *, complete):
+    if proof is None or proof != pending_absence_attestation(m,p,name,consumers,complete=complete):
+        return {'status':'refused'}
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = m.cmd_revoke(name,forget_pending=True,reason=proof['reason'])
+    except Exception:
+        return {'status':'unresolved'}
+    return {'status':'operator-attested' if rc == 0 else 'unresolved'}
 
 
 def representation(m, p):
@@ -537,13 +622,21 @@ def case(seed, trace=False):
             break
         for s in todo:
             rec = m.ledger()["issued"].get(s["name"]) or {}
-            if s["action"] == "held-pending" and not rec.get("hash"):
-                # the documented remedy: delete the key called <name> at the provider, then revoke
+            if s["action"] == "held-pending" and not rec.get("hash") and not consumers:
+                # Explicit synthetic operator cleanup, never clear observed holders.
+                # Complete finite model inventory is not a real bounded listing.
                 for h in [h for h, r in p.keys.items() if r["name"] == s["name"]]:
                     del p.keys[h]
                     p.order.remove(h)
             rc = remedy_revoke(m, p, s["name"], consumers)
             log.append(f"  remedy revoke {s['name']} ({s['action']}) -> {rc}")
+            if rc != 0 and s["action"] == "held-pending" and not rec.get("hash"):
+                proof = pending_absence_attestation(m,p,s["name"],consumers,complete=True)
+                outcome = apply_pending_attestation(m,p,s["name"],consumers,proof,complete=True)
+                log.append(f"  explicit operator attestation {s['name']} -> {outcome['status']}")
+        for proposal in limit_remedies(m,p,plan):
+            outcome = apply_limit_remedy(m,p,plan,proposal)
+            log.append(f"  explicit operator limit {proposal['name']} -> {outcome['status']}")
     if invalid_at_rest:
         pass  # the rejection property above replaces convergence only for invalid inputs
     elif last is None:

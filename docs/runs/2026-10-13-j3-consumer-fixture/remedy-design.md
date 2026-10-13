@@ -1,6 +1,6 @@
 # Proposed source-backed remedies for the remaining adversarial cases
 
-Status: design for independent review, not implemented. This extends fixture source
+Status: accepted for test-only implementation after independent review of `d17b477`. This extends fixture source
 `532b70911ec39fcb4590a6632283dc63dfcaecf5` and the
 [24-case classification](residuals.md). No production mutation or live provider
 operation is authorized. The original range is7000000–7005199 inclusive; all5200
@@ -111,3 +111,12 @@ Full5200 remains NOT_RUN here. Universal refusal of policy-marked rotation does 
 prove useful successful rotation or reconciliation. Meaningful positive rotation,
 strict ceiling preservation across uncertain effects, all-writer policy admission,
 full holder coverage and installed/live acceptance remain separate open requirements.
+
+## Implementation qualification
+
+Pre-action digest checks are test preconditions, not a new production compare-and-swap
+transaction. The real commands take their existing non-reentrant policy locks; the
+adapter acquires no nested lock. External changes after its precheck remain outside
+this simulated phase. No production race-safety claim follows from these negatives.
+The producer fixture at `532b709` passed six independent probes and representative
+residual replays. The remedial adapter is a separate change requiring its own review.

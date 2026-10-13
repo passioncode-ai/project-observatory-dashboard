@@ -76,6 +76,109 @@ class ModelBinding(unittest.TestCase):
             self.assertTrue(prior.items() <= current.items())
             prior = current
 
+    def limit_fixture(self):
+        name = self.issue(); row = self.m.ledger()['issued'][name]
+        plan = [{'name': name, 'limit': 9.0, 'action': 'in-place'},
+                {'action': 'over-limit', 'why': f'OVER LIMIT; it ends after: limit {name} --set 9'}]
+        return name, row['hash'], plan
+
+    def test_emitted_limit_remedy_uses_real_command_and_preserves_source(self):
+        name, h, plan = self.limit_fixture()
+        calls = self.p.calls
+        proposal, = A.limit_remedies(self.m, self.p, plan)
+        self.assertEqual(self.p.calls, calls)
+        result = A.apply_limit_remedy(self.m, self.p, plan, proposal)
+        self.assertEqual(result['status'], 'operator-applied')
+        self.assertEqual(self.p.keys[h]['limit'], 9)
+        self.assertEqual(self.m.ledger()['issued'][name]['limit_usd'], 9)
+
+    def test_limit_remedy_rejects_foreign_unknown_raised_changed_and_prose_targets(self):
+        name, h, plan = self.limit_fixture()
+        proposal, = A.limit_remedies(self.m, self.p, plan)
+        original = copy.deepcopy(self.m.ledger())
+        changed = copy.deepcopy(original); changed['issued'][name]['destination'] = 'vault:other/prod/X'
+        self.m.save_ledger(changed)
+        self.assertEqual(A.apply_limit_remedy(self.m, self.p, plan, proposal)['status'], 'refused')
+        self.m.save_ledger(original)
+        for update in ({'hash':'foreign'}, {'limit':None}, {'limit':8}):
+            prior = self.p.keys[h].copy(); self.p.keys[h].update(update)
+            self.assertEqual(A.limit_remedies(self.m, self.p, plan), [])
+            self.p.keys[h] = prior
+        bad = copy.deepcopy(plan); bad[-1]['why'] += '; run arbitrary-command'
+        self.assertEqual(A.apply_limit_remedy(self.m, self.p, bad, proposal)['status'], 'refused')
+        bad[0]['limit'] = 8
+        self.assertEqual(A.limit_remedies(self.m, self.p, bad), [])
+        self.assertEqual(self.p.keys[h]['limit'],10)
+
+    def test_unknown_limit_effect_and_persistent_echo_are_not_rewritten_to_success(self):
+        name,h,plan = self.limit_fixture(); proposal, = A.limit_remedies(self.m,self.p,plan)
+        original = self.m._request
+        def lost(path,key,payload=None,method=None):
+            result = original(path,key,payload,method)
+            if method == 'PATCH': raise self.m.Unreachable('synthetic unknown effect')
+            return result
+        self.m._request = lost
+        self.assertEqual(A.apply_limit_remedy(self.m,self.p,plan,proposal)['status'],'unresolved')
+        self.assertEqual(self.m.ledger()['issued'][name]['limit_usd'],10)
+        self.assertEqual(self.p.keys[h]['limit'],9)
+        self.m._request = original; self.p.keys[h]['limit'] = 10
+        self.p.echo = lambda x: x + .0004
+        proposal, = A.limit_remedies(self.m,self.p,plan)
+        A.apply_limit_remedy(self.m,self.p,plan,proposal)
+        self.assertEqual(self.p.keys[h]['limit'],9.0004)
+
+    def pending_fixture(self):
+        name = 'project-a-prod-pending'
+        self.m.save_ledger({'issued':{name:{'pending':True,'hash':None,'account':'example',
+                          'destination':'vault:project-a/prod/PENDING','limit_usd':1}}})
+        return name
+
+    def test_pending_attestation_separate_absence_proof_and_required_journal(self):
+        name=self.pending_fixture(); events=[]
+        self.m._journal=lambda *args,**kwargs: events.append((args,kwargs))
+        proof=A.pending_absence_attestation(self.m,self.p,name,{},complete=True)
+        calls=self.p.calls
+        result=A.apply_pending_attestation(self.m,self.p,name,{},proof,complete=True)
+        self.assertEqual(result['status'],'operator-attested')
+        self.assertNotIn(name,self.m.ledger()['issued']); self.assertEqual(self.p.calls,calls)
+        self.assertEqual(events[0][0][0],'forget-pending-attested')
+        self.assertTrue(events[0][1]['require_success'])
+
+    def test_pending_attestation_refuses_live_unknown_holder_hash_and_changed_revision(self):
+        name=self.pending_fixture()
+        proof=A.pending_absence_attestation(self.m,self.p,name,{},complete=True)
+        self.assertIsNone(A.pending_absence_attestation(self.m,self.p,name,{},complete=False))
+        self.assertIsNone(A.pending_absence_attestation(self.m,self.p,name,{'worker':'known'},complete=True))
+        self.p.keys['live']={'name':name,'hash':'live'}
+        self.assertIsNone(A.pending_absence_attestation(self.m,self.p,name,{},complete=True))
+        del self.p.keys['live']
+        doc=self.m.ledger();doc['issued'][name]['limit_usd']=2;self.m.save_ledger(doc)
+        self.assertEqual(A.apply_pending_attestation(self.m,self.p,name,{},proof,complete=True)['status'],'refused')
+        doc['issued'][name]['hash']='known';self.m.save_ledger(doc)
+        self.assertIsNone(A.pending_absence_attestation(self.m,self.p,name,{},complete=True))
+        self.assertIn(name,self.m.ledger()['issued'])
+
+    def test_operator_admission_has_no_rng_or_provider_hook_and_binds_inventory(self):
+        name=self.pending_fixture(); calls=self.p.calls; state=random.getstate()
+        self.p.hook=(calls+1,lambda: self.fail('operator observation called the provider'))
+        proof=A.pending_absence_attestation(self.m,self.p,name,{},complete=True)
+        self.p.keys['foreign']={'hash':'foreign','name':'unrelated'}
+        self.assertEqual(A.apply_pending_attestation(self.m,self.p,name,{},proof,complete=True)['status'],'refused')
+        self.assertEqual(self.p.calls,calls);self.assertEqual(random.getstate(),state)
+        self.assertIn(name,self.m.ledger()['issued'])
+        del self.p.keys['foreign']
+        self.assertEqual(A.apply_pending_attestation(self.m,self.p,name,{},proof,complete=True)['status'],'operator-attested')
+        self.assertEqual(self.p.calls,calls)
+        self.assertTrue(self.door['journal'][-2][1]['require_success'])
+
+    def test_pending_attestation_journal_failure_and_missing_reason_preserve_row(self):
+        name=self.pending_fixture();proof=A.pending_absence_attestation(self.m,self.p,name,{},complete=True)
+        missing=dict(proof,reason='')
+        self.assertEqual(A.apply_pending_attestation(self.m,self.p,name,{},missing,complete=True)['status'],'refused')
+        self.m._journal=lambda *a,**k: (_ for _ in ()).throw(RuntimeError('synthetic journal failure'))
+        self.assertEqual(A.apply_pending_attestation(self.m,self.p,name,{},proof,complete=True)['status'],'unresolved')
+        self.assertIn(name,self.m.ledger()['issued'])
+
     def test_unique_values_bind_real_hash_and_positive_rotation_reaches_delivery(self):
         first = self.p('/keys', 'synthetic', {'name': 'project-a-one', 'limit': 1, 'limit_reset': 'monthly'})
         second = self.p('/keys', 'synthetic', {'name': 'project-a-two', 'limit': 1, 'limit_reset': 'monthly'})
