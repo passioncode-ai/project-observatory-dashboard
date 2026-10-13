@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "status": "TIMEOUT",
+  "checkout_before": "c862c596c3ce99216f01f89d1047773bfceb9f03",
+  "source_before": {
+    "observatory/engine/tests/adv_j1_property.py": "fdd71cd470d781913d6323cfcb3052c6d5022bb923561415fbc56cd4dd6f16b2",
+    "observatory/engine/tests/test_credential_doors.py": "3fae97d50337e3354d834791b6fccc576b8ebe0fe972d97daf781405f18c6592",
+    "observatory/engine/tools/openrouter.py": "036070aa003e679f680712362f85fd8aed40af6110d55c75300baa242d21849a",
+    "observatory/engine/collectors/scan_openrouter.py": "b146f9f331ca5ef4d24b3c328db46b860fa319797018ecdbe811fe4e1a307aae",
+    "observatory/engine/tests/adversarial_runner.py": "a70295a9bbea620f18d4fd1d39148667b69073a99dd6e356b0b7427e9aa425e6"
+  },
+  "start_seed": 7000000,
+  "requested": 5200,
+  "jobs": 1,
+  "started_at": "2026-10-13T09:18:05.593231+00:00",
+  "timeout_seconds": 900,
+  "exit_code": null,
+  "temp_peak_observed": {
+    "apparent_bytes": 15237394,
+    "allocated_bytes": 33120256,
+    "scan_errors": 0,
+    "sampling_seconds": 0.5,
+    "scope": "only owned synthetic TMPDIR; sampled lower bound"
+  },
+  "seconds": 900.5532928750035,
+  "checkout_after": "c862c596c3ce99216f01f89d1047773bfceb9f03",
+  "source_after": {
+    "observatory/engine/tests/adv_j1_property.py": "fdd71cd470d781913d6323cfcb3052c6d5022bb923561415fbc56cd4dd6f16b2",
+    "observatory/engine/tests/test_credential_doors.py": "3fae97d50337e3354d834791b6fccc576b8ebe0fe972d97daf781405f18c6592",
+    "observatory/engine/tools/openrouter.py": "036070aa003e679f680712362f85fd8aed40af6110d55c75300baa242d21849a",
+    "observatory/engine/collectors/scan_openrouter.py": "b146f9f331ca5ef4d24b3c328db46b860fa319797018ecdbe811fe4e1a307aae",
+    "observatory/engine/tests/adversarial_runner.py": "a70295a9bbea620f18d4fd1d39148667b69073a99dd6e356b0b7427e9aa425e6"
+  },
+  "source_unchanged": true,
+  "owned_temp_removed": true,
+  "measurement_status": "NOT_COMPLETE",
+  "completed": null,
+  "pass_cases": null,
+  "fail_cases": null,
+  "error_cases": null,
+  "unknown_reason": "No case matrix was published before timeout; completed prefix was held only in memory."
+}

@@ -1,11 +1,14 @@
 # Emitted decrease guidance reaches the guarded CLI
 
-Status: implemented candidate, independent source review pending. Runtime dependency
-b4fbc94 passed scoped review and was delivered with handoff 89e8cd7. This candidate
-adds the separate guidance/parser seam; it is not full-system acceptance. Existing complete 153 matrix remains 2147 PASS / 3053 FAIL /
-0 ERROR; broad remains 542 PASS / 8 FAIL. These are not rerun or waived here.
+Status: independently reviewed source candidate at c862c596, NOT_ACCEPTED as a
+complete system. Runtime dependency b4fbc94 passed scoped review and was delivered
+with handoff 89e8cd7. This candidate adds the separate guidance/parser seam. Two
+full measurement attempts timed out without publishing case counts. The separate
+broad suite completed with 542 PASS / 8 FAIL. The latest completed full matrix
+remains 153a160: 2147 PASS / 3053 FAIL / 0 ERROR. See the
+[frozen measurement and next task](measurement.md); none of these results is waived.
 
-## Exact source seam
+## Baseline source seam before this change
 
 At 5abd295 `issue_for_policy` appends generic `limit NAME --set USD` to `settle`
 for near-target held-ceiling rows. `settle` is only printed in the over-limit
@@ -79,8 +82,8 @@ real entry exception tuple (OSError, ValueError, RuntimeError). Unexpected failu
 must escape and remain model errors, not become a generic unresolved/pass result.
 No arbitrary Exception catch, hidden refresh, new operator event or extra attempt.
 The runtime dependency is the corrected source candidate b4fbc94, whose independent
-scoped source review passed, not the rejected first candidate. Implementation acceptance
-of this future seam remains separate.
+scoped source review passed, not the rejected first candidate. Implementation review
+subsequently passed at c862c596 within the scope recorded in the measurement packet.
 
 ## Candidate evidence and exact next task
 
@@ -98,15 +101,17 @@ including original event/RNG/five-attempt/assertion logic, is identical.
 brand lint exits zero with 2407 warnings, not a warning-free result.
 Representative original seeds: 17/32/39/8/18/29/104 pass; 828/72/2628/3708 fail
 (all prefixed 7000000). Exact seeds and traces are in `focused.json`.
-No broad or complete 5200 remeasurement is claimed here.
+These focused results precede the separate measurements linked above.
 
 Fixture changes follow the new production representation: no-emission negatives
 remove the row's command rather than only aggregate text; an unknown effect now
 asserts no retry, while persistent echo uses a separate fresh fixture. No old
 failure receipt or production acceptance criterion was changed.
 
-Next: independent exact source review, then immutable privacy/history gate and
-normal draft-branch delivery. Only after that review may a frozen complete
-measurement assess this new seam. Current-main composition, live/provider and
-installed acceptance remain open. The new command requests an explicit action;
-proposal discovery does not execute it or make external writers atomic.
+Independent exact source review and immutable privacy/history gate passed for
+c862c596, published as draft PR #276. Full measurements did not complete; the
+separate broad suite is red. Next: review and implement the bounded progress
+receipt contract in the measurement packet before another expensive full run.
+Current-main composition, live/provider and installed acceptance remain open.
+The new command requests an explicit action; proposal discovery does not execute
+it or make external writers atomic.
