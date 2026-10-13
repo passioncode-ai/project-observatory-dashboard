@@ -44,6 +44,13 @@ class Observation(unittest.TestCase):
             self.assertNotIn('/private/location', json.dumps(doc))
             self.assertIsNone(doc['logical_bytes'])
 
+    def test_unknown_type_is_not_a_successful_empty_observation(self):
+        bad = subject.parse(listing().replace(b'tREG', b'tMALFORMED'))
+        self.assertFalse(bad['command_complete'])
+        self.assertIsNone(bad['logical_bytes'])
+        self.assertIn('unknown-file-type', bad['degraded'])
+        self.assertEqual(subject.parse(listing().replace(b'tREG', b'tDIR'))['logical_bytes'], 0)
+
     def test_empty_is_measured_only_for_complete_success(self):
         self.assertEqual(subject.parse(b'')['logical_bytes'], 0)
         for extra in ({'returncode': 1}, {'stderr_seen': True}, {'truncated': True}):
