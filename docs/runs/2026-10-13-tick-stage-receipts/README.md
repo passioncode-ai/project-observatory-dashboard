@@ -39,7 +39,7 @@ remains unknown, not healthy or finished.
 ## Verification and remaining work
 
 [Checks and exact source hashes](checks.json) record the passing compatibility
-and contract suites. The new stage suite has 11 cases, including a real synthetic
+and contract suites. The final stage suite has 16 cases, including a real synthetic
 supervisor timeout. Existing tick 38, lifecycle 60, health 9, privacy 17 tests,
 failed-step 22 and pipeline 37 assertions pass. The initial portable run exposed
 an omitted sandbox module dependency and is recorded rather than erased.
@@ -47,3 +47,17 @@ Documentation copies and source inventory are checked. Windows-native execution
 and installed latency were not measured here. Obtain independent scoped review,
 then publish a draft branch under the repository policy; do not treat the parent
 measured-red provider acceptance as solved by this change.
+
+## Review correction
+
+The first source candidate `d370dab` was **CHANGES_REQUIRED**: a FIFO receipt
+could block outside the watchdog, and an overflowing numeric duration could
+suppress the whole-run receipt. A self-review also reproduced a broken diagnostic
+sink replacing the original exit. Tests reproduce all three before correction.
+Receipt reads now require a regular file through the shared OS privacy boundary,
+with nonblocking/no-follow flags and a byte limit. Malformed numeric data becomes
+unknown. Optional stage projection is isolated from the authoritative run receipt,
+and fixed diagnostics are best effort. Synthetic FIFO and symlink cases preserve
+the foreign input; Windows-native race guarantees are not established by POSIX
+fixtures. The final 16-case stage suite passes; lifecycle 60 and privacy 17 cases
+were rerun after the source correction. No installed service was touched.

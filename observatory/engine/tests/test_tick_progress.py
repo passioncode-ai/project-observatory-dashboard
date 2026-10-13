@@ -117,6 +117,61 @@ class StageReceipts(unittest.TestCase):
             (self.scratch/"tick.json").write_text(json.dumps(doc))
             self.assertEqual(tick_progress.snapshot(self.scratch,"a"*32)["coverage"],"unknown")
 
+    def test_receipt_and_diagnostic_failure_do_not_replace_command_exit(self):
+        import atomic
+        def broken_logger(message):
+            raise OSError("secret-log-detail")
+        self.t.progress.logger=broken_logger
+        with patch.object(atomic,"write_json",side_effect=OSError("secret-disk-detail")), \
+             patch.object(self.tick.subprocess,"run",return_value=subprocess.CompletedProcess([],19,"","")):
+            self.assertEqual(self.t.bounded("merge","synthetic")[0],19)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFO fixture")
+    def test_fifo_receipt_is_unknown_without_blocking(self):
+        os.mkfifo(self.scratch/"tick.json")
+        probe="import sys;sys.path.insert(0,sys.argv[1]);import tick_progress;from pathlib import Path;print(tick_progress.snapshot(Path(sys.argv[2]),'a'*32)['coverage'])"
+        try:
+            result=subprocess.run([sys.executable,"-c",probe,str(ROOT),str(self.scratch)],
+                                  capture_output=True,text=True,timeout=2)
+        except subprocess.TimeoutExpired:
+            self.fail("optional stage receipt blocked on FIFO")
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.strip(),"unknown")
+
+    def test_symlink_receipt_is_unknown_and_does_not_copy_target(self):
+        import tick_progress
+        target=self.base/"foreign.json";target.write_text('{"secret":"synthetic-only"}')
+        try:
+            (self.scratch/"tick.json").symlink_to(target)
+        except OSError:
+            self.skipTest("symlink fixture unavailable")
+        self.assertEqual(tick_progress.snapshot(self.scratch,"a"*32)["coverage"],"unknown")
+        with patch.object(self.tick.subprocess,"run",return_value=subprocess.CompletedProcess([],7,"","")), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.t.bounded("merge","synthetic")[0],7)
+        self.assertEqual(target.read_text(),'{"secret":"synthetic-only"}')
+        self.assertTrue((self.scratch/"tick.json").is_symlink())
+
+    def test_huge_duration_is_unknown_not_an_overflow(self):
+        import tick_progress
+        with patch.object(self.tick.subprocess,"run",return_value=subprocess.CompletedProcess([],0,"","")):
+            self.t.bounded("merge","synthetic")
+        doc=self.read();doc["progress"]["stages"][0]["duration_seconds"]=10**500
+        (self.scratch/"tick.json").write_text(json.dumps(doc))
+        self.assertEqual(tick_progress.snapshot(self.scratch,"a"*32)["coverage"],"unknown")
+
+    def test_projection_exception_cannot_drop_supervisor_receipt(self):
+        import tick_progress
+        spec=importlib.util.spec_from_file_location("stage_supervisor",ROOT/"tools/tick_lease.py")
+        supervisor=importlib.util.module_from_spec(spec);spec.loader.exec_module(supervisor)
+        with patch.object(supervisor.paths,"SCRATCH",self.scratch), \
+             patch.object(tick_progress,"snapshot",side_effect=OverflowError("secret-projection")):
+            supervisor.record_run("2026-01-01T00:00:00Z","timeout",124,"ceiling",run_id="a"*32)
+        report=json.loads((self.scratch/"tick-run.json").read_text())
+        self.assertEqual((report["outcome"],report["exit"]),("timeout",124))
+        self.assertEqual(report["stage_progress"]["coverage"],"unknown")
+        self.assertNotIn("secret-projection",json.dumps(report))
+        self.assertEqual(json.loads((self.scratch/"tick-runs.jsonl").read_text())["exit"],124)
+
     def test_final_report_includes_progress_but_legacy_fields_remain(self):
         with patch.object(self.tick.subprocess,"run",return_value=subprocess.CompletedProcess([],0,"","")):
             self.t.bounded("merge", "synthetic")
