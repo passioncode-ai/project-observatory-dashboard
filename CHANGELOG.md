@@ -48,6 +48,15 @@ is 0.22.1, with updated credential-handling guidance.
 - **Findings follow the measured cause**: collector deadlines distinguish work not started
   from interrupted work; partial leak scans retain sightings; memory and swap findings use
   their own measurement freshness and preserve unreadable-source degradation.
+- **Policy-managed keys refuse unproved rotation headroom**: applying an explicit
+  policy records provenance on its selected keys. Rotation refuses marked identities
+  and exact hash aliases before provider calls; a stored policy snapshot is not live
+  headroom proof. Unmarked legacy and standalone keys keep their existing behavior
+  and remain outside verified project-wide capacity. No automatic re-attestation or
+  reconciliation is added.
+- **Engine-update snapshots stay visible**: backup status and verified migration now
+  include local `before-update` snapshots. Recognized snapshots share one kind list;
+  damaged copies remain reported and retained, while foreign kinds remain untouched.
 - **Rotation retains uncertain exposure before external effects**: OpenRouter records a
   successor reservation before minting, validates returned identities before delivery or
   predecessor deletion, and serializes local ledger writers. A failed or ambiguous result

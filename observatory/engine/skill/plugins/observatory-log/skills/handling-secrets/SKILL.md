@@ -181,9 +181,14 @@ accounts, budgets or tokens. Limit issuance and revocation to the task's scope.
 A project's own OpenRouter keys come from its spend policy: `openrouter.py
 issue-for-policy --policy FILE [--dry-run]` keeps their ceilings together within
 the project limit and exits 1 with `OVER LIMIT by $X now ($A against the $L
-limit); it ends after: …` when they are not. `rotate` records a successor reservation
-before minting, verifies returned identities before delivery, and retains predecessor
-exposure until deletion is confirmed. Failed or ambiguous effects remain accounted for;
+limit); it ends after: …` when they are not. An applied policy marks its new and
+explicitly selected existing rows with policy provenance; dry-run does not write it.
+`rotate` refuses a marked row, or an exact primary/predecessor/successor hash alias,
+before provider calls because current aggregate headroom is unproved. A saved policy
+snapshot does not grant that proof; malformed provenance also refuses. Unmarked legacy
+and standalone rows are not classified by their names or folders. Their rotation
+records a successor reservation before minting, verifies returned identities before
+delivery, and retains predecessor exposure until deletion is confirmed. Failed or ambiguous effects remain accounted for;
 repeating rotation or mutating an identity held by unresolved rotation is refused.
 Overlapping ceilings can remain above the limit until reconciled. There is no automatic
 reconciliation command, and the full 5200-case rotation/convergence acceptance remains

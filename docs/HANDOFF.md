@@ -17,6 +17,16 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-13 — Recovery wave 8](runs/2026-10-13-recovery-wave-8/README.md):
+explicit policy provenance makes unproved rotation refuse before provider requests,
+including exact hash aliases; known engine-update backups are visible to status and
+verified migration. A conditional capacity-transfer model remains synthetic only.
+The exact policy source's 128-case baseline is 58 PASS / 70 FAIL, all remaining failures
+in convergence; full 5,200-case acceptance is open. This combined candidate supersedes
+checkpoint `8aff34f` after its CI failures; source preparation is not installed acceptance.
+Next: combined independent review and protected integration, preserving explicit
+legacy/unmarked-key, backup-kind and live-provider limits.
+
 [2026-10-13 — Release 0.25.0 preparation](runs/2026-10-13-release-0.25.0-preparation/README.md):
 application 0.25.0 and companion plugin 0.22.1 combine independently reviewed waves
 four through seven: rotation identity/accounting, checkout/cache coverage and saved readers,

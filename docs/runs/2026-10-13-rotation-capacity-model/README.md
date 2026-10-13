@@ -2,6 +2,16 @@
 
 <sub>ssheleg skills — task-pipeline · evidence-docs · handling-secrets</sub>
 
+## Follow-up status in the combined candidate
+
+The record below describes the model's original source snapshot and its review
+correction. Its proposed policy-provenance task is now implemented in the separate
+[policy admission packet](../2026-10-13-policy-rotation-admission/README.md), which
+supersedes that next-task status and the earlier bounded baseline for current diagnosis.
+The model still adds no production reconciliation. The newer exact policy baseline
+is 58 PASS / 70 FAIL; full 5,200-case acceptance remains open. Earlier receipts and
+failed observations below are retained as historical evidence.
+
 ## What this unit establishes
 
 The pure proposal and simulator in `tests/rotation_capacity_model.py` are test-only.

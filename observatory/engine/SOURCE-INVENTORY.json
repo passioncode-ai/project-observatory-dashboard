@@ -1763,8 +1763,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "477d66534ad25d493cfbb389165a64ae9d24853467af42113020bc91a32841c2",
-      "bytes": 19357,
+      "export_sha256": "b61d7438d3ed9697f3b8e07de5970df69bf9e3cc7bda5b50e1fdf916fd7e371d",
+      "bytes": 19807,
       "upstream_modified": true
     },
     {
