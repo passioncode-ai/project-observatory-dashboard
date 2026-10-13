@@ -40,8 +40,47 @@ Seed 7000104 retains its separate invalid-budget rejection with unchanged state 
 a planted mutation detector. In the full rotation variant that same seed may also
 fail its strict rotation ceiling property; it is not suppressed or reclassified PASS.
 
-Next: run the bounded full-rotation baseline on the committed model, record exact
-source hashes and all FAIL/ERROR results, then independently review the adapter.
+## Bounded baseline and next task
+
+The [complete synthetic receipt](raw/baseline-128.json) binds the model and provider
+source file hashes to commit `77866893bcef182df163113b933ec509c4ef00f1`.
+All 128 requested seeds, 7000000–7000127 inclusive, completed: **62 PASS, 66 FAIL,
+0 ERROR**. The runner returned exit 1, as required for an invariant failure.
+Counts below overlap; they are affected cases, not independent incident counts.
+
+| Original invariant | Failed cases | First counterexample |
+|---|---:|---:|
+| Strict post-rotation actual ceiling | 36 | 7000002 |
+| Convergence after documented remedies | 64 | 7000002 |
+| Represented live identities | 5 | 7000021 |
+| No revocation of a consumed key | 1 | 7000099 |
+
+Seed 7000104 is FAIL: a successful rotation leaves actual synthetic provider limits
+at 0.034, above both the 0.03 ceiling and the pre-rotation 0.03. Its separate
+invalid-budget rejection remains preserved. Representation counterexamples include
+renamed unknown mints and a reservation exceeded by a later sub-cent mutation.
+Seed 7000099 deletes a key read by a consumer label beyond the first destination
+listing; preserving this failure is necessary for the next live-holder repair.
+
+Reproduce from this repository checkout with Python 3 and the existing test dependencies:
+
+```sh
+python3 observatory/engine/tests/run_portable.py --suite j3_adversary --jobs 1
+python3 -m unittest discover -s tests -p test_j1_evidence.py -q
+python3 observatory/engine/tests/adv_j1_property.py 7000000 128 baseline-128.json
+```
+
+The eight fixed synthetic cases pass. The root evidence wrapper passes and executes
+its existing twelve evidence checks in an isolated synthetic home. Independent
+review of commit `7786689` accepted the model binding and observer semantics only;
+the production invariants above remain red. No random draws or seed coverage were
+removed, and the no-rotation variant was not substituted.
+
+Next: implement a separately reviewed reconciliation and strict-ceiling design using
+these fixed counterexamples and the provider's actual API contract, then repeat the
+full unchanged acceptance range. A reservation records uncertainty and cannot prove
+that an unknown provider effect is absent, identify a key for deletion, or constitute
+convergence.
 Full 5200-seed acceptance, reconciliation design, live-holder revoke, policy across
 writers and live/native/install acceptance remain open. No production/provider/vault
 operation is performed by this task; every provider operation uses a synthetic fake.
