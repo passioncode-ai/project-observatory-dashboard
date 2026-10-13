@@ -57,6 +57,15 @@ class Base(unittest.TestCase):
         importlib.reload(paths)
         import disk_guard
         self.g = importlib.reload(disk_guard)
+        self.real_refresh_memory = self.g.refresh_memory
+        memory_refresh = patch.object(self.g, "refresh_memory", return_value="fresh")
+        memory_refresh.start()
+        self.addCleanup(memory_refresh.stop)
+        self.real_fresh_busy = getattr(self.g, "fresh_busy", None)
+        # No test probes the host process table or live holders.
+        fresh = patch.object(self.g, "fresh_busy", return_value=False, create=True)
+        fresh.start()
+        self.addCleanup(fresh.stop)
         self.t1 = self.base / "t1"
         self.t1.mkdir()
         # NOTHING OUTSIDE THE TEMPORARY DIRECTORY: the clone root and the temporary
@@ -77,6 +86,10 @@ class Base(unittest.TestCase):
         cfg = self.g.load_config()
         cfg.update({"temp_roots": [{"path": str(self.t1), "depth": 1}], "commands": []}, **over)
         return cfg
+
+    def identity(self, path):
+        st = os.lstat(path)
+        return {"dev": st.st_dev, "ino": st.st_ino}
 
     def free(self, *names):
         """Holders that know of exactly these open paths."""
@@ -232,7 +245,7 @@ class Order(Base):
 class Acting(Base):
     def test_a_path_that_became_held_after_the_plan_is_skipped(self):
         (self.t1 / "x").mkdir()
-        rec = self.g.act({"class": "temp", "target": str(self.t1 / "x"), "bytes": 0},
+        rec = self.g.act({"class": "temp", "target": str(self.t1 / "x"), "identity": self.identity(self.t1 / "x"), "bytes": 0},
                          self.free(self.t1 / "x" / "opened-since"))
         self.assertEqual(rec["result"], "skipped")
         self.assertTrue((self.t1 / "x").exists())
@@ -241,7 +254,7 @@ class Acting(Base):
         (self.t1 / "x").mkdir()
         frees = iter([1000 * 1048576, 1250 * 1048576])
         with patch.object(self.g, "free_bytes", side_effect=lambda *_: next(frees)):
-            rec = self.g.act({"class": "temp", "target": str(self.t1 / "x"), "bytes": 4096}, self.free())
+            rec = self.g.act({"class": "temp", "target": str(self.t1 / "x"), "identity": self.identity(self.t1 / "x"), "bytes": 4096}, self.free())
         self.assertEqual(rec["result"], "removed")
         self.assertEqual(rec["freed_mb"], 250)
         self.assertEqual(rec["kb"], 4)
@@ -366,7 +379,7 @@ class Builds(Base):
         import paths
         paths.SCRATCH.mkdir(parents=True, exist_ok=True)
         (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps(
-            {"checkouts": [{"path": str(r), "worktrees": []} for r in repos]}))
+            {"measured_at": self.g.now(), "checkouts": [{"path": str(r), "worktrees": []} for r in repos]}))
 
     def test_idle_checkouts_lose_ignored_output_and_busy_or_recent_ones_keep_it(self):
         idle, recent, held = self.repo("idle", 20), self.repo("recent", 2), self.repo("held", 20)
@@ -605,8 +618,8 @@ class AnyDevice(Base):
                 raise PermissionError(32, "being used by another process")
             return real_rename(src, dst)
         with patch.object(self.g.os, "rename", side_effect=rename):
-            held = self.g.act({"class": "temp", "target": str(self.t1 / "held"), "bytes": 0}, h)
-            free = self.g.act({"class": "temp", "target": str(self.t1 / "free"), "bytes": 0}, h)
+            held = self.g.act({"class": "temp", "target": str(self.t1 / "held"), "identity": self.identity(self.t1 / "held"), "bytes": 0}, h)
+            free = self.g.act({"class": "temp", "target": str(self.t1 / "free"), "identity": self.identity(self.t1 / "free"), "bytes": 0}, h)
         self.assertEqual(held["result"], "skipped")
         self.assertTrue((self.t1 / "held").exists(), "nothing of a held folder is deleted")
         self.assertEqual(free["result"], "removed")
@@ -688,6 +701,111 @@ class GitTierPressure(Base):
 
 def pathlib_name(p) -> str:
     return Path(str(p)).name
+
+
+class StaleRows(Base):
+    """ENG-009: a git-hygiene pass the deadline cut short carries its unreached checkouts with
+    `stale: true`, and the cleanup planned auto actions from them as from fresh rows. The act-time
+    re-checks cover merge state, holders and cleanliness, not recency; the auto tier acts with
+    no person present, so it waits for a fresh pass. The manual tier only proposes: its rows
+    stay, marked with the age a person needs to see."""
+
+    def checkout(self, name: str, measured_at: str, stale: bool) -> dict:
+        row = {"repository": f"example-org/{name}", "path": str(self.base / name),
+               "default_branch": "main", "measured_at": measured_at,
+               "branches": [{"name": "old-feature", "class": "merged", "idle_days": 40},
+                            {"name": "spike", "class": "unique", "ahead": 2, "idle_days": 40}],
+               "worktrees": [{"path": str(self.base / f"{name}-gone"), "state": "missing", "idle_days": 40},
+                             {"path": str(self.base / f"{name}-clean"), "state": "clean", "branch": "x", "idle_days": 40},
+                             {"path": str(self.base / f"{name}-dirty"), "state": "dirty", "branch": "y",
+                              "dirty_files": 3, "idle_days": 40}]}
+        return {**row, "stale": True} if stale else row
+
+    def hygiene(self, stale: bool, quiet_fresh: bool = False) -> dict:
+        """One checkout this pass measured and, when `stale`, one it carried from an earlier pass:
+        a reader that counted every row as carried, or none, gets a different number."""
+        fresh = self.checkout("beta-api", "2026-10-12T09:00:00Z", stale=False)
+        if quiet_fresh:
+            fresh.update(branches=[], worktrees=[])
+        rows = [fresh,
+                self.checkout("alpha-web", "2026-10-01T09:00:00Z", stale=stale)]
+        return {"measured_at": "2026-10-12T09:00:00Z", "partial": stale, "checkouts": rows}
+
+    def test_a_stale_checkout_yields_no_auto_action_and_marked_manual_ones(self):
+        import cleanup
+        cfg = cleanup.load_config()
+        stale_repo, fresh_repo = str(self.base / "alpha-web"), str(self.base / "beta-api")
+        fresh = cleanup.plan_git(self.hygiene(stale=False), cfg)
+        self.assertEqual(sorted(a["class"] for a in fresh if a["tier"] == "auto" and a["repo"] == stale_repo),
+                         ["branch-merged", "worktree-clean", "worktree-missing"], "the fixture must plan auto work")
+        plan = cleanup.plan_git(self.hygiene(stale=True), cfg)
+        self.assertEqual([a for a in plan if a["tier"] == "auto" and a["repo"] == stale_repo], [],
+                         "an auto action from a carried row")
+        self.assertEqual(sorted(a["class"] for a in plan if a["tier"] == "auto" and a["repo"] == fresh_repo),
+                         ["branch-merged", "worktree-clean", "worktree-missing"], "the fresh checkout still plans")
+        manual = [a for a in plan if a["tier"] == "manual" and a["repo"] == stale_repo]
+        self.assertEqual(sorted(a["class"] for a in manual), ["branch-unique", "worktree-dirty"])
+        for a in manual:
+            self.assertIs(a.get("stale"), True)
+            self.assertEqual(a.get("measured_at"), "2026-10-01T09:00:00Z")
+        self.assertTrue(all("stale" not in a for a in fresh), "a fresh row is not marked")
+        self.assertTrue(all("stale" not in a for a in plan if a["repo"] == fresh_repo))
+
+    def test_the_plan_and_the_page_count_carried_rows_with_one_function(self):
+        import cleanup, machine_view
+        # Reloaded in order, since other cases reload machine_view: cleanup must take the function
+        # machine_view defines, not a copy of its own.
+        machine_view = importlib.reload(machine_view)
+        cleanup = importlib.reload(cleanup)
+        self.assertIs(cleanup.carried, machine_view.carried, "two readers of `stale` would drift apart")
+        self.assertEqual(cleanup.carried(self.hygiene(stale=True)),
+                         {"checkouts": 1, "measured_at": "2026-10-01T09:00:00Z"})
+        self.assertIsNone(cleanup.carried(self.hygiene(stale=False)))
+
+    def enable_auto(self):
+        import paths
+        settings = self.home / "config" / "settings.json"
+        doc = json.loads(settings.read_text())
+        doc.setdefault("features", {})["auto_cleanup"] = True
+        settings.write_text(json.dumps(doc))
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        # The fresh checkout holds nothing to clean here, so the run has nothing to act on at all and
+        # every count it prints is the carried one.
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps(self.hygiene(stale=True, quiet_fresh=True)))
+        return paths
+
+    def test_the_plan_and_the_auto_run_say_what_waits_for_a_fresh_pass(self):
+        paths = self.enable_auto()
+        done = subprocess.run([sys.executable, str(ROOT / "tools/cleanup.py"), "--auto", "--git-only"],
+                              cwd=ROOT, env={**os.environ}, capture_output=True, text=True, timeout=300)
+        self.assertEqual(done.returncode, 0, done.stderr[-400:])
+        self.assertIn("cleanup: 1 checkouts carried from 2026-10-01T09:00:00Z; their auto actions wait for a fresh pass",
+                      done.stdout)
+        self.assertIn("0 removed", done.stdout)
+        plan = json.loads((paths.SCRATCH / "cleanup-plan.json").read_text())
+        self.assertEqual(plan["carried"], {"checkouts": 1, "measured_at": "2026-10-01T09:00:00Z"})
+        self.assertIs(plan["survey_partial"], True)
+
+    def test_the_guards_report_keeps_the_carried_count(self):
+        """Under `--json` the line goes to stderr and the guard keeps only the JSON summary, so the
+        count travels inside the summary and reaches the guard's report and journal."""
+        self.enable_auto()
+        done = subprocess.run([sys.executable, str(ROOT / "tools/cleanup.py"), "--auto", "--git-only", "--json"],
+                              cwd=ROOT, env={**os.environ}, capture_output=True, text=True, timeout=300)
+        summary = json.loads(done.stdout.strip().splitlines()[-1])
+        self.assertEqual(summary.get("carried"), {"checkouts": 1, "measured_at": "2026-10-01T09:00:00Z"})
+        tier = self.g._git_tier(False, "normal", 120)
+        self.assertEqual(tier.get("carried"), {"checkouts": 1, "measured_at": "2026-10-01T09:00:00Z"})
+
+    def test_the_machine_view_shows_the_partial_survey_and_its_carried_count(self):
+        import paths
+        import machine_view
+        importlib.reload(machine_view)
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps(self.hygiene(stale=True)))
+        git_view = machine_view.summary()["git"]
+        self.assertIs(git_view["partial"], True)
+        self.assertEqual(git_view["carried"], {"checkouts": 1, "measured_at": "2026-10-01T09:00:00Z"})
 
 
 class SecondIteration(Base):
@@ -804,6 +922,138 @@ class HoldersModule(unittest.TestCase):
 
 
 class GitTierSafety(Base):
+    def test_manual_removal_preserves_ignored_local_data(self):
+        import cleanup
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q", "-b", "main")
+        (repo / ".gitignore").write_text(".env.local\n")
+        (repo / "a").write_text("original\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        wt = self.base / "worktree"
+        git(repo, "worktree", "add", "-qb", "topic", str(wt))
+        (wt / "a").write_text("uncommitted\n")
+        (wt / ".env.local").write_text("synthetic local data\n")
+        with patch.object(cleanup, "busy_now", return_value=False):
+            rec = cleanup.act({"class": "worktree-dirty", "tier": "manual", "repo": str(repo),
+                               "target": str(wt), "branch": "topic"}, self.base / "archive")
+        self.assertEqual(rec["result"], "skipped", rec)
+        self.assertIn("ignored", rec["reason"])
+        self.assertEqual((wt / ".env.local").read_text(), "synthetic local data\n")
+        self.assertEqual((wt / "a").read_text(), "uncommitted\n")
+
+    def test_ignored_files_appearing_during_archive_keep_the_worktree(self):
+        import cleanup
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q", "-b", "main")
+        (repo / ".gitignore").write_text(".env.local\n")
+        (repo / "a").write_text("original\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        wt = self.base / "worktree"
+        git(repo, "worktree", "add", "-qb", "topic", str(wt))
+        (wt / "a").write_text("uncommitted\n")
+        export = cleanup.export_tracked
+
+        def create_ignored(target, status):
+            result = export(target, status)
+            (wt / ".env.local").write_text("arrived during archive")
+            return result
+
+        with patch.object(cleanup, "busy_now", return_value=False), \
+                patch.object(cleanup, "export_tracked", side_effect=create_ignored):
+            rec = cleanup.act({"class": "worktree-dirty", "tier": "manual", "repo": str(repo),
+                               "target": str(wt), "branch": "topic"}, self.base / "archive")
+        self.assertEqual(rec["result"], "skipped", rec)
+        self.assertEqual((wt / ".env.local").read_text(), "arrived during archive")
+        self.assertTrue((Path(rec["archive"]) / "tracked.patch").exists())
+
+    def test_local_state_is_protected_even_by_an_older_artifact_configuration(self):
+        import cleanup
+        import paths
+        paths.config_file("cleanup.json").write_text(json.dumps({"artifact_dirs": [".wrangler", "dist"]}))
+        self.assertNotIn(".wrangler", self.g.artifact_names())
+        self.assertNotIn(".wrangler", cleanup.load_config()["artifact_dirs"])
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        (repo / ".gitignore").write_text(".wrangler/\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        (repo / ".wrangler" / "state").mkdir(parents=True)
+        (repo / ".wrangler" / "state" / "db.sqlite").write_text("unique local data")
+        self.assertEqual(cleanup.ignored_keepers(str(repo), {".wrangler", "dist"}), [".wrangler"])
+        age(repo, 30)
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"measured_at": self.g.now(), "checkouts": [{"path": str(repo), "worktrees": []}]}))
+        self.assertEqual(self.g.plan_builds(self.g.load_config(), "critical", self.free(),
+                                          time.time(), [".wrangler"]), [])
+        with patch.object(cleanup, "idle_projects", return_value=[{"id": "alpha-web", "folders": [str(repo)], "idle_days": 30}]):
+            self.assertEqual(cleanup.plan_artifacts({"artifact_dirs": [".wrangler"]}, self.free()), [])
+
+    def test_artifact_names_below_local_state_never_make_it_disposable(self):
+        import cleanup
+        import paths
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        (repo / ".gitignore").write_text(".wrangler/state/dist/\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        state = repo / ".wrangler" / "state" / "dist"
+        state.mkdir(parents=True)
+        (state / "database").write_text("unique local state")
+        self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), [".wrangler/state/dist"])
+        age(repo, 30)
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"measured_at": self.g.now(), "checkouts": [{"path": str(repo), "worktrees": []}]}))
+        self.assertEqual(self.g.plan_builds(self.g.load_config(), "critical", self.free(),
+                                          time.time(), ["dist"]), [])
+        with patch.object(cleanup, "idle_projects", return_value=[{"id": "alpha-web", "folders": [str(repo)], "idle_days": 30}]):
+            self.assertEqual(cleanup.plan_artifacts({"artifact_dirs": ["dist"]}, self.free()), [])
+
+    def test_ignored_artifact_parent_keeps_nested_state_and_git(self):
+        import cleanup
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        (repo / ".gitignore").write_text("dist/\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        for marker in (".wrangler", ".git"):
+            with self.subTest(marker=marker):
+                nested = repo / "dist" / "nested" / marker
+                nested.mkdir(parents=True)
+                (nested / "only-copy").write_text("unique data")
+                self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), ["dist"])
+                with patch.object(cleanup, "idle_projects", return_value=[{"id": "alpha-web", "folders": [str(repo)], "idle_days": 30}]):
+                    self.assertEqual(cleanup.plan_artifacts({"artifact_dirs": ["dist"]}, self.free()), [])
+                with patch.object(cleanup, "busy_now", return_value=False):
+                    rec = cleanup.act({"class": "build-artifacts", "tier": "auto", "target": str(repo / "dist")}, self.base / "archive")
+                self.assertEqual(rec["result"], "skipped")
+                self.assertTrue((nested / "only-copy").exists())
+                import shutil
+                shutil.rmtree(repo / "dist")
+
+    def test_uncertain_artifact_walk_is_a_keeper(self):
+        import cleanup
+        import cleanup_safety
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        (repo / ".gitignore").write_text("dist/\n")
+        (repo / "dist").mkdir()
+        (repo / "dist" / "output").write_text("regenerable")
+        self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), [])
+        with patch.object(cleanup_safety.os, "scandir", side_effect=PermissionError):
+            self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), ["dist"])
+        self.assertTrue(cleanup_safety.protected_tree_reason(str(repo / "dist"), timeout=0))
+        self.assertTrue(cleanup_safety.protected_tree_reason(str(repo / "dist"), max_entries=0))
+        (repo / "dist" / "link").symlink_to(repo / "elsewhere")
+        self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), ["dist"])
+
     def test_a_clean_worktree_with_a_keeper_ignored_file_is_skipped(self):
         import cleanup
         repo = self.base / "repo"
@@ -834,7 +1084,7 @@ class GitTierSafety(Base):
         age(r, 30)
         import paths
         paths.SCRATCH.mkdir(parents=True, exist_ok=True)
-        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"checkouts": [{"path": str(r), "worktrees": []}]}))
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"measured_at": self.g.now(), "checkouts": [{"path": str(r), "worktrees": []}]}))
         plan = self.g.plan_builds(self.g.load_config(), "critical", self.free(), time.time(), ["dist"])
         self.assertEqual(plan, [])
         # git check-ignore already calls such a folder not ignored; `_force_tracked` is the
@@ -968,6 +1218,505 @@ class Surfaces(Base):
         self.assertEqual(workspace.parse(["disk-guard", "--level", "low"]).level, "low")
         with self.assertRaises(SystemExit):
             workspace.parse(["disk-guard", "--level", "extreme"])
+
+
+class TargetRevalidation(Builds):
+    """Only synthetic targets; every rule preserves bytes on a changed/unknown decision."""
+
+    def build_action(self):
+        root = self.repo("alpha-web", 20)
+        self.hygiene(root)
+        action = self.g.plan_builds(self.g.load_config(), "normal", self.free(),
+                                   time.time(), ["node_modules"])[0]
+        return root, action
+
+    def test_generic_temp_preserves_git_repository_worktree_and_nested_repository(self):
+        for name, marker in (("repo", ".git/config"), ("linked", ".git"),
+                             ("session", "scratch/repo/.git/config")):
+            root = self.t1 / name
+            (root / marker).parent.mkdir(parents=True, exist_ok=True)
+            (root / marker).write_text("only copy")
+            age(root, 10)
+        self.assertEqual(self.g.plan_temp(self.cfg(), "critical", self.free(), time.time()), [])
+
+    def test_generic_temp_preserves_paths_beneath_git_ancestry(self):
+        (self.t1 / ".git").write_text("gitdir: unavailable")
+        old = self.t1 / "scratch"
+        old.mkdir()
+        (old / "only-copy").write_text("keep")
+        age(self.t1, 10)
+        self.assertEqual(self.g.plan_temp(self.cfg(), "critical", self.free(), time.time()), [])
+
+    def test_apply_rejects_new_git_marker_even_with_old_timestamps(self):
+        root = self.t1 / "old"
+        root.mkdir()
+        age(root, 10)
+        action = self.g.plan_temp(self.cfg(), "critical", self.free(), time.time())[0]
+        (root / ".git").write_text("gitdir: unavailable")
+        age(root, 10)
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / ".git").exists())
+
+    def test_apply_build_preserves_force_added_output(self):
+        root, action = self.build_action()
+        git(root, "add", "-f", "node_modules/pkg/index.js")
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules/pkg/index.js").exists())
+
+    def test_apply_build_preserves_output_no_longer_ignored(self):
+        root, action = self.build_action()
+        (root / ".gitignore").write_text("")
+        age(root, 20)
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules").exists())
+
+    def test_apply_build_rechecks_checkout_activity(self):
+        root, action = self.build_action()
+        (root / "app.js").write_text("active again")
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules").exists())
+
+    def test_apply_build_rechecks_new_ignored_file(self):
+        root, action = self.build_action()
+        (root / "node_modules/new-file").write_text("new work")
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules/new-file").exists())
+
+    def test_apply_build_preserves_nested_git_marker(self):
+        root, action = self.build_action()
+        (root / "node_modules/pkg/.git").write_text("gitdir: unavailable")
+        age(root, 20)
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules/pkg/.git").exists())
+
+    def test_apply_build_refuses_missing_revalidation_context(self):
+        root = self.repo("alpha-web", 20)
+        action = {"class": "build-output", "target": str(root / "node_modules"),
+                  "identity": self.identity(root / "node_modules")}
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules").exists())
+
+    def test_apply_build_still_removes_unchanged_ignored_output(self):
+        root, action = self.build_action()
+        self.assertEqual(self.g.act(action, self.free())["result"], "removed")
+        self.assertFalse((root / "node_modules").exists())
+        self.assertTrue((root / "app.js").exists())
+
+    def test_each_action_uses_fresh_holders_and_unknown_is_a_skip(self):
+        for outcome in (True, None):
+            with self.subTest(outcome=outcome):
+                root = self.t1 / str(outcome)
+                root.mkdir()
+                with patch.object(self.g, "fresh_busy", return_value=outcome) as fresh:
+                    rec = self.g.act({"class": "temp", "target": str(root), "identity": self.identity(root)}, self.free())
+                self.assertEqual(rec["result"], "skipped")
+                self.assertTrue(root.exists())
+                fresh.assert_called_once()
+
+    def test_expired_inspection_deadline_preserves_even_a_small_tree(self):
+        self.assertFalse(self.g.inspect(str(self.t1), deadline=time.monotonic() - 1)["complete"])
+
+    def test_apply_build_preserves_nested_local_state(self):
+        root, action = self.build_action()
+        (root / "node_modules/pkg/.wrangler").mkdir()
+        (root / "node_modules/pkg/.wrangler/db").write_text("only copy")
+        age(root, 20)
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules/pkg/.wrangler/db").exists())
+
+    def test_fresh_build_probe_covers_checkout_activity(self):
+        root, action = self.build_action()
+        with patch.object(self.g, "fresh_busy", return_value=True) as fresh:
+            self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertEqual(fresh.call_args.args[0], str(root))
+        self.assertTrue((root / "node_modules").exists())
+
+    def test_small_tree_with_unknown_stat_is_preserved(self):
+        entry = self.t1 / "only-copy"
+        entry.write_text("keep")
+        with patch.object(self.g.os, "scandir", side_effect=PermissionError):
+            self.assertFalse(self.g.inspect(str(self.t1))["complete"])
+        self.assertTrue(entry.exists())
+
+
+@unittest.skipIf(os.name == "nt", "POSIX target probe; Windows uses rename")
+class FreshTargetProbe(Base):
+    def test_target_probe_is_bounded_and_unknown_never_means_free(self):
+        self.assertIsNotNone(self.real_fresh_busy, "fresh target probe must exist")
+        command_results = [subprocess.CompletedProcess([], 1, "", ""),
+                           subprocess.CompletedProcess([], 0, "/usr/bin/editor", "")]
+        with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
+                patch.object(self.g.subprocess, "run", side_effect=command_results) as call:
+            self.assertIs(self.real_fresh_busy(str(self.t1), 5), False)
+        self.assertTrue(any(str(self.t1) in c.args[0] for c in call.call_args_list))
+        self.assertTrue(all(0 < c.kwargs["timeout"] <= 5 for c in call.call_args_list))
+        with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
+                patch.object(self.g.subprocess, "run", side_effect=subprocess.TimeoutExpired("lsof", 5)):
+            self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
+
+    def test_target_probe_refuses_partial_listing(self):
+        self.assertIsNotNone(self.real_fresh_busy, "fresh target probe must exist")
+        with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
+                patch.object(self.g.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "permission denied")):
+            self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
+
+
+class CoverageTruth(Base):
+    def test_missing_swap_is_unknown_and_measured_zero_is_zero(self):
+        for memory, expected in (({}, None), ({"swap_used_mb": None}, None),
+                                 ({"swap_used_mb": 0}, 0.0), ({"swap_used_mb": 2048}, 2.0)):
+            with self.subTest(memory=memory), patch.object(self.g, "_read", return_value={
+                    "measured_at": "2026-01-01T00:00:00Z", "memory": memory}):
+                report = self.g.memory_report()
+            self.assertEqual(report["swap_gb"], expected)
+            self.assertEqual(report["measured_at"], "2026-01-01T00:00:00Z")
+            self.assertEqual(report.get("swap_reason"), "missing-swap-measurement" if expected is None else None)
+
+    def test_unreadable_directory_is_incomplete_with_count_not_error_body(self):
+        broken = self.base / "unreadable"
+        broken.mkdir()
+        original = self.g.os.scandir
+        def scan(path):
+            if str(path) == str(broken):
+                raise PermissionError("private error body")
+            return original(path)
+        with patch.object(self.g.os, "scandir", side_effect=scan):
+            report = self.g.large_files(self.cfg(), None, True)
+        self.assertFalse(report["complete"])
+        self.assertEqual(report["errors"]["directory_read"], 1)
+        self.assertNotIn("private error body", json.dumps(report))
+
+    def test_missing_root_is_an_incomplete_measurement_not_exception(self):
+        with patch.object(self.g.pathlib.Path, "home", return_value=self.base / "missing"):
+            report = self.g.large_files(self.cfg(), None, True)
+        self.assertFalse(report["complete"])
+        self.assertEqual(report["errors"]["root_stat"], 1)
+        self.assertEqual(report["files"], [])
+        self.assertTrue(report["measured_at"])
+
+    def test_stat_failure_is_counted_and_prior_success_is_retained(self):
+        from types import SimpleNamespace
+        good = self.base / "good.bin"
+        good.write_bytes(b"x" * 2048)
+        good_entry = SimpleNamespace(name=good.name, path=str(good), stat=lambda **kw: good.stat())
+        def unavailable(**kw):
+            raise FileNotFoundError("removed during traversal")
+        bad_entry = SimpleNamespace(name="gone", path=str(self.base / "gone"), stat=unavailable)
+        class Entries(list):
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+        with patch.object(self.g.os, "scandir", return_value=Entries([good_entry, bad_entry])):
+            report = self.g.large_files(self.cfg(large_file_min_mb=0.001), None, True)
+        self.assertFalse(report["complete"])
+        self.assertEqual(report["errors"]["entry_stat"], 1)
+        self.assertEqual([r["path"] for r in report["files"]], [str(good)])
+
+    def test_complete_empty_measurement_has_explicit_zero_errors(self):
+        empty = self.base / "empty"
+        empty.mkdir()
+        with patch.object(self.g.pathlib.Path, "home", return_value=empty):
+            report = self.g.large_files(self.cfg(), None, True)
+        self.assertTrue(report["complete"])
+        self.assertEqual(report.get("errors"), {"root_stat": 0, "directory_read": 0, "entry_stat": 0})
+        self.assertIs(report.get("budget_exhausted"), False)
+
+    def test_page_does_not_call_failed_empty_scan_no_large_files(self):
+        sys.path.insert(0, str(ROOT / "dashboard"))
+        import machine_page
+        from i18n import Translator
+        guard = {"largeFiles": {"complete": False, "files": [], "errors": {"directory_read": 1}}}
+        html = machine_page.guard_html(guard, Translator("en"))
+        self.assertIn("incomplete measurement", html)
+        self.assertNotIn("No file above the size line.", html)
+        guard["largeFiles"]["complete"] = True
+        self.assertIn("No file above the size line.", machine_page.guard_html(guard, Translator("en")))
+
+    def test_mcp_overview_retains_coverage_and_unknown_swap(self):
+        sys.path.insert(0, str(ROOT / "mcp"))
+        import server, machine_view
+        sample = {"degraded": [], "guard": {"largeFiles": {"measured_at": "2026-01-01T00:00:00Z",
+                    "complete": False, "files": [], "errors": {"directory_read": 1}},
+                    "memory": {"measured_at": "2026-01-01T00:00:00Z", "swap_gb": None,
+                               "swap_reason": "missing-swap-measurement"}}}
+        with patch.object(machine_view, "summary", return_value=sample):
+            result = server.observatory_machine()
+        self.assertFalse(result["guard"]["largeFilesCoverage"]["complete"])
+        self.assertEqual(result["guard"]["largeFilesCoverage"]["errors"]["directory_read"], 1)
+        self.assertIsNone(result["guard"]["memory"]["swap_gb"])
+
+
+class SnapshotSafety(Base):
+    def test_bare_repository_is_preserved_by_temp_and_shared_artifact_scan(self):
+        import cleanup_safety
+        bare = self.t1 / "only-copy.git"
+        bare.mkdir()
+        git(bare, "init", "--bare", "-q")
+        age(bare, 9)
+        self.assertEqual(self.g.plan_temp(self.cfg(), "critical", self.free(), time.time()), [])
+        self.assertTrue(cleanup_safety.protected_tree_reason(str(bare)))
+        self.assertFalse(self.g.inspect(str(bare))["complete"])
+        self.assertTrue((bare / "HEAD").exists())
+
+    def test_bare_repository_ancestry_preserves_selected_nested_temp_root(self):
+        bare = self.t1 / "only-copy.git"
+        bare.mkdir()
+        git(bare, "init", "--bare", "-q")
+        (bare / "objects" / "old-pack").write_text("only copy")
+        age(bare, 9)
+        cfg = self.cfg(temp_roots=[{"path": str(bare / "objects"), "depth": 1}])
+        self.assertEqual(self.g.plan_temp(cfg, "critical", self.free(), time.time()), [])
+
+    def test_bare_ancestry_and_nested_tree_protect_other_cleanup_classes(self):
+        import cleanup_safety
+        bare = self.t1 / "only-copy.git"
+        bare.mkdir()
+        git(bare, "init", "--bare", "-q")
+        data = bare / "objects" / "old-data"
+        data.mkdir()
+        (data / "only-copy").write_text("keep")
+        age(bare, 9)
+        self.assertTrue(cleanup_safety.protected_tree_reason(str(data)))
+        self.assertFalse(self.g.inspect(str(data))["complete"])
+        self.assertFalse(self.g.inspect(str(self.t1))["complete"])
+        self.assertEqual(self.g.plan_cache_dirs(
+            self.cfg(cache_roots=[str(bare / "objects")], cache_keep=[]),
+            "critical", self.free(), time.time()), [])
+
+    def test_replaced_directory_is_preserved_even_with_eligible_timestamps(self):
+        root = self.t1 / "old"
+        root.mkdir()
+        (root / "old-file").write_text("old")
+        age(root, 9)
+        action = self.g.plan_temp(self.cfg(), "critical", self.free(), time.time())[0]
+        root.rename(self.t1 / "original")
+        root.mkdir()
+        (root / "new-only-copy").write_text("keep")
+        age(root, 9)
+        rec = self.g.act(action, self.free())
+        self.assertEqual(rec["result"], "skipped")
+        self.assertTrue((root / "new-only-copy").exists())
+
+    def test_missing_identity_requires_replanning_for_every_path_class(self):
+        for kind in ("temp", "cache-dir", "trash", "browser-clone", "build-output"):
+            with self.subTest(kind=kind):
+                root = self.t1 / kind
+                root.mkdir()
+                result = self.g.act({"class": kind, "target": str(root)}, self.free())
+                self.assertEqual(result["result"], "skipped")
+                self.assertIn("identity", result["reason"])
+                self.assertTrue(root.exists())
+
+    def test_every_path_planner_binds_device_and_inode(self):
+        root = self.t1 / "old"
+        root.mkdir()
+        age(root, 9)
+        plans = self.g.plan_temp(self.cfg(), "critical", self.free(), time.time())
+        plans += self.g.plan_cache_dirs(self.cfg(cache_roots=[str(self.t1)], cache_keep=[]),
+                                        "critical", self.free(), time.time())
+        with patch.object(self.g, "trash_dirs", return_value=[str(self.t1)]):
+            plans += self.g.plan_trash(self.cfg(), "critical", time.time() + 31 * DAY, [])
+        clone = self.clones / "com.example.Browser.code_sign_clone" / "code_sign_clone.old"
+        clone.mkdir(parents=True)
+        age(clone, 9)
+        plans += self.g.plan_clones(self.cfg(), self.free(), time.time())
+        self.assertEqual({a["class"] for a in plans}, {"temp", "cache-dir", "trash", "browser-clone"})
+        for action in plans:
+            st = os.lstat(action["target"])
+            self.assertEqual(action.get("identity"), {"dev": st.st_dev, "ino": st.st_ino})
+
+
+class RegistrationIntegration(Base):
+    def test_real_registration_child_lists_linked_worktree_without_freshening_hygiene(self):
+        import paths
+        root = self.t1 / "repo"
+        root.mkdir()
+        git(root, "init", "-q")
+        (root / "source").write_text("keep")
+        git(root, "add", ".")
+        git(root, "commit", "-qm", "initial")
+        linked = self.t1 / "linked"
+        git(root, "worktree", "add", "-qb", "topic", str(linked))
+        (self.home / "registry/repositories.json").write_text(json.dumps({"repositories": [
+            {"id": "repository:example-org/repo", "local": {"path": str(root)}}]}))
+        (self.home / "registry/projects.json").write_text(json.dumps({"projects": []}))
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        hygiene = paths.SCRATCH / "git-hygiene.json"
+        hygiene.write_text(json.dumps({"measured_at": "2000-01-01T00:00:00Z", "checkouts": []}))
+        before, stamp = hygiene.read_bytes(), hygiene.stat().st_mtime_ns
+        with patch.dict(os.environ, {"OBSERVATORY_STEP_DEADLINE": "1"}):
+            result = self.g.refresh("collectors/scan_git_hygiene.py", paths.SCRATCH / "worktree-registration.json",
+                                    0, 10, ("--registrations-only", "--budget-seconds", "8"))
+        self.assertEqual(result, "refreshed")
+        self.assertEqual(self.g.checkouts(), sorted([str(root), str(linked)]))
+        self.assertEqual(hygiene.read_bytes(), before)
+        self.assertEqual(hygiene.stat().st_mtime_ns, stamp)
+
+
+class RegistrationMalformed(Base):
+    def write_receipt(self, **over):
+        import paths
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        doc = {"schema_version": 1, "kind": "worktree-registration", "partial": False,
+               "repositories": [self.valid_row()]}
+        doc.update(over)
+        (paths.SCRATCH / "worktree-registration.json").write_text(json.dumps(doc))
+
+    def valid_row(self):
+        return {"path": str(self.t1), "registered_at": self.g.now(), "stale": False,
+                "worktrees": [{"path": str(self.t1), "bare": False, "locked": False, "prunable": False}]}
+
+    def test_malformed_collections_and_rows_preserve_valid_peers_with_degradation(self):
+        for bad in (None, "bad", 1, {}, [None]):
+            with self.subTest(bad=bad):
+                self.write_receipt(repositories=bad)
+                degraded = []
+                self.assertEqual(self.g.checkouts(degraded), [])
+                self.assertTrue(degraded)
+        self.write_receipt(repositories=[None, self.valid_row()])
+        degraded = []
+        self.assertEqual(self.g.checkouts(degraded), [str(self.t1)])
+        self.assertTrue(degraded)
+
+    def test_invalid_worktree_metadata_is_never_eligible(self):
+        for bad in (None, "bad", 1, {}, {"path": "relative"}, {"path": 4},
+                    {"path": "/bad\0path"}, {"path": str(self.t1)}, {"path": str(self.t1), "bare": 0},
+                    {"path": str(self.t1), "locked": "false"}):
+            with self.subTest(bad=bad):
+                row = self.valid_row()
+                row["worktrees"] = [bad, row["worktrees"][0]]
+                self.write_receipt(repositories=[row])
+                degraded = []
+                self.assertEqual(self.g.checkouts(degraded), [str(self.t1)])
+                self.assertTrue(degraded)
+        for bad in (None, "bad", {}, 1):
+            row = {**self.valid_row(), "worktrees": bad}
+            self.write_receipt(repositories=[row])
+            degraded = []
+            self.assertEqual(self.g.checkouts(degraded), [])
+            self.assertTrue(degraded)
+
+    def test_invalid_root_timestamp_stale_and_schema_are_refused(self):
+        for field, value in (("path", "relative"), ("path", None), ("registered_at", []),
+                             ("registered_at", "bad"), ("stale", 0), ("stale", "false")):
+            self.write_receipt(repositories=[{**self.valid_row(), field: value}])
+            degraded = []
+            self.assertEqual(self.g.checkouts(degraded), [])
+            self.assertTrue(degraded)
+        self.write_receipt(schema_version=True)
+        self.assertEqual(self.g.checkouts([]), [])
+
+    def test_malformed_dated_fallback_preserves_valid_peers(self):
+        import paths
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({
+            "measured_at": self.g.now(), "checkouts": [None, {"path": str(self.t1), "worktrees": [None]}]}))
+        degraded = []
+        self.assertEqual(self.g.checkouts(degraded), [str(self.t1)])
+        self.assertEqual(degraded[0]["invalid"], {"repositories": 1, "worktrees": 1})
+
+    def test_run_reports_malformed_receipt_without_losing_other_phases(self):
+        self.write_receipt(repositories=[None, self.valid_row()])
+        with patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "refresh", return_value="refreshed"), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "checkout_idle_days", return_value=None), \
+                patch.object(self.g, "large_files", return_value=None):
+            doc = self.g.run([])
+        self.assertIn("cache-command", doc["phases"])
+        self.assertTrue(any(d.get("source") == "build-roots" for d in doc["degraded"]))
+        self.assertEqual(doc["planned"]["build-output"], 0)
+
+
+class RegistrationFairness(Base):
+    def test_current_registration_roots_replace_undated_hygiene(self):
+        import paths
+        roots = [self.t1 / n for n in ("fresh", "stale", "old")]
+        for root in roots:
+            root.mkdir()
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({
+            "checkouts": [{"path": str(roots[2])}]}))
+        (paths.SCRATCH / "worktree-registration.json").write_text(json.dumps({
+            "schema_version": 1, "kind": "worktree-registration", "partial": True,
+            "repositories": [{"path": str(root), "registered_at": self.g.now(),
+                "stale": i == 1, "worktrees": [{"path": str(root), "bare": False, "locked": False, "prunable": False}]} for i, root in enumerate(roots[:2])]}))
+        self.assertEqual(self.g.checkouts(), [str(roots[0])])
+
+    def test_undated_hygiene_is_not_current_registration(self):
+        import paths
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        out = paths.SCRATCH / "git-hygiene.json"
+        doc = {"checkouts": [{"path": str(self.t1)}]}
+        out.write_text(json.dumps(doc))
+        self.assertEqual(self.g.checkouts(), [])
+        doc["at"] = self.g.now()
+        out.write_text(json.dumps(doc))
+        self.assertEqual(self.g.checkouts(), [str(self.t1)])
+        doc["at"] = "2000-01-01T00:00:00Z"
+        out.write_text(json.dumps(doc))
+        self.assertEqual(self.g.checkouts(), [])
+
+    def test_refresh_child_gets_its_own_bounded_deadline(self):
+        with patch.dict(os.environ, {"OBSERVATORY_STEP_DEADLINE": "1"}), \
+                patch.object(self.g.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as call:
+            self.g.refresh("collectors/scan_git_hygiene.py", self.t1 / "out.json", 0, 20)
+        deadline = float(call.call_args.kwargs["env"]["OBSERVATORY_STEP_DEADLINE"])
+        self.assertGreater(deadline, time.time() + 17)
+        self.assertLessEqual(deadline, time.time() + 20)
+
+    def test_refresh_precedes_build_planning_and_holder_failure_survives_command_phase(self):
+        events = []
+        with patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "refresh", side_effect=lambda *a, **k: events.append(("refresh", a)) or "refreshed"), \
+                patch.object(self.g.Holders, "take", return_value=self.g.Holders(None)), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g, "planners", side_effect=lambda *a, **k: events.append(("plan", None)) or [(n, lambda b: []) for n in self.g.CLASSES]):
+            doc = self.g.run([])
+        self.assertEqual(events[0][0], "refresh")
+        self.assertIn("--registrations-only", events[0][1][4])
+        self.assertNotEqual(doc["holders"], "none")
+        self.assertFalse(doc["holders_by_phase"]["build-output"]["known"])
+        self.assertEqual(doc["holders_by_phase"]["cache-command"]["mode"], "none")
+
+    def test_cursor_is_persisted_before_expensive_scan_and_advances_next_pass(self):
+        import paths
+        roots = [str(self.t1 / n) for n in ("a", "b", "c")]
+        calls = []
+        def stop(root, at, timeout):
+            state = json.loads((paths.STATE / "disk-guard-build-cursor.json").read_text())
+            self.assertEqual(state["last_attempted"], root)
+            calls.append(root)
+            raise KeyboardInterrupt
+        with patch.object(self.g, "checkouts", return_value=roots), \
+                patch.object(self.g, "checkout_idle_days", side_effect=stop):
+            for _ in range(2):
+                with self.assertRaises(KeyboardInterrupt):
+                    self.g.plan_builds(self.cfg(), "critical", self.free(), time.time(), ["dist"])
+        self.assertEqual(calls, roots[:2])
+
+    def test_build_directory_enumeration_itself_has_an_entry_bound(self):
+        for name in ("a", "b", "c"):
+            (self.t1 / name).mkdir()
+        degraded = []
+        with patch.object(self.g, "WALK_LIMIT", 1):
+            rows = list(self.g._build_walk(str(self.t1), time.monotonic() + 2, degraded))
+        self.assertEqual(rows, [])
+        self.assertIn("incomplete", degraded[0]["reason"])
+
+    def test_each_root_gets_only_its_quantum(self):
+        roots = [str(self.t1 / n) for n in ("a", "b", "c")]
+        clock, calls = [100.0], []
+        def slow(root, at, timeout):
+            calls.append((root, timeout))
+            clock[0] += timeout
+            return None
+        with patch.object(self.g, "checkouts", return_value=roots), \
+                patch.object(self.g.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(self.g, "checkout_idle_days", side_effect=slow):
+            self.g.plan_builds(self.cfg(build_root_quantum_seconds=2), "critical", self.free(), time.time(),
+                               ["dist"], self.g.Budget(7, []))
+        self.assertEqual([row[0] for row in calls], roots)
+        self.assertTrue(all(0 < row[1] <= 2 for row in calls))
 
 
 if __name__ == "__main__":

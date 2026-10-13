@@ -24,6 +24,8 @@ import json
 import os
 import re
 import sys
+import stat
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -403,6 +405,7 @@ TOOL_CONFIGS = (
     (".config/opencode/opencode.json", "json"),
     (".codex/config.toml", "toml"),
     (".claude.json", "json-mcp"),
+    (".claude/settings.json", "json-env"),
     (".gemini/settings.json", "json"),
     (".cursor/mcp.json", "json"),
 )
@@ -411,36 +414,132 @@ SECRET_NAME = re.compile(r"key|token|secret|password|passwd|auth|bearer|credenti
 
 
 def _walk(node, path: str = ""):
-    if isinstance(node, dict):
-        for k, v in node.items():
-            yield from _walk(v, f"{path}.{k}" if path else str(k))
-    elif isinstance(node, list):
-        for i, v in enumerate(node):
-            yield from _walk(v, f"{path}[{i}]")
-    elif isinstance(node, str):
-        yield path, node
+    """Bound both nesting and width before deriving credential field names."""
+    stack = [(node, path, 0)]
+    count = 0
+    while stack:
+        node, path, depth = stack.pop()
+        count += 1
+        if depth > 64 or count > 10_000 or len(path) > 4096:
+            raise ValueError("configuration traversal limit")
+        if isinstance(node, dict):
+            if len(node) + len(stack) + count > 10_000:
+                raise ValueError("configuration traversal limit")
+            stack.extend((v, f"{path}.{k}" if path else str(k), depth + 1) for k, v in node.items())
+        elif isinstance(node, list):
+            if len(node) + len(stack) + count > 10_000:
+                raise ValueError("configuration traversal limit")
+            stack.extend((v, f"{path}[{i}]", depth + 1) for i, v in enumerate(node))
+        elif isinstance(node, str):
+            yield path, node
 
 
-def tool_plaintext(home: Path) -> list[dict]:
-    """Provider credentials kept in plaintext in agent tools' own config files: per file, the names (a key, or
-    a dotted path in JSON/TOML) whose value is credential-shaped under a credential-like name. Never a value;
-    never the file's other content. `.claude.json` is read only under `mcpServers` (env and headers)."""
+def tool_plaintext(home: Path, degraded: list[dict] | None = None,
+                   roots: list[Path] | None = None) -> list[dict]:
+    """Report names, parse coverage and tracking, never values or parser bodies.
+
+    A name recovered from a broken file is still evidence. It does not turn a
+    partial parse into complete coverage; its degraded row remains beside it.
+    """
     import credential_shape
+    import safe_git
+    degraded = degraded if degraded is not None else []
+    roots = roots if roots is not None else own_roots()
     out = []
-    for rel, kind in TOOL_CONFIGS:
-        path = home / rel
-        if not path.is_file():
+    project_ids = {}
+    registered = read_json(paths.REGISTRY / "projects.json").get("projects", [])
+    for project in registered if isinstance(registered, list) else []:
+        if not isinstance(project, dict) or not isinstance(project.get("id"), str):
             continue
+        folders = project.get("local_folders")
+        for folder in folders if isinstance(folders, list) else []:
+            if isinstance(folder, str):
+                for root in roots:
+                    project_ids[str((root / folder).resolve())] = project["id"]
+
+    def project_name(path):
+        path = Path(path)
+        value = project_ids.get(str(path.resolve()), path.name)
+        return value if value.startswith("project:") else "project:" + value
+
+    def problem(label, code, reason):
+        degraded.append({"source": "tool-config:" + label, "code": code, "reason": reason})
+
+    candidates = [(home / rel, kind, "~/" + rel) for rel, kind in TOOL_CONFIGS]
+    for root in dict.fromkeys(p.resolve() for p in roots):
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            with os.scandir(root) as entries:
+                for index, entry in enumerate(entries):
+                    if index >= 10_000:
+                        problem("configured-projects", "discovery-limit", "project configuration discovery reached its entry limit")
+                        break
+                    if entry.is_dir(follow_symlinks=False):
+                        project = Path(entry.path)
+                        candidates.append((project / ".mcp.json", "json", project_name(project) + "/.mcp.json"))
+        except FileNotFoundError:
             continue
-        pairs: list[tuple[str, str]] = []
+        except OSError:
+            problem("configured-projects", "unreadable", "project configuration discovery could not list its root")
+
+    def tracked(path, label):
+        try:
+            marker = False
+            for parent in path.parents:
+                try:
+                    (parent / ".git").lstat()
+                    marker = True
+                    break
+                except FileNotFoundError:
+                    continue
+            if not marker:
+                return False
+            result = safe_git.run(["ls-files", "--error-unmatch", "--", path.name], cwd=path.parent, timeout=5)
+            if result.returncode in (0, 1):
+                return result.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            pass
+        problem(label, "tracking-unknown", "Git tracking could not be measured; review whether this config is committed")
+        return None
+
+    def object_field(doc, key):
+        value = doc.get(key, {})
+        if not isinstance(value, dict):
+            raise ValueError("object required")
+        return value
+
+    def fallback(text, kind):
+        section = ""
+        for line in text.splitlines():
+            if kind == "toml":
+                table = re.fullmatch(r"\s*\[([A-Za-z0-9_.-]+)\]\s*", line)
+                if table:
+                    section = table[1] + "."
+            # Do not copy surrounding lines, parser context or project path keys.
+            for match in re.finditer(r"[\"']?([A-Za-z_][A-Za-z0-9_.-]*)[\"']?\s*[:=]\s*[\"']([^\"'\n]*)[\"']", line):
+                yield section + match[1], match[2]
+
+    for path, kind, label in candidates:
+        try:
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode):
+                problem(label, "unreadable", "not a regular config file; excluded without reading")
+                continue
+            if info.st_size > TEXT_MAX:
+                problem(label, "size-limit", "config exceeds the text size limit; not read")
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            continue
+        except OSError:
+            problem(label, "unreadable", "config could not be read")
+            continue
+        parsed = True
+        pairs = []
         if kind == "env":
             for line in text.splitlines():
-                m = re.match(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$", line)
-                if m:
-                    pairs.append((m.group(1), m.group(2).strip().strip("'\"")))
+                match = re.match(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$", line)
+                if match:
+                    pairs.append((match[1], match[2].strip().strip("'\"")))
         else:
             try:
                 if kind == "toml":
@@ -448,17 +547,32 @@ def tool_plaintext(home: Path) -> list[dict]:
                     doc = tomllib.loads(text)
                 else:
                     doc = json.loads(text)
-            except (ValueError, ImportError):
-                continue
-            if kind == "json-mcp":
-                doc = {"mcpServers": doc.get("mcpServers") or {},
-                       "projects": {p: {"mcpServers": (v or {}).get("mcpServers") or {}}
-                                    for p, v in (doc.get("projects") or {}).items() if isinstance(v, dict)}}
-            pairs = list(_walk(doc))
+                if not isinstance(doc, dict):
+                    raise ValueError("object required")
+                if kind == "json-mcp":
+                    projects = object_field(doc, "projects")
+                    if not isinstance(projects, dict):
+                        raise ValueError("projects object required")
+                    pairs = list(_walk(object_field(doc, "mcpServers"), "mcpServers"))
+                    for folder, config in projects.items():
+                        if not isinstance(config, dict):
+                            raise ValueError("project object required")
+                        pairs.extend(_walk(object_field(config, "mcpServers"), project_name(folder) + ".mcpServers"))
+                elif kind == "json-env":
+                    pairs = list(_walk(object_field(doc, "env"), "env"))
+                else:
+                    pairs = list(_walk(doc))
+            except (ValueError, ImportError, RecursionError):
+                parsed = False
+                problem(label, "parse-error", "config could not be parsed; recovered names are incomplete")
+                pairs = list(fallback(text, kind))
         names = sorted({name for name, value in pairs
-                        if SECRET_NAME.search(name.rsplit(".", 1)[-1]) and credential_shape.shaped(value)})
+                        if (SECRET_NAME.search(name.rsplit(".", 1)[-1])
+                            or ".headers." in name or ".http_headers." in name)
+                        and credential_shape.shaped(value)})
         if names:
-            out.append({"file": "~/" + rel, "names": names[:20], "count": len(names)})
+            out.append({"file": label, "names": names[:20], "count": len(names),
+                        "parsed": parsed, "tracked": tracked(path, label)})
     return out
 
 
@@ -553,7 +667,7 @@ def scan(home: Path, pins_file: Path, own_owners: set[str] | None = None) -> dic
         "instructions": instructions,
         "mcp_deferral": {"off": deferral_off, "base_url_host": base_host or None, "betas_disabled": betas_off},
         "projects": projects,
-        "tool_plaintext": tool_plaintext(home),
+        "tool_plaintext": tool_plaintext(home, degraded, roots),
         "codex": codex,
         "hooks": hooks,
         "hook_security": hooks_found,

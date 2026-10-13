@@ -103,6 +103,118 @@ def test_what_is_not_a_credential_is_not_called_one():
               f"got {got!r}" + (f" — {why}" if why else ""))
 
 
+def _random(n: int, seed: int) -> str:
+    """A random-looking body, made at run time so no literal looks like a live key."""
+    import random, string
+    return "".join(random.Random(seed).choices(string.ascii_letters + string.digits, k=n))
+
+
+def _uuid(seed: int) -> str:
+    import uuid, random
+    return str(uuid.UUID(int=random.Random(seed).getrandbits(128), version=4))
+
+
+def test_a_prefixed_token_is_a_secret_and_a_uuid_is_decided_by_its_name():
+    """INB-002: `ntn_…` read as config and a collection UUID as a secret — the truth inverted.
+
+    `wordish` read the short issuer prefix (`ntn`, `ol_api`) as a WORD, so a
+    random 46-character token became configuration; a canonical UUID has the
+    entropy of a key, so an id became a secret.
+    """
+    import scan_env
+    cases = [
+        ("AGENT_SYNC_NOTION_TOKEN", _k("ntn_", _random(46, 1)), "secret"),
+        ("AGENT_SYNC_OUTLINE_TOKEN", _k("ol_api_", _random(38, 2)), "secret"),
+        # A prefix no list knows: the tail decides, not the prefix.
+        ("VENDOR_TOKEN", _k("vndr_", _random(40, 3)), "secret"),
+        ("SOME_SETTING", _k("abc_", _random(40, 4)), "secret"),
+        ("AGENT_SYNC_OUTLINE_COLLECTION", _uuid(5), "config"),
+        ("AGENT_SYNC_NOTION_PARENT", _uuid(6), "config"),
+        ("WORKSPACE_ID", _uuid(7), "config"),
+        ("BILLING_PROJECT", _uuid(8), "config"),
+        ("HEROKU_API_KEY", _uuid(9), "secret"),
+        # Still configuration: words, regions, addresses.
+        ("GEMINI_MODEL", "gemini-2.5-flash-preview", "config"),
+        ("AWS_REGION", "us-east-1", "config"),
+        ("OAUTH_REDIRECT_URL", "https://app.example.com/auth/callback/provider", "config"),
+        ("SERVICE_NAME", "svc_applicationservicenameprimary", "config"),
+    ]
+    for name, value, want in cases:
+        got = scan_env.classify(name, value)
+        check(f"{name} is {want}", got == want, f"got {got!r}")
+    check("the prefix is not a word to wordish", not scan_env.wordish(_k("ntn_", _random(46, 1))))
+
+
+def _hex(n: int, seed: int) -> str:
+    import random
+    return "".join(random.Random(seed).choices("0123456789abcdef", k=n))
+
+
+def test_a_public_identifier_with_a_prefix_stays_configuration():
+    """INB-002's fix must not turn public identifiers into secrets (review round 1).
+
+    A prefix in front of a random run is a TOKEN's shape, and also a price's,
+    an organisation's, a project's, an image tag's. Where the random tail is the
+    only reason to call it secret, an identifier's NAME decides: configuration,
+    so it is neither counted nor searched for by the leak scan. A name the
+    secret rule claims (`*_SECRET_ID`, `*_TOKEN_ID`) keeps it secret.
+    """
+    import scan_env
+    import scan_leaks
+    config = [
+        ("STRIPE_PRICE_ID", "price_" + _random(24, 11)),
+        ("STRIPE_PRICE_PRO", "price_" + _random(24, 12)),
+        ("OPENAI_ORG", "org-" + _random(24, 13)),
+        ("VERCEL_PROJECT", "prj_" + _random(28, 14)),
+        ("VERCEL_TEAM_ID", "team_" + _random(24, 15)),
+        ("ASSISTANT_ID", "asst_" + _random(24, 16)),
+        ("PURCHASES_APPLE_ID", "appl_" + _random(27, 17)),
+        ("PURCHASES_GOOGLE_ID", "goog_" + _random(27, 18)),
+        ("IMAGE_TAG", "sha-" + _hex(40, 19)),
+        ("APP_RELEASE", "web-" + _hex(40, 20)),
+        ("UPLOADS_BUCKET", "uploads-" + _random(24, 21)),
+        ("EMPTY_ID", "00000000-0000-0000-0000-000000000000"),
+        ("REQUEST_CORRELATION", "00000000-0000-0000-0000-000000000000"),
+    ]
+    for name, value in config:
+        got = scan_env.classify(name, value)
+        check(f"{name} ({value[:5]}…) is config", got == "config", f"got {got!r}")
+    secret = [
+        ("VAULT_SECRET_ID", _uuid(22)),
+        ("SERVICE_TOKEN_ID", "tok_" + _random(30, 23)),
+        ("AGENT_SYNC_NOTION_TOKEN", _k("ntn_", _random(46, 1))),
+        ("AGENT_SYNC_OUTLINE_TOKEN", _k("ol_api_", _random(38, 2))),
+        # A known issuer prefix is claimed whatever the name says.
+        ("BILLING_PROJECT", _k("sk_", "live_" + _random(30, 24))),
+        ("LINEAR_TOKEN_REF", _k("lin_api_", _random(40, 25))),
+        ("NOTION_WORKSPACE_ID", _k("secret_", _random(43, 26))),
+    ]
+    for name, value in secret:
+        got = scan_env.classify(name, value)
+        check(f"{name} is secret", got == "secret", f"got {got!r}")
+    check("a configuration value never reaches the leak scan's known values",
+          not any(scan_env.classify(n, v) == "secret" for n, v in config),
+          "the leak scan searches only `secret` rows (scan_leaks.known_values)")
+    check("and the scan's own test still finds an issued token distinctive",
+          scan_leaks.searchable(_k("ntn_", _random(46, 1))))
+
+
+def test_a_known_prefix_or_a_secret_name_wins_over_word_shape():
+    """Review round 3: a body with `-` or `_` read as words, so `GOCSPX-…` under
+    GOOGLE_CLIENT_SECRET was a secret 178 times in 400. Seeded, 300+ each."""
+    import random, string, scan_env, credential_shape
+    alphabet = string.ascii_letters + string.digits + "-_"
+    rng = random.Random(20261013)
+    cases = ([("GOOGLE_CLIENT_SECRET", "GOCSPX-" + "".join(rng.choices(alphabet, k=28))) for _ in range(400)]
+             + [("TAVILY_API_KEY", "tvly-" + "".join(rng.choices(alphabet, k=32))) for _ in range(300)]
+             + [("SERVICE_CLIENT_SECRET", "".join(rng.choices(alphabet, k=32))) for _ in range(300)])
+    wrong = [(n, v[:6]) for n, v in cases if scan_env.classify(n, v) != "secret"]
+    check(f"all {len(cases)} prefixed or secret-named random values are secret", not wrong,
+          f"{len(wrong)} were not, e.g. {wrong[:3]}")
+    check("KNOWN_PREFIX derives from credential_shape.PREFIXES",
+          set(credential_shape.PREFIXES) <= set(scan_env.KNOWN_PREFIX) and "secret_" in credential_shape.PREFIXES)
+
+
 def test_a_comment_is_not_a_value_end_to_end():
     """The defect was in the PARSER, so the assertion has to run the pair.
 
@@ -476,6 +588,9 @@ if __name__ == "__main__":
     print("the env inventory — names, never values\n")
     for fn in (test_a_credential_is_recognised_by_shape,
                test_what_is_not_a_credential_is_not_called_one,
+               test_a_prefixed_token_is_a_secret_and_a_uuid_is_decided_by_its_name,
+               test_a_public_identifier_with_a_prefix_stays_configuration,
+               test_a_known_prefix_or_a_secret_name_wins_over_word_shape,
                test_a_comment_is_not_a_value_end_to_end,
                test_the_parser_keeps_a_value_whole,
                test_only_a_secret_is_fingerprinted,

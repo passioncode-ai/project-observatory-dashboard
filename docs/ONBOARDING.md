@@ -292,16 +292,34 @@ chooses the helper's working directory and `PATH`. The door prints exactly
 `{"Authorization": "Bearer <value>"}` and a newline; `--name X-Api-Key` changes the header and
 `--scheme ""` prints the bare value. It reads the vault only, never an env file or the
 environment, and refuses, printing nothing on stdout, when stdout is a terminal, when
-`CLAUDE_CODE_MCP_SERVER_URL` is unset or names a scheme, host or port other than the binding,
-when the slot is not bound, when `--name` or `--scheme` is not an RFC 7230 token, or when the
+`CLAUDE_CODE_MCP_SERVER_URL` is unset and no `--server-url` was given, when the server URL it
+has names a scheme, host or port other than the binding, when the slot is not bound, when `--name` or `--scheme` is not an RFC 7230 token, or when the
 value carries a control character. `--header-for` takes an https URL or a bare host (https on
-the default port); the path is not part of the binding, and plain http, userinfo, a query or a
-fragment are refused. `vault.py bind … --clear` removes the binding; `vault.py list` shows it;
-both verbs are journalled in the movements journal. Each `header` call adds a row to the
-`secret-use.jsonl` audit (served or refused, the server's name and host, the parent process),
-never the value. The binding narrows an accident (`header … | cat` in an agent's shell is
-refused for want of the server's URL); it is not a sandbox, because anything that can set that
-variable to the bound URL and read stdout receives the value.
+the default port), or plain http to a loopback literal with its port —
+`http://127.0.0.1:<port>` or `http://[::1]:<port>` — since loopback crosses no network;
+`localhost` is refused (a name `/etc/hosts` can remap), as is http to any other host. The path
+is not part of the binding, and userinfo, a query or a fragment are refused. A client that does
+not export the server's URL to its helper — Codex's `http_headers_helper` — passes it with
+`--server-url URL`, used only when `CLAUDE_CODE_MCP_SERVER_URL` is unset; when both are set and
+name different servers the call is refused (`url-conflict`). `vault.py bind … --clear` removes
+the binding; `vault.py list` shows it; both verbs are journalled in the movements journal. Each
+`header` call adds a row to the `secret-use.jsonl` audit (served or refused, the server's name
+and host, the parent process, and the caller — `claude-headersHelper` when the URL came from
+the variable, `codex-helper` when it came from `--server-url`), never the value. The binding
+narrows an accident: a bare `header … | cat` in an agent's shell is refused for want of a server
+URL. It is not a sandbox: anything that names the bound URL — in the variable or with
+`--server-url` — and reads stdout receives the value.
+
+**Codex is untested.** The `--server-url` form follows Codex's documented `http_headers_helper`
+("a local command that prints a JSON object"), but no Codex configuration entry has been
+verified against this door, and Codex documents `http_headers_helper` as supported only for
+local MCP servers. Until an entry is verified, Codex's documented fallback is an environment
+variable read by Codex itself — `bearer_token_env_var = "<ENV>"` for an `Authorization: Bearer`
+header, `env_http_headers = { "<header>" = "<ENV>" }` for any other — with Codex started under
+`use_secret.py serve`. That is weaker than the helper: the value then sits in the agent's own
+environment for the whole session, where any command the agent runs can read it, and none of the
+door's refusals (a terminal, an unbound slot, a server other than the binding, `url-conflict`)
+applies.
 
 Slots are private files under the workspace by default. A separate
 `sources.secret_store` is optional and belongs to the user. File permissions
@@ -309,22 +327,60 @@ limit local access; this is not a claim that the default files are encrypted at
 rest. Protect private backups just as carefully. A configured external store
 is not included in workspace backup snapshots.
 
-**A DigitalOcean managed database's password, into the vault and rotated without printing it.**
-`tools/digitalocean.py` uses `doctl`'s current context as its credential (`doctl auth init` first).
-`db list` and `db consumers CLUSTER` print names, ids, exposure and which App Platform apps keep the
-password or URL in their own spec; `db credential CLUSTER USER --db NAME --to vault:PROJECT/ENV/NAME`
-puts the connection URL in the vault on stdin; `db rotate … --app ID --spec-env ID:KEY` resets the
-password once and moves every consumer you name, after reading everything it needs and asking the
-vault for the slot, and prints the `use_secret.py serve` services that still need a restart. `db
-consumers` lists only App Platform apps whose spec binds the cluster; an app that reaches it by a URL
-alone, a droplet, a Worker or a laptop is yours to name. The consumers are down between the reset and
-their new deployment reaching ACTIVE. A folder you filled with `vault.py inject` keeps the old value
-until you run `vault.py inject` for it again. Exit codes: exit 0 done; 1 refused before the reset, nothing changed; after the reset 2 a deployment not ACTIVE, 3 the vault did not take the value, 4 an app not updated or redeployed, 5 the reset returned no password (several: the largest). Do not ask a provider MCP
-tool for clusters: its answer can carry every cluster's passwords.
+**A DigitalOcean managed database's password, without printing it.**
+`tools/digitalocean.py` uses the operator's `doctl` context. `db list` and
+`db consumers CLUSTER` show metadata; the latter lists only apps whose spec binds the
+cluster, so it is not a complete consumer inventory. `db credential CLUSTER USER --db NAME
+--to vault:PROJECT/ENV/NAME` delivers a URL on stdin. `db rotate … --app ID --spec-env ID:KEY`
+resets once and names local `use_secret.py serve` consumers that still need a restart.
+A folder populated with `vault.py inject` keeps the old value until injected again.
+Do not ask a provider MCP tool for credentials: its whole answer may be retained.
+
+DigitalOcean rotation verifies every selected `--spec-env APP:KEY` literal before any reset.
+Its name is not evidence: a plain value must equal the selected database user's current
+provider password, or be a database URL with that password, user, engine and the provider's
+connection host/port. Opaque encrypted values and unverified pool endpoints are refused;
+migrate those consumers to App Platform database bindings before rotation. No command in
+this flow prints the current password. Only the named consumers are moved, with downtime
+between reset and ACTIVE; ACTIVE is not application health verification.
+
+The door writes an owner-only receipt under `store/digitalocean-rotations/` before reset,
+initially `reset: unknown`. A lost or malformed response, timeout or nonzero CLI result can
+follow a committed reset: exit 5 means **unknown**, not “nothing changed”. Never repeat
+`db rotate` to recover it. Use `db credential` to deliver the current value into the selected
+vault slot, then reconcile each consumer without another reset. Exit 1 is a refusal before
+reset; after an attempt, 2 means deployment unconfirmed, 3 vault delivery failed, 4 an app
+update/redeploy or temporary spec cleanup failed, and 6 receipt update failed. The largest
+code wins. Independent consumers continue after a confirmed reset despite another consumer's
+failure. Provider/vault error bodies are withheld. A crash or failed final receipt write
+leaves the earlier uncertain receipt; there is no automatic reconciliation, retry or claim
+of a transaction across provider and vault. A failed temporary-file cleanup may leave its
+owner-only spec file and is reported for local recovery.
+
+Reset, app updates and redeploys each make one attempt; only read calls retry.
+A lost/nonzero mutation response leaves that consumer `unknown`, even if the provider
+already applied it. The receipt distinguishes this from `not_started` for a local
+pre-call failure. Read current spec and deployment state before any retry; a blind
+redeploy is not recovery for a literal. Independent peers still continue. Deployment
+confirmation accepts a validated phase equal to `ACTIVE`, never a suffix or arbitrary
+provider text; malformed metadata remains unconfirmed and its body is not printed.
+
 
 Known-value scanning finds occurrences of values already known locally. It
 cannot prove the absence of unknown, encoded or previously deleted values.
 Rotation changes the local slot; provider revocation is a separate action.
+
+Vault slot discovery reports unreadable ancestors and excludes symbolic links or special files as unmeasured. Session directory links are likewise unmeasured and are never followed.
+
+Leak discovery reports unreadable sessions, log directories, dashboard metadata and
+tracked-tree listings as `source-unreadable`, preserving sightings from readable
+siblings. Permission/stat/timeout errors never become an empty healthy source.
+A package with no Git marker in its ancestry explicitly reports that it has no
+tracked-tree source; a present marker whose Git listing fails is a coverage hole.
+Missing optional paths remain absent. A source expected to be a file but resolving
+to a directory, submodule entry or special file is explicitly unmeasured and is
+never opened as a file. An interrupted or unreadable source is
+unmeasured, not proof that it contains no credential.
 
 A file the scan could not open is listed as unread and raises a warning. It is never counted as
 clean. When a sighting is known and accepted, for example a synthetic value a fixture prints on
@@ -375,6 +431,27 @@ claude mcp list | grep observatory     # Connected
 
 Restart open Claude Code sessions afterwards; they read their MCP servers at
 start.
+
+Agents keep their work memory here. `observatory_record` writes a note about one
+project and `observatory_learn` a lesson inside one project; `observatory_lesson`
+records a lesson for every project — a retro entry's class with the project's
+pseudonymous key (`p-` and 12 hex digits of its root commit, never its name) and
+the evidence commit. Every one is a proposal (confidence 0.5). A lesson becomes
+`observed` without you when a second, distinct project records the same class and
+both commits resolve in clones the registry knows on this machine:
+`tools/corroborate.py`, which the tick runs, asks git for each commit in the clone
+whose root commit gives the project's key. A key no registered clone carries is not
+a witness; its lesson stays proposed and `corroboration.json` lists it as "commit not
+resolvable here". `supported` is yours, through `review.py`.
+Proposed lessons are kept 365 days (`retention.json` → `ledger.kinds.lesson`), and
+an observed one is never erased by age. An agent finds lessons with
+`observatory_search` and `kinds: ["lesson"]`, without a project. task-pipeline
+writes them with `observatory_lesson` where the engine has it and as `lesson:`
+notes through `observatory_record` otherwise. Lessons stay in
+this workspace: they are agents' memory, not the project's. Lessons recorded earlier
+as `lesson:` notes are converted once with
+`python "$(project-observatory full-path)/tools/migrate_lessons.py" --apply`
+(without `--apply` it lists what it would change and writes nothing).
 
 The optional `observatory-log` plugin adds Claude Code hooks; other hosts can
 use the CLI and MCP without those hooks.
@@ -599,7 +676,10 @@ same summary.
   and `du -x` never counts a mounted image as the host disk. `du` counts an APFS clone in full, so
   on macOS a place of 512 MB or more is walked a second time, inside the same budget, for the
   private size of its files: where clones hold at least a tenth of it (and 100 MB), the row says
-  what removing it frees at least. Swap files are a row too: on
+  what removing it frees at least. That walk is repeated only every `private_every_hours` (72;
+  `--disk` always walks); one that runs out of time or budget keeps the last figures, dated "as of",
+  and is named under "Not measured", and a git-hygiene pass cut short carries its unreached
+  checkouts with their old date, from which the cleanup takes no automatic action. Swap files are a row too: on
   macOS they share the disk's container, so memory pressure is disk pressure.
 - **Git hygiene**: every registered checkout's worktrees (clean, dirty,
   missing, in use, idle days) and branches (merged, patch-merged, pushed,
@@ -619,11 +699,75 @@ project-observatory full cleanup --apply                  # the auto tier, now
 project-observatory full cleanup --apply --include manual # also unique branches and dirty worktrees, archived first
 ```
 
-The manual tier writes a thin git bundle per branch and a patch plus a tarball
-of untracked files per worktree under `<home>/archive/cleanup/<date>/` before
-removing anything. A worktree's patch is re-applied, in check mode, to a scratch
-index of its HEAD first; if git cannot produce it or it does not apply, the
-worktree stays and the run reports it as failed with the reason.
+The manual tier writes a thin git bundle per branch. For each dirty worktree it
+creates a fresh directory under `<home>/archive/cleanup/<date>/`, with
+`tracked.patch` (HEAD to working files), `staged.patch` (HEAD to index),
+`status.txt`, `untracked-manifest.json` and `untracked.tgz`. Both patches must apply
+in check mode to a scratch index of HEAD. The tarball's exact regular-file list,
+sizes, modes and streaming SHA-256 hashes must match the saved manifest. Before
+removal it reads the archive back, refreshes process holders, and rechecks HEAD,
+status, both patches and the untracked listing/content. Changes, unreadable data,
+archive errors or an exhausted inspection budget retain the worktree and report
+failure, naming any partial archive; a retry never overwrites an earlier archive.
+
+Manual archiving permits ordinary files only: nested repositories (including
+submodules and bare repositories), symlinks and special files are retained.
+Ignored files are outside this archive and cause a skip; preserve or move them
+before retrying. Inspection allows 60 seconds (or the remaining run budget),
+10,000 tree entries and 512 MiB of untracked content; each patch also has a
+512 MiB limit. Untracked hashing reads at most 1 MiB at a time. Git patch capture
+and individual filesystem operations are not a strict memory or wall-clock cap.
+These checks are not an atomic filesystem lock: another writer can still change
+a file between its final observation and Git removal. Stop writers before an
+explicit manual cleanup. Coverage: `CleanupNeverLosesWork` in
+`observatory/engine/tests/test_git_hardening.py`.
+
+Before both automatic and manual worktree removal, cleanup reads index flags
+before status and again at the removal boundary. `assume-unchanged`,
+`skip-worktree` (including sparse checkouts), unsupported entries or an unreadable
+index cause a skip: Git status and diff can omit changes behind these flags.
+Cleanup does not clear or rewrite the flags. It also verifies the live HEAD's
+retaining branch; a detached HEAD needs an archive ref whose readback equals the
+exact commit. A conflicting ref or a failed creation retains the worktree.
+
+Branch cleanup captures its tip before eligibility checks. A unique branch's
+verified bundle must advertise that exact tip, and the current tip and worktree
+attachments are checked again. Deletion uses Git's expected-old-tip comparison
+with `--no-deref`: a newer commit cannot be deleted by a stale cleanup, and a
+late symbolic-ref conversion cannot redirect deletion to another branch.
+Symbolic branch targets, invalid names and shorthand names are refused during
+eligibility checks; only the three known branch cleanup classes can act. A newly attached worktree
+still has a small final attachment-check/deletion race; concurrent checkout
+writers must be stopped. Each branch bundle gets a new directory. Git branch
+configuration is retained when the ref is deleted. Coverage:
+`CleanupNeverLosesWork` in `observatory/engine/tests/test_git_hardening.py`.
+
+The legacy `full cleanup` build-artifact action now reports a skip and asks for
+`full disk-guard` to replan; only the disk guard owns build-output eligibility.
+`CleanupNeverLosesWork.test_legacy_artifact_plan_cannot_delete_newly_tracked_output`
+covers this refusal.
+The `.wrangler` directory can hold local databases and object storage; it is never
+classified as build output, even when an older cleanup configuration lists it.
+Cleanup also retains an ignored artifact parent containing a nested repository or
+local state, and any tree whose contents cannot be fully inspected within its
+bounded check. Symlinks and special files are retained conservatively.
+Regression coverage: `observatory/engine/tests/test_disk_guard.py`, `GitTierSafety`.
+
+### A lightweight memory refresh
+
+`project-observatory full machine --memory-only` refreshes RAM, swap and per-process
+RSS into `store/raw/machine-memory.json`, without sizing directories or reading process
+arguments. Disk-guard passes reserve up to eight seconds for this before planning, even
+when automatic cleanup is disabled. This measurement never stops a process or removes data.
+
+The Machine page and `observatory_machine` select memory and process observations separately,
+show their timestamps and flag samples older than 30 minutes or with unknown timestamps.
+A failed measurement remains null with a reason; zero means a measured zero. RSS totals
+can count shared pages more than once and do not measure unique physical memory or
+reclaimable disk bytes. Lightweight process groups identify executable basenames only;
+project/simulator attribution still belongs to the full survey and is not inferred here.
+Native Windows has no new memory adapter in this slice and reports unsupported sources.
+Proof: `tests/test_memory_freshness.py` in the engine.
 
 ### The disk guard
 
@@ -662,6 +806,23 @@ yourself; a worktree with uncommitted edits, or with ignored files that are not 
 database), and a branch with unique commits never do. `project-observatory full cleanup --level low` previews it.
 Every cleanup takes one lock, so the tick, the guard and you never act on the same thing at once. npx's package
 cache and macOS diagnostic reports are swept too.
+
+Temporary cleanup preserves repositories and linked worktrees, including nested
+Git markers, bare repositories and paths beneath a checkout or bare repository.
+Each path plan carries its device/inode identity; a replaced target or a plan
+without that identity is skipped and must be planned again. Build cleanup rechecks checkout
+activity, ignore rules, tracked files and new writes immediately before acting.
+Each path action also makes a fresh, target-scoped holder probe within five
+seconds; unknown, partial or timed-out results skip the path. On POSIX this
+last probe requires `lsof`; without it the plan is available but path removal
+waits. Windows retains the rename probe. See [the preservation contract](design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
+and `tests/test_disk_guard.py::TargetRevalidation` / `FreshTargetProbe`.
+
+Build planning first refreshes explicit Git worktree registrations within a
+reserved budget. Root attempts rotate across passes with a persisted cursor and
+a five-second default quantum. Registration lists membership, not abandoned or
+safe-to-delete status. Failed path-holder readings remain visible per phase.
+See [registration and fairness](design/DISK-GUARD.md#registration-refresh-and-build-root-fairness-obs-87-subset).
 
 **On every system.** What a process holds is read with `lsof` on macOS and Linux, from
 `/proc` on a Linux without `lsof`, and on Windows by renaming the folder aside before
@@ -1182,3 +1343,52 @@ the engine's absolute path and an initialized workspace in **Settings**. The ass
 needs the setup in [Enable background or paid actions deliberately](#enable-background-or-paid-actions-deliberately).
 It runs the installed engine's `full assistant` command; it needs no MCP server and registers none. Details:
 [macOS app](macos/README.md).
+
+Disk-guard measurement limits: unknown swap remains `null` with a reason and
+source time; it is not zero. The largest-file report carries completeness,
+error counts and budget exhaustion. An incomplete empty scan is shown as an
+incomplete measurement. The MCP overview exposes `guard.largeFilesCoverage`
+beside its bounded file list. See [measurement coverage](design/DISK-GUARD.md#measurement-coverage-obs-87-subset).
+
+### Tool configuration coverage
+
+With the harness integration enabled, the scan names credential-shaped fields in
+user tool configs and `.mcp.json` files one level below the configured projects
+root. It never prints their values. Project-scoped names use a measured registry
+id when available and otherwise the directory basename. A malformed config emits
+`harness.scan_degraded`; line-based name recovery is marked `parsed: false` and
+never establishes full coverage. Unreadable, unsupported or oversized files are
+also explicitly unmeasured. Git-tracked plaintext configs raise a critical
+finding; failed tracking checks remain unknown. Follow the reason-specific remedy
+and rerun `project-observatory full harness`. A tracked key may remain in history:
+review exposure and revoke or rotate through its owner before treating it as safe.
+
+### Scheduled measurement freshness
+
+Tick receipts distinguish `disabled`, `not_started`, `stopped`, `failed` and
+`ran`. Disabled steps preserve the last successful measurement time; they do not
+raise starvation. A collector absent from the last tick's `collector_order` is
+not classified as starved. Planned collectors warn after three missed starts or
+six hours without a completed measurement (`config/tick.json` `starve_hours`
+overrides the age bound); leaks and integrity use critical severity. Interrupted
+attempts retain unknown completion. Unsupported rotation schemas are reported as
+`tick.rotation_degraded`, never interpreted as a healthy empty queue.
+
+Merge provenance records `inputs` timestamps and degrades old inputs: local
+filesystem data after two hours, GitHub/remotes after six, daily inputs after
+48. Legacy files without a declared timestamp use file modification time;
+invalid declared timestamps stay unknown. A new merge does not refresh them.
+Rollback to an older engine can reset schema-2 starvation streaks; allow fresh
+receipts before trusting scheduling coverage after rollback.
+
+### Repeated cleanup stops and unmeasured sources
+
+Three consecutive guard summaries reporting stopped Git cleanup produce
+`machine.guard_stopping` (warning), with the latest count and pressure level.
+The guard's own unavailable sources produce `machine.guard_degraded` (info).
+Only a Trash Full Disk Access failure receives the macOS consent instructions:
+a person grants the maintenance job's interpreter access in System Settings →
+Privacy & Security → Full Disk Access, or leaves that source unmeasured. Other
+access, journal and time-budget failures keep their own reason and recovery step.
+The compact agent overview already carries Git `partial` and `carried` evidence;
+carried measurements are not a new cleanup authorization.

@@ -33,6 +33,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 for sub in ("", "collectors", "tools", "plugins", "tests"):
@@ -501,6 +502,407 @@ class CleanupNeverLosesWork(unittest.TestCase):
             self.assertKept(self.act())
         finally:
             self.cleanup.git = real
+
+    def test_tracked_edit_during_archive_refuses_removal(self) -> None:
+        original = self.cleanup.export_tracked
+        def changed(target, status):
+            result = original(target, status)
+            (self.wt / "old.txt").write_text("the only copy of this edit\nnewer edit\n")
+            return result
+        with patch.object(self.cleanup, "export_tracked", side_effect=changed):
+            self.assertKept(self.act())
+        self.assertIn("newer edit", (self.wt / "old.txt").read_text())
+
+    def test_untracked_edit_after_tar_write_refuses_removal(self) -> None:
+        import tarfile
+        untracked = self.wt / "notes.txt"
+        untracked.write_text("first note\n")
+        original = tarfile.TarFile.add
+        def changed(tar, name, *args, **kwargs):
+            result = original(tar, name, *args, **kwargs)
+            untracked.write_text("newer only copy\n")
+            return result
+        with patch.object(tarfile.TarFile, "add", changed):
+            self.assertKept(self.act())
+        self.assertEqual(untracked.read_text(), "newer only copy\n")
+
+    def test_nested_untracked_repository_is_preserved(self) -> None:
+        nested = self.wt / "nested"
+        bare(self.wt, "init", "-q", str(nested))
+        (nested / "only.txt").write_text("uncommitted nested work\n")
+        self.assertKept(self.act())
+        self.assertTrue((nested / ".git").is_dir())
+        self.assertEqual((nested / "only.txt").read_text(), "uncommitted nested work\n")
+
+    def test_manual_regular_untracked_content_is_verified_and_restorable(self) -> None:
+        import hashlib, json, tarfile
+        content = b"untracked binary\x00payload\n"
+        (self.wt / "notes.bin").write_bytes(content)
+        rec = self.act()
+        self.assertRestorable(rec)
+        dest = pathlib.Path(rec["archive"])
+        manifest = json.loads((dest / "untracked-manifest.json").read_text())
+        self.assertEqual(manifest["notes.bin"]["sha256"], hashlib.sha256(content).hexdigest())
+        with tarfile.open(dest / "untracked.tgz", "r:gz") as tar:
+            self.assertEqual(tar.extractfile("notes.bin").read(), content)
+
+    def test_manual_archive_budget_exhaustion_preserves_work(self) -> None:
+        with patch.object(self.cleanup, "ARCHIVE_SECONDS", 0, create=True):
+            self.assertKept(self.act())
+
+    def test_archive_read_failure_preserves_work(self) -> None:
+        import tarfile
+        (self.wt / "notes.txt").write_text("only note\n")
+        original = tarfile.open
+        def unreadable(name, mode="r", *args, **kwargs):
+            if mode.startswith("r"):
+                raise OSError("synthetic archive read error")
+            return original(name, mode, *args, **kwargs)
+        with patch.object(tarfile, "open", side_effect=unreadable):
+            self.assertKept(self.act())
+
+    def test_untracked_special_file_is_preserved(self) -> None:
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("FIFO requires POSIX")
+        fifo = self.wt / "queue"
+        os.mkfifo(fifo)
+        self.assertKept(self.act())
+        self.assertTrue(fifo.exists())
+
+    def test_legacy_artifact_plan_cannot_delete_newly_tracked_output(self) -> None:
+        output = self.repo / "dist"
+        output.mkdir()
+        (output / "only.txt").write_text("new source, not disposable\n")
+        bare(self.repo, "add", "dist")
+        result = self.cleanup.act({"class": "build-artifacts", "tier": "auto", "target": str(output)},
+                                  self.d / "archive")
+        self.assertEqual(result["result"], "skipped")
+        self.assertIn("full disk-guard", result["reason"])
+        self.assertEqual((output / "only.txt").read_text(), "new source, not disposable\n")
+
+    def test_head_change_during_archive_refuses_removal(self) -> None:
+        original = self.cleanup.export_tracked
+        def changed(target, status):
+            result = original(target, status)
+            bare(self.wt, "add", "old.txt")
+            bare(self.wt, "commit", "-qm", "concurrent work")
+            return result
+        with patch.object(self.cleanup, "export_tracked", side_effect=changed):
+            self.assertKept(self.act())
+
+    def test_added_untracked_file_after_tar_write_refuses_removal(self) -> None:
+        import tarfile
+        (self.wt / "notes.txt").write_text("original note\n")
+        original = tarfile.TarFile.add
+        def changed(tar, name, *args, **kwargs):
+            result = original(tar, name, *args, **kwargs)
+            (self.wt / "new.txt").write_text("new only copy\n")
+            return result
+        with patch.object(tarfile.TarFile, "add", changed):
+            self.assertKept(self.act())
+        self.assertEqual((self.wt / "new.txt").read_text(), "new only copy\n")
+
+    def test_untracked_symlink_and_bare_repository_are_preserved(self) -> None:
+        link = self.wt / "link"
+        link.symlink_to("old.txt")
+        self.assertKept(self.act())
+        self.assertTrue(link.is_symlink())
+        link.unlink()
+        nested = self.wt / "nested.git"
+        bare(self.wt, "init", "--bare", "-q", str(nested))
+        self.assertKept(self.act())
+        self.assertTrue((nested / "HEAD").is_file())
+
+    def test_hashing_reads_bounded_chunks_and_refuses_excess(self) -> None:
+        import io
+        calls = []
+        class Source(io.BytesIO):
+            def read(self, count=-1):
+                calls.append(count)
+                return super().read(count)
+        data = b"x" * (2 * 1024 * 1024 + 7)
+        size, _ = self.cleanup.stream_digest(Source(data), time.monotonic() + 30, len(data))
+        self.assertEqual(size, len(data))
+        self.assertTrue(all(0 < n <= 1024 * 1024 for n in calls))
+        with self.assertRaises(self.cleanup.ArchiveRefused):
+            self.cleanup.stream_digest(Source(data), time.monotonic() + 30, 10)
+
+    def test_untracked_read_error_refuses_removal(self) -> None:
+        note = self.wt / "notes.txt"
+        note.write_text("only note\n")
+        original = os.open
+        def denied(path, *args, **kwargs):
+            if pathlib.Path(path) == note:
+                raise PermissionError("synthetic unreadable file")
+            return original(path, *args, **kwargs)
+        with patch.object(self.cleanup.os, "open", side_effect=denied):
+            rec = self.act()
+        self.assertKept(rec)
+        self.assertIn("archive", rec)  # the partial recovery directory stays named
+        self.assertEqual(note.read_text(), "only note\n")
+
+    def test_distinct_staged_and_working_edits_are_both_archived(self) -> None:
+        (self.wt / "old.txt").write_text("staged only copy\n")
+        bare(self.wt, "add", "old.txt")
+        (self.wt / "old.txt").write_text("the only copy of this edit\nworking copy\n")
+        rec = self.act()
+        self.assertRestorable(rec)
+        staged = pathlib.Path(rec["archive"]) / "staged.patch"
+        self.assertIn("+staged only copy", staged.read_text())
+        restored = self.d / "restore-index"
+        bare(self.d, "clone", "-q", str(self.repo), str(restored))
+        bare(restored, "apply", "--cached", str(staged))
+        self.assertEqual(bare(restored, "show", ":old.txt").stdout, "staged only copy\n")
+
+    def test_staged_edit_during_archive_refuses_removal(self) -> None:
+        path = self.wt / "old.txt"
+        path.write_text("first staged copy\n")
+        bare(self.wt, "add", "old.txt")
+        path.write_text("the only copy of this edit\nworking copy\n")
+        original = self.cleanup.archive_manual
+        def revise(*args, **kwargs):
+            result = original(*args, **kwargs)
+            working = path.read_bytes()
+            path.write_text("new staged only copy\n")
+            bare(self.wt, "add", "old.txt")
+            path.write_bytes(working)
+            return result
+        with patch.object(self.cleanup, "archive_manual", side_effect=revise):
+            rec = self.act()
+        self.assertKept(rec)
+        self.assertIn("index changed", rec["reason"])
+        self.assertEqual(bare(self.wt, "show", ":old.txt").stdout, "new staged only copy\n")
+
+    def _worktree_action(self, cls="worktree-dirty", branch="topic") -> dict:
+        return self.cleanup.act({"class": cls, "tier": "manual" if cls.endswith("dirty") else "auto",
+                                 "repo": str(self.repo), "target": str(self.wt), "branch": branch}, self.d / "archive")
+
+    def _hidden_index_case(self, flag, cls):
+        bare(self.wt, "update-index", flag, "old.txt")
+        (self.wt / "old.txt").write_text("hidden only copy\n")
+        if cls.endswith("dirty"):
+            (self.wt / "visible.txt").write_text("visible edit\n")
+        rec = self._worktree_action(cls)
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual((self.wt / "old.txt").read_text(), "hidden only copy\n")
+        self.assertIn("index", rec["reason"])
+
+    def test_assume_unchanged_refuses_manual_and_auto_removal(self):
+        for cls in ("worktree-dirty", "worktree-clean"):
+            with self.subTest(cls=cls):
+                self.setUp()
+                self._hidden_index_case("--assume-unchanged", cls)
+
+    def test_skip_worktree_refuses_manual_and_auto_removal(self):
+        for cls in ("worktree-dirty", "worktree-clean"):
+            with self.subTest(cls=cls):
+                self.setUp()
+                self._hidden_index_case("--skip-worktree", cls)
+
+    def test_index_flag_appearing_during_archive_refuses_removal(self):
+        original = self.cleanup.archive_manual
+        def revise(*args, **kwargs):
+            result = original(*args, **kwargs)
+            bare(self.wt, "update-index", "--assume-unchanged", "old.txt")
+            return result
+        with patch.object(self.cleanup, "archive_manual", side_effect=revise):
+            rec = self.act()
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertTrue(self.wt.exists())
+
+    def test_unreadable_index_flags_refuse_removal(self):
+        original = self.cleanup.git
+        def unreadable(repo, *args, **kwargs):
+            if args[:2] == ("ls-files", "-v"):
+                return subprocess.CompletedProcess(args, 1, "", "synthetic read failure")
+            return original(repo, *args, **kwargs)
+        with patch.object(self.cleanup, "git", side_effect=unreadable):
+            rec = self.act()
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertTrue(self.wt.exists())
+
+    def _detached_unique_head(self):
+        bare(self.wt, "checkout", "--detach", "-q")
+        bare(self.wt, "add", "old.txt")
+        bare(self.wt, "commit", "-qm", "unique detached change")
+        head = bare(self.wt, "rev-parse", "HEAD").stdout.strip()
+        with (self.wt / "old.txt").open("a") as f:
+            f.write("new working edit\n")
+        return head, "archive/wt-" + head[:8]
+
+    def test_detached_archive_ref_conflict_retains_unique_head(self):
+        head, name = self._detached_unique_head()
+        bare(self.repo, "branch", name, "main")
+        rec = self._worktree_action(branch=None)
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.wt, "rev-parse", "HEAD").stdout.strip(), head)
+
+    def test_detached_archive_ref_creation_failure_retains_worktree(self):
+        head, name = self._detached_unique_head()
+        original = self.cleanup.git
+        def refuse(repo, *args, **kwargs):
+            if args[:2] == ("branch", name):
+                return subprocess.CompletedProcess(args, 1, "", "synthetic ref failure")
+            return original(repo, *args, **kwargs)
+        with patch.object(self.cleanup, "git", side_effect=refuse):
+            rec = self._worktree_action(branch=None)
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertTrue(self.wt.exists())
+
+    def test_matching_detached_archive_ref_permits_removal(self):
+        head, name = self._detached_unique_head()
+        bare(self.repo, "branch", name, head)
+        rec = self._worktree_action(branch=None)
+        self.assertEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "rev-parse", name).stdout.strip(), head)
+
+    def test_detached_head_drift_after_ref_creation_refuses_removal(self):
+        head, name = self._detached_unique_head()
+        original = self.cleanup.git
+        def revise(repo, *args, **kwargs):
+            result = original(repo, *args, **kwargs)
+            if args[:2] == ("branch", name):
+                bare(self.wt, "add", "old.txt")
+                bare(self.wt, "commit", "-qm", "new detached head")
+            return result
+        with patch.object(self.cleanup, "git", side_effect=revise):
+            rec = self._worktree_action(branch=None)
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertTrue(self.wt.exists())
+
+    def test_new_detached_archive_ref_retains_unique_head(self):
+        head, name = self._detached_unique_head()
+        rec = self._worktree_action(branch="stale-survey-branch")
+        self.assertEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "rev-parse", name).stdout.strip(), head)
+
+    def _unique_branch(self):
+        bare(self.wt, "add", "old.txt")
+        bare(self.wt, "commit", "-qm", "unique branch change")
+        head = bare(self.wt, "rev-parse", "HEAD").stdout.strip()
+        bare(self.wt, "checkout", "--detach", "-q")
+        return head
+
+    def _branch_action(self, cls="branch-unique"):
+        return self.cleanup.act({"class": cls, "tier": "manual", "repo": str(self.repo),
+                                 "target": "topic", "default_branch": "main",
+                                 "repository": "repository:example-org/alpha-web"}, self.d / "archive")
+
+    def _advance_topic(self):
+        head = bare(self.repo, "rev-parse", "topic").stdout.strip()
+        tree = bare(self.repo, "rev-parse", "topic^{tree}").stdout.strip()
+        new = bare(self.repo, "commit-tree", tree, "-p", head, input="new only commit\n").stdout.strip()
+        bare(self.repo, "update-ref", "refs/heads/topic", new)
+        return new
+
+    def test_unique_branch_drift_during_bundle_verification_is_retained(self):
+        self._unique_branch()
+        original = self.cleanup.git
+        advanced = []
+        def drift(repo, *args, **kwargs):
+            result = original(repo, *args, **kwargs)
+            if args[:2] == ("bundle", "verify"):
+                advanced.append(self._advance_topic())
+            return result
+        with patch.object(self.cleanup, "git", side_effect=drift):
+            rec = self._branch_action()
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "rev-parse", "topic").stdout.strip(), advanced[0])
+
+    def test_wrong_bundle_tip_refuses_branch_removal(self):
+        self._unique_branch()
+        original = self.cleanup.git
+        def wrong(repo, *args, **kwargs):
+            if args[:2] == ("bundle", "list-heads"):
+                return subprocess.CompletedProcess(args, 0, "0" * 40 + " refs/heads/topic\n", "")
+            return original(repo, *args, **kwargs)
+        with patch.object(self.cleanup, "git", side_effect=wrong):
+            rec = self._branch_action()
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "show-ref", "--verify", "--quiet", "refs/heads/topic", check=False).returncode, 0)
+
+    def test_unique_branch_verified_tip_is_archived_and_removed(self):
+        head = self._unique_branch()
+        rec = self._branch_action()
+        self.assertEqual(rec["result"], "removed", rec)
+        self.assertIn(head + " refs/heads/topic", bare(self.repo, "bundle", "list-heads", rec["archive"]).stdout)
+
+    def test_auto_branch_drift_at_delete_is_refused_by_cas(self):
+        bare(self.wt, "checkout", "--detach", "-q")
+        original = self.cleanup.git
+        advanced = []
+        def drift(repo, *args, **kwargs):
+            if args[:2] in (("branch", "-D"), ("update-ref", "-d")):
+                advanced.append(self._advance_topic())
+            return original(repo, *args, **kwargs)
+        with patch.object(self.cleanup, "git", side_effect=drift):
+            rec = self._branch_action("branch-merged")
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "rev-parse", "topic").stdout.strip(), advanced[0])
+
+    def test_index_flag_appearing_after_auto_status_refuses_removal(self):
+        bare(self.wt, "checkout", "--", "old.txt")
+        original = self.cleanup.ignored_keepers
+        def revise(*args, **kwargs):
+            result = original(*args, **kwargs)
+            bare(self.wt, "update-index", "--skip-worktree", "old.txt")
+            (self.wt / "old.txt").write_text("hidden late copy\n")
+            return result
+        with patch.object(self.cleanup, "ignored_keepers", side_effect=revise):
+            rec = self._worktree_action("worktree-clean")
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual((self.wt / "old.txt").read_text(), "hidden late copy\n")
+
+    def test_unique_branch_checked_out_is_never_deleted(self):
+        rec = self._branch_action()
+        self.assertEqual(rec["result"], "skipped", rec)
+        self.assertIn("checked out", rec["reason"])
+
+    def test_unknown_branch_worktree_listing_refuses_deletion(self):
+        self._unique_branch()
+        original = self.cleanup.git
+        def unreadable(repo, *args, **kwargs):
+            if args[:2] == ("worktree", "list"):
+                return subprocess.CompletedProcess(args, 1, "", "unreadable")
+            return original(repo, *args, **kwargs)
+        with patch.object(self.cleanup, "git", side_effect=unreadable):
+            rec = self._branch_action()
+        self.assertEqual(rec["result"], "skipped", rec)
+        self.assertIn("could not be read", rec["reason"])
+
+    def test_symbolic_branch_alias_cannot_delete_checked_out_referent(self):
+        bare(self.wt, "checkout", "--detach", "-q")
+        head = bare(self.repo, "rev-parse", "main").stdout.strip()
+        bare(self.repo, "symbolic-ref", "refs/heads/topic", "refs/heads/main")
+        rec = self._branch_action("branch-merged")
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "rev-parse", "--verify", "main").stdout.strip(), head)
+        self.assertEqual(bare(self.repo, "symbolic-ref", "refs/heads/topic").stdout.strip(), "refs/heads/main")
+
+    def test_late_symbolic_branch_alias_never_deletes_referent(self):
+        bare(self.wt, "checkout", "--detach", "-q")
+        head = bare(self.repo, "rev-parse", "main").stdout.strip()
+        original = self.cleanup.git
+        changed = []
+        def alias(repo, *args, **kwargs):
+            if args[:2] == ("update-ref", "-d"):
+                bare(self.repo, "symbolic-ref", "refs/heads/topic", "refs/heads/main")
+                changed.append(True)
+            return original(repo, *args, **kwargs)
+        with patch.object(self.cleanup, "git", side_effect=alias):
+            self._branch_action("branch-merged")
+        self.assertTrue(changed)
+        self.assertEqual(bare(self.repo, "rev-parse", "--verify", "main").stdout.strip(), head)
+
+    def test_invalid_branch_names_and_classes_do_not_reach_deletion(self):
+        for name, cls in [("HEAD", "branch-merged"), ("@{-1}", "branch-merged"),
+                          ("-D", "branch-unique"), ("bad..ref", "branch-unique"),
+                          ("topic", "branch-unsupported")]:
+            with self.subTest(name=name, cls=cls):
+                rec = self.cleanup.act({"class": cls, "tier": "auto", "repo": str(self.repo),
+                                        "target": name, "default_branch": "main"}, self.d / "archive")
+                self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "show-ref", "--verify", "--quiet", "refs/heads/main", check=False).returncode, 0)
 
 
 class RemoteReason(unittest.TestCase):

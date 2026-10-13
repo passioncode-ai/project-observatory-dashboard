@@ -95,16 +95,17 @@ def setup(tmp: pathlib.Path, flaky: dict | None = None, **extra) -> dict:
         "apps": [{"id": "app-bind", "spec": {"name": "api", "databases": [{"name": "db", "cluster_name": "shop-db"}],
                                              "services": [{"name": "api", "envs": [{"key": "DATABASE_URL", "value": "${db.DATABASE_URL}"}]}]}},
                  {"id": "app-lit", "spec": {"name": "web", "databases": [{"name": "db", "cluster_name": "shop-db", "db_user": "doadmin"}],
-                                            "envs": [{"key": "DB_PASSWORD", "value": "EV[1:abc]", "type": "SECRET"},
-                                                     {"key": "DATABASE_URL", "value": "EV[1:def]", "type": "SECRET"}]}}],
-        "specs": {"app-lit": {"name": "web", "envs": [{"key": "DB_PASSWORD", "value": "EV[1:abc]", "type": "SECRET"},
-                                                     {"key": "DATABASE_URL", "value": "EV[1:def]", "type": "SECRET"}]}},
+                                            "envs": [{"key": "DB_PASSWORD", "value": OLD, "type": "SECRET"},
+                                                     {"key": "DATABASE_URL", "value": "postgresql://doadmin:" + OLD + "@shop-db.example:25060/shop?sslmode=require", "type": "SECRET"}]}}],
+        "specs": {"app-lit": {"name": "web", "envs": [{"key": "DB_PASSWORD", "value": OLD, "type": "SECRET"},
+                                                     {"key": "DATABASE_URL", "value": "postgresql://doadmin:" + OLD + "@shop-db.example:25060/shop?sslmode=require", "type": "SECRET"}]}},
         "deps": {"app-bind": [{"id": "dep-old-b", "phase": "ACTIVE"}], "app-lit": [{"id": "dep-old-l", "phase": "ACTIVE"}]},
     }
     state.update(extra)
     (tmp / "state.json").write_text(json.dumps(state))
     (tmp / "vault").mkdir()
-    return {**os.environ, "DOCTL": str(fake), "FAKE_DO_STATE": str(tmp / "state.json"),
+    return {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp), "OBSERVATORY_HOME": str(tmp / "workspace"),
+            "PYTHONDONTWRITEBYTECODE": "1", "DOCTL": str(fake), "FAKE_DO_STATE": str(tmp / "state.json"),
             "OBSERVATORY_VAULT_DIR": str(tmp / "vault"), "OBSERVATORY_DO_RETRY_DELAY": "0",
             "OBSERVATORY_DO_POLL": "0"}
 
@@ -125,7 +126,7 @@ def main() -> int:
     print("digitalocean door")
     with tempfile.TemporaryDirectory() as t:
         tmp = pathlib.Path(t).resolve()
-        env = setup(tmp, flaky={"apps list-deployments app-bind": 1, "apps create-deployment app-bind": 1})
+        env = setup(tmp, flaky={"apps list-deployments app-bind": 1, "apps spec get": 1})
         r = run(env, "db", "rotate", "shop-db", "doadmin", "--db", "shop", "--to", "vault:shop/prod/DATABASE_URL",
                 "--app", "app-bind", "--spec-env", "app-lit:DB_PASSWORD", "--wait", "5")
         both = r.stdout + r.stderr
@@ -245,7 +246,7 @@ def review_round_one() -> None:
 
     with tempfile.TemporaryDirectory() as t:
         tmp = pathlib.Path(t).resolve()
-        lit2 = {"name": "web2", "envs": [{"key": "DB_PASSWORD", "value": "EV[1:abc]", "type": "SECRET"}]}
+        lit2 = {"name": "web2", "envs": [{"key": "DB_PASSWORD", "value": OLD, "type": "SECRET"}]}
         env = setup(tmp, flaky={"apps update app-lit2": 99})
         st = json.loads((tmp / "state.json").read_text())
         st["specs"]["app-lit2"] = lit2
@@ -288,6 +289,7 @@ def review_round_one() -> None:
         tmp = pathlib.Path(t).resolve()
         env = setup(tmp)
         saved = dict(os.environ)
+        os.environ.clear()
         os.environ.update(env)
         try:
             spec = importlib.util.spec_from_file_location("do_door_t", DOOR)
@@ -326,7 +328,7 @@ def review_round_two() -> None:
 
     with tempfile.TemporaryDirectory() as t:
         tmp = pathlib.Path(t).resolve()
-        pool = "postgresql://doadmin:" + OLD + "@shop-db-pool.example:25061/shop-pool?sslmode=require"
+        pool = "postgresql://doadmin:" + OLD + "@shop-db.example:25060/shop-pool?sslmode=require"
         env = setup(tmp)
         st = json.loads((tmp / "state.json").read_text())
         st["specs"]["app-pool"] = {"name": "pool", "envs": [{"key": "DATABASE_URL", "value": pool}]}
@@ -337,17 +339,18 @@ def review_round_two() -> None:
         got = json.loads((tmp / "state.json").read_text())["specs"]["app-pool"]["envs"][0]["value"]
         check("a plain URL literal keeps its own user, host, port, path and query; only the password changes",
               r.returncode == 0 and got == pool.replace(OLD, NEW), (r.stdout + r.stderr)[-300:])
-        check("and the run names where that URL points", "shop-db-pool.example:25061/shop-pool" in r.stdout, r.stdout[-300:])
+        check("and the run names the updated app", "app-pool" in r.stdout, r.stdout[-300:])
         check("nothing printed holds either password", OLD not in r.stdout + r.stderr and NEW not in r.stdout + r.stderr)
 
     with tempfile.TemporaryDirectory() as t:
         tmp = pathlib.Path(t).resolve()
         env = setup(tmp)
+        with_spec(tmp, "app-lit", {"name": "web", "envs": [{"key": "DATABASE_URL", "value": "EV[1:synthetic]"}]})
         r = run(env, "db", "rotate", "shop-db", "doadmin", "--to", "vault:shop/prod/DATABASE_URL",
                 "--spec-env", "app-lit:DATABASE_URL", "--wait", "5")
         state = json.loads((tmp / "state.json").read_text())
-        check("an encrypted URL literal without --db is refused before the reset",
-              r.returncode == 1 and "--db" in r.stderr and "nothing was reset" in r.stderr
+        check("an encrypted URL literal is refused before the reset",
+              r.returncode == 1 and "cannot prove" in r.stderr and "nothing was reset" in r.stderr
               and not any(c[:3] == ["databases", "user", "reset"] for c in state["calls"]), r.stderr[-300:])
 
     with tempfile.TemporaryDirectory() as t:
@@ -363,7 +366,7 @@ def review_round_two() -> None:
         check("and never advises rerunning db rotate after a reset",
               "rerun" not in r.stderr.lower() and "db credential" in r.stderr, r.stderr[-400:])
         check("nor a redeploy for a literal (a redeploy keeps the old literal)",
-              "redeploy it" not in r.stderr and "by hand" in r.stderr, r.stderr[-400:])
+              "read each app's current spec" in r.stderr and "redeploy alone keeps an old literal" in r.stderr, r.stderr[-400:])
 
     with tempfile.TemporaryDirectory() as t:
         tmp = pathlib.Path(t).resolve()
@@ -442,7 +445,7 @@ def review_round_three() -> None:
         r = rotate(env, "--spec-env", "app-rep:DATABASE_URL")
         got = json.loads((tmp / "state.json").read_text())["specs"]["app-rep"]["envs"][0]["value"]
         check("a URL literal for another user is refused before the reset and left untouched",
-              r.returncode == 1 and "reporting" in r.stderr and not reset_called(tmp) and NEW not in got,
+              r.returncode == 1 and "cannot prove" in r.stderr and not reset_called(tmp) and NEW not in got,
               r.stderr[-300:])
         check("and its password is not printed", OLD not in r.stdout + r.stderr)
 
@@ -450,8 +453,8 @@ def review_round_three() -> None:
         tmp = pathlib.Path(t).resolve()
         env = setup(tmp, reset_no_password=True)
         r = rotate(env, "--app", "app-bind")
-        check("a reset that answers without a password is exit 5 and says WAS reset",
-              r.returncode == 5 and "WAS reset" in r.stderr and "may have changed" not in r.stderr, r.stderr[-300:])
+        check("a reset that answers without a password is exit 5 and says unknown",
+              r.returncode == 5 and "outcome unknown" in r.stderr and "may have changed" in r.stderr, r.stderr[-300:])
 
     with tempfile.TemporaryDirectory() as t:
         tmp = pathlib.Path(t).resolve()
@@ -472,8 +475,8 @@ def review_round_three() -> None:
         tmp = pathlib.Path(t).resolve()
         env = setup(tmp, garbage=["databases user reset"])
         r = rotate(env, "--app", "app-bind")
-        check("a non-JSON answer from the reset itself is exit 5 with WAS reset",
-              r.returncode == 5 and "WAS reset" in r.stderr and "Traceback" not in r.stderr, r.stderr[-300:])
+        check("a non-JSON answer from the reset itself is exit 5 with unknown outcome",
+              r.returncode == 5 and "outcome unknown" in r.stderr and "Traceback" not in r.stderr, r.stderr[-300:])
 
     with tempfile.TemporaryDirectory() as t:
         tmp = pathlib.Path(t).resolve()

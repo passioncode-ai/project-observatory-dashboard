@@ -35,6 +35,7 @@ import shutil
 import subprocess
 import sys
 import time
+from typing import NamedTuple
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -415,7 +416,23 @@ def _private_size_reader():
     return read
 
 
-def private_kb(path: pathlib.Path, timeout: float, reader=None) -> int | None:
+class Private(NamedTuple):
+    """A private walk that finished: what deleting the place gives back at least, in KB."""
+    kb: int
+
+
+class Unmeasured(NamedTuple):
+    """A private walk with no figure, and why. `timeout`: the walk did not finish within
+    `seconds`. `unreadable`: the place itself could not be opened (`detail` names the error).
+    Both keep the last figures and the survey says so. `not-applicable`: no reader on this
+    platform, or a file system that keeps no private size (nothing to keep, nothing to
+    report). Before ENG-006 all of these were one `None`."""
+    reason: str
+    seconds: float | None = None
+    detail: str | None = None
+
+
+def private_kb(path: pathlib.Path, timeout: float, reader=None) -> Private | Unmeasured:
     """What deleting `path` would give back AT LEAST, in KB: the sum of every file's private
     size (OBS-66). `du` counts an APFS clone in full, so 19 browser code-sign clones read as
     13 GB and their removal freed nothing (2026-10-11); this sum reads them as ~0.
@@ -423,16 +440,19 @@ def private_kb(path: pathlib.Path, timeout: float, reader=None) -> int | None:
     A lower bound, not the exact figure: two clones of each other INSIDE the place are each
     private-free, yet removing both frees their shared blocks. One file system only (like
     `du -x`), symlinks not followed, a hard link counted once. A file whose number cannot be
-    read counts in full, as `du` would. None — not measured — when the walk does not finish
-    within `timeout`, or where the file system keeps no private size."""
+    read counts in full, as `du` would. `Unmeasured("timeout", seconds)` when the walk does not
+    finish within `timeout`; `Unmeasured("not-applicable")` where there is no reader or the file
+    system keeps no private size. The deadline is asked after every entry: the reader is the slow
+    part, and a place of few large files never reached a check made every 256 entries."""
     reader = reader or _private_size_reader()
     if reader is None:
-        return None
-    deadline = time.monotonic() + max(1.0, timeout)
+        return Unmeasured("not-applicable")
+    allowed = max(1.0, timeout)
+    deadline = time.monotonic() + allowed
     try:
         root = os.lstat(path)
-    except OSError:
-        return None
+    except OSError as exc:
+        return Unmeasured("unreadable", None, type(exc).__name__)
     total, seen, stack, visited, files, read = 0, set(), [str(path)], 0, 0, 0
     while stack:
         try:
@@ -442,8 +462,8 @@ def private_kb(path: pathlib.Path, timeout: float, reader=None) -> int | None:
         with entries:
             for entry in entries:
                 visited += 1
-                if visited % 256 == 0 and time.monotonic() > deadline:
-                    return None
+                if time.monotonic() > deadline:
+                    return Unmeasured("timeout", allowed)
                 try:
                     st = entry.stat(follow_symlinks=False)
                 except OSError:
@@ -464,8 +484,8 @@ def private_kb(path: pathlib.Path, timeout: float, reader=None) -> int | None:
                 read += size is not None
                 total += st.st_blocks * 512 if size is None else size
     if files and not read:
-        return None              # no file answered: not APFS, or nothing readable — not measured
-    return total // 1024
+        return Unmeasured("not-applicable")   # no file answered: not APFS, or nothing readable
+    return Private(total // 1024)
 
 
 def _stamp_age(stamp: str | None) -> float:
@@ -508,20 +528,48 @@ def protected_place(path: pathlib.Path, home: pathlib.Path | None = None) -> boo
     return False
 
 
-#: The row fields `frees` writes; a carried row keeps them with its `gb`.
-FREES_FIELDS = ("frees_at_least_gb", "clone_shared_gb", "clones_matter")
+#: The row fields `frees` writes; a carried row keeps them with its `gb`, and
+#: `frees_measured_at` says when the private walk behind them ran (ENG-006).
+FREES_FIELDS = ("frees_at_least_gb", "clone_shared_gb", "clones_matter", "frees_measured_at")
+#: A private walk younger than this is carried rather than repeated (machine.json
+#: `private_every_hours`): clone share changes slowly, and the budget is `du`'s.
+PRIVATE_EVERY_HOURS = 72
 
 
-def frees(kb: int, private: int | None) -> dict:
+def frees(kb: int, private: "Private | Unmeasured | int | None") -> dict:
     """The row's removal figures from `du`'s KB and the private sum; nothing when unmeasured."""
-    if private is None:
+    if isinstance(private, Unmeasured) or private is None:
         return {}
+    if isinstance(private, Private):
+        private = private.kb
     private = min(private, kb)
     shared = kb - private
     # `clones_matter`: clones hold enough of the place that `du` alone would mislead. Decided on
     # the KB, not the rounded GB: 0.098 GB rounds to the 0.1 GB line.
     return {"frees_at_least_gb": round(private / 1048576, 2), "clone_shared_gb": round(shared / 1048576, 2),
-            "clones_matter": shared >= CLONE_NOTE_GB * 1048576 and shared >= CLONE_NOTE_SHARE * kb}
+            "clones_matter": clones_matter(shared, kb)}
+
+
+def clones_matter(shared_kb: float, kb: float) -> bool:
+    """Clones hold enough of a place that `du` alone would mislead: at least CLONE_NOTE_GB and
+    at least CLONE_NOTE_SHARE of it. One rule for a fresh walk and for carried figures."""
+    return shared_kb >= CLONE_NOTE_GB * 1048576 and shared_kb >= CLONE_NOTE_SHARE * kb
+
+
+def carried_frees(old: dict | None, gb: float) -> dict:
+    """The last private walk's figures for a row `du` just re-sized, with their own date.
+
+    A row written before `frees_measured_at` existed had its figures measured with its
+    `gb`, so its `measured_at` dates them. A place can shrink between walks, so the split is
+    fitted inside the fresh size: the floor never exceeds it, the clone share never exceeds
+    what is left beside the floor, and `clones_matter` is decided again on those numbers."""
+    if not old or "frees_at_least_gb" not in old:
+        return {}
+    floor = min(old["frees_at_least_gb"], gb)
+    shared = max(0.0, min(old.get("clone_shared_gb", 0.0), gb - floor))
+    return {"frees_at_least_gb": round(floor, 2), "clone_shared_gb": round(shared, 2),
+            "clones_matter": clones_matter(round(shared, 2) * 1048576, gb * 1048576),
+            "frees_measured_at": old.get("frees_measured_at") or old.get("measured_at")}
 
 
 def survey_disk(previous: dict | None, force: bool) -> dict:
@@ -537,8 +585,10 @@ def survey_disk(previous: dict | None, force: bool) -> dict:
 
     WHAT A REMOVAL FREES. `du` counts an APFS clone in full. On macOS a place of 512 MB or more
     is walked a second time, inside the same budget, for the private size of its files
-    (`private_kb`): the row gains `frees_at_least_gb` and `clone_shared_gb`. A place whose walk
-    does not finish keeps `du`'s number alone (OBS-66).
+    (`private_kb`): the row gains `frees_at_least_gb`, `clone_shared_gb` and `frees_measured_at`
+    (OBS-66). A walk that does not finish keeps the last walk's figures with their own date and
+    adds a `degraded` entry naming the place (ENG-006). A walk younger than `private_every_hours`
+    (72) is carried, not repeated; `--disk` always walks.
 
     PROTECTED PLACES ARE MANUAL ONLY. Without `--disk` a place `protected_place`
     names is not sized, not even stat'ed: it is listed in `manual_only` with its
@@ -547,6 +597,7 @@ def survey_disk(previous: dict | None, force: bool) -> dict:
     every = float(cfg.get("every_hours", 12)) * 3600
     budget = float(cfg.get("disk_budget_seconds_manual" if force else "disk_budget_seconds", 900 if force else 90))
     per = float(cfg.get("disk_location_timeout_seconds", 60))
+    private_every = float(cfg.get("private_every_hours", PRIVATE_EVERY_HOURS)) * 3600
     prev = {r["path"]: r for r in ((previous or {}).get("disk") or {}).get("locations") or [] if isinstance(r, dict)}
     out = {"volume": volume(), "thresholds": {k: cfg.get(k) for k in ("free_space_warning_percent", "free_space_critical_percent")}}
     wanted, manual_only = [], []
@@ -569,10 +620,34 @@ def survey_disk(previous: dict | None, force: bool) -> dict:
         if kb is None:
             degraded.append({"source": loc["path"], "reason": f"not sized within {min(per, left):.0f} s; the last number is kept"})
             continue
-        measured[loc["path"]] = {"gb": round(kb / 1048576, 2), "measured_at": now()}
+        gb = round(kb / 1048576, 2)
+        measured[loc["path"]] = {"gb": gb, "measured_at": now()}
+        if kb < PRIVATE_MIN_KB:
+            continue
+        old = prev.get(loc["path"])
+        last = carried_frees(old, gb)
+        if last and not force and _stamp_age(last["frees_measured_at"]) < private_every:
+            measured[loc["path"]].update(last)          # walked recently: the budget goes to `du`
+            continue
+        kept = "the last figures are kept" if last else "no earlier figure to keep"
         left = budget - (time.monotonic() - started)
-        if kb >= PRIVATE_MIN_KB and left > 1:
-            measured[loc["path"]].update(frees(kb, private_kb(path, min(per, left))))
+        if left <= 1:
+            measured[loc["path"]].update(last)
+            degraded.append({"source": loc["path"],
+                             "reason": f"private size not measured: the survey's budget was spent; {kept}"})
+            continue
+        private = private_kb(path, min(per, left))
+        if isinstance(private, Unmeasured):
+            if private.reason == "timeout":
+                measured[loc["path"]].update(last)
+                degraded.append({"source": loc["path"],
+                                 "reason": f"private size not measured within {private.seconds:.0f} s; {kept}"})
+            elif private.reason == "unreadable":
+                measured[loc["path"]].update(last)
+                degraded.append({"source": loc["path"],
+                                 "reason": f"private size could not be read ({private.detail}); {kept}"})
+            continue
+        measured[loc["path"]].update(frees(kb, private), frees_measured_at=measured[loc["path"]]["measured_at"])
     rows = []
     for loc, _path in wanted:
         base = {**{k: loc[k] for k in ("path", "kind", "label", "reclaim") if k in loc},
@@ -583,7 +658,7 @@ def survey_disk(previous: dict | None, force: bool) -> dict:
             old = prev[loc["path"]]
             rows.append({**base, "gb": old["gb"], "measured_at": old.get("measured_at") or
                          ((previous or {}).get("disk") or {}).get("measured_at"),
-                         **{k: old[k] for k in FREES_FIELDS if k in old}})
+                         **carried_frees(old, old["gb"])})
     swap = swap_on_disk()
     if swap and swap["gb"] > 0:
         rows.append({"path": swap["path"], "kind": "swap", "label": "Swap files (memory written to disk)",
@@ -643,8 +718,19 @@ def main(argv: list[str]) -> int:
         previous = json.loads(out.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         previous = None
+    process_start = now()
+    processes = survey_processes()
+    processes["attribution"] = "origin-and-project"
+    processes["projects_measured"] = processes.get("count") is not None
+    processes["rss_semantics"] = "sum-of-process-rss-not-unique-physical-memory"
+    processes["attempted_at"] = process_start
+    processes["measured_at"] = process_start if processes.get("count") is not None else None
+    memory_start = now()
+    memory = survey_memory()
+    memory["attempted_at"] = memory_start
+    memory["measured_at"] = memory_start if memory.get("total_mb") is not None else None
     doc = {"schema_version": 1, "measured_at": now(), "platform": sys.platform,
-           "processes": survey_processes(), "memory": survey_memory(),
+           "processes": processes, "memory": memory,
            "disk": survey_disk(previous, "--disk" in argv),
            "witr": bool(shutil.which("witr"))}
     out.parent.mkdir(parents=True, exist_ok=True)

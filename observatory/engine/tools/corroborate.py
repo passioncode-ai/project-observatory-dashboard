@@ -26,10 +26,24 @@ WHAT CAN HONESTLY BE CORROBORATED, and what cannot:
   true. Those rows need a person, and the queue says so instead of quietly
   shrinking.
 
+* **`lesson` rows can, by a second PROJECT.** A lesson (`observatory_lesson`) is a
+  class one project learned. When a second, DISTINCT project records the same
+  `classKey`, that is an independent witness to the class — and each lesson's evidence
+  commit is asked of git in its own project's clone, found by the project's
+  pseudonymous key (the first 12 hex digits of the clone's root commit). The rule is the
+  operator's (O2): two distinct projects record the class AND BOTH COMMITS RESOLVE, and
+  then no person is needed; `supported` stays the operator's. "Resolve" means here, in
+  git: the project's key must belong to a clone the registry knows on this machine, and
+  the commit must be an object in it. A key no registered clone carries cannot be asked
+  — the lesson stays `proposed`, listed as "commit not resolvable here", and witnesses
+  nothing, so one caller inventing two `p-` keys buys nothing. A commit git cannot find
+  in a clone that IS here contradicts the lesson. The same project twice is one witness:
+  a repeat revises that project's record and never counts again.
+
     corroborate.py [--dry-run]
 """
 from __future__ import annotations
-import json, pathlib, subprocess, sys
+import json, pathlib, subprocess, sys, time
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -41,6 +55,171 @@ from store import ledger as L
 import atomic                                                                      
 
 BY = "agent:corroborator"
+#: The witness for lessons: a second identity, so a lesson an `agent:corroborator` wrote
+#: (none does today) could still be corroborated, and the provenance says which rule ran.
+LESSON_BY = "agent:lesson-corroborator"
+#: Distinct projects that must hold one classKey before its lessons are promoted.
+LESSON_PROJECTS = 2
+
+
+def repository_paths() -> list[pathlib.Path]:
+    """Every clone the registry knows on this machine."""
+    reg = paths.REGISTRY / "repositories.json"
+    if not reg.is_file():
+        return []
+    try:
+        doc = json.loads(reg.read_text(encoding="utf-8"))
+        repos = doc.get("repositories", []) if isinstance(doc, dict) else []
+        if not isinstance(repos, list):
+            return []
+    except (OSError, ValueError):
+        return []
+    out = []
+    for r in repos:
+        local = r.get("local") if isinstance(r, dict) else None
+        p = local.get("path") if isinstance(local, dict) else None
+        if isinstance(p, str) and p and pathlib.Path(p).is_dir():
+            out.append(pathlib.Path(p))
+    return out
+
+
+def project_keys(*, deadline: float | None = None) -> dict[str, list[pathlib.Path]]:
+    """Pseudonymous project key -> the clones here that carry it.
+
+    The key is `p-` and the first 12 hex digits of the repository's root commit (the
+    lowest, when a history has several roots) — the same derivation as task-pipeline's
+    `lessons.py project_key`, so a lesson's origin finds its clone without the store ever
+    holding the project's name."""
+    keys: dict[str, list[pathlib.Path]] = {}
+    for path in repository_paths():
+        if deadline is not None and time.monotonic() >= deadline:
+            break
+        code, out = git(path, "rev-list", "--max-parents=0", "HEAD", deadline=deadline)
+        if code != 0 or not out.split():
+            continue
+        keys.setdefault("p-" + sorted(out.split())[0][:12], []).append(path)
+    return keys
+
+
+def resolve_origin(origin: dict, keys: dict[str, list[pathlib.Path]], *,
+                   deadline: float | None = None) -> tuple[bool | None, str]:
+    """Does this lesson's evidence commit resolve? Three answers, as for sessions.
+
+    True: a clone of the project is here and git finds the commit. False: a clone is here
+    and git does not — the lesson cites work this project does not hold. None: no clone
+    the registry knows carries this key, so nothing could look; the lesson can neither be
+    promoted nor witness for another (O2: both commits must resolve)."""
+    project, commit = origin.get("projectId"), str(origin.get("commit") or "")
+    sha = commit.split("commit:", 1)[-1]
+    if not (isinstance(project, str) and project.startswith("p-")) or not sha \
+            or not all(c in "0123456789abcdef" for c in sha) or not 7 <= len(sha) <= 40:
+        return False, "the origin carries no pseudonymous project key and commit form"
+    clones = keys.get(project, [])
+    if not clones:
+        return None, (f"commit not resolvable here: no clone in the registry carries "
+                      f"{project}, so commit:{sha} cannot be asked of git")
+    unavailable = False
+    for path in clones:
+        code = git(path, "cat-file", "-e", f"{sha}^{{commit}}", deadline=deadline)[0]
+        if code == 0:
+            return True, f"commit:{sha} resolves in {project}'s clone"
+        unavailable = unavailable or code == 127
+    if unavailable:
+        return None, "commit verification unavailable or its time budget expired"
+    return False, f"commit:{sha} is not an object in any clone of {project} here"
+
+
+def corroborate_lessons(conn, dry: bool) -> dict:
+    """Promote `proposed` lessons whose class a second, distinct project also holds.
+
+    A lesson is promoted when its own commit resolves in its project's clone here and at
+    least one OTHER project's lesson of the same classKey — proposed, observed or
+    supported — resolves in its clone too. The witness is named in the check, with both
+    resolutions; the ledger's own guards still apply (`L.corroborate`: never the owner,
+    never the operator, only from `proposed`). Four outcomes: promoted, waiting (resolved,
+    no second resolved project yet), unresolvable (no registered clone carries the key),
+    contradicted (the clone does not hold the commit)."""
+    from store import lessons as LS
+    rows = LS.current_lessons(conn)
+    # The clones are asked only when some class could be promoted: a proposed lesson whose
+    # class names two or more projects. Otherwise no root commit needs reading, and a tick
+    # over an estate of many clones spends nothing on lessons that wait.
+    claimed: dict[str, set] = {}
+    for r in rows:
+        claimed.setdefault(r["body"].get("classKey"), set()).add(
+            (r["body"].get("origin") or {}).get("projectId"))
+    askable = any(len(claimed.get(r["body"].get("classKey"), ())) >= LESSON_PROJECTS
+                  for r in rows if r["state"] in ("proposed", "observed"))
+    keys = project_keys() if askable else {}
+    resolution = {r["memory_id"]: resolve_origin((r["body"].get("origin") or {}), keys)
+                  for r in rows}
+    by_class: dict[str, list[dict]] = {}
+    for r in rows:
+        ck = r["body"].get("classKey")
+        if isinstance(ck, str) and ck:
+            by_class.setdefault(ck, []).append(r)
+    promoted, waiting, unresolvable, contradicted, invalidated = [], [], [], [], []
+    for ck, members in sorted(by_class.items()):
+        # Only a RESOLVED origin witnesses: a key no registered clone carries is not a
+        # project this machine can vouch for.
+        standing = [m for m in members if resolution[m["memory_id"]][0] is True]
+        projects = {m["body"]["origin"]["projectId"] for m in standing}
+        for m in members:
+            if m["state"] == "observed" and m["owner"] != L.OPERATOR:
+                if resolution[m["memory_id"]][0] is not True or len(projects) < LESSON_PROJECTS:
+                    if dry:
+                        invalidated.append({"memory_id": m["memory_id"], "dry_run": True})
+                    else:
+                        try:
+                            out = LS.revalidate(conn, L, memory_id=m["memory_id"],
+                                                expected_revision=m["revision"])
+                            if out["outcome"] == "replaced":
+                                invalidated.append({"memory_id": m["memory_id"], **out})
+                        except L.LedgerError as exc:
+                            waiting.append({"memory_id": m["memory_id"], "classKey": ck,
+                                            "reason": type(exc).__name__})
+                continue
+            if m["state"] != "proposed":
+                continue
+            if len(claimed.get(ck, ())) < LESSON_PROJECTS:
+                # Nothing to ask git yet: no other project has recorded the class.
+                waiting.append({"memory_id": m["memory_id"], "classKey": ck,
+                                "projects": len(claimed.get(ck, ()))})
+                continue
+            ok, why = resolution[m["memory_id"]]
+            if ok is False:
+                contradicted.append({"memory_id": m["memory_id"], "classKey": ck,
+                                     "why": why, "created_at": m["created_at"]})
+                continue
+            if ok is None:
+                unresolvable.append({"memory_id": m["memory_id"], "classKey": ck,
+                                     "why": why, "created_at": m["created_at"]})
+                continue
+            mine = m["body"]["origin"]["projectId"]
+            witnesses = [w for w in standing if w["body"]["origin"]["projectId"] != mine]
+            if len(projects) < LESSON_PROJECTS or not witnesses:
+                waiting.append({"memory_id": m["memory_id"], "classKey": ck,
+                                "projects": len(projects)})
+                continue
+            w = witnesses[0]
+            how = (f"lesson {ck} is held by {len(projects)} distinct projects; this one "
+                   f"({mine}): {why}; witness {w['memory_id']}@{w['revision']} "
+                   f"({w['body']['origin']['projectId']}): {resolution[w['memory_id']][1]}")
+            if dry:
+                promoted.append({"memory_id": m["memory_id"], "classKey": ck, "how": how})
+                continue
+            try:
+                L.corroborate(conn, m["memory_id"], by=LESSON_BY,
+                              check={"how": how, "rule": "lesson-two-projects",
+                                     "witness": f"{w['memory_id']}@{w['revision']}"},
+                              expected_revision=m["revision"])
+                promoted.append({"memory_id": m["memory_id"], "classKey": ck, "how": how})
+            except L.LedgerError as exc:
+                contradicted.append({"memory_id": m["memory_id"], "classKey": ck,
+                                     "why": f"{type(exc).__name__}: {exc}",
+                                     "created_at": m["created_at"]})
+    return {"classes": len(by_class), "promoted": promoted, "waiting": waiting,
+            "unresolvable": unresolvable, "contradicted": contradicted, "invalidated": invalidated}
 
 
 def clone_path(nwo: str) -> pathlib.Path | None:
@@ -53,9 +232,12 @@ def clone_path(nwo: str) -> pathlib.Path | None:
     return None
 
 
-def git(path: pathlib.Path, *args: str) -> tuple[int, str]:
+def git(path: pathlib.Path, *args: str, deadline: float | None = None) -> tuple[int, str]:
     try:
-        r = safe_git.run(args, repo=path, timeout=20)
+        timeout = 20 if deadline is None else min(20, deadline - time.monotonic())
+        if timeout <= 0:
+            return 127, ""
+        r = safe_git.run(args, repo=path, timeout=timeout)
         return r.returncode, r.stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return 127, ""
@@ -202,11 +384,18 @@ def main(argv: list[str]) -> int:
         "GROUP BY memory_id) m ON l.memory_id = m.memory_id AND l.revision = m.rev "
         "LEFT JOIN tombstones t ON t.memory_id = l.memory_id "
         "WHERE l.state = 'proposed' AND t.memory_id IS NULL").fetchall()
+    # Lessons leave here: they have their own rule and their own counts
+    # (`corroborate_lessons`), so `counts.proposed` is the rows the rules below read.
+    rows = [r for r in rows if r["kind"] != "lesson"]
 
     # FOUR BUCKETS, because `check_session` now has three answers and one of
     # them is "nobody could look". Folding that into `refused` is what put four
     # records of pushed work on the board as unplaceable.
     promoted, refused, unaskable, needs_person = [], [], [], []
+    # LESSONS HAVE THEIR OWN RULE, across projects, and their own bucket in the receipt:
+    # a lesson waiting for a second project is not a refusal, and the findings builder
+    # reads `refused` as work git can no longer place.
+    lessons = corroborate_lessons(conn, dry)
     for row in rows:
         # ONE rule, and it is positive: `session` is the only kind with evidence
         # a machine can re-check. There were two — a `NO_MECHANICAL_CHECK`
@@ -253,7 +442,14 @@ def main(argv: list[str]) -> int:
             "checked_on": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             "counts": {"proposed": len(rows), "promoted": len(promoted),
                        "refused": len(refused), "unaskable": len(unaskable),
-                       "needs_person": len(needs_person)},
+                       "needs_person": len(needs_person),
+                       "lessons_promoted": len(lessons["promoted"]),
+                       "lessons_waiting": len(lessons["waiting"]),
+                       "lessons_unresolvable": len(lessons["unresolvable"]),
+                       "lessons_contradicted": len(lessons["contradicted"]),
+                       "lessons_invalidated": len(lessons["invalidated"])},
+            # Lessons apart from `refused`: see `corroborate_lessons`.
+            "lessons": lessons,
             "refused": [{"memory_id": mid, "why": why, "created_at": at,
                          "owner": owner, "state": state}
                         for mid, why, at, owner, state in refused],
@@ -281,6 +477,13 @@ def main(argv: list[str]) -> int:
         print(f"  + {mid}  {why[:96]}")
     for mid, why, *_ in refused[:6]:
         print(f"  - {mid}  {why[:96]}")
+    print(f"  lessons: {lessons['classes']} class(es) — {len(lessons['promoted'])} promoted, "
+          f"{len(lessons['waiting'])} waiting for a second project, "
+          f"{len(lessons['unresolvable'])} not resolvable here, "
+          f"{len(lessons['contradicted'])} contradicted by git, "
+          f"{len(lessons['invalidated'])} observations invalidated")
+    for c in (lessons["unresolvable"] + lessons["contradicted"])[:6]:
+        print(f"  - {c['memory_id']}  {c['why'][:96]}")
     if needs_person:
         kinds = sorted({k for _, k in needs_person})
         print(f"  ? {len(needs_person)} row(s) of kind {kinds} carry no evidence a "

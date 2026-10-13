@@ -1021,13 +1021,26 @@ _CURRENT = ("NOT EXISTS (SELECT 1 FROM tombstones t WHERE t.memory_id = {l}.memo
 
 def _scope_sql(alias: str, project_id: str | None,
                classes: tuple[str, ...] | None,
-               hidden_kinds: tuple[str, ...] = ()) -> tuple[str, list]:
-    """The `_CURRENT` predicate plus the caller's project, classes and the record kinds
-    it may not read (workflow memory without its scope), with its args."""
+               hidden_kinds: tuple[str, ...] = (),
+               kinds: tuple[str, ...] | None = None) -> tuple[str, list]:
+    """The `_CURRENT` predicate plus the caller's project, classes, the record kinds
+    it may not read (workflow memory without its scope) and the kinds it asked for,
+    with its args.
+
+    `kinds` is the caller's filter (`observatory_search(kinds=[...])`), and it sits HERE,
+    inside the candidate query, for the same reason scope does: the store is dominated by
+    the companion's per-session turn records, so a question across projects filled the
+    300-match window with them before a single lesson could rank, and the search
+    abstained over a store that held the answer (measured 2026-10-12: `count 0,
+    abstain: true`, `window` full). Filtered after the window, the filter could only
+    remove what had already crowded the answer out."""
     sql, args = _CURRENT.format(l=alias), []
     if hidden_kinds:
         sql += f" AND {alias}.kind NOT IN ({','.join('?' * len(hidden_kinds))})"
         args += list(hidden_kinds)
+    if kinds is not None:
+        sql += (f" AND {alias}.kind IN ({','.join('?' * len(kinds))})" if kinds else " AND 0")
+        args += list(kinds)
     if project_id:
         sql += f" AND {alias}.project_id = ?"
         args.append(project_id)
@@ -1036,6 +1049,21 @@ def _scope_sql(alias: str, project_id: str | None,
                 if classes else " AND 0")
         args += list(classes)
     return sql, args
+
+
+#: The lesson/1 fields a lesson hit carries back. Its origin is the pseudonymous project
+#: key and the commit form — never a `project:<slug>` id, which would put one project's
+#: name into every other project's reading.
+LESSON_FIELDS = ("classKey", "title", "trigger", "check", "nouns", "origin")
+
+
+def lesson_view(body_json: str | None) -> dict:
+    """A lesson row's body, reduced to what a reader at stage 0 cites and checks."""
+    try:
+        body = json.loads(body_json or "{}")
+    except ValueError:
+        return {}
+    return {k: body[k] for k in LESSON_FIELDS if k in body} if isinstance(body, dict) else {}
 
 
 #: At most this many chunks are named per hit.
@@ -1063,8 +1091,13 @@ def _chunk_provenance(body_json: str, qkeys: list[str]) -> list[dict]:
 def search(query: str, project_id: str | None = None, limit: int = 10, *,
            authority: str = "caller-argument", classification: str | None = None,
            classes: tuple[str, ...] | None = None,
-           hidden_kinds: tuple[str, ...] = ()) -> dict:
+           hidden_kinds: tuple[str, ...] = (),
+           kinds: tuple[str, ...] | None = None) -> dict:
     """Recall over the narrative: by similarity where possible, lexically always.
+
+    `kinds` keeps only records of those kinds (`lesson`, `learning`, `note`, …), applied
+    inside the candidate query before the window; every hit names its `kind`, and a
+    lesson hit carries its lesson/1 fields as `lesson`.
 
     Two rules the contract makes non-negotiable, and both are visible in the
     result rather than described in a docstring nobody reads:
@@ -1180,7 +1213,7 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
                 # match must be current and the caller's before it may take one of
                 # the `RETRIEVAL_WIDTH` places; filtering after the LIMIT let three
                 # hundred stronger foreign matches push the caller's own record out.
-                scope_sql, scope_args = _scope_sql("l", project_id, classes, hidden_kinds)
+                scope_sql, scope_args = _scope_sql("l", project_id, classes, hidden_kinds, kinds)
                 fts = ("SELECT search_notes.memory_id AS memory_id,"
                        " search_notes.revision AS revision, search_notes.rank AS rank,"
                        " search_notes.stems AS stems FROM search_notes"
@@ -1238,7 +1271,7 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
         try:
             # IN THE CALLER'S SCOPE: another project's queue is not this answer's lag,
             # and counting it would tell a binding that rows it may not see exist.
-            lag_sql, lag_args = _scope_sql("l", project_id, classes, hidden_kinds)
+            lag_sql, lag_args = _scope_sql("l", project_id, classes, hidden_kinds, kinds)
             lag = conn.execute(
                 "SELECT count(*) AS n, min(l.created_at) AS oldest FROM outbox o"
                 " JOIN ledger l ON l.memory_id = o.memory_id AND l.revision = o.revision"
@@ -1270,7 +1303,7 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
             # THE CANONICAL RECHECK, the same predicate the lexical window used:
             # a vector hit was never filtered before its KNN, so its validity and
             # visibility are decided here.
-            hscope, hargs = _scope_sql("l", project_id, classes, hidden_kinds)
+            hscope, hargs = _scope_sql("l", project_id, classes, hidden_kinds, kinds)
             if conn.execute(f"SELECT 1 FROM ledger l WHERE l.memory_id = ? AND l.revision = ?"
                             f" AND {hscope}", (mid, rev, *hargs)).fetchone() is None:
                 continue
@@ -1295,7 +1328,10 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
                 chunks = _chunk_provenance(row["body_json"], qkeys)
                 if chunks:
                     h = {**h, "chunks": chunks}
-            out.append({**h, "projectId": row["project_id"], "state": row["state"],
+            if row["kind"] == "lesson":
+                h = {**h, "lesson": lesson_view(row["body_json"])}
+            out.append({**h, "kind": row["kind"], "projectId": row["project_id"],
+                        "state": row["state"],
                         "owner": row["owner"], "confidence": row["confidence"],
                         "statement": row["statement"], "why": row["why"],
                         "createdAt": row["created_at"],
@@ -1328,7 +1364,9 @@ def search(query: str, project_id: str | None = None, limit: int = 10, *,
         reason = ("no subject words in the question" if not qkeys else
                   f"{below} lexical match(es) below the coverage floor" if below else
                   "nothing matched")
-        return {"query": query, "projectId": project_id, "count": len(out[:limit]),
+        return {"query": query, "projectId": project_id,
+                **({"kinds": list(kinds)} if kinds is not None else {}),
+                "count": len(out[:limit]),
                 "abstain": abstain, **({"abstainReason": reason} if abstain else {}),
                 "floor": {"coverage": lexical_floor, "keys": len(qkeys),
                           "belowFloor": below},

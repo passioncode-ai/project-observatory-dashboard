@@ -1,0 +1,67 @@
+{
+  "source_head": "563c4976dd685001cd73b276825ef5cde0e2ee4c",
+  "source_pr_head": "6f30de4faa3f6b04d12c15d0da94375bdd972b7c",
+  "files": [
+    {
+      "path": "docs/design/AGENT-SECRETS.md",
+      "bytes": 10766,
+      "sha256": "ef52baae204677f3bddb563a8a5d1697591076efb984905171a63f1ba7ee7e0b",
+      "tracked": true
+    },
+    {
+      "path": "observatory/engine/skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
+      "bytes": 15035,
+      "sha256": "3a670e501b02f59a4625c016fbe839fd61d03aad94633a202c4bc48f4e4b55c0",
+      "tracked": true
+    },
+    {
+      "path": "observatory/engine/tests/test_credential_doors.py",
+      "bytes": 174410,
+      "sha256": "cb4475fdce23fbf9114771f721196780f4c7c1cc4e817fa4fbe7214124b487e1",
+      "tracked": true
+    },
+    {
+      "path": "observatory/engine/tools/openrouter.py",
+      "bytes": 86977,
+      "sha256": "57e5f114199b3258d97b53226eef02da412ad0e83089d3d0f596cd0e5ea5f794",
+      "tracked": true
+    },
+    {
+      "path": "observatory/engine/tests/adv_j1_property.py",
+      "bytes": 22784,
+      "sha256": "85c3b99085cce7ac717d21a21a54bf96975e43248dfef0c9d4978af9e829b783",
+      "tracked": false
+    },
+    {
+      "path": "observatory/engine/tests/adv_j1_property_forget.py",
+      "bytes": 23130,
+      "sha256": "72230c7011757d0d9eda9419404ff7986c90ba48db65a7b7fb4f75e3b173362c",
+      "tracked": false
+    },
+    {
+      "path": "observatory/engine/tests/adv_norot.py",
+      "bytes": 22838,
+      "sha256": "5e327c2f9be2c2ed744b3e76da30678e67e9dc88f91e8dcf59a4d4598723da18",
+      "tracked": false
+    },
+    {
+      "path": "observatory/engine/tests/adv_norot_forget.py",
+      "bytes": 23184,
+      "sha256": "118c975adfa47d20bb31081769e923a91fb1e9abb2158f30175efc15f91c59a0",
+      "tracked": false
+    },
+    {
+      "path": "observatory/engine/tests/adv_repro.py",
+      "bytes": 5995,
+      "sha256": "3c01a14dbf991ef74f427db58d4209feb557fe39535bd7994c5ff280e5c3072f",
+      "tracked": false
+    },
+    {
+      "path": "observatory/engine/tests/adv_split.py",
+      "bytes": 1668,
+      "sha256": "485ba7bce1a61d50250bf0cdd0cf235a0fa4dbcfed2330852a5ffa484e09be4f",
+      "tracked": false
+    }
+  ],
+  "status": "inherited unvalidated work; copied byte-for-byte, original unchanged"
+}
