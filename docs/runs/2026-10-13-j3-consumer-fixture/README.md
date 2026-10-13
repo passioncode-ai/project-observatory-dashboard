@@ -49,3 +49,17 @@ providers, installed acceptance and full remote/vault consumer coverage remain o
 [Proposed next remedy design](remedy-design.md) separates explicit operator action,
 provider observation and unresolved consumer/metadata conditions. Implementation
 waits for independent design review.
+
+## Explicit remedy implementation
+
+Corrected source `6ee4e6c26a1f403b57584417ea380c193438eb38` passes19
+[focused cases](raw/remedy-tests.json). The first six new helper tests failed before
+implementation; a further renamed-identity refusal test failed on `f3ffea10` before
+its correction. The independent reviewer also reproduced that attestation seam.
+
+The [same128 seeds](raw/documented-remedies-128.json) now complete109PASS,19FAIL,
+0ERROR, exit1. [Exact comparison](raw/remedy-comparison.json) identifies precisely
+7000008,7000018,7000029,7000083,7000093 as improved; all other19 failures remain.
+No original invariant or five-attempt bound changed. Explicit operator actions are
+recorded in traces and stay separate from spontaneous recovery. Corrective source
+review is pending; full5200 is still NOT_RUN in this receipt.

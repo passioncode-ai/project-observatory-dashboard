@@ -1,0 +1,46 @@
+{
+  "source_commit": "6ee4e6c26a1f403b57584417ea380c193438eb38",
+  "status": "FAIL",
+  "completed": 128,
+  "counts": {
+    "PASS": 109,
+    "FAIL": 19
+  },
+  "resolved_seeds": [
+    7000008,
+    7000018,
+    7000029,
+    7000083,
+    7000093
+  ],
+  "new_failure_seeds": [],
+  "remaining_failure_seeds": [
+    7000009,
+    7000013,
+    7000015,
+    7000025,
+    7000026,
+    7000028,
+    7000031,
+    7000037,
+    7000045,
+    7000049,
+    7000057,
+    7000065,
+    7000072,
+    7000074,
+    7000081,
+    7000087,
+    7000089,
+    7000095,
+    7000097
+  ],
+  "review": "PENDING",
+  "full5200": "NOT_RUN",
+  "limits": [
+    "Explicit synthetic operator intervention, not autonomous recovery",
+    "No provider/live/installed acceptance",
+    "No production CAS or full consumer coverage proof",
+    "Meaningful positive policy rotation remains open"
+  ]
+}
