@@ -273,6 +273,13 @@ current provider observation. Evidence:
 `test_rotation_accounting.py::test_unknown_rotation_extras_never_supply_new_policy_headroom`.
 These checks cannot prevent an external mutation or immediately identify an
 unknown minted key; the original representation failures remain open.
+Before a policy run uses a requested limit decrease as headroom, the PATCH receipt
+must match the recorded key, reset period and a supported positive ceiling no
+higher than the planned amount. A missing, foreign, malformed or higher receipt
+stops the partial run before later issuance or raises; the old ledger amount is
+retained and no PATCH is retried. A confirmed amount is recorded as observed.
+This is same-operation provider evidence, not an atomic external snapshot.
+Evidence: `test_or_policy_confirms_lowered_exposure_before_spending_headroom`.
 
 An applied spend policy records its explicit origin and exact digest on new and
 selected existing key rows; dry-run preserves ledger state. Rotation of a marked

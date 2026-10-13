@@ -1,0 +1,16 @@
+{
+  "production_source_sha256": "8c74363dca294ff62291df2bb8aac71e8fb7b9ca795db5f81bb0be6cc48b503b",
+  "tests_first": {
+    "pass": 1,
+    "fail": 8,
+    "exit_code": 1
+  },
+  "focused_final": {
+    "pass": 80,
+    "fail": 0,
+    "exit_code": 0
+  },
+  "test": "test_or_policy_confirms_lowered_exposure_before_spending_headroom",
+  "live_provider": "NOT_RUN",
+  "full_combined_5200": "NOT_RUN"
+}

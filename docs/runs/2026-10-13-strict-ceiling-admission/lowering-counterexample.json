@@ -1,0 +1,18 @@
+{
+  "source_sha256": "82b25a891a8fbadaf97a8fa104f039ba6efc4d774b083fe6ed9a9a54588da3f9",
+  "before": 8.0,
+  "after": 10.000399999999999,
+  "cap": 10,
+  "new_posts": 1,
+  "moves": [
+    {
+      "requested": 2.0,
+      "observed": 2.0004
+    }
+  ],
+  "actions": [
+    "ceiling-moved",
+    "issued"
+  ],
+  "source_commit": "1274cc3"
+}

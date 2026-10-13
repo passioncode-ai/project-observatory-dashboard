@@ -54,3 +54,6 @@ separate from the fractional correction above.
 [Unobserved reservations](unobserved-reservations.md) extends the same admission
 rule to pending mints and rotation extras, while retaining their records.
 This is the current source boundary; the earlier counterexamples remain intact.
+
+[Lowering confirmation](lowering.md) also requires the provider mutation receipt
+to prove released capacity before a policy run proceeds to later increases.

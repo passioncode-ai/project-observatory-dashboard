@@ -1959,6 +1959,8 @@ def _policy_door():
             return {"data": {"hash": f"h-{len(calls['posted'])}", "label": "sk-or-v1-x...y"}, "key": "sk-or-v1-" + "q" * 40}
         if method == "PATCH":
             calls["patched"].append((path, payload))
+            return {"data": {"hash": path.rsplit("/", 1)[-1], "limit": payload["limit"],
+                             "limit_reset": payload["limit_reset"]}}
         return {"data": {"hash": path.rsplit("/", 1)[-1], "name": "project-a-prod-model-key"}}
     m._request = fake
     # The provider reports the ceiling the door last set: the ledger's, as an honest provider would.
@@ -2486,6 +2488,43 @@ def test_or_policy_unknown_pending_reservation_is_not_current_headroom() -> None
     check("identity-bound pending delivery counts its fresh provider ceiling",
           p.total() == 9 and [row["action"] for row in plan] == ["held-pending", "issued"]
           and m.ledger()["issued"][name]["pending"], str(plan))
+
+
+def test_or_policy_confirms_lowered_exposure_before_spending_headroom() -> None:
+    """A requested decrease cannot authorize a later increase without evidence."""
+    for mode in ("higher", "missing", "foreign", "negative", "zero", "nonfinite", "reset", "exact", "lower"):
+        m, p = _r3_door()
+        m.issue_for_policy(_pol(1, limit=8), "example")
+        handle = p.by_name("k0"); posts = p.n
+        def response(path, admin, payload=None, method=None):
+            result = p(path, admin, payload, method)
+            if method != "PATCH": return result
+            if mode == "higher": p.keys[handle]["limit"] = 2.0004
+            if mode == "lower": p.keys[handle]["limit"] = 1.5
+            result = {"data": dict(p.keys[handle])}
+            if mode == "missing": result["data"].pop("limit")
+            if mode == "foreign": result["data"]["hash"] = "foreign"
+            if mode == "negative": result["data"]["limit"] = -1
+            if mode == "zero": result["data"]["limit"] = 0
+            if mode == "nonfinite": result["data"]["limit"] = float("nan")
+            if mode == "reset": result["data"]["limit_reset"] = "daily"
+            return result
+        m._request = response
+        try:
+            m.issue_for_policy(_pol(2, limit=10), "example",
+                               split={"vault:project-a/prod/K0": 2, "vault:project-a/prod/K1": 8})
+            partial = False
+        except m.PolicyPartial:
+            partial = True
+        rec = next(iter(m.ledger()["issued"].values()))
+        if mode in ("exact", "lower"):
+            check(f"{mode} confirmed lowering permits a bounded later issue",
+                  not partial and p.n == posts + 1 and p.total() <= 10
+                  and rec["limit_usd"] == (2 if mode == "exact" else 1.5))
+        else:
+            check(f"{mode} lowering observation stops before later issuance and retains the old ledger bound",
+                  partial and p.n == posts and p.patches == 1 and rec["limit_usd"] == 8,
+                  f"partial={partial}, posts={p.n-posts}, patches={p.patches}, recorded={rec['limit_usd']}")
 
 
 def test_or_policy_runs_one_at_a_time() -> None:
@@ -3146,6 +3185,7 @@ if __name__ == "__main__":
                test_or_policy_raises_only_what_fits_beside_unread_or_renamed_keys,
                test_or_policy_unread_exposure_is_not_saved_headroom,
                test_or_policy_unknown_pending_reservation_is_not_current_headroom,
+               test_or_policy_confirms_lowered_exposure_before_spending_headroom,
                test_or_policy_runs_one_at_a_time,
                test_or_policy_counts_every_positive_provider_fraction,
                test_or_policy_amounts_are_whole_cents_against_the_exact_limit,

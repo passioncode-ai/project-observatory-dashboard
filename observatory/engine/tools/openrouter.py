@@ -1121,7 +1121,8 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                 continue
             try:
                 if moving:
-                    _set_limit_locked(name, step["limit"], step["reset"])
+                    _set_limit_locked(name, step["limit"], step["reset"],
+                                      policy_ceiling_cents=_cents(step["limit"], "a planned ceiling"))
                 else:
                     _issue_key_locked(step["name"], step["limit"], account, step["to"], step["project"], step["reset"],
                                       policy_binding=dict(binding))
@@ -1255,7 +1256,8 @@ def set_limit(name_or_label: str, limit: float, reset: str | None = None) -> dic
         return _set_limit_locked(name_or_label, limit, reset)
 
 
-def _set_limit_locked(name_or_label: str, limit: float, reset: str | None = None) -> dict:
+def _set_limit_locked(name_or_label: str, limit: float, reset: str | None = None, *,
+                      policy_ceiling_cents: int | None = None) -> dict:
     """Moves a key's ceiling. Without a `reset` the key keeps the period it has: moving a daily
     ceiling never turns it into a monthly one behind the caller's back."""
     if not math.isfinite(limit) or limit <= 0:
@@ -1268,19 +1270,34 @@ def _set_limit_locked(name_or_label: str, limit: float, reset: str | None = None
     if not row:
         raise LookupError(f"the ledger records {name!r} but {label!r} holds no such key — "
                           f"it was deleted at the provider; `revoke {name}` clears the row")
-    _request(f"/keys/{row['hash']}", admin, {"limit": limit, "limit_reset": reset},
-             method="PATCH")
+    if policy_ceiling_cents is not None and (not rec.get("hash") or row.get("hash") != rec["hash"]):
+        raise RuntimeError("Policy ceiling identity is unresolved; no limit was changed")
+    response = _request(f"/keys/{row['hash']}", admin, {"limit": limit, "limit_reset": reset},
+                        method="PATCH")
+    confirmed_limit = limit
+    if policy_ceiling_cents is not None:
+        # A requested lowering is not released capacity. Confirm this PATCH's
+        # identity, amount and reset before recording success or allowing the
+        # policy loop to issue/raise another key. Never retry an uncertain effect.
+        current = response.get("data") if isinstance(response, dict) else None
+        observed = _ceiling_of(current) if isinstance(current, dict) else None
+        if (not isinstance(current, dict) or current.get("hash") != rec["hash"]
+                or observed is None or observed <= 0
+                or _cents_up(observed) > policy_ceiling_cents
+                or current.get("limit_reset") != reset):
+            raise RuntimeError("Policy ceiling effect is unconfirmed; the provider may have changed; refresh its evidence before further increases")
+        confirmed_limit = observed
     doc = ledger()
     before = doc["issued"][name].get("limit_usd")
-    doc["issued"][name]["limit_usd"] = limit
+    doc["issued"][name]["limit_usd"] = confirmed_limit
     doc["issued"][name]["limit_reset"] = reset
     save_ledger(doc)
     # A ceiling is what a key may spend: moving it is a movement like an issue or a
     # rotation, and it went unrecorded (2026-10-06). Here, not in `cmd_limit`, so the
     # keyserver's live action records it too.
-    _journal("limit", f"openrouter/{label}/{name}", limit_usd=limit, previous_usd=before,
+    _journal("limit", f"openrouter/{label}/{name}", limit_usd=confirmed_limit, previous_usd=before,
              limit_reset=reset)
-    return {"name": name, "label": row.get("label"), "limit": limit, "limit_reset": reset}
+    return {"name": name, "label": row.get("label"), "limit": confirmed_limit, "limit_reset": reset}
 
 
 def cmd_limit(name: str, set_to: float | None, reset: str | None = None) -> int:
