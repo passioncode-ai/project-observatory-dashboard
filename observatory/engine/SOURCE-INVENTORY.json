@@ -87,15 +87,15 @@
       "path": "checkout_inventory.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2c0c382846db53b8fec709f478679fd01d5c93ec3d4a2ca8631aadc17c38bd8a",
-      "bytes": 16449
+      "export_sha256": "ec4dac21a0d4b86f7eea036d585c21de18d05a57f3dad89c52e302df6fbfc5cc",
+      "bytes": 16463
     },
     {
       "path": "checkout_state.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c3e58cf4b7fe7b732789fbb77c5427037a58a6683380c2c418c2eff1bccccfed",
-      "bytes": 6790
+      "export_sha256": "d494d9e0dd44b1aec2f5ae0e5c954e0fab73dd5c7a6c62fe57e334a93a150058",
+      "bytes": 6804
     },
     {
       "path": "cleanup_lock.py",
@@ -835,8 +835,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "3ed2b0754dc08cabb59e8bd2a8072b2a6b3475ca556f79937b0437ceb75650c4",
-      "bytes": 16609,
+      "export_sha256": "86365264b54475e4d0e913095f7d619e9a26aad40b46d8ece57503c15ffde1d4",
+      "bytes": 17371,
       "upstream_modified": true
     },
     {
@@ -856,15 +856,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "6910302cb37624cbf4cd090ff400e9f6ea7e20b2781e90c05c7279b7479c8032",
-      "bytes": 106530,
+      "export_sha256": "6d03f99f1bb10f69fb907074a784c546212635f058e188519c4fefb39719f297",
+      "bytes": 107292,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "9896c81e7233884d3254aa54be1e40474394db9fc4dd5e7508b4ef2a0ac1b9c9",
-      "bytes": 82731,
+      "export_sha256": "b28545ccbe6f4311ec29a6c7b5b2a2fc918486e520ef77192ce4e3bcb8aaaf24",
+      "bytes": 83204,
       "upstream_modified": true
     },
     {
@@ -1697,8 +1697,8 @@
       "path": "safe_git.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b8d98d65e7fe98302ef5a90ffed08cee064cba1db15ab86bb667f251fb255879",
-      "bytes": 20415
+      "export_sha256": "32411e7330b7afc9b9aa03d2d484b8c055986a0614a44193b6d06bd54e411334",
+      "bytes": 21420
     },
     {
       "path": "service_events.py",
@@ -2372,8 +2372,8 @@
       "path": "tests/test_checkout_state.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "58176e04d942a62726dfbe0933947ea20b4610f5a5caa56aefb768e03d68ad52",
-      "bytes": 8066
+      "export_sha256": "fd7db05be5ebb18774277a06fd665d424e1549829a936542a433273e86692cdc",
+      "bytes": 12426
     },
     {
       "path": "tests/test_checkout_subject.py",

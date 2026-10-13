@@ -17,7 +17,7 @@ def query(path, args, deadline):
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise ValueError('command-timeout')
-    argv, env = safe_git.command(args, repo=path, timeout=remaining)
+    argv, env = safe_git.command(args, repo=path, timeout=remaining, offline=True)
     result = open_unlinked.capture(argv, env=env, seconds=max(0, deadline - time.monotonic()), max_bytes=MAX_BYTES)
     if result['reason']:
         raise ValueError(result['reason'])

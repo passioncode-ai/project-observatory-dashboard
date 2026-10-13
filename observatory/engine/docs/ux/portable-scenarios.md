@@ -311,3 +311,13 @@ no cleanup authority and does not prove absence of a concurrent writer.
 Tests: `test_checkout_state.py::CheckoutState` (real Git changes and index flags,
 unchanged index, byte filenames, parser limits, binding change, incomplete reads,
 bare/unborn/Windows, saved-reader validation).
+
+
+### Partial-clone checkout observation
+
+An explicit checkout scan observes only locally available Git data. It does not
+fetch missing promisor objects, refresh remote refs or infer remote durability.
+Missing required objects leave local state unknown and non-actionable. Ordinary
+complete local checkouts remain observable. Proof:
+`test_checkout_state.py::OfflineGitObservation`, including the actual bounded
+checkout query and unchanged synthetic object-store contents.
