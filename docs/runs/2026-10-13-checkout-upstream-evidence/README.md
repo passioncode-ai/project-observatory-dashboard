@@ -1,6 +1,6 @@
 # Bounded local upstream graph observation
 
-Status: scoped local implementation; independent source review pending.
+Status: independent scoped source review passed at `52c40faa`; draft delivery only.
 
 ## Objective and dependencies
 
@@ -46,7 +46,7 @@ stale remote tracking after a separate local writer pushes, missing/detached/unb
 state, history exclusions, drift, malformed counts, saved freshness and publication
 under graph failure. All provider and filesystem inputs are synthetic.
 
-Next: independent exact-source review, current/history privacy and draft stack on
+Next: current/history privacy on the final documentation successor and draft stack on
 PR269. Hosted/platform/installed acceptance remains separate. No merge or release
 is authorized by this packet.
 
@@ -66,3 +66,13 @@ next pass. Missing/null/boolean binding fields, changed candidate HEAD and faile
 source hashing refuse counts; actual complete local graphs still project useful
 results. The initial rejection is preserved; source review of the successor is
 required before draft delivery.
+
+## Corrected source review
+
+Independent review accepted exact source `52c40faa2f4e286e2935439b0174d934ae9299d0`.
+The six original counterexamples/controls now behave correctly, with 21 additional
+controls covering real ahead/diverged and saved positive graphs, stale/future/source
+errors, typed counts, non-actionability, directory/HEAD mismatch and incomplete
+history boundaries. This documentation successor leaves runtime and test bytes
+unchanged. Scoped source acceptance is not installed acceptance, remote durability
+or cleanup authority.
