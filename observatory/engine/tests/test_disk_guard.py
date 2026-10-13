@@ -57,6 +57,11 @@ class Base(unittest.TestCase):
         importlib.reload(paths)
         import disk_guard
         self.g = importlib.reload(disk_guard)
+        self.real_fresh_busy = getattr(self.g, "fresh_busy", None)
+        # No test probes the host process table or live holders.
+        fresh = patch.object(self.g, "fresh_busy", return_value=False, create=True)
+        fresh.start()
+        self.addCleanup(fresh.stop)
         self.t1 = self.base / "t1"
         self.t1.mkdir()
         # NOTHING OUTSIDE THE TEMPORARY DIRECTORY: the clone root and the temporary
@@ -909,6 +914,138 @@ class HoldersModule(unittest.TestCase):
 
 
 class GitTierSafety(Base):
+    def test_manual_removal_preserves_ignored_local_data(self):
+        import cleanup
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q", "-b", "main")
+        (repo / ".gitignore").write_text(".env.local\n")
+        (repo / "a").write_text("original\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        wt = self.base / "worktree"
+        git(repo, "worktree", "add", "-qb", "topic", str(wt))
+        (wt / "a").write_text("uncommitted\n")
+        (wt / ".env.local").write_text("synthetic local data\n")
+        with patch.object(cleanup, "busy_now", return_value=False):
+            rec = cleanup.act({"class": "worktree-dirty", "tier": "manual", "repo": str(repo),
+                               "target": str(wt), "branch": "topic"}, self.base / "archive")
+        self.assertEqual(rec["result"], "skipped", rec)
+        self.assertIn("ignored", rec["reason"])
+        self.assertEqual((wt / ".env.local").read_text(), "synthetic local data\n")
+        self.assertEqual((wt / "a").read_text(), "uncommitted\n")
+
+    def test_ignored_files_appearing_during_archive_keep_the_worktree(self):
+        import cleanup
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q", "-b", "main")
+        (repo / ".gitignore").write_text(".env.local\n")
+        (repo / "a").write_text("original\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        wt = self.base / "worktree"
+        git(repo, "worktree", "add", "-qb", "topic", str(wt))
+        (wt / "a").write_text("uncommitted\n")
+        export = cleanup.export_tracked
+
+        def create_ignored(target, status):
+            result = export(target, status)
+            (wt / ".env.local").write_text("arrived during archive")
+            return result
+
+        with patch.object(cleanup, "busy_now", return_value=False), \
+                patch.object(cleanup, "export_tracked", side_effect=create_ignored):
+            rec = cleanup.act({"class": "worktree-dirty", "tier": "manual", "repo": str(repo),
+                               "target": str(wt), "branch": "topic"}, self.base / "archive")
+        self.assertEqual(rec["result"], "skipped", rec)
+        self.assertEqual((wt / ".env.local").read_text(), "arrived during archive")
+        self.assertTrue((Path(rec["archive"]) / "tracked.patch").exists())
+
+    def test_local_state_is_protected_even_by_an_older_artifact_configuration(self):
+        import cleanup
+        import paths
+        paths.config_file("cleanup.json").write_text(json.dumps({"artifact_dirs": [".wrangler", "dist"]}))
+        self.assertNotIn(".wrangler", self.g.artifact_names())
+        self.assertNotIn(".wrangler", cleanup.load_config()["artifact_dirs"])
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        (repo / ".gitignore").write_text(".wrangler/\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        (repo / ".wrangler" / "state").mkdir(parents=True)
+        (repo / ".wrangler" / "state" / "db.sqlite").write_text("unique local data")
+        self.assertEqual(cleanup.ignored_keepers(str(repo), {".wrangler", "dist"}), [".wrangler"])
+        age(repo, 30)
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"checkouts": [{"path": str(repo), "worktrees": []}]}))
+        self.assertEqual(self.g.plan_builds(self.g.load_config(), "critical", self.free(),
+                                          time.time(), [".wrangler"]), [])
+        with patch.object(cleanup, "idle_projects", return_value=[{"id": "alpha-web", "folders": [str(repo)], "idle_days": 30}]):
+            self.assertEqual(cleanup.plan_artifacts({"artifact_dirs": [".wrangler"]}, self.free()), [])
+
+    def test_artifact_names_below_local_state_never_make_it_disposable(self):
+        import cleanup
+        import paths
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        (repo / ".gitignore").write_text(".wrangler/state/dist/\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        state = repo / ".wrangler" / "state" / "dist"
+        state.mkdir(parents=True)
+        (state / "database").write_text("unique local state")
+        self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), [".wrangler/state/dist"])
+        age(repo, 30)
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"checkouts": [{"path": str(repo), "worktrees": []}]}))
+        self.assertEqual(self.g.plan_builds(self.g.load_config(), "critical", self.free(),
+                                          time.time(), ["dist"]), [])
+        with patch.object(cleanup, "idle_projects", return_value=[{"id": "alpha-web", "folders": [str(repo)], "idle_days": 30}]):
+            self.assertEqual(cleanup.plan_artifacts({"artifact_dirs": ["dist"]}, self.free()), [])
+
+    def test_ignored_artifact_parent_keeps_nested_state_and_git(self):
+        import cleanup
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        (repo / ".gitignore").write_text("dist/\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        for marker in (".wrangler", ".git"):
+            with self.subTest(marker=marker):
+                nested = repo / "dist" / "nested" / marker
+                nested.mkdir(parents=True)
+                (nested / "only-copy").write_text("unique data")
+                self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), ["dist"])
+                with patch.object(cleanup, "idle_projects", return_value=[{"id": "alpha-web", "folders": [str(repo)], "idle_days": 30}]):
+                    self.assertEqual(cleanup.plan_artifacts({"artifact_dirs": ["dist"]}, self.free()), [])
+                with patch.object(cleanup, "busy_now", return_value=False):
+                    rec = cleanup.act({"class": "build-artifacts", "tier": "auto", "target": str(repo / "dist")}, self.base / "archive")
+                self.assertEqual(rec["result"], "skipped")
+                self.assertTrue((nested / "only-copy").exists())
+                import shutil
+                shutil.rmtree(repo / "dist")
+
+    def test_uncertain_artifact_walk_is_a_keeper(self):
+        import cleanup
+        import cleanup_safety
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        (repo / ".gitignore").write_text("dist/\n")
+        (repo / "dist").mkdir()
+        (repo / "dist" / "output").write_text("regenerable")
+        self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), [])
+        with patch.object(cleanup_safety.os, "scandir", side_effect=PermissionError):
+            self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), ["dist"])
+        self.assertTrue(cleanup_safety.protected_tree_reason(str(repo / "dist"), timeout=0))
+        self.assertTrue(cleanup_safety.protected_tree_reason(str(repo / "dist"), max_entries=0))
+        (repo / "dist" / "link").symlink_to(repo / "elsewhere")
+        self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), ["dist"])
+
     def test_a_clean_worktree_with_a_keeper_ignored_file_is_skipped(self):
         import cleanup
         repo = self.base / "repo"
@@ -1073,6 +1210,146 @@ class Surfaces(Base):
         self.assertEqual(workspace.parse(["disk-guard", "--level", "low"]).level, "low")
         with self.assertRaises(SystemExit):
             workspace.parse(["disk-guard", "--level", "extreme"])
+
+
+class TargetRevalidation(Builds):
+    """Only synthetic targets; every rule preserves bytes on a changed/unknown decision."""
+
+    def build_action(self):
+        root = self.repo("alpha-web", 20)
+        self.hygiene(root)
+        action = self.g.plan_builds(self.g.load_config(), "normal", self.free(),
+                                   time.time(), ["node_modules"])[0]
+        return root, action
+
+    def test_generic_temp_preserves_git_repository_worktree_and_nested_repository(self):
+        for name, marker in (("repo", ".git/config"), ("linked", ".git"),
+                             ("session", "scratch/repo/.git/config")):
+            root = self.t1 / name
+            (root / marker).parent.mkdir(parents=True, exist_ok=True)
+            (root / marker).write_text("only copy")
+            age(root, 10)
+        self.assertEqual(self.g.plan_temp(self.cfg(), "critical", self.free(), time.time()), [])
+
+    def test_generic_temp_preserves_paths_beneath_git_ancestry(self):
+        (self.t1 / ".git").write_text("gitdir: unavailable")
+        old = self.t1 / "scratch"
+        old.mkdir()
+        (old / "only-copy").write_text("keep")
+        age(self.t1, 10)
+        self.assertEqual(self.g.plan_temp(self.cfg(), "critical", self.free(), time.time()), [])
+
+    def test_apply_rejects_new_git_marker_even_with_old_timestamps(self):
+        root = self.t1 / "old"
+        root.mkdir()
+        age(root, 10)
+        action = self.g.plan_temp(self.cfg(), "critical", self.free(), time.time())[0]
+        (root / ".git").write_text("gitdir: unavailable")
+        age(root, 10)
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / ".git").exists())
+
+    def test_apply_build_preserves_force_added_output(self):
+        root, action = self.build_action()
+        git(root, "add", "-f", "node_modules/pkg/index.js")
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules/pkg/index.js").exists())
+
+    def test_apply_build_preserves_output_no_longer_ignored(self):
+        root, action = self.build_action()
+        (root / ".gitignore").write_text("")
+        age(root, 20)
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules").exists())
+
+    def test_apply_build_rechecks_checkout_activity(self):
+        root, action = self.build_action()
+        (root / "app.js").write_text("active again")
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules").exists())
+
+    def test_apply_build_rechecks_new_ignored_file(self):
+        root, action = self.build_action()
+        (root / "node_modules/new-file").write_text("new work")
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules/new-file").exists())
+
+    def test_apply_build_preserves_nested_git_marker(self):
+        root, action = self.build_action()
+        (root / "node_modules/pkg/.git").write_text("gitdir: unavailable")
+        age(root, 20)
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules/pkg/.git").exists())
+
+    def test_apply_build_refuses_missing_revalidation_context(self):
+        root = self.repo("alpha-web", 20)
+        action = {"class": "build-output", "target": str(root / "node_modules")}
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules").exists())
+
+    def test_apply_build_still_removes_unchanged_ignored_output(self):
+        root, action = self.build_action()
+        self.assertEqual(self.g.act(action, self.free())["result"], "removed")
+        self.assertFalse((root / "node_modules").exists())
+        self.assertTrue((root / "app.js").exists())
+
+    def test_each_action_uses_fresh_holders_and_unknown_is_a_skip(self):
+        for outcome in (True, None):
+            with self.subTest(outcome=outcome):
+                root = self.t1 / str(outcome)
+                root.mkdir()
+                with patch.object(self.g, "fresh_busy", return_value=outcome) as fresh:
+                    rec = self.g.act({"class": "temp", "target": str(root)}, self.free())
+                self.assertEqual(rec["result"], "skipped")
+                self.assertTrue(root.exists())
+                fresh.assert_called_once()
+
+    def test_expired_inspection_deadline_preserves_even_a_small_tree(self):
+        self.assertFalse(self.g.inspect(str(self.t1), deadline=time.monotonic() - 1)["complete"])
+
+    def test_apply_build_preserves_nested_local_state(self):
+        root, action = self.build_action()
+        (root / "node_modules/pkg/.wrangler").mkdir()
+        (root / "node_modules/pkg/.wrangler/db").write_text("only copy")
+        age(root, 20)
+        self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertTrue((root / "node_modules/pkg/.wrangler/db").exists())
+
+    def test_fresh_build_probe_covers_checkout_activity(self):
+        root, action = self.build_action()
+        with patch.object(self.g, "fresh_busy", return_value=True) as fresh:
+            self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
+        self.assertEqual(fresh.call_args.args[0], str(root))
+        self.assertTrue((root / "node_modules").exists())
+
+    def test_small_tree_with_unknown_stat_is_preserved(self):
+        entry = self.t1 / "only-copy"
+        entry.write_text("keep")
+        with patch.object(self.g.os, "scandir", side_effect=PermissionError):
+            self.assertFalse(self.g.inspect(str(self.t1))["complete"])
+        self.assertTrue(entry.exists())
+
+
+@unittest.skipIf(os.name == "nt", "POSIX target probe; Windows uses rename")
+class FreshTargetProbe(Base):
+    def test_target_probe_is_bounded_and_unknown_never_means_free(self):
+        self.assertIsNotNone(self.real_fresh_busy, "fresh target probe must exist")
+        command_results = [subprocess.CompletedProcess([], 1, "", ""),
+                           subprocess.CompletedProcess([], 0, "/usr/bin/editor", "")]
+        with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
+                patch.object(self.g.subprocess, "run", side_effect=command_results) as call:
+            self.assertIs(self.real_fresh_busy(str(self.t1), 5), False)
+        self.assertTrue(any(str(self.t1) in c.args[0] for c in call.call_args_list))
+        self.assertTrue(all(0 < c.kwargs["timeout"] <= 5 for c in call.call_args_list))
+        with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
+                patch.object(self.g.subprocess, "run", side_effect=subprocess.TimeoutExpired("lsof", 5)):
+            self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
+
+    def test_target_probe_refuses_partial_listing(self):
+        self.assertIsNotNone(self.real_fresh_busy, "fresh target probe must exist")
+        with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
+                patch.object(self.g.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "permission denied")):
+            self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
 
 
 if __name__ == "__main__":

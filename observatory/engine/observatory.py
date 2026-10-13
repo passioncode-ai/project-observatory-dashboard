@@ -485,7 +485,7 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                integrations, features, language, models, policy files;
                                never sources, secrets or the registry
   machine [--disk] [--explain PID]   processes by origin, memory, disk; why one process runs
-  cleanup [--apply [--include manual]]  plan, or remove what loses nothing; manual tier archives first
+  cleanup [--apply [--include manual]]  plan, or remove what loses nothing; manual tier archives first, skips ignored files
   disk-guard [--apply] [--level L]  keep free space by pressure: temp, browser clones, Trash, cache
                                tools, build output of idle checkouts; never what a process holds.
                                Runs from `maintain` (every 15 min) when features.auto_cleanup is on

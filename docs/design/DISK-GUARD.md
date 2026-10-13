@@ -26,7 +26,7 @@ the design that replaces those patches with one set of rules. The run record is
 
 | Found | Rule now |
 |---|---|
-| One `lsof` listing at the start, reused for minutes of removals | **Fresh holders per class**, plus a re-check of the target right before removal: still held? still old (an early-stopping walk)? |
+| One `lsof` listing at the start, reused for minutes of removals | **Fresh holders per class** for planning, then a bounded target-scoped holder probe immediately before each removal; missing, partial or timed-out evidence skips the target |
 | The git tier checked only working directories; "clean" worktree removal deleted ignored files (`.env.local`, local databases) | The git tier uses **the same holders** (open files, maps, executables) and a worktree with **ignored files outside the artifact directories is not clean** |
 | Programs run from a cache folder (an `npx` MCP server) hold no file open | Holders include every running process's **executable and the absolute paths in its arguments** |
 | `lsof` printed non-ASCII names escaped without a UTF-8 locale | `lsof` runs under a UTF-8 locale and `\xNN` escapes are decoded |
@@ -55,6 +55,20 @@ the design that replaces those patches with one set of rules. The run record is
 4. Survey refreshes and the large-file walk, only with the time left.
 5. Write the summary row and the report — always, in `finally`.
 
+## Local state preservation
+
+`.wrangler` is a state container, not disposable build output. The artifact-name
+filter in `tools/cleanup.py::artifact_names` excludes it from both cleanup paths,
+including copied configurations that still list it. A manually removed dirty
+worktree has only its tracked patch and untracked files archived; any ignored
+files therefore cause a skip before archiving and again before force removal.
+`tests/test_disk_guard.py::GitTierSafety` reproduces and pins these refusals.
+Git can collapse an ignored artifact parent into one row. Cleanup therefore walks
+that candidate with `cleanup_safety.protected_tree_reason`: repository and local
+state markers, symlinks, special files, read errors and exhausted time/entry budgets
+all retain it. The disk guard shares the entry predicate in its own bounded walk.
+This observation does not lock out an adversarial writer between a check and removal.
+
 ## Not done here, and why
 
 - A person's `full update --apply` started while a pass runs is refused by the snapshot's
@@ -62,3 +76,28 @@ the design that replaces those patches with one set of rules. The run record is
   (OBS-40 family), not the guard's.
 - Case-insensitive APFS paths written in the wrong case in a person's own roots do not match
   `lsof` names; the shipped roots are cased correctly.
+
+## Apply-time preservation (2026-10-13)
+
+`tools/disk_guard.py::git_ancestry` keeps generic temporary cleanup out of Git
+repositories and linked worktrees, including a target whose parent is a checkout.
+The recursive inspection also refuses nested repository markers and local state;
+old timestamps do not turn those paths into disposable temporary data.
+
+Build plans carry their checkout, idle threshold and planning timestamp.
+`act` repeats the checkout-idle, Git-ignore, tracked-content and subtree-freshness
+checks before removal. Missing context requires a new plan; failed Git reads,
+recent edits, newly written ignored files and new nested repositories preserve
+the target. `tests/test_disk_guard.py::TargetRevalidation` covers these changes.
+
+Every path action uses `fresh_busy` after its filesystem checks. On POSIX it
+queries `lsof` for this target only, then refreshes command-line paths with `ps`,
+sharing at most five seconds (and never beyond the action deadline). Warnings,
+partial output, a missing tool or timeout are unknown, so nothing is removed.
+There is deliberately no unbounded per-action `/proc` fallback: on a POSIX host
+without `lsof`, planning remains available but path actions skip. Windows keeps
+the rename probe. `FreshTargetProbe` pins the bounded and unknown outcomes.
+
+These checks reduce the planning-to-action race; they are not an exclusive
+filesystem lock against an arbitrary writer starting after the final probe.
+The existing cleanup lock serializes Observatory writers only.

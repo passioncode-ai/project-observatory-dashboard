@@ -16,7 +16,8 @@ TWO TIERS (config/cleanup.json):
   manual  the only copy of somebody's work: a branch with unique commits, a
           worktree with uncommitted edits. `--apply --include manual` archives it
           first — a thin git bundle, a patch plus a tarball of untracked files —
-          and never runs on a tick.
+          and never runs on a tick. Ignored files are not archived; their presence
+          skips manual worktree removal until they are preserved or moved.
 
 EVERY TARGET IS RE-CHECKED at the moment it is acted on, because the survey may be
 half an hour old and an agent may have started work since: a branch must still
@@ -49,9 +50,20 @@ sys.path.insert(0, str(ROOT / "collectors"))
 import configuration  # noqa: E402
 import paths  # noqa: E402
 import safe_git  # noqa: E402
+from cleanup_safety import protected_tree_reason  # noqa: E402
 
 AUTO_CLASSES = ("branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts")
 MANUAL_CLASSES = ("branch-unique", "worktree-dirty")
+
+
+def artifact_names(cfg: dict) -> list[str]:
+    """Known state containers are never output, even in older copied configurations.
+
+    Wrangler keeps local databases and object storage in `.wrangler/state`; being
+    ignored by git does not make those bytes reproducible. Older defaults listed
+    the whole folder, so filtering only the new default would leave installs unsafe.
+    """
+    return [name for name in cfg.get("artifact_dirs") or [] if name != ".wrangler"]
 
 
 def now() -> str:
@@ -76,6 +88,7 @@ def load_config() -> dict:
     # made. Pressure lowers only the others (review 2026-10-12: it overrode a person's 30).
     base_auto = shipped.get("auto") or {}
     cfg["_own_auto"] = sorted(k for k, v in (own.get("auto") or {}).items() if base_auto.get(k) != v)
+    cfg["artifact_dirs"] = artifact_names(cfg)
     return cfg
 
 
@@ -173,7 +186,7 @@ def plan_git(hygiene: dict, cfg: dict) -> list[dict]:
                             "why": "its directory no longer exists"})
             elif fresh and w["state"] == "clean" and idle >= auto.get("clean_worktree_idle_days", 7):
                 out.append({**base, "class": "worktree-clean", "tier": "auto", "target": w["path"],
-                            "branch": w.get("branch"), "artifacts": list(cfg.get("artifact_dirs") or []),
+                            "branch": w.get("branch"), "artifacts": artifact_names(cfg),
                             "why": f"no uncommitted change, idle {idle} days"})
             elif w["state"] == "dirty" and idle >= manual.get("dirty_worktree_idle_days", 7):
                 out.append({**base, "class": "worktree-dirty", "tier": "manual", "target": w["path"],
@@ -202,7 +215,7 @@ def idle_projects(days: int) -> list[dict]:
 
 
 def plan_artifacts(cfg: dict, busy: set[str]) -> list[dict]:
-    names = set(cfg.get("artifact_dirs") or [])
+    names = set(artifact_names(cfg))
     days = (cfg.get("auto") or {}).get("build_artifacts_project_idle_days", 30)
     out = []
     for p in idle_projects(days):
@@ -215,14 +228,14 @@ def plan_artifacts(cfg: dict, busy: set[str]) -> list[dict]:
                 keep = []
                 for d in dirnames:
                     full = os.path.join(dirpath, d)
-                    if d == ".git" or os.path.islink(full):
+                    if d in (".git", ".wrangler") or os.path.islink(full):
                         continue
                     if d in names:
                         ignored = git(dirpath, "check-ignore", "-q", full).returncode == 0
                         in_repo = git(dirpath, "rev-parse", "--git-dir").returncode == 0
                         held = busy.busy(full) if hasattr(busy, "busy") else \
                             any(b == full or b.startswith(full + "/") for b in busy)
-                        if (ignored or not in_repo) and not held:
+                        if (ignored or not in_repo) and not held and not protected_tree_reason(full):
                             out.append({"class": "build-artifacts", "tier": "auto", "target": full,
                                         "project": p["id"], "why": f"{'git-ignored' if in_repo else 'outside git'} "
                                                                    f"build output; project idle {p['idle_days']} days"})
@@ -300,11 +313,13 @@ def ignored_keepers(target: str, artifacts: set[str]) -> list[str]:
     out = git(target, "status", "--porcelain", "--ignored=matching", "--untracked-files=normal", "-z")
     if out.returncode:
         return ["(git status could not be read)"]
+    artifacts = set(artifact_names({"artifact_dirs": artifacts}))
     keep = []
     for entry in out.stdout.split("\0"):
         if entry.startswith("!! "):
             rel = entry[3:].rstrip("/")
-            if not any(part in artifacts for part in rel.split("/")):
+            if (".wrangler" in rel.split("/") or not any(part in artifacts for part in rel.split("/"))
+                    or protected_tree_reason(os.path.join(target, rel))):
                 keep.append(rel)
     return keep
 
@@ -348,6 +363,9 @@ def act(a: dict, archive: pathlib.Path) -> dict:
                 return {**rec, "result": "skipped",
                         "reason": f"it holds {len(keepers)} ignored file(s) that are not build output, "
                                   f"e.g. {keepers[0][:60]}"}
+        if cls == "worktree-dirty" and ignored_keepers(target, set()):
+            return {**rec, "result": "skipped", "reason": "ignored files are outside the manual archive; "
+                    "preserve or move them first, then rerun full cleanup --apply --include manual"}
         rec["head"] = git(target, "rev-parse", "HEAD").stdout.strip()
         if cls == "worktree-dirty":
             # NOTHING IS REMOVED UNLESS THE ARCHIVE IS PROVEN: every refusal below
@@ -373,6 +391,11 @@ def act(a: dict, archive: pathlib.Path) -> dict:
                         if name:
                             tar.add(os.path.join(target, name), arcname=name, recursive=False)
             rec["archive"] = str(dest)
+        # An archive can take time; an ignored file appearing meanwhile must not
+        # be lost to the force removal either. No ignored file is in this archive.
+        if cls == "worktree-dirty" and ignored_keepers(target, set()):
+            return {**rec, "result": "skipped", "reason": "ignored files appeared during archiving; "
+                    "preserve or move them first, then rerun full cleanup --apply --include manual"}
         if not a.get("branch") and rec["head"]:
             # A detached HEAD's commits must stay reachable after the worktree goes.
             git(repo, "branch", f"archive/wt-{rec['head'][:8]}", rec["head"])
@@ -383,6 +406,9 @@ def act(a: dict, archive: pathlib.Path) -> dict:
     if cls == "build-artifacts":
         if busy_now(target):
             return {**rec, "result": "skipped", "reason": "a process works inside it now"}
+        why = protected_tree_reason(target)
+        if why:
+            return {**rec, "result": "skipped", "reason": why}
         size = subprocess.run(["du", "-sk", target], capture_output=True, text=True).stdout.split()
         shutil.rmtree(target, ignore_errors=True)
         return {**rec, "project": a.get("project"), "kb": int(size[0]) if size else None,

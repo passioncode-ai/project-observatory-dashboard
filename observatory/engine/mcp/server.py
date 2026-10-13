@@ -539,6 +539,8 @@ def observatory_machine(
     cleanup and the disk guard run in the maintenance job (every 15 minutes) when the operator
     enabled features.auto_cleanup, and anything that
     holds unique work only through `full cleanup --apply --include manual`.
+    Manual worktree removal skips ignored files: preserve or move them before
+    retrying. `.wrangler` local state is never classified as build output.
     A process is reported by executable and script, never by its environment or
     full command line, because either can carry a credential.
     """

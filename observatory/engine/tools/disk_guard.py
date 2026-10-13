@@ -56,7 +56,8 @@ import configuration  # noqa: E402
 import osprivacy  # noqa: E402
 import paths  # noqa: E402
 import safe_git  # noqa: E402
-from holders import Holders, running  # noqa: E402,F401  (re-exported: tests patch `disk_guard.running`)
+from cleanup_safety import protected_entry_reason  # noqa: E402
+from holders import Holders, running, _utf8_env  # noqa: E402,F401  (re-exported: tests patch `disk_guard.running`)
 
 LEVELS = ("normal", "low", "critical")
 GB = 1024 ** 3
@@ -121,8 +122,8 @@ def load_config() -> dict:
 
 
 def artifact_names() -> list[str]:
-    own = _read(paths.config_file("cleanup.json")).get("artifact_dirs")
-    return list(own or _read(ROOT / "defaults" / "cleanup.json").get("artifact_dirs") or [])
+    import cleanup
+    return cleanup.load_config()["artifact_dirs"]
 
 
 def _number(value, default: float) -> float:
@@ -185,22 +186,26 @@ def inspect(root: str, cutoff: float | None = None, deadline: float | None = Non
     more entries than `limit`, or the `deadline` reached. The walk stops at the first of
     them, so a large tree in use costs one entry, not two hundred thousand."""
     out = {"newest": 0.0, "size": 0, "complete": False, "reason": ""}
+    if deadline is not None and time.monotonic() >= deadline:
+        out["reason"] = "the time ran out"
+        return out
     try:
         st = os.lstat(root)
     except OSError:
         out["reason"] = "gone"
         return out
 
-    def refuse(s: os.stat_result) -> str:
-        if stat.S_ISSOCK(s.st_mode):
-            return "a socket inside"
+    def refuse(s: os.stat_result, name: str) -> str:
+        protected = protected_entry_reason(name, s.st_mode)
+        if protected:
+            return protected
         if not osprivacy.owns(s):
             return "another account owns an entry"
         if cutoff is not None and s.st_mtime >= cutoff:
             return "used since the cutoff"
         return ""
 
-    why = refuse(st)
+    why = refuse(st, os.path.basename(root))
     out["newest"] = st.st_mtime
     if why:
         out["reason"] = why
@@ -210,33 +215,34 @@ def inspect(root: str, cutoff: float | None = None, deadline: float | None = Non
         return out
     seen, stack = 0, [root]
     while stack:
+        if deadline is not None and time.monotonic() >= deadline:
+            out["reason"] = "the time ran out"
+            return out
         d = stack.pop()
         try:
-            entries = list(os.scandir(d))
+            # Iterate lazily: even a single huge directory obeys the entry/time budget.
+            with os.scandir(d) as entries:
+                for e in entries:
+                    seen += 1
+                    if seen > limit:
+                        out["reason"] = f"more than {limit} entries"
+                        return out
+                    if deadline is not None and time.monotonic() >= deadline:
+                        out["reason"] = "the time ran out"
+                        return out
+                    s = e.stat(follow_symlinks=False)
+                    why = refuse(s, e.name)
+                    if why:
+                        out["reason"] = why
+                        return out
+                    out["newest"] = max(out["newest"], s.st_mtime)
+                    if stat.S_ISDIR(s.st_mode):
+                        stack.append(e.path)
+                    elif stat.S_ISREG(s.st_mode):
+                        out["size"] += s.st_size
         except OSError:
-            out["reason"] = "unreadable inside"
+            out["reason"] = "an entry could not be read"
             return out
-        for e in entries:
-            seen += 1
-            if seen > limit:
-                out["reason"] = f"more than {limit} entries"
-                return out
-            if deadline is not None and seen % 2000 == 0 and time.monotonic() > deadline:
-                out["reason"] = "the time ran out"
-                return out
-            try:
-                s = e.stat(follow_symlinks=False)
-            except OSError:
-                continue
-            why = refuse(s)
-            if why:
-                out["reason"] = why
-                return out
-            out["newest"] = max(out["newest"], s.st_mtime)
-            if stat.S_ISDIR(s.st_mode):
-                stack.append(e.path)
-            elif stat.S_ISREG(s.st_mode):
-                out["size"] += s.st_size
     out["complete"] = True
     return out
 
@@ -319,6 +325,66 @@ def guarded(path: str, degraded: list | None = None) -> bool:
 
 # --- the classes -------------------------------------------------------------------
 
+def git_ancestry(path: str) -> bool:
+    """Generic temporary cleanup never owns a checkout, even a broken linked one.
+
+    Check lexical and resolved ancestry without asking Git to trust a config or following
+    the marker. An unreadable ancestor is uncertainty, so preserve the candidate.
+    """
+    for candidate in {os.path.abspath(path), os.path.realpath(path)}:
+        p = pathlib.Path(candidate)
+        for parent in (p, *p.parents):
+            try:
+                os.lstat(parent / ".git")
+                return True
+            except (FileNotFoundError, NotADirectoryError):
+                pass
+            except OSError:
+                return True
+    return False
+
+
+def fresh_busy(target: str, timeout: float = 5.0) -> bool | None:
+    """Fresh, target-scoped holder check. Unknown is never a free target.
+
+    POSIX uses a bounded lsof query for this subtree plus fresh command paths. This
+    avoids another full-machine open-file inventory per action. Missing lsof, warnings,
+    partial output or timeout preserve the target; there is no unbounded /proc fallback.
+    Windows keeps the rename probe. This is a point-in-time check, not a filesystem lock.
+    """
+    if os.name == "nt":
+        return False
+    tool = shutil.which("lsof")
+    if not tool or timeout <= 0:
+        return None
+    end = time.monotonic() + min(5.0, timeout)
+    try:
+        selector = ["+D", target] if os.path.isdir(target) else ["--", target]
+        p = subprocess.run([tool, "-n", "-P", "-Fn", *selector], capture_output=True,
+                           text=True, errors="replace", timeout=max(0.001, end - time.monotonic()),
+                           env=_utf8_env(), stdin=subprocess.DEVNULL)
+        if p.returncode == 0 and p.stdout:
+            return True
+        if p.returncode != 1 or p.stdout or p.stderr:
+            return None
+        left = end - time.monotonic()
+        if left <= 0:
+            return None
+        p = subprocess.run(["ps", "-axww", "-o", "args="], capture_output=True,
+                           text=True, errors="replace", timeout=left, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if p.returncode or p.stderr or not p.stdout:
+        return None
+    paths_held = []
+    for line in p.stdout.splitlines():
+        for word in line.split():
+            word = word.split("=", 1)[-1] if word.startswith("-") and "=" in word else word
+            if word.startswith("/") and len(word) > 1:
+                paths_held.append(word.rstrip(",;:"))
+    return Holders(paths_held).busy(target)
+
+
 def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget | None = None,
               degraded: list | None = None) -> list[dict]:
     """Entries of the temporary roots nobody touched for `temp_days`, held by nobody."""
@@ -357,7 +423,7 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
                     return out
                 full = e.path
                 if (os.path.realpath(full) in nested or any(fnmatch.fnmatch(e.name, k) for k in keep)
-                        or e.is_symlink() or not owned(full)):
+                        or e.is_symlink() or not owned(full) or git_ancestry(full)):
                     continue
                 r = inspect(full, cutoff, time.monotonic() + max(1.0, budget.left()) if budget else None)
                 if r["complete"] and not holders.busy(full):
@@ -533,16 +599,21 @@ def checkout_idle_days(root: str, at: float, timeout: float = 60) -> float | Non
         # Through safe_git, the engine's one git door: no hooks, no external diff driver, and
         # no optional index lock taken in somebody's working checkout.
         p = safe_git.run(["ls-files", "-m", "-o", "--exclude-standard", "-z"], repo=root,
-                         timeout=max(5.0, timeout), text=False,
+                         timeout=max(0.001, timeout), text=False,
                          extra_env={"LC_ALL": "C", "GIT_OPTIONAL_LOCKS": "0"})
     except (OSError, subprocess.SubprocessError):
         return None
     if p.returncode:
         return None
-    for name in p.stdout.decode("utf-8", "replace").split("\0")[:5000]:
+    names = p.stdout.decode("utf-8", "replace").split("\0")
+    if len(names) > 5001:
+        return None                         # a partial activity census cannot prove idle
+    for name in names:
         if name:
-            with contextlib.suppress(OSError):
+            try:
                 stamps.append(os.lstat(os.path.join(root, name)).st_mtime)
+            except OSError:
+                return None
     return (at - max(stamps)) / 86400 if stamps else None
 
 
@@ -561,7 +632,7 @@ def _force_tracked(dirpath: str, full: str, timeout: float) -> bool:
     holds somebody's file and is not build output. `git check-ignore` usually already calls
     such a folder not ignored; this is the second line, for the patterns where it does not."""
     try:
-        p = safe_git.run(["ls-files", "-z", "--", full], repo=dirpath, timeout=max(5.0, timeout), text=False)
+        p = safe_git.run(["ls-files", "-z", "--", full], repo=dirpath, timeout=max(0.001, timeout), text=False)
     except (OSError, subprocess.SubprocessError):
         return True
     return p.returncode != 0 or bool(p.stdout.strip(b"\0"))
@@ -575,7 +646,8 @@ def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[
     nested in another (that one is judged on its own), never in a privacy-guarded place."""
     days = by_level(cfg, "build_idle_days", level, 14)
     roots = checkouts()
-    wanted = set(names)
+    import cleanup
+    wanted = set(cleanup.artifact_names({"artifact_dirs": names}))
     out = []
     left = (lambda: budget.left()) if budget else (lambda: 3600.0)  # noqa: E731
     for root in roots:
@@ -597,15 +669,16 @@ def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[
             keep = []
             for d in dirnames:
                 full = os.path.join(dirpath, d)
-                if d == ".git" or os.path.islink(full):
+                if d in (".git", ".wrangler") or os.path.islink(full):
                     continue
                 if d in wanted:
                     t = min(30.0, max(1.0, left()))
                     ignored = safe_git.run(["check-ignore", "-q", full], repo=dirpath, timeout=t).returncode == 0
                     if ignored and not holders.busy(full) and not _force_tracked(dirpath, full, t):
-                        r = inspect(full, None, time.monotonic() + max(1.0, left()), limit=500_000)
+                        r = inspect(full, at, time.monotonic() + max(1.0, left()), limit=500_000)
                         if r["complete"]:
                             out.append({"class": "build-output", "target": full, "bytes": r["size"],
+                                        "checkout": root, "idle_days": days, "cutoff": at,
                                         "why": f"git-ignored {d}; checkout idle {idle:.0f} days"})
                     continue
                 if depth < 5:
@@ -729,12 +802,44 @@ def act(a: dict, holders: Holders) -> dict:
             return {**rec, "result": "skipped", "reason": "already gone"}
         if holders.busy(target):
             return {**rec, "result": "skipped", "reason": "a process holds it now"}
-        if a.get("cutoff") is not None:
-            # STILL OLD, right now: the plan may be minutes old, and reading or entering a
-            # folder does not change it, but writing anything in it does.
-            r = inspect(target, a["cutoff"], time.monotonic() + 30)
-            if not r["complete"]:
-                return {**rec, "result": "skipped", "reason": f"changed since the plan: {r['reason']}"}
+        deadline = min(a.get("deadline", float("inf")), time.monotonic() + 30)
+        if guarded(target) or os.path.islink(target) or not owned(target):
+            return {**rec, "result": "skipped", "reason": "the target is protected, linked or no longer owned"}
+        if a["class"] == "temp" and git_ancestry(target):
+            return {**rec, "result": "skipped", "reason": "temporary target belongs to a Git checkout"}
+        if a["class"] == "build-output":
+            root = a.get("checkout")
+            days = a.get("idle_days")
+            if not root or not isinstance(days, (int, float)) or a.get("cutoff") is None:
+                return {**rec, "result": "skipped", "reason": "build revalidation context is missing; replan"}
+            real_root, real_target = os.path.realpath(root), os.path.realpath(target)
+            if not real_target.startswith(real_root + os.sep) or holders.busy(root):
+                return {**rec, "result": "skipped", "reason": "build checkout changed or is held"}
+            try:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise subprocess.TimeoutExpired("build revalidation", 0)
+                idle = checkout_idle_days(root, time.time(), min(5.0, left))
+                left = deadline - time.monotonic()
+                if idle is None or idle < days or left <= 0:
+                    return {**rec, "result": "skipped", "reason": "checkout active or its idle state is unknown"}
+                ignored = safe_git.run(["check-ignore", "-q", real_target], repo=root,
+                                       timeout=min(5.0, left)).returncode == 0
+                left = deadline - time.monotonic()
+                if not ignored or left <= 0 or _force_tracked(root, real_target, min(5.0, left)):
+                    return {**rec, "result": "skipped", "reason": "build output is no longer ignored or may be tracked"}
+            except (OSError, subprocess.SubprocessError):
+                return {**rec, "result": "skipped", "reason": "build revalidation could not complete"}
+        # Always inspect again: a marker or socket can appear even on a class without a cutoff.
+        r = inspect(target, a.get("cutoff"), deadline)
+        if not r["complete"]:
+            return {**rec, "result": "skipped", "reason": f"changed since the plan: {r['reason']}"}
+        held = fresh_busy(a.get("checkout", target), min(5.0, deadline - time.monotonic()))
+        if held is not False:
+            return {**rec, "result": "skipped", "reason": "a process holds it now" if held
+                    else "fresh target holders could not be read; nothing removed"}
+        if time.monotonic() >= deadline:
+            return {**rec, "result": "skipped", "reason": "target revalidation time ran out"}
         try:
             remove(target, probe=holders.mode == "rename")
             rec["result"] = "removed"
@@ -912,6 +1017,8 @@ def run(argv: list[str]) -> dict:
                                                                            f"{len(actions) - i} action(s) wait for next pass"})
                                 break
                             a = {**a, "timeout": min(_number(a.get("timeout"), 90), remaining)}
+                        if a["class"] != "cache-command":
+                            a = {**a, "deadline": min(class_end, time.monotonic() + max(0.0, left() - reserve))}
                         try:
                             row = act(a, holders)
                         except (OSError, subprocess.SubprocessError) as exc:

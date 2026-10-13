@@ -613,7 +613,15 @@ The manual tier writes a thin git bundle per branch and a patch plus a tarball
 of untracked files per worktree under `<home>/archive/cleanup/<date>/` before
 removing anything. A worktree's patch is re-applied, in check mode, to a scratch
 index of its HEAD first; if git cannot produce it or it does not apply, the
-worktree stays and the run reports it as failed with the reason.
+worktree stays and the run reports it as failed with the reason. Ignored files are
+not included in that archive: if any are present, manual removal is skipped.
+Preserve or move them first, then rerun `full cleanup --apply --include manual`.
+The `.wrangler` directory can hold local databases and object storage; it is never
+classified as build output, even when an older cleanup configuration lists it.
+Cleanup also retains an ignored artifact parent containing a nested repository or
+local state, and any tree whose contents cannot be fully inspected within its
+bounded check. Symlinks and special files are retained conservatively.
+Regression coverage: `tests/test_disk_guard.py`, `GitTierSafety`.
 
 ### The disk guard
 
@@ -652,6 +660,15 @@ yourself; a worktree with uncommitted edits, or with ignored files that are not 
 database), and a branch with unique commits never do. `project-observatory full cleanup --level low` previews it.
 Every cleanup takes one lock, so the tick, the guard and you never act on the same thing at once. npx's package
 cache and macOS diagnostic reports are swept too.
+
+Temporary cleanup preserves repositories and linked worktrees, including nested
+Git markers and paths beneath a checkout. Build cleanup rechecks checkout
+activity, ignore rules, tracked files and new writes immediately before acting.
+Each path action also makes a fresh, target-scoped holder probe within five
+seconds; unknown, partial or timed-out results skip the path. On POSIX this
+last probe requires `lsof`; without it the plan is available but path removal
+waits. Windows retains the rename probe. See [the preservation contract](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
+and `tests/test_disk_guard.py::TargetRevalidation` / `FreshTargetProbe`.
 
 **On every system.** What a process holds is read with `lsof` on macOS and Linux, from
 `/proc` on a Linux without `lsof`, and on Windows by renaming the folder aside before
