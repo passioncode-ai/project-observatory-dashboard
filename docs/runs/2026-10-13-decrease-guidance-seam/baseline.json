@@ -1,0 +1,42 @@
+{
+  "source": "89e8cd751c834a045d071ec0fd63e45d52c74fe9",
+  "source_sha256": "892740d16cc4e9ad4e51382f03cafd5dc81f7247a5127e7e8aee876f5981b7ae",
+  "cases": [
+    {
+      "kind": "large-target",
+      "target": 123456.78,
+      "actions": [
+        "held-ceiling",
+        "over-limit"
+      ],
+      "explanations": [
+        "The provider ceiling remains above the requested share; no automatic retry",
+        "OVER LIMIT by $0.01 now ($123456.79 against the $123456.78 limit); it ends after: limit project-a-prod-k0 --set 123457"
+      ],
+      "flagged_command_emitted": false
+    },
+    {
+      "kind": "within-aggregate",
+      "target": 9,
+      "actions": [
+        "held-ceiling"
+      ],
+      "explanations": [
+        "The provider ceiling remains above the requested share; no automatic retry"
+      ],
+      "flagged_command_emitted": false
+    },
+    {
+      "kind": "post-effect-unmet",
+      "target": 9,
+      "actions": [
+        "held-ceiling"
+      ],
+      "explanations": [
+        "The provider reported $9.004; the requested share is unmet; actual exposure counts before any increase"
+      ],
+      "flagged_command_emitted": false
+    }
+  ],
+  "scope": "synthetic source baseline; no production provider calls"
+}

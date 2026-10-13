@@ -31,3 +31,6 @@ Contract: brand-contract v1
 | openrouter.repair_help | require a fresh known ceiling and record one non-increasing repair attempt | observatory/engine/tools/openrouter.py | Explicit decrease-only ceiling repair | proposed | copy |
 | openrouter.repair_status_help | show the recorded ceiling repair without provider access | observatory/engine/tools/openrouter.py | Explicit decrease-only ceiling repair | proposed | copy |
 | openrouter.repair_refresh_help | with --repair-status: record a fresh observation attempt; never retry the mutation | observatory/engine/tools/openrouter.py | Explicit decrease-only ceiling repair | proposed | copy |
+
+| openrouter.repair_guidance | request one observed decrease: `{command}` | observatory/engine/tools/openrouter.py | Policy guidance reaches the guarded decrease door | proposed | copy |
+| openrouter.explicit_actions | explicit actions to request: | observatory/engine/tools/openrouter.py | Policy guidance reaches the guarded decrease door | proposed | copy |

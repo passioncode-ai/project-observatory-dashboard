@@ -1931,8 +1931,8 @@
       "path": "tests/adv_j1_property.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "374eee9807585e7599771c23866026746c924f9f8c586abb4025bc5a068c1a6b",
-      "bytes": 33825
+      "export_sha256": "fdd71cd470d781913d6323cfcb3052c6d5022bb923561415fbc56cd4dd6f16b2",
+      "bytes": 33613
     },
     {
       "path": "tests/adv_j1_property_forget.py",
@@ -2950,8 +2950,8 @@
       "path": "tests/test_j3_adversary.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b013f4e1a57858a18ef0f696658ce74a2ec4daef8a133f62e337b6a2bbf5fa28",
-      "bytes": 18580
+      "export_sha256": "fa288fa60e175731332eff96d0dba2a1daa13061bef2475699ca15b4af3d1e22",
+      "bytes": 24565
     },
     {
       "path": "tests/test_key.py",
@@ -4519,8 +4519,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "892740d16cc4e9ad4e51382f03cafd5dc81f7247a5127e7e8aee876f5981b7ae",
-      "bytes": 136325,
+      "export_sha256": "036070aa003e679f680712362f85fd8aed40af6110d55c75300baa242d21849a",
+      "bytes": 136990,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,

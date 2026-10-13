@@ -330,46 +330,42 @@ def _fixture_digest(value):
 
 
 def limit_remedies(m, p, plan):
-    """Translate only the door's emitted decrease into a source-bound test proposal.
-
-    These checks are not a production CAS: there is no nested policy lock, and
-    external writers between the check and command remain outside this fixture.
-    Reported public metadata is authoritative here; never inspect hidden _asked.
-    """
-    import math, re
+    """Translate emitted guarded commands; prechecks are not an external CAS."""
+    import math, shlex
     try:
         doc = m.ledger(); ledger_digest = _fixture_digest(doc); plan_digest = _fixture_digest(plan)
         if not isinstance(plan, list): return []
         proposals = []
-        for warning in plan:
-            if warning.get('action') != 'over-limit': continue
-            tail = warning.get('why', '').partition('it ends after: ')[2]
-            for command in tail.split(', '):
-                match = re.fullmatch(r'limit ([a-z0-9_-]+) --set ([0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)', command)
-                if not match: continue
-                name, amount = match.group(1), float(match.group(2))
-                slots = [r for r in plan if r.get('name') == name and
-                         r.get('action') in ('in-place', 'held-ceiling')]
-                rec = doc['issued'].get(name); handle = rec.get('hash') if isinstance(rec, dict) else None
-                row = p.keys.get(handle)
-                if len(slots) != 1 or type(slots[0].get('limit')) not in (int,float) or slots[0]['limit'] != amount: continue
-                if not isinstance(handle,str) or not handle or not isinstance(row,dict) or row.get('hash') != handle: continue
-                current = row.get('limit')
-                if type(current) not in (int,float) or not math.isfinite(current) or not 0 < amount < current: continue
-                if not math.isfinite(amount): continue
-                proposal = {'kind':'emitted-limit-decrease','name':name,'hash':handle,'amount':amount,
-                            'ledger_digest':ledger_digest,'plan_digest':plan_digest}
-                if proposal not in proposals: proposals.append(proposal)
+        for step in plan:
+            if step.get('action') != 'held-ceiling': continue
+            command = step.get('repair_command')
+            if not isinstance(command, str): continue
+            if f'; request one observed decrease: `{command}`' not in step.get('why', ''): continue
+            args = shlex.split(command)
+            if len(args) != 5 or args[0] != 'limit' or args[2] != '--set' or args[4] != '--decrease-only': continue
+            name, amount = args[1], float(args[3])
+            slots = [r for r in plan if r.get('name') == name]
+            rec = doc['issued'].get(name); handle = rec.get('hash') if isinstance(rec, dict) else None
+            row = p.keys.get(handle)
+            if len(slots) != 1 or slots[0] is not step or type(step.get('limit')) not in (int,float) or step['limit'] != amount: continue
+            if not isinstance(handle,str) or not handle or not isinstance(row,dict) or row.get('hash') != handle: continue
+            current = row.get('limit')
+            if type(current) not in (int,float) or not math.isfinite(current) or not 0 < amount < current: continue
+            if not math.isfinite(amount): continue
+            proposals.append({'kind':'emitted-limit-decrease','name':name,'hash':handle,'amount':amount,
+                              'command':command,'args':args,'ledger_digest':ledger_digest,'plan_digest':plan_digest})
         return proposals
     except (ValueError,TypeError,KeyError,AttributeError): return []
 
 
 def apply_limit_remedy(m, p, plan, proposal):
+    from unittest.mock import patch
     if proposal not in limit_remedies(m,p,plan): return {'status':'refused'}
     try:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            rc = m.cmd_limit(proposal['name'],proposal['amount'],None)
-    except Exception:
+            with patch.object(m.sys, 'argv', ['openrouter.py', *proposal['args']]):
+                rc = m.main()
+    except (OSError, ValueError, RuntimeError):
         return {'status':'unresolved'}
     return {'status':'operator-applied' if rc == 0 else 'unresolved'}
 

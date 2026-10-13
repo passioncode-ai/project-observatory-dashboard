@@ -146,3 +146,19 @@ Status: scoped source and synthetic review passed; product outcome unobserved.
 Synthetic coverage: `observatory/engine/tests/test_decrease_repair.py`; implementation
 receipt: `docs/runs/2026-10-13-decrease-only-repair/implementation-focused.json`.
 No installed/provider acceptance; original adversarial convergence remains failed.
+
+### Policy guidance reaches the guarded decrease door
+
+A final `held-ceiling` plan row shows its existing requested share as
+`limit NAME --set USD --decrease-only`, including when the aggregate fits and
+when a confirmed lowering still reports an above-share amount. USD retains every
+planned cent. The same command may also appear in aggregate guidance; planning
+adds no provider write. It requests one observed decrease and promises neither
+convergence nor released capacity. An unknown effect does not invent a refresh
+or retry. General manual `limit --set` is a separate command contract.
+
+Synthetic acceptance uses actual CLI output, argument parser and repair evidence:
+`test_j3_adversary.ModelBinding.test_actual_cli_prints_exact_command_and_proposal_has_no_effect`
+and `test_guarded_remedy_uses_actual_parser_and_exact_entry_exception_tuple`.
+The original model's assertions and event sequence remain unchanged; its previous
+full failure matrix is retained until a separately recorded complete rerun.
