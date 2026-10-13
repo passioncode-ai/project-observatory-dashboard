@@ -1604,3 +1604,26 @@ profile retain their existing behavior. This is not a new cleanup permission.
 Proof: `tests/test_checkout_state.py::OfflineGitObservation` in the engine uses
 only disposable local file remotes, checks object-store contents before/after,
 and includes a positive complete local observation and explicit remote controls.
+
+
+### Read local upstream graph evidence
+
+An explicit checkout scan saves local-state results before a separately budgeted
+upstream graph phase. That phase reserves up to a quarter of the scan's time
+budget, at most five seconds, with its own persistent round-robin cursor and
+bounded child per checkout. Failures preserve the saved local-state observation.
+
+For a supported complete local graph, the receipt records ahead/behind commit
+counts and whether the upstream is another local branch or a remote-tracking
+ref. These are local resolved commits only: a remote-tracking ref can be stale,
+so `remote_durability` remains `unknown`, and `actionable` remains false. No
+fetch, deletion, pruning or owner inference follows. Detached/unborn/missing
+upstream, shallow or promisor history, replacement refs, grafts and alternate
+object stores produce unknown counts. Those exclusions preserve uncertainty
+rather than silently interpreting a different graph.
+
+The saved coverage view uses the graph's own measurement time and source binding;
+it never refreshes graph evidence from another phase's success. After 30 minutes,
+a malformed receipt or a source/binding mismatch, counts are unknown. Git output,
+remote URLs, commit subjects and ref names are absent from this aggregate view.
+Proof: `tests/test_checkout_state.py::UpstreamGraph` and `GraphPhase` in the engine.
