@@ -1931,8 +1931,8 @@
       "path": "tests/adv_j1_property.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "df0f0f03b178fae42a5219e7e90c0b571c1b7918f4249e041c4128f96eff98e6",
-      "bytes": 25497
+      "export_sha256": "31468d0406ebe6c3b9b7abc0c7736bcf63e273c289d58b231329ff99b83d3b8c",
+      "bytes": 27311
     },
     {
       "path": "tests/adv_j1_property_forget.py",
@@ -2943,8 +2943,8 @@
       "path": "tests/test_j3_adversary.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "daa8c60a1330e5a354be5df7fc255587039461580ea6ec73d4c2c401228cec1d",
-      "bytes": 5364
+      "export_sha256": "96300090cb6aa5f7654ef6cc3aea9a599b9ae71c69849c383583793a01f1dae9",
+      "bytes": 7998
     },
     {
       "path": "tests/test_key.py",

@@ -282,6 +282,42 @@ def revoke(m, name):
         return "killed"
 
 
+
+def refresh_consumers(m, p, consumers, *, listed=True):
+    """Run the real producer over bounded, read-only synthetic observations.
+
+    Only explicit consumer-label events populate this model's destination survey;
+    delivery alone does not assert a running holder. Keep observations through
+    convergence. The finite fake snapshot is not real pagination/remote coverage.
+    No door calls, RNG draws, hooks, writes or credentials enter this adapter.
+    """
+    import configuration
+    from unittest.mock import patch
+    scanner = T.load("collectors/scan_openrouter.py", "j3_consumer_producer")
+    rows = [p.public(row) for row in p.keys.values()]
+    if len(rows) > 1000 or len(consumers) > 1000:
+        raise RuntimeError("ENVIRONMENT synthetic consumer inventory exceeds model bound")
+    def by_hash(_admin, handle):
+        row = p.keys.get(handle)
+        return (p.public(row), None, None) if row else (None, 404, "HTTP 404")
+    out = m.paths.SCRATCH / "openrouter.json"
+    with patch.object(configuration, "enabled", return_value=True), \
+         patch.object(scanner, "DESTINATIONS", {"provisioning": m.ADMIN_STORE / "example"}), \
+         patch.object(scanner, "destinations", return_value=(dict(consumers), [], [])), \
+         patch.object(scanner, "listing", return_value=(rows if listed else [], None)), \
+         patch.object(scanner, "key_by_hash", side_effect=by_hash), \
+         patch.object(scanner, "_get", side_effect=AssertionError("synthetic source only")), \
+         contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        if scanner.main(["scan_openrouter.py", str(out)]) != 0:
+            raise RuntimeError("ENVIRONMENT synthetic consumer producer failed")
+    return json.loads(out.read_text())
+
+
+def remedy_revoke(m, p, name, consumers):
+    refresh_consumers(m, p, consumers)
+    return revoke(m, name)
+
+
 def representation(m, p):
     """Synthetic observer: explicit identities differ from bounded unknown reservations.
 
@@ -349,6 +385,7 @@ def case(seed, trace=False):
         if err is not None or any(s.get("action") == "blocked" for s in plan or []):
             broke.append(f"(b) {sum(planned)} planned under {limit_cents} refused: {err}")
     protected: set[str] = set()
+    consumers: dict[str, str] = {}
 
     def lname(ref):
         return T.orr.__globals__ and m.slug(f"project-a-{ref.split('/')[1]}-{ref.split('/')[2]}")
@@ -455,12 +492,9 @@ def case(seed, trace=False):
             rec_name = next((n for n, r in issued.items() if r.get("hash") == h), None)
             if rec_name:
                 lab = p.keys[h]["label"]
-                scan = rng.choice([
-                    {"keys": [{"name": p.keys[h]["name"], "label": lab, "serves": "worker"}], "destination_hashes": {}},
-                    {"keys": [], "destinations": {"worker": lab}, "destination_hashes": {},
-                     "unlisted_destinations": ["worker"]},
-                ])
-                (m.paths.SCRATCH / "openrouter.json").write_text(json.dumps(scan), encoding="utf-8")
+                listed = rng.choice([True, False])
+                consumers[f"worker-{rec_name}"] = lab
+                scan = refresh_consumers(m, p, consumers, listed=listed)
                 rc = revoke(m, rec_name)
                 still = h in p.keys
                 log.append(f"consumer reads {h} by label ({'listed' if scan['keys'] else 'unlisted'}); revoke -> rc={rc} still={still}")
@@ -473,7 +507,7 @@ def case(seed, trace=False):
             for s in plan or []:
                 if s.get("action") in ("held-pending", "not-in-policy", "held-missing", "held-disabled") \
                         and s.get("name") not in protected:
-                    log.append(f"remedy revoke {s['name']} -> {revoke(m, s['name'])}")
+                    log.append(f"remedy revoke {s['name']} -> {remedy_revoke(m, p, s['name'], consumers)}")
         for u in untracked(m, p):
             msg = f"(L) live project key unknown to the ledger after {ev}: {u}"
             if msg not in broke:
@@ -482,7 +516,7 @@ def case(seed, trace=False):
     p.fail.clear()
     p.unread.clear()
     door["deliver"] = door["save"] = None
-    (m.paths.SCRATCH / "openrouter.json").unlink(missing_ok=True)
+    # Each remedy refreshes the real producer; known consumers remain observed.
     last = None
     invalid_at_rest = invalid_policy(pol, limit_cents)
     for attempt in range(5):
@@ -508,7 +542,7 @@ def case(seed, trace=False):
                 for h in [h for h, r in p.keys.items() if r["name"] == s["name"]]:
                     del p.keys[h]
                     p.order.remove(h)
-            rc = revoke(m, s["name"])
+            rc = remedy_revoke(m, p, s["name"], consumers)
             log.append(f"  remedy revoke {s['name']} ({s['action']}) -> {rc}")
     if invalid_at_rest:
         pass  # the rejection property above replaces convergence only for invalid inputs
@@ -535,4 +569,5 @@ def case(seed, trace=False):
 if __name__ == "__main__":
     from adversarial_runner import main
     raise SystemExit(main(case, sys.argv[1:], variant=pathlib.Path(__file__).stem,
-                          source_paths=[__file__, T.__file__, T.ROOT / "tools/openrouter.py"]))
+                          source_paths=[__file__, T.__file__, T.ROOT / "tools/openrouter.py",
+                                        T.ROOT / "collectors/scan_openrouter.py"]))

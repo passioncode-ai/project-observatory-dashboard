@@ -26,6 +26,56 @@ class ModelBinding(unittest.TestCase):
         self.m.issue_key('project-a-prod-k0',10,'example','vault:project-a/prod/K0','project-a')
         return next(iter(self.m.ledger()['issued']))
 
+    def test_producer_refresh_preserves_holders_and_has_no_door_effects(self):
+        name = self.issue(); row = self.m.ledger()['issued'][name]
+        h = row['hash']; consumers = {'worker': self.p.keys[h]['label']}
+        before = (copy.deepcopy(self.m.ledger()), copy.deepcopy(self.p.keys), self.p.calls, self.p.writes)
+        receipt = A.refresh_consumers(self.m, self.p, consumers)
+        self.assertEqual(receipt['schema_version'], 1)
+        self.assertEqual(receipt['degraded'], [])
+        self.assertEqual(receipt['destination_hashes']['worker']['hash'], h)
+        self.m._revoke_scan()
+        self.assertEqual(before[2:], (self.p.calls, self.p.writes))
+        self.assertEqual(A.revoke(self.m, name), 1)
+        receipt = A.refresh_consumers(self.m, self.p, consumers)
+        self.assertEqual(receipt['destinations'], consumers)
+        # Revoke reads only; refresh itself must not consume fake-door calls.
+        self.assertEqual(before[:2], (self.m.ledger(), self.p.keys))
+        self.assertEqual(before[3], self.p.writes)
+
+    def test_producer_empty_positive_unlisted_and_stale_negative(self):
+        import datetime, json
+        name = self.issue(); h = self.m.ledger()['issued'][name]['hash']
+        consumers = {'worker': self.p.keys[h]['label']}
+        calls = self.p.calls
+        doc = A.refresh_consumers(self.m, self.p, consumers, listed=False)
+        self.assertTrue(doc['degraded'])
+        self.assertEqual(A.revoke(self.m, name), 1)
+        self.assertEqual(self.p.calls, calls)
+        doc = A.refresh_consumers(self.m, self.p, {})
+        self.assertEqual(doc['degraded'], [])
+        doc['scanned_at'] = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=37)).isoformat()
+        path = self.m.paths.SCRATCH / 'openrouter.json'; path.write_text(json.dumps(doc))
+        self.assertEqual(A.revoke(self.m, name), 1)
+        path.unlink(); self.assertEqual(A.revoke(self.m, name), 1)
+        A.refresh_consumers(self.m, self.p, {})
+        self.assertEqual(A.revoke(self.m, name), 0)
+        self.assertNotIn(h, self.p.keys)
+
+    def test_convergence_refresh_does_not_erase_observed_consumers(self):
+        seen = []
+        real = A.refresh_consumers
+        def observed(m, p, consumers, **kwargs):
+            seen.append(dict(consumers))
+            return real(m, p, consumers, **kwargs)
+        with patch.object(A, 'refresh_consumers', side_effect=observed):
+            A.case(7000099)
+        prior = {}
+        self.assertTrue(any(seen))
+        for current in seen:
+            self.assertTrue(prior.items() <= current.items())
+            prior = current
+
     def test_unique_values_bind_real_hash_and_positive_rotation_reaches_delivery(self):
         first = self.p('/keys', 'synthetic', {'name': 'project-a-one', 'limit': 1, 'limit_reset': 'monthly'})
         second = self.p('/keys', 'synthetic', {'name': 'project-a-two', 'limit': 1, 'limit_reset': 'monthly'})
