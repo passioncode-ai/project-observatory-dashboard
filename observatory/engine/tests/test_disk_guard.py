@@ -280,6 +280,28 @@ class Acting(Base):
             self.assertEqual(self.g.act(a, self.free())["result"], "skipped")
             self.assertEqual(self.g.act({**a, "busy_output": ""}, self.free())["result"], "failed")
 
+    def test_child_diagnostics_never_enter_receipts_or_journal(self):
+        marker = "SYNTHETIC_CREDENTIAL_SENTINEL"
+        for stream, busy, code in (("stderr", False, 2), ("stdout", False, 2),
+                                   ("stderr", True, 2), ("stdout", False, 0)):
+            with self.subTest(stream=stream, busy=busy, code=code):
+                child = self.t1 / "fake-cache.py"
+                message = ("in-use " if busy else "") + "Authorization: Bearer " + marker
+                child.write_text("import sys; sys." + stream + ".write(" + repr(message)
+                                 + "); sys.exit(" + str(code) + ")")
+                action = {"class": "cache-command", "target": "synthetic prune",
+                          "argv": [sys.executable, str(child)], "needs": [], "busy_if": [],
+                          "busy_output": "in-use", "timeout": 3}
+                with patch.object(self.g, "free_bytes", return_value=1000000000):
+                    row = self.g.act(action, self.free())
+                self.assertEqual(row["result"], "skipped" if busy else "failed" if code else "removed")
+                if code:
+                    self.assertEqual(row["exit_code"], code)
+                    self.assertEqual(row["reason_code"], "cache-in-use" if busy else "command-failed")
+                self.assertNotIn(marker, json.dumps(row))
+                self.g.journal([row])
+                self.assertNotIn(marker, self.g.journal_file().read_text())
+
     def test_a_command_held_up_on_a_lock_is_skipped_quickly(self):
         a = {"class": "cache-command", "target": "tool prune", "busy_if": [], "needs": [], "timeout": 1,
              "argv": [sys.executable, "-c", "import time; time.sleep(30)"]}
