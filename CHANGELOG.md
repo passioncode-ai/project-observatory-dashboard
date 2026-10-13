@@ -74,11 +74,21 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
   answers: a run killed between the mint and its record, or a cleanup delete that failed (the row is then kept as an
   orphan), leaves a row that holds its slot — the next run mints nothing there, reads `held-pending` and names
   `revoke` (or, with no hash, `claim` or a delete at the provider) — so an account listing past `PAGES_MAX` no
-  longer mints a second key. Whenever the total a run leaves is past the limit it prints `OVER LIMIT by $X now; it
-  ends after: revoke A, B` (`unbounded` when a key has no ceiling) and exits 1, a total past the limit only within
+  longer mints a second key. Whenever the total a run leaves is past the limit it prints `OVER LIMIT by $X now ($A
+  against the $L limit); it ends after: revoke A, B` (`OVER LIMIT: unbounded now` when a key has no ceiling) and exits 1, a total past the limit only within
   the half-cent tolerance included. `revoke` refuses a key a consumer reads, found by its hash in the scan or by the
   label recorded at issue, whatever the key is now called at the provider. The one window in which a project's
   keys can sum past its limit is `rotate`'s, while the successor and the predecessor are both live.
+  **Until the J-3 change, a `rotate` that fails is not counted:** a provider error after the mint, a timeout, a kill,
+  a vault put that fails or a predecessor delete that fails can leave the successor `NAME-next` live and untracked,
+  or the predecessor live and uncounted (the row reads `rotation_status: successor-delivered-predecessor-pending`
+  with its `predecessor_hash`), and `issue-for-policy` does not see either; delete at the provider whichever of the
+  two the slot does not hold, then run `issue-for-policy`. A mint answered with a 5xx or a timeout keeps its pending
+  row (only a 4xx proves nothing was minted), so an account listing past `PAGES_MAX` never mints the slot twice;
+  `revoke NAME --forget-pending --reason "…"` clears a pending row with no hash there once its key is gone, after
+  journaling the reason as an attestation (no journal, no clearing). `revoke` also refuses a key whose label a
+  destination holds in the scan (`destinations`, the only trace of a key past the listing), and a ledger write that
+  fails inside it exits 1 instead of a traceback. A provider ceiling $0.0001 above the plan counts as the next cent.
 - **The agent's deadline reaches the model call** (ENG-003): `agent` started a project's call while 150 s were
   left, but `providers.complete()` walks a chain of models, each attempt allowed 120 s, so three Retryable models
   took 360 s and the watchdog killed a step that had paid for calls. `complete(…, deadline=)` now gets the step's

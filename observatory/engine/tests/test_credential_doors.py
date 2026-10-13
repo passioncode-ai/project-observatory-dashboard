@@ -2704,6 +2704,32 @@ def test_or_policy_fix_five() -> None:
     check("--forget-pending refuses a row that is not a hashless pending one", rc == 1 and p.keys
           and "project-a-prod-k0" in m.ledger()["issued"], e3.getvalue())
 
+    # Harness: a provider holding $0.0001 more than the plan is past the limit; only float noise below
+    # a millionth of a dollar is not a cent.
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(2), "example")
+    p.keys[p.by_name("k1")]["limit"] = 5.0001
+    rc, out = _cmd(m, _pol(2), "example", None, True)
+    check("a provider ceiling $0.0001 past the plan counts as the next cent: OVER LIMIT, exit 1",
+          rc == 1 and "OVER LIMIT by $0.01 now" in out, out)
+    check("float noise (5.000000001) is not a cent", m._cents_up(5.000000001) == 500 and m._cents_up(5.0001) == 501,
+          f"{m._cents_up(5.000000001)} {m._cents_up(5.0001)}")
+    # Harness: a ledger write that fails inside revoke is a refusal with exit 1, never a traceback.
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(1), "example")
+
+    def disk_refuses(doc):
+        raise OSError("the disk refused the ledger write")
+    m.paths.SCRATCH = pathlib.Path(tmpdir.mkdtemp())      # no consumer scan: an earlier case set one
+    m.save_ledger = disk_refuses
+    try:
+        with contextlib.redirect_stderr(io.StringIO()) as e4:
+            rc = m.cmd_revoke("project-a-prod-k0")
+        check("revoke whose ledger write fails exits 1 and says the row was kept", rc == 1 and "kept" in e4.getvalue(),
+              e4.getvalue())
+    except OSError as exc:
+        check("revoke whose ledger write fails exits 1 and says the row was kept", False, f"crashed: {exc}")
+
     # Item 5: a disk that is full under the test is the machine's failure, never a (b) violation.
     import errno
     rng = random.Random(1)
