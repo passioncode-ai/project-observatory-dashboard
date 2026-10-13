@@ -613,7 +613,12 @@ The manual tier writes a thin git bundle per branch and a patch plus a tarball
 of untracked files per worktree under `<home>/archive/cleanup/<date>/` before
 removing anything. A worktree's patch is re-applied, in check mode, to a scratch
 index of its HEAD first; if git cannot produce it or it does not apply, the
-worktree stays and the run reports it as failed with the reason.
+worktree stays and the run reports it as failed with the reason. Ignored files are
+not included in that archive: if any are present, manual removal is skipped.
+Preserve or move them first, then rerun `full cleanup --apply --include manual`.
+The `.wrangler` directory can hold local databases and object storage; it is never
+classified as build output, even when an older cleanup configuration lists it.
+Regression coverage: `tests/test_disk_guard.py`, `GitTierSafety`.
 
 ### The disk guard
 

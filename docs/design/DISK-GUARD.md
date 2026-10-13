@@ -55,6 +55,15 @@ the design that replaces those patches with one set of rules. The run record is
 4. Survey refreshes and the large-file walk, only with the time left.
 5. Write the summary row and the report — always, in `finally`.
 
+## Local state preservation
+
+`.wrangler` is a state container, not disposable build output. The artifact-name
+filter in `tools/cleanup.py::artifact_names` excludes it from both cleanup paths,
+including copied configurations that still list it. A manually removed dirty
+worktree has only its tracked patch and untracked files archived; any ignored
+files therefore cause a skip before archiving and again before force removal.
+`tests/test_disk_guard.py::GitTierSafety` reproduces and pins both refusals.
+
 ## Not done here, and why
 
 - A person's `full update --apply` started while a pass runs is refused by the snapshot's

@@ -121,8 +121,8 @@ def load_config() -> dict:
 
 
 def artifact_names() -> list[str]:
-    own = _read(paths.config_file("cleanup.json")).get("artifact_dirs")
-    return list(own or _read(ROOT / "defaults" / "cleanup.json").get("artifact_dirs") or [])
+    import cleanup
+    return cleanup.load_config()["artifact_dirs"]
 
 
 def _number(value, default: float) -> float:
@@ -575,7 +575,8 @@ def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[
     nested in another (that one is judged on its own), never in a privacy-guarded place."""
     days = by_level(cfg, "build_idle_days", level, 14)
     roots = checkouts()
-    wanted = set(names)
+    import cleanup
+    wanted = set(cleanup.artifact_names({"artifact_dirs": names}))
     out = []
     left = (lambda: budget.left()) if budget else (lambda: 3600.0)  # noqa: E731
     for root in roots:

@@ -909,6 +909,77 @@ class HoldersModule(unittest.TestCase):
 
 
 class GitTierSafety(Base):
+    def test_manual_removal_preserves_ignored_local_data(self):
+        import cleanup
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q", "-b", "main")
+        (repo / ".gitignore").write_text(".env.local\n")
+        (repo / "a").write_text("original\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        wt = self.base / "worktree"
+        git(repo, "worktree", "add", "-qb", "topic", str(wt))
+        (wt / "a").write_text("uncommitted\n")
+        (wt / ".env.local").write_text("synthetic local data\n")
+        with patch.object(cleanup, "busy_now", return_value=False):
+            rec = cleanup.act({"class": "worktree-dirty", "tier": "manual", "repo": str(repo),
+                               "target": str(wt), "branch": "topic"}, self.base / "archive")
+        self.assertEqual(rec["result"], "skipped", rec)
+        self.assertIn("ignored", rec["reason"])
+        self.assertEqual((wt / ".env.local").read_text(), "synthetic local data\n")
+        self.assertEqual((wt / "a").read_text(), "uncommitted\n")
+
+    def test_ignored_files_appearing_during_archive_keep_the_worktree(self):
+        import cleanup
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q", "-b", "main")
+        (repo / ".gitignore").write_text(".env.local\n")
+        (repo / "a").write_text("original\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        wt = self.base / "worktree"
+        git(repo, "worktree", "add", "-qb", "topic", str(wt))
+        (wt / "a").write_text("uncommitted\n")
+        export = cleanup.export_tracked
+
+        def create_ignored(target, status):
+            result = export(target, status)
+            (wt / ".env.local").write_text("arrived during archive")
+            return result
+
+        with patch.object(cleanup, "busy_now", return_value=False), \
+                patch.object(cleanup, "export_tracked", side_effect=create_ignored):
+            rec = cleanup.act({"class": "worktree-dirty", "tier": "manual", "repo": str(repo),
+                               "target": str(wt), "branch": "topic"}, self.base / "archive")
+        self.assertEqual(rec["result"], "skipped", rec)
+        self.assertEqual((wt / ".env.local").read_text(), "arrived during archive")
+        self.assertTrue((Path(rec["archive"]) / "tracked.patch").exists())
+
+    def test_local_state_is_protected_even_by_an_older_artifact_configuration(self):
+        import cleanup
+        import paths
+        paths.config_file("cleanup.json").write_text(json.dumps({"artifact_dirs": [".wrangler", "dist"]}))
+        self.assertNotIn(".wrangler", self.g.artifact_names())
+        self.assertNotIn(".wrangler", cleanup.load_config()["artifact_dirs"])
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        (repo / ".gitignore").write_text(".wrangler/\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        (repo / ".wrangler" / "state").mkdir(parents=True)
+        (repo / ".wrangler" / "state" / "db.sqlite").write_text("unique local data")
+        self.assertEqual(cleanup.ignored_keepers(str(repo), {".wrangler", "dist"}), [".wrangler"])
+        age(repo, 30)
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({"checkouts": [{"path": str(repo), "worktrees": []}]}))
+        self.assertEqual(self.g.plan_builds(self.g.load_config(), "critical", self.free(),
+                                          time.time(), [".wrangler"]), [])
+        with patch.object(cleanup, "idle_projects", return_value=[{"id": "alpha-web", "folders": [str(repo)], "idle_days": 30}]):
+            self.assertEqual(cleanup.plan_artifacts({"artifact_dirs": [".wrangler"]}, self.free()), [])
+
     def test_a_clean_worktree_with_a_keeper_ignored_file_is_skipped(self):
         import cleanup
         repo = self.base / "repo"

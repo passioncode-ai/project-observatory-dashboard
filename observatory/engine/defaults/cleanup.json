@@ -17,7 +17,7 @@
   "dirty_worktree_idle_days": 7
  },
  "artifact_dirs": ["node_modules", ".next", ".turbo", ".nuxt", ".svelte-kit", ".parcel-cache", ".expo",
-                   "target", "DerivedData", "Pods", ".gradle", "build", "dist", ".output", ".wrangler",
+                   "target", "DerivedData", "Pods", ".gradle", "build", "dist", ".output",
                    "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"],
  "guard": {
   "_why": "tools/disk_guard.py, run by the maintenance job (every 15 minutes; hourly while space is normal, every pass below `low`) before the backup. Free space below levels.low / levels.critical (GB) moves every threshold below it. It removes only what nobody holds open, maps, runs from or works inside (a fresh listing per class, re-checked at each removal), never a privacy-guarded place, never a symlink target, never another user's file; it stops no process. Every action is journalled with the free-space delta the disk reports.",

@@ -72,6 +72,17 @@ Numbered OSS-13 until 2026-10-06; the dashboard row above keeps that id.
 
 Given an accepted sighting with a reason and expiry, the operator copies its secret name, exact location and opaque `version_id` into the suppression config. The accepted sighting remains visible as suppressed. A new value under that name, another location, or another workspace salt remains an active sighting. Expiry replays old evidence without requiring a new write to the source. Malformed and legacy unversioned rules raise a warning and suppress nothing. Proof: `tests/test_leak_coverage.py` (rotation, exact path, duplicate names in files/SQLite, salt change, malformed shapes, expiry and incremental value discovery). Detection still covers known values only; it does not discover every unknown secret shape or search all deleted Git history.
 
+### Cleanup preservation: ignored local data
+
+When `full cleanup --apply --include manual` reaches a dirty worktree with ignored
+files, it leaves the worktree in place and reports a skip with a recovery command.
+The operator preserves or moves those files before retrying; an archive of tracked
+and untracked files does not claim to contain ignored files. Automatic cleanup and
+the disk guard exclude `.wrangler` from build output even in an older workspace's
+artifact list, preserving its local database and object state. Coverage:
+`tests/test_disk_guard.py::GitTierSafety::test_manual_removal_preserves_ignored_local_data`
+and `test_local_state_is_protected_even_by_an_older_artifact_configuration`.
+
 ## Operating the engine (2026-10-06)
 
 These paths shipped before they had a scenario (audit A45 in
