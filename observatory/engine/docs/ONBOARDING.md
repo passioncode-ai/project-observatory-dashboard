@@ -609,13 +609,33 @@ project-observatory full cleanup --apply                  # the auto tier, now
 project-observatory full cleanup --apply --include manual # also unique branches and dirty worktrees, archived first
 ```
 
-The manual tier writes a thin git bundle per branch and a patch plus a tarball
-of untracked files per worktree under `<home>/archive/cleanup/<date>/` before
-removing anything. A worktree's patch is re-applied, in check mode, to a scratch
-index of its HEAD first; if git cannot produce it or it does not apply, the
-worktree stays and the run reports it as failed with the reason. Ignored files are
-not included in that archive: if any are present, manual removal is skipped.
-Preserve or move them first, then rerun `full cleanup --apply --include manual`.
+The manual tier writes a thin git bundle per branch. For each dirty worktree it
+creates a fresh directory under `<home>/archive/cleanup/<date>/`, with
+`tracked.patch` (HEAD to working files), `staged.patch` (HEAD to index),
+`status.txt`, `untracked-manifest.json` and `untracked.tgz`. Both patches must apply
+in check mode to a scratch index of HEAD. The tarball's exact regular-file list,
+sizes, modes and streaming SHA-256 hashes must match the saved manifest. Before
+removal it reads the archive back, refreshes process holders, and rechecks HEAD,
+status, both patches and the untracked listing/content. Changes, unreadable data,
+archive errors or an exhausted inspection budget retain the worktree and report
+failure, naming any partial archive; a retry never overwrites an earlier archive.
+
+Manual archiving permits ordinary files only: nested repositories (including
+submodules and bare repositories), symlinks and special files are retained.
+Ignored files are outside this archive and cause a skip; preserve or move them
+before retrying. Inspection allows 60 seconds (or the remaining run budget),
+10,000 tree entries and 512 MiB of untracked content; each patch also has a
+512 MiB limit. Untracked hashing reads at most 1 MiB at a time. Git patch capture
+and individual filesystem operations are not a strict memory or wall-clock cap.
+These checks are not an atomic filesystem lock: another writer can still change
+a file between its final observation and Git removal. Stop writers before an
+explicit manual cleanup. Coverage: `CleanupNeverLosesWork` in
+`tests/test_git_hardening.py`.
+
+The legacy `full cleanup` build-artifact action now reports a skip and asks for
+`full disk-guard` to replan; only the disk guard owns build-output eligibility.
+`CleanupNeverLosesWork.test_legacy_artifact_plan_cannot_delete_newly_tracked_output`
+covers this refusal.
 The `.wrangler` directory can hold local databases and object storage; it is never
 classified as build output, even when an older cleanup configuration lists it.
 Cleanup also retains an ignored artifact parent containing a nested repository or

@@ -33,6 +33,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 for sub in ("", "collectors", "tools", "plugins", "tests"):
@@ -501,6 +502,176 @@ class CleanupNeverLosesWork(unittest.TestCase):
             self.assertKept(self.act())
         finally:
             self.cleanup.git = real
+
+    def test_tracked_edit_during_archive_refuses_removal(self) -> None:
+        original = self.cleanup.export_tracked
+        def changed(target, status):
+            result = original(target, status)
+            (self.wt / "old.txt").write_text("the only copy of this edit\nnewer edit\n")
+            return result
+        with patch.object(self.cleanup, "export_tracked", side_effect=changed):
+            self.assertKept(self.act())
+        self.assertIn("newer edit", (self.wt / "old.txt").read_text())
+
+    def test_untracked_edit_after_tar_write_refuses_removal(self) -> None:
+        import tarfile
+        untracked = self.wt / "notes.txt"
+        untracked.write_text("first note\n")
+        original = tarfile.TarFile.add
+        def changed(tar, name, *args, **kwargs):
+            result = original(tar, name, *args, **kwargs)
+            untracked.write_text("newer only copy\n")
+            return result
+        with patch.object(tarfile.TarFile, "add", changed):
+            self.assertKept(self.act())
+        self.assertEqual(untracked.read_text(), "newer only copy\n")
+
+    def test_nested_untracked_repository_is_preserved(self) -> None:
+        nested = self.wt / "nested"
+        bare(self.wt, "init", "-q", str(nested))
+        (nested / "only.txt").write_text("uncommitted nested work\n")
+        self.assertKept(self.act())
+        self.assertTrue((nested / ".git").is_dir())
+        self.assertEqual((nested / "only.txt").read_text(), "uncommitted nested work\n")
+
+    def test_manual_regular_untracked_content_is_verified_and_restorable(self) -> None:
+        import hashlib, json, tarfile
+        content = b"untracked binary\x00payload\n"
+        (self.wt / "notes.bin").write_bytes(content)
+        rec = self.act()
+        self.assertRestorable(rec)
+        dest = pathlib.Path(rec["archive"])
+        manifest = json.loads((dest / "untracked-manifest.json").read_text())
+        self.assertEqual(manifest["notes.bin"]["sha256"], hashlib.sha256(content).hexdigest())
+        with tarfile.open(dest / "untracked.tgz", "r:gz") as tar:
+            self.assertEqual(tar.extractfile("notes.bin").read(), content)
+
+    def test_manual_archive_budget_exhaustion_preserves_work(self) -> None:
+        with patch.object(self.cleanup, "ARCHIVE_SECONDS", 0, create=True):
+            self.assertKept(self.act())
+
+    def test_archive_read_failure_preserves_work(self) -> None:
+        import tarfile
+        (self.wt / "notes.txt").write_text("only note\n")
+        original = tarfile.open
+        def unreadable(name, mode="r", *args, **kwargs):
+            if mode.startswith("r"):
+                raise OSError("synthetic archive read error")
+            return original(name, mode, *args, **kwargs)
+        with patch.object(tarfile, "open", side_effect=unreadable):
+            self.assertKept(self.act())
+
+    def test_untracked_special_file_is_preserved(self) -> None:
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("FIFO requires POSIX")
+        fifo = self.wt / "queue"
+        os.mkfifo(fifo)
+        self.assertKept(self.act())
+        self.assertTrue(fifo.exists())
+
+    def test_legacy_artifact_plan_cannot_delete_newly_tracked_output(self) -> None:
+        output = self.repo / "dist"
+        output.mkdir()
+        (output / "only.txt").write_text("new source, not disposable\n")
+        bare(self.repo, "add", "dist")
+        result = self.cleanup.act({"class": "build-artifacts", "tier": "auto", "target": str(output)},
+                                  self.d / "archive")
+        self.assertEqual(result["result"], "skipped")
+        self.assertIn("full disk-guard", result["reason"])
+        self.assertEqual((output / "only.txt").read_text(), "new source, not disposable\n")
+
+    def test_head_change_during_archive_refuses_removal(self) -> None:
+        original = self.cleanup.export_tracked
+        def changed(target, status):
+            result = original(target, status)
+            bare(self.wt, "add", "old.txt")
+            bare(self.wt, "commit", "-qm", "concurrent work")
+            return result
+        with patch.object(self.cleanup, "export_tracked", side_effect=changed):
+            self.assertKept(self.act())
+
+    def test_added_untracked_file_after_tar_write_refuses_removal(self) -> None:
+        import tarfile
+        (self.wt / "notes.txt").write_text("original note\n")
+        original = tarfile.TarFile.add
+        def changed(tar, name, *args, **kwargs):
+            result = original(tar, name, *args, **kwargs)
+            (self.wt / "new.txt").write_text("new only copy\n")
+            return result
+        with patch.object(tarfile.TarFile, "add", changed):
+            self.assertKept(self.act())
+        self.assertEqual((self.wt / "new.txt").read_text(), "new only copy\n")
+
+    def test_untracked_symlink_and_bare_repository_are_preserved(self) -> None:
+        link = self.wt / "link"
+        link.symlink_to("old.txt")
+        self.assertKept(self.act())
+        self.assertTrue(link.is_symlink())
+        link.unlink()
+        nested = self.wt / "nested.git"
+        bare(self.wt, "init", "--bare", "-q", str(nested))
+        self.assertKept(self.act())
+        self.assertTrue((nested / "HEAD").is_file())
+
+    def test_hashing_reads_bounded_chunks_and_refuses_excess(self) -> None:
+        import io
+        calls = []
+        class Source(io.BytesIO):
+            def read(self, count=-1):
+                calls.append(count)
+                return super().read(count)
+        data = b"x" * (2 * 1024 * 1024 + 7)
+        size, _ = self.cleanup.stream_digest(Source(data), time.monotonic() + 30, len(data))
+        self.assertEqual(size, len(data))
+        self.assertTrue(all(0 < n <= 1024 * 1024 for n in calls))
+        with self.assertRaises(self.cleanup.ArchiveRefused):
+            self.cleanup.stream_digest(Source(data), time.monotonic() + 30, 10)
+
+    def test_untracked_read_error_refuses_removal(self) -> None:
+        note = self.wt / "notes.txt"
+        note.write_text("only note\n")
+        original = os.open
+        def denied(path, *args, **kwargs):
+            if pathlib.Path(path) == note:
+                raise PermissionError("synthetic unreadable file")
+            return original(path, *args, **kwargs)
+        with patch.object(self.cleanup.os, "open", side_effect=denied):
+            rec = self.act()
+        self.assertKept(rec)
+        self.assertIn("archive", rec)  # the partial recovery directory stays named
+        self.assertEqual(note.read_text(), "only note\n")
+
+    def test_distinct_staged_and_working_edits_are_both_archived(self) -> None:
+        (self.wt / "old.txt").write_text("staged only copy\n")
+        bare(self.wt, "add", "old.txt")
+        (self.wt / "old.txt").write_text("the only copy of this edit\nworking copy\n")
+        rec = self.act()
+        self.assertRestorable(rec)
+        staged = pathlib.Path(rec["archive"]) / "staged.patch"
+        self.assertIn("+staged only copy", staged.read_text())
+        restored = self.d / "restore-index"
+        bare(self.d, "clone", "-q", str(self.repo), str(restored))
+        bare(restored, "apply", "--cached", str(staged))
+        self.assertEqual(bare(restored, "show", ":old.txt").stdout, "staged only copy\n")
+
+    def test_staged_edit_during_archive_refuses_removal(self) -> None:
+        path = self.wt / "old.txt"
+        path.write_text("first staged copy\n")
+        bare(self.wt, "add", "old.txt")
+        path.write_text("the only copy of this edit\nworking copy\n")
+        original = self.cleanup.archive_manual
+        def revise(*args, **kwargs):
+            result = original(*args, **kwargs)
+            working = path.read_bytes()
+            path.write_text("new staged only copy\n")
+            bare(self.wt, "add", "old.txt")
+            path.write_bytes(working)
+            return result
+        with patch.object(self.cleanup, "archive_manual", side_effect=revise):
+            rec = self.act()
+        self.assertKept(rec)
+        self.assertIn("index changed", rec["reason"])
+        self.assertEqual(bare(self.wt, "show", ":old.txt").stdout, "new staged only copy\n")
 
 
 class RemoteReason(unittest.TestCase):
