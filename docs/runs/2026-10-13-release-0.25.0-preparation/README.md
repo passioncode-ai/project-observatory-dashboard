@@ -12,8 +12,11 @@ The independently accepted saved-coverage reader source
 `5aa9eac9477398e39eb60466c695a9363e290df5` is included as a fix-only cherry-pick.
 Its inventory conflict was resolved by regenerating against this candidate after
 clearing the unmerged index state; the first generation refused that state safely.
-The separate per-key activity/spend PR #249 is excluded and remains open: its activity
-functions and CLI are not present here.
+The independently accepted per-issued-key activity source
+`3c3510ea2eaa34aa8d9403d56e2e714160ac379c` is now included. Its docs/scenario append
+conflicts preserve both saved-coverage and spend sections; inventory was regenerated.
+This supersedes the earlier exclusion of PR #249 below after protected source integration.
+Retired-key and full J-11 project aggregation remain separate.
 No tag, installation or release was attempted. Final checks are appended in checks.json;
 the earlier preparation record below remains historical.
 
@@ -44,6 +47,19 @@ acceptance open and does not imply standalone commands enforce every project pol
 Plugin 0.22.1 is unchanged. Four manifest cases, strict plugin validation, inventory
 and diff checks pass. These documentation and diagnostic corrections do not establish
 live provider, installed-runtime or native asset acceptance.
+
+## Issued-key activity integration
+
+Accepted source `3c3510ea` restores the separate per-issued-key spend capability after
+independent review. Four combined synthetic suites pass: 41 unittest cases and
+486 credential assertions, no skips. They include activity, rotation, credential
+compatibility and the corrected provider-boundary fixtures from `1d216101`.
+Fourteen focused version/plugin/document-copy cases, static manifest URLs, inventory
+and whitespace checks also pass. The actual CLI help was separately checked after
+removing stale rotation advice in `a045276`.
+
+The original PR #249 may be marked superseded only after protected source integration.
+The new report does not include retired keys or close full project-spend accounting.
 
 ## Initial preparation snapshot (superseded integration status)
 

@@ -35,6 +35,11 @@ is 0.22.1, with updated credential-handling guidance.
   `observatory_machine(section="coverage")` return bounded checkout/cache summaries
   without starting scans. Missing, partial, stale and invalid receipts remain explicit;
   sample rows never claim whole-machine totals or permission to clean up.
+- **An issued key can report its provider activity**: `openrouter.py spend NAME`
+  reads bounded, hash-filtered activity and groups valid usage by UTC day and model.
+  Missing optional counters stay unknown; invalid/nonfinite costs or an identity change
+  refuse the report. This read-only total covers the current issued key, not retired keys
+  or the project's complete spend across providers.
 - **A failed check retains its peers' receipts** (OBS-85): setup, execution and report-write
   failures produce error evidence without losing completed suite results. Unknown
   completion fails the run instead of becoming a passing or empty summary.

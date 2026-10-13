@@ -241,7 +241,7 @@
     "warnings": 2043
   },
   "excluded": [
-    "PR #249 per-key spend activity capability"
+    "Retired-key and project-wide spend aggregation; full J-11 remains separate"
   ],
   "not_run": [
     "hosted exact-release-SHA acceptance",
@@ -484,6 +484,97 @@
       "observatory/engine/tests/test_disk_guard.py": "d8c848612ebaa9bbe752e326cd734b4f157c5f396a084cff7a3659734ac9ae3a",
       "observatory/engine/skill/plugins/observatory-log/skills/handling-secrets/SKILL.md": "477d66534ad25d493cfbb389165a64ae9d24853467af42113020bc91a32841c2",
       "observatory/engine/SOURCE-INVENTORY.json": "22fd6b4ddd6e737c4a3bf8c4eccbd6c90eb7d49d0ea9e7a29a598908b520fa6b"
+    }
+  },
+  "issued_spend_integration": {
+    "accepted_source": "3c3510ea2eaa34aa8d9403d56e2e714160ac379c",
+    "local_commit": "063e4dc08712396910ab6573f9c9bdf08541f84e",
+    "ci_fixture_source": "1d2161019a89ca4a5988f19b66189bba83172dbc",
+    "cli_help_correction": "a0452763918ed5d88a8d6d371f2efde48b9bf543",
+    "portable": {
+      "schema_version": 1,
+      "coverage": "synthetic-offline",
+      "status": "PASS",
+      "suites": [
+        {
+          "file": "tests/test_issued_spend.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 0.61,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 10,
+          "unittest_skipped": 0,
+          "log": "issued_spend/run.log"
+        },
+        {
+          "file": "tests/test_rotation_accounting.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 0.93,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 19,
+          "unittest_skipped": 0,
+          "log": "rotation_accounting/run.log"
+        },
+        {
+          "file": "tests/test_credential_doors.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 88.27,
+          "pass_assertions": 486,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 0,
+          "unittest_skipped": 0,
+          "log": "credential_doors/run.log"
+        },
+        {
+          "file": "tests/test_provider_secret_boundaries.py",
+          "status": "PASS",
+          "exit_code": 0,
+          "seconds": 0.51,
+          "pass_assertions": 0,
+          "fail_assertions": 0,
+          "skip_assertions": 0,
+          "unittest_cases": 12,
+          "unittest_skipped": 0,
+          "log": "provider_secret_boundaries/run.log"
+        }
+      ],
+      "not_run": [
+        {
+          "scope": "live-provider-acceptance",
+          "status": "NOT_RUN",
+          "reason": "Requires independently configured provider accounts and explicit opt-in; no credentials are inherited."
+        },
+        {
+          "scope": "external-mcp-host-admission",
+          "status": "NOT_RUN",
+          "reason": "The local stdio protocol is tested; acceptance by another host requires a separate configured fixture run."
+        },
+        {
+          "scope": "live-secret-rotation-and-delivery",
+          "status": "NOT_RUN",
+          "reason": "Synthetic credential boundaries are tested; real rotation/delivery must be independently authorized."
+        }
+      ],
+      "suite_count": 4,
+      "python": "3.14.7"
+    },
+    "root_focused_cases": 14,
+    "version_plugin_doc_copy_checks": 0,
+    "manifest_check": 0,
+    "inventory_check": 0,
+    "diff_check": 0,
+    "source_hashes": {
+      "observatory/engine/tools/openrouter.py": "68aa510b4127e80149bfb0630963d70f45da99797ef0780b82702132d51547b0",
+      "observatory/engine/tests/test_issued_spend.py": "dd9e9c1c6e6d0bc9332f89a15a8fb0128457f4ce45e3ea48fe286530058e7910",
+      "observatory/engine/tests/test_provider_secret_boundaries.py": "17969f40dfd7494b89debd885bcdb94fbd4f30700e0e015552418642c228c04f",
+      "observatory/engine/SOURCE-INVENTORY.json": "8f77f1d3185f0b2af0c788e0bd70f8b7ad4551ae286d055799977cd9a254ef23"
     }
   }
 }
