@@ -1714,8 +1714,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "e5182022db9a8e53d77afeccdb2bcf270e890b929fd922f2a350ae0b8bcca08a",
-      "bytes": 14328,
+      "export_sha256": "3a670e501b02f59a4625c016fbe839fd61d03aad94633a202c4bc48f4e4b55c0",
+      "bytes": 15035,
       "upstream_modified": true
     },
     {
@@ -2311,8 +2311,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "4bdc187d4df876ec3f59a96dd74ffde4040c2d4c59d70d94502fe17e7dc371b9",
-      "bytes": 167225,
+      "export_sha256": "396de0c1acfc84ad73eba7f6646f2edfdbde8eefdf111617176e417c28ba14b1",
+      "bytes": 175857,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -4246,8 +4246,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "ca6001029093123ddbeec26b79f6d1825aa174facd63384e0f61469a63b1c684",
-      "bytes": 82689,
+      "export_sha256": "bde86d1d87ae8348ab36dfa40ec747e3b716b0e5a6d3c37089871e5bbcf98921",
+      "bytes": 87451,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,

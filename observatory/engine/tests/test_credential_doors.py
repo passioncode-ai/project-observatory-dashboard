@@ -2229,7 +2229,9 @@ def test_or_policy_partial_failure_names_what_was_done() -> None:
 
     def second_issue_fails(path, key, payload=None, method=None):
         if path == "/keys" and payload and len(calls["posted"]) == 1:
-            raise RuntimeError("openrouter answered 500 for /keys")
+            # A REFUSAL (4xx) minted nothing, so the re-run issues the key. A 5xx proves nothing and
+            # keeps a pending row that holds the slot (test_or_policy_fix_five).
+            raise RuntimeError("openrouter answered HTTP 400 for /keys")
         return real(path, key, payload, method)
     m._request = second_issue_fails
     d = pathlib.Path(tmpdir.mkdtemp()).resolve()
@@ -2579,23 +2581,150 @@ def test_or_policy_round_four() -> None:
     rc, out = _cmd(m, _pol(1), "example", None, False)
     check("a pending row with no hash: nothing is minted, the remedy names claim or a provider delete",
           rc == 1 and not p.keys and "claim project-a-prod-k0" in out and "at the provider" in out, out)
-    # R4: revoke must not delete a key a consumer reads, whatever its provider name.
-    m, p = _r3_door()
-    m.issue_for_policy(_pol(1), "example")
-    h = next(iter(p.keys))
-    p.keys[h]["name"] = "billing-worker"
-    rec = m.ledger()["issued"]["project-a-prod-k0"]
-    scratch = pathlib.Path(tmpdir.mkdtemp())
-    m.paths.SCRATCH = scratch
-    for scan in ({"keys": [{"name": "billing-worker", "label": rec.get("label"), "serves": "billing-worker"}]},
-                 {"keys": [], "destination_hashes": {"billing-worker": {"label": "x", "hash": h}}}):
-        (scratch / "openrouter.json").write_text(json.dumps(scan), encoding="utf-8")
+    # R4 and fix 5: revoke must not delete a key a consumer reads, whatever its provider name and
+    # whether or not the listing reaches it: by the scan's hash, by its listed label, and by the
+    # label a destination holds (`destinations`, the only trace of a key past the listing).
+    for what, make in (
+            ("listed, by recorded label", lambda h, lab: {"keys": [{"name": "billing-worker", "label": lab,
+                                                                    "serves": "billing-worker"}]}),
+            ("by hash", lambda h, lab: {"keys": [], "destination_hashes": {"billing-worker": {"label": "x", "hash": h}}}),
+            ("past the listing, by the label a destination holds",
+             lambda h, lab: {"keys": [], "destinations": {"billing-worker": lab}, "destination_hashes": {},
+                             "unlisted_destinations": ["billing-worker"]})):
+        m, p = _r3_door()
+        m.issue_for_policy(_pol(1), "example")
+        h = next(iter(p.keys))
+        p.keys[h]["name"] = "billing-worker"
+        rec = m.ledger()["issued"]["project-a-prod-k0"]
+        scratch = pathlib.Path(tmpdir.mkdtemp())
+        m.paths.SCRATCH = scratch
+        (scratch / "openrouter.json").write_text(json.dumps(make(h, rec.get("label"))), encoding="utf-8")
         try:
             m.revoke_key("project-a-prod-k0")
-            check("R4: revoke refuses a renamed key a consumer reads", False, "revoked")
+            check(f"R4: revoke refuses a renamed key a consumer reads ({what})", False,
+                  f"revoked; key still at the provider: {h in p.keys}")
         except ValueError as exc:
-            check("R4: revoke refuses a renamed key a consumer reads (by recorded label, then by hash)",
-                  "reading right now" in str(exc) and h in p.keys and rec.get("label"), str(exc))
+            check(f"R4: revoke refuses a renamed key a consumer reads ({what})",
+                  "reading right now" in str(exc) and h in p.keys and bool(rec.get("label")), str(exc))
+        except Exception as exc:                    # noqa: BLE001 — a crash is a FAIL, never a traceback
+            check(f"R4: revoke refuses a renamed key a consumer reads ({what})", False,
+                  f"{type(exc).__name__}: {exc}")
+
+
+def test_or_policy_fix_five() -> None:
+    """Fix 5 on J-1: a 5xx after a mint proves nothing; a hashless pending row is clearable past PAGES_MAX."""
+    # R-F: the provider created the key and then answered 502; the account lists past PAGES_MAX.
+    m, p = _r3_door()
+
+    def too_long(admin, include_disabled=True):
+        raise m.ListingTooLong("past PAGES_MAX", [])
+    m._all_keys = too_long
+    real = m._request
+    state = {"done": False}
+
+    def created_then_502(path, key, payload=None, method=None):
+        out = real(path, key, payload, method)
+        if path == "/keys" and payload and not state["done"]:
+            state["done"] = True
+            raise RuntimeError("openrouter answered HTTP 502; provider response withheld")
+        return out
+    m._request = created_then_502
+    p.start()
+    try:
+        m.issue_for_policy(_pol(1), "example")
+    except m.PolicyPartial:
+        pass
+    m._request = p
+    rec = m.ledger()["issued"].get("project-a-prod-k0") or {}
+    rc, out = _cmd(m, _pol(1), "example", None, False)
+    check("R-F: a 502 after the mint keeps the pending row, and the next run mints nothing past PAGES_MAX",
+          rec.get("pending") and not rec.get("hash") and len(p.keys) == 1 and p.max_sum <= 10.0 and rc == 1
+          and "held-pending" in out, f"row={rec} keys={len(p.keys)} max={p.max_sum} {out}")
+    m, p = _r3_door()
+
+    def refused_400(path, key, payload=None, method=None):
+        if path == "/keys" and payload:
+            raise RuntimeError("openrouter answered HTTP 400; provider response withheld")
+        return p(path, key, payload, method)
+    m._request = refused_400
+    try:
+        m.issue_for_policy(_pol(1), "example")
+    except m.PolicyPartial:
+        pass
+    check("a 4xx refusal minted nothing, so it leaves no pending row", not m.ledger()["issued"] and not p.keys,
+          str(m.ledger()["issued"]))
+
+    # R-E: the remedy for a hashless pending row works past PAGES_MAX.
+    m, p = _r3_door()
+    m._all_keys = too_long
+    m.save_ledger({"issued": {"project-a-prod-k0": {"account": "example", "hash": None, "pending": True,
+                                                    "destination": "vault:project-a/prod/K0", "limit_usd": 10.0,
+                                                    "limit_reset": "monthly"}}})
+    import contextlib
+    import io
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        plain = m.cmd_revoke("project-a-prod-k0")
+    check("R-E: a plain revoke past PAGES_MAX refuses and names --forget-pending",
+          plain == 1 and "--forget-pending" in err.getvalue() and "project-a-prod-k0" in m.ledger()["issued"],
+          err.getvalue())
+    with contextlib.redirect_stderr(io.StringIO()) as e2:
+        no_reason = m.cmd_revoke("project-a-prod-k0", forget_pending=True, reason="")
+    check("--forget-pending without a reason is refused", no_reason == 2, e2.getvalue())
+    journaled = []
+    m._journal = lambda *a, **k: journaled.append((a, k))
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc = m.cmd_revoke("project-a-prod-k0", forget_pending=True, reason="deleted at the provider by name")
+    rc2, out = _cmd(m, _pol(1), "example", None, False)
+    check("R-E: --forget-pending with a reason clears the row, journaled; the next run issues the slot",
+          rc == 0 and rc2 == 0 and len(p.keys) == 1 and journaled and journaled[0][0][0] == "forget-pending"
+          and "deleted at the provider by name" in json.dumps(journaled[0][1]), f"{rc} {rc2} {journaled} {out}")
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(1), "example")
+    with contextlib.redirect_stderr(io.StringIO()) as e3:
+        rc = m.cmd_revoke("project-a-prod-k0", forget_pending=True, reason="x")
+    check("--forget-pending refuses a row that is not a hashless pending one", rc == 1 and p.keys
+          and "project-a-prod-k0" in m.ledger()["issued"], e3.getvalue())
+
+    # Harness: a provider holding $0.0001 more than the plan is past the limit; only float noise below
+    # a millionth of a dollar is not a cent.
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(2), "example")
+    p.keys[p.by_name("k1")]["limit"] = 5.0001
+    rc, out = _cmd(m, _pol(2), "example", None, True)
+    check("a provider ceiling $0.0001 past the plan counts as the next cent: OVER LIMIT, exit 1",
+          rc == 1 and "OVER LIMIT by $0.01 now" in out, out)
+    check("float noise (5.000000001) is not a cent", m._cents_up(5.000000001) == 500 and m._cents_up(5.0001) == 501,
+          f"{m._cents_up(5.000000001)} {m._cents_up(5.0001)}")
+    # Harness: a ledger write that fails inside revoke is a refusal with exit 1, never a traceback.
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(1), "example")
+
+    def disk_refuses(doc):
+        raise OSError("the disk refused the ledger write")
+    m.paths.SCRATCH = pathlib.Path(tmpdir.mkdtemp())      # no consumer scan: an earlier case set one
+    m.save_ledger = disk_refuses
+    try:
+        with contextlib.redirect_stderr(io.StringIO()) as e4:
+            rc = m.cmd_revoke("project-a-prod-k0")
+        check("revoke whose ledger write fails exits 1 and says the row was kept", rc == 1 and "kept" in e4.getvalue(),
+              e4.getvalue())
+    except OSError as exc:
+        check("revoke whose ledger write fails exits 1 and says the row was kept", False, f"crashed: {exc}")
+
+    # Item 5: a disk that is full under the test is the machine's failure, never a (b) violation.
+    import errno
+    rng = random.Random(1)
+    m, p, door = _prop_door(rng)
+    real_save = m.save_ledger
+
+    def full(doc):
+        raise OSError(errno.ENOSPC, "No space left on device")
+    m.save_ledger = full
+    plan, err, _ = _prop_run(m, p, _pol(1), {}, 1000)
+    m.save_ledger = real_save
+    check("an ENOSPC under the property is reported as ENVIRONMENT with its full reason",
+          (err or "").startswith("ENVIRONMENT") and "No space left on device" in err, str(err))
 
 
 # ─────────────────────────── round 4: the property, before any fix ─────────────
@@ -2781,7 +2910,23 @@ def _prop_run(m, p, policy, kw, limit_cents):
         plan, err = None, f"ValueError: {exc}"
     except Exception as exc:                        # noqa: BLE001 — the property reads every outcome
         plan, err = getattr(exc, "plan", None), f"{type(exc).__name__}: {exc}"
+        env = _environment_error(exc) or next((s.get("why") for s in plan or []
+                                               if s.get("errno") in ENVIRONMENT_ERRNOS), None)
+        if env:
+            err = f"ENVIRONMENT {env}"
     return plan, err, start
+
+
+#: OS errors that say the MACHINE failed (disk full, I/O error, read-only, quota), not the door.
+ENVIRONMENT_ERRNOS = {__import__("errno").ENOSPC, __import__("errno").EIO, __import__("errno").EROFS,
+                      getattr(__import__("errno"), "EDQUOT", -1)}
+
+
+def _environment_error(exc: BaseException) -> str | None:
+    """The full reason when `exc` is the machine's failure rather than the door's refusal."""
+    if isinstance(exc, OSError) and exc.errno in ENVIRONMENT_ERRNOS:
+        return f"{type(exc).__name__}: {exc}"
+    return None
 
 
 def _prop_case(seed):
@@ -2796,6 +2941,10 @@ def _prop_case(seed):
     refs = rng.sample(names, rng.randint(1, 12))
     policy, kw, planned = _prop_policy(rng, refs, limit_cents)
     plan, err, _ = _prop_run(m, p, policy, kw, limit_cents)
+    if err and err.startswith("ENVIRONMENT"):
+        # The disk or the I/O failed under the test (ENOSPC, EIO): the machine's failure, reported
+        # with its reason and never counted against the door. A case that hits it proves nothing.
+        return [f"ENVIRONMENT {err}"]
     if planned is not None and sum(planned) <= limit_cents:
         refused = err is not None or any(s.get("action") == "blocked" for s in plan or [])
         if refused:
@@ -2841,7 +2990,7 @@ def _prop_case(seed):
 def test_or_policy_property_regression_seeds() -> None:
     """The seeds the property found failing on fc479fc, each a named case."""
     for seed, what in PROPERTY_REGRESSION_SEEDS.items():
-        broke = _prop_case(seed)
+        broke = [b for b in _prop_case(seed) if not b.startswith("ENVIRONMENT")]
         check(f"seed {seed} ({what})", not broke, "; ".join(broke)[:300])
 
 
@@ -2867,6 +3016,11 @@ def test_or_policy_property() -> None:
         broke = _prop_case(seed)
         if broke:
             failing[seed] = broke
+    env = {s: b for s, b in failing.items() if any(x.startswith("ENVIRONMENT") for x in b)}
+    for seed, broke in sorted(env.items()):
+        print(f"  NOTE  seed {seed} not judged — the machine failed under it: {broke[0]}")
+    check("the environment failed under at most 1% of the cases (ENOSPC/EIO are the machine's, not the door's)",
+          len(env) <= PROPERTY_CASES // 100, f"{len(env)} cases")
     for prop in ("(a)", "(b)", "(c)"):
         seeds = sorted(s for s, b in failing.items() if any(x.startswith(prop) for x in b))
         check(f"property {prop} holds over {PROPERTY_CASES} cases (seed {PROPERTY_SEED})", not seeds,
@@ -2892,6 +3046,7 @@ if __name__ == "__main__":
                test_or_policy_never_leaves_a_live_untracked_key,
                test_or_policy_dry_run_resolves_the_issuing_account,
                test_or_policy_round_four,
+               test_or_policy_fix_five,
                test_or_policy_property_regression_seeds,
                test_or_policy_property,
                test_no_door_takes_or_prints_a_value_outside_stdin,

@@ -462,10 +462,13 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     # the door did not. Monthly unless the caller asks for daily or weekly.
     try:
         d = _request("/keys", admin, {"name": name, "limit": limit, "limit_reset": reset})
-    except Unreachable:
-        raise                           # whether it was minted is unknown: the pending row stays
-    except RuntimeError:
-        _forget(name)                   # the provider answered with a refusal: nothing was minted
+    except RuntimeError as exc:
+        # Only a 4xx proves nothing was minted (the provider refused the request). A 5xx, a timeout
+        # or an unreachable provider does not: the key may exist, and on an account listing past
+        # PAGES_MAX nothing could find it again — the pending row stays and holds its slot (fix 5).
+        code = re.search(r"HTTP (\d{3})", str(exc))
+        if code and 400 <= int(code.group(1)) < 500:
+            _forget(name)
         raise
     value = d.get("key") or (d.get("data") or {}).get("key")
     row = d.get("data") or d
@@ -496,8 +499,9 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
 #: What to do about a pending row (a key minted, or perhaps minted, whose delivery was never recorded).
 PENDING_REMEDY = ("its key was minted but never recorded as delivered — `revoke {name}` deletes it and clears the row, "
                   "then issue again; if the ledger holds no hash for it, whether it was minted is unknown: `claim "
-                  "{name}` with its value if one reached the slot, or delete the key called {name!r} at the "
-                  "provider, then `revoke {name}`")
+                  "{name}` with its value if one reached the slot, or delete any key called {name!r} at the "
+                  "provider, then `revoke {name}` (past the listing, where the door cannot look the name up: "
+                  "`revoke {name} --forget-pending --reason \"…\"`)")
 
 
 def _forget(name: str) -> None:
@@ -806,11 +810,11 @@ def _ceiling_of(row: dict | None) -> float | None:
 
 def _cents_up(usd) -> int | None:
     """A ceiling the provider holds, in cents rounded UP (3.334 is 334), so a total never reads
-    lower than what can be spent. Float noise below a hundredth of a cent (an echo of 3.330000001)
-    is not a cent. None (no ceiling) is unbounded."""
+    lower than what can be spent. Float noise below a millionth of a dollar (an echo of 3.330000001)
+    is not a cent; a provider holding $0.0001 more than asked is (fix 5). None is unbounded."""
     if not isinstance(usd, (int, float)) or isinstance(usd, bool) or not math.isfinite(usd):
         return None
-    exact = decimal.Decimal(repr(float(usd))) * 100 - decimal.Decimal("0.01")
+    exact = decimal.Decimal(repr(float(usd))) * 100 - decimal.Decimal("0.0001")
     return max(int(exact.to_integral_value(rounding=decimal.ROUND_CEILING)), 0)
 
 
@@ -967,6 +971,8 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                 step["action"] = "failed"
                 step["why"] = (str(exc) if isinstance(exc, (ValueError, LookupError))
                                else type(exc).__name__ + ": " + str(exc))
+                if isinstance(exc, OSError) and exc.errno is not None:
+                    step["errno"] = exc.errno     # ENOSPC, EIO…: the machine's failure, named as such
                 done = sum(1 for s in plan if s.get("action") in ("issued", "ceiling-moved", "in-place"))
                 raise PolicyPartial(f"partial: {done} of {len(slots)} slots served before {step['ref']} failed; "
                                     f"a re-run does only what is missing", plan) from None
@@ -1383,6 +1389,28 @@ def cmd_claim(name: str, account: str | None, where: str) -> int:
     return 0
 
 
+def forget_pending_key(name: str, reason: str) -> dict:
+    """Clear a pending row with no hash WITHOUT reading the provider: the one remedy that works on an
+    account listing past PAGES_MAX, where the name cannot be looked up (fix 5). Only after the key
+    called NAME was deleted at the provider, or is known never to have been minted; `reason` says
+    which, and the journal keeps it. Refuses any other row — a row with a hash is revoked by hash."""
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValueError("--forget-pending needs --reason: what makes the key gone (deleted at the provider "
+                         "by name, or never minted)")
+    doc = ledger()
+    rec = doc["issued"].get(name)
+    if not rec:
+        raise LookupError(f"no issued key called {name!r}")
+    if not rec.get("pending") or rec.get("hash"):
+        raise LookupError(f"{name!r} is not a pending row without a hash; `revoke {name}` deletes it by its hash")
+    doc["issued"].pop(name)
+    save_ledger(doc)
+    _journal("forget-pending", f"openrouter/{rec.get('account')}/{name}", reason=reason,
+             destination=rec.get("destination"))
+    return {"name": name, "forgotten": True}
+
+
 def revoke_key(name_or_label: str) -> dict:
     """Delete at the provider, then clear the ledger row — in that order: a
     forgotten live key is worse than a stale row. REFUSED for a key something
@@ -1398,6 +1426,12 @@ def revoke_key(name_or_label: str) -> dict:
             for dest, held in (doc_scan.get("destination_hashes") or {}).items():
                 if rec.get("hash") and isinstance(held, dict) and held.get("hash") == rec["hash"]:
                     raise ValueError(f"{name} is what {dest} is reading right now; "
+                                     f"issue its replacement first, then revoke this one")
+            # A key past the listing appears in the scan only as the label a destination holds
+            # (`destinations`, fix 5). A label two keys share refuses too: the safe side.
+            for dest, lab in (doc_scan.get("destinations") or {}).items():
+                if rec.get("label") and lab == rec["label"]:
+                    raise ValueError(f"{name} is what {dest} is reading right now (by its label); "
                                      f"issue its replacement first, then revoke this one")
             for k in doc_scan.get("keys", []):
                 names = {name, rec.get("provider_name")} - {None}
@@ -1423,15 +1457,37 @@ def revoke_key(name_or_label: str) -> dict:
             "delivered_to": rec.get("delivered_to")}
 
 
-def cmd_revoke(name: str) -> int:
+def cmd_revoke(name: str, forget_pending: bool = False, reason: str | None = None) -> int:
+    if forget_pending:
+        try:
+            forget_pending_row = forget_pending_key(name, reason or "")
+        except ValueError as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 2
+        except (LookupError, RuntimeError) as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 1
+        print(f"forgot the pending row {forget_pending_row['name']!r} (journaled with its reason); "
+              f"nothing was read or deleted at the provider")
+        return 0
     try:
         r = revoke_key(name)
     except (ValueError, LookupError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
+    except OSError as exc:
+        # The ledger could not be written (a full disk): the provider may already have deleted the
+        # key; the row stays, and the next revoke finds it gone (404) and clears it.
+        print(f"refused: the ledger could not be written ({type(exc).__name__}: {exc})\n  the ledger row was "
+              f"kept; run the revoke again once the disk takes writes", file=sys.stderr)
+        return 1
     except RuntimeError as exc:
+        rec = (ledger().get("issued", {}).get(name) or {}) if LEDGER.exists() else {}
+        hint = (f"\n  past the listing the name cannot be looked up: once the key called {name!r} is deleted at "
+                f"the provider (or was never minted), `revoke {name} --forget-pending --reason \"…\"` clears "
+                f"the row" if rec.get("pending") and not rec.get("hash") else "")
         print(f"refused: {exc}\n  the ledger row was kept — a forgotten live key "
-              f"is worse than a stale row", file=sys.stderr)
+              f"is worse than a stale row{hint}", file=sys.stderr)
         return 1
     print(f"revoked {r['name']!r}; note the delivered copy at {r['delivered_to']} is "
           f"now a dead value — the consumer will degrade at next use")
@@ -1562,12 +1618,22 @@ def main() -> int:
     p_di.add_argument("name")
     p_en = sub.add_parser("enable", help="let a disabled key spend again")
     p_en.add_argument("name")
-    p_ro = sub.add_parser("rotate", help="create successor, deliver, delete predecessor")
+    p_ro = sub.add_parser("rotate", help="create successor, deliver, delete predecessor. While it runs the slot "
+                          "holds two live keys (the one window past a spend policy's limit). Until the J-3 change "
+                          "counts them, a rotate that FAILS can leave the successor NAME-next live and untracked, "
+                          "or the predecessor live and uncounted (the row then says rotation_status "
+                          "successor-delivered-predecessor-pending with its predecessor_hash): delete at the "
+                          "provider whichever of the two the slot does not hold, then run issue-for-policy, which "
+                          "names any total still past the limit")
     p_ro.add_argument("name", nargs="?")
     p_ro.add_argument("--leaked", action="store_true",
                       help="rotate every issued key named in an open leak")
     p_re = sub.add_parser("revoke", help="delete at the provider, clear the ledger row")
     p_re.add_argument("name")
+    p_re.add_argument("--forget-pending", action="store_true",
+                      help="clear a pending row with no hash without reading the provider — only once the key "
+                      "called NAME is deleted there or was never minted (an account listing past PAGES_MAX)")
+    p_re.add_argument("--reason", help="with --forget-pending: what makes the key gone; journaled")
     p_cl = sub.add_parser("claim", help="bring a key minted elsewhere under this door; value on stdin")
     p_cl.add_argument("name", help="what the ledger will call it")
     p_cl.add_argument("--account", help="the stashed account to look in (default: every one)")
@@ -1597,7 +1663,7 @@ def main() -> int:
     if a.cmd == "rotate":
         return cmd_rotate(a.name, a.leaked)
     if a.cmd == "revoke":
-        return cmd_revoke(a.name)
+        return cmd_revoke(a.name, a.forget_pending, a.reason)
     if a.cmd == "claim":
         return cmd_claim(a.name, a.account, a.where)
     return 2

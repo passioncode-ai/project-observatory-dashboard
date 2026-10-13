@@ -132,6 +132,16 @@ They require an explicitly configured integration and the user's own admin or
 provisioning credential. They do not make a new user inherit the author's
 accounts, budgets or tokens. Limit issuance and revocation to the task's scope.
 
+A project's own OpenRouter keys come from its spend policy: `openrouter.py
+issue-for-policy --policy FILE [--dry-run]` keeps their ceilings together within
+the project limit and exits 1 with `OVER LIMIT by $X now ($A against the $L
+limit); it ends after: …` when they are not. `rotate` is the one window past the
+limit: both keys are live while it runs, and until the J-3 change a rotate that
+fails can leave the successor `NAME-next` untracked or the predecessor uncounted —
+delete at the provider the one the slot does not hold, then run
+`issue-for-policy`. A pending row with no hash on an account past the listing is
+cleared with `revoke NAME --forget-pending --reason "…"` once its key is gone.
+
 A project that must edit DNS in one zone (a custom domain, a CNAME to its host)
 gets `cloudflare.py issue --preset dns-edit --zone <zone> --vault <project>/<env>/<NAME>`:
 Zone Read and DNS Write on that zone only, verified against its records and
