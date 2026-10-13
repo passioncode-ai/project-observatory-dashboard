@@ -1,5 +1,5 @@
 {
-  "status": "focused-source-checks-pass-independent-review-pending",
+  "status": "independent-scoped-source-pass",
   "base": "25c375d5b9818fdcabbb1258814ae69116ef2d2e",
   "source_sha256": {
     "observatory/engine/holders.py": "3d36197197bf3c14c1082e53b63493100c4c0e4838d09eaf018c09626e411b5a",
@@ -75,5 +75,21 @@
       "exit_code": 0,
       "runtime_identical_to_initial_run": true
     }
+  },
+  "implementation_commit": "ef3612954ffe0be6de9bb49e2f92bf8c58a6d386",
+  "independent": {
+    "verdict": "PASS_SCOPED_SOURCE_AND_OWNED_SYNTHETIC",
+    "reexecuted_capture": 17,
+    "reexecuted_action_fresh": 6,
+    "additional_control_groups": 4,
+    "owned_argv_forms": 5,
+    "findings": []
+  },
+  "implementation_privacy": {
+    "exit_code": 0,
+    "files": 994,
+    "history_blobs": 13,
+    "effective_private_identifiers": 4055,
+    "findings": 0
   }
 }
