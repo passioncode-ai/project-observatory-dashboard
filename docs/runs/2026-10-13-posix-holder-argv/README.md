@@ -1,6 +1,6 @@
 # POSIX rendered argv safety correction
 
-Status: scoped local checks passed; independent source review pending.
+Status: independent scoped source/synthetic review passed at `22ea6f4`; draft delivery.
 Base: accepted Windows source `ff13f861390dd5b575a1b7ec62c0565ff4131fdb` (PR272).
 
 ## Why this changed
@@ -61,10 +61,10 @@ stacked on PR272; hosted/native evidence remains separate. No release or install
 
 ## Final local check
 
-The final disk-guard suite passes148 cases with two explicit skips. Git hardening
-passes61 cases; six documentation-copy checks and four workflow checks pass.
+The final disk-guard suite ran 148 cases: 146 passed and two explicitly skipped. Git hardening
+passes 61 cases; six documentation-copy checks and four workflow checks pass.
 Python3.11 compiles the three changed Python files. Source inventory and copied
-docs match. Brand lint reports zero errors and2043 warnings (non-strict exit0);
+docs match. Brand lint reports zero errors and 2043 warnings (non-strict exit 0);
 there is no repository UX-lint script, so no such execution is claimed.
 
 The earlier disk-guard run retained one failure: a pre-existing two-second
@@ -73,3 +73,15 @@ That fixture now allows ten seconds for setup/archive while still asserting a
 five-second maximum for the final probe. The separate expired-deadline refusal
 remains unchanged. This is synthetic fixture stabilization, not a production
 budget increase. Native Windows and hosted successor checks remain pending.
+
+## Independent corrected-source verdict
+
+Exact `22ea6f44278b9a94cdb6a8749c1c0d9808530616` passed scoped source/synthetic
+review: five actual owned child-process controls now yield unknown for the four
+original missing path forms and true for the ordinary absolute path. Seven
+additional controls cover destructive admission, cache child suppression, lsof/proc
+completeness, malformed/timeout/decode evidence and the owned Windows home fixture.
+The reviewer compared complete workflow YAML semantics: only the job-level
+Windows exception was removed; strict holder step and job are both unsuppressed.
+This documentation successor changes no runtime, tests or workflow bytes. Native
+Windows successor and installed/live cleanup acceptance remain unmeasured.
