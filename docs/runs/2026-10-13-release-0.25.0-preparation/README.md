@@ -61,6 +61,34 @@ removing stale rotation advice in `a045276`.
 The original PR #249 may be marked superseded only after protected source integration.
 The new report does not include retired keys or close full project-spend accounting.
 
+## Further review corrections and remaining rotation failures
+
+The model binding (`77866893`, receipts `ee2a56c`) and consumer-safe revoke
+(`23b4249`, receipts `e22f46f`) are now integrated. Portable suite registration
+preserves issued-key activity, rotation accounting and both new suites. App 0.25.0
+and plugin 0.22.1 remain unchanged. Documentation append conflicts preserve both
+spend and revoke guidance; source inventory was regenerated after integration.
+
+The latest [full-rotation baseline](../2026-10-13-consumer-safe-revoke/raw/baseline-128.json)
+completes 128 cases at source `23b4249`: **28 PASS, 100 FAIL**. It supersedes the
+older model-bound 62 PASS / 66 FAIL baseline for diagnosis, without erasing it.
+This source-bound baseline was not rerun on this integration tree. Full 5,200-case
+acceptance and reconciliation remain open. Seed 7000104's invalid 0.03/four-slot
+split must be rejected unchanged; its separate successful rotation leaving 0.034
+capacity above a 0.03 cap remains a real strict-ceiling defect. Neither outcome
+settles the other, and the strict invariant has not been weakened.
+
+Cleanup diagnostic follow-ups `c5d39b8` and `bd64afb` are included together. The
+first was independently rejected for retaining extra fields in otherwise-valid
+summaries and ignoring nonzero child exits. The correction reconstructs bounded
+known fields and rejects invalid/failed child receipts; the independent correction
+review passed. See [the retained correction record](../2026-10-13-cleanup-command-diagnostics/README.md).
+Final bounded integration checks pass: 61 key-management cases and 486 credential
+assertions without skips; 128 disk-guard cases with two platform skips; and 14
+version, manifest and document-copy cases. Inventory and whitespace checks pass.
+`checks.json` binds these results to source hashes. No tag, provider mutation,
+installed acceptance or automatic-cleanup enablement is claimed.
+
 ## Initial preparation snapshot (superseded integration status)
 
 This is a local release-preparation candidate, not a published or installed release.

@@ -52,6 +52,13 @@ is 0.22.1, with updated credential-handling guidance.
   retains possible capacity and refuses another mutation; aliases cannot bypass unresolved
   ownership. This is not automatic reconciliation or a guarantee that overlapping provider
   ceilings have already converged; external account writers are not serialized.
+- **Revocation requires current consumer evidence**: missing, unreadable, stale,
+  degraded or changed scans prevent provider deletion and retain the issued-key row.
+  The check includes destination-only witnesses. It does not prove that all live vault
+  slots or remote environments are unused; full holder reconciliation remains open.
+- **Cleanup child receipts are validated before use**: failed commands and malformed
+  summaries remain failures. Valid summaries retain only known structured fields;
+  exception details, child output and extra fields do not enter persisted diagnostics.
 - **Scoped Heroku refreshes preserve the rest of the survey** (OBS-80): `scan_heroku --only`
   updates only successfully measured apps, retains unrequested rows and the global survey
   timestamp, and records per-scope results. Missing apps, malformed responses and invalid

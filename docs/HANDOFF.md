@@ -19,8 +19,11 @@ expectation. It changes test evidence and documentation, not the published engin
 
 [2026-10-13 — Release 0.25.0 preparation](runs/2026-10-13-release-0.25.0-preparation/README.md):
 application 0.25.0 and companion plugin 0.22.1 combine independently reviewed waves
-four through six: rotation identity/accounting, checkout/cache coverage and saved readers,
-scoped Heroku preservation, cleanup diagnostic privacy and read-only issued-key activity.
+four through seven: rotation identity/accounting, checkout/cache coverage and saved readers,
+scoped Heroku preservation, cleanup diagnostic privacy and read-only issued-key activity,
+plus current-consumer revocation refusal and validated cleanup child summaries.
+The corrected full-rotation model preserves a failed 128-case baseline (28 PASS /
+100 FAIL); this is evidence of remaining work, not full J3 acceptance.
 Source is prepared; no tag, published assets or installed acceptance is claimed. Next:
 protected exact-source CI and merge, tag the accepted main SHA, verify signed release
 assets, then verify installed code and scheduled receipts with automatic cleanup off.

@@ -576,5 +576,157 @@
       "observatory/engine/tests/test_provider_secret_boundaries.py": "17969f40dfd7494b89debd885bcdb94fbd4f30700e0e015552418642c228c04f",
       "observatory/engine/SOURCE-INVENTORY.json": "8f77f1d3185f0b2af0c788e0bd70f8b7ad4551ae286d055799977cd9a254ef23"
     }
+  },
+  "review_corrections_wave7": {
+    "status": "PASS_SCOPED",
+    "integrated_source_head": "ab3ddfc50e592865c21b44c114510d66418d7185",
+    "application_version": "0.25.0",
+    "plugin_version": "0.22.1",
+    "accepted_sources": [
+      "77866893bcef182df163113b933ec509c4ef00f1",
+      "ee2a56c3b51570e8c377b4fe857b322fe69c8514",
+      "23b4249f23d5b4ebc469fcdcc95b022c7deac0f8",
+      "e22f46fa877c72cf3d97c542d2ae2c3ad133896a",
+      "c5d39b81d74ec185445b4937f34c270d86ac6868",
+      "bd64afbdf55e29ee91385f7af14c062ef4bfedac"
+    ],
+    "suite_results": [
+      {
+        "name": "j3_adversary",
+        "unittest_cases": 8,
+        "assertions": 0,
+        "skips": 0,
+        "exit_code": 0
+      },
+      {
+        "name": "revoke_consumers",
+        "unittest_cases": 12,
+        "assertions": 0,
+        "skips": 0,
+        "exit_code": 0
+      },
+      {
+        "name": "issued_spend",
+        "unittest_cases": 10,
+        "assertions": 0,
+        "skips": 0,
+        "exit_code": 0
+      },
+      {
+        "name": "rotation_accounting",
+        "unittest_cases": 19,
+        "assertions": 0,
+        "skips": 0,
+        "exit_code": 0
+      },
+      {
+        "name": "provider_secret_boundaries",
+        "unittest_cases": 12,
+        "assertions": 0,
+        "skips": 0,
+        "exit_code": 0
+      },
+      {
+        "name": "credential_doors",
+        "unittest_cases": 0,
+        "assertions": 486,
+        "skips": 0,
+        "exit_code": 0
+      },
+      {
+        "name": "disk_guard",
+        "unittest_cases": 128,
+        "assertions": 0,
+        "skips": 2,
+        "exit_code": 0
+      }
+    ],
+    "focused_checks": [
+      {
+        "name": "versions",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests",
+          "-p",
+          "test_version_consistency.py",
+          "-v"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "plugin_manifests",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests",
+          "-p",
+          "test_plugin_manifests.py",
+          "-v"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "doc_copies",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "tests",
+          "-p",
+          "test_engine_doc_copies.py",
+          "-v"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "inventory",
+        "command": [
+          "python3",
+          "tools/update_inventory.py",
+          "--check"
+        ],
+        "exit_code": 0
+      },
+      {
+        "name": "diff",
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exit_code": 0
+      }
+    ],
+    "source_hashes": {
+      "observatory/engine/tools/openrouter.py": "b76935b0ef971da92ddf6f1124d0aa21abd73f265b9f47c0252db9844bd49d87",
+      "observatory/engine/tools/disk_guard.py": "8d14b3d9129636bf0c289d8a76ed1e59a50439b9a03239782cf29d1977c970bc",
+      "observatory/engine/tests/adv_j1_property.py": "df0f0f03b178fae42a5219e7e90c0b571c1b7918f4249e041c4128f96eff98e6",
+      "observatory/engine/tests/run_portable.py": "03d728ef65104b900337864aeb258fcad4822dd0df5628a6edddaca96a162841"
+    },
+    "full_rotation_baseline": {
+      "source": "23b4249f23d5b4ebc469fcdcc95b022c7deac0f8",
+      "requested": 128,
+      "completed": 128,
+      "PASS": 28,
+      "FAIL": 100,
+      "full_5200": "NOT_RUN",
+      "scope": "Retained source-bound baseline; not rerun on integration tree"
+    },
+    "remaining": [
+      "full reconciliation and strict ceiling convergence",
+      "full consumer holder proofs",
+      "live provider acceptance",
+      "native/installed acceptance",
+      "final combined independent review and protected CI"
+    ]
   }
 }
