@@ -2517,8 +2517,8 @@
       "path": "tests/test_digitalocean_door.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "65ab821abedade845e62261ce77e3e168682b22e54ee83373d81407fb26c9e5e",
-      "bytes": 39617
+      "export_sha256": "2b190f0e1f2ff0f0a259e1c0fd1b44495f5a976c2c86ae86b9efc8c2049c9e98",
+      "bytes": 40310
     },
     {
       "path": "tests/test_digitalocean_safety.py",
@@ -4211,8 +4211,8 @@
       "path": "tools/digitalocean.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "319a90d84531bd96183dbb309c76d19dd3d10b1ea2f3ed9570f410a664acd068",
-      "bytes": 35932
+      "export_sha256": "4e465a4d843537bff5e54c412eb1d0cd9385ebb948cc05c906dd84a4284553da",
+      "bytes": 36262
     },
     {
       "path": "tools/disk_guard.py",

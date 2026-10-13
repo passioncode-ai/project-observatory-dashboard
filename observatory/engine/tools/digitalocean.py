@@ -418,7 +418,13 @@ def validate_connection(c: dict, user: str, db: str | None) -> None:
     checked_name(c.get("id"), "cluster id")
     checked_name(c.get("name"), "cluster name")
     conn = c.get("connection")
-    if (c.get("engine") not in ("pg", "mysql", "redis", "valkey") or not isinstance(conn, dict)
+    engine = c.get("engine")
+    if engine not in ("pg", "mysql", "redis", "valkey"):
+        # Named, not "incomplete metadata" (review round 6): mongodb, kafka and
+        # opensearch need scheme options this door does not build.
+        shown = engine if _is_name(engine) else "this engine"
+        raise DoorError(f"the door supports pg, mysql, redis and valkey clusters, not {shown}")
+    if (not isinstance(conn, dict)
             or not isinstance(conn.get("host"), str) or not conn["host"]
             or type(conn.get("port")) is not int or not 0 < conn["port"] < 65536):
         raise DoorError("unsupported or incomplete database connection metadata")

@@ -622,6 +622,17 @@ def review_round_five() -> None:
             check(f"{engine}: credential without --db still delivers",
                   r.returncode == 0 and slot_written(tmp, "CACHE_URL"), (r.stdout + r.stderr)[-300:])
 
+    # Review round 6: an engine the door does not build URLs for is refused by name.
+    for engine in ("mongodb", "kafka", "opensearch"):
+        with tempfile.TemporaryDirectory() as t:
+            tmp = pathlib.Path(t).resolve()
+            env = setup(tmp)
+            with_cluster(tmp, engine=engine, db_names=None)
+            r = run(env, "db", "credential", "shop-db", "doadmin", "--to", "vault:shop/prod/OTHER_URL")
+            check(f"{engine}: credential is refused naming the engine and writes nothing",
+                  r.returncode == 1 and f"not {engine}" in r.stderr and "incomplete" not in r.stderr
+                  and not slot_written(tmp, "OTHER_URL"), r.stderr[-300:])
+
     with tempfile.TemporaryDirectory() as t:
         tmp = pathlib.Path(t).resolve()
         env = setup(tmp)

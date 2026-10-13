@@ -66,6 +66,8 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
     cannot be proven to hold the selected user's credential. A binding is never rewritten.
   - `db credential` checks `--db` the same way before it reads the password, so the recovery that rotate's
     exit 4 and exit 5 point to cannot write a URL to a database that does not exist into the vault.
+    It also checks the cluster's engine, so a mongodb, kafka or opensearch cluster is refused by name: the door
+    builds pg, mysql, redis and valkey URLs only.
   - `db consumers` lists a key whose `_`-separated name has a database word (`DATABASE`, `DB`, `PG`,
     `POSTGRES`, `POSTGRESQL`, `MYSQL`, `REDIS`, `VALKEY`, `MONGO`, `MONGODB`) beside `URL`, `URI` or `DSN`
     anywhere in it, encrypted or not (`APP_DATABASE_DSN`, `PRIMARY_DB_URI`); `SENTRY_DSN`, `OTEL_…_URI`,
