@@ -17,6 +17,16 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-13 — Final holder coverage and prune receipts](runs/2026-10-13-cleanup-holder-integration/README.md):
+partial or unreadable process evidence no longer declares an omitted target free;
+clean and archived dirty worktrees require a fresh bounded final target observation.
+Failed repository-wide registration pruning reports unknown effects, never success.
+These independently reviewed corrections supersede the `93223f5` preparation
+checkpoint. Local combined checks passed; protected exact-source CI, merge,
+tagged assets and installed acceptance remain pending. Versions stay 0.25.0/0.22.1.
+Next: independent composition binding, privacy, then the existing protected release
+PR; retain the open rotation-convergence and filesystem-race limitations.
+
 [2026-10-13 — Recovery wave 8](runs/2026-10-13-recovery-wave-8/README.md):
 explicit policy provenance makes unproved rotation refuse before provider requests,
 including exact hash aliases; known engine-update backups are visible to status and

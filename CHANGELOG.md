@@ -21,6 +21,10 @@ is 0.22.1, with updated credential-handling guidance.
   Log rotation also refuses symbolic links, linked directories and hardlinks before
   rotating or changing permissions. External writers can still race the final filesystem
   check: use an idle workspace. Copy/truncate can still lose a concurrent append.
+  Incomplete or unreadable process listings cannot declare an omitted target free;
+  clean and archived dirty worktrees repeat a bounded holder check immediately
+  before removal. Failed registration pruning reports unknown effects and its
+  repository-wide scope instead of claiming success.
 - **Survey gaps stay visible** (OBS-87): bounded checkout registration and fairer scans
   preserve older measurements with their dates. Unknown swap, failed file walks and
   incomplete registration are not reported as measured zero or fresh coverage.
