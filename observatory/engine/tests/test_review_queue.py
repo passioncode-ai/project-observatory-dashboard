@@ -50,14 +50,20 @@ def store_with(rows: list[tuple[str, int]]) -> pathlib.Path:
     # The schema ships with the program; the workspace store holds only data.
     conn.executescript((ROOT / "store" / "schema.sql").read_text(encoding="utf-8"))
     now = datetime.now(timezone.utc)
-    for i, (pid, age) in enumerate(rows):
+    for i, row in enumerate(rows):
+        # (project, age) is an observer's conclusion; (None, age, "lesson") a lesson,
+        # which retention keeps 365 days while proposed (`ledger.kinds.lesson`).
+        pid, age, kind = (*row, "observation") if len(row) == 2 else row
         made = (now - timedelta(days=age)).strftime("%Y-%m-%dT%H:%M:%SZ")
         conn.execute(
             "INSERT INTO ledger (memory_id, revision, kind, project_id, owner, function,"
             " scope, statement, state, confidence, created_at)"
-            " VALUES (?,1,'observation',?,'agent:observer','episodic','project',?,"
-            "'proposed',0.5,?)",
-            (f"mem:test{i:04d}", pid, f"a conclusion about {pid}", made))
+            " VALUES (?,1,?,?,?,?,?,?,'proposed',0.5,?)",
+            (f"mem:test{i:04d}", kind, pid,
+             "agent:task-pipeline" if kind == "lesson" else "agent:observer",
+             "experiential" if kind == "lesson" else "episodic",
+             "global" if kind == "lesson" else "project",
+             f"a conclusion about {pid}", made))
     conn.commit()
     conn.close()
     return db
@@ -173,6 +179,53 @@ def test_the_horizon_comes_from_the_file_that_owns_it() -> None:
     check("the digest reads the same horizon", "proposed_days" in dig)
 
 
+# ─────────── a lesson waits 365 days, and every reader of the queue says so ───────────
+
+LESSON = (None, 80, "lesson")
+
+
+def test_a_lesson_is_not_announced_for_erasure_at_the_general_horizon() -> None:
+    """Retention keeps a proposed lesson 365 days; the deadline finding must not count
+    an 80-day lesson among those erased within 14 days."""
+    reg = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-qreg-")) / "registry"
+    import shutil
+    shutil.copytree(paths.REGISTRY, reg)
+    db = store_with([("project:old", 80)] * 2 + [LESSON] * 3 + [("project:new", 1)] * 25)
+    code, out = run([PY, "tools/build_findings.py"], db, {"OBSERVATORY_REGISTRY": str(reg)})
+    check("the builder ran", code == 0, out[-200:])
+    import json
+    doc = json.loads((reg / "findings.json").read_text(encoding="utf-8"))
+    expiring = [f for f in doc["findings"] if f["type"] == "ledger.review_expiring"]
+    check("the deadline counts the two conclusions and none of the three lessons",
+          bool(expiring) and "2 conclusion" in expiring[0]["title"],
+          expiring[0]["title"] if expiring else "no ledger.review_expiring finding")
+
+
+def test_the_digest_does_not_name_a_lesson_for_erasure() -> None:
+    db = store_with([("project:old", 80), LESSON])
+    code, out = run([PY, "tools/review.py", "digest"], db)
+    tail = out.split("will be ERASED UNREVIEWED", 1)[-1]
+    check("the 80-day conclusion is named for erasure", "mem:test0000" in tail, tail[:200])
+    check("the 80-day lesson is not", "mem:test0001" not in tail, tail[:300])
+    check("and the digest says a lesson's horizon", "365" in out, out[:600])
+
+
+def test_the_health_page_does_not_count_a_lesson_in_its_seven_days() -> None:
+    db = store_with([("project:old", 85), (None, 85, "lesson")])
+    code, out = run([PY, "-c", "import json, sqlite3, sys; sys.path.insert(0, 'dashboard');"
+                     " import paths, build_dashboard as B;"
+                     " c = sqlite3.connect(str(paths.DB)); c.row_factory = sqlite3.Row;"
+                     " print(json.dumps(B._digest(c)))"], db)
+    import json
+    try:
+        digest = json.loads(out.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        check("the dashboard digest ran", False, out[-300:])
+        return
+    check("one row erases within 7 days: the conclusion, not the lesson",
+          digest.get("erases_within_7d") == 1, json.dumps(digest))
+
+
 if __name__ == "__main__":
     print("the review queue — readable, dated, and still the operator's to decide\n")
     for fn in (test_the_agent_corrects_todays_record_instead_of_appending,
@@ -180,7 +233,10 @@ if __name__ == "__main__":
                test_the_digest_names_what_is_about_to_be_erased,
                test_promotion_still_refuses_a_script,
                test_a_deadline_finding_fires_and_a_count_alone_does_not,
-               test_the_horizon_comes_from_the_file_that_owns_it):
+               test_the_horizon_comes_from_the_file_that_owns_it,
+               test_a_lesson_is_not_announced_for_erasure_at_the_general_horizon,
+               test_the_digest_does_not_name_a_lesson_for_erasure,
+               test_the_health_page_does_not_count_a_lesson_in_its_seven_days):
         fn()
     print()
     if FAILURES:

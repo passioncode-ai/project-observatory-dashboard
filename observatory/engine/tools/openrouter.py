@@ -71,6 +71,7 @@ SETTLE_HINT = ("the leaked values are dead; close each row the register names wi
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import oslocks
+import osprivacy
 import private_io
 import paths                                                                    
 
@@ -88,15 +89,18 @@ LEDGER = paths.source_path("secret_store", paths.SECRETS) / 'openrouter-issued.j
 NAMED_DESTINATIONS = ("observatory", "claude-mem")
 
 
-def _journal(event: str, secret: str, **detail) -> None:
+def _journal(event: str, secret: str, *, require_success: bool = False, **detail) -> None:
     """The vault's movements journal: every issue, rotation and
     revocation this door performs is on the record beside the vault's own.
-    Never raises — a journal failure must not undo a rotation that happened."""
+    Past external changes keep best-effort journaling. A pre-action attestation can
+    require success before local state is cleared."""
     try:
         sys.path.insert(0, str(ROOT / "tools"))
         import vault
         vault.journal(event, secret, tool="openrouter.py", **detail)
     except Exception as exc:                                                      
+        if require_success:
+            raise RuntimeError("attestation could not be journaled; pending row retained") from None
         print(f"  (movement not journaled: {type(exc).__name__})", file=sys.stderr)
 
 
@@ -756,7 +760,7 @@ def _policy_lock():
     other's keys before either moved them, and opposite splits ended both keys high (round 3: $16
     against a $10 limit). A second run waits up to POLICY_LOCK_WAIT_S, then refuses."""
     LEDGER.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(LEDGER.parent / ".openrouter-policy.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    fd = osprivacy.open(LEDGER.parent / ".openrouter-policy.lock", os.O_RDWR | os.O_CREAT, 0o600)
     try:
         give_up = time.monotonic() + POLICY_LOCK_WAIT_S
         while True:
@@ -810,11 +814,11 @@ def _ceiling_of(row: dict | None) -> float | None:
 
 def _cents_up(usd) -> int | None:
     """A ceiling the provider holds, in cents rounded UP (3.334 is 334), so a total never reads
-    lower than what can be spent. Float noise below a millionth of a dollar (an echo of 3.330000001)
-    is not a cent; a provider holding $0.0001 more than asked is (fix 5). None is unbounded."""
+    lower than what can be spent. Float noise below a hundredth of a cent (an echo of 3.330000001)
+    is not a cent. None (no ceiling) is unbounded."""
     if not isinstance(usd, (int, float)) or isinstance(usd, bool) or not math.isfinite(usd):
         return None
-    exact = decimal.Decimal(repr(float(usd))) * 100 - decimal.Decimal("0.0001")
+    exact = decimal.Decimal(repr(float(usd))) * 100 - decimal.Decimal("0.01")
     return max(int(exact.to_integral_value(rounding=decimal.ROUND_CEILING)), 0)
 
 
@@ -1404,6 +1408,9 @@ def forget_pending_key(name: str, reason: str) -> dict:
         raise LookupError(f"no issued key called {name!r}")
     if not rec.get("pending") or rec.get("hash"):
         raise LookupError(f"{name!r} is not a pending row without a hash; `revoke {name}` deletes it by its hash")
+    _journal("forget-pending-attested", f"openrouter/{rec.get('account')}/{name}",
+             require_success=True, reason=reason, destination=rec.get("destination"),
+             attestation_only=True)
     doc["issued"].pop(name)
     save_ledger(doc)
     _journal("forget-pending", f"openrouter/{rec.get('account')}/{name}", reason=reason,
@@ -1474,12 +1481,6 @@ def cmd_revoke(name: str, forget_pending: bool = False, reason: str | None = Non
         r = revoke_key(name)
     except (ValueError, LookupError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
-        return 1
-    except OSError as exc:
-        # The ledger could not be written (a full disk): the provider may already have deleted the
-        # key; the row stays, and the next revoke finds it gone (404) and clears it.
-        print(f"refused: the ledger could not be written ({type(exc).__name__}: {exc})\n  the ledger row was "
-              f"kept; run the revoke again once the disk takes writes", file=sys.stderr)
         return 1
     except RuntimeError as exc:
         rec = (ledger().get("issued", {}).get(name) or {}) if LEDGER.exists() else {}

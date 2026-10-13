@@ -1,0 +1,669 @@
+{
+  "attempted": 128,
+  "cases": [
+    {
+      "issues": [],
+      "seed": 7000000,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000001,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000002,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000003,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000004,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000005,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000006,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000007,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000008,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000009,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000010,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000011,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000012,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000013,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000014,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000015,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000016,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000017,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000018,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000019,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000020,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000021,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000022,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000023,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000024,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000025,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000026,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000027,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000028,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000029,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000030,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000031,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000032,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000033,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000034,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000035,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000036,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000037,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000038,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000039,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000040,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000041,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000042,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000043,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000044,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000045,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000046,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000047,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000048,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000049,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000050,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000051,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000052,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000053,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000054,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000055,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000056,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000057,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000058,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000059,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000060,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000061,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000062,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000063,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000064,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000065,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000066,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000067,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000068,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000069,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000070,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000071,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000072,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000073,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000074,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000075,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000076,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000077,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000078,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000079,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000080,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000081,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000082,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000083,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000084,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000085,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000086,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000087,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000088,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000089,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000090,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000091,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000092,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000093,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000094,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000095,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000096,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000097,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000098,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000099,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000100,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000101,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000102,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000103,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000104,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000105,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000106,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000107,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000108,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000109,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000110,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000111,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000112,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000113,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000114,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000115,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000116,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000117,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000118,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000119,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000120,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000121,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000122,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000123,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000124,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000125,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000126,
+      "status": "PASS"
+    },
+    {
+      "issues": [],
+      "seed": 7000127,
+      "status": "PASS"
+    }
+  ],
+  "completed": 128,
+  "requested": 128,
+  "schema": "synthetic-adversary/1",
+  "source_commit": "bb67f30f234d916a473c14e9a7f9f780248ecbcd",
+  "sources": [
+    {
+      "path": "observatory/engine/tests/adv_norot_forget.py",
+      "sha256": "6d9211fc47af584fe5e5561e480161ddfc06b4dedb248b92dd1aa0ad9caf5736"
+    },
+    {
+      "path": "observatory/engine/tests/test_credential_doors.py",
+      "sha256": "af7d71288ccc461ec05e37514ce32128fd4fa7631317c7abf34a98c3db3d319a"
+    },
+    {
+      "path": "observatory/engine/tools/openrouter.py",
+      "sha256": "80b7d975b10bff0bb183cdef027e881178edb0923eb4cf6679e6016d1fc92cd5"
+    },
+    {
+      "path": "observatory/engine/tests/adversarial_runner.py",
+      "sha256": "a70295a9bbea620f18d4fd1d39148667b69073a99dd6e356b0b7427e9aa425e6"
+    }
+  ],
+  "status": "PASS",
+  "variant": "adv_norot_forget"
+}

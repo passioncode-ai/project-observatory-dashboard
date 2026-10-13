@@ -116,7 +116,7 @@ BOUNDARY += ('harness',)
 # OBS-55: the meter and the delegation verifier (contract DEC-0039).
 BOUNDARY += ('meter', 'meter_wire', 'spend')
 # docs/design/WINDOWS-LINUX.md W3: a whole tick, through tools/tick.py.
-BOUNDARY += ('tick_py',)
+BOUNDARY += ('tick_py', 'tick_findings', 'merge_input_age', 'machine_findings')
 # ENG-003: the agent's deadline reaches providers.complete().
 BOUNDARY += ('provider_deadline',)
 # One credential-shape heuristic for every door that judges typed text.
@@ -151,9 +151,11 @@ BOUNDARY += ('embedding_policy',)
 # embedding-policy/1 enforced at the provider, the indexer, the query path and the CLI (N-003).
 BOUNDARY += ('embedding_enforcement',)
 # access-bindings/1 enforced at every business entry point (PB-137 N-008).
-BOUNDARY += ('memory_access',)
+BOUNDARY += ('memory_access', 'memory_freshness')
 # Scope and validity filtered before the candidate window (PB-137 N-009).
 BOUNDARY += ('search_scope',)
+# A lesson as its own record kind, and search filtered by kind before the window (M-7).
+BOUNDARY += ('lesson', 'search')
 # Retrieval receipts, scoped explain, redaction on the way out (PB-137 N-012).
 BOUNDARY += ('retrieval_audit',)
 # Checkpoint prose with field/chunk provenance; replays resurrect nothing (PB-137 N-011).
@@ -172,6 +174,8 @@ BOUNDARY += ('maintenance',)
 BOUNDARY += ('maintain_app',)
 # The disk guard: pressure, the lsof rule, each class; synthetic roots only (2026-10-11).
 BOUNDARY += ('disk_guard',)
+# The DigitalOcean door against a fake `doctl` and a scratch vault (PLN-142).
+BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -194,12 +198,14 @@ HELPERS += (
     # language reads in the other (L10N-01).
     'relocalize.py',
 )
+# task-pipeline's lessons.py emit-observatory output, copied: observatory_lesson's arguments (M-7).
+HELPERS += ('lesson_emitter_fixture.json',)
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', 'tools')
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py',
     'identity_map.py', 'identifiers.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'workspace.py',
-    'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
+    'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'memory_snapshot.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'log_policy.py', 'code_freshness.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
     # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).
@@ -208,7 +214,7 @@ ROOT_FILES = (
     'release_signature.py',
     # The meter and the delegation verifier (OBS-55).
     'delegation.py', 'meter.py',
-    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
+    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
 )
@@ -379,6 +385,25 @@ def nothing_ran(result: dict) -> bool:
     return executed <= 0 and (result['skip_assertions'] + result['unittest_skipped']) > 0
 
 
+def run_suite_recorded(name: str, base: Path, template: Path, timeout: int) -> dict:
+    """Keep one receipt per selection even when sandbox setup or log I/O fails.
+
+    Pool.map otherwise raises on the first exception and discards the other suites'
+    completed evidence. Exception bodies may contain local paths, so retain only type.
+    ERROR means completion could not be established, never a successful test run.
+    """
+    started = time.monotonic()
+    try:
+        return run_suite(name, base, template, timeout)
+    except Exception as exc:
+        result = {'file': 'tests/test_' + name + '.py', 'status': 'ERROR',
+                  'exit_code': None, 'seconds': round(time.monotonic() - started, 2),
+                  'error_type': type(exc).__name__,
+                  'reason': 'suite setup, execution or evidence capture failed; completion unknown'}
+        print('ERROR ' + result['file'], file=sys.stderr, flush=True)
+        return result
+
+
 def overall(results: list[dict]) -> str:
     """FAIL when any suite failed or timed out; SKIP when no suite ran anything; else PASS.
 
@@ -395,6 +420,8 @@ def not_run(results: list[dict], node: str | None) -> list[dict]:
     rows = list(NOT_RUN)
     rows += [{'scope': 'suite:' + row['file'], 'status': 'NOT_RUN', 'reason': row['skip_reason']}
              for row in results if row['status'] == 'SKIP']
+    rows += [{'scope': 'suite:' + row['file'], 'status': 'NOT_RUN', 'reason': row['reason']}
+             for row in results if row['status'] == 'ERROR']
     if node is None:
         rows.append({'scope': 'dashboard-execution', 'status': 'NOT_RUN',
                      'reason': 'node is not on PATH: checks that execute the built dashboard '
@@ -425,18 +452,30 @@ def main() -> int:
     try:
         template=base/'template';template.mkdir();copy_source(template)
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            results=list(pool.map(lambda name:run_suite(name,base,template,args.timeout),names))
+            results=list(pool.map(lambda name:run_suite_recorded(name,base,template,args.timeout),names))
         report={'schema_version':1,'coverage':'synthetic-offline',
                 'status':overall(results),
                 'suites':results,'not_run':not_run(results, shutil.which('node')),
                 'suite_count':len(results),'python':sys.version.split()[0]}
         if args.report_dir:
-            args.report_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
-            for row in results:
-                target=args.report_dir / row['log']; target.parent.mkdir(mode=0o700)
-                shutil.copyfile(base / row['log'], target); target.chmod(0o600)
-            summary=args.report_dir / 'summary.json'
-            summary.write_text(json.dumps(report, indent=2) + '\n'); summary.chmod(0o600)
+            try:
+                args.report_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+                for row in results:
+                    if 'log' not in row:
+                        continue
+                    target=args.report_dir / row['log']; target.parent.mkdir(mode=0o700)
+                    shutil.copyfile(base / row['log'], target); target.chmod(0o600)
+                summary=args.report_dir / 'summary.json'
+                pending=args.report_dir / 'summary.json.tmp'
+                # Publish last: failure to write or restrict the receipt must not
+                # leave a final PASS artifact while stdout correctly says FAIL.
+                pending.write_text(json.dumps(report, indent=2) + '\n'); pending.chmod(0o600)
+                pending.replace(summary)
+            except OSError as exc:
+                # A full disk or refused destination must not erase the stdout receipt.
+                # Files already copied are partial evidence, never a completed report.
+                report['status'] = 'FAIL'
+                report['report_error_type'] = type(exc).__name__
         if args.keep:report['private_logs']=str(base)
         print(json.dumps(report,indent=2))
         return 0 if report['status']=='PASS' else 1

@@ -1,0 +1,31 @@
+{
+ "_fixture": "THE SHAPE task-pipeline's emitter prints for `--tool observatory_lesson` (re-added in ssheleg/task-pipeline#112's next cycle), HAND-WRITTEN from that emitter at 9c5929d: `scripts/lessons.py emit-observatory L-<sha12> --tool observatory_lesson` on a synthetic one-commit repository. Until the flag is back, the emitter's default is the record bridge (`observatory_record`, a `lesson:` note), which `tools/migrate_lessons.py` converts. tests/test_lesson.py checks observatory_lesson's published input schema against these arguments and records them through the tool, so a field renamed on either side fails here. Re-pin it to the real output once the flag lands; never change the arguments to make a test pass.",
+ "emitter": {
+  "repository": "ssheleg/task-pipeline",
+  "ref": "9c5929d",
+  "provenance": "hand-written",
+  "repin": "the real output of --tool observatory_lesson after task-pipeline#112's next cycle",
+  "script": "plugins/task-pipeline/skills/task-pipeline/scripts/lessons.py",
+  "command": "emit-observatory --tool observatory_lesson"
+ },
+ "output": {
+  "tool": "observatory_lesson",
+  "arguments": {
+   "owner": "agent:task-pipeline",
+   "classKey": "absence-needs-its-own-check",
+   "title": "An absent input must fail its own check, not pass silently",
+   "trigger": "a gate reads an optional file",
+   "check": "docs gate rule absent-file",
+   "nouns": [
+    "gate",
+    "absence",
+    "optional",
+    "file"
+   ],
+   "origin": {
+    "projectId": "p-b9044fa136cc",
+    "commit": "b9044fa136ccfa597d0d339961296060bcbdcced"
+   }
+  }
+ }
+}

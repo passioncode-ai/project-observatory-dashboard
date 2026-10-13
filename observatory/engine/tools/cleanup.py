@@ -16,7 +16,8 @@ TWO TIERS (config/cleanup.json):
   manual  the only copy of somebody's work: a branch with unique commits, a
           worktree with uncommitted edits. `--apply --include manual` archives it
           first — a thin git bundle, a patch plus a tarball of untracked files —
-          and never runs on a tick.
+          and never runs on a tick. Ignored files are not archived; their presence
+          skips manual worktree removal until they are preserved or moved.
 
 EVERY TARGET IS RE-CHECKED at the moment it is acted on, because the survey may be
 half an hour old and an agent may have started work since: a branch must still
@@ -32,10 +33,12 @@ it (a branch's sha, an archive path).
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import os
 import pathlib
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -48,10 +51,22 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "collectors"))
 import configuration  # noqa: E402
 import paths  # noqa: E402
+import osprivacy  # noqa: E402
 import safe_git  # noqa: E402
+from cleanup_safety import protected_tree_reason  # noqa: E402
 
 AUTO_CLASSES = ("branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts")
 MANUAL_CLASSES = ("branch-unique", "worktree-dirty")
+
+
+def artifact_names(cfg: dict) -> list[str]:
+    """Known state containers are never output, even in older copied configurations.
+
+    Wrangler keeps local databases and object storage in `.wrangler/state`; being
+    ignored by git does not make those bytes reproducible. Older defaults listed
+    the whole folder, so filtering only the new default would leave installs unsafe.
+    """
+    return [name for name in cfg.get("artifact_dirs") or [] if name != ".wrangler"]
 
 
 def now() -> str:
@@ -76,6 +91,7 @@ def load_config() -> dict:
     # made. Pressure lowers only the others (review 2026-10-12: it overrode a person's 30).
     base_auto = shipped.get("auto") or {}
     cfg["_own_auto"] = sorted(k for k, v in (own.get("auto") or {}).items() if base_auto.get(k) != v)
+    cfg["artifact_dirs"] = artifact_names(cfg)
     return cfg
 
 
@@ -126,26 +142,236 @@ def export_tracked(target: str, status: str) -> tuple[bytes | None, str]:
     return patch, ""
 
 
+# The manual tier must finish proving its archive inside a bounded observation.
+# This is not a lock against an unrelated writer; the final Git removal still has
+# a small check/use race. Refuse anything this regular-file archive cannot prove.
+ARCHIVE_SECONDS = 60.0
+ARCHIVE_BYTES = 512 * 1024 * 1024
+ARCHIVE_FILES = 10_000
+
+
+class ArchiveRefused(RuntimeError):
+    pass
+
+
+def archive_time_left(deadline: float) -> float:
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise ArchiveRefused("manual archive inspection budget exhausted")
+    return left
+
+
+def archive_git(target: str, deadline: float, *args: str, text: bool = True, input=None, extra_env=None):
+    result = git(target, *args, timeout=min(120, archive_time_left(deadline)), text=text,
+                 input=input, extra_env=extra_env)
+    if result.returncode:
+        raise ArchiveRefused("manual archive Git state could not be read")
+    archive_time_left(deadline)
+    return result.stdout
+
+
+def stream_digest(stream, deadline: float, limit: int) -> tuple[int, str]:
+    digest, size = hashlib.sha256(), 0
+    while True:
+        archive_time_left(deadline)
+        chunk = stream.read(min(1024 * 1024, limit - size + 1))
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > limit:
+            raise ArchiveRefused("manual archive byte budget exhausted")
+        digest.update(chunk)
+    return size, digest.hexdigest()
+
+
+def manual_tree_readable(target: str, deadline: float) -> None:
+    """Git omits FIFOs/sockets entirely; an untracked nested repo may be one directory row."""
+    root = pathlib.Path(target)
+    if not stat.S_ISDIR(os.lstat(root).st_mode):
+        raise ArchiveRefused("the worktree path is not an ordinary directory")
+    pending, count = [root], 0
+    while pending:
+        archive_time_left(deadline)
+        folder = pending.pop()
+        with os.scandir(folder) as entries:
+            children = []
+            for entry in entries:
+                archive_time_left(deadline)
+                count += 1
+                if count > ARCHIVE_FILES:
+                    raise ArchiveRefused("manual archive tree inspection budget exhausted")
+                if folder == root and entry.name == ".git":
+                    continue  # the worktree's own Git administration is retained by Git
+                mode = entry.stat(follow_symlinks=False).st_mode
+                if entry.name == ".git":
+                    raise ArchiveRefused("a nested repository is outside the manual archive")
+                if not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+                    raise ArchiveRefused("a symlink or special file is outside the manual archive")
+                children.append(entry.name)
+                if stat.S_ISDIR(mode):
+                    pending.append(pathlib.Path(entry.path))
+            if folder != root and {"HEAD", "objects"} <= set(children) and ({"refs", "packed-refs"} & set(children)):
+                raise ArchiveRefused("a nested bare repository is outside the manual archive")
+
+
+def untracked_manifest(target: str, deadline: float) -> dict:
+    manual_tree_readable(target, deadline)
+    listing = archive_git(target, deadline, "ls-files", "--others", "--exclude-standard", "-z")
+    names = [name for name in listing.split("\0") if name]
+    if len(names) > ARCHIVE_FILES or len(names) != len(set(names)):
+        raise ArchiveRefused("manual archive file budget or listing is invalid")
+    # A tracked submodule's working copy is not represented by the parent's patch.
+    stage = archive_git(target, deadline, "ls-files", "--stage", "-z")
+    if any(entry.startswith("160000 ") for entry in stage.split("\0")):
+        raise ArchiveRefused("a nested repository is outside the manual archive")
+    manifest, total = {}, 0
+    for name in sorted(names):
+        archive_time_left(deadline)
+        rel = pathlib.PurePosixPath(name)
+        if rel.is_absolute() or not rel.parts or any(p in ("..", ".git") for p in rel.parts):
+            raise ArchiveRefused("an untracked path is outside the manual archive")
+        path = pathlib.Path(target)
+        for part in rel.parts[:-1]:
+            path /= part
+            if not stat.S_ISDIR(os.lstat(path).st_mode):
+                raise ArchiveRefused("an untracked parent is not an ordinary directory")
+        path /= rel.name
+        before = os.lstat(path)
+        if not stat.S_ISREG(before.st_mode):
+            raise ArchiveRefused("an untracked directory, symlink or special file is outside the manual archive")
+        flags = os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK
+        fd = osprivacy.open(path, flags)
+        with os.fdopen(fd, "rb") as source:
+            opened = os.fstat(source.fileno())
+            if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                raise ArchiveRefused("an untracked file changed while opening it")
+            size, digest = stream_digest(source, deadline, ARCHIVE_BYTES - total)
+            after = os.fstat(source.fileno())
+        current = os.lstat(path)
+        identity = lambda st: (st.st_dev, st.st_ino, st.st_mode, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+        if identity(before) != identity(after) or identity(after) != identity(current) or size != before.st_size:
+            raise ArchiveRefused("an untracked file changed while reading it")
+        total += size
+        manifest[name] = {"size": size, "sha256": digest, "mode": stat.S_IMODE(before.st_mode),
+                          "identity": list(identity(before))}
+    return manifest
+
+
+def verify_untracked_archive(dest: pathlib.Path, manifest: dict, deadline: float) -> None:
+    archive_time_left(deadline)
+    recorded = json.loads((dest / "untracked-manifest.json").read_text())
+    if recorded != manifest:
+        raise ArchiveRefused("the saved untracked manifest changed")
+    seen = set()
+    with tarfile.open(dest / "untracked.tgz", "r:gz") as tar:
+        for member in tar:
+            archive_time_left(deadline)
+            expected = manifest.get(member.name)
+            if expected is None or member.name in seen or not member.isfile():
+                raise ArchiveRefused("the untracked archive has unexpected entries")
+            if member.size != expected["size"] or member.mode != expected["mode"]:
+                raise ArchiveRefused("the untracked archive metadata does not match")
+            with tar.extractfile(member) as source:
+                size, digest = stream_digest(source, deadline, expected["size"])
+            if size != expected["size"] or digest != expected["sha256"]:
+                raise ArchiveRefused("the untracked archive content does not match")
+            seen.add(member.name)
+    if seen != set(manifest):
+        raise ArchiveRefused("the untracked archive is incomplete")
+
+
+def archive_manual(target: str, dest: pathlib.Path, status: str,
+                   deadline: float) -> tuple[bytes, bytes, dict]:
+    archive_time_left(deadline)
+    patch, why = export_tracked(target, status)
+    if patch is None:
+        raise ArchiveRefused(why)
+    if len(patch) > ARCHIVE_BYTES:
+        raise ArchiveRefused("manual archive patch budget exhausted")
+    staged = archive_git(target, deadline, "diff", "--cached", "HEAD", "--binary", text=False)
+    if len(staged) > ARCHIVE_BYTES:
+        raise ArchiveRefused("manual archive staged patch budget exhausted")
+    if staged.strip():
+        with tempfile.TemporaryDirectory(prefix="observatory-cleanup-index-") as scratch:
+            index = {"GIT_INDEX_FILE": os.path.join(scratch, "index")}
+            archive_git(target, deadline, "read-tree", "HEAD", extra_env=index)
+            archive_git(target, deadline, "apply", "--check", "--cached", "--binary", "-",
+                        text=False, input=staged, extra_env=index)
+    manifest = untracked_manifest(target, deadline)
+    for name, content in (("tracked.patch", patch), ("staged.patch", staged), ("status.txt", status.encode()),
+                          ("untracked-manifest.json", json.dumps(manifest, sort_keys=True).encode())):
+        (dest / name).write_bytes(content)
+        (dest / name).chmod(0o600)
+    def ordinary_member(info):
+        archive_time_left(deadline)
+        expected = manifest.get(info.name)
+        if expected is None or not info.isfile() or info.size != expected["size"]:
+            raise ArchiveRefused("an untracked archive source changed or is not a regular file")
+        return info
+    with tarfile.open(dest / "untracked.tgz", "w:gz", dereference=False) as tar:
+        for name in manifest:
+            archive_time_left(deadline)
+            tar.add(os.path.join(target, name), arcname=name, recursive=False, filter=ordinary_member)
+    (dest / "untracked.tgz").chmod(0o600)
+    verify_untracked_archive(dest, manifest, deadline)
+    if (dest / "tracked.patch").read_bytes() != patch or (dest / "status.txt").read_text() != status:
+        raise ArchiveRefused("the saved tracked archive changed")
+    return patch, staged, manifest
+
+
+def revalidate_manual(target: str, dest: pathlib.Path, head: str, status: str, patch: bytes,
+                      staged: bytes, manifest: dict, deadline: float) -> None:
+    verify_untracked_archive(dest, manifest, deadline)
+    if ((dest / "tracked.patch").read_bytes() != patch or (dest / "staged.patch").read_bytes() != staged
+            or (dest / "status.txt").read_text() != status):
+        raise ArchiveRefused("the saved tracked archive changed")
+    if untracked_manifest(target, deadline) != manifest:
+        raise ArchiveRefused("untracked files changed during archiving")
+    if archive_git(target, deadline, "rev-parse", "HEAD").strip() != head:
+        raise ArchiveRefused("HEAD changed during archiving")
+    if archive_git(target, deadline, "status", "--porcelain", "--untracked-files=normal") != status:
+        raise ArchiveRefused("worktree status changed during archiving")
+    current_patch = archive_git(target, deadline, "diff", "HEAD", "--binary", text=False)
+    if current_patch != patch:
+        raise ArchiveRefused("tracked files changed during archiving")
+    if archive_git(target, deadline, "diff", "--cached", "HEAD", "--binary", text=False) != staged:
+        raise ArchiveRefused("the index changed during archiving")
+    archive_time_left(deadline)
+
+
 def protected(name: str, cfg: dict) -> bool:
     return any(fnmatch.fnmatch(name, pat) for pat in cfg.get("protect") or [])
 
 
 # --- the plan -----------------------------------------------------------------
 
+from machine_view import carried  # noqa: E402 — the one reader of `stale` (ENG-009)
+
+
 def plan_git(hygiene: dict, cfg: dict) -> list[dict]:
+    """Auto and manual actions from the hygiene survey's rows.
+
+    A CARRIED ROW PLANS NO AUTO ACTION (ENG-009). A pass the deadline cut short keeps its
+    unreached checkouts' last rows marked `stale`; the act-time re-checks cover merge state,
+    holders and cleanliness but not how old the row is, and the auto tier acts with no person
+    present, so it waits for a fresh pass. A manual action only proposes: it stays, marked
+    `stale` with the row's `measured_at`, so the person sees the age."""
     auto, manual = cfg.get("auto") or {}, cfg.get("manual") or {}
     out = []
     for c in hygiene.get("checkouts") or []:
         repo, default = c["path"], c["default_branch"]
         base = {"repository": c["repository"], "repo": repo, "default_branch": default}
+        fresh = not c.get("stale")
+        if not fresh:
+            base.update(stale=True, measured_at=c.get("measured_at"))
         for b in c.get("branches") or []:
             if protected(b["name"], cfg):
                 continue
             idle = b.get("idle_days") or 0
-            if b["class"] in ("merged", "patch-merged") and idle >= auto.get("merged_branch_idle_days", 7):
+            if fresh and b["class"] in ("merged", "patch-merged") and idle >= auto.get("merged_branch_idle_days", 7):
                 out.append({**base, "class": "branch-merged", "tier": "auto", "target": b["name"],
                             "why": f"{b['class']}, idle {idle} days"})
-            elif b["class"] == "pushed" and idle >= auto.get("pushed_branch_idle_days", 30):
+            elif fresh and b["class"] == "pushed" and idle >= auto.get("pushed_branch_idle_days", 30):
                 out.append({**base, "class": "branch-pushed", "tier": "auto", "target": b["name"],
                             "why": f"identical to {b.get('upstream')}, idle {idle} days"})
             elif b["class"] == "unique" and idle >= manual.get("unique_branch_idle_days", 14):
@@ -155,12 +381,12 @@ def plan_git(hygiene: dict, cfg: dict) -> list[dict]:
             if w.get("locked") or w.get("busy"):
                 continue
             idle = w.get("idle_days") or 0
-            if w["state"] == "missing":
+            if fresh and w["state"] == "missing":
                 out.append({**base, "class": "worktree-missing", "tier": "auto", "target": w["path"],
                             "why": "its directory no longer exists"})
-            elif w["state"] == "clean" and idle >= auto.get("clean_worktree_idle_days", 7):
+            elif fresh and w["state"] == "clean" and idle >= auto.get("clean_worktree_idle_days", 7):
                 out.append({**base, "class": "worktree-clean", "tier": "auto", "target": w["path"],
-                            "branch": w.get("branch"), "artifacts": list(cfg.get("artifact_dirs") or []),
+                            "branch": w.get("branch"), "artifacts": artifact_names(cfg),
                             "why": f"no uncommitted change, idle {idle} days"})
             elif w["state"] == "dirty" and idle >= manual.get("dirty_worktree_idle_days", 7):
                 out.append({**base, "class": "worktree-dirty", "tier": "manual", "target": w["path"],
@@ -189,7 +415,7 @@ def idle_projects(days: int) -> list[dict]:
 
 
 def plan_artifacts(cfg: dict, busy: set[str]) -> list[dict]:
-    names = set(cfg.get("artifact_dirs") or [])
+    names = set(artifact_names(cfg))
     days = (cfg.get("auto") or {}).get("build_artifacts_project_idle_days", 30)
     out = []
     for p in idle_projects(days):
@@ -202,14 +428,14 @@ def plan_artifacts(cfg: dict, busy: set[str]) -> list[dict]:
                 keep = []
                 for d in dirnames:
                     full = os.path.join(dirpath, d)
-                    if d == ".git" or os.path.islink(full):
+                    if d in (".git", ".wrangler") or os.path.islink(full):
                         continue
                     if d in names:
                         ignored = git(dirpath, "check-ignore", "-q", full).returncode == 0
                         in_repo = git(dirpath, "rev-parse", "--git-dir").returncode == 0
                         held = busy.busy(full) if hasattr(busy, "busy") else \
                             any(b == full or b.startswith(full + "/") for b in busy)
-                        if (ignored or not in_repo) and not held:
+                        if (ignored or not in_repo) and not held and not protected_tree_reason(full):
                             out.append({"class": "build-artifacts", "tier": "auto", "target": full,
                                         "project": p["id"], "why": f"{'git-ignored' if in_repo else 'outside git'} "
                                                                    f"build output; project idle {p['idle_days']} days"})
@@ -227,6 +453,7 @@ def build_plan(cfg: dict, busy: set[str], artifacts: bool = True) -> dict:
         hygiene = {}
     actions = plan_git(hygiene, cfg) + (plan_artifacts(cfg, busy) if artifacts else [])
     return {"schema_version": 1, "planned_at": now(), "survey_at": hygiene.get("measured_at"),
+            "survey_partial": bool(hygiene.get("partial")), "carried": carried(hygiene),
             "auto_enabled": configuration.enabled("auto_cleanup", "features"),
             "counts": {k: sum(1 for a in actions if a["class"] == k) for k in AUTO_CLASSES + MANUAL_CLASSES},
             "actions": actions}
@@ -234,24 +461,53 @@ def build_plan(cfg: dict, busy: set[str], artifacts: bool = True) -> dict:
 
 # --- acting, with a re-check ---------------------------------------------------
 
-def still_safe_branch(a: dict) -> str:
-    """"" when the branch may still be deleted under its class, else why not."""
-    repo, name, default = a["repo"], a["target"], a["default_branch"]
-    if git(repo, "rev-parse", "--verify", "-q", "refs/heads/" + name).returncode:
-        return "branch no longer exists"
-    held = {l.split(" ", 1)[1].replace("refs/heads/", "") for l in git(repo, "worktree", "list", "--porcelain").stdout.splitlines()
-            if l.startswith("branch ")}
-    if name in held:
+def branch_name_reason(repo: str, name) -> str:
+    if not isinstance(name, str) or not name or name.startswith("-"):
+        return "branch name is invalid"
+    checked = git(repo, "check-ref-format", "--branch", name)
+    # --branch can expand shortcuts such as @{-1}; plans must name the literal branch.
+    if checked.returncode or checked.stdout.strip() != name:
+        return "branch name is invalid or not literal"
+    return ""
+
+
+def still_safe_branch(a: dict, expected: str | None = None) -> str:
+    """Prove eligibility for a fixed tip and refuse unreadable checkout state."""
+    repo, name, default = a["repo"], a["target"], a.get("default_branch")
+    why = branch_name_reason(repo, name)
+    if why:
+        return why
+    symbolic = git(repo, "symbolic-ref", "--quiet", "refs/heads/" + name)
+    if symbolic.returncode == 0:
+        return "symbolic branch refs are not cleanup targets"
+    if symbolic.returncode != 1:
+        return "branch ref type could not be read"
+    tip = git(repo, "rev-parse", "--verify", "refs/heads/" + name)
+    if tip.returncode or not tip.stdout.strip():
+        return "branch no longer exists or could not be read"
+    sha = tip.stdout.strip()
+    if expected is not None and sha != expected:
+        return "branch tip changed since its cleanup proof"
+    worktrees = git(repo, "worktree", "list", "--porcelain")
+    if worktrees.returncode or not worktrees.stdout.startswith("worktree "):
+        return "worktree attachments could not be read"
+    held = {line.split(" ", 1)[1] for line in worktrees.stdout.splitlines() if line.startswith("branch ")}
+    if "refs/heads/" + name in held:
         return "branch is checked out in a worktree now"
     if a["class"] == "branch-merged":
-        ahead = git(repo, "rev-list", "--count", f"{default}..{name}").stdout.strip()
-        if ahead != "0":
-            cherry = git(repo, "cherry", default, name).stdout
-            if not cherry or not all(c.startswith("-") for c in cherry.splitlines()):
+        ahead = git(repo, "rev-list", "--count", f"{default}..{sha}")
+        if ahead.returncode:
+            return "branch merge proof could not be read"
+        if ahead.stdout.strip() != "0":
+            cherry = git(repo, "cherry", default, sha)
+            if cherry.returncode or not cherry.stdout or not all(c.startswith("-") for c in cherry.stdout.splitlines()):
                 return "branch has commits the default branch lacks now"
     if a["class"] == "branch-pushed":
-        up = git(repo, "rev-parse", "--abbrev-ref", name + "@{upstream}").stdout.strip()
-        if not up or git(repo, "rev-list", "--count", f"{up}..{name}").stdout.strip() != "0":
+        up = git(repo, "rev-parse", "--abbrev-ref", name + "@{upstream}")
+        if up.returncode or not up.stdout.strip():
+            return "branch upstream could not be read"
+        ahead = git(repo, "rev-list", "--count", f"{up.stdout.strip()}..{sha}")
+        if ahead.returncode or ahead.stdout.strip() != "0":
             return "branch is no longer identical to its upstream"
     return ""
 
@@ -286,35 +542,105 @@ def ignored_keepers(target: str, artifacts: set[str]) -> list[str]:
     out = git(target, "status", "--porcelain", "--ignored=matching", "--untracked-files=normal", "-z")
     if out.returncode:
         return ["(git status could not be read)"]
+    artifacts = set(artifact_names({"artifact_dirs": artifacts}))
     keep = []
     for entry in out.stdout.split("\0"):
         if entry.startswith("!! "):
             rel = entry[3:].rstrip("/")
-            if not any(part in artifacts for part in rel.split("/")):
+            if (".wrangler" in rel.split("/") or not any(part in artifacts for part in rel.split("/"))
+                    or protected_tree_reason(os.path.join(target, rel))):
                 keep.append(rel)
     return keep
+
+
+def index_visibility_reason(target: str) -> str:
+    """Status/diff can conceal content behind assume-unchanged or skip-worktree."""
+    try:
+        result = git(target, "ls-files", "-v", "-z")
+        if result.returncode:
+            return "index flags could not be read; nothing removed"
+        rows = result.stdout.split("\0")
+        if any(row and (not row.startswith("H ") or len(row) <= 2) for row in rows):
+            return "index has hidden or unsupported entries; nothing removed"
+        return ""
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return "index flags could not be read; nothing removed"
+
+
+def retain_worktree_head(repo: str, target: str, head: str) -> str:
+    """Prove current HEAD remains reachable without trusting the survey's branch."""
+    try:
+        if not head:
+            return "HEAD could not be read; nothing removed"
+        symbolic = git(target, "symbolic-ref", "--quiet", "HEAD")
+        if symbolic.returncode == 0:
+            ref = symbolic.stdout.strip()
+            if not ref.startswith("refs/heads/"):
+                return "HEAD branch could not be verified; nothing removed"
+        elif symbolic.returncode == 1:
+            name = f"archive/wt-{head[:8]}"
+            ref = "refs/heads/" + name
+            existing = git(repo, "show-ref", "--verify", "--quiet", ref)
+            if existing.returncode == 0:
+                resolved = git(repo, "rev-parse", "--verify", ref)
+                if resolved.returncode or resolved.stdout.strip() != head:
+                    return "detached HEAD archive ref conflicts; nothing removed"
+            elif existing.returncode == 1:
+                made = git(repo, "branch", name, head)
+                if made.returncode:
+                    return "detached HEAD archive ref could not be created; nothing removed"
+            else:
+                return "detached HEAD archive ref could not be read; nothing removed"
+        else:
+            return "HEAD attachment could not be read; nothing removed"
+        retained = git(repo, "rev-parse", "--verify", ref)
+        current = git(target, "rev-parse", "--verify", "HEAD")
+        if (retained.returncode or current.returncode or retained.stdout.strip() != head
+                or current.stdout.strip() != head):
+            return "HEAD retention changed or could not be verified; nothing removed"
+        return ""
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return "HEAD retention could not be read; nothing removed"
 
 
 def act(a: dict, archive: pathlib.Path) -> dict:
     cls, repo, target = a["class"], a.get("repo"), a["target"]
     rec = {"at": now(), "class": cls, "tier": a["tier"], "target": target, **({"repository": a["repository"]} if "repository" in a else {})}
-    if cls.startswith("branch-"):
-        why = still_safe_branch(a) if cls != "branch-unique" else ""
+    if cls in ("branch-merged", "branch-pushed", "branch-unique"):
+        why = branch_name_reason(repo, target)
+        if not why and cls in ("branch-merged", "branch-unique"):
+            why = branch_name_reason(repo, a.get("default_branch"))
         if why:
             return {**rec, "result": "skipped", "reason": why}
-        sha = git(repo, "rev-parse", "refs/heads/" + target).stdout.strip()
+        tip = git(repo, "rev-parse", "--verify", "refs/heads/" + target)
+        if tip.returncode or not tip.stdout.strip():
+            return {**rec, "result": "skipped", "reason": "branch tip could not be read"}
+        sha = tip.stdout.strip()
         rec["sha"] = sha
+        why = still_safe_branch(a, sha)
+        if why:
+            return {**rec, "result": "skipped", "reason": why}
         if cls == "branch-unique":
             archive.mkdir(parents=True, exist_ok=True, mode=0o700)
-            bundle = archive / (a["repository"].split(":", 1)[-1].replace("/", "__") + "__" + target.replace("/", "__") + ".bundle")
+            folder = pathlib.Path(tempfile.mkdtemp(prefix="branch-" + sha[:8] + "-", dir=archive))  # paths-check: allow - durable recovery archive under the caller's redirected archive root, never temporary test state
+            bundle = folder / "branch.bundle"
+            rec["archive"] = str(bundle)
             made = git(repo, "bundle", "create", str(bundle), "refs/heads/" + target, "^" + a["default_branch"])
             if made.returncode or git(repo, "bundle", "verify", str(bundle)).returncode:
                 return {**rec, "result": "failed", "reason": "bundle could not be written and verified; nothing deleted"}
             os.chmod(bundle, 0o600)
-            rec["archive"] = str(bundle)
-        done = git(repo, "branch", "-D", target)
+            heads = git(repo, "bundle", "list-heads", str(bundle))
+            if heads.returncode or heads.stdout.splitlines() != [sha + " refs/heads/" + target]:
+                return {**rec, "result": "failed", "reason": "bundle does not contain the proven branch tip; nothing deleted"}
+        why = still_safe_branch(a, sha)
+        if why:
+            return {**rec, "result": "skipped", "reason": why}
+        # Expected-old-value deletion cannot remove a newer tip. Worktree attachment
+        # is checked above; an unrelated checkout still has a final check/use race.
+        # A late symbolic-ref conversion must never redirect deletion to its referent.
+        done = git(repo, "update-ref", "-d", "--no-deref", "refs/heads/" + target, sha)
         return {**rec, "result": "removed" if done.returncode == 0 else "failed",
-                **({"reason": done.stderr.strip()[:200]} if done.returncode else {})}
+                **({"reason": "branch changed or could not be deleted; nothing deleted"} if done.returncode else {})}
     if cls == "worktree-missing":
         if os.path.exists(target):
             return {**rec, "result": "skipped", "reason": "the directory exists again"}
@@ -323,6 +649,9 @@ def act(a: dict, archive: pathlib.Path) -> dict:
     if cls in ("worktree-clean", "worktree-dirty"):
         if busy_now(target):
             return {**rec, "result": "skipped", "reason": "a process works inside it now"}
+        why = index_visibility_reason(target)
+        if why:
+            return {**rec, "result": "skipped", "reason": why}
         status = git(target, "status", "--porcelain", "--untracked-files=normal")
         if status.returncode:
             return {**rec, "result": "skipped", "reason": "git status could not be read"}
@@ -334,45 +663,56 @@ def act(a: dict, archive: pathlib.Path) -> dict:
                 return {**rec, "result": "skipped",
                         "reason": f"it holds {len(keepers)} ignored file(s) that are not build output, "
                                   f"e.g. {keepers[0][:60]}"}
+        if cls == "worktree-dirty" and ignored_keepers(target, set()):
+            return {**rec, "result": "skipped", "reason": "ignored files are outside the manual archive; "
+                    "preserve or move them first, then rerun full cleanup --apply --include manual"}
         rec["head"] = git(target, "rev-parse", "HEAD").stdout.strip()
         if cls == "worktree-dirty":
-            # NOTHING IS REMOVED UNLESS THE ARCHIVE IS PROVEN: every refusal below
-            # returns before `worktree remove --force --force`, which is the step
-            # that destroys the only copy.
-            if not rec["head"]:
-                return {**rec, "result": "failed", "reason": "HEAD could not be resolved; nothing removed"}
-            patch, why = export_tracked(target, status.stdout)
-            if patch is None:
-                return {**rec, "result": "failed", "reason": f"{why}; nothing removed"[:200]}
-            listed = git(target, "ls-files", "--others", "--exclude-standard", "-z")
-            if listed.returncode:
-                return {**rec, "result": "failed",
-                        "reason": f"untracked files could not be listed: {listed.stderr.strip()[:120]}; nothing removed"}
-            dest = archive / (pathlib.Path(target).name + "-" + rec["head"][:8])
-            dest.mkdir(parents=True, exist_ok=True, mode=0o700)
-            (dest / "tracked.patch").write_bytes(patch)
-            (dest / "status.txt").write_text(status.stdout)
-            untracked = listed.stdout
-            if untracked:
-                with tarfile.open(dest / "untracked.tgz", "w:gz") as tar:
-                    for name in untracked.split("\0"):
-                        if name:
-                            tar.add(os.path.join(target, name), arcname=name, recursive=False)
-            rec["archive"] = str(dest)
-        if not a.get("branch") and rec["head"]:
-            # A detached HEAD's commits must stay reachable after the worktree goes.
-            git(repo, "branch", f"archive/wt-{rec['head'][:8]}", rec["head"])
+            # Capture and verify before forced removal; an unreadable or changing
+            # source is preserved, even if a partial recovery directory was written.
+            deadline = min(time.monotonic() + ARCHIVE_SECONDS, a.get("_deadline") or float("inf"))
+            try:
+                if not rec["head"]:
+                    raise ArchiveRefused("HEAD could not be resolved")
+                archive_time_left(deadline)
+                archive.mkdir(parents=True, exist_ok=True, mode=0o700)
+                # A failed attempt keeps a named partial archive; retries never overwrite it.
+                dest = pathlib.Path(tempfile.mkdtemp(prefix=pathlib.Path(target).name + "-" + rec["head"][:8] + "-", dir=archive))  # paths-check: allow - durable recovery archive under the caller's redirected archive root, retained after exit
+                rec["archive"] = str(dest)
+                patch, staged, manifest = archive_manual(target, dest, status.stdout, deadline)
+            except (ArchiveRefused, OSError, subprocess.SubprocessError, tarfile.TarError, ValueError) as exc:
+                reason = str(exc) if isinstance(exc, ArchiveRefused) else f"manual archive verification failed ({type(exc).__name__})"
+                return {**rec, "result": "failed", "reason": (reason + "; nothing removed")[:200]}
+        # An archive can take time; an ignored file appearing meanwhile must not
+        # be lost to the force removal either. No ignored file is in this archive.
+        if cls == "worktree-dirty" and ignored_keepers(target, set()):
+            return {**rec, "result": "skipped", "reason": "ignored files appeared during archiving; "
+                    "preserve or move them first, then rerun full cleanup --apply --include manual"}
+        if cls == "worktree-dirty":
+            try:
+                global _LISTING
+                _LISTING = (0.0, None)  # archiving may outlive the shared holders observation
+                if busy_now(target):
+                    raise ArchiveRefused("a process holds the worktree after archiving")
+                revalidate_manual(target, dest, rec["head"], status.stdout, patch, staged, manifest, deadline)
+                if ignored_keepers(target, set()):
+                    raise ArchiveRefused("ignored files appeared during archive verification")
+                archive_time_left(deadline)
+            except (ArchiveRefused, OSError, subprocess.SubprocessError, tarfile.TarError, ValueError) as exc:
+                reason = str(exc) if isinstance(exc, ArchiveRefused) else f"manual archive recheck failed ({type(exc).__name__})"
+                return {**rec, "result": "failed", "reason": (reason + "; nothing removed")[:200]}
+        why = index_visibility_reason(target) or retain_worktree_head(repo, target, rec["head"])
+        if why:
+            return {**rec, "result": "skipped", "reason": why}
         args = ["worktree", "remove", target] + (["--force", "--force"] if cls == "worktree-dirty" else [])
         done = git(repo, *args)
         return {**rec, "result": "removed" if done.returncode == 0 else "failed",
                 **({"reason": done.stderr.strip()[:200]} if done.returncode else {})}
     if cls == "build-artifacts":
-        if busy_now(target):
-            return {**rec, "result": "skipped", "reason": "a process works inside it now"}
-        size = subprocess.run(["du", "-sk", target], capture_output=True, text=True).stdout.split()
-        shutil.rmtree(target, ignore_errors=True)
-        return {**rec, "project": a.get("project"), "kb": int(size[0]) if size else None,
-                "result": "removed" if not os.path.exists(target) else "failed"}
+        # Only disk_guard carries the action-time eligibility/identity contract.
+        # A stale legacy plan cannot prove tracked/ignored/idle state here.
+        return {**rec, "result": "skipped", "reason": "legacy artifact action needs a fresh eligibility check; "
+                "run full disk-guard to replan build output"}
     return {**rec, "result": "skipped", "reason": "unknown class"}
 
 
@@ -446,11 +786,19 @@ def main(argv: list[str]) -> int:
         os.chmod(tmp, 0o600)
         os.replace(tmp, out)
         counts = ", ".join(f"{k} {v}" for k, v in plan["counts"].items() if v) or "nothing"
+        held_back = plan.get("carried")
+        # In the JSON summary too: under `--json` the line goes to stderr, and the disk guard keeps
+        # only the summary, so this is how the count reaches its report and journal.
+        held = {"carried": held_back} if held_back else {}
+        if held_back:
+            # Said on every path, so a run that removes nothing does not read as "nothing to do".
+            print(f"cleanup: {held_back['checkouts']} checkouts carried from {held_back['measured_at']}; "
+                  "their auto actions wait for a fresh pass", file=sys.stderr if as_json else sys.stdout)
         if "--auto" in argv and not plan["auto_enabled"]:
-            return say({"result": "plan-only", "counts": plan["counts"]},
+            return say({"result": "plan-only", "counts": plan["counts"], **held},
                        f"cleanup: plan only (features.auto_cleanup is off) — {counts}")
         if "--auto" not in argv and "--apply" not in argv:
-            return say({"result": "plan-only", "counts": plan["counts"]},
+            return say({"result": "plan-only", "counts": plan["counts"], **held},
                        f"cleanup plan{' at ' + level if level else ''}: {counts}. Nothing removed; `--apply` removes "
                        f"the auto tier, `--apply --include manual` also archives and removes the manual tier.")
         tiers = {"auto"} | ({"manual"} if "--apply" in argv and "manual" in argv else set())
@@ -463,7 +811,7 @@ def main(argv: list[str]) -> int:
                 stopped = len(chosen) - n
                 break
             try:
-                row = act(a, archive)
+                row = act({**a, "_deadline": deadline}, archive)
             except (OSError, subprocess.SubprocessError) as exc:
                 row = {"at": now(), "class": a["class"], "target": a["target"], "result": "failed",
                        "reason": f"{type(exc).__name__}: {exc}"[:200]}
@@ -475,7 +823,7 @@ def main(argv: list[str]) -> int:
         failed = sum(1 for r in rows if r["result"] == "failed")
         freed = sum(r.get("kb") or 0 for r in rows) / 1048576
         summary = {"result": "ran", "removed": done, "skipped": skipped, "failed": failed,
-                   "stopped": stopped, "level": level or "normal", "plan_seconds": plan["plan_seconds"]}
+                   "stopped": stopped, "level": level or "normal", "plan_seconds": plan["plan_seconds"], **held}
         text = (f"cleanup: {done} removed, {skipped} skipped on re-check, {failed} failed"
                 + (f"; {freed:.1f} GB of build output freed" if freed else "")
                 + (f"; {stopped} left for the next run (deadline)" if stopped else ""))

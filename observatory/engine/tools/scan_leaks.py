@@ -51,6 +51,7 @@ import os
 import pathlib
 import re
 import sqlite3
+import stat
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -128,6 +129,51 @@ def _read(p: pathlib.Path) -> str | None:
         return None
 
 
+def vault_slots(notes: list[dict], *, max_entries: int = 100_000):
+    """Enumerate only project/env/slot, with explicit discovery boundaries.
+
+    Symlinks and unexpected types are not followed; unreadable ancestors must
+    not make the readable sibling slots look like a complete inventory.
+    """
+    remaining = max_entries
+
+    def hole(path, reason):
+        relative = path.relative_to(VAULT).as_posix()
+        notes.append({"what": "vault:" + relative, "unreadable": True,
+                      "why": reason + "; values in this source are unmeasured"})
+
+    def visit(path, depth):
+        nonlocal remaining
+        try:
+            info = path.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                hole(path, "symbolic link excluded without following")
+            elif depth == 3:
+                if stat.S_ISREG(info.st_mode):
+                    yield path
+                else:
+                    hole(path, "not a regular slot file; excluded without reading")
+            elif not stat.S_ISDIR(info.st_mode):
+                hole(path, "not a directory; excluded without reading")
+            else:
+                with os.scandir(path) as entries:
+                    for entry in entries:
+                        if remaining <= 0:
+                            hole(path, "vault discovery entry limit reached")
+                            break
+                        remaining -= 1
+                        if depth == 2 and (entry.name.startswith(".") or entry.name == "meta.json"):
+                            continue
+                        yield from visit(pathlib.Path(entry.path), depth + 1)
+        except FileNotFoundError:
+            if depth != 0:
+                hole(path, "disappeared before it could be examined")
+        except OSError:
+            hole(path, "could not be examined or listed")
+
+    yield from visit(VAULT, 0)
+
+
 def known_values() -> tuple[dict[str, str], list[dict], list[dict]]:
     """value -> a name for it, plus the homes to exclude and what was skipped."""
     values: dict[str, str] = {}
@@ -147,7 +193,9 @@ def known_values() -> tuple[dict[str, str], list[dict], list[dict]]:
             path = paths.DATA / f["path"]
             text = _read(path)
             if text is None:
-                skipped.append({"what": f["path"], "why": "unreadable now"})
+                # A HOLE, not a choice (review round 3): its values cannot be
+                # looked for, so the scan is unmeasured for them.
+                skipped.append({"what": f["path"], "why": "unreadable now", "unreadable": True})
                 continue
             homes.append({"path": str(path)})
             for name, value in scan_env.parse(text)[0]:
@@ -165,25 +213,24 @@ def known_values() -> tuple[dict[str, str], list[dict], list[dict]]:
                 values.setdefault(value, f"env:{f['project']}/{name}")
 
     # 2. the vault's slots
-    if VAULT.is_dir():
-        for slot in sorted(VAULT.glob("*/*/*")):
-            if not slot.is_file() or slot.name.startswith(".") or slot.name == "meta.json":
-                continue
-            text = _read(slot)
-            if text is None:
-                continue
-            value = text.strip()
-            homes.append({"path": str(slot)})
-            if not searchable(value):
-                skipped.append({"what": f"vault:{slot.parent.parent.name}/{slot.name}",
-                                "why": ("shorter than 12 characters"
-                                        if len(value) < MIN_LEN else
-                                        "its shape is not distinctive enough for a "
-                                        "text match to be evidence")})
-                continue
-            # `vault:<project>/<env>/<NAME>`, the address the rest of the
-            # engine uses for a slot (`openrouter.py --to`, the keyserver).
-            values.setdefault(value, f"vault:{slot.parent.parent.name}/{slot.parent.name}/{slot.name}")
+    for slot in vault_slots(skipped):
+        text = _read(slot)
+        if text is None:
+            skipped.append({"what": f"vault:{slot.parent.parent.name}/{slot.parent.name}/{slot.name}",
+                            "why": "could not be read; its value is not looked for", "unreadable": True})
+            continue
+        value = text.strip()
+        homes.append({"path": str(slot)})
+        if not searchable(value):
+            skipped.append({"what": f"vault:{slot.parent.parent.name}/{slot.name}",
+                            "why": ("shorter than 12 characters"
+                                    if len(value) < MIN_LEN else
+                                    "its shape is not distinctive enough for a "
+                                    "text match to be evidence")})
+            continue
+        # `vault:<project>/<env>/<NAME>`, the address the rest of the
+        # engine uses for a slot (`openrouter.py --to`, the keyserver).
+        values.setdefault(value, f"vault:{slot.parent.parent.name}/{slot.parent.name}/{slot.name}")
 
     # 3. the OpenRouter destinations
     for label, path in DESTINATIONS.items():
@@ -200,48 +247,148 @@ def known_values() -> tuple[dict[str, str], list[dict], list[dict]]:
     return values, homes, skipped
 
 
+def source_stat(path: pathlib.Path, notes: list[dict], *, required: bool = False):
+    """Absent optional sources differ from a source whose metadata cannot be read.
+
+    Path.exists/is_file suppress OSError on newer Python versions. Using them
+    here turned permission failures into healthy empty surveys.
+    """
+    try:
+        return path.stat()
+    except FileNotFoundError:
+        if not required:
+            return None
+        problem = "disappeared before it could be examined"
+    except OSError:
+        problem = "could not be examined"
+    notes.append({"what": _label(path), "unreadable": True,
+                  "why": problem + "; this source is unmeasured, not clean"})
+    return None
+
+
+def source_file_stat(path: pathlib.Path, notes: list[dict], *, required: bool = False):
+    """Only ordinary files are scan targets; unsupported types remain visible.
+
+    A FIFO must never be opened by this scanner. A directory (including a Git
+    submodule entry) is not recursively covered by a file listing either.
+    """
+    info = source_stat(path, notes, required=required)
+    if info is not None and not stat.S_ISREG(info.st_mode):
+        notes.append({"what": _label(path), "unreadable": True,
+                      "why": "not a regular file; excluded without reading, this source is unmeasured"})
+        return None
+    return info
+
+
+def checkout_source(root: pathlib.Path, notes: list[dict]) -> bool:
+    """A package without a Git marker has no tracked-tree source to measure.
+
+    A present (including linked-worktree) marker does not prove Git works: its
+    listing must still succeed. Inaccessible marker metadata is a coverage hole.
+    """
+    for folder in (root, *root.parents):
+        marker = folder / ".git"
+        try:
+            marker.lstat()
+            return True
+        except FileNotFoundError:
+            continue
+        except OSError:
+            notes.append({"what": "the tracked tree", "unreadable": True,
+                          "why": "Git marker metadata could not be read; tracked files are unmeasured"})
+            return False
+    notes.append({"what": "the engine's tracked tree",
+                  "why": "the engine directory is not a git checkout (an installed package)"})
+    return False
+
+
 def targets(days: int) -> tuple[list[pathlib.Path], list[dict]]:
     """Where a value must never appear, and what was left out of the window."""
     out: list[pathlib.Path] = []
     notes: list[dict] = []
     cutoff = datetime.now(timezone.utc).timestamp() - days * 86400
-    if SESSIONS.is_dir():
-        old = unstatable = 0
-        for p in SESSIONS.rglob("*.jsonl"):
-            try:
-                if p.stat().st_mtime < cutoff:
+    sessions_info = source_stat(SESSIONS, notes)
+    if sessions_info is not None and not stat.S_ISDIR(sessions_info.st_mode):
+        notes.append({"what": _label(SESSIONS), "unreadable": True,
+                      "why": "the sessions source is not a directory; its transcripts are unmeasured"})
+    if sessions_info is not None and stat.S_ISDIR(sessions_info.st_mode):
+        old = 0
+        # AN EXPLICIT WALK, not `rglob` (review round 3): `rglob` skips a folder
+        # it cannot open without a word, so a project folder at mode 000 dropped
+        # its transcripts and /health stayed green. Each folder that will not
+        # list is a hole now, named `~`-relative.
+        unlisted: list[str] = []
+
+        def refused(err: OSError) -> None:
+            unlisted.append(_label(getattr(err, "filename", None) or SESSIONS))
+
+        for folder, dirs, files in os.walk(SESSIONS, onerror=refused):
+            for name in list(dirs):
+                child = pathlib.Path(folder) / name
+                try:
+                    linked = stat.S_ISLNK(child.lstat().st_mode)
+                except OSError:
+                    dirs.remove(name)
+                    notes.append({"what": _label(child), "unreadable": True,
+                                  "why": "session folder metadata could not be read; its transcripts are unmeasured"})
+                    continue
+                if linked:
+                    dirs.remove(name)
+                    notes.append({"what": _label(child), "unreadable": True,
+                                  "why": "session directory symbolic link excluded without following; its transcripts are unmeasured"})
+            for fname in files:
+                if not fname.endswith(".jsonl"):
+                    continue
+                p = pathlib.Path(folder) / fname
+                info = source_file_stat(p, notes, required=True)
+                if info is None:
+                    continue
+                if info.st_mtime < cutoff:
                     old += 1
                     continue
-            except OSError:
-                unstatable += 1
-                continue
-            out.append(p)
-        if unstatable:
-            notes.append({"what": f"{unstatable} session transcript(s)", "unreadable": True,
-                          "why": "could not be examined (stat failed); a transcript not read is not a clean one"})
+                out.append(p)
+        for where in unlisted:
+            notes.append({"what": f"session folder {where}", "unreadable": True,
+                          "why": "could not be listed; the transcripts in it are unmeasured, not clean"})
         if old:
             notes.append({"what": f"{old} session transcript(s)",
                           "why": f"older than {days} days; `--days N` widens the "
                                  f"window and `--full` re-reads from the start"})
     logs = paths.STATE / "logs"
-    if logs.is_dir():
-        out.extend(sorted(logs.glob("*.jsonl")))
-    if paths.DASHBOARD_HTML.is_file():
+    logs_info = source_stat(logs, notes)
+    if logs_info is not None:
+        try:
+            with os.scandir(logs) as entries:
+                for entry in entries:
+                    if not entry.name.endswith(".jsonl"):
+                        continue
+                    p = pathlib.Path(entry.path)
+                    info = source_file_stat(p, notes, required=True)
+                    if info is not None and stat.S_ISREG(info.st_mode):
+                        out.append(p)
+        except OSError:
+            notes.append({"what": _label(logs), "unreadable": True,
+                          "why": "the log directory could not be listed; its files are unmeasured"})
+    dashboard_info = source_file_stat(paths.DASHBOARD_HTML, notes)
+    if dashboard_info is not None and stat.S_ISREG(dashboard_info.st_mode):
         out.append(paths.DASHBOARD_HTML)
-    try:
-        tracked = safe_git.run(["ls-files"], cwd=ROOT, timeout=60)
-        if tracked.returncode != 0:
-            # An installed engine is not a git checkout. Its files cannot hold
-            # this machine's values, but "not scanned" is still said, not implied.
-            notes.append({"what": "the engine's tracked tree",
-                          "why": "the engine directory is not a git checkout (an installed package)"})
-        for rel in tracked.stdout.splitlines():
-            p = ROOT / rel
-            if p.is_file():
-                out.append(p)
-    except (OSError, subprocess.SubprocessError) as exc:
-        notes.append({"what": "the tracked tree",
-                      "why": f"git ls-files failed: {type(exc).__name__}"})
+    if checkout_source(ROOT, notes):
+        try:
+            tracked = safe_git.run(["ls-files", "-z"], cwd=ROOT, timeout=60)
+            if tracked.returncode != 0:
+                notes.append({"what": "the tracked tree", "unreadable": True,
+                              "why": "git ls-files failed; tracked files are unmeasured, not clean"})
+            else:
+                for rel in tracked.stdout.split("\0"):
+                    if not rel:
+                        continue
+                    p = ROOT / rel
+                    info = source_file_stat(p, notes, required=True)
+                    if info is not None and stat.S_ISREG(info.st_mode):
+                        out.append(p)
+        except (OSError, subprocess.SubprocessError) as exc:
+            notes.append({"what": "the tracked tree", "unreadable": True,
+                          "why": f"git ls-files failed: {type(exc).__name__}; tracked files are unmeasured"})
     return out, notes
 
 
@@ -391,6 +538,18 @@ def apply_suppressions(rows: list[dict], rules: list[dict]) -> tuple[list[dict],
     return kept, gone
 
 
+NO_VALUES = "nothing to look for: no env scan, no vault and no installed key on this machine"
+
+
+def _label(path) -> str:
+    """A store's name for the report: `~`-relative under the home, never a value."""
+    p = pathlib.Path(path)
+    try:
+        return "~/" + str(p.relative_to(pathlib.Path.home()))
+    except ValueError:
+        return str(p)
+
+
 def scan_file(path: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, SecretRef],
               start: int, longest: int) -> tuple[dict[SecretRef, int], int, str | None]:
     """Occurrences by secret name, the offset reached, and why it could not be read.
@@ -447,8 +606,8 @@ def main(argv: list[str]) -> int:
     if not values:
         atomic.write_json(OUT, {
             "scanned_at": now, "hits": [], "known": 0, "skipped": skipped,
-            "degraded": [{"why": "nothing to look for: no env scan, no vault and "
-                                 "no installed key on this machine",
+            "degraded": [{"code": "no-values", "source": "leak-scan:no-values",
+                          "why": NO_VALUES, "reason": NO_VALUES,
                           "effect": "a clean report here means UNMEASURED, not clean"}]})
         print("leaks: nothing to look for — no env scan, no vault, no installed key")
         return 0
@@ -556,14 +715,41 @@ def main(argv: list[str]) -> int:
             for ((name, version), where), n in sorted(hits.items(), key=lambda kv: -kv[1])]
     rows, suppressed = apply_suppressions(rows, rules)
     notes = notes + unreadable
+    # EACH ENTRY CARRIES A CODE (ENG-001). One unlabelled `degraded` used to mean
+    # both "nothing to look for" and "the deadline cut this pass", and the
+    # findings read any entry as the first: a pass the deadline cut after it had
+    # already seen a credential reported only that it had nothing to look for.
+    # The codes are `no-values` (above), `deadline-targets`, `deadline-store`
+    # and `source-unreadable`; the prose beside them is for a person.
     degraded = []
     if cut_at is not None:
-        degraded.append({"why": f"the step's time ran out after {cut_at} of {len(files)} targets; the other "
+        degraded.append({"code": "deadline-targets",
+                         "why": f"the step's time ran out after {cut_at} of {len(files)} targets; the other "
                                 f"{len(files) - cut_at} resume from their offsets on the next pass",
                          "effect": "those targets are UNMEASURED by this pass, not clean"})
     for store in stores_cut:
-        degraded.append({"why": f"the step's time ran out before {store} was read; its mark did not move",
+        degraded.append({"code": "deadline-store",
+                         "why": f"the step's time ran out before {_label(store)} was read; its mark did not move",
                          "effect": "that store is UNMEASURED by this pass, not clean"})
+    stores_unread = [_label(s) for s in stores_cut] + [
+        _label(store) for store, r in results.items() if r[1] and str(store) not in stores_cut]
+    # EVERY UNREAD SOURCE IS A HOLE, and a hole holds /health as degraded
+    # (decision, review round 2): the scan finished, but what it could not open
+    # is unmeasured, not clean. `notes` already holds `unreadable` and any
+    # unreadable source `targets()` named.
+    holes = (sum(1 for n in notes if n.get("unreadable")) + sum(1 for k in skipped if k.get("unreadable"))
+             + sum(1 for r in results.values() if r[1]))
+    if holes:
+        degraded.append({"code": "source-unreadable",
+                         "why": f"{holes} source(s) could not be opened; each is named in not_scanned or skipped",
+                         "effect": "those sources are UNMEASURED, not clean; the rest of the pass counts"})
+    for d in degraded:
+        # `source` and `reason` are what /health and `collector.degraded` read;
+        # without them every entry printed "no reason given".
+        d.setdefault("source", "leak-scan:" + d["code"])
+        d.setdefault("reason", d["why"])
+    partial = any(d["code"].startswith("deadline-") for d in degraded)
+    targets_read = len(files) if cut_at is None else cut_at
     atomic.write_json(OUT, {
         "scanned_at": now,
         "known": len(values),
@@ -574,6 +760,7 @@ def main(argv: list[str]) -> int:
         "suppressed": suppressed,
         "suppression_problems": rule_problems,
         "coverage": {"known_values": len(values), "targets": len(files),
+                     "targets_read": targets_read, "stores_unread": stores_unread,
                      "targets_unreadable": len(unreadable), "read_bytes": read_bytes,
                      "window_days": a.days, "companion_store": companion["mode"] if companion["read"] else "unread",
                      "observatory_store": own_store["mode"] if own_store["read"] else "unread"},
@@ -581,13 +768,15 @@ def main(argv: list[str]) -> int:
         "not_scanned": notes,
         "companion_store": companion,
         "observatory_store": own_store,
-        "partial": bool(degraded),
+        "partial": partial,
         "degraded": degraded,
     })
     print(f"leaks: {len(values)} known value(s) against {len(files)} target(s), "
           f"{read_bytes/1e6:.1f} MB read, {len(rows)} sighting(s); companion store "
           f"{companion['mode']} ({why}), {mem_rows} row(s) read; observatory store "
-          f"{own_rows} row(s) read")
+          f"{own_rows} row(s) read"
+          + (f"; partial: read {targets_read}/{len(files)} targets, stores unread: {len(stores_unread)}"
+             if partial else ""))
     for r in rows[:8]:
         # THE NAME AND THE FILE, never the line. A report that quotes the leak is
         # a second copy of it, in a file that is easier to read than the first.

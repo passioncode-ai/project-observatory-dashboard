@@ -182,12 +182,8 @@ class BoardLint(unittest.TestCase):
         self.assertEqual(spec["file"], "docs/backlog.md")
         self.assertEqual(spec["pattern"], self.lint.NEXT_FREE.pattern)
 
-    @unittest.expectedFailure
     def test_the_live_board_is_clean(self):
-        """Expected to fail until node L-1 moves the rows (after #246 merges): the board has no
-        `Next free ID` line yet, OBS-55 carries a raw pipe, and the 9a3778f wording above is still
-        there. L-1 removes this decorator; an unexpected success fails the suite, so it cannot be
-        forgotten."""
+        """The live board must remain reservable and meet the same rules as fixtures."""
         text = (ROOT / "docs/backlog.md").read_text(encoding="utf-8")
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         self.assertEqual(self.lint.check_board(text, changelog), [])

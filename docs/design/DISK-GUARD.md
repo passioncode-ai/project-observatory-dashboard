@@ -26,7 +26,7 @@ the design that replaces those patches with one set of rules. The run record is
 
 | Found | Rule now |
 |---|---|
-| One `lsof` listing at the start, reused for minutes of removals | **Fresh holders per class**, plus a re-check of the target right before removal: still held? still old (an early-stopping walk)? |
+| One `lsof` listing at the start, reused for minutes of removals | **Fresh holders per class** for planning, then a bounded target-scoped holder probe immediately before each removal; missing, partial or timed-out evidence skips the target |
 | The git tier checked only working directories; "clean" worktree removal deleted ignored files (`.env.local`, local databases) | The git tier uses **the same holders** (open files, maps, executables) and a worktree with **ignored files outside the artifact directories is not clean** |
 | Programs run from a cache folder (an `npx` MCP server) hold no file open | Holders include every running process's **executable and the absolute paths in its arguments** |
 | `lsof` printed non-ASCII names escaped without a UTF-8 locale | `lsof` runs under a UTF-8 locale and `\xNN` escapes are decoded |
@@ -55,6 +55,20 @@ the design that replaces those patches with one set of rules. The run record is
 4. Survey refreshes and the large-file walk, only with the time left.
 5. Write the summary row and the report — always, in `finally`.
 
+## Local state preservation
+
+`.wrangler` is a state container, not disposable build output. The artifact-name
+filter in `tools/cleanup.py::artifact_names` excludes it from both cleanup paths,
+including copied configurations that still list it. A manually removed dirty
+worktree has only its tracked patch and untracked files archived; any ignored
+files therefore cause a skip before archiving and again before force removal.
+`tests/test_disk_guard.py::GitTierSafety` reproduces and pins these refusals.
+Git can collapse an ignored artifact parent into one row. Cleanup therefore walks
+that candidate with `cleanup_safety.protected_tree_reason`: repository and local
+state markers, symlinks, special files, read errors and exhausted time/entry budgets
+all retain it. The disk guard shares the entry predicate in its own bounded walk.
+This observation does not lock out an adversarial writer between a check and removal.
+
 ## Not done here, and why
 
 - A person's `full update --apply` started while a pass runs is refused by the snapshot's
@@ -62,3 +76,98 @@ the design that replaces those patches with one set of rules. The run record is
   (OBS-40 family), not the guard's.
 - Case-insensitive APFS paths written in the wrong case in a person's own roots do not match
   `lsof` names; the shipped roots are cased correctly.
+
+## Apply-time preservation (2026-10-13)
+
+`tools/disk_guard.py::git_ancestry` keeps generic temporary cleanup out of Git
+repositories and linked worktrees, including a target whose parent is a checkout.
+The recursive inspection also refuses nested repository markers and local state;
+old timestamps do not turn those paths into disposable temporary data. Structural
+bare repositories (`HEAD`, `objects`, and `refs` or `config`) are preserved even
+without a `.git` marker, including nested trees and configured paths beneath one.
+The shared `cleanup_safety` inspection applies the same rule to artifact pruning.
+
+Every path plan records the target device and inode. Apply requires that identity
+and checks it before revalidation, after inspection and immediately before removal;
+a replacement or missing identity is a skip requiring a new plan. Browser clones
+also undergo subtree inspection when planned. `SnapshotSafety` covers bare
+repositories, their ancestry, target replacement and identity on each path class.
+
+Build plans carry their checkout, idle threshold and planning timestamp.
+`act` repeats the checkout-idle, Git-ignore, tracked-content and subtree-freshness
+checks before removal. Missing context requires a new plan; failed Git reads,
+recent edits, newly written ignored files and new nested repositories preserve
+the target. `tests/test_disk_guard.py::TargetRevalidation` covers these changes.
+
+Every path action uses `fresh_busy` after its filesystem checks. On POSIX it
+queries `lsof` for this target only, then refreshes command-line paths with `ps`,
+sharing at most five seconds (and never beyond the action deadline). Warnings,
+partial output, a missing tool or timeout are unknown, so nothing is removed.
+There is deliberately no unbounded per-action `/proc` fallback: on a POSIX host
+without `lsof`, planning remains available but path actions skip. Windows keeps
+the rename probe. `FreshTargetProbe` pins the bounded and unknown outcomes.
+
+These checks reduce the planning-to-action race; they are not an exclusive
+filesystem lock against an arbitrary writer starting after the final probe.
+The existing cleanup lock serializes Observatory writers only.
+
+## Measurement coverage (OBS-87 subset)
+
+`memory_report` preserves an unavailable swap measurement as `swap_gb: null`,
+with `swap_reason` and the source measurement timestamp. A measured zero remains
+zero. Invalid negative, nonnumeric or nonfinite values are unknown too.
+
+`large_files` records `complete`, `errors` counts (`root_stat`,
+`directory_read`, `entry_stat`) and `budget_exhausted`. Failure reasons are
+fixed categories: OS error bodies are not returned. Successful observations
+survive a later failed path; an empty partial scan never proves no large files.
+Completeness applies to `home-with-policy-exclusions`, not every mounted volume
+or privacy-protected folder. Reused reports retain their measurement time.
+
+The bounded MCP overview keeps `largeFiles` as a list for compatibility and adds
+`largeFilesCoverage`; its guard memory summary retains the nullable swap value
+and reason. The dashboard labels incomplete coverage even when some files were
+found. `test_disk_guard.py::CoverageTruth` covers these producer/consumer seams.
+This subset does not complete worktree discovery or survey scheduling fairness.
+
+## Registration refresh and build-root fairness (OBS-87 subset)
+
+Before splitting the class budgets, `run` reserves up to 20 seconds (at most a
+quarter of the time available after the run reserve) for the registration-only
+collector. It writes `worktree-registration.json`, not `git-hygiene.json`; it
+cannot refresh old cleanliness or branch evidence. `refresh` supplies its child
+with a new deadline just inside its subprocess timeout, rather than inheriting
+an expired step deadline.
+
+`checkouts` accepts only successful, nonstale registration rows measured within
+six hours, excluding bare, locked and prunable worktrees. If a registration
+receipt exists, failed or old rows never fall back to hygiene. Only when the
+receipt is absent may a dated, nonstale hygiene root measured within 24 hours be
+used, with a degradation entry naming its original measurement time. Membership
+alone never authorizes removal: checkout activity, ignored/tracked content,
+subtree protection, identity and holder checks still apply.
+
+`plan_builds` saves `disk-guard-build-cursor.json` before attempting each root.
+The next pass rotates after that root, including after an interruption. A root
+gets five seconds by default (`build_root_quantum_seconds`, capped at 30), bounded
+by the phase budget. Git calls, activity inspection and lazy directory enumeration
+share that deadline; enumeration also has the existing 50,000-entry limit.
+Unknown activity preserves the root; incomplete traversal reports partial
+coverage and only independently inspected candidates can be planned. This is fairness
+between registered roots, not resumable progress within one oversized root; such
+a root can remain incomplete. Individual blocked filesystem system calls cannot
+be preempted by these cooperative deadlines.
+
+`holders_by_phase` retains each phase's mode, known state and measurement time;
+the cache-command phase's `none` does not erase a failed path-holder probe.
+`RegistrationFairness` pins the refresh order, stale fallback, child deadline,
+pre-attempt cursor, per-root quantum and bounded enumeration.
+
+The registration consumer validates nested collections and row types before
+reading fields. Invalid repository/worktree rows are excluded with explicit
+counts in `degraded`, while valid peers remain available. Paths must be absolute
+strings without NUL, timestamps must parse, and freshness and worktree protection
+flags must be booleans. Unknown flags never authorize a root. The dated hygiene
+fallback also rejects malformed nested rows. `RegistrationMalformed` exercises
+null/scalar collections, mixed valid/invalid peers, malformed metadata and the
+whole guard run continuing through later phases after a damaged receipt.

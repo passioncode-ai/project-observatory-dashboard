@@ -81,15 +81,21 @@ class WholeTick(unittest.TestCase):
     def test_the_collectors_ran_in_turn_and_their_starts_are_kept(self):
         report = json.loads((self.home / "store/raw/tick.json").read_text(encoding="utf-8"))
         order = report["collector_order"]
-        self.assertEqual(order[0], "scan-fs", order)          # no record yet: the planned order
-        self.assertNotIn("integrity", order)
+        self.assertEqual(order[:2], ["integrity", "scan-fs"], order)
+        self.assertEqual(order.count("integrity"), 1)
         self.assertEqual(report["not_started"], [])
         record = json.loads((self.home / "store/tick-rotation.json").read_text(encoding="utf-8"))
         self.assertEqual(record["schema"], 2)
         self.assertEqual(set(record["collectors"]), set(order))
         for name, row in record["collectors"].items():
-            self.assertIn(row["outcome"], ("ran", "failed", "stopped"), (name, row))
-            self.assertLessEqual(row["started_at"], row["finished_at"], (name, row))
+            self.assertIn(row["outcome"], ("ran", "failed", "stopped", "disabled"), (name, row))
+            if row["outcome"] == "disabled":
+                self.assertIsNone(row["started_at"], (name, row))
+                self.assertIsNone(row["last_ran_at"], (name, row))
+                self.assertEqual(row["not_started_streak"], 0, (name, row))
+                self.assertIsInstance(row["finished_at"], (int, float), (name, row))
+            else:
+                self.assertLessEqual(row["started_at"], row["finished_at"], (name, row))
 
 
 def load_tick():

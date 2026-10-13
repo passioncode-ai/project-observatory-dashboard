@@ -373,6 +373,48 @@ def test_plan_writes_nothing() -> None:
     check("plan is a dry run and says so", before == after, f"{before} -> {after}")
 
 
+def test_a_lesson_is_kept_a_year_and_for_good_once_corroborated() -> None:
+    """A lesson waits for a SECOND PROJECT, which takes longer than a review queue's 90
+    days; once corroborated it is the estate's working memory and age never erases it."""
+    conn, L, R = fresh()
+    body = {"schema": "lesson/1", "classKey": "a-class",
+            "title": "Keep bounded lesson evidence", "trigger": "A lesson awaits corroboration",
+            "check": "Retain the proposal for its configured horizon",
+            "nouns": ["lesson", "evidence", "retention"],
+            "origin": {"projectId": "p-0123456789ab", "commit": "commit:0123456"}}
+    young = L.append(conn, owner="agent:task-pipeline", kind="lesson", function="experiential",
+                     scope="global", statement="lesson: a-class — kept while it waits",
+                     confidence=0.5, body=body)
+    old = L.append(conn, owner="agent:task-pipeline", kind="lesson", function="experiential",
+                   scope="global", statement="lesson: b-class — waited too long",
+                   confidence=0.5, body={**body, "classKey": "b-class"})
+    seen = L.append(conn, owner="agent:task-pipeline", kind="lesson", function="experiential",
+                    scope="global", statement="lesson: c-class — corroborated", confidence=0.5,
+                    body={**body, "classKey": "c-class"})
+    # Seed a previously corroborated persisted row: this case tests retention,
+    # not live Git evidence admission (covered by test_lesson/test_corroboration).
+    with conn:
+        conn.execute("UPDATE ledger SET state = 'observed' WHERE memory_id = ?",
+                     (seen["memoryId"],))
+    note = L.append(conn, owner="agent:observer", statement="a note of the same age",
+                    confidence=0.5, project_id="project:x")
+    age(conn, young["memoryId"], 100)
+    age(conn, old["memoryId"], 400)
+    age(conn, seen["memoryId"], 1000)
+    age(conn, note["memoryId"], 100)
+    gone = {c["memory_id"] for c in R.ledger_candidates(conn)}
+    check("a 100-day proposed lesson is kept", young["memoryId"] not in gone, str(gone))
+    check("a note of the same age is not", note["memoryId"] in gone, str(gone))
+    check("a proposed lesson past 365 days goes", old["memoryId"] in gone, str(gone))
+    check("an observed lesson is never pruned by age", seen["memoryId"] not in gone, str(gone))
+    check("and the countdown every reader shows agrees",
+          R.days_left("agent:task-pipeline", "proposed", "2026-01-01T00:00:00Z", kind="lesson")
+          == R.days_left("agent:task-pipeline", "proposed", "2026-01-01T00:00:00Z") + 275
+          and R.days_left("agent:task-pipeline", "observed", "2026-01-01T00:00:00Z",
+                          kind="lesson") is None)
+    conn.close()
+
+
 if __name__ == "__main__":
     print("retention — and what it must never touch\n")
     for fn in (test_an_old_proposed_row_is_tombstoned_not_deleted, test_a_young_row_is_untouched,
@@ -382,7 +424,8 @@ if __name__ == "__main__":
                test_the_collector_never_inserts_past_the_horizon,
                test_volatile_rows_are_deleted_and_the_spine_is_not,
                test_an_unverifiable_index_is_quarantined_not_counted,
-               test_the_collector_and_retention_share_one_horizon, test_plan_writes_nothing):
+               test_the_collector_and_retention_share_one_horizon, test_plan_writes_nothing,
+               test_a_lesson_is_kept_a_year_and_for_good_once_corroborated):
         fn()
     print()
     if FAILURES:

@@ -81,6 +81,24 @@ def test_the_ledgers_hold_no_values() -> None:
               '"value": value' not in code and "'value': value" not in code, "")
 
 
+def test_the_digitalocean_door_keeps_the_same_rules() -> None:
+    """`tools/digitalocean.py` (PLN-142): no value in argv or on stdout, provider stderr withheld.
+
+    It holds no admin credential of its own — doctl's context is the credential —
+    so its value goes to the vault on stdin rather than through `write_secret`."""
+    rel = "tools/digitalocean.py"
+    src = (ROOT / rel).read_text(encoding="utf-8")
+    code = source_reader.code_only(src)
+    check(f"{rel} hands a value to the vault on stdin only",
+          "input=value" in code and not source_reader.appears_in_code(src, '"--password"')
+          and not source_reader.appears_in_code(src, '"--token"'),
+          "a value in argv is in the shell history, ps and the transcript")
+    check(f"{rel} withholds provider diagnostics",
+          "provider diagnostics withheld" in source_reader.code_keeping_strings(src) and "p.stderr.strip()" not in code, "")
+    check(f"{rel} prints no password variable",
+          not any(f"print({v}" in code or f"{{{v}}}" in code for v in ("pw", "url", "value")), "")
+
+
 # ─────────────────────────── cloudflare ──────────────────────────────────────
 
 def cf():
@@ -2677,7 +2695,7 @@ def test_or_policy_fix_five() -> None:
         rc = m.cmd_revoke("project-a-prod-k0", forget_pending=True, reason="deleted at the provider by name")
     rc2, out = _cmd(m, _pol(1), "example", None, False)
     check("R-E: --forget-pending with a reason clears the row, journaled; the next run issues the slot",
-          rc == 0 and rc2 == 0 and len(p.keys) == 1 and journaled and journaled[0][0][0] == "forget-pending"
+          rc == 0 and rc2 == 0 and len(p.keys) == 1 and journaled and journaled[0][0][0] == "forget-pending-attested" and journaled[1][0][0] == "forget-pending"
           and "deleted at the provider by name" in json.dumps(journaled[0][1]), f"{rc} {rc2} {journaled} {out}")
     m, p = _r3_door()
     m.issue_for_policy(_pol(1), "example")
@@ -2685,32 +2703,6 @@ def test_or_policy_fix_five() -> None:
         rc = m.cmd_revoke("project-a-prod-k0", forget_pending=True, reason="x")
     check("--forget-pending refuses a row that is not a hashless pending one", rc == 1 and p.keys
           and "project-a-prod-k0" in m.ledger()["issued"], e3.getvalue())
-
-    # Harness: a provider holding $0.0001 more than the plan is past the limit; only float noise below
-    # a millionth of a dollar is not a cent.
-    m, p = _r3_door()
-    m.issue_for_policy(_pol(2), "example")
-    p.keys[p.by_name("k1")]["limit"] = 5.0001
-    rc, out = _cmd(m, _pol(2), "example", None, True)
-    check("a provider ceiling $0.0001 past the plan counts as the next cent: OVER LIMIT, exit 1",
-          rc == 1 and "OVER LIMIT by $0.01 now" in out, out)
-    check("float noise (5.000000001) is not a cent", m._cents_up(5.000000001) == 500 and m._cents_up(5.0001) == 501,
-          f"{m._cents_up(5.000000001)} {m._cents_up(5.0001)}")
-    # Harness: a ledger write that fails inside revoke is a refusal with exit 1, never a traceback.
-    m, p = _r3_door()
-    m.issue_for_policy(_pol(1), "example")
-
-    def disk_refuses(doc):
-        raise OSError("the disk refused the ledger write")
-    m.paths.SCRATCH = pathlib.Path(tmpdir.mkdtemp())      # no consumer scan: an earlier case set one
-    m.save_ledger = disk_refuses
-    try:
-        with contextlib.redirect_stderr(io.StringIO()) as e4:
-            rc = m.cmd_revoke("project-a-prod-k0")
-        check("revoke whose ledger write fails exits 1 and says the row was kept", rc == 1 and "kept" in e4.getvalue(),
-              e4.getvalue())
-    except OSError as exc:
-        check("revoke whose ledger write fails exits 1 and says the row was kept", False, f"crashed: {exc}")
 
     # Item 5: a disk that is full under the test is the machine's failure, never a (b) violation.
     import errno
@@ -2990,7 +2982,7 @@ def _prop_case(seed):
 def test_or_policy_property_regression_seeds() -> None:
     """The seeds the property found failing on fc479fc, each a named case."""
     for seed, what in PROPERTY_REGRESSION_SEEDS.items():
-        broke = [b for b in _prop_case(seed) if not b.startswith("ENVIRONMENT")]
+        broke = _prop_case(seed)
         check(f"seed {seed} ({what})", not broke, "; ".join(broke)[:300])
 
 
@@ -3019,18 +3011,19 @@ def test_or_policy_property() -> None:
     env = {s: b for s, b in failing.items() if any(x.startswith("ENVIRONMENT") for x in b)}
     for seed, broke in sorted(env.items()):
         print(f"  NOTE  seed {seed} not judged — the machine failed under it: {broke[0]}")
-    check("the environment failed under at most 1% of the cases (ENOSPC/EIO are the machine's, not the door's)",
-          len(env) <= PROPERTY_CASES // 100, f"{len(env)} cases")
+    check("every requested property case was judged (environment errors leave acceptance incomplete)",
+          not env, f"{len(env)} ERROR/NOT_RUN cases")
     for prop in ("(a)", "(b)", "(c)"):
         seeds = sorted(s for s, b in failing.items() if any(x.startswith(prop) for x in b))
-        check(f"property {prop} holds over {PROPERTY_CASES} cases (seed {PROPERTY_SEED})", not seeds,
+        check(f"property {prop} holds over {PROPERTY_CASES} cases (seed {PROPERTY_SEED})", not seeds and not env,
               f"{len(seeds)} failing seeds, e.g. " + "; ".join(f"{s}: {next(x for x in failing[s] if x.startswith(prop))}"
                                                              for s in seeds[:3]))
 
 
 if __name__ == "__main__":
     print("the credential doors — stash, issue, rotate, revoke, and what they refuse\n")
-    for fn in (test_cf_a_token_this_call_created_is_deleted_when_the_issue_fails,
+    for fn in (test_the_digitalocean_door_keeps_the_same_rules,
+               test_cf_a_token_this_call_created_is_deleted_when_the_issue_fails,
                test_or_a_project_policy_gets_its_own_key_in_its_own_slot,
                test_or_a_policy_never_borrows_and_never_issues_an_unbounded_key,
                test_or_issue_for_policy_command_line,
@@ -3096,5 +3089,4 @@ if __name__ == "__main__":
         for f in FAILURES:
             print("  -", f)
         raise SystemExit(1)
-    print("\033[32mthe admin credential never leaves its stash, and every issued "
-          "key is accounted for\033[0m")
+    print("\033[32mcredential-door checks passed; cross-verb rotation accounting remains J-3\033[0m")

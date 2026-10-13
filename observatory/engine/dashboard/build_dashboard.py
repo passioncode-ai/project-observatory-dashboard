@@ -203,7 +203,8 @@ def _digest(conn) -> dict:
     what retention erases first — the same arithmetic `tools/review.py digest`
     prints, read here so the health page can say it above the rows instead of
     leaving the operator to count. Retention's horizon is the store's own
-    (`retention.json → ledger.proposed_days`, 90 when unstated); the exempt
+    (`retention.json → ledger.proposed_days`, 90 when unstated; a kind under
+    `ledger.kinds` by its own, through `store/retention.horizon_for`); the exempt
     owners are `review.py`'s to know, so this counts every waiting row and
     says "erases" of the ones whose day has come, not of the exempt.
     """
@@ -216,6 +217,16 @@ def _digest(conn) -> dict:
         horizon = int(cfg["ledger"]["proposed_days"])
     except (OSError, ValueError, KeyError, TypeError):
         pass
+    # BY KIND: a kind with its own horizon (a proposed lesson: 365 days) is not erased
+    # at the general one, and `store/retention.horizon_for` is the one reader of that rule.
+    own: dict[str, int | None] = {}
+    try:
+        sys.path.insert(0, str(ROOT / "store"))
+        import retention
+        own = {k: retention.horizon_for("proposed", k)
+               for k, kc in retention.kind_horizons().items() if "proposed_days" in kc}
+    except Exception:                                                               # noqa: BLE001
+        own = {}
     rows = [dict(r) for r in conn.execute(
         f"SELECT l.kind, l.created_at FROM {CURRENT}")]
     by_kind = Counter((r.get("kind") or "?") for r in rows)
@@ -226,12 +237,15 @@ def _digest(conn) -> dict:
             made = datetime.strptime(r.get("created_at") or "", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
         except ValueError:
             continue
-        gone = made + timedelta(days=horizon)
+        days = own[r.get("kind")] if r.get("kind") in own else horizon
+        if days is None:
+            continue
+        gone = made + timedelta(days=days)
         if gone <= now + timedelta(days=7):
             soon_n += 1
             first = gone if first is None or gone < first else first
     return {"waiting": len(rows), "by_kind": dict(by_kind.most_common()),
-            "horizon_days": horizon, "erases_within_7d": soon_n,
+            "horizon_days": horizon, "kind_horizon_days": own, "erases_within_7d": soon_n,
             "first_erase_on": first.strftime("%Y-%m-%d") if first else None}
 
 

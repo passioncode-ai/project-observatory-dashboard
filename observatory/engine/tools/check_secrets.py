@@ -50,6 +50,7 @@ import argparse, collections, json, math, pathlib, re, sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import safe_git  # noqa: E402  — the engine's one git door
+import credential_shape  # noqa: E402  — the engine's one list of issuer prefixes
 
 #: Shannon entropy DIVIDED BY its own ceiling, `log2(len)`. The first version
 #: used raw bits per character with a floor of 4.3 — and a real AWS key sailed
@@ -93,10 +94,25 @@ PATTERNS = [
     ("slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{16,}")),
     ("google api key", re.compile(r"\bAIza[A-Za-z0-9_\-]{20,}")),
     ("private key block", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY")),
+    # EVERY PREFIX THE REDACTOR KNOWS (review round 2): `credential_shape.PREFIXES`
+    # is the engine's one list of issuer prefixes, so a vendor added there is
+    # refused at commit as well as redacted at write — not two lists that drift.
+    # No word character or `_` may precede the prefix: `load_hf_…`, `test_sk_…`
+    # are names that contain a prefix, not keys that start with one.
+    ("issuer prefix", re.compile(r"(?<![A-Za-z0-9_])(?:" + "|".join(
+        re.escape(p) for p in credential_shape.PREFIXES)
+        # The body rule is the redactor's too: 16+ characters with a digit or a
+        # capital, or 32+ of any kind, so `npm_config_cache_dir` stays a name.
+        + r")(?:(?=[A-Za-z0-9_\-]*[0-9A-Z])[A-Za-z0-9_\-]{16,}|[A-Za-z0-9_\-]{32,})")),
     # An unbranded token assigned to a name that says what it is. The name is
     # what makes it worth measuring; the entropy is what decides.
+    # An environment-style NAME ending in one of these words too (`NOTION_TOKEN`,
+    # `STRIPE_WEBHOOK_KEY`): `\btoken\b` alone missed every such name, because
+    # `_` is a word character (review round 3). Upper case, as a variable is
+    # named, so a code argument like `idempotency_key=` is not one.
     ("named secret", re.compile(
-        r"(?i)\b(?:api[_-]?key|secret|token|passwd|password)\b\s*[:=]\s*"
+        r"(?:(?i:\b(?:api[_-]?key|secret|token|passwd|password))\b"
+        r"|\b[A-Z][A-Z0-9_]*_(?:API_?KEY|SECRET|TOKEN|PASSWD|PASSWORD|KEY)\b)\s*[:=]\s*"
         r"['\"]([A-Za-z0-9_\-+/=]{20,})['\"]")),
 ]
 
@@ -163,6 +179,19 @@ def normalised(s: str) -> float:
     return entropy(s) / math.log2(len(s))
 
 
+#: A body in snake case — lower-case words and numbers joined by `_` — is a name.
+SNAKE = re.compile(r"[a-z]+(?:_[a-z0-9]+)+")
+
+
+def BODY_MIN_FOR(raw: str) -> int:  # noqa: N802 — a per-prefix MIN_BODY
+    """The measurable body length for the issuer prefix `raw` starts with: the
+    vendor's own where `credential_shape.BODY_MIN` names one (`glpat-` 20)."""
+    for pre in sorted(credential_shape.PREFIXES, key=len, reverse=True):
+        if raw.startswith(pre):
+            return min(MIN_BODY, credential_shape.BODY_MIN.get(pre, MIN_BODY))
+    return MIN_BODY
+
+
 def body_of(match: str) -> str:
     """The random part, with the vendor prefix removed.
 
@@ -170,8 +199,8 @@ def body_of(match: str) -> str:
     lowers the entropy of every real key by diluting it with a known string;
     the measurement has to be about the part that is supposed to be random.
     """
-    for pre in ("sk-or-v1-", "sk-proj-", "sk-ant-api03-", "sk-", "github_pat_",
-                "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "lin_api_", "AKIA", "AIza"):
+    for pre in sorted({"sk-or-v1-", "sk-proj-", "sk-ant-api03-", "AKIA", *credential_shape.PREFIXES},
+                      key=len, reverse=True):
         if match.startswith(pre):
             return match[len(pre):]
     return match
@@ -186,9 +215,14 @@ def tracked() -> list[str]:
 
 def scan_text(text: str, where: str) -> list[dict]:
     hits = []
+    seen: set[int] = set()       # one finding per token, whichever pattern saw it first
     for label, rx in PATTERNS:
         for m in rx.finditer(text):
             raw = m.group(1) if m.groups() else m.group(0)
+            at = m.start(1) if m.groups() else m.start()
+            if at in seen:
+                continue
+            seen.add(at)
             if label == "private key block":
                 hits.append({"where": where, "kind": label, "entropy": None,
                              "why": "a private key block is a credential whatever "
@@ -196,6 +230,10 @@ def scan_text(text: str, where: str) -> list[dict]:
                 continue
             body = body_of(raw)
             line = text[:m.start()].count("\n") + 1
+            if label == "issuer prefix" and SNAKE.fullmatch(body):
+                # `npm_package_version_2024_10_12`: a name in snake case, not a key.
+                continue
+            minimum = BODY_MIN_FOR(raw) if label == "issuer prefix" else MIN_BODY
             if label in EXACT_SHAPES:
                 hits.append({"where": f"{where}:{line}", "kind": label,
                              "entropy": round(entropy(body), 2),
@@ -205,7 +243,7 @@ def scan_text(text: str, where: str) -> list[dict]:
                                     "entropy cannot separate a 16-character "
                                     "credential from a placeholder"})
                 continue
-            if len(body) < MIN_BODY:
+            if len(body) < minimum:
                 # Too short to measure and not an exact shape: reported, never
                 # silently dropped, because "below the measurable length" is a
                 # different answer from "measured and harmless".
@@ -213,7 +251,7 @@ def scan_text(text: str, where: str) -> list[dict]:
                              "entropy": round(entropy(body), 2),
                              "normalised": round(normalised(body), 2),
                              "credential": False, "length": len(raw),
-                             "why": f"body is {len(body)} chars, under the {MIN_BODY} "
+                             "why": f"body is {len(body)} chars, under the {minimum} "
                                     f"entropy needs to mean anything"})
                 continue
             n = normalised(body)

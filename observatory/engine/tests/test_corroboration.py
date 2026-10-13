@@ -287,6 +287,285 @@ def test_the_report_is_written_where_findings_looks() -> None:
     check("with corroboration running before findings in the tick", ok, why)
 
 
+# ─────────────────────── lessons: a second project ──────────────────────
+
+def _lesson_store(repos: dict[str, pathlib.Path | None]):
+    """A registry naming these clones and a fresh store, with the modules reloaded on it."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-corr-lesson-"))
+    (d / "registry").mkdir()
+    (d / "scratch").mkdir()
+    (d / "registry/repositories.json").write_text(json.dumps({
+        "schema_version": 2,
+        "repositories": [{"id": f"repository:fixture/{n}", "name_with_owner": f"fixture/{n}",
+                          "host": "github", "local": {"path": str(p)} if p else None}
+                         for n, p in repos.items()]}), encoding="utf-8")
+    os.environ["OBSERVATORY_REGISTRY"] = str(d / "registry")
+    os.environ["OBSERVATORY_DB"] = str(d / "observatory.db")
+    os.environ["OBSERVATORY_SCRATCH"] = str(d / "scratch")
+    import paths
+    importlib.reload(paths)
+    from store import db as sdb
+    importlib.reload(sdb)
+    from store import ledger as L
+    importlib.reload(L)
+    from store import lessons as LS
+    importlib.reload(LS)
+    return d, sdb, L, LS
+
+
+def _other_repo() -> pathlib.Path:
+    """A second repository with a root of its own (two `repo_with_history` made in one
+    second share every byte of their root commit, and so their project key)."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-corr-other-"))
+    git(d, "init", "-q", "-b", "main")
+    git(d, "config", "user.email", "fixture@example.invalid")
+    git(d, "config", "user.name", "Fixture")
+    (d / "b.txt").write_text("another project\n", encoding="utf-8")
+    git(d, "add", "-A")
+    git(d, "commit", "-qm", "another root")
+    return d
+
+
+def _key(repo: pathlib.Path) -> str:
+    return "p-" + sorted(git(repo, "rev-list", "--max-parents=0", "HEAD").split())[0][:12]
+
+
+def _write_lesson(conn, L, LS, project: str, commit: str, class_key: str = "absence-needs-its-own-check"):
+    body = LS.body_of({"classKey": class_key, "title": "An absent input must fail its own check",
+                       "trigger": "a gate reads an optional file",
+                       "check": "docs gate rule absent-file",
+                       "nouns": ["gate", "absence", "file"],
+                       "origin": {"projectId": project, "commit": commit}})
+    out = LS.write(conn, L, owner="agent:task-pipeline", body=body,
+                   provenance=[{"source": "test"}])
+    conn.commit()
+    return out
+
+
+def _state(conn, mid: str) -> str:
+    return conn.execute("SELECT state FROM ledger WHERE memory_id = ? ORDER BY revision DESC"
+                        " LIMIT 1", (mid,)).fetchone()[0]
+
+
+def test_two_projects_with_one_class_promote_each_other() -> None:
+    a, a1, _ = repo_with_history()
+    b = _other_repo()
+    d, sdb, L, LS = _lesson_store({"alpha": a, "beta": b})
+    conn = sdb.connect()
+    la = _write_lesson(conn, L, LS, _key(a), a1)
+    lb = _write_lesson(conn, L, LS, _key(b), git(b, "rev-parse", "HEAD"))
+    conn.close()
+    check("two clones carry two distinct project keys", _key(a) != _key(b), _key(a))
+    p = subprocess.run([PY, "tools/corroborate.py"], cwd=ROOT, env=dict(os.environ),
+                       capture_output=True, text=True, timeout=300)
+    check("the corroborator ran", p.returncode == 0, (p.stdout + p.stderr)[-300:])
+    conn = sdb.connect()
+    check("the first project's lesson is observed", _state(conn, la["memoryId"]) == "observed",
+          _state(conn, la["memoryId"]))
+    check("and the second's", _state(conn, lb["memoryId"]) == "observed",
+          _state(conn, lb["memoryId"]))
+    row = conn.execute("SELECT owner, provenance_json, evidence_json FROM ledger WHERE"
+                       " memory_id = ? ORDER BY revision DESC LIMIT 1",
+                       (la["memoryId"],)).fetchone()
+    check("its author still owns it", row[0] == "agent:task-pipeline", row[0])
+    check("the lesson corroborator is named in provenance",
+          "agent:lesson-corroborator" in row[1], row[1][:200])
+    check("and the check names the witness and both resolutions",
+          lb["memoryId"] in row[2] and "resolves" in row[2], row[2][:300])
+    conn.close()
+    receipt = json.loads((d / "scratch/corroboration.json").read_text(encoding="utf-8"))
+    check("the receipt counts lessons apart from refusals",
+          receipt["counts"]["lessons_promoted"] == 2 and receipt["refused"] == [],
+          json.dumps(receipt["counts"]))
+
+
+def test_one_project_twice_is_one_witness() -> None:
+    a, a1, a2 = repo_with_history()
+    d, sdb, L, LS = _lesson_store({"alpha": a})
+    conn = sdb.connect()
+    first = _write_lesson(conn, L, LS, _key(a), a1)
+    again = _write_lesson(conn, L, LS, _key(a), a2)
+    check("a repeat from the same project revises, never mints",
+          again["memoryId"] == first["memoryId"] and again["outcome"] == "revised", str(again))
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    check("and is not promoted by itself", _state(conn, first["memoryId"]) == "proposed",
+          _state(conn, first["memoryId"]))
+    conn.close()
+    receipt = json.loads((d / "scratch/corroboration.json").read_text(encoding="utf-8"))
+    check("it waits for a second project",
+          [w["memory_id"] for w in receipt["lessons"]["waiting"]] == [first["memoryId"]],
+          json.dumps(receipt["lessons"]))
+
+
+def test_a_commit_git_cannot_find_blocks_the_promotion() -> None:
+    a, a1, _ = repo_with_history()
+    d, sdb, L, LS = _lesson_store({"alpha": a})
+    conn = sdb.connect()
+    ghost = _write_lesson(conn, L, LS, _key(a), "deadbeefcafe")
+    elsewhere = _write_lesson(conn, L, LS, "p-0123456789ab", "abcdef1234567")
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    check("a lesson whose commit is not in its project's clone stays proposed",
+          _state(conn, ghost["memoryId"]) == "proposed", _state(conn, ghost["memoryId"]))
+    check("and cannot witness for another project",
+          _state(conn, elsewhere["memoryId"]) == "proposed",
+          _state(conn, elsewhere["memoryId"]))
+    conn.close()
+    receipt = json.loads((d / "scratch/corroboration.json").read_text(encoding="utf-8"))
+    check("the contradiction is in the receipt, with git's reason",
+          [c["memory_id"] for c in receipt["lessons"]["contradicted"]] == [ghost["memoryId"]]
+          and "not an object" in receipt["lessons"]["contradicted"][0]["why"],
+          json.dumps(receipt["lessons"]))
+
+
+def test_a_project_with_no_clone_here_is_not_a_witness() -> None:
+    """The operator's rule (O2): both commits must RESOLVE. A project with no clone in
+    the registry cannot be asked, so its lesson witnesses nothing and stays proposed, and
+    the receipt says why."""
+    a, a1, _ = repo_with_history()
+    d, sdb, L, LS = _lesson_store({"alpha": a})
+    conn = sdb.connect()
+    here = _write_lesson(conn, L, LS, _key(a), a1)
+    away = _write_lesson(conn, L, LS, "p-0123456789ab", "abcdef1234567")
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    check("a resolvable lesson with only an unknown project beside it stays proposed",
+          _state(conn, here["memoryId"]) == "proposed", _state(conn, here["memoryId"]))
+    check("and so does the lesson nobody here can ask",
+          _state(conn, away["memoryId"]) == "proposed", _state(conn, away["memoryId"]))
+    conn.close()
+    receipt = json.loads((d / "scratch/corroboration.json").read_text(encoding="utf-8"))
+    unres = receipt["lessons"].get("unresolvable", [])
+    check("the receipt lists it as not resolvable here, with the reason",
+          [u["memory_id"] for u in unres] == [away["memoryId"]]
+          and "commit not resolvable here" in unres[0]["why"], json.dumps(receipt["lessons"]))
+    check("and its count", receipt["counts"].get("lessons_unresolvable") == 1,
+          json.dumps(receipt["counts"]))
+
+
+def test_two_invented_keys_promote_nothing() -> None:
+    """One caller writing two made-up `p-` keys must not buy `observed`."""
+    d, sdb, L, LS = _lesson_store({})
+    conn = sdb.connect()
+    one = _write_lesson(conn, L, LS, "p-0123456789ab", "abcdef1234567")
+    two = _write_lesson(conn, L, LS, "p-ba9876543210", "1234567abcdef")
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    check("neither invented project is promoted",
+          {_state(conn, one["memoryId"]), _state(conn, two["memoryId"])} == {"proposed"},
+          f"{_state(conn, one['memoryId'])}, {_state(conn, two['memoryId'])}")
+    conn.close()
+
+
+def test_the_project_threshold_is_the_one_constant() -> None:
+    """LESSON_PROJECTS is read, not decoration: at three, two projects promote nothing."""
+    a, a1, _ = repo_with_history()
+    b = _other_repo()
+    d, sdb, L, LS = _lesson_store({"alpha": a, "beta": b})
+    conn = sdb.connect()
+    la = _write_lesson(conn, L, LS, _key(a), a1)
+    _write_lesson(conn, L, LS, _key(b), git(b, "rev-parse", "HEAD"))
+    conn.close()
+    mod = load_corroborator()
+    mod.LESSON_PROJECTS = 3
+    mod.main(["corroborate.py"])
+    conn = sdb.connect()
+    check("with the threshold at three, two projects leave it proposed",
+          _state(conn, la["memoryId"]) == "proposed", _state(conn, la["memoryId"]))
+    conn.close()
+
+
+def test_the_proposed_count_is_the_rows_the_session_rule_looked_at() -> None:
+    a, a1, _ = repo_with_history()
+    d, sdb, L, LS = _lesson_store({"alpha": a})
+    conn = sdb.connect()
+    _write_lesson(conn, L, LS, _key(a), a1)
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    receipt = json.loads((d / "scratch/corroboration.json").read_text(encoding="utf-8"))
+    check("counts.proposed leaves out the lessons, which have their own counts",
+          receipt["counts"]["proposed"] == 0 and receipt["counts"]["lessons_waiting"] == 1,
+          json.dumps(receipt["counts"]))
+
+
+def test_a_promoted_lesson_whose_commit_changes_is_proposed_again() -> None:
+    """A revision that cites a different commit is a new claim: the corroboration was of
+    the old commit. It drops back to `proposed` and is promoted again only once the new
+    commit resolves."""
+    a, a1, _ = repo_with_history()
+    b = _other_repo()
+    d, sdb, L, LS = _lesson_store({"alpha": a, "beta": b})
+    conn = sdb.connect()
+    _write_lesson(conn, L, LS, _key(a), a1)
+    lb = _write_lesson(conn, L, LS, _key(b), git(b, "rev-parse", "HEAD"))
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    check("both start observed", _state(conn, lb["memoryId"]) == "observed",
+          _state(conn, lb["memoryId"]))
+
+    def bs_record():
+        row = LS.existing(conn, "absence-needs-its-own-check", _key(b))
+        return (row["memory_id"], row["state"]) if row is not None else (None, None)
+
+    moved = _write_lesson(conn, L, LS, _key(b), "deadbeefcafe")
+    check("a new commit after promotion is not kept as observed",
+          bs_record()[1] == "proposed", f"{moved.get('outcome')}: {bs_record()}")
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    check("and a commit git cannot find keeps it proposed", bs_record()[1] == "proposed",
+          str(bs_record()))
+    (b / "c.txt").write_text("more\n", encoding="utf-8")
+    git(b, "add", "-A")
+    git(b, "commit", "-qm", "the fix")
+    _write_lesson(conn, L, LS, _key(b), git(b, "rev-parse", "HEAD"))
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    check("it is promoted again once the new commit resolves", bs_record()[1] == "observed",
+          str(bs_record()))
+    conn.close()
+
+def test_observation_is_revalidated_when_unchanged_commit_disappears() -> None:
+    a, a1, _ = repo_with_history()
+    b = _other_repo()
+    (b / "extra").write_text("evidence")
+    git(b, "add", "extra")
+    git(b, "commit", "-qm", "evidence")
+    evidence = git(b, "rev-parse", "HEAD")
+    d, sdb, L, LS = _lesson_store({"alpha": a, "beta": b})
+    conn = sdb.connect()
+    _write_lesson(conn, L, LS, _key(a), a1)
+    item = _write_lesson(conn, L, LS, _key(b), evidence)
+    conn.close()
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    prior = L.current(conn, item["memoryId"])
+    body = json.loads(prior["body_json"])
+    body["title"] = "A revised description with two resolving projects"
+    revised = LS.write(conn, L, owner=prior["owner"], body=body, provenance=[])
+    check("valid unchanged evidence keeps a wording revision observed", revised["state"] == "observed")
+    conn.close()
+    git(b, "reset", "--hard", "HEAD~1")
+    git(b, "reflog", "expire", "--expire=now", "--all")
+    git(b, "gc", "--prune=now")
+    load_corroborator().main(["corroborate.py"])
+    conn = sdb.connect()
+    try:
+        current = LS.existing(conn, "absence-needs-its-own-check", _key(b))
+        check("a vanished unchanged commit no longer carries observed promotion",
+              current is not None and current["state"] == "proposed", str(dict(current) if current else None))
+        check("the old observation remains archived history", _state(conn, item["memoryId"]) == "archived")
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     print("the second witness — what it refuses, and who hears about it\n")
     for fn in (test_a_row_with_no_recorded_head_is_refused,
@@ -297,7 +576,16 @@ if __name__ == "__main__":
                test_only_session_rows_are_eligible_and_the_rule_is_singular,
                test_the_ledger_still_refuses_a_self_witness,
                test_a_refusal_becomes_a_finding,
-               test_the_report_is_written_where_findings_looks):
+               test_the_report_is_written_where_findings_looks,
+               test_two_projects_with_one_class_promote_each_other,
+               test_one_project_twice_is_one_witness,
+               test_a_commit_git_cannot_find_blocks_the_promotion,
+               test_a_project_with_no_clone_here_is_not_a_witness,
+               test_two_invented_keys_promote_nothing,
+               test_the_project_threshold_is_the_one_constant,
+               test_the_proposed_count_is_the_rows_the_session_rule_looked_at,
+               test_a_promoted_lesson_whose_commit_changes_is_proposed_again,
+               test_observation_is_revalidated_when_unchanged_commit_disappears):
         fn()
     print()
     if FAILURES:

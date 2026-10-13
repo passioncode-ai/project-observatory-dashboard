@@ -183,18 +183,28 @@ def evidence(project_id=None):
         findings=[f for f in findings if about(str(f.get('subject') or ''))]
     findings.sort(key=lambda f:SEVERITY.get(f.get('severity'),3))
     if not project_id:
+        import memory_snapshot
+        memory = memory_snapshot.read_sources()['memory']
+        degraded.extend({'source': 'memory', 'code': row.get('reason', 'unavailable'),
+                         'reason': row.get('reason', 'unavailable')} for row in memory['degraded'])
         try:
             doc=json.loads((paths.SCRATCH/'machine.json').read_text())
-            disk=doc.get('disk') or {};volume=disk.get('volume') or {};memory=doc.get('memory') or {}
+            disk=doc.get('disk') or {};volume=disk.get('volume') or {}
             # Named by what they measure: bare `total_mb`/`free_mb` beside `free_gb`
             # were read by a model as a second disk volume.
             facts={'disk_'+k:volume[k] for k in ('free_gb','total_gb','free_percent') if k in volume}
-            facts.update({('memory_'+k if not k.startswith('swap') else k):memory[k] for k in ('total_mb','free_mb','swap_used_mb') if k in memory})
+            if memory['source'] == 'machine.json':
+                facts.update({('memory_'+k if not k.startswith('swap') else k):memory[k] for k in ('total_mb','free_mb','swap_used_mb')})
+                facts.update(memory_measured_at=memory.get('measured_at'), memory_stale=memory.get('stale'))
             places=sorted((l for l in disk.get('locations') or [] if isinstance(l,dict)),key=lambda l:-(l.get('gb') or 0))[:5]
             if places:facts['largest_locations']=[{'label':str(l.get('label') or l.get('path') or '')[:80],'gb':l.get('gb')} for l in places]
             add('This machine: startup disk volume and memory','store/raw/machine.json',doc.get('measured_at'),facts)
         except FileNotFoundError:degraded.append({'source':'machine','code':'not-measured','reason':'not measured yet: run `project-observatory full machine`'})
         except (ValueError,OSError,AttributeError,TypeError):degraded.append({'source':'machine','code':'unavailable','reason':'unavailable'})
+        if memory['source'] == 'machine-memory.json':
+            facts = {('memory_'+k if not k.startswith('swap') else k): memory[k] for k in ('total_mb','free_mb','swap_used_mb')}
+            facts.update(attempted_at=memory.get('attempted_at'), stale=memory.get('stale'), degraded=memory['degraded'])
+            add('This machine: memory', 'store/raw/machine-memory.json', memory.get('measured_at'), facts)
     shown=0
     for f in findings[:MAX_FINDINGS]:
         fields={k:str(f[k])[:400] for k in ('id','severity','type','subject','title','detail','action','first_seen') if k in f}
