@@ -50,3 +50,21 @@ with no skips. Fourteen version/manifest/document-copy cases, three strict plugi
 validators and source inventory also pass. Receipts are in `checks.json`. These are synthetic
 source checks, with live provider, native release and installed acceptance excluded.
 Historical failing probes remain in each source packet rather than being overwritten.
+
+## Hosted CI corrections retained
+
+The original `8aff34f` source failed the
+[hosted check run](https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/38349250996).
+Raw no-follow flag access in log rotation violated the portable privacy boundary,
+and an older claimed-key test supplied an incomplete consumer scan. Corrections
+`f06c6a2` and `9892212` are included and independently accepted in their narrow scopes.
+The first uses the established no-follow flag helper; the second updates only the
+fixture and adds missing/stale evidence refusals before the valid consumer controls.
+
+On this combined source, 12 log-policy and three privacy-boundary cases pass; the
+claimed-key suite passes 51 assertions. These small checks use isolated resolved
+HOME/TMPDIR without copying the engine. The first direct claimed-key attempt correctly
+refused the platform's symbolic temporary-directory ancestor; the unchanged suite
+passed after that harness path was resolved. `checks.json` retains that distinction.
+The prior hosted failure is not relabelled green; the superseding source still needs
+its own protected hosted checks.

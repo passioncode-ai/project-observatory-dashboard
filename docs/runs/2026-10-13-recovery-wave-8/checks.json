@@ -243,7 +243,31 @@
     "source": "8aff34f801a4154882d536bba0472b6549b041e7",
     "run": "https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/38349250996",
     "status": "FAILURE",
-    "corrections": "Pending integration; preserved historical failure"
+    "corrections": [
+      "f06c6a26435b68b04c436877866e5abc938a5e8a",
+      "98922124f56a7f6fcbeafb157f1617690cc136af"
+    ]
   },
-  "scope": "Synthetic only; no live provider, key reads, backup migration or installed acceptance"
+  "scope": "Synthetic only; no live provider, key reads, backup migration or installed acceptance",
+  "ci_correction_checks": {
+    "source_parent": "4249e6a1c2ed1838d9e807656c10a0bf343b086a",
+    "log_policy_cases": 12,
+    "privacy_boundary_cases": 3,
+    "claimed_key_assertions": 51,
+    "exit_codes": [
+      0,
+      0,
+      0
+    ],
+    "isolation": "Resolved temporary HOME/TMPDIR and OBSERVATORY_HOME, no engine archive/copy",
+    "first_direct_attempt": {
+      "status": "FAIL",
+      "reason": "Inherited macOS /tmp symbolic ancestor refused by atomic output; no source change before resolved-TMPDIR retry"
+    },
+    "accepted_source_blob_match": {
+      "log_policy.py": "67c9c7049eae74a10ef8398d2a00f5487aefba72",
+      "tests/test_openrouter_keys.py": "2081e860fcd584ef45c019d296d53a69927973c5"
+    },
+    "inventory_exit_code": 0
+  }
 }
