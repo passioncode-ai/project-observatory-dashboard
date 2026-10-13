@@ -36,6 +36,17 @@ corrected candidates and compared the reviewed source blobs with the integrated
 head. It found no remaining blocking defect in this bounded wave. Whole-engine,
 native, live-provider and installed acceptance are separate checks.
 
+## Hosted-check correction
+
+Full hosted compatibility checks at `328b5d1` found two additional failures outside
+those selected suites: direct OS file opening in the archive reader, and discovery
+of the measured-empty translation ID passed through a variable. `e80c73d` routes
+the reader through `osprivacy.open` (including Windows binary mode) and registers
+the existing dynamic message ID. Independent review accepted this bounded correction;
+osprivacy (17), i18n (44), and Git hardening (56) passed independently. The root
+suite still passes 172 cases. Native Windows was not run locally. Required hosted
+checks on the corrected candidate remain the integration gate.
+
 ## Remaining work and next task
 
 Next: integrate the reviewed candidate under the repository's required checks,

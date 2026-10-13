@@ -94,5 +94,20 @@
     "corrected_findings": 12,
     "whole_system_complete": false
   },
-  "command": "python tests/run_portable.py --jobs 1 --suite disk_guard --suite git_hardening --suite machine --suite cli_compatibility --suite mcp_wire"
+  "command": "python tests/run_portable.py --jobs 1 --suite disk_guard --suite git_hardening --suite machine --suite cli_compatibility --suite mcp_wire",
+  "ci_correction": {
+    "source_head": "e80c73d2b72f8643d5447863200305aa423c701b",
+    "trigger": "Hosted full compatibility checks exposed osprivacy boundary and dynamic translation-ID discovery failures at 328b5d1.",
+    "suites": {
+      "osprivacy": 17,
+      "i18n": 44,
+      "git_hardening": 56
+    },
+    "local_status": "PASS",
+    "independent_status": "PASS_SCOPED",
+    "root_cases": 172,
+    "root_exit_code": 0,
+    "native_windows": "NOT_RUN",
+    "hosted_rerun": "PENDING"
+  }
 }
