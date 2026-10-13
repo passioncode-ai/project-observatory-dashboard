@@ -24,3 +24,10 @@ Contract: brand-contract v1
 | openrouter.lowering_drift | Policy lowering is no longer non-increasing; refresh before changing the limit | observatory/engine/tools/openrouter.py | OSS-54 | proposed | copy |
 | openrouter.fresh_ceiling_unknown | Policy fresh ceiling is unknown; no limit was changed | observatory/engine/tools/openrouter.py | OSS-54 | proposed | copy |
 | openrouter.observed_total | in all (observed ceilings rounded up; other amounts planned) | observatory/engine/tools/openrouter.py | OSS-54 | proposed | copy |
+
+| openrouter.repair_flags | refused: use --decrease-only with --set, or --repair-status with optional --refresh | observatory/engine/tools/openrouter.py | Explicit decrease-only ceiling repair | proposed | copy |
+| openrouter.repair_refused | Ceiling repair refused; inspect its status and reconcile identity or unresolved evidence before another mutation | observatory/engine/tools/openrouter.py | Explicit decrease-only ceiling repair | proposed | copy |
+| openrouter.repair_recorded | {name}: recorded {status}; observed ceiling {actual}; observed at {time} | observatory/engine/tools/openrouter.py | Explicit decrease-only ceiling repair | proposed | copy |
+| openrouter.repair_help | require a fresh known ceiling and record one non-increasing repair attempt | observatory/engine/tools/openrouter.py | Explicit decrease-only ceiling repair | proposed | copy |
+| openrouter.repair_status_help | show the recorded ceiling repair without provider access | observatory/engine/tools/openrouter.py | Explicit decrease-only ceiling repair | proposed | copy |
+| openrouter.repair_refresh_help | with --repair-status: record a fresh observation attempt; never retry the mutation | observatory/engine/tools/openrouter.py | Explicit decrease-only ceiling repair | proposed | copy |

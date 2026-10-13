@@ -119,3 +119,30 @@ out-of-window dates are refused before a provider read. A rotation or identity c
 during the read refuses a potentially misattributed result. Provider bodies, hashes,
 credential values and arbitrary extra fields are withheld. Status: draft; synthetic
 coverage: `test_issued_spend.py`; product outcome unobserved.
+
+### Explicit decrease-only ceiling repair
+
+An operator or agent who has chosen a smaller ceiling runs
+`openrouter.py limit NAME --set USD --decrease-only` for an exact issued name.
+The door preserves the reset period and requires a fresh, finite, identity-bound
+ceiling. A smaller current ceiling refuses; equality is a read-only no-op.
+Otherwise it persists intent and a required journal record before one PATCH.
+A complete non-increasing response records the actual amount: at or below the
+requested target exits zero; above target remains `observed-unmet` and exits one.
+An unknown effect keeps the previous amount historical and blocks alias writers,
+including policy-provenance changes, until explicit observation reconciles it.
+
+`limit NAME --repair-status` reads recorded evidence without provider access.
+Adding `--refresh` persists a pending observation before GET, never repeats PATCH,
+and preserves a previous observation as historical. Failed refresh makes current
+actual unknown. A subsequent successful read does not prove the outcome of a
+previous uncertain PATCH. Context drift or malformed evidence refuses before any
+publication or provider effect. A resolved, matching repair may be superseded by
+an authorized context change only with its historical reference and new context
+in the same publication. The general manual limit command keeps its separate
+semantics; external writers are outside the local lock.
+
+Status: source candidate, independent implementation review pending. Synthetic
+coverage: `observatory/engine/tests/test_decrease_repair.py`; implementation
+receipt: `docs/runs/2026-10-13-decrease-only-repair/implementation-focused.json`.
+No installed/provider acceptance; original adversarial convergence remains failed.

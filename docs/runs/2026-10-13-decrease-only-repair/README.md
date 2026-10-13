@@ -1,7 +1,8 @@
-# Proposed J3 bounded decrease-only repair contract
+# J3 bounded decrease-only repair contract
 
-Status: scoped design review passed; implementation and acceptance remain pending. No production implementation, provider operation or
-new automatic remedy. Source baseline `153a1605fbbaf2caf1674a3f70cf2da3557934f3`;
+Status: scoped design review passed. The [implementation candidate](implementation.md)
+now has synthetic checks; independent implementation review remains pending.
+No provider operation or new automatic remedy. Source baseline `153a1605fbbaf2caf1674a3f70cf2da3557934f3`;
 production SHA256 `602d50bd7f594c74585c10eff3388bd68a16d90a0d5e26cb85c4c50e826e31ba`.
 Prerequisite evidence: [actual CLI semantics](manual-semantics.json)
 and [held-share guidance gap](guidance-boundary.md).
