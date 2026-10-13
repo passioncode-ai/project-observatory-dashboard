@@ -20,6 +20,9 @@ request is how you agree to it; there is no checkbox to tick.
 
 ## Checks
 
+Full hosted checks follow the [nightly and explicit candidate cadence](docs/CI-CADENCE.md).
+Focused local checks remain part of each change; absent hosted checks never count as passing.
+
 The offline portable runner retains one JSON row per selected suite if setup,
 execution or evidence capture raises. An `ERROR` row names the exception type,
 records unknown completion and fails the run while completed peers keep their

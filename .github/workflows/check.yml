@@ -1,5 +1,13 @@
 name: observatory-release-check
-on: [push, pull_request, workflow_dispatch]
+# Full validation is a daily snapshot; branch acceptance is an explicit batch.
+on:
+  schedule:
+    - cron: '0 23 * * *'
+      timezone: Poland
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -14,6 +22,7 @@ jobs:
             python: '3.14'
           - os: macos-latest
             python: '3.14'
+    timeout-minutes: 60
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -70,7 +79,8 @@ jobs:
           DISABLE_AUTOUPDATER: '1'
         run: |
           npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-          export CLAUDE_CONFIG_DIR="$(mktemp -d)"
+          CLAUDE_CONFIG_DIR="$(mktemp -d)"
+          export CLAUDE_CONFIG_DIR
           claude --version
           for dir in . observatory/engine/skill observatory/engine/skill/plugins/observatory-log; do
             claude plugin validate --strict "$dir"
@@ -137,6 +147,7 @@ jobs:
           retention-days: 7
 
   windows:
+    timeout-minutes: 30
     # docs/design/WINDOWS-LINUX.md, W0: what the engine does on Windows, measured on every
     # change. Informative until W3 — each step runs whatever the one before it did, and the
     # summary lists every outcome — so it is not one of the required checks yet.

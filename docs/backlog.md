@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-91`
+**Next free ID:** `OBS-92`
 
 This is the canonical status source for OBS engine execution. Product packages and operator gates
 live on the organization board; a source reference to a package does not close its operations.
@@ -99,3 +99,4 @@ from [backlog-sources.json](backlog-sources.json). Dated handoffs remain histori
 | OBS-88 | Bound harness configuration discovery and make malformed, unreadable, deep or truncated source coverage explicit; associate a project by measured registry folder | open — implementation and isolated fixture tests complete; independent source review accepted, hosted and installed acceptance remain | [wave-three record](runs/2026-10-13-recovery-wave-3/README.md); `tests/test_harness.py` inside the engine |
 | OBS-89 | Preserve actual input age and collector outcomes through tick, merge and findings; disabled, missing or malformed completion cannot count as a successful scan | open — implementation and adversarial source review complete; integration and installed acceptance remain | [wave-three record](runs/2026-10-13-recovery-wave-3/README.md); engine `tests/test_tick_findings.py`, `tests/test_merge_input_age.py`, `tests/test_tick_py.py` |
 | OBS-90 | Report repeated disk-guard failures with bounded history reads and stable deduplicated coverage findings; retain low-disk evidence when a guard receipt is malformed | open — implementation and adversarial source review complete; integration and installed acceptance remain | [wave-three record](runs/2026-10-13-recovery-wave-3/README.md); engine `tests/test_machine_findings.py` |
+| OBS-91 | Run complete hosted checks nightly and for explicit accumulated candidates, preserving exact-commit release and protected-merge checks | open — cadence correction prepared; independent review, explicit branch acceptance and first nightly observation remain | [run record](runs/2026-10-13-nightly-check-cadence/README.md) |

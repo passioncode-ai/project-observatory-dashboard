@@ -17,6 +17,11 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-13 — Nightly full-check cadence](runs/2026-10-13-nightly-check-cadence/README.md):
+OBS-91 preserves required checks and exact-commit release evidence while removing
+full-suite push/PR duplication. Next: independent review and one explicit branch
+acceptance batch, then protected integration and first nightly observation.
+
 [2026-10-13 — Findings and measurement recovery](runs/2026-10-13-recovery-wave-3/README.md):
 OBS-88–90 preserve configuration coverage, measurement age and repeated guard errors;
 OBS-87 adds independent memory observations. Next: combined source acceptance,
