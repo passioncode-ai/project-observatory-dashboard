@@ -3381,8 +3381,8 @@
     {
       "path": "tests/test_provider_secret_boundaries.py",
       "source_sha256": "c9d258e5efec069e47379357e0c849b77e7a3bb3b22afc9ea181c574cf7ffdd9",
-      "export_sha256": "c9d258e5efec069e47379357e0c849b77e7a3bb3b22afc9ea181c574cf7ffdd9",
-      "bytes": 11670,
+      "export_sha256": "17969f40dfd7494b89debd885bcdb94fbd4f30700e0e015552418642c228c04f",
+      "bytes": 12350,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
