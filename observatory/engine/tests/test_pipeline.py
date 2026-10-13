@@ -71,6 +71,10 @@ ACROSS_TICKS: dict[tuple[str, str], str] = {
         "registry the emit has not yet rewritten.",
     ("scan-sessions", "registry/repositories.json"):
         "the same fixpoint as the project list below.",
+    ("scan-harness", "registry/projects.json"):
+        "exact-folder attribution reads the previously emitted project registry; "
+        "the current tick has not emitted its replacement yet. A new project gains "
+        "its registry identity on the next scan, while this scan keeps its folder label.",
     ("scan-sessions", "registry/projects.json"):
         "attribution needs the project list, and the project list needs sessions for its "
         "activity date — a fixpoint over ticks. A project's first sessions attach on the "
@@ -105,7 +109,7 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
     "scan-vault": {"writes": ["store/raw/vault.json"], "reads": ["registry/domains.json"]},
     "scan-cloudflare": {"writes": ["store/raw/cloudflare_zones.json"], "reads": []},
     "scan-mcp": {"writes": ["store/raw/mcp.json"], "reads": []},
-    "scan-harness": {"writes": ["store/raw/harness.json"], "reads": []},
+    "scan-harness": {"writes": ["store/raw/harness.json"], "reads": ["registry/projects.json"]},
     "scan-spend": {"writes": ["store/raw/spend.json"], "reads": []},
     # READS the registry it will later help write, and that is a fixpoint over
     # ticks rather than a cycle: attribution needs the project list, so a
@@ -544,11 +548,12 @@ def test_the_check_would_catch_an_inversion() -> None:
 
 def rotated_collectors() -> list[tuple[str, str]]:
     """(name in the tick, name in `observatory.py`) for every collector the tick plans for its
-    rotation — the `step(...)` calls between `Rotation(...)` and `rotation.run_in_turn()`."""
+    rotation, including its fixed-priority integrity phase and the ordinary phase."""
     import tick_reader
     lines = (ROOT / "tools/tick.py").read_text(encoding="utf-8").splitlines()
     start = next(i for i, l in enumerate(lines, 1) if "rotation = Rotation(" in l)
-    end = next(i for i, l in enumerate(lines, 1) if l.strip() == "rotation.run_in_turn()")
+    # Integrity has its own first pass; every planned phase must remain in the graph.
+    end = max(i for i, l in enumerate(lines, 1) if l.strip() == "rotation.run_in_turn()")
     by_sig = {step_signature(argv): name for name, argv in obs.STEPS.items() if step_signature(argv)}
     out = []
     for line, fn, name, words in tick_reader.tick_calls(ROOT):
@@ -596,6 +601,22 @@ def test_the_rotation_keeps_every_reader_after_its_writer() -> None:
     planted = {k: v for k, v in tick.READS_FROM.items() if k != "remote-env"}
     check("and the check catches a dropped read (remote-env from heroku)",
           any("remote-env" in p for p in rotation_reads_problems(planted)), "")
+
+
+def test_the_rotation_reads_have_no_cycle() -> None:
+    """ENG-007: `rotation_order` moves each writer before its readers; a cycle in READS_FROM has no
+    such order. The tick now gives up on one and runs the planned order, but a cycle is a mistake in
+    the declaration, refused here at review rather than met by a tick."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tick_for_cycles", ROOT / "tools/tick.py")
+    tick = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tick)
+    names = sorted(set(tick.READS_FROM) | {w for ws in tick.READS_FROM.values() for w in ws})
+    check("READS_FROM is acyclic", tick.reads_cycle(tick.READS_FROM, names) == [],
+          str(tick.reads_cycle(tick.READS_FROM, names)))
+    planted = dict(tick.READS_FROM, env=("leaks",))
+    check("and the check catches a planted cycle (env reading leaks)",
+          set(tick.reads_cycle(planted, names)) >= {"env", "leaks"}, str(tick.reads_cycle(planted, names)))
 
 
 def files_a_script_opens(script: pathlib.Path) -> set[str]:
@@ -775,6 +796,7 @@ if __name__ == "__main__":
                test_every_traced_exemption_is_still_needed,
                test_the_check_would_catch_an_inversion,
                test_the_rotation_keeps_every_reader_after_its_writer,
+               test_the_rotation_reads_have_no_cycle,
                test_every_step_declares_the_files_its_script_opens,
                test_the_path_a_step_is_HANDED_is_declared_too,
                test_every_test_a_suite_defines_is_dispatched):

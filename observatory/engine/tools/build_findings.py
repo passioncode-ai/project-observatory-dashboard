@@ -101,6 +101,27 @@ REVIEW_HORIZON_DAYS = int(json.loads(
 )['ledger']['proposed_days'])
 REVIEW_BACKLOG = 20
 
+
+def _kind_horizons(state: str = "proposed") -> dict[str, int | None]:
+    """Kinds that age by their own horizon in this state (`retention.json` → `ledger.kinds`),
+    asked of `store/retention.horizon_for`, the one reader of that rule: a proposed lesson
+    is kept 365 days, so the general horizon must not announce it for erasure at 90.
+    Empty when retention cannot be read — then every row ages by the general horizon,
+    which is what this builder did before the rule existed."""
+    try:
+        sys.path.insert(0, str(ROOT / "store"))
+        import retention
+        return {k: retention.horizon_for(state, k) for k, kc in retention.kind_horizons().items()
+                if f"{state}_days" in kc}
+    except Exception:                                                               # noqa: BLE001
+        return {}
+
+
+def _kind_horizon_note(horizons: dict[str, int | None]) -> str:
+    """`, a lesson at 365 days` — what the general sentence leaves out."""
+    return "".join(f", a {k} at {d} days" if d is not None else f", a {k} never by age"
+                   for k, d in sorted(horizons.items()))
+
 #: How many (source, reason) pairs a `collector.degraded` row prints. Six RDAP
 #: 404s fit; a collector failing on ninety owners must not print ninety lines,
 #: and the remainder is COUNTED rather than dropped.
@@ -1146,7 +1167,7 @@ def _erasure_horizon(row: dict) -> str:
     try:
         sys.path.insert(0, str(ROOT / "store"))
         import retention
-        left = retention.days_left(owner, state, at)
+        left = retention.days_left(owner, state, at, kind=row.get("kind"))
     except Exception:                                                               
         return ""
     if left is None:
@@ -2645,7 +2666,7 @@ def collect() -> list[dict]:
         for _t in _h.get("tool_plaintext") or []:
             out.append({
                 "type": "harness.plaintext_secret", "subject": f"harness:plaintext:{_t.get('file')}",
-                "severity": "warning",
+                "severity": "critical" if _t.get("tracked") is True else "warning",
                 **titled("{file} keeps {n} credentials in plaintext", file=_t.get("file"), n=int(_t.get("count") or 0)),
                 "detail": ("Credential-shaped values under " + listed(_t.get("names") or [], 8) + ". Any process of "
                            "this account reads that file, and a value there drifts from the vault on the first "
@@ -2654,6 +2675,21 @@ def collect() -> list[dict]:
                           "have the tool read it through `use_secret.py run` or its own secret helper, then delete "
                           "the line; an OpenRouter key is reissued through the door instead",
                 "evidence": ["store/raw/harness.json#tool_plaintext"]})
+        for _d in _h.get("degraded") or []:
+            if str(_d.get("source", "")).startswith("tool-config:"):
+                _remedy = {
+                    "tracking-unknown": "repair Git access and check whether the named config is tracked",
+                    "discovery-limit": "narrow the configured projects root or review omitted project configurations separately",
+                    "size-limit": "review the named config locally and reduce it below the scanner's text size limit",
+                    "parse-error": "repair the named config's JSON or TOML syntax and object structure",
+                    "unreadable": "restore read access to a regular config file at the named source",
+                }.get(_d.get("code"), "inspect the named configuration source")
+                out.append({"type": "harness.scan_degraded", "subject": "harness:" + _d["source"],
+                            "severity": "warning",
+                            **titled("the tool configuration scan is incomplete for {source}", source=_d["source"]),
+                            "detail": _d.get("reason") or "Configuration coverage is unmeasured.",
+                            "action": _remedy + ", then run `project-observatory full harness`; recovered names do not prove complete coverage",
+                            "evidence": ["store/raw/harness.json#degraded"]})
         for _p in _h.get("projects") or []:
             if _p.get("pushes_over"):
                 out.append({
@@ -4254,29 +4290,18 @@ def collect() -> list[dict]:
     # `store/retention.py apply`, whose non-zero exit means an erasure did not
     # complete — the contract's "completion blocks until every configured
     # backend attests" was true of the function and false of the system.
-    tickf = paths.SCRATCH / "tick.json"
-    if tickf.is_file():
+    import tick_findings
+    def _tick_receipt(path):
         try:
-            tdoc = json.loads(tickf.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"  tick.json unreadable: {exc}", file=sys.stderr)
-            tdoc = {}
-        for row in tdoc.get("failed_steps", []):
-            name = row.get("step", "unknown")
-            grave = SEVERE_STEPS.get(name)
-            out.append({
-                "type": "tick.step_failed", "subject": f"step:{name}",
-                "severity": "critical" if grave else "warning",
-                **titled("the scheduled tick's `{step}` step exited {code}", step=name, code=row.get("exit")),
-                "detail": (grave or
-                           "The tick does not abort on a degradation, by design — "
-                           "launchd would retry a state that needs reporting rather "
-                           "than repeating. So a failed step is recorded here instead "
-                           "of stopping the cycle.")
-                          + f" Last tick finished {tdoc.get('finished_at', 'unknown')}.",
-                "action": f"read the reason in store/logs/tick.log, then run "
-                          f"`./observatory.py` for that step by hand to see it fail",
-                "evidence": ["store:raw/tick.json", "store:logs/tick.log"]})
+            return json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            return {"schema": "unreadable"}
+    out.extend(tick_findings.findings(
+        _tick_receipt(paths.SCRATCH / "tick.json"),
+        _tick_receipt(paths.STATE / "tick-rotation.json"),
+        config=_tick_receipt(paths.config_file("tick.json")), severe=SEVERE_STEPS))
 
     # WORK GIT CAN NO LONGER PLACE. `tools/corroborate.py` refuses to promote
     # a `session` row whose recorded sha is gone or has fallen off its
@@ -4385,13 +4410,29 @@ def collect() -> list[dict]:
             # "9 will be erased unreviewed in eleven days" is a decision with a date
             # on it — and erasure by timeout is what `tools/corroborate.py` calls
             # "not review" in its own docstring.
+            # BY KIND: a kind with its own horizon (a lesson: 365 days) leaves the general
+            # count and is counted against its own cutoff, or not at all when it is never
+            # erased by age (`store/retention.horizon_for`).
+            own = _kind_horizons("proposed")
+            kind_sql = (f" AND l.kind NOT IN ({','.join('?' * len(own))})" if own else "")
+            per_kind = [c.execute(
+                "SELECT COUNT(*), MIN(l.created_at) FROM ledger l"
+                " JOIN (SELECT memory_id, MAX(revision) rev FROM ledger GROUP BY memory_id) m"
+                "   ON l.memory_id = m.memory_id AND l.revision = m.rev"
+                " LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
+                " WHERE t.memory_id IS NULL AND l.state = 'proposed' AND l.kind = ?"
+                "   AND l.created_at < ?"
+                f"   AND l.owner NOT IN ({','.join('?' * len(EXEMPT_OWNERS))})",
+                (k, (datetime.now(timezone.utc) - timedelta(days=max(d - 14, 1))
+                     ).strftime("%Y-%m-%dT%H:%M:%SZ"), *EXEMPT_OWNERS)).fetchone()
+                for k, d in sorted(own.items()) if d is not None]
             soon = c.execute(
                 "SELECT COUNT(*), MIN(l.created_at) FROM ledger l"
                 " JOIN (SELECT memory_id, MAX(revision) rev FROM ledger GROUP BY memory_id) m"
                 "   ON l.memory_id = m.memory_id AND l.revision = m.rev"
                 " LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
                 " WHERE t.memory_id IS NULL AND l.state = 'proposed'"
-                "   AND l.created_at < ?"
+                "   AND l.created_at < ?" + kind_sql +
                 # STRUCTURAL, as in `store/retention.py`'s own query: the
                 # exempt owners are inlined rather than passed by a caller who
                 # might forget. This query did forget, so a row retention will
@@ -4405,7 +4446,9 @@ def collect() -> list[dict]:
                 # by a planted row rather than in production.
                 ((datetime.now(timezone.utc)
                 - timedelta(days=max(REVIEW_HORIZON_DAYS - 14, 1))
-                ).strftime("%Y-%m-%dT%H:%M:%SZ"), *EXEMPT_OWNERS)).fetchone()
+                ).strftime("%Y-%m-%dT%H:%M:%SZ"), *own, *EXEMPT_OWNERS)).fetchone()
+            soon = (soon[0] + sum(r[0] for r in per_kind),
+                    min([x for x in (soon[1], *(r[1] for r in per_kind)) if x], default=None))
             c.close()
         except sqlite3.Error as exc:
             # Named, not vanished. A handler here hid a closed-connection
@@ -4438,7 +4481,8 @@ def collect() -> list[dict]:
                              "print time — a difference of a few rows between "
                              "them is minutes, not disagreement. Retention "
                              "erases them at "
-                             f"{REVIEW_HORIZON_DAYS} days whether or not anyone "
+                             f"{REVIEW_HORIZON_DAYS} days"
+                             f"{_kind_horizon_note(_kind_horizons('proposed'))} whether or not anyone "
                              f"looked — except rows owned by "
                              f"{', '.join(EXEMPT_OWNERS)}, which it never erases "
                              f"because nothing could re-derive them."),
@@ -4463,7 +4507,8 @@ def collect() -> list[dict]:
                 "severity": "warning",
                 **titled("{n} conclusions will be erased unreviewed within 14 days", n=soon[0]),
                 "detail": "Retention tombstones a `proposed` row at "
-                          f"{REVIEW_HORIZON_DAYS} days. These were written by an "
+                          f"{REVIEW_HORIZON_DAYS} days"
+                          f"{_kind_horizon_note(_kind_horizons('proposed'))}. These were written by an "
                           "automated reader that cannot promote its own work, and "
                           "nobody has looked. Erasure by timeout is not a decision.",
                 "action": "project-observatory full digest, then review.py promote|reject "

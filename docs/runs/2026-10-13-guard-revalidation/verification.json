@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "coverage": "synthetic-offline",
+  "command": "python observatory/engine/tests/run_portable.py --suite disk_guard --jobs 1 --timeout 180",
+  "status": "PASS",
+  "exit_code": 0,
+  "suite_count": 1,
+  "python": "3.14.7",
+  "suites": [
+    {
+      "file": "tests/test_disk_guard.py",
+      "exit_code": 0,
+      "seconds": 38.24,
+      "unittest_cases": 97,
+      "unittest_skipped": 2
+    }
+  ],
+  "not_run": [
+    "full-engine-suite",
+    "live-cleanup",
+    "installed-runtime-acceptance",
+    "Python 3.11 runtime",
+    "Windows runtime",
+    "Linux runtime",
+    "private-denylist-history-review"
+  ],
+  "focused_checks": {
+    "source_inventory": {
+      "exit_code": 0,
+      "differences": []
+    },
+    "engine_doc_copies": {
+      "exit_code": 0,
+      "stale": []
+    },
+    "public_tree_patterns": {
+      "exit_code": 0,
+      "files_checked": 886,
+      "findings": [],
+      "history_blobs_checked": 0,
+      "private_denylist_entries": 0
+    },
+    "git_diff_check": {
+      "exit_code": 0
+    }
+  }
+}

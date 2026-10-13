@@ -1,0 +1,52 @@
+[
+  {
+    "check": "credential_policy",
+    "exit_code": 0,
+    "seconds": 66.631,
+    "raw_log": "retained in the private maintainer recovery report"
+  },
+  {
+    "check": "provider_deadline",
+    "exit_code": 0,
+    "seconds": 0.11,
+    "raw_log": "retained in the private maintainer recovery report"
+  },
+  {
+    "check": "evidence_regressions",
+    "exit_code": 0,
+    "raw_log": "retained in private maintainer recovery report"
+  },
+  {
+    "check": "adversary_j1",
+    "exit_code": 0,
+    "raw_log": "retained in private maintainer recovery report",
+    "status": "PASS",
+    "attempted": 128,
+    "completed": 128
+  },
+  {
+    "check": "root_wrapper",
+    "exit_code": 0,
+    "raw_log": "retained in private maintainer recovery report"
+  },
+  {
+    "check": "scoped_public_privacy",
+    "files": 18,
+    "findings": [],
+    "exit_code": 0
+  },
+  {
+    "check": "source_inventory",
+    "exit_code": 0
+  },
+  {
+    "check": "engine_docs_sync",
+    "exit_code": 0
+  },
+  {
+    "check": "original_wip_hashes",
+    "files": 10,
+    "changed": [],
+    "exit_code": 0
+  }
+]

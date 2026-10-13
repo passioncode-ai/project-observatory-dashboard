@@ -20,6 +20,12 @@ request is how you agree to it; there is no checkbox to tick.
 
 ## Checks
 
+The offline portable runner retains one JSON row per selected suite if setup,
+execution or evidence capture raises. An `ERROR` row names the exception type,
+records unknown completion and fails the run while completed peers keep their
+receipts. If `--report-dir` cannot be saved, stdout retains the rows with
+`report_error_type`; partially copied files are not a completed report.
+
 The complete checks need:
 
 - **Python 3.11 or newer** with loadable SQLite extensions (`requires-python` in

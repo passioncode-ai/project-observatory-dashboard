@@ -26,7 +26,7 @@ matters, because reasoning carries a vendor credential that does not travel and
 fails as a 400 rather than as degradation.
 """
 from __future__ import annotations
-import json, os, sys, pathlib, urllib.error, urllib.parse, urllib.request
+import contextlib, contextvars, http.client, json, os, sys, pathlib, time, urllib.error, urllib.parse, urllib.request
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -125,6 +125,89 @@ class BudgetExceeded(ProviderError):
     """A guardrail said stop. Not a failure — a decision."""
 
 
+class OutOfTime(ProviderError):
+    """The caller's deadline cut the call (ENG-003). Two cases, told apart by `sent`:
+
+    * `sent=False`: raised BEFORE an attempt, because what is left would not fit one; that attempt
+      was never sent and costs nothing.
+    * `sent=True`: an attempt whose timeout the deadline had clipped was sent and then timed out.
+      The provider may still have billed it; nothing more is sent.
+
+    Neither Retryable nor Fatal: the clock ended the call, no model did, so no model is marked
+    unhealthy and nothing should retry it inside the same deadline. `attempts` is how many attempts
+    were sent in all, the cut one included when `sent`."""
+
+    def __init__(self, message: str, attempts: int = 0, sent: bool = False):
+        super().__init__(message)
+        self.attempts = attempts
+        self.sent = sent
+
+
+# ───────────────────────────── the caller's deadline ─────────────────────────
+
+#: `_post`'s socket timeout, the most one attempt is given.
+ATTEMPT_TIMEOUT_S = 120.0
+#: What the caller keeps after the last attempt to write its report (ENG-003).
+REPORT_RESERVE_S = 20.0
+#: An attempt given less than this is not started: a structured completion rarely answers sooner,
+#: and an attempt cut by its own timeout is paid for and lost.
+MIN_ATTEMPT_S = 30.0
+
+#: The clock the deadline is read against; a module attribute so a test can stand a fake in.
+_clock = time.time
+#: The deadline (epoch seconds) of the `complete` call in progress, or None. The catalogue fetch
+#: and the key-usage read run inside it and read it here, so their signatures — and every stub
+#: that replaces them — stay as they were. A context variable, so a thread or task running its
+#: own call never reads another's deadline.
+_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar("providers_deadline", default=None)
+
+
+@contextlib.contextmanager
+def deadline_scope(deadline: float | None):
+    """Reads made inside this block are cut to the time `deadline` leaves (see `_read_timeout`)."""
+    token = _DEADLINE.set(deadline)
+    try:
+        yield
+    finally:
+        _DEADLINE.reset(token)
+
+
+def _left(deadline: float | None) -> float | None:
+    """Seconds an attempt may use before `deadline`, the report's reserve kept; None without one."""
+    return None if deadline is None else deadline - _clock() - REPORT_RESERVE_S
+
+
+def _read_timeout(own: float) -> float | None:
+    """A side read's timeout inside the current deadline: its own, or what is left if less.
+    None when nothing is left — the read is then not made and degrades as unreachable."""
+    left = _left(_DEADLINE.get())
+    if left is None:
+        return own
+    if left < 1:
+        return None
+    return min(own, left)
+
+
+def _timed_out(exc: BaseException) -> bool:
+    """True when a Retryable came from a socket timeout (`_post` chains the original exception)."""
+    cause = exc.__cause__
+    if isinstance(cause, urllib.error.URLError) and not isinstance(cause, urllib.error.HTTPError):
+        cause = cause.reason
+    return isinstance(cause, TimeoutError)
+
+
+def _attempt_timeout(deadline: float | None, attempts: int) -> float:
+    """The timeout of the next attempt, or OutOfTime when the deadline leaves too little for one."""
+    left = _left(deadline)
+    if left is None:
+        return ATTEMPT_TIMEOUT_S
+    if left < MIN_ATTEMPT_S:
+        raise OutOfTime(f"step deadline: {max(left, 0):.0f} s left after the report's {REPORT_RESERVE_S:.0f} s "
+                        f"reserve, an attempt needs {MIN_ATTEMPT_S:.0f} s ({attempts} attempt(s) made)",
+                        attempts=attempts)
+    return min(ATTEMPT_TIMEOUT_S, left)
+
+
 def now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -139,9 +222,25 @@ def config() -> dict:
 
 # ─────────────────────────────── the catalogue ───────────────────────────────
 
+class _NoTimeLeft(urllib.error.URLError):
+    """A side read not made because the caller's deadline left no time for it."""
+
+
+def _cut_by_deadline(clipped: bool, exc: BaseException) -> bool:
+    """True when a side read failed because the current deadline cut it: no time was left for it,
+    or its timeout had been clipped below its own and it then timed out."""
+    if isinstance(exc, _NoTimeLeft):
+        return True
+    reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    return clipped and isinstance(reason, TimeoutError)
+
+
 def _fetch_catalogue(base_url: str) -> dict:
+    timeout = _read_timeout(45)
+    if timeout is None:
+        raise _NoTimeLeft("the step deadline leaves no time to fetch the catalogue")
     req = urllib.request.Request(f"{base_url}/models", headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=45) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
@@ -160,11 +259,18 @@ def catalogue(refresh: bool = False) -> tuple[dict, str]:
             cached = None
     if cached and not refresh and age is not None and age < ttl:
         return cached["models"], f"cached {int(age.total_seconds() // 60)}m ago"
+    given = _read_timeout(45)
+    clipped = given is None or given < 45
     try:
         raw = _fetch_catalogue(cfg["base_url"])
     except (urllib.error.URLError, OSError, ValueError) as exc:
         if cached:
             return cached["models"], f"STALE ({exc.__class__.__name__}); cached {age}"
+        if _cut_by_deadline(clipped, exc):
+            # The DEADLINE cut the fetch, not the provider: a deadline halt, never sent an attempt,
+            # rather than "every model unavailable" (round 3).
+            raise OutOfTime("step deadline: the model catalogue could not be fetched in the time left and "
+                            "nothing is cached; no attempt was sent", attempts=0, sent=False) from exc
         raise Retryable(f"the catalogue is unreachable and nothing is cached: {exc}") from exc
     models = {}
     for m in raw.get("data", []):
@@ -307,10 +413,13 @@ def provider_usage(force: bool = False) -> dict | None:
     key, _ = read_key()
     if not key:
         return None
+    timeout = _read_timeout(30)
+    if timeout is None:
+        return None                     # no time left inside the caller's deadline: unreachable
     req = urllib.request.Request(f"{config()['base_url']}/key",
                                  headers={"Authorization": f"Bearer {key}", "User-Agent": UA})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             d = json.loads(r.read().decode("utf-8")).get("data") or {}
     except (urllib.error.URLError, OSError, ValueError):
         return None
@@ -570,7 +679,7 @@ def charge(model_id: str, cost: float, tokens_in: int, tokens_out: int,
 
 # ────────────────────────────── the call ─────────────────────────────────────
 
-def _post(base_url: str, key: str, body: dict, timeout: int = 120) -> dict:
+def _post(base_url: str, key: str, body: dict, timeout: float = ATTEMPT_TIMEOUT_S) -> dict:
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         f"{base_url}/chat/completions", data=data, method="POST",
@@ -586,7 +695,9 @@ def _post(base_url: str, key: str, body: dict, timeout: int = 120) -> dict:
         if exc.code in (401, 403):
             raise CredentialError(f"HTTP {exc.code}: {detail}") from exc
         raise Fatal(f"HTTP {exc.code}: {detail}") from exc
-    except (urllib.error.URLError, OSError) as exc:
+    except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
+        # HTTPException: a connection that died mid-body (IncompleteRead, RemoteDisconnected) is the
+        # same transient as a reset socket, never an unhandled crash of the run.
         raise Retryable(f"{type(exc).__name__}: {exc}") from exc
 
 
@@ -955,13 +1066,28 @@ def scheduled_key_status() -> str:
 
 
 def complete(messages: list[dict], *, schema_name: str, schema: dict,
-             requested: str | None = None, log=print) -> dict:
+             requested: str | None = None, log=print, deadline: float | None = None) -> dict:
     """One structured completion, over the chain, capped in total attempts.
 
     Returns {parsed, model, cost, tokens_in, tokens_out, attempts, stop}.
     Raises BudgetExceeded before spending, Fatal when no attempt can help, and
     Retryable only when every attempt was retryable.
+
+    `deadline` (epoch seconds; the tick step's, from `step_budget.deadline()`) bounds the whole
+    call (ENG-003). Before each attempt the time left after `REPORT_RESERVE_S` is computed: under
+    `MIN_ATTEMPT_S` it raises OutOfTime before sending anything (`sent=False`), otherwise the
+    attempt's timeout is cut to it; an attempt sent with a cut timeout that then times out raises
+    OutOfTime too (`sent=True`) — that one may have been billed. The catalogue fetch and the
+    key-usage read inside are cut the same way.
+    None — a run by hand — keeps every timeout as it was.
     """
+    with deadline_scope(deadline):
+        return _complete(messages, schema_name=schema_name, schema=schema, requested=requested,
+                         log=log, deadline=deadline)
+
+
+def _complete(messages: list[dict], *, schema_name: str, schema: dict,
+              requested: str | None, log, deadline: float | None) -> dict:
     import configuration
     if not configuration.enabled("agent", "features"):
         raise Fatal("Feature agent is not enabled for this workspace")
@@ -969,6 +1095,7 @@ def complete(messages: list[dict], *, schema_name: str, schema: dict,
     if not key:
         raise Fatal(f"no OpenRouter key. {key_status()}")
     log(f"  key from {source}")
+    _attempt_timeout(deadline, 0)       # not even one attempt fits: stop before any read
     stop = check_budget()
     if stop:
         raise BudgetExceeded(stop)
@@ -990,6 +1117,7 @@ def complete(messages: list[dict], *, schema_name: str, schema: dict,
             log(f"  skipping {model['id']}: the catalogue says it has no structured_outputs")
             continue
         while attempts < budget_attempts:
+            timeout = _attempt_timeout(deadline, attempts)
             attempts += 1
             body = {
                 "model": model["id"],
@@ -1002,9 +1130,20 @@ def complete(messages: list[dict], *, schema_name: str, schema: dict,
                 "provider": {"require_parameters": True},
                 "max_tokens": 2048,
             }
+            if deadline is not None:
+                log(f"  {model['id']} attempt {attempts}/{budget_attempts}, timeout {timeout:.0f} s")
             try:
-                raw = _post(cfg["base_url"], key, body)
+                raw = _post(cfg["base_url"], key, body, timeout=timeout)
             except Retryable as exc:
+                if timeout < ATTEMPT_TIMEOUT_S and _timed_out(exc):
+                    # The DEADLINE cut this attempt's timeout and the attempt then timed out: the
+                    # model might have answered in its full time, so its health is left alone and
+                    # the call ends here, as any other deadline cut does.
+                    log(f"  {model['id']} attempt {attempts}/{budget_attempts} timed out at the {timeout:.0f} s "
+                        f"the deadline left")
+                    raise OutOfTime(f"step deadline: attempt {attempts} was sent and timed out at the "
+                                    f"{timeout:.0f} s the deadline left — it may have been billed; the model "
+                                    f"is not marked", attempts=attempts, sent=True) from exc
                 last_retryable = exc
                 log(f"  {model['id']} attempt {attempts}/{budget_attempts} retryable: {exc}")
                 mark_unhealthy(model["id"], str(exc))

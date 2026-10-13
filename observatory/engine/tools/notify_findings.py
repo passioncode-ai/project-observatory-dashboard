@@ -33,6 +33,10 @@ FINDINGS = paths.REGISTRY / "findings.json"
 KIND = "finding.notified"
 #: The other half of once-only: the record that an episode ENDED.
 CLEARED = "finding.cleared"
+#: Types that stay on the board and are never pushed. A leak scan the deadline
+#: cut short is a coverage gap, not an incident; the sightings it travels with
+#: are `secret.seen_outside_its_home`, critical, and those are pushed (ENG-001).
+NOT_PUSHED = frozenset({"secret.leak_scan_partial"})
 
 
 def episode(con: sqlite3.Connection, fid: str) -> int:
@@ -176,7 +180,7 @@ def main(argv: list[str]) -> int:
         _report(now_z(), False, f"findings.json unreadable: {type(exc).__name__}", [])
         return 1
     due = [f for f in doc["findings"]
-           if f["severity"] in levels and not f.get("acked")]
+           if f["severity"] in levels and not f.get("acked") and f.get("type") not in NOT_PUSHED]
 
     # `paths.DB`, not `paths.STORE / "observatory.db"`. The literal bypassed the
     # `OBSERVATORY_DB` override, so nothing could redirect this tool — and its

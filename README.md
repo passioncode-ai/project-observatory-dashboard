@@ -93,6 +93,18 @@ project-observatory full scan-mcp
 
 Other agents take the same command line; [connect an agent](docs/ONBOARDING.md#connect-an-agent) has the details.
 
+What agents write and read back is agent memory, and every write is a proposal (confidence 0.5) that the operator reviews or an independent check corroborates:
+
+| Tool | Writes or reads |
+|---|---|
+| `observatory_record` | a note about one project: the claim and why it mattered |
+| `observatory_learn` | a lesson inside one project, from a failure record and its fix record |
+| `observatory_lesson` | a lesson for every project: a retro entry's class (`classKey`, `title`, `trigger`, `check`, `nouns`) and its origin, the project's pseudonymous key `p-<12 hex>` and the evidence commit. One record per class and project; a second, distinct project recording the same class promotes both to `observed` when both commits resolve in clones the registry knows on this machine (an unknown key is no witness). Kept 365 days while proposed. Local stdio only |
+| `observatory_search` | records by word forms; `kinds: ["lesson"]` without a project finds lessons across projects, filtered before the 300-match window, and every hit names its `kind` |
+| `observatory_recall` | current records, paged; `kinds` narrows the page and its `total` alike |
+
+task-pipeline's `lessons.py emit-observatory` writes lessons through `observatory_lesson` where the engine has it (`--tool observatory_lesson` prints its arguments) and as `lesson:` notes through `observatory_record` otherwise, which `tools/migrate_lessons.py` converts ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#lessons)).
+
 To watch what every session loads — how much of the skill listing your skills take, which descriptions no longer fit, instruction files that grew too long, and skills that download and run code or carry hidden characters — turn on the harness scan the same way; files are read, never run, and a changed skill is reported until you accept it ([design](docs/design/HARNESS.md)):
 
 ```sh

@@ -15,7 +15,13 @@
       "agent:estate-history"
     ],
     "checkpoint_closed_days": 30,
-    "handoff_days": 90
+    "handoff_days": 90,
+    "kinds": {
+      "lesson": {
+        "proposed_days": 365,
+        "observed_days": null
+      }
+    }
   },
   "events_days": 365,
   "observations_days": 90,

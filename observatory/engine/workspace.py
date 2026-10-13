@@ -608,7 +608,9 @@ def machine_parser(name: str) -> argparse.ArgumentParser:
     if name == "machine":
         ap = argparse.ArgumentParser(prog=f"{PROG} machine",
                                      description="processes by origin, memory and disk; why one process runs")
-        ap.add_argument("--disk", action="store_true", help="also size the disk's largest places (slower)")
+        mode = ap.add_mutually_exclusive_group()
+        mode.add_argument("--disk", action="store_true", help="also size the disk's largest places (slower)")
+        mode.add_argument("--memory-only", action="store_true", help="refresh RAM, swap and process RSS without disk sizing")
         ap.add_argument("--explain", type=int, metavar="PID", help="why one process runs, and print nothing else")
         return ap
     if name == "disk-guard":
@@ -846,6 +848,11 @@ def machine_command(name: str, argv: list[str]) -> int:
     if name == "machine":
         if a.explain is not None:
             print(json.dumps(scan_machine.explain(a.explain), indent=1, ensure_ascii=False))
+            return 0
+        if a.memory_only:
+            import memory_snapshot
+            doc = memory_snapshot.write(paths.SCRATCH / "machine-memory.json")
+            print(json.dumps(doc, indent=1, ensure_ascii=False))
             return 0
         out = paths.SCRATCH / "machine.json"
         scan_machine.main(["scan_machine.py", str(out), *(["--disk"] if a.disk else [])])

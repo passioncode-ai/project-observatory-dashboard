@@ -144,11 +144,43 @@ def test_every_vendor_shape_is_caught() -> None:
         "google api key": f'K = "AIza{random_body(35)}"',
         "private key block": KEY_HEADER + "\nMII...\n",
         "an unbranded named secret": f'api_key = "{random_body(40)}"',
+        "notion token": f'K = "ntn_{random_body(46)}"',
+        "outline token": f'K = "ol_api_{random_body(38)}"',
     }
     for label, text in planted.items():
         got = scan_string(text)
         check(f"a planted {label} is refused", bool(got["credentials"]),
               f"{got} — a scanner that misses this is a green nobody earned")
+
+
+def test_every_prefix_the_redactor_knows_is_caught() -> None:
+    """One list of issuer prefixes (review round 2): `credential_shape.PREFIXES`
+    redacts them, and the commit gate must refuse each of them too."""
+    import credential_shape
+    for pre in credential_shape.PREFIXES:
+        got = scan_string(f'K = "{pre}{random_body(40)}"')
+        check(f"a planted {pre}… token is refused", bool(got["credentials"]), str(got)[:200])
+    check("ntn_ and ol_api_ are among them", {"ntn_", "ol_api_"} <= set(credential_shape.PREFIXES))
+
+
+def test_a_short_vendor_body_and_a_named_token_are_refused() -> None:
+    """Review round 3: a 20-character `glpat-` body was called a fixture, and
+    NOTION_TOKEN="secret_…" passed the named-secret rule (`\\btoken\\b`)."""
+    got = scan_string(f'K = "glpat-{random_body(20)}"')
+    check("a 20-character glpat- body is refused", bool(got["credentials"]), str(got)[:200])
+    got = scan_string(f'NOTION_TOKEN = "secret_{random_body(43)}"')
+    check("a *_TOKEN name with a secret_ value is refused", bool(got["credentials"]), str(got)[:200])
+    got = scan_string(f'STRIPE_WEBHOOK_KEY = "{random_body(40)}"')
+    check("a *_KEY name with an unbranded value is refused", bool(got["credentials"]), str(got)[:200])
+
+
+def test_a_word_before_a_prefix_is_not_an_issuer() -> None:
+    """An identifier that merely contains a prefix is a name, not a key (review round 3)."""
+    for text in ('model = load_hf_AutoModelForCausalLM2024abc()',
+                 'v = "npm_package_version_2024_10_12_build"',
+                 'def test_sk_live_rejects_a_bad_signature_2024(): pass'):
+        got = scan_string(text)
+        check(f"{text[:30]}… is not refused", not got["credentials"] and not got["fixtures"], str(got)[:200])
 
 
 def test_the_exit_code_says_so() -> None:
@@ -256,7 +288,8 @@ def test_the_check_is_in_the_gate() -> None:
 
 if __name__ == "__main__":
     print("secrets — the claim, the check, and the false critical\n")
-    for fn in (test_every_vendor_shape_is_caught,
+    for fn in (test_every_vendor_shape_is_caught, test_every_prefix_the_redactor_knows_is_caught,
+               test_a_short_vendor_body_and_a_named_token_are_refused, test_a_word_before_a_prefix_is_not_an_issuer,
                test_the_exit_code_says_so,
                test_calling_a_real_key_fake_does_not_help,
                test_a_low_entropy_placeholder_is_not_a_credential,

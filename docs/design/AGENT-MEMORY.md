@@ -262,11 +262,15 @@ The numbers and how they were measured:
 | `checkpoint` | while its workflow is open, whatever its age; then 30 days after it closes | `ledger.checkpoint_closed_days` |
 | `handoff` | 90 days from creation | `ledger.handoff_days` |
 | `step_result` | by its state, like any record (`proposed`: 90 days) | `ledger.proposed_days` |
+| `lesson` | 365 days while `proposed`; once `observed`, never by age | `ledger.kinds.lesson` (`proposed_days: 365`, `observed_days: null`) |
 | idempotency answers | 7 days | `idempotency_days` |
 
 The generic age rules skip checkpoints and packs (`retention.ledger_candidates`), so an open
-workflow's checkpoint is never erased because the work took long. A workspace whose
-`retention.json` predates these keys uses the defaults above.
+workflow's checkpoint is never erased because the work took long. A kind under `ledger.kinds`
+ages by its own horizon for each state it names (`null`: never by age) and by the general one
+for every other state; `store/retention.horizon_for` is the one reader, and `days_left` (the
+review queue's countdown) asks it by kind. A workspace whose `retention.json` predates these
+keys uses the defaults above.
 
 Retention **withdraws**: a record leaves every read and index, and its ledger rows stay as the
 trail. To make a text **unrecoverable**, the operator runs `full forget`. It replaces the
@@ -291,6 +295,100 @@ PB-137 N-014.
 - **Nobody promotes their own proposal.** Out of `proposed` there are two doors: the operator's review (`tools/review.py`), and `corroborate` by a different witness. An author can keep its proposal or withdraw it (`rejected`). Appending it as `observed` is refused (`IllegalTransition`), and so is corroborating it oneself. Confidence never promotes anything.
 - **Out of scope:** user preferences. They are not project memory and are not stored here.
 
+## Lessons
+
+A lesson is a retro entry's **class**, recorded so an agent in another project finds it before
+it repeats the mistake. Its writer is task-pipeline's `lessons.py emit-observatory`, which has
+two routes: `--tool observatory_lesson` where the engine has this tool, and `observatory_record`
+otherwise (the bridge: a note whose statement starts `lesson:`, converted later by
+`tools/migrate_lessons.py`). `observatory/engine/tests/lesson_emitter_fixture.json` holds the
+shape the first route prints — hand-written from the emitter until task-pipeline re-adds the
+flag, then re-pinned to its real output — and `tests/test_lesson.py` checks the published input
+schema against it.
+
+- **Its own kind.** `observatory_lesson` writes `kind: lesson`, `function: experiential`,
+  `scope: global`, no `project_id`, `state: proposed`, confidence 0.5. The lesson/1 fields
+  (`classKey`, `title`, `trigger`, `check`, `nouns`, `origin`) are the record's body; the
+  statement reads `lesson: <classKey> — <title>` and the why `<trigger>; check: <check>`.
+- **The project is pseudonymous.** `origin.projectId` is `p-` and the first 12 hex digits of
+  the repository's root commit, never a `project:<slug>` id: a lesson is read by every other
+  project, and a repository's name can be a customer's. The commit is stored as
+  `commit:<12 hex>`, the form the memory redactor keeps whole.
+- **What it may not carry** is refused before any write (`code: invalid-lesson`, every reason
+  listed): a path, a URL, an e-mail address, a line break, a field outside lesson/1's bounds,
+  and a `classKey` the redactor would change (a long hex or random run would stop being a slug
+  and stop matching another project's copy). The refusal's hint names both emitter routes.
+  Credential shapes and the workspace's known values are redacted, as on every agent write,
+  and the answer's `redacted.fields` says where.
+- **One record per (classKey, project).** A repeat from the same project revises that record
+  (`outcome: revised`) or writes nothing (`unchanged`). A changed evidence commit, or
+  an observation whose current evidence no longer resolves in two distinct known projects,
+  archives the old observation and creates a new proposal (`replaced`, `replaces: id@revision`).
+  The archive, successor, outbox and lexical index commit together. An unchanged repeat is
+  also revalidated. The project and class cannot change on an existing lesson, including
+  through generic ledger revisions. Operator-owned records remain protected.
+  Proof: `test_lesson.EvidenceRevisionSafety` and `ANewCommitAfterPromotion`.
+  Migration takes the write lock before re-reading both the candidate revision and the
+  active identity. A candidate changed since the scan is skipped; a dry run takes no
+  writer lock. The shared `insert_revision` uses one conditional SQL INSERT to exclude
+  an already active identity and a record-wide tombstone, including generic new lessons
+  and note conversions. No caller-held transaction is committed by this insert.
+  Proof: `TheBridgeNotesMigrate.test_migration_serializes_identity_check_and_competing_lesson_write`,
+  `test_migration_rereads_candidate_revision_under_lock`,
+  `test_generic_new_and_converted_lessons_cannot_duplicate_active_identity` and
+  `test_generic_revision_refuses_erasure_between_read_and_insert`.
+- **Found by kind.** `observatory_search(query, kinds: ["lesson"])` with no project filters by
+  kind inside the candidate query, before the 300-match window. Without it, the companion's
+  per-session records filled the window and the search abstained over a store that held the
+  answer (measured 2026-10-12). Every hit names its `kind`; a lesson hit carries its fields as
+  `lesson`. `observatory_recall(kinds: [...])` filters the page and its `total` alike.
+- **Promoted by a second project, when both commits resolve here.** The rule is the operator's
+  decision (O2): two distinct projects record the classKey and both commits resolve, and then no
+  person is needed; `supported` stays the operator's. `tools/corroborate.py` applies it as
+  `agent:lesson-corroborator`, and "resolve" means in git, on this machine: each origin's
+  `p-` key must belong to a clone the registry knows (its root commit gives the key) and the
+  commit must be an object in that clone. Five outcomes, each listed in `corroboration.json`
+  under `lessons`:
+  - `promoted` — this lesson's commit and another project's commit of the same class resolve;
+  - `waiting` — no second project has recorded the class, or none of theirs resolves yet;
+  - `unresolvable` — "commit not resolvable here": no registered clone carries the key, so the
+    lesson stays `proposed` and witnesses for nobody (an invented key buys nothing);
+  - `contradicted` — the clone is here and git does not hold the commit;
+  - `invalidated` — an agent-owned observation lost its current evidence and was replaced
+    by a proposal, with the old revision preserved. A stale scan cannot overwrite a newer
+    revision. Dry runs only list the proposed invalidation.
+
+  `test_corroboration.test_observation_is_revalidated_when_unchanged_commit_disappears`
+  verifies promotion, a valid wording revision and loss of evidence using synthetic Git
+  repositories. Shared ledger promotion also checks the two known project identities;
+  a caller-supplied description of a check is insufficient. Write-time Git checks share
+  a five-second budget per validation; timeouts fail closed. This budget does not bound
+  SQLite lock acquisition or filesystem reads. Local stdio caller identity remains
+  self-declared; resolving two project roots is evidence, not caller authentication.
+
+  The same project twice is one witness. `counts.proposed` counts only the rows the session
+  rule reads; lessons have their own `lessons_*` counts.
+- **Local only for now.** A binding over HTTP is refused (`local-only`): a lesson belongs to no
+  one project, and a binding is scoped to its projects. A Fabric capability
+  (`memory.lesson.record`) is a contract revision for later.
+- **Migration.** Lessons written before this tool are `observatory_record` notes whose
+  statement starts `lesson:` (the emitter's bridge). `tools/migrate_lessons.py` (`--dry-run`
+  by default, `--apply` to write) turns an agent-owned proposal into a lesson record: a new revision of the same
+  record, by its author, with `migrated-from` in its provenance. A note whose commit the
+  redactor already replaced (a full 40-digit id) is listed and left as it is.
+  Operator-owned and promoted notes are also left for explicit review. A generic
+  note's corroboration cannot transfer to a lesson: `ledger.append` permits this
+  kind conversion only from proposed to proposed with a valid lesson/1 body.
+  `test_lesson.EvidenceRevisionSafety.test_a_lesson_cannot_inherit_an_ordinary_notes_promotion`
+  and `TheBridgeNotesMigrate.test_migration_preserves_promoted_and_operator_owned_notes`
+  verify those boundaries.
+
+**The memory boundary.** Lessons are agents' work memory, and they stay in this store. A lesson
+that turns out to be project knowledge — something the project's people, not only its agents,
+should keep — will have an export path to Fabric project memory once that memory exists; this
+store is its source, and the seam is the lesson record as written here (its body, its state and
+its corroboration). Nothing exports a lesson today, and nothing here moves project memory.
+
 ## MCP tools
 
 | Tool | Writes | Notes |
@@ -302,6 +400,8 @@ PB-137 N-014.
 | `observatory_handoff_accept` | yes | returns the new `leaseId`, the constraints, the current checkpoint and the pack |
 | `observatory_handoff_get` | no | status: `offered`, `accepted`, `expired`, `superseded`, `workflow-closed` |
 | `observatory_learn` | yes | a lesson from a failure and its fix, always a proposal; the candidate for the contract's reserved `memory.learning.propose` |
+| `observatory_lesson` | yes | a lesson for every project (see [Lessons](#lessons)), always a proposal; local stdio only |
+| `observatory_search`, `observatory_recall` | no | `kinds` filters by record kind before the window; every hit or record names its `kind` |
 
 Every refusal is a typed answer with `error`, `detail` and `remedy`; `LeaseLost` adds `keptAs`.
 The caller is `agent:<name>` or `service:<name>`: the operator's authority cannot be claimed

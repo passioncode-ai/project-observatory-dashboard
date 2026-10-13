@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "coverage": "synthetic-offline",
+  "status": "PASS",
+  "suites": [
+    {
+      "file": "tests/test_disk_guard.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 18.88,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 123,
+      "unittest_skipped": 2
+    },
+    {
+      "file": "tests/test_git_hardening.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 13.93,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 56,
+      "unittest_skipped": 0
+    },
+    {
+      "file": "tests/test_machine.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 29.82,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 59,
+      "unittest_skipped": 0
+    },
+    {
+      "file": "tests/test_cli_compatibility.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.49,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 19,
+      "unittest_skipped": 0
+    },
+    {
+      "file": "tests/test_mcp_wire.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 5.81,
+      "pass_assertions": 128,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 0,
+      "unittest_skipped": 0
+    }
+  ],
+  "not_run": [
+    {
+      "scope": "live-provider-acceptance",
+      "status": "NOT_RUN",
+      "reason": "Requires independently configured provider accounts and explicit opt-in; no credentials are inherited."
+    },
+    {
+      "scope": "external-mcp-host-admission",
+      "status": "NOT_RUN",
+      "reason": "The local stdio protocol is tested; acceptance by another host requires a separate configured fixture run."
+    },
+    {
+      "scope": "live-secret-rotation-and-delivery",
+      "status": "NOT_RUN",
+      "reason": "Synthetic credential boundaries are tested; real rotation/delivery must be independently authorized."
+    }
+  ],
+  "suite_count": 5,
+  "python": "3.14.7",
+  "source_head": "799a429891e8d11bd1bb06c596bda9adcbe0a25c",
+  "root_suite": {
+    "cases": 172,
+    "expected_failures": 0,
+    "exit_code": 0
+  },
+  "python_311_grammar": {
+    "changed_files": 14,
+    "passed": true,
+    "runtime_test": false
+  },
+  "independent_review": {
+    "verdict": "PASS_SCOPED",
+    "corrected_findings": 12,
+    "whole_system_complete": false
+  },
+  "command": "python tests/run_portable.py --jobs 1 --suite disk_guard --suite git_hardening --suite machine --suite cli_compatibility --suite mcp_wire",
+  "ci_correction": {
+    "source_head": "e80c73d2b72f8643d5447863200305aa423c701b",
+    "trigger": "Hosted full compatibility checks exposed osprivacy boundary and dynamic translation-ID discovery failures at 328b5d1.",
+    "suites": {
+      "osprivacy": 17,
+      "i18n": 44,
+      "git_hardening": 56
+    },
+    "local_status": "PASS",
+    "independent_status": "PASS_SCOPED",
+    "root_cases": 172,
+    "root_exit_code": 0,
+    "native_windows": "NOT_RUN",
+    "hosted_rerun": "PENDING"
+  },
+  "path_hygiene_correction": {
+    "source_head": "196f0be",
+    "trigger": "The hosted 238-suite run at bb7296e found two persistent archives classified as leaked test temporary directories.",
+    "change": "Two local documented exceptions; runtime AST unchanged. Recovery archives must survive process exit.",
+    "api_listings_assertions": 62,
+    "git_hardening_cases": 56,
+    "local_status": "PASS",
+    "independent_review": "Scoped source review accepted the archive lifetime rationale.",
+    "hosted_rerun": "PENDING"
+  }
+}

@@ -145,11 +145,81 @@ def unscanned(doc: dict | None) -> list[dict]:
     }]
 
 
+def unmeasured(doc: dict) -> bool:
+    """Did the scan have nothing to look for? Only then is a clean report UNMEASURED.
+
+    A document carries `known` (the values it searched for) and a `code` on each
+    `degraded` entry (ENG-001). A legacy document with neither is read the old
+    way, where any `degraded` meant nothing to look for; a legacy document that
+    knew values was cut by its deadline, and its sightings stand.
+    """
+    degraded = doc.get("degraded") or []
+    codes = {d.get("code") for d in degraded if isinstance(d, dict)}
+    if "no-values" in codes:
+        return True
+    if "known" in doc:
+        return not doc.get("known")
+    return bool(degraded) and not codes - {None}
+
+
+def _home_relative(text: str) -> str:
+    """An older scanner wrote a store's absolute path into its prose; the board
+    gets it `~`-relative, as the current scanner writes it."""
+    import pathlib
+    home = str(pathlib.Path.home())
+    return text.replace(home + "/", "~/") if home not in ("", "/") else text
+
+
+def _cut_short(doc: dict) -> bool:
+    degraded = [d for d in (doc.get("degraded") or []) if isinstance(d, dict)]
+    if any(str(d.get("code") or "").startswith("deadline-") for d in degraded):
+        return True
+    # A legacy document: the only uncoded degradation a scan that knew values
+    # could write was its deadline.
+    return bool(doc.get("known")) and any(d.get("code") is None for d in degraded)
+
+
+def partial(doc: dict) -> list[dict]:
+    """The pass the deadline cut short: what it read, beside the sightings it still reports."""
+    if not _cut_short(doc):
+        return []
+    cov = doc.get("coverage") or {}
+    # A SCANNER BEFORE ENG-001 recorded no coverage. Reading `targets` as what
+    # it read claimed the whole target list for a pass cut near its start
+    # (review round 1): such a document says it was cut, and claims no count.
+    measured = "targets_read" in cov
+    return [{
+        "type": "secret.leak_scan_partial",
+        "subject": "estate:leak-scan-coverage",
+        "severity": "warning",
+        **(titled("the leak scan read {read} of {n} sources; stores unread: {stores}",
+                  read=int(cov.get("targets_read") or 0),
+                  n=int(cov.get("targets", doc.get("targets", 0)) or 0),
+                  stores=len(cov.get("stores_unread") or [])) if measured else
+           titled("the leak scan was cut short; this scanner version recorded no coverage")),
+        "detail": ("The step's time ran out before the scan finished: "
+                   + "; ".join(_home_relative(str(d.get("why", ""))) for d in (doc.get("degraded") or [])
+                               if isinstance(d, dict) and str(d.get("code") or "deadline-").startswith("deadline-"))
+                   + ". What it did not reach is UNMEASURED by this pass, not clean."),
+        "action": ("any sightings reported beside this are real — act on them now; the remainder resumes "
+                   "from its offsets on the next pass, or run `python \"$(project-observatory full-path)"
+                   "/tools/scan_leaks.py\"` outside the tick to finish it"),
+    }]
+
+
 def findings(doc: dict | None) -> list[dict]:
+    """What reaches the board. COVERAGE AND SIGHTINGS ARE SEPARATE AXES (ENG-001).
+
+    A pass the deadline cut short used to return only "nothing to look for" and
+    drop every sighting it had already made. Now only a scan that knew no values
+    is unmeasured; every other document reports its sightings, and a cut one
+    adds `secret.leak_scan_partial` beside them.
+    """
     if not doc:
         return []
-    if doc.get("degraded"):
-        return [{
+    if unmeasured(doc):
+        # A sighting is never withheld, not even beside "nothing to look for".
+        return sightings(doc) + [{
             "type": "secret.leak_scan_unmeasured",
             "subject": "estate:leak-scan-coverage",
             "severity": "warning",
@@ -160,4 +230,4 @@ def findings(doc: dict | None) -> list[dict]:
                        "whole point of saying so."),
             "action": "project-observatory full env, then project-observatory full leaks",
         }]
-    return sightings(doc) + suppression(doc) + unscanned(doc)
+    return sightings(doc) + partial(doc) + suppression(doc) + unscanned(doc)

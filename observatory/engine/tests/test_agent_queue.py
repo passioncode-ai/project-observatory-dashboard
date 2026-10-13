@@ -99,8 +99,25 @@ def store_with(projects: list[str]) -> tuple[pathlib.Path, pathlib.Path]:
     return db, scratch
 
 
+#: The stub `providers.complete` most runs use: every call answers ANSWER at once.
+ANSWERING = ("providers.complete = lambda *a, **k: {'parsed': ANSWER, 'model': 'stub/model',\n"
+             "                                      'cost': 0.0, 'tokens_in': 0, 'tokens_out': 0,\n"
+             "                                      'attempts': 1, 'finish_reason': 'stop',\n"
+             "                                      'stop': False, 'selection_level': 'stub'}\n")
+#: A `complete` that runs out of time whenever it is handed a deadline — what the real one does
+#: when the attempts it would start do not fit (ENG-003). Without a deadline it answers.
+CUT_BY_DEADLINE = ("SENT = False\n"
+                   "def _complete(*a, deadline=None, **k):\n"
+                   "    if deadline is not None:\n"
+                   "        raise providers.OutOfTime('the step deadline leaves 12 s; an attempt needs 30 s', attempts=1, sent=SENT)\n"
+                   "    return {'parsed': ANSWER, 'model': 'stub/model', 'cost': 0.0, 'tokens_in': 0,\n"
+                   "            'tokens_out': 0, 'attempts': 1, 'finish_reason': 'stop', 'stop': False,\n"
+                   "            'selection_level': 'stub'}\n"
+                   "providers.complete = _complete\n")
+
+
 def run(db: pathlib.Path, scratch: pathlib.Path, limit: int,
-        answer: dict = DECLINE, env: dict | None = None) -> tuple[int, str]:
+        answer: dict = DECLINE, env: dict | None = None, complete: str = ANSWERING) -> tuple[int, str]:
     driver = scratch / "drive.py"
     driver.write_text(
         "import json, sys\n"
@@ -108,10 +125,7 @@ def run(db: pathlib.Path, scratch: pathlib.Path, limit: int,
         f"sys.path.insert(0, {str(ROOT / 'agent')!r})\n"
         "import providers\n"
         f"ANSWER = json.loads({json.dumps(json.dumps(answer))})\n"
-        "providers.complete = lambda *a, **k: {'parsed': ANSWER, 'model': 'stub/model',\n"
-        "                                      'cost': 0.0, 'tokens_in': 0, 'tokens_out': 0,\n"
-        "                                      'attempts': 1, 'finish_reason': 'stop',\n"
-        "                                      'stop': False, 'selection_level': 'stub'}\n"
+        + complete +
         "providers.check_budget = lambda *a, **k: None\n"
         "providers.provider_usage = lambda force=False: None\n"
         "providers.read_key = lambda *a, **k: ('stub-key', 'stub')\n"
@@ -269,6 +283,39 @@ def test_a_call_the_deadline_would_cut_is_never_started() -> None:
     check("without a deadline the next run drains them", rc == 0 and unconsumed(db) == 0, f"{unconsumed(db)} left")
 
 
+def test_a_call_the_deadline_cuts_inside_complete_leaves_its_deltas() -> None:
+    """ENG-003: the gate before a call is one check; `providers.complete` makes several attempts. The
+    step's deadline is now handed to `complete`, which raises `OutOfTime` before an attempt that
+    would not fit. The run treats it as the pre-call halt: it stops, names the deadline, counts the
+    cut, and every delta stays for the next run."""
+    import time
+    db, scratch = store_with(["project:a", "project:b"])
+    rc, out = run(db, scratch, limit=5, complete=CUT_BY_DEADLINE,
+                  env={"OBSERVATORY_STEP_DEADLINE": f"{time.time() + 600:.0f}"})
+    check("the run ends cleanly", rc == 0, out[-400:])
+    rep = report_of(scratch)
+    check("the deadline reached complete(), and the report names the cut",
+          "step deadline" in str(rep.get("halted_by")) and "2 project(s) not finished" in str(rep.get("halted_by")),
+          str(rep.get("halted_by")))
+    check("the report counts the attempt the deadline refused before sending it",
+          rep.get("attempts_refused_by_deadline") == 1 and rep.get("attempts_sent_and_cut_by_deadline") == 0,
+          str(rep))
+    check("no delta was consumed", unconsumed(db) == 2, str(unconsumed(db)))
+    check("no project is counted as failed: the clock is not the model's fault", rep.get("failed") == 0,
+          str(rep.get("failed")))
+    rc, out = run(db, scratch, limit=5, complete=CUT_BY_DEADLINE)
+    check("without a deadline nothing is cut and the next run drains them",
+          rc == 0 and unconsumed(db) == 0 and report_of(scratch).get("attempts_refused_by_deadline") == 0,
+          f"{unconsumed(db)} left")
+    db, scratch = store_with(["project:a"])
+    rc, out = run(db, scratch, limit=5, complete=CUT_BY_DEADLINE.replace("SENT = False", "SENT = True"),
+                  env={"OBSERVATORY_STEP_DEADLINE": f"{time.time() + 600:.0f}"})
+    rep = report_of(scratch)
+    check("an attempt that was SENT and then cut is counted apart: it may have been billed",
+          rep.get("attempts_sent_and_cut_by_deadline") == 1 and rep.get("attempts_refused_by_deadline") == 0
+          and "may have been billed" in str(rep.get("halted_by")), str(rep))
+
+
 if __name__ == "__main__":
     print("the agent's queue — served by arrival, not by alphabet\n")
     for fn in (test_the_oldest_delta_is_served_even_when_its_project_sorts_last,
@@ -276,6 +323,7 @@ if __name__ == "__main__":
                test_the_selection_is_not_alphabetical_in_the_source,
                test_a_drained_queue_reports_and_spends_nothing,
                test_a_call_the_deadline_would_cut_is_never_started,
+               test_a_call_the_deadline_cuts_inside_complete_leaves_its_deltas,
                test_the_summary_reports_the_figures_that_decided,
                test_the_environment_warning_is_said_once_per_process):
         fn()
