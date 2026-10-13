@@ -55,6 +55,13 @@ configuration in that repository's context (reading configuration runs
 nothing), so `includeIf`-scoped and repository-local identities keep working,
 and is handed to the hardened commit as `GIT_AUTHOR_*` / `GIT_COMMITTER_*`.
 
+OFFLINE OBSERVATION is explicit (`offline=True`), not inferred from `PURE` or
+`write=False`. It suppresses promisor lazy fetch and refuses all transports;
+missing objects therefore remain unavailable. The default profile retains
+explicit network operations and its historical lazy-fetch behavior. The offline
+profile is intended for trusted observation subcommands, not an arbitrary-command
+sandbox: it does not make a caller-supplied mutating Git command read-only.
+
 WHAT IS LEFT OUTSIDE, said rather than implied: `ssh` reads its own
 `~/.ssh/config`, which can name a `ProxyCommand`; a submodule's private
 configuration can name a filter driver the parent repository does not, and only
@@ -326,8 +333,10 @@ def identity(repo: str | os.PathLike | None, git: str | None = None) -> dict[str
 
 # --- composing a call ----------------------------------------------------------
 
-def environment(*, write: bool = False, extra: Mapping[str, str] | None = None,
+def environment(*, write: bool = False, offline: bool = False, extra: Mapping[str, str] | None = None,
                 git: str | None = None) -> dict[str, str]:
+    if offline and write:
+        raise ValueError("offline observation cannot request write identity")
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") or k in KEEP_ENV}
     env.update({
         "GIT_CONFIG_NOSYSTEM": "1",
@@ -347,6 +356,12 @@ def environment(*, write: bool = False, extra: Mapping[str, str] | None = None,
         env["GIT_OPTIONAL_LOCKS"] = "0"
     if extra:
         env.update(extra)
+    if offline:
+        # Object reads can lazily fetch from a promisor remote. Disable that,
+        # with a transport-level fallback for Git versions ignoring the flag.
+        # Enforce after caller extras; this profile must not be reopened there.
+        env["GIT_NO_LAZY_FETCH"] = "1"
+        env["GIT_ALLOW_PROTOCOL"] = ""
     return env
 
 
@@ -384,7 +399,7 @@ def driver_overrides(location: Sequence[str], env: Mapping[str, str], git: str,
 
 
 def command(args: Sequence[str], *, repo: str | os.PathLike | None = None,
-            cwd: str | os.PathLike | None = None, write: bool = False,
+            cwd: str | os.PathLike | None = None, write: bool = False, offline: bool = False,
             extra_env: Mapping[str, str] | None = None, git: str | None = None,
             timeout: float | None = 60) -> tuple[list[str], dict[str, str]]:
     """`(argv, env)` for one hardened git call, for callers that run it their own
@@ -392,7 +407,7 @@ def command(args: Sequence[str], *, repo: str | os.PathLike | None = None,
     `cwd` is used only to read the configuration from the same place."""
     git = binary(git)
     args = list(args)
-    env = environment(write=write, extra=extra_env, git=git)
+    env = environment(write=write, offline=offline, extra=extra_env, git=git)
     sub = args[0] if args else ""
     if write and sub in COMMITTING:
         for k, v in identity(repo if repo is not None else cwd, git).items():
@@ -407,7 +422,7 @@ def command(args: Sequence[str], *, repo: str | os.PathLike | None = None,
 
 
 def run(args: Sequence[str], *, repo: str | os.PathLike | None = None,
-        cwd: str | os.PathLike | None = None, write: bool = False, timeout: float | None = 60,
+        cwd: str | os.PathLike | None = None, write: bool = False, offline: bool = False, timeout: float | None = 60,
         text: bool = True, input: str | bytes | None = None, check: bool = False,
         extra_env: Mapping[str, str] | None = None, git: str | None = None) -> subprocess.CompletedProcess:
     """`subprocess.run` for git, hardened; output is always captured.
@@ -418,7 +433,7 @@ def run(args: Sequence[str], *, repo: str | os.PathLike | None = None,
     shape as any other git failure, so callers keep a single failure path.
     """
     try:
-        argv, env = command(args, repo=repo, cwd=cwd, write=write, extra_env=extra_env,
+        argv, env = command(args, repo=repo, cwd=cwd, write=write, offline=offline, extra_env=extra_env,
                             git=git, timeout=timeout)
     except GitConfigUnreadable as exc:
         empty: str | bytes = "" if text else b""

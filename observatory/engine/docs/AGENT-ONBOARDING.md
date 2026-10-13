@@ -208,3 +208,17 @@ Ownership and any supported supervisor action require separate evidence.
 
 Contract tests: `tests/test_open_unlinked.py`, including a
 disposable open-then-unlinked file owned by the test; no host process is stopped.
+
+
+### Checkout observation does not fetch missing objects
+
+Checkout inventory and local-state Git queries explicitly use the offline
+observation profile. Partial clones can omit objects that an ordinary Git read
+would download on demand; this observation refuses that download and keeps an
+unreadable state unknown. It does not fetch upstream refs or establish remote
+backup durability. Explicit fetch and remote-query operations outside this
+profile retain their existing behavior. This is not a new cleanup permission.
+
+Proof: `tests/test_checkout_state.py::OfflineGitObservation` in the engine uses
+only disposable local file remotes, checks object-store contents before/after,
+and includes a positive complete local observation and explicit remote controls.

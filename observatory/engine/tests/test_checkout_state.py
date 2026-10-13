@@ -150,5 +150,83 @@ class CheckoutState(Base):
                 self.assertEqual(coverage_view.local_state_summary({**value, **change}, at, True)['current_state'], 'unknown')
 
 
+class OfflineGitObservation(Base):
+    def partial(self, name='partial'):
+        source = self.data / ('source-' + name); source.mkdir()
+        git(source, 'init', '-q'); commit(source, 'tracked', 'synthetic content')
+        git(source, 'config', 'uploadpack.allowFilter', 'true')
+        git(source, 'config', 'uploadpack.allowAnySHA1InWant', 'true')
+        target = self.data / name
+        git(self.data, 'clone', '--quiet', '--filter=tree:0', '--no-checkout', source.as_uri(), str(target))
+        return source, target, git(source, 'rev-parse', 'HEAD^{tree}').strip()
+
+    def objects(self, target):
+        import hashlib
+        return {str(p.relative_to(target)): hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in (target / '.git/objects').rglob('*') if p.is_file()}
+
+    def test_offline_missing_objects_refuse_without_object_writes(self):
+        import safe_git
+        for name in ('cat-file', 'rev-list', 'show'):
+            source, target, tree = self.partial(name)
+            before = self.objects(target)
+            args = {'cat-file': ['cat-file', '-p', tree], 'rev-list': ['rev-list', '--objects', 'HEAD'],
+                    'show': ['show', 'HEAD:tracked']}[name]
+            result = safe_git.run(args, repo=target, offline=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(self.objects(target), before)
+            # Explicit default-profile reads retain their historical fetch semantics.
+            self.assertEqual(safe_git.run(args, repo=target).returncode, 0)
+            self.assertNotEqual(self.objects(target), before)
+
+    @unittest.skipIf(os.name == 'nt', 'bounded checkout pipes currently POSIX only')
+    def test_checkout_query_refuses_lazy_fetch_and_preserves_objects(self):
+        import checkout_state, time
+        source, target, tree = self.partial()
+        before = self.objects(target)
+        with self.assertRaises(ValueError):
+            checkout_state.query(target, ['cat-file', '-p', tree], time.monotonic() + 5)
+        self.assertEqual(self.objects(target), before)
+
+    @unittest.skipIf(os.name == 'nt', 'bounded checkout pipes currently POSIX only')
+    def test_partial_checkout_observation_is_unknown_without_fetch(self):
+        import checkout_inventory
+        source, target, tree = self.partial()
+        before = self.objects(target)
+        row = checkout_inventory.classify(target, 5)
+        self.assertEqual(row['classification'], 'clone')
+        self.assertEqual(row['local_state']['state'], 'unknown')
+        self.assertFalse(row['local_state']['complete'])
+        self.assertFalse(row['local_state']['actionable'])
+        self.assertEqual(self.objects(target), before)
+
+    def test_offline_local_positive_and_explicit_remote_default(self):
+        import safe_git
+        source, target, tree = self.partial()
+        self.assertEqual(safe_git.run(['rev-list', '--count', 'HEAD'], repo=target, offline=True).stdout.strip(), '1')
+        self.assertNotEqual(safe_git.run(['ls-remote', source.as_uri()], repo=target, offline=True).returncode, 0)
+        self.assertEqual(safe_git.run(['ls-remote', source.as_uri()], repo=target).returncode, 0)
+        self.assertEqual(safe_git.run(['fetch', 'origin'], repo=target, write=True).returncode, 0)
+
+    def test_offline_settings_cannot_be_reopened_by_extra_environment(self):
+        import safe_git
+        argv, env = safe_git.command(['rev-parse', 'HEAD'], offline=True,
+                                    extra_env={'GIT_NO_LAZY_FETCH': '0', 'GIT_ALLOW_PROTOCOL': 'file'})
+        self.assertEqual(env['GIT_NO_LAZY_FETCH'], '1')
+        self.assertEqual(env['GIT_ALLOW_PROTOCOL'], '')
+        with self.assertRaises(ValueError):
+            safe_git.command(['commit'], offline=True, write=True)
+
+    def test_transport_fallback_refuses_missing_object_even_without_lazy_fetch_variable(self):
+        import safe_git, subprocess
+        source, target, tree = self.partial()
+        before = self.objects(target)
+        argv, env = safe_git.command(['cat-file', '-p', tree], repo=target, offline=True)
+        env.pop('GIT_NO_LAZY_FETCH')  # simulate an older Git ignoring this setting
+        result = subprocess.run(argv, env=env, capture_output=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.objects(target), before)
+
+
 if __name__ == '__main__':
     unittest.main()
