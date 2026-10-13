@@ -85,7 +85,30 @@ def exempt_owners() -> tuple[str, ...]:
     return tuple(config()["ledger"].get("owner_exempt") or ())
 
 
-def days_left(owner: str, state: str, created_at: str) -> int | None:
+def kind_horizons() -> dict[str, dict]:
+    """Per-kind horizons (`ledger.kinds`): a kind named there ages by its own days.
+
+    A key present with `null` means that state of that kind is never erased by age; a key
+    absent falls back to the general `<state>_days`. The lesson is the first: it waits for
+    a second PROJECT to corroborate it, which takes longer than a review queue's 90 days,
+    and once corroborated it is the estate's working memory (`proposed_days: 365`,
+    `observed_days: null`). A workspace configured before the key existed reads `{}` and
+    keeps today's behaviour."""
+    kinds = config()["ledger"].get("kinds") or {}
+    return {k: v for k, v in kinds.items() if isinstance(v, dict)}
+
+
+def horizon_for(state: str, kind: str | None = None) -> int | None:
+    """Days a row of this state (and kind) is kept, or None when age never erases it."""
+    per_kind = kind_horizons().get(kind or "", {})
+    key = f"{state}_days"
+    if key in per_kind:
+        return None if per_kind[key] is None else int(per_kind[key])
+    value = config()["ledger"].get(key)
+    return None if value is None else int(value)
+
+
+def days_left(owner: str, state: str, created_at: str, kind: str | None = None) -> int | None:
     """Days until retention would erase this row, or `None` if it never will.
 
     **ONE HOME, because there were three readers and one applied the rule.**
@@ -104,8 +127,7 @@ def days_left(owner: str, state: str, created_at: str) -> int | None:
     """
     if owner in exempt_owners() or state in never_states():
         return None
-    cfg = config()["ledger"]
-    horizon = cfg.get(f"{state}_days")
+    horizon = horizon_for(state, kind)
     if horizon is None:
         # A state with no declared horizon is not erased by age. Saying `None`
         # is the honest answer: this function must not invent a deadline for a
@@ -125,31 +147,46 @@ def ledger_candidates(conn: sqlite3.Connection) -> list[dict]:
     cfg = config()["ledger"]
     ages = {"proposed": cfg["proposed_days"], "observed": cfg["observed_days"],
             "rejected": cfg["rejected_days"]}
+    kinds = kind_horizons()
     out = []
     for state, days in ages.items():
         if state in cfg["never"]:
             continue
-        rows = conn.execute(
-            "SELECT l.memory_id, l.revision, l.state, l.owner, l.created_at,"
-            "       substr(l.statement, 1, 70) AS gist"
-            " FROM ledger l"
-            " JOIN (SELECT memory_id, MAX(revision) r FROM ledger GROUP BY memory_id) m"
-            "   ON m.memory_id = l.memory_id AND m.r = l.revision"
-            " LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
-            " WHERE t.memory_id IS NULL"
-            "   AND l.state = ?"
-            "   AND l.created_at < ?"
-            # A workflow's records age by the WORKFLOW, not by their own
-            # revision date: an open workflow's checkpoint is the work in
-            # progress however long the work takes. `workflow_candidates`
-            # applies their horizons below.
-            "   AND " + ledger.not_workflow() +
-            # Structural, not a parameter: the exempt owners are inlined into
-            # every query rather than passed in by a caller who might forget.
-            f"   AND l.owner NOT IN ({','.join('?' * len(cfg['owner_exempt']))})",
-            (state, cutoff(days), *cfg["owner_exempt"])).fetchall()
-        out += [dict(r, horizon_days=days) for r in rows]
+        # A KIND WITH ITS OWN HORIZON FOR THIS STATE leaves the general query and is asked
+        # once with its own cutoff, or not at all when that horizon is `null`.
+        own = sorted(k for k, kc in kinds.items() if f"{state}_days" in kc)
+        passes = [(days, " AND l.kind NOT IN (" + ",".join("?" * len(own)) + ")" if own else "",
+                   tuple(own))]
+        passes += [(int(kinds[k][f"{state}_days"]), " AND l.kind = ?", (k,))
+                   for k in own if kinds[k][f"{state}_days"] is not None]
+        for days, kind_sql, kind_args in passes:
+            out += _ledger_rows(conn, cfg, state, days, kind_sql, kind_args)
     return out + workflow_candidates(conn)
+
+
+def _ledger_rows(conn: sqlite3.Connection, cfg: dict, state: str, days: int,
+                 kind_sql: str, kind_args: tuple) -> list[dict]:
+    """One state's rows older than `days`, narrowed by `kind_sql` (a kind or its complement)."""
+    rows = conn.execute(
+        "SELECT l.memory_id, l.revision, l.state, l.owner, l.created_at,"
+        "       substr(l.statement, 1, 70) AS gist"
+        " FROM ledger l"
+        " JOIN (SELECT memory_id, MAX(revision) r FROM ledger GROUP BY memory_id) m"
+        "   ON m.memory_id = l.memory_id AND m.r = l.revision"
+        " LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
+        " WHERE t.memory_id IS NULL"
+        "   AND l.state = ?"
+        "   AND l.created_at < ?"
+        # A workflow's records age by the WORKFLOW, not by their own
+        # revision date: an open workflow's checkpoint is the work in
+        # progress however long the work takes. `workflow_candidates`
+        # applies their horizons below.
+        "   AND " + ledger.not_workflow() +
+        # Structural, not a parameter: the exempt owners are inlined into
+        # every query rather than passed in by a caller who might forget.
+        f"   AND l.owner NOT IN ({','.join('?' * len(cfg['owner_exempt']))})" + kind_sql,
+        (state, cutoff(days), *cfg["owner_exempt"], *kind_args)).fetchall()
+    return [dict(r, horizon_days=days) for r in rows]
 
 
 def workflow_candidates(conn: sqlite3.Connection) -> list[dict]:

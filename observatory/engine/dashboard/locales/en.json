@@ -60,6 +60,10 @@
   "one": "the leak scan could not read {n} source",
   "other": "the leak scan could not read {n} sources"
  },
+ "the leak scan read {read} of {n} sources; stores unread: {stores}": {
+  "one": "the leak scan read {read} of {n} source; stores unread: {stores}",
+  "other": "the leak scan read {read} of {n} sources; stores unread: {stores}"
+ },
  "the leak scan did not read {n} sources": {
   "one": "the leak scan did not read {n} source",
   "other": "the leak scan did not read {n} sources"

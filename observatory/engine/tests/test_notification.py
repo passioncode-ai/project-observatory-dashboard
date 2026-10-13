@@ -266,6 +266,31 @@ def test_info_findings_still_never_notify() -> None:
           "the reason must travel with the rule, or the next cap re-hides a class")
 
 
+def test_a_partial_leak_scan_is_on_the_board_but_not_pushed() -> None:
+    """A coverage gap is not an incident: the critical sightings it travels with are (ENG-001)."""
+    d, _ = sandbox()
+    doc = json.loads((d / "registry/findings.json").read_text(encoding="utf-8"))
+    doc["findings"] = [
+        {**FINDING, "id": "secret.leak_scan_partial:estate:leak-scan-coverage",
+         "type": "secret.leak_scan_partial", "severity": "warning", "title": "the leak scan read 1 of 4 sources"},
+        {**FINDING, "id": "secret.seen_outside_its_home:estate:leak-sightings",
+         "type": "secret.seen_outside_its_home", "severity": "critical", "title": "1 credential appears elsewhere"}]
+    (d / "registry/findings.json").write_text(json.dumps(doc), encoding="utf-8")
+    m = load_notifier()
+    sent = []
+
+    def recording(title, body):
+        sent.append(title + " " + body)
+        return True, "ok"
+
+    m.notify = recording
+    m.main([])
+    refs = notified_refs(d)
+    check("the sighting is pushed", any(r.startswith("secret.seen_outside_its_home") for r in refs), str(refs))
+    check("the partial-scan warning is not", not any(r.startswith("secret.leak_scan_partial") for r in refs)
+          and not any("read 1 of 4" in t for t in sent), str(refs))
+
+
 def test_a_fabric_host_is_the_one_channel() -> None:
     """With its descriptor installed and Fabric Dashboards present, the host delivers
     `finding.opened` from the events feed; a banner of our own would be the same finding
@@ -305,6 +330,7 @@ if __name__ == "__main__":
                test_a_successful_run_raises_no_channel_finding,
                test_the_reason_reaches_the_caller,
                test_info_findings_still_never_notify,
+               test_a_partial_leak_scan_is_on_the_board_but_not_pushed,
                test_a_fabric_host_is_the_one_channel):
         fn()
     print()

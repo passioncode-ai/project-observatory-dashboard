@@ -37,11 +37,12 @@ REQUIRED = ["observatory_status", "observatory_project", "observatory_timeline",
 #: Every tool name `mcp/server.py` publishes in `tools/list` (OSS-07: existing MCP tool
 #: names stay available). Changing this list is changing the published surface.
 GOLDEN_TOOLS = [
-    # observatory_* tools (23)
+    # observatory_* tools (24)
     "observatory_assistant_ask", "observatory_assistant_conversation", "observatory_assistant_status",
     "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_credentials",
     "observatory_explain", "observatory_findings", "observatory_handoff_accept",
-    "observatory_handoff_create", "observatory_handoff_get", "observatory_learn", "observatory_machine",
+    "observatory_handoff_create", "observatory_handoff_get", "observatory_learn", "observatory_lesson",
+    "observatory_machine",
     "observatory_overview", "observatory_project", "observatory_propose", "observatory_recall",
     "observatory_record", "observatory_resolve", "observatory_search", "observatory_status",
     "observatory_timeline", "observatory_workflow_list",

@@ -49,3 +49,19 @@ dashboard pages (SCN-001–006). The [specification](../macos/SPEC.md) and
 Offline verification also serves agents and contributors: a failed suite setup or
 report export must retain completed evidence and never publish a successful final
 summary. See [offline verification](../../observatory/engine/docs/ux/portable-scenarios.md#offline-verification-receipts).
+
+Lesson evidence recovery: an agent revises or repeats an observed lesson after its commit
+is no longer available. The tool preserves the old observation as archived history and
+returns a new proposal plus its `replaces` reference; a failure to create the proposal
+leaves the old record and indexes intact. Valid wording-only revisions remain observed
+when both known projects still resolve. Identity mutation is refused, and operator-owned
+support remains protected. Executable scenarios: `tests/test_lesson.py` class
+`EvidenceRevisionSafety` and `tests/test_corroboration.py`
+`test_observation_is_revalidated_when_unchanged_commit_disappears`, inside the engine.
+
+Lesson bridge migration concurrency: while a proposed note is migrating, another caller
+records the same lesson identity. The contender cannot pass the migration's write lock;
+a retry returns the migrated lesson instead of creating another active identity. A note
+changed since candidate discovery is skipped. Generic ledger creation/conversion also
+refuses a duplicate identity; erasure committed after its first read still prevents an
+insert. `TheBridgeNotesMigrate` exercises these interleavings with two SQLite connections.

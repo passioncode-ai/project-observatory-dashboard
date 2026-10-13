@@ -347,6 +347,92 @@ class HeaderDoorTests(unittest.TestCase):
                 self.assertNotEqual(b.returncode, 0, b.stdout)
                 self.assertNotIn("header_for", self.meta() if (self.store / "alpha-web" / "prod" / "ALPHA_TOKEN.meta.json").exists() else {})
 
+    # ── loopback servers and clients that do not export the URL (PB-139) ──
+
+    LOOPBACK = "http://127.0.0.1:47835"
+
+    def test_a_loopback_literal_with_a_port_may_be_bound_over_http(self):
+        """Loopback crosses no network: the https rule's reason does not apply to it."""
+        self.put()
+        for target, want in ((self.LOOPBACK + "/mcp", self.LOOPBACK),
+                             ("http://127.9.8.7:9", "http://127.9.8.7:9"),
+                             ("http://[::1]:8080/mcp", "http://[::1]:8080"),
+                             ("http://127.0.0.1:80", "http://127.0.0.1:80")):
+            with self.subTest(target=target):
+                b = self.bind(target)
+                self.assertEqual(b.returncode, 0, b.stderr)
+                self.assertEqual(self.meta()["header_for"], want)
+
+    def test_http_to_anything_but_a_loopback_literal_with_a_port_is_refused(self):
+        self.put()
+        for target, phrase in (("http://localhost:1", "localhost"),
+                               ("http://10.0.0.1:80", "loopback"),
+                               ("http://example.com", "loopback"),
+                               ("http://mcp.example.invalid:8080", "loopback"),
+                               ("http://127.0.0.1", "port"),
+                               ("http://" + "user:pw" + "@127.0.0.1:1", "carries"),
+                               ("http://127.0.0.1:1/?k=v", "query")):
+            with self.subTest(target=target):
+                p = self.bind(target)
+                self.assertNotEqual(p.returncode, 0, p.stdout)
+                self.assertIn(phrase, p.stderr)
+                self.assertNotIn("header_for", self.meta())
+
+    def test_a_loopback_binding_is_served_to_its_server_and_only_its_server(self):
+        self.put()
+        self.assertEqual(self.bind(self.LOOPBACK).returncode, 0)
+        p = self.header(url=self.LOOPBACK + "/mcp")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(json.loads(p.stdout), {"Authorization": f"Bearer {VALUE}"})
+        for other in ("http://127.0.0.1:47836/mcp", "https://127.0.0.1:47835/mcp",
+                      "http://localhost:47835/mcp"):
+            with self.subTest(url=other):
+                self.assertRefused(self.header(url=other), "bound to " + self.LOOPBACK)
+
+    def test_server_url_serves_a_client_that_does_not_export_one(self):
+        """Codex's helper sets no CLAUDE_CODE_MCP_SERVER_URL; the flag names the server, the binding decides."""
+        self.put()
+        self.assertEqual(self.bind(self.LOOPBACK).returncode, 0)
+        args = ["--env", "prod", "--server-url", self.LOOPBACK + "/mcp", "alpha-web", "ALPHA_TOKEN"]
+        p = self.header(*args, url=None, server_name=None)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(json.loads(p.stdout), {"Authorization": f"Bearer {VALUE}"})
+        p = self.header("--env", "prod", "--server-url", "http://127.0.0.1:9/mcp", "alpha-web",
+                        "ALPHA_TOKEN", url=None, server_name=None)
+        self.assertRefused(p, "bound to " + self.LOOPBACK)
+        rows = [r for r in self.audit_rows() if r.get("action") == "header"]
+        self.assertEqual([r["caller"] for r in rows], ["codex-helper", "codex-helper"])
+        self.assertEqual([r["verdict"] for r in rows], ["served", "refused"])
+        self.assertEqual(rows[-1]["reason"], "server-mismatch")
+
+    def test_two_urls_that_disagree_are_refused(self):
+        self.put()
+        self.assertEqual(self.bind(self.LOOPBACK).returncode, 0)
+        p = self.header("--env", "prod", "--server-url", "http://127.0.0.1:9/mcp", "alpha-web",
+                        "ALPHA_TOKEN", url=self.LOOPBACK + "/mcp")
+        self.assertRefused(p, "url-conflict")
+        agree = self.header("--env", "prod", "--server-url", self.LOOPBACK + "/other", "alpha-web",
+                            "ALPHA_TOKEN", url=self.LOOPBACK + "/mcp")
+        self.assertEqual(agree.returncode, 0, agree.stderr)
+        rows = [r for r in self.audit_rows() if r.get("action") == "header"]
+        self.assertEqual(rows[0]["reason"], "url-conflict")
+        self.assertEqual(rows[1]["caller"], "claude-headersHelper")
+
+    def test_server_url_does_not_lift_the_terminal_refusal(self):
+        self.put()
+        self.assertEqual(self.bind(self.LOOPBACK).returncode, 0)
+        env = {k: v for k, v in self.env.items() if not k.startswith("CLAUDE_CODE_MCP_")}
+        leader, follower = pty.openpty()
+        try:
+            p = subprocess.run([sys.executable, str(USE), "header", "--env", "prod", "--server-url",
+                                self.LOOPBACK, "alpha-web", "ALPHA_TOKEN"], stdout=follower,
+                               stderr=subprocess.PIPE, text=True, env=env, timeout=60)
+        finally:
+            os.close(follower)
+            os.close(leader)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("the reader must be a program", p.stderr)
+
     def test_binding_a_slot_that_holds_nothing_is_refused(self):
         p = self.bind()
         self.assertNotEqual(p.returncode, 0)

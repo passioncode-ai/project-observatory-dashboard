@@ -101,6 +101,27 @@ REVIEW_HORIZON_DAYS = int(json.loads(
 )['ledger']['proposed_days'])
 REVIEW_BACKLOG = 20
 
+
+def _kind_horizons(state: str = "proposed") -> dict[str, int | None]:
+    """Kinds that age by their own horizon in this state (`retention.json` → `ledger.kinds`),
+    asked of `store/retention.horizon_for`, the one reader of that rule: a proposed lesson
+    is kept 365 days, so the general horizon must not announce it for erasure at 90.
+    Empty when retention cannot be read — then every row ages by the general horizon,
+    which is what this builder did before the rule existed."""
+    try:
+        sys.path.insert(0, str(ROOT / "store"))
+        import retention
+        return {k: retention.horizon_for(state, k) for k, kc in retention.kind_horizons().items()
+                if f"{state}_days" in kc}
+    except Exception:                                                               # noqa: BLE001
+        return {}
+
+
+def _kind_horizon_note(horizons: dict[str, int | None]) -> str:
+    """`, a lesson at 365 days` — what the general sentence leaves out."""
+    return "".join(f", a {k} at {d} days" if d is not None else f", a {k} never by age"
+                   for k, d in sorted(horizons.items()))
+
 #: How many (source, reason) pairs a `collector.degraded` row prints. Six RDAP
 #: 404s fit; a collector failing on ninety owners must not print ninety lines,
 #: and the remainder is COUNTED rather than dropped.
@@ -1146,7 +1167,7 @@ def _erasure_horizon(row: dict) -> str:
     try:
         sys.path.insert(0, str(ROOT / "store"))
         import retention
-        left = retention.days_left(owner, state, at)
+        left = retention.days_left(owner, state, at, kind=row.get("kind"))
     except Exception:                                                               
         return ""
     if left is None:
@@ -4385,13 +4406,29 @@ def collect() -> list[dict]:
             # "9 will be erased unreviewed in eleven days" is a decision with a date
             # on it — and erasure by timeout is what `tools/corroborate.py` calls
             # "not review" in its own docstring.
+            # BY KIND: a kind with its own horizon (a lesson: 365 days) leaves the general
+            # count and is counted against its own cutoff, or not at all when it is never
+            # erased by age (`store/retention.horizon_for`).
+            own = _kind_horizons("proposed")
+            kind_sql = (f" AND l.kind NOT IN ({','.join('?' * len(own))})" if own else "")
+            per_kind = [c.execute(
+                "SELECT COUNT(*), MIN(l.created_at) FROM ledger l"
+                " JOIN (SELECT memory_id, MAX(revision) rev FROM ledger GROUP BY memory_id) m"
+                "   ON l.memory_id = m.memory_id AND l.revision = m.rev"
+                " LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
+                " WHERE t.memory_id IS NULL AND l.state = 'proposed' AND l.kind = ?"
+                "   AND l.created_at < ?"
+                f"   AND l.owner NOT IN ({','.join('?' * len(EXEMPT_OWNERS))})",
+                (k, (datetime.now(timezone.utc) - timedelta(days=max(d - 14, 1))
+                     ).strftime("%Y-%m-%dT%H:%M:%SZ"), *EXEMPT_OWNERS)).fetchone()
+                for k, d in sorted(own.items()) if d is not None]
             soon = c.execute(
                 "SELECT COUNT(*), MIN(l.created_at) FROM ledger l"
                 " JOIN (SELECT memory_id, MAX(revision) rev FROM ledger GROUP BY memory_id) m"
                 "   ON l.memory_id = m.memory_id AND l.revision = m.rev"
                 " LEFT JOIN tombstones t ON t.memory_id = l.memory_id"
                 " WHERE t.memory_id IS NULL AND l.state = 'proposed'"
-                "   AND l.created_at < ?"
+                "   AND l.created_at < ?" + kind_sql +
                 # STRUCTURAL, as in `store/retention.py`'s own query: the
                 # exempt owners are inlined rather than passed by a caller who
                 # might forget. This query did forget, so a row retention will
@@ -4405,7 +4442,9 @@ def collect() -> list[dict]:
                 # by a planted row rather than in production.
                 ((datetime.now(timezone.utc)
                 - timedelta(days=max(REVIEW_HORIZON_DAYS - 14, 1))
-                ).strftime("%Y-%m-%dT%H:%M:%SZ"), *EXEMPT_OWNERS)).fetchone()
+                ).strftime("%Y-%m-%dT%H:%M:%SZ"), *own, *EXEMPT_OWNERS)).fetchone()
+            soon = (soon[0] + sum(r[0] for r in per_kind),
+                    min([x for x in (soon[1], *(r[1] for r in per_kind)) if x], default=None))
             c.close()
         except sqlite3.Error as exc:
             # Named, not vanished. A handler here hid a closed-connection
@@ -4438,7 +4477,8 @@ def collect() -> list[dict]:
                              "print time — a difference of a few rows between "
                              "them is minutes, not disagreement. Retention "
                              "erases them at "
-                             f"{REVIEW_HORIZON_DAYS} days whether or not anyone "
+                             f"{REVIEW_HORIZON_DAYS} days"
+                             f"{_kind_horizon_note(_kind_horizons('proposed'))} whether or not anyone "
                              f"looked — except rows owned by "
                              f"{', '.join(EXEMPT_OWNERS)}, which it never erases "
                              f"because nothing could re-derive them."),
@@ -4463,7 +4503,8 @@ def collect() -> list[dict]:
                 "severity": "warning",
                 **titled("{n} conclusions will be erased unreviewed within 14 days", n=soon[0]),
                 "detail": "Retention tombstones a `proposed` row at "
-                          f"{REVIEW_HORIZON_DAYS} days. These were written by an "
+                          f"{REVIEW_HORIZON_DAYS} days"
+                          f"{_kind_horizon_note(_kind_horizons('proposed'))}. These were written by an "
                           "automated reader that cannot promote its own work, and "
                           "nobody has looked. Erasure by timeout is not a decision.",
                 "action": "project-observatory full digest, then review.py promote|reject "

@@ -164,6 +164,50 @@
   {
    "token": "deepseek",
    "reason": "The public provider/model namespace in synthetic usage receipts (observatory/engine/tests/test_fabric_service.py), not a private project identity."
+  },
+  {
+   "token": "aws_region",
+   "reason": "Public AWS configuration variable name used in synthetic classification tests; no value or account identity."
+  },
+  {
+   "token": "callback",
+   "reason": "Common OAuth callback URL path in a synthetic example.com test fixture."
+  },
+  {
+   "token": "doadmin",
+   "reason": "DigitalOcean managed database default account name in synthetic provider fixtures; no real account credential."
+  },
+  {
+   "token": "google_client_secret",
+   "reason": "Public OAuth environment variable name used by classification tests and commentary, never its value."
+  },
+  {
+   "token": "heroku_api_key",
+   "reason": "Public Heroku environment variable name in a synthetic classification fixture, never a live key."
+  },
+  {
+   "token": "postgresql",
+   "reason": "Public database product and connection URI scheme handled by the provider door."
+  },
+  {
+   "token": "redis",
+   "reason": "Public database product and connection URI scheme handled by the provider door."
+  },
+  {
+   "token": "redis_url",
+   "reason": "Conventional Redis connection environment variable name handled by the provider door, never a live URL."
+  },
+  {
+   "token": "sentry_dsn",
+   "reason": "Public Sentry environment variable name used to distinguish non-database connection settings."
+  },
+  {
+   "token": "sslmode",
+   "reason": "Public PostgreSQL connection parameter used in synthetic URLs and URL construction."
+  },
+  {
+   "token": "valkey",
+   "reason": "Public database product and connection URI scheme handled by the provider door."
   }
  ]
 }

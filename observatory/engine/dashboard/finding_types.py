@@ -162,6 +162,7 @@ LABELS: dict[str, str] = {
     "secret.identifier_seen": "Account identifiers outside their files",
     "secret.journal_unreadable": "Key journal unreadable",
     "secret.leak_scan_blind": "Leak scan cannot read a source",
+    "secret.leak_scan_partial": "Leak scan cut short",
     "secret.leak_scan_unmeasured": "Leak scan not measured",
     "secret.leaked_unrotated": "Leaked key not rotated",
     "secret.moved_unrecorded": "Key movement not recorded",

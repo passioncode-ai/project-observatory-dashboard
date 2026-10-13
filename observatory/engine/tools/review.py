@@ -237,6 +237,13 @@ def cmd_digest(conn, args) -> int:
           + (f", {shape['unclassified']} on evidence this cannot read"
              if shape.get("unclassified") else "")
           + f". Retention tombstones a `proposed` row after {horizon} days"
+          # BY KIND, from the one reader of the rule (`retention.horizon_for`): a lesson
+          # waits 365 days for a second project, and saying 90 would be a false deadline.
+          + "".join(f", a {k} after {_retention.horizon_for('proposed', k)} days"
+                    if _retention.horizon_for("proposed", k) is not None
+                    else f", a {k} never by age"
+                    for k, kc in sorted(_retention.kind_horizons().items())
+                    if "proposed_days" in kc)
           + (f", except rows owned by {', '.join(_exempt)}, which it never "
              f"erases — those are marked `kept` and still wait for a decision."
              if (_exempt := _retention.exempt_owners()) else "."))
@@ -277,7 +284,8 @@ def cmd_digest(conn, args) -> int:
             # row and printed a countdown for rows retention will never touch —
             # a deadline on the operator's attention that does not exist
             #.
-            left = _retention.days_left(r["owner"], "proposed", r["created_at"])
+            # AND BY KIND: a lesson waits 365 days for a second project, not 90.
+            left = _retention.days_left(r["owner"], "proposed", r["created_at"], kind=r["kind"])
             if left is None:
                 kept += 1
                 continue

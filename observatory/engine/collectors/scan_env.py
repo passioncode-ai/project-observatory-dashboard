@@ -39,6 +39,7 @@ sys.path.insert(0, str(ROOT))
 import atomic              
 import paths              
 import safe_git  # noqa: E402  — the engine's one git door
+import credential_shape  # noqa: E402  — the one list of issuer prefixes
 from runtime_identity import IdentityError, load as load_identity
 
 #: NO DEPTH LIMIT. A fixed depth looks sufficient and silently misses files a
@@ -105,11 +106,12 @@ PLACEHOLDER_EXACT = re.compile(
 PLACEHOLDER_MARK = re.compile(
     r"(_?here$|[-_]here$|goes[-_]here|your[-_]|xxxxx|<[^>]+>|\.\.\.)", re.I)
 
-#: Shapes that are a credential whatever they are called.
-KNOWN_PREFIX = ("sk-", "sk_", "pk_live", "pk_test", "rk_", "ghp_", "gho_", "ghs_",
-                "github_pat_", "xoxb-", "xoxp-", "xapp-", "AIza", "AKIA", "ASIA",
-                "eyJ", "-----BEGIN", "glpat-", "dop_v1_", "shpss_", "shpat_",
-                "SG.", "hf_", "npm_", "dckr_pat_", "figd_", "sntrys_")
+#: Shapes that are a credential whatever they are called. ONE LIST (review
+#: round 3): every issuer prefix the redactor knows (`credential_shape.PREFIXES`,
+#: which the commit gate reads too), plus the shapes that are not issuer
+#: prefixes — a JWT, a PEM block, an AWS id, SendGrid's `SG.`.
+KNOWN_PREFIX = tuple(dict.fromkeys((*credential_shape.PREFIXES, "pk_live", "pk_test", "AKIA", "ASIA",
+                                    "eyJ", "-----BEGIN", "SG.")))
 
 #: A URL carrying its own credentials — `postgres://user:pass@host`. The name may
 #: be anything; the shape decides.
@@ -167,10 +169,51 @@ def namespace(pepper: str) -> str:
     return f"{FINGERPRINT_VERSION}:{digest}"
 
 
-def wordish(value: str) -> bool:
-    """Does this read as a tokenised identifier rather than as randomness?"""
+#: An issuer prefix and a random tail: `ntn_<46>`, `ol_api_<38>`, `secret_<40>`.
+#: The prefix is at most eight characters, the tail one run of twenty or more
+#: with no separator in it.
+PREFIXED_TAIL = re.compile(r"^([A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*)[-_.]([A-Za-z0-9]{20,})$")
+
+#: A canonical UUID. It has the entropy of a key, so its NAME decides (INB-002).
+UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+#: Names that say "this value identifies something": an id, a price, a
+#: release, an image tag, a collection, a parent page, a project, an
+#: organisation, a bucket. Such a value can carry a prefix in front of a random
+#: run — `price_…`, `org-…`, `prj_…`, `sha-<hex>` — exactly like an issued
+#: token, and is public by design. Under `SECRET_NAME` as well (`*_SECRET_ID`,
+#: `*_TOKEN_ID`) the secret rule wins: the safe default.
+IDENTIFIER_NAME = re.compile(r"(_ID$|_PRICE|_RELEASE$|_TAG$|_COLLECTION$|_PARENT$|_PROJECT$|"
+                             r"_ORG$|_BUCKET$)", re.I)
+
+
+def _random_tail(value: str) -> bool:
+    """Is this a short prefix in front of a random run, the shape of an issued token?
+
+    A PREFIX IS NOT A WORD (INB-002). `wordish` read `ntn` and `api` as words,
+    so a Notion or Outline token — a random 46- or 38-character run behind its
+    issuer's prefix — was filed as configuration. The tail must mix letters and
+    digits as well: a long run of letters alone is a name, not a key.
+    """
+    m = PREFIXED_TAIL.match(value)
+    if not m or len(m.group(1)) > 8:
+        return False
+    tail = m.group(2)
+    return (any(c.isdigit() for c in tail) and any(c.isalpha() for c in tail)
+            and entropy(tail) >= MIN_SECRET_ENTROPY)
+
+
+def wordish(value: str, *, tail_tolerant: bool = True) -> bool:
+    """Does this read as a tokenised identifier rather than as randomness?
+
+    `tail_tolerant=False` is the reading before INB-002, in which a prefix is
+    a word; `classify` asks it to tell a value that is random throughout from
+    one whose only randomness is its tail.
+    """
     toks = re.split(r"[-_.]", value)
     if len(toks) < 2:
+        return False
+    if tail_tolerant and _random_tail(value):
         return False
     return any(len(t) >= 3 and t.isalpha() and not HEX_ONLY.match(t) for t in toks)
 
@@ -193,7 +236,7 @@ MIN_SECRET_LEN = 24
 MIN_SECRET_ENTROPY = 3.4
 
 
-def looks_secret(value: str) -> bool:
+def looks_secret(value: str, *, tail_tolerant: bool = True) -> bool:
     """The value's own shape, independent of what it is called.
 
     Order matters. A known issuer prefix is decisive whatever else is true; a URL
@@ -214,11 +257,22 @@ def looks_secret(value: str) -> bool:
         return False
     if len(v) < MIN_SECRET_LEN:
         return False
-    if wordish(v):
+    if wordish(v, tail_tolerant=tail_tolerant):
         return False
     if not re.fullmatch(r"[A-Za-z0-9_\-+/=.]+", v):
         return False
     return entropy(v) >= MIN_SECRET_ENTROPY
+
+
+def _random_run(value: str) -> bool:
+    """Random once its separators are removed: 20+ characters of a key's alphabet,
+    a digit or both cases, and a key's entropy. A URL, a sentence or a short word
+    is not."""
+    if not re.fullmatch(r"[A-Za-z0-9_\-.+/=]+", value):
+        return False
+    bare = re.sub(r"[-_.]", "", value)
+    mixed = any(c.isdigit() for c in bare) or (any(c.isupper() for c in bare) and any(c.islower() for c in bare))
+    return len(bare) >= 20 and mixed and entropy(bare) >= MIN_SECRET_ENTROPY
 
 
 def classify(name: str, value: str) -> str:
@@ -228,7 +282,33 @@ def classify(name: str, value: str) -> str:
         return "empty"
     if is_placeholder(v):
         return "placeholder"
+    secret_name = bool(SECRET_NAME.search(name))
+    identifier_name = bool(IDENTIFIER_NAME.search(name))
+    if UUID.match(v):
+        # A UUID IS DECIDED BY ITS NAME (INB-002): an Outline collection id read
+        # as a secret on entropy alone, while a UUID-shaped API key is real. The
+        # secret rule wins a name both claim (`VAULT_SECRET_ID`); a name neither
+        # claims falls through to the shape, so the nil UUID is configuration.
+        if secret_name:
+            return "secret"
+        if identifier_name:
+            return "config"
+    if secret_name and _random_run(v):
+        # A SECRET'S NAME WINS OVER WORD SHAPE (review round 3). A random body
+        # that happens to hold `-` or `_` — Google's `GOCSPX-…`, Tavily's
+        # `tvly-…`, any URL-safe base64 — split into "words", and under
+        # GOOGLE_CLIENT_SECRET it was a secret less than half the time.
+        return "secret"
     if looks_secret(v):
+        # AN IDENTIFIER'S PREFIX IS NOT AN ISSUER'S (INB-002, review round 1).
+        # When the random tail is the ONLY reason to call the value secret — the
+        # reading before INB-002 said words — and the name says identifier, it
+        # is a price, an organisation, a tag: configuration. A name the secret
+        # rule claims keeps it secret, and so does a known issuer prefix:
+        # `looks_secret(v, tail_tolerant=False)` is True for one, so the last
+        # test below already holds it.
+        if identifier_name and not secret_name and not looks_secret(v, tail_tolerant=False):
+            return "config"
         return "secret"
     if PLAIN.match(v) or URL_NO_AUTH.match(v):
         # AN ADDRESS IS NOT A CREDENTIAL, whatever it is called. A redirect

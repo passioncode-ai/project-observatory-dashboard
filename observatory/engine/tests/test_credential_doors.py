@@ -81,6 +81,24 @@ def test_the_ledgers_hold_no_values() -> None:
               '"value": value' not in code and "'value': value" not in code, "")
 
 
+def test_the_digitalocean_door_keeps_the_same_rules() -> None:
+    """`tools/digitalocean.py` (PLN-142): no value in argv or on stdout, provider stderr withheld.
+
+    It holds no admin credential of its own — doctl's context is the credential —
+    so its value goes to the vault on stdin rather than through `write_secret`."""
+    rel = "tools/digitalocean.py"
+    src = (ROOT / rel).read_text(encoding="utf-8")
+    code = source_reader.code_only(src)
+    check(f"{rel} hands a value to the vault on stdin only",
+          "input=value" in code and not source_reader.appears_in_code(src, '"--password"')
+          and not source_reader.appears_in_code(src, '"--token"'),
+          "a value in argv is in the shell history, ps and the transcript")
+    check(f"{rel} withholds provider diagnostics",
+          "provider diagnostics withheld" in source_reader.code_keeping_strings(src) and "p.stderr.strip()" not in code, "")
+    check(f"{rel} prints no password variable",
+          not any(f"print({v}" in code or f"{{{v}}}" in code for v in ("pw", "url", "value")), "")
+
+
 # ─────────────────────────── cloudflare ──────────────────────────────────────
 
 def cf():
@@ -1940,7 +1958,10 @@ def _policy_door():
             calls["patched"].append((path, payload))
         return {"data": {"hash": path.rsplit("/", 1)[-1], "name": "project-a-prod-model-key"}}
     m._request = fake
-    m.find_key = lambda admin, name: {"hash": "h-1", "name": name, "label": "sk-or-v1-x...y"}
+    # The provider reports the ceiling the door last set: the ledger's, as an honest provider would.
+    m.find_key = lambda admin, name: {"hash": "h-1", "name": name, "label": "sk-or-v1-x...y",
+                                      "limit": (m.ledger()["issued"].get(name) or {}).get("limit_usd"),
+                                      "limit_reset": (m.ledger()["issued"].get(name) or {}).get("limit_reset")}
     m.deliver = lambda value, to: calls["delivered"].append(to) or f"vault {to[len('vault:'):]}"
     m._journal = lambda *a, **k: None
     return m, calls
@@ -2019,12 +2040,1008 @@ def test_or_issue_for_policy_command_line() -> None:
     check("a refused policy exits 2", m.cmd_issue_for_policy(str(good), "example", 99.0, False) == 2, "")
 
 
+def _two_slots(**over):
+    """A limited policy with two project-key sources of the same project."""
+    return _policy(credentialSources=[{"kind": "project-key", "ref": "vault:project-a/prod/MODEL_KEY"},
+                                      {"kind": "project-key", "ref": "vault:project-a/prod/OTHER_KEY"}], **over)
+
+
+def test_or_policy_ceilings_sum_to_the_project_limit() -> None:
+    """ENG-002: every project-key source used to get the WHOLE project limit, so two sources of a $40
+    project could spend $80. The ceilings of every key the plan touches now sum to at most `limitUsd`:
+    an equal split rounded down to the cent by default, `--split` for explicit amounts, and `--limit`
+    meaning per key, refused when N × limit exceeds the project limit."""
+    m, calls = _policy_door()
+    m.issue_for_policy(_two_slots(), "example")
+    ceilings = [p["limit"] for p in calls["posted"]]
+    check("two sources of a $40 project: ceilings sum to at most $40 (was $80)",
+          len(ceilings) == 2 and sum(ceilings) <= 40.0 and ceilings == [20.0, 20.0], str(ceilings))
+
+    m, calls = _policy_door()
+    m.issue_for_policy(_policy(limitUsd=10, credentialSources=[
+        {"kind": "project-key", "ref": f"vault:project-a/prod/K{i}"} for i in range(3)]), "example")
+    ceilings = [p["limit"] for p in calls["posted"]]
+    check("an equal split is rounded DOWN to the cent ($10 over three keys: $3.33 each)",
+          ceilings == [3.33, 3.33, 3.33] and sum(ceilings) <= 10.0, str(ceilings))
+
+    m, calls = _policy_door()
+    plan = m.issue_for_policy(_two_slots(), "example", split={"vault:project-a/prod/MODEL_KEY": 30.0,
+                                                               "project-a/prod/OTHER_KEY": 10.0})
+    check("--split gives explicit amounts; a ref is matched as written or as its vault slot",
+          [p["limit"] for p in calls["posted"]] == [30.0, 10.0], str(plan))
+
+    for name, kw, needle in [
+        ("--split over the limit", {"split": {"vault:project-a/prod/MODEL_KEY": 30.0,
+                                              "vault:project-a/prod/OTHER_KEY": 10.01}}, "more than the project limit"),
+        ("--split naming a slot the policy does not", {"split": {"vault:project-a/prod/MODEL_KEY": 10.0,
+                                                                 "vault:project-a/prod/NOPE": 10.0}}, "not a project-key source"),
+        ("--split leaving a slot without a ceiling", {"split": {"vault:project-a/prod/MODEL_KEY": 10.0}}, "no ceiling"),
+        ("--limit per key over the project limit", {"limit_override": 21.0}, "cannot exceed"),
+        ("--limit and --split together", {"limit_override": 5.0, "split": {"vault:project-a/prod/MODEL_KEY": 5.0}}, "not both"),
+        ("--split naming one slot twice under two spellings", {"split": {"vault:project-a/prod/MODEL_KEY": 10.0,
+                                                                         "project-a/prod/MODEL_KEY": 10.0,
+                                                                         "vault:project-a/prod/OTHER_KEY": 10.0}}, "twice"),
+    ]:
+        m, calls = _policy_door()
+        try:
+            m.issue_for_policy(_two_slots(), "example", **kw)
+            check(f"refused: {name}", False, "planned")
+        except ValueError as exc:
+            check(f"refused: {name}", needle in str(exc) and not calls["posted"], str(exc))
+
+    m, calls = _policy_door()
+    m.issue_for_policy(_two_slots(), "example", 15.0)
+    check("--limit is per key: two keys at $15 under a $40 limit",
+          [p["limit"] for p in calls["posted"]] == [15.0, 15.0], str(calls["posted"]))
+
+    m, calls = _policy_door()
+    try:
+        m.issue_for_policy(_policy(limitUsd=0.01, credentialSources=[
+            {"kind": "project-key", "ref": f"vault:project-a/prod/K{i}"} for i in range(2)]), "example")
+        check("a limit too small to give every key a cent is refused", False, "planned")
+    except ValueError as exc:
+        check("a limit too small to give every key a cent is refused", "cent" in str(exc), str(exc))
+
+    m, calls = _policy_door()
+    plan = m.issue_for_policy(_policy(mode="no-project-limit", limitUsd=None, credentialSources=[
+        {"kind": "project-key", "ref": f"vault:project-a/prod/K{i}"} for i in range(2)]), "example", 15.0)
+    check("with no project limit --limit stays each key's own ceiling",
+          [p["limit"] for p in calls["posted"]] == [15.0, 15.0], str(plan))
+
+    m, calls = _policy_door()
+    plan = m.issue_for_policy(_policy(credentialSources=[{"kind": "project-key", "ref": "vault:project-a/prod/MODEL_KEY"},
+                                                         {"kind": "project-key", "ref": "project-a/prod/MODEL_KEY"}]), "example")
+    check("one slot named twice is one key with the whole limit, the repeat named",
+          [p["limit"] for p in calls["posted"]] == [40.0] and [s.get("action") for s in plan] == ["issued", "skipped"],
+          str(plan))
+
+
+def test_or_policy_lowers_ceilings_before_it_raises_one() -> None:
+    """Moving an existing split must never let the sum pass the limit halfway: a ceiling that goes
+    down moves before one that goes up or a key that is issued."""
+    m, calls = _policy_door()
+    m.save_ledger({"issued": {
+        "held-a": {"account": "example", "hash": "h-a", "destination": "vault:project-a/prod/MODEL_KEY",
+                   "limit_usd": 5.0, "limit_reset": "monthly"},
+        "held-b": {"account": "example", "hash": "h-b", "destination": "vault:project-a/prod/OTHER_KEY",
+                   "limit_usd": 35.0, "limit_reset": "monthly"}}})
+    m.find_key = lambda admin, name: {"hash": {"held-a": "h-a", "held-b": "h-b"}[name], "name": name,
+                                      "limit": {"held-a": 5.0, "held-b": 35.0}[name], "limit_reset": "monthly",
+                                      "disabled": False}
+    plan = m.issue_for_policy(_two_slots(), "example")
+    check("both ceilings move to the equal split, the lowered one first",
+          [p for p, _ in calls["patched"]] == ["/keys/h-b", "/keys/h-a"]
+          and [b["limit"] for _, b in calls["patched"]] == [20.0, 20.0], str(calls["patched"]))
+    check("and the plan says so", [s["action"] for s in plan] == ["ceiling-moved", "ceiling-moved"], str(plan))
+
+
+def test_or_policy_reads_held_keys_at_the_provider() -> None:
+    """A slot the ledger says is held used to read `in-place` without asking the provider, so a
+    disabled or deleted key counted as serving the project. Each held row is read by hash."""
+    def door(row):
+        m, calls = _policy_door()
+        m.save_ledger({"issued": {
+            "held": {"account": "example", "hash": "h-1", "destination": "vault:project-a/prod/MODEL_KEY",
+                     "limit_usd": 40.0, "limit_reset": "monthly"}}})
+        m.find_key = lambda admin, name: row
+        return m, calls
+
+    m, calls = door({"hash": "h-1", "name": "held", "limit": 40.0, "limit_reset": "monthly", "disabled": True})
+    plan = m.issue_for_policy(_policy(), "example")
+    check("a disabled held key is held-disabled, never in-place",
+          [s["action"] for s in plan if "to" in s] == ["held-disabled"] and not calls["posted"], str(plan))
+    m, calls = door(None)
+    plan = m.issue_for_policy(_policy(), "example", dry_run=True)
+    check("a held key the provider no longer has is held-missing, even in a dry run",
+          [s["action"] for s in plan if "to" in s] == ["held-missing"] and not calls["posted"], str(plan))
+    m, calls = door({"hash": "h-1", "name": "held", "limit": None, "limit_reset": "monthly", "disabled": False})
+    plan = m.issue_for_policy(_policy(), "example")
+    check("a provider row with no ceiling is unbounded: the ceiling is moved, never taken from the ledger",
+          [s["action"] for s in plan if "to" in s] == ["ceiling-moved"] and calls["patched"], str(plan))
+
+    m, calls = door({"hash": "h-1", "name": "held", "limit": 25.0, "limit_reset": "monthly", "disabled": False})
+    plan = m.issue_for_policy(_policy(), "example")
+    check("a ceiling moved at the provider is read there, not from the ledger",
+          [s["action"] for s in plan if "to" in s] == ["ceiling-moved"] and plan[-1]["previous"] == 25.0, str(plan))
+
+    m, calls = door(None)
+
+    def not_json(admin, name):
+        raise ValueError("Expecting value: line 1 column 1")
+    m.find_key = not_json
+    plan = m.issue_for_policy(_policy(), "example")
+    check("a provider answer that is not JSON is held-unread, not a crash",
+          [s["action"] for s in plan if "to" in s] == ["held-unread"] and not calls["posted"], str(plan))
+
+    m, calls = door({"hash": "h-1", "name": "held", "limit": 40.0, "limit_reset": "monthly", "disabled": True})
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    (d / "p.json").write_text(json.dumps(_policy()), encoding="utf-8")
+    import contextlib
+    import io
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_for_policy(str(d / "p.json"), "example", None, False)
+    check("the command exits 1 while a slot is held by a key that does not serve it, and names the remedy",
+          rc == 1 and "held-disabled" in out.getvalue() and "enable held" in out.getvalue(), f"{rc} {out.getvalue()}")
+
+
+def test_or_policy_round_two() -> None:
+    """Verification round 2 on ENG-002."""
+    try:
+        orr()._parse_split("vault:project-a/prod/A=10,vault:project-a/prod/B=10,vault:project-a/prod/A=30")
+        check("--split giving one spelling twice is refused", False, "parsed; the last value won")
+    except ValueError as exc:
+        check("--split giving one spelling twice is refused", "twice" in str(exc), str(exc))
+
+    m, calls = _policy_door()
+    m.save_ledger({"issued": {"held": {"account": "example", "hash": "h-1",
+                                       "destination": "vault:project-a/prod/MODEL_KEY",
+                                       "limit_usd": 40.0, "limit_reset": "monthly"}}})
+    m.find_key = lambda admin, name: {"hash": "h-1", "name": name, "limit": 40.0, "limit_reset": None,
+                                      "disabled": False}
+    plan = m.issue_for_policy(_policy(), "example")
+    check("a provider row with no reset period differs from a monthly policy: the ceiling is moved",
+          [s["action"] for s in plan if "to" in s] == ["ceiling-moved"]
+          and calls["patched"] and calls["patched"][-1][1] == {"limit": 40.0, "limit_reset": "monthly"}, str(plan))
+
+    # An unbounded held key is brought under the limit BEFORE a new key is minted, so a mint that
+    # fails leaves the unbounded key already bounded. The new slot is listed first, so only the
+    # lowering-first order puts the held key's move ahead of it.
+    m, calls = _policy_door()
+    m.save_ledger({"issued": {"held": {"account": "example", "hash": "h-held",
+                                       "destination": "vault:project-a/prod/OTHER_KEY",
+                                       "limit_usd": 40.0, "limit_reset": "monthly"}}})
+    m.find_key = lambda admin, name: {"hash": "h-held", "name": name, "limit": None, "limit_reset": "monthly",
+                                      "disabled": False}
+
+    def mint_fails(*a, **k):
+        raise RuntimeError("openrouter answered 500 for /keys")
+    m.issue_key = mint_fails
+    try:
+        m.issue_for_policy(_two_slots(), "example")
+        check("the partial run raises", False, "returned")
+    except m.PolicyPartial as exc:
+        check("the unbounded held key's ceiling was set before the mint failed",
+              [p for p, _ in calls["patched"]] == ["/keys/h-held"]
+              and [s["action"] for s in exc.plan] == ["failed", "ceiling-moved"], f"{calls['patched']} {exc.plan}")
+
+    m, calls = _policy_door()
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    (d / "p.json").write_text(json.dumps(_two_slots()), encoding="utf-8")
+    import contextlib
+    import io
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_for_policy(str(d / "p.json"), "example", None, True)
+    check("the plan prints the keyCeilingsUsd it implies for config/meter.json",
+          rc == 0 and '"vault:project-a/prod/MODEL_KEY": 20.0' in out.getvalue() and "keyCeilingsUsd" in out.getvalue(),
+          out.getvalue())
+
+
+def test_or_policy_partial_failure_names_what_was_done() -> None:
+    """A provider failure in the middle of the run used to raise with no word of the keys already
+    minted. The run stops, the plan comes back with the done steps, the failed one and the ones not
+    reached, the command exits 1 saying `partial`, and a re-run issues only what is missing."""
+    m, calls = _policy_door()
+    real = m._request
+
+    def second_issue_fails(path, key, payload=None, method=None):
+        if path == "/keys" and payload and len(calls["posted"]) == 1:
+            # A REFUSAL (4xx) minted nothing, so the re-run issues the key. A 5xx proves nothing and
+            # keeps a pending row that holds the slot (test_or_policy_fix_five).
+            raise RuntimeError("openrouter answered HTTP 400 for /keys")
+        return real(path, key, payload, method)
+    m._request = second_issue_fails
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    (d / "p.json").write_text(json.dumps(_two_slots()), encoding="utf-8")
+    import contextlib
+    import io
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_for_policy(str(d / "p.json"), "example", None, False)
+    said = out.getvalue()
+    check("exit 1, with partial said", rc == 1 and "partial" in said, f"{rc} {said}")
+    check("the key already minted is listed as issued", "MODEL_KEY: issued" in said, said)
+    check("the failing step is listed as failed", "OTHER_KEY: failed" in said, said)
+    try:
+        m.issue_for_policy(_two_slots(), "example")
+        check("the partial run raises PolicyPartial with the plan", False, "returned")
+    except m.PolicyPartial as exc:
+        check("the partial run raises PolicyPartial with the plan",
+              [s["action"] for s in exc.plan] == ["in-place", "failed"], str(exc.plan))
+    m._request = real
+    plan = m.issue_for_policy(_two_slots(), "example")
+    check("a re-run issues only the missing key",
+          [s["action"] for s in plan] == ["in-place", "issued"] and len(calls["posted"]) == 2, str(plan))
+
+
+# ─────────────────────────── round 3: the invariant at every moment ───────────
+
+class MaxProvider:
+    """A fake OpenRouter that records the HIGHEST total of every key's ceiling (disabled ones too;
+    none counts as unbounded) at every moment — the adversarial round's probe fake. A test asserts
+    `max_sum`, not only the ceilings a run ends with."""
+
+    def __init__(self, unreachable, echo=lambda x: x):
+        self.keys, self.n, self.max_sum, self.patches, self.echo = {}, 0, 0.0, 0, echo
+        self.unread, self.unreachable = set(), unreachable
+        self.lock = __import__("threading").Lock()
+        self.on_patch = None
+
+    def total(self):
+        return sum((r["limit"] if r["limit"] is not None else 1e9) for r in self.keys.values())
+
+    def __call__(self, path, key, payload=None, method=None):
+        with self.lock:
+            if path.startswith("/keys?"):
+                return {"data": [dict(r) for r in self.keys.values()]}
+            if path == "/keys" and payload:
+                self.n += 1
+                h = f"h{self.n}"
+                self.keys[h] = {"hash": h, "name": payload["name"], "limit": self.echo(payload["limit"]),
+                                "limit_reset": payload["limit_reset"], "disabled": False, "label": f"label-{h}"}
+                self.max_sum = max(self.max_sum, self.total())
+                return {"data": dict(self.keys[h]), "key": "sk-or-v1-" + "q" * 40}
+            h = path.rsplit("/", 1)[-1]
+            if h in self.unread and method is None:
+                raise self.unreachable("openrouter unreachable: TimeoutError")
+            if h not in self.keys:
+                raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+            if method == "DELETE":
+                del self.keys[h]
+                return {}
+            if method == "PATCH":
+                self.patches += 1
+                self.keys[h]["limit"] = self.echo(payload["limit"])
+                self.keys[h]["limit_reset"] = payload["limit_reset"]
+                self.max_sum = max(self.max_sum, self.total())
+            row = dict(self.keys[h])
+        if method == "PATCH" and self.on_patch:
+            hook, self.on_patch = self.on_patch, None
+            hook()
+        return {"data": row}
+
+    def start(self):
+        """Measure from now: the highest total this run reaches, the state it found included."""
+        self.max_sum = self.total()
+
+    def by_name(self, suffix):
+        return next(h for h, r in self.keys.items() if r["name"].endswith(suffix))
+
+
+def _r3_door(admins=("example",), echo=lambda x: x):
+    m = orr()
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    m.ADMIN_STORE = d / "admin"
+    m.ADMIN_STORE.mkdir(parents=True)
+    for a in admins:
+        private_io.write(m.ADMIN_STORE / a, "prov\n")
+    m.LEDGER = d / "ledger.json"
+    m._project_folder = lambda project, env, name: {"a": "project-a"}.get(project, project)
+    m.vault_destination = lambda to: to
+    m.deliver = lambda value, to: f"vault {to}"
+    m._journal = lambda *a, **k: None
+    p = MaxProvider(m.Unreachable, echo)
+    m._request = p
+    return m, p
+
+
+def _pol(n=None, refs=None, limit=10, **over):
+    refs = refs or [f"vault:project-a/prod/K{i}" for i in range(n)]
+    base = {"kind": "spend-policy", "project": "urn:project:a", "mode": "limited", "limitUsd": limit,
+            "period": "month", "credentialSources": [{"kind": "project-key", "ref": r} for r in refs]}
+    base.update(over)
+    return base
+
+
+def _cmd(m, policy, *args):
+    import contextlib
+    import io
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    (d / "p.json").write_text(json.dumps(policy), encoding="utf-8")
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_for_policy(str(d / "p.json"), *args)
+    return rc, out.getvalue()
+
+
+def test_or_policy_counts_every_key_of_the_project() -> None:
+    """Round 3, probe A: a source removed from the policy left its key live at its old ceiling, and
+    the remaining two were raised past it ([3.33, 5, 5] = $13.33 against $10). Every ledger row under
+    `vault:<project>/` counts; one the policy no longer names is not moved (refused, not lowered to
+    $0), it is named and the run exits 1. Probe K: a second key behind one slot is counted the same."""
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(3), "example")
+    p.start()
+    rc, out = _cmd(m, _pol(2), "example", None, False)
+    check("A: dropping a source never lifts the total past the limit, at any moment",
+          p.max_sum <= 10.0 and p.total() <= 10.0, f"max={p.max_sum} now={sorted(r['limit'] for r in p.keys.values())}")
+    check("A: the key the policy no longer names is reported and the run exits 1",
+          rc == 1 and "not-in-policy 'project-a-prod-k2'" in out and "revoke project-a-prod-k2" in out, f"{rc} {out}")
+    check("A: the raises it could not make are blocked, not made", out.count(": blocked ") == 2, out)
+
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(1), "example")
+    m.issue_key("hand-made", 7.0, "example", "vault:project-a/prod/K0", "project-a")
+    p.start()
+    plan = m.issue_for_policy(_pol(1), "example")
+    check("K: a second key behind one slot is counted and named; the run raises nothing",
+          p.max_sum == 17.0 and p.total() == 17.0
+          and [s["action"] for s in plan] == ["in-place", "not-in-policy", "over-limit"]
+          and "OVER LIMIT by $7.00 now" in plan[-1]["why"] and "revoke hand-made" in plan[-1]["why"],
+          f"max={p.max_sum} {[s.get('action') for s in plan]}")
+
+
+def test_or_policy_raises_only_what_fits_beside_unread_or_renamed_keys() -> None:
+    """Round 3, probes B and C: K1 unread (or renamed in the provider's dashboard, which read as
+    missing) stayed live at $5 while K0 was raised to $8 — $13 at the highest. An unread key counts
+    at its ledger ceiling, so the raise is blocked; a renamed key is still found by its hash."""
+    split = {"vault:project-a/prod/K0": 8, "vault:project-a/prod/K1": 2}
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(2), "example")
+    p.unread.add(p.by_name("k1"))
+    p.start()
+    plan = m.issue_for_policy(_pol(2), "example", split=split)
+    check("B: beside an unread key the raise is blocked and the total never passes the limit",
+          p.max_sum <= 10.0 and [s["action"] for s in plan] == ["blocked", "held-unread"],
+          f"max={p.max_sum} {[s.get('action') for s in plan]}")
+
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(2), "example")
+    p.keys[p.by_name("k1")]["name"] = "renamed-in-dashboard"
+    p.start()
+    plan = m.issue_for_policy(_pol(2), "example", split=split)
+    check("C: a key renamed at the provider is live, lowered first, and the total stays within the limit",
+          p.max_sum <= 10.0 and sorted(r["limit"] for r in p.keys.values()) == [2.0, 8.0]
+          and [s["action"] for s in plan] == ["ceiling-moved", "ceiling-moved"],
+          f"max={p.max_sum} {[s.get('action') for s in plan]}")
+    p.keys.clear()
+    plan = m.issue_for_policy(_pol(2), "example", dry_run=True)
+    check("C: only a 404 reads held-missing", [s["action"] for s in plan] == ["held-missing", "held-missing"], str(plan))
+
+
+def test_or_policy_runs_one_at_a_time() -> None:
+    """Round 3, probe F2: two runs at once with opposite splits read each other's keys before either
+    moved them and ended both at $8 ($16 against $10). A run holds an exclusive lock beside the ledger
+    from plan to last write; the second waits, re-reads, and its own plan holds; a run that cannot
+    get the lock in time refuses before reading anything."""
+    import threading
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(2), "example")
+    p.start()
+    results = []
+
+    def second():
+        results.append(m.issue_for_policy(_pol(2), "example",
+                                          split={"vault:project-a/prod/K0": 2, "vault:project-a/prod/K1": 8}))
+    other = threading.Thread(target=second)
+
+    def start_the_other_run_mid_write():
+        other.start()
+        __import__("time").sleep(0.3)           # the other run is now waiting on the lock
+    p.on_patch = start_the_other_run_mid_write
+    results.append(m.issue_for_policy(_pol(2), "example",
+                                      split={"vault:project-a/prod/K0": 8, "vault:project-a/prod/K1": 2}))
+    other.join(10)
+    check("F2: opposite splits at once never total past the limit, and the later run's split holds",
+          p.max_sum <= 10.0 and len(results) == 2
+          and {r["name"][-2:]: r["limit"] for r in p.keys.values()} == {"k0": 2.0, "k1": 8.0},
+          f"max={p.max_sum} {[(r['name'], r['limit']) for r in p.keys.values()]}")
+
+    import oslocks
+    m.POLICY_LOCK_WAIT_S = 0.2
+    fd = __import__("os").open(m.LEDGER.parent / ".openrouter-policy.lock", __import__("os").O_RDWR)
+    oslocks.flock(fd, oslocks.LOCK_EX)
+    before = p.patches
+    try:
+        m.issue_for_policy(_pol(2), "example", split={"vault:project-a/prod/K0": 9, "vault:project-a/prod/K1": 1})
+        check("a run that cannot take the lock refuses", False, "ran")
+    except RuntimeError as exc:
+        check("a run that cannot take the lock refuses, having moved nothing",
+              "policy lock" in str(exc) and p.patches == before, str(exc))
+    finally:
+        oslocks.flock(fd, oslocks.LOCK_UN)
+        __import__("os").close(fd)
+
+
+def test_or_policy_amounts_are_whole_cents_against_the_exact_limit() -> None:
+    """Round 3, probes D, D2, H, J2, J3, I."""
+    m, p = _r3_door(echo=lambda x: x + 1e-9)
+    m.issue_for_policy(_pol(3), "example")
+    p.start()
+    before = p.patches
+    m.issue_for_policy(_pol(3), "example")
+    m.issue_for_policy(_pol(3), "example")
+    check("D: a provider echoing 3.330000001 is not re-PATCHed", p.patches == before and p.max_sum <= 10.0,
+          f"{p.patches - before} patches")
+    m, p = _r3_door(echo=lambda x: round(x, 2))
+    m.issue_for_policy(_pol(1), "example", split={"vault:project-a/prod/K0": 3.333})
+    before = p.patches
+    m.issue_for_policy(_pol(1), "example", split={"vault:project-a/prod/K0": 3.333})
+    check("D2: a --split amount is rounded down to the cent, so a provider storing cents is not re-PATCHed",
+          p.patches == before and [r["limit"] for r in p.keys.values()] == [3.33], f"{p.patches - before} patches")
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(3), "example", 3.3333334)
+    check("J2: --limit 3.3333334 x 3 is 3.33 each: the total never passes $10",
+          p.max_sum <= 10.0 and [r["limit"] for r in p.keys.values()] == [3.33] * 3, f"max={p.max_sum!r}")
+    m, p = _r3_door()
+    plan = m.issue_for_policy(_pol(1, limit=0.0299999996), "example")
+    check("J3: a share is rounded down from the exact limit (0.0299999996 -> 0.02)",
+          plan[0]["limit"] == 0.02 and p.max_sum <= 0.0299999996, f"{plan[0]['limit']} max={p.max_sum}")
+    for limit in (1e307, 1e300):
+        try:
+            m.issue_for_policy(_pol(3, limit=limit), "example", dry_run=True)
+            check(f"H: limitUsd {limit:g} is refused", False, "planned")
+        except ValueError as exc:
+            check(f"H: limitUsd {limit:g} is refused as a ValueError", "past" in str(exc), str(exc))
+    m, p = _r3_door()
+    try:
+        m.issue_for_policy(_pol(refs=["vault:project-a/prod/MODEL_KEY", "vault:project-a/prod/model_key"]), "example")
+        check("I: two slots one key name apart are refused up front", False, "planned")
+    except ValueError as exc:
+        check("I: two slots one key name apart are refused up front", "name the slots apart" in str(exc)
+              and not p.keys, str(exc))
+
+
+def test_or_policy_never_leaves_a_live_untracked_key() -> None:
+    """Round 3, probe G: a vault `put` that timed out after the mint left a live key no ledger knew."""
+    m, p = _r3_door()
+
+    def slow(value, to):
+        raise __import__("subprocess").TimeoutExpired(["vault.py", "put"], 60)
+    m.deliver = slow
+    p.start()
+    try:
+        m.issue_for_policy(_pol(1), "example")
+        check("G: the run is partial", False, "returned")
+    except m.PolicyPartial as exc:
+        check("G: a delivery that timed out deletes the minted key; nothing live is left untracked",
+              not p.keys and not m.ledger()["issued"] and p.max_sum <= 10.0
+              and [s["action"] for s in exc.plan] == ["failed"], f"keys={p.keys} max={p.max_sum}")
+
+
+def test_or_policy_dry_run_resolves_the_issuing_account() -> None:
+    """Round 3, probe N: with two stashed accounts and no --account the dry run planned an issue the
+    real run then failed. Both refuse now, before anything is read or moved."""
+    m, p = _r3_door(admins=("one", "two"))
+    outcomes = []
+    for dry in (True, False):
+        try:
+            m.issue_for_policy(_pol(1), None, dry_run=dry)
+            outcomes.append("planned")
+        except RuntimeError as exc:
+            outcomes.append("--account" in str(exc))
+    check("N: the dry run and the real run refuse alike, and nothing is minted",
+          outcomes == [True, True] and not p.keys and p.max_sum == 0.0, str(outcomes))
+
+
+def test_or_policy_round_four() -> None:
+    """Round 4's probes, each asserting the fake's highest total."""
+    # R6: $0.30 over three keys is three $0.10 keys; a float total read $0.30 as past $0.30.
+    m, p = _r3_door()
+    p.start()
+    rc, out = _cmd(m, _pol(3, limit=0.3), "example", None, False)
+    check("R6: $0.30 over 3 keys is issued in whole cents, never 'past its $0.30 limit'",
+          rc == 0 and len(p.keys) == 3 and p.max_sum <= 0.3 + 1e-9 and "past its $0.30" not in out, f"{rc} {out}")
+    m, p = _r3_door()
+    plan = m.issue_for_policy(_pol(2, limit=0.3), "example",
+                              split={"vault:project-a/prod/K0": 0.1, "vault:project-a/prod/K1": 0.2})
+    check("R6b: --split 0.10 + 0.20 under $0.30 is issued", [s["action"] for s in plan] == ["issued", "issued"]
+          and p.max_sum <= 0.3 + 1e-9, str(plan))
+    # R7: the provider holds 3.334 x 3 = $10.002: within half a cent each, but past the limit in all.
+    m, p = _r3_door(echo=lambda x: round(x + 0.004, 3))
+    m.issue_for_policy(_pol(3), "example")
+    p.start()
+    rc, out = _cmd(m, _pol(3), "example", None, False)
+    check("R7: a total past the limit with nothing blocked is named and exits 1",
+          rc == 1 and "OVER LIMIT by $0.02 now" in out and "limit project-a-prod-k0 --set 3.33" in out
+          and p.max_sum == p.total(), out)
+    # R2b / R3b: a key minted but never recorded, on an account listing past PAGES_MAX.
+    for what in ("killed", "cleanup failed"):
+        m, p = _r3_door()
+
+        def too_long(admin, include_disabled=True):
+            raise m.ListingTooLong("past PAGES_MAX", [])
+        m._all_keys = too_long
+        if what == "killed":
+            def interrupted(value, to):
+                raise KeyboardInterrupt
+            m.deliver = interrupted
+        else:
+            def timeout(value, to):
+                raise __import__("subprocess").TimeoutExpired(["vault.py", "put"], 60)
+            m.deliver = timeout
+            real = m._request
+
+            def no_delete(path, key, payload=None, method=None):
+                if method == "DELETE":
+                    raise RuntimeError("openrouter answered HTTP 502")
+                return real(path, key, payload, method)
+            m._request = no_delete
+        p.start()
+        try:
+            m.issue_for_policy(_pol(1), "example")
+        except (KeyboardInterrupt, m.PolicyPartial):
+            pass
+        rec = m.ledger()["issued"].get("project-a-prod-k0") or {}
+        m.deliver = lambda value, to: f"vault {to}"
+        m._request = p
+        rc, out = _cmd(m, _pol(1), "example", None, False)
+        check(f"R{'2b' if what == 'killed' else '3b'}: after a mint {what}, the pending row holds the slot: "
+              f"one key, nothing minted again, the run exits 1 naming revoke",
+              rec.get("pending") and rec.get("hash") and len(p.keys) == 1 and p.max_sum <= 10.0 and rc == 1
+              and "held-pending" in out and "revoke project-a-prod-k0" in out, f"{rec} {len(p.keys)} {out}")
+    m, p = _r3_door()
+    m.save_ledger({"issued": {"project-a-prod-k0": {"account": "example", "hash": None, "pending": True,
+                                                    "destination": "vault:project-a/prod/K0", "limit_usd": 10.0,
+                                                    "limit_reset": "monthly"}}})
+    p.start()
+    rc, out = _cmd(m, _pol(1), "example", None, False)
+    check("a pending row with no hash: nothing is minted, the remedy names claim or a provider delete",
+          rc == 1 and not p.keys and "claim project-a-prod-k0" in out and "at the provider" in out, out)
+    # R4 and fix 5: revoke must not delete a key a consumer reads, whatever its provider name and
+    # whether or not the listing reaches it: by the scan's hash, by its listed label, and by the
+    # label a destination holds (`destinations`, the only trace of a key past the listing).
+    for what, make in (
+            ("listed, by recorded label", lambda h, lab: {"keys": [{"name": "billing-worker", "label": lab,
+                                                                    "serves": "billing-worker"}]}),
+            ("by hash", lambda h, lab: {"keys": [], "destination_hashes": {"billing-worker": {"label": "x", "hash": h}}}),
+            ("past the listing, by the label a destination holds",
+             lambda h, lab: {"keys": [], "destinations": {"billing-worker": lab}, "destination_hashes": {},
+                             "unlisted_destinations": ["billing-worker"]})):
+        m, p = _r3_door()
+        m.issue_for_policy(_pol(1), "example")
+        h = next(iter(p.keys))
+        p.keys[h]["name"] = "billing-worker"
+        rec = m.ledger()["issued"]["project-a-prod-k0"]
+        scratch = pathlib.Path(tmpdir.mkdtemp())
+        m.paths.SCRATCH = scratch
+        (scratch / "openrouter.json").write_text(json.dumps(make(h, rec.get("label"))), encoding="utf-8")
+        try:
+            m.revoke_key("project-a-prod-k0")
+            check(f"R4: revoke refuses a renamed key a consumer reads ({what})", False,
+                  f"revoked; key still at the provider: {h in p.keys}")
+        except ValueError as exc:
+            check(f"R4: revoke refuses a renamed key a consumer reads ({what})",
+                  "reading right now" in str(exc) and h in p.keys and bool(rec.get("label")), str(exc))
+        except Exception as exc:                    # noqa: BLE001 — a crash is a FAIL, never a traceback
+            check(f"R4: revoke refuses a renamed key a consumer reads ({what})", False,
+                  f"{type(exc).__name__}: {exc}")
+
+
+def test_or_policy_fix_five() -> None:
+    """Fix 5 on J-1: a 5xx after a mint proves nothing; a hashless pending row is clearable past PAGES_MAX."""
+    # R-F: the provider created the key and then answered 502; the account lists past PAGES_MAX.
+    m, p = _r3_door()
+
+    def too_long(admin, include_disabled=True):
+        raise m.ListingTooLong("past PAGES_MAX", [])
+    m._all_keys = too_long
+    real = m._request
+    state = {"done": False}
+
+    def created_then_502(path, key, payload=None, method=None):
+        out = real(path, key, payload, method)
+        if path == "/keys" and payload and not state["done"]:
+            state["done"] = True
+            raise RuntimeError("openrouter answered HTTP 502; provider response withheld")
+        return out
+    m._request = created_then_502
+    p.start()
+    try:
+        m.issue_for_policy(_pol(1), "example")
+    except m.PolicyPartial:
+        pass
+    m._request = p
+    rec = m.ledger()["issued"].get("project-a-prod-k0") or {}
+    rc, out = _cmd(m, _pol(1), "example", None, False)
+    check("R-F: a 502 after the mint keeps the pending row, and the next run mints nothing past PAGES_MAX",
+          rec.get("pending") and not rec.get("hash") and len(p.keys) == 1 and p.max_sum <= 10.0 and rc == 1
+          and "held-pending" in out, f"row={rec} keys={len(p.keys)} max={p.max_sum} {out}")
+    m, p = _r3_door()
+
+    def refused_400(path, key, payload=None, method=None):
+        if path == "/keys" and payload:
+            raise RuntimeError("openrouter answered HTTP 400; provider response withheld")
+        return p(path, key, payload, method)
+    m._request = refused_400
+    try:
+        m.issue_for_policy(_pol(1), "example")
+    except m.PolicyPartial:
+        pass
+    check("a 4xx refusal minted nothing, so it leaves no pending row", not m.ledger()["issued"] and not p.keys,
+          str(m.ledger()["issued"]))
+
+    # R-E: the remedy for a hashless pending row works past PAGES_MAX.
+    m, p = _r3_door()
+    m._all_keys = too_long
+    m.save_ledger({"issued": {"project-a-prod-k0": {"account": "example", "hash": None, "pending": True,
+                                                    "destination": "vault:project-a/prod/K0", "limit_usd": 10.0,
+                                                    "limit_reset": "monthly"}}})
+    import contextlib
+    import io
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        plain = m.cmd_revoke("project-a-prod-k0")
+    check("R-E: a plain revoke past PAGES_MAX refuses and names --forget-pending",
+          plain == 1 and "--forget-pending" in err.getvalue() and "project-a-prod-k0" in m.ledger()["issued"],
+          err.getvalue())
+    with contextlib.redirect_stderr(io.StringIO()) as e2:
+        no_reason = m.cmd_revoke("project-a-prod-k0", forget_pending=True, reason="")
+    check("--forget-pending without a reason is refused", no_reason == 2, e2.getvalue())
+    journaled = []
+    m._journal = lambda *a, **k: journaled.append((a, k))
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc = m.cmd_revoke("project-a-prod-k0", forget_pending=True, reason="deleted at the provider by name")
+    rc2, out = _cmd(m, _pol(1), "example", None, False)
+    check("R-E: --forget-pending with a reason clears the row, journaled; the next run issues the slot",
+          rc == 0 and rc2 == 0 and len(p.keys) == 1 and journaled and journaled[0][0][0] == "forget-pending-attested" and journaled[1][0][0] == "forget-pending"
+          and "deleted at the provider by name" in json.dumps(journaled[0][1]), f"{rc} {rc2} {journaled} {out}")
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(1), "example")
+    with contextlib.redirect_stderr(io.StringIO()) as e3:
+        rc = m.cmd_revoke("project-a-prod-k0", forget_pending=True, reason="x")
+    check("--forget-pending refuses a row that is not a hashless pending one", rc == 1 and p.keys
+          and "project-a-prod-k0" in m.ledger()["issued"], e3.getvalue())
+
+    # Item 5: a disk that is full under the test is the machine's failure, never a (b) violation.
+    import errno
+    rng = random.Random(1)
+    m, p, door = _prop_door(rng)
+    real_save = m.save_ledger
+
+    def full(doc):
+        raise OSError(errno.ENOSPC, "No space left on device")
+    m.save_ledger = full
+    plan, err, _ = _prop_run(m, p, _pol(1), {}, 1000)
+    m.save_ledger = real_save
+    check("an ENOSPC under the property is reported as ENVIRONMENT with its full reason",
+          (err or "").startswith("ENVIRONMENT") and "No space left on device" in err, str(err))
+
+
+# ─────────────────────────── round 4: the property, before any fix ─────────────
+
+#: The property test's seed: case i draws from random.Random(PROPERTY_SEED + i).
+PROPERTY_SEED = 20261012
+PROPERTY_CASES = 2000
+#: Seeds the property found failing on fc479fc, kept as named regression cases (run first).
+PROPERTY_REGRESSION_SEEDS: dict[int, str] = {
+    20261100: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261137: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261163: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261186: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261215: "(a)(b) a mint after a kill took the total past the limit",
+    20261291: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261379: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261383: "(a) a mint after a kill took the total past the limit",
+    20261388: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261401: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261426: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261490: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261503: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261537: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261595: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261598: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261624: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261675: "(a) a mint after a kill took the total past the limit",
+    20261697: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261755: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261756: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261840: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261910: "(a) a mint after a kill took the total past the limit",
+    20261912: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20261999: "(a)(b) a mint after a kill took the total past the limit",
+    20262002: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262132: "(a) a mint after a kill took the total past the limit",
+    20262167: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262197: "(a) a mint after a kill took the total past the limit",
+    20262202: "(a) a mint after a kill took the total past the limit",
+    20262287: "(a) a mint after a kill took the total past the limit",
+    20262378: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262503: "(a) a mint after a kill took the total past the limit",
+    20262516: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262589: "(a) a mint after a kill took the total past the limit",
+    20262595: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262603: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262636: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262648: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262798: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262818: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+    20262975: "(a) a mint after a kill took the total past the limit",
+    20263008: "(b) whole-cent ceilings under the limit were blocked as over it (float total)",
+}
+
+
+class PropProvider(MaxProvider):
+    """The highest-total fake, plus what the property needs: failures injected at the n-th write of a
+    kind (lower, raise, mint, cleanup), a write count, and the check that matters — after every write
+    that RAISES the total (a mint, a ceiling moved up) the total in whole cents is within the limit
+    of the run in progress. A write that lowers the total never breaks the invariant."""
+
+    def __init__(self, unreachable, echo=lambda x: x):
+        super().__init__(unreachable, echo)
+        self.writes, self.fail, self.seen = 0, None, {}
+        self.limit_cents, self.violations = None, []
+
+    def cents(self):
+        total = 0
+        for r in self.keys.values():
+            if r["limit"] is None:
+                return math.inf
+            total += round(r["limit"] * 100)
+        return total
+
+    def _maybe_fail(self, kind):
+        self.seen[kind] = self.seen.get(kind, 0) + 1
+        if self.fail and self.fail[0] == kind and self.fail[1] == self.seen[kind]:
+            self.fail = None
+            raise RuntimeError(f"openrouter answered HTTP 500 (injected at {kind})")
+
+    def __call__(self, path, key, payload=None, method=None):
+        before = self.cents()
+        if path == "/keys" and payload:
+            self._maybe_fail("mint")
+        elif method == "DELETE":
+            self._maybe_fail("cleanup")
+        elif method == "PATCH" and payload and "limit" in payload:
+            h = path.rsplit("/", 1)[-1]
+            old = (self.keys.get(h) or {}).get("limit")
+            self._maybe_fail("lower" if old is None or payload["limit"] < old else "raise")
+        out = super().__call__(path, key, payload, method)
+        if (path == "/keys" and payload) or method in ("PATCH", "DELETE"):
+            self.writes += 1
+            after = self.cents()
+            if after > before and self.limit_cents is not None and after > self.limit_cents:
+                self.violations.append(f"{method or 'POST'} {path} took the total to {after} cents "
+                                       f"past {self.limit_cents}")
+        return out
+
+
+import math                                                         # noqa: E402
+import random                                                       # noqa: E402
+
+PROVIDER_FAILURES = ("lower", "raise", "mint", "cleanup")
+DOOR_FAILURES = ("deliver", "deliver-timeout", "kill", "ledger-save")
+
+
+def _prop_door(rng):
+    echo = rng.choice([lambda x: x, lambda x: x + 1e-9, lambda x: round(x, 2)])
+    m = orr()
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    m.ADMIN_STORE = d / "admin"
+    m.ADMIN_STORE.mkdir(parents=True)
+    private_io.write(m.ADMIN_STORE / "example", "prov\n")
+    m.LEDGER = d / "ledger.json"
+    m._project_folder = lambda project, env, name: {"a": "project-a"}.get(project, project)
+    m.vault_destination = lambda to: to
+    m._journal = lambda *a, **k: None
+    p = PropProvider(m.Unreachable, echo)
+    m._request = p
+    if rng.random() < 0.3:                          # an account that lists past PAGES_MAX
+        def too_long(admin, include_disabled=True):
+            raise m.ListingTooLong("past PAGES_MAX", [])
+        m._all_keys = too_long
+    door = {"deliver": None, "save": None}
+    real_save = m.save_ledger
+
+    def deliver(value, to, **k):
+        f = door["deliver"]
+        if f:
+            door["deliver"] = None
+            if f == "deliver":
+                raise OSError("the vault refused the put")
+            if f == "deliver-timeout":
+                raise __import__("subprocess").TimeoutExpired(["vault.py", "put"], 60)
+            raise KeyboardInterrupt                 # the run is killed between the mint and its record
+        return f"vault {to}"
+
+    def save(doc):
+        f = door["save"]
+        if f is not None:
+            f[0] -= 1
+            if f[0] == 0:
+                door["save"] = None
+                raise OSError("the disk refused the ledger write")
+        return real_save(doc)
+    m.deliver, m.save_ledger = deliver, save
+    return m, p, door
+
+
+def _prop_policy(rng, refs, limit_cents):
+    """A policy over `refs` and how it is split, with the whole-cent ceilings the door must plan, or
+    None where the door is right to refuse (less than a cent per key)."""
+    n = len(refs)
+    mode = rng.choice(["equal", "equal", "split", "limit"])
+    kw, planned = {}, None
+    if mode == "equal" and limit_cents // n >= 1:
+        planned = [limit_cents // n] * n
+    elif mode == "split" and limit_cents >= n:
+        cuts = sorted(rng.sample(range(1, limit_cents + 1), n)) if limit_cents > n else list(range(1, n + 1))
+        planned = [cuts[0]] + [b - a for a, b in zip(cuts, cuts[1:])]
+        if rng.random() < 0.5:                      # not always the whole limit
+            planned = [max(1, c - rng.randint(0, c - 1)) for c in planned]
+        kw["split"] = {r: c / 100 for r, c in zip(refs, planned)}
+    elif mode == "limit" and limit_cents // n >= 1:
+        c = rng.randint(1, limit_cents // n)
+        planned, kw["limit_override"] = [c] * n, c / 100
+    policy = {"kind": "spend-policy", "project": "urn:project:a", "mode": "limited",
+              "limitUsd": limit_cents / 100, "period": "month",
+              "credentialSources": [{"kind": "project-key", "ref": r} for r in refs]}
+    return policy, kw, planned
+
+
+def _prop_run(m, p, policy, kw, limit_cents):
+    p.limit_cents = limit_cents
+    start = p.cents()
+    p.max_sum = p.total()
+    try:
+        plan, err = m.issue_for_policy(policy, "example", dry_run=False, **kw), None
+    except KeyboardInterrupt:
+        plan, err = None, "killed"
+    except ValueError as exc:
+        plan, err = None, f"ValueError: {exc}"
+    except Exception as exc:                        # noqa: BLE001 — the property reads every outcome
+        plan, err = getattr(exc, "plan", None), f"{type(exc).__name__}: {exc}"
+        env = _environment_error(exc) or next((s.get("why") for s in plan or []
+                                               if s.get("errno") in ENVIRONMENT_ERRNOS), None)
+        if env:
+            err = f"ENVIRONMENT {env}"
+    return plan, err, start
+
+
+#: OS errors that say the MACHINE failed (disk full, I/O error, read-only, quota), not the door.
+ENVIRONMENT_ERRNOS = {__import__("errno").ENOSPC, __import__("errno").EIO, __import__("errno").EROFS,
+                      getattr(__import__("errno"), "EDQUOT", -1)}
+
+
+def _environment_error(exc: BaseException) -> str | None:
+    """The full reason when `exc` is the machine's failure rather than the door's refusal."""
+    if isinstance(exc, OSError) and exc.errno in ENVIRONMENT_ERRNOS:
+        return f"{type(exc).__name__}: {exc}"
+    return None
+
+
+def _prop_case(seed):
+    """One case: a first run, provider states and a policy edit, a run with one failure injected, a
+    clean re-run, and a run that must move nothing. Returns the properties it broke."""
+    rng = random.Random(seed)
+    broke = []
+    m, p, door = _prop_door(rng)
+    scale = rng.choice([100, 10_000, 100_000_000])          # $1, $100, $1e6
+    limit_cents = rng.randint(1, scale)
+    names = [f"vault:project-a/prod/K{j}" for j in range(12)]
+    refs = rng.sample(names, rng.randint(1, 12))
+    policy, kw, planned = _prop_policy(rng, refs, limit_cents)
+    plan, err, _ = _prop_run(m, p, policy, kw, limit_cents)
+    if err and err.startswith("ENVIRONMENT"):
+        # The disk or the I/O failed under the test (ENOSPC, EIO): the machine's failure, reported
+        # with its reason and never counted against the door. A case that hits it proves nothing.
+        return [f"ENVIRONMENT {err}"]
+    if planned is not None and sum(planned) <= limit_cents:
+        refused = err is not None or any(s.get("action") == "blocked" for s in plan or [])
+        if refused:
+            broke.append(f"(b) {sum(planned)} cents planned under a {limit_cents}-cent limit refused: "
+                         f"{err} {[s.get('why') for s in plan or [] if s.get('action') in ('blocked', 'failed')][:1]}")
+    # Provider states the run did not cause.
+    for h in list(p.keys):
+        roll = rng.random()
+        if roll < 0.08:
+            p.unread.add(h)
+        elif roll < 0.14:
+            del p.keys[h]
+        elif roll < 0.22:
+            p.keys[h]["name"] = f"renamed-{h}"
+        elif roll < 0.27:
+            p.keys[h]["limit"] = None
+    # A policy edit: sources added or dropped, the limit changed.
+    refs = [r for r in refs if rng.random() > 0.25] or refs[:1]
+    refs += [r for r in rng.sample(names, rng.randint(0, 3)) if r not in refs]
+    limit_cents = max(1, min(scale, int(limit_cents * rng.choice([0.5, 1, 1, 2]))))
+    policy, kw, _ = _prop_policy(rng, refs, limit_cents)
+    kind = rng.choice(PROVIDER_FAILURES + DOOR_FAILURES)
+    if kind in PROVIDER_FAILURES:
+        p.fail = (kind, rng.randint(1, 2))
+    elif kind == "ledger-save":
+        door["save"] = [rng.randint(1, 3)]
+    else:
+        door["deliver"] = kind
+    _prop_run(m, p, policy, kw, limit_cents)
+    p.fail, door["deliver"], door["save"] = None, None, None
+    p.unread.clear()
+    _prop_run(m, p, policy, kw, limit_cents)                # the clean re-run
+    writes = p.writes
+    plan, err, _ = _prop_run(m, p, policy, kw, limit_cents)
+    if p.writes != writes:
+        broke.append(f"(c) the run after the clean re-run made {p.writes - writes} write(s): "
+                     f"{[s.get('action') for s in plan or []]} {err}")
+    if p.violations:
+        broke.append(f"(a) {p.violations[0]} (after a {kind} failure)")
+    return broke
+
+
+def test_or_policy_property_regression_seeds() -> None:
+    """The seeds the property found failing on fc479fc, each a named case."""
+    for seed, what in PROPERTY_REGRESSION_SEEDS.items():
+        broke = _prop_case(seed)
+        check(f"seed {seed} ({what})", not broke, "; ".join(broke)[:300])
+
+
+def test_or_policy_property() -> None:
+    """J-1's invariant as a property, PROPERTY_CASES seeded cases, no new dependency:
+
+    (a) no write a run makes that raises the provider's total (a mint, a ceiling moved up) leaves the
+        total, in whole cents, above the limit of the run — so a project within its limit stays
+        within it at every moment. **The documented exception** is `rotate` (and `rotate --leaked`):
+        it creates the successor before it deletes the predecessor, so for that window the slot holds
+        two live keys and the total can be up to twice the slot's ceiling. This property drives
+        `issue-for-policy` only; the window is named in docs/design/AGENT-SECRETS.md.
+    (b) a policy whose planned whole-cent ceilings sum to at most the limit, in integer cents, is
+        never refused or blocked as over it, on a project with no other keys;
+    (c) after any failure — at a lowering, a raise, a mint, a delivery (refused, timed out, killed),
+        a ledger write, a cleanup delete — a clean re-run converges and the run after it moves nothing.
+
+    Inputs: limits from $0.01 to $1e6, 1–12 sources, policy edits between runs, provider states
+    (unread, 404, renamed, null limit, a float echo or cents storage), an account listing past
+    PAGES_MAX."""
+    failing: dict[int, list[str]] = {}
+    for seed in [PROPERTY_SEED + i for i in range(PROPERTY_CASES)]:
+        broke = _prop_case(seed)
+        if broke:
+            failing[seed] = broke
+    env = {s: b for s, b in failing.items() if any(x.startswith("ENVIRONMENT") for x in b)}
+    for seed, broke in sorted(env.items()):
+        print(f"  NOTE  seed {seed} not judged — the machine failed under it: {broke[0]}")
+    check("every requested property case was judged (environment errors leave acceptance incomplete)",
+          not env, f"{len(env)} ERROR/NOT_RUN cases")
+    for prop in ("(a)", "(b)", "(c)"):
+        seeds = sorted(s for s, b in failing.items() if any(x.startswith(prop) for x in b))
+        check(f"property {prop} holds over {PROPERTY_CASES} cases (seed {PROPERTY_SEED})", not seeds and not env,
+              f"{len(seeds)} failing seeds, e.g. " + "; ".join(f"{s}: {next(x for x in failing[s] if x.startswith(prop))}"
+                                                             for s in seeds[:3]))
+
+
 if __name__ == "__main__":
     print("the credential doors — stash, issue, rotate, revoke, and what they refuse\n")
-    for fn in (test_cf_a_token_this_call_created_is_deleted_when_the_issue_fails,
+    for fn in (test_the_digitalocean_door_keeps_the_same_rules,
+               test_cf_a_token_this_call_created_is_deleted_when_the_issue_fails,
                test_or_a_project_policy_gets_its_own_key_in_its_own_slot,
                test_or_a_policy_never_borrows_and_never_issues_an_unbounded_key,
                test_or_issue_for_policy_command_line,
+               test_or_policy_ceilings_sum_to_the_project_limit,
+               test_or_policy_lowers_ceilings_before_it_raises_one,
+               test_or_policy_reads_held_keys_at_the_provider,
+               test_or_policy_partial_failure_names_what_was_done,
+               test_or_policy_round_two,
+               test_or_policy_counts_every_key_of_the_project,
+               test_or_policy_raises_only_what_fits_beside_unread_or_renamed_keys,
+               test_or_policy_runs_one_at_a_time,
+               test_or_policy_amounts_are_whole_cents_against_the_exact_limit,
+               test_or_policy_never_leaves_a_live_untracked_key,
+               test_or_policy_dry_run_resolves_the_issuing_account,
+               test_or_policy_round_four,
+               test_or_policy_fix_five,
+               test_or_policy_property_regression_seeds,
+               test_or_policy_property,
                test_no_door_takes_or_prints_a_value_outside_stdin,
                test_the_ledgers_hold_no_values,
                test_cf_stash_refuses_an_admin_that_cannot_issue,
@@ -2072,5 +3089,4 @@ if __name__ == "__main__":
         for f in FAILURES:
             print("  -", f)
         raise SystemExit(1)
-    print("\033[32mthe admin credential never leaves its stash, and every issued "
-          "key is accounted for\033[0m")
+    print("\033[32mcredential-door checks passed; cross-verb rotation accounting remains J-3\033[0m")

@@ -5,8 +5,93 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **A lesson is its own record kind, for every project** (`observatory_lesson`): a retro entry's class —
+  `classKey`, `title`, `trigger`, `check`, `nouns` — with its origin, the project's pseudonymous key
+  (`p-` and 12 hex digits of its root commit, never a `project:<slug>` id) and the evidence commit (kept as
+  `commit:<12 hex>`). The arguments are what task-pipeline's `lessons.py emit-observatory --tool
+  observatory_lesson` prints (where the engine lacks the tool, the emitter writes `lesson:` notes through
+  `observatory_record`); `tests/lesson_emitter_fixture.json` holds that shape and the published schema is
+  checked against it. One record per (classKey, project): a repeat revises it or writes nothing. A
+  path, a URL, an e-mail address, a line break or a `classKey` the redactor would change is refused before any write (`invalid-lesson`, every reason
+  listed); credential shapes and known values are redacted. Written `proposed`, confidence 0.5, local stdio only.
+  The tool publishes its outputSchema.
+- **`observatory_search` and `observatory_recall` take `kinds`**, applied inside the candidate query before the
+  300-match window, and every hit names its `kind`; a lesson hit carries its fields as `lesson`. Across projects
+  the search abstained with the window full of per-session turn records (measured: `count 0, abstain: true`);
+  with `kinds: ["lesson"]` a lesson among 400 such rows is found.
+- **Lessons are corroborated by a second project**: `tools/corroborate.py` promotes a proposed lesson to
+  `observed` as `agent:lesson-corroborator` when another, distinct project records the same `classKey` and both
+  commits resolve — each asked of git in the registered clone whose root commit gives its project key. A key no
+  registered clone carries is no witness: its lesson stays proposed, listed as "commit not resolvable here". The
+  same project twice is one witness; `supported` stays the operator's. `corroboration.json` lists lessons apart
+  from refusals (`lessons`: promoted, waiting, unresolvable, contradicted), and `counts.proposed` no longer
+  counts them.
+- **Lessons are kept 365 days while proposed, and for good once observed** (`retention.json` →
+  `ledger.kinds.lesson`); any kind can carry its own horizons there, read through `retention.horizon_for` by
+  the review queue's countdown and prose, the `ledger.review_expiring` finding and the health page's digest,
+  so none announces a proposed lesson's erasure at the general 90 days.
+- **`tools/migrate_lessons.py`** converts lessons written earlier as `observatory_record` notes (`lesson:`
+  statements) into lesson records, as a new revision of the same record; `--dry-run` is the default.
+
+Lessons are agents' work memory and stay in Observatory; an export of project-grade lessons to Fabric project
+memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#lessons)).
+
 ### Changed
 
+- **A spend policy's keys share its limit** (ENG-002): `openrouter.py issue-for-policy` gave every `project-key`
+  source the whole project limit, so a $40 project with two keys could spend $80. The ceilings of every key the plan
+  touches now sum to at most `limitUsd`: an equal split rounded down to the cent by default, `--split REF=USD,…` for
+  explicit amounts (refused over the limit, or with a slot left out), and `--limit` now one ceiling **per key**,
+  refused when N × limit exceeds the project limit. A held slot is read at the provider by hash: a disabled key is
+  `held-disabled` and a deleted one `held-missing`, never `in-place`, and the command exits 1 naming the remedy.
+  Ceilings that go down move before those that go up. A failure halfway exits 1 with `partial`, listing what was
+  already issued or moved; a re-run does only what is missing. The plan prints the ceilings' total beside the limit.
+  A provider row with no ceiling counts as unbounded and is brought under the limit first; a provider answer that
+  cannot be read is `held-unread` (exit 1); the dry run now reads the provider too. Keys issued earlier keep their
+  whole-limit ceilings until `issue-for-policy` runs again — `--dry-run` shows the moves it would make — and a key
+  lowered below what it has already spent this period stops spending until the period resets. A provider row's
+  reset period is read from the provider alone (none there differs from a monthly policy, so the ceiling is moved),
+  and `--split` naming a slot twice — in one spelling or two — is refused. **Upgrade note:** the meter's L0 per key
+  is configured, not read from the provider: after `issue-for-policy` moves a ceiling, set `keyCeilingsUsd[ref]` in
+  `config/meter.json` to the same amount — the plan prints the values it implies. The dry run reads the provider, so
+  without a stashed admin for a slot's account its held slots read `held-unread` and it exits 1. The total holds at
+  every moment, not only at the end: every key the ledger holds under `vault:<project>/` counts, including one the
+  policy no longer names (a removed source, a second key behind one slot), which is **not moved** — it is reported
+  `not-in-policy` with `revoke NAME` as the remedy and the run exits 1; a key that cannot be read counts at its
+  ledger ceiling (unbounded with none), only a provider 404 counts as gone, and a key renamed in the provider's
+  dashboard is still found by its hash (this applies to `limit`, `rotate` and `revoke` too). Lowerings run first;
+  raises and new keys run only when the project's total after the run fits the limit, otherwise they are `blocked`
+  and the run exits 1. One run at a time: a lock beside the ledger is held from the plan to the last write, a second
+  run waits up to 30 s and then refuses. Every amount is rounded down to whole cents and compared with the exact
+  limit; ceilings within half a cent of the target are not moved again; a limit past $1,000,000,000 is refused; two
+  slots whose key names differ only in case are refused; the issuing account of a new key is resolved before
+  anything moves, in a dry run too; a minted key whose delivery times out is deleted, never left live and untracked.
+  Totals are kept in whole cents (planned ceilings exactly, provider ceilings rounded up, unbounded apart), so $0.30
+  over three keys is three $0.10 keys rather than a false block. `issue` writes a **pending** ledger row (name,
+  destination, ceiling) before it mints and records the key's hash and provider label the moment the provider
+  answers: a run killed between the mint and its record, or a cleanup delete that failed (the row is then kept as an
+  orphan), leaves a row that holds its slot — the next run mints nothing there, reads `held-pending` and names
+  `revoke` (or, with no hash, `claim` or a delete at the provider) — so an account listing past `PAGES_MAX` no
+  longer mints a second key. Whenever the total a run leaves is past the limit it prints `OVER LIMIT by $X now; it
+  ends after: revoke A, B` (`unbounded` when a key has no ceiling) and exits 1, a total past the limit only within
+  the half-cent tolerance included. `revoke` refuses a key a consumer reads, found by its hash in the scan or by the
+  label recorded at issue, whatever the key is now called at the provider. The one window in which a project's
+  keys can sum past its limit is `rotate`'s, while the successor and the predecessor are both live.
+- **The agent's deadline reaches the model call** (ENG-003): `agent` started a project's call while 150 s were
+  left, but `providers.complete()` walks a chain of models, each attempt allowed 120 s, so three Retryable models
+  took 360 s and the watchdog killed a step that had paid for calls. `complete(…, deadline=)` now gets the step's
+  deadline: an attempt starts only while 30 s are left after a 20 s reserve for the report, its timeout is cut to
+  what is left, and otherwise it raises `providers.OutOfTime` before sending anything; the catalogue fetch and the
+  key-usage read inside are cut the same way. An attempt sent with a cut timeout that then times out also ends the
+  call as `OutOfTime`, without marking the model unhealthy — that attempt was sent and may have been billed. The
+  agent treats `OutOfTime` like its pre-call halt — deltas left, `halted_by` names the deadline and says when the cut
+  attempt may have been billed — and `store/raw/agent.json` gains `attempts_refused_by_deadline` (never sent) and
+  `attempts_sent_and_cut_by_deadline` (sent, possibly billed). A model catalogue fetch the deadline cut, with
+  nothing cached, is `OutOfTime` too rather than "every model unavailable"; a connection that dies mid-body
+  (`http.client.HTTPException`) is Retryable instead of crashing the run. The pre-call reserve is derived (50 s),
+  not a constant. Without a deadline nothing changes.
 - **The tick says how each collector ended** (ENG-005, ENG-007): `store/tick-rotation.json` is schema 2 — per
   collector `started_at` (stamped before the step; schema 1 kept the time after it), `finished_at`, `outcome`
   (`ran`, `failed`, `stopped`, `not_started`), `not_started_streak` and `last_ran_at`; a collector never started
@@ -34,6 +119,25 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **A DigitalOcean door: database credentials to the vault, and a rotation that moves every consumer you name** (PLN-142):
+  `tools/digitalocean.py` over the operator's `doctl` context. `db list` names clusters and which are open to
+  the internet; `db consumers CLUSTER` names the App Platform apps that bind one and the password keys they keep
+  in their own spec, each marked `url` or `password`; `db credential CLUSTER USER --db NAME --to
+  vault:<project>/<env>/<NAME>` delivers a connection URL on stdin ("unchanged" when the slot holds it);
+  `db rotate` moves every consumer you name (`db consumers` lists the App Platform ones; services started with
+  `use_secret.py serve` are named for restart): it prints the doctl context and team, asks the vault for the
+  slot and reads every spec before the reset, resets once, writes the URL or the password into each
+  `--spec-env APP:KEY` literal as the key expects, redeploys each `--app`, retries read calls only and
+  waits for exact ACTIVE. Mutations are attempted once; uncertain outcomes remain unknown in
+  owner-only receipts and require reconciliation before retry. Nothing
+  prints a value. The handling-secrets skill names the provider MCP tools that return a credential by design.
+  Its suite runs in the portable gate.
+
+- **The header door serves loopback servers and clients that export no URL** (PB-139): `vault.py bind
+  --header-for` accepts plain http to a loopback literal with its port (`http://127.0.0.1:<port>`,
+  `http://[::1]:<port>`); `localhost` and http to any other host stay refused. `use_secret.py header` gains
+  `--server-url URL` for Codex's `http_headers_helper`, used only when `CLAUDE_CODE_MCP_SERVER_URL` is unset;
+  two URLs that name different servers are refused (`url-conflict`), and the audit row names the `caller`.
 - **A manifest never pins a tag its release lacks** (ENG-018): 0.24.0 shipped `fabric-agent.json` with the
   `grant.check` schemas at `/v0.24.1/`, a tag that did not exist until the next release, so a host admitting
   0.24.0 read 404s. `observatory/engine/tools/check_manifest_urls.py` refuses a pinned tag newer than the release
@@ -47,6 +151,43 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Fixed
 
+- **A leak scan cut short by its deadline still reports what it saw** (ENG-001): any `degraded` entry in
+  `leak-scan.json` used to turn the whole board into "the leak scan had nothing to look for", so a pass that
+  had already found a credential before its time ran out reported nothing. Each entry now carries a `code`
+  (`no-values`, `deadline-targets`, `deadline-store`, `source-unreadable`), and `coverage` gains
+  `targets_read` and `stores_unread` (`~`-relative). Only a scan that knew no values is
+  `secret.leak_scan_unmeasured`; every other one keeps `secret.seen_outside_its_home`, and a cut pass adds the
+  new warning `secret.leak_scan_partial` ("the leak scan read X of N sources; stores unread: K"), which stays on
+  the board and is not pushed by `notify_findings` (the sightings beside it are critical and are). `partial` is
+  now true only for a deadline cut; each entry also carries `source` (`leak-scan:<code>`) and `reason`, so
+  `/health` names it. A sighting is reported even beside "nothing to look for". A document written by an older
+  scanner reads as before, and a cut one says the scanner recorded no coverage instead of inventing a count.
+  **After installing, the first full pass may raise real `secret.seen_outside_its_home` criticals** that a cut
+  pass used to hide. The first passes after install are forced full (the known values change with INB-002, and
+  changed values reset the offsets), so they stay `partial` for several ticks until the scan has read every
+  target once. An unreadable source (`source-unreadable`) holds `/health` as degraded: unread is not clean —
+  a session folder that will not list, an env file or a vault slot that will not read, a store that will not
+  open. **Known gaps, not closed here:** a PEM key stored with escaped newlines in a JSONL line, and base64- or
+  JSON-escaped echoes of a value, are not matched (PB-157); a crowd of noise sightings can push a real one past
+  the six the finding lists; a sighting is reported by the pass that first reads its row or offset only.
+- **A prefixed token is a secret and a UUID is decided by its name** (INB-002): the env classifier read an
+  issuer prefix (`ntn_`, `ol_api_`) as a word, so Notion and Outline tokens were filed as configuration, and a
+  collection UUID as a secret. A prefix of at most eight characters in front of a random run of twenty or more
+  letters and digits no longer reads as words. Under an identifier's name (`*_ID`, `*_PRICE*`, `*_RELEASE`,
+  `*_TAG`, `*_COLLECTION`, `*_PARENT`, `*_PROJECT`, `*_ORG`, `*_BUCKET`) a value whose only randomness is that
+  tail — a price, an organisation, a project, an image tag — stays configuration unless a known issuer prefix
+  claims it; a name the secret rule also claims (`*_SECRET_ID`, `*_TOKEN_ID`) keeps it secret. A UUID is
+  decided the same way, and under a name neither rule claims it is judged by its shape (the nil UUID is
+  configuration). A random value under a secret's name, or behind a known issuer prefix, is a secret even when
+  its body holds `-` or `_` (`GOCSPX-…`, `tvly-…`, URL-safe base64), which used to read as words about half the
+  time. One prefix list: `KNOWN_PREFIX` now derives from `credential_shape.PREFIXES`, which gains `ntn_`,
+  `ol_api_`, `secret_`, `GOCSPX-` and `tvly-`. The commit gate `tools/check_secrets.py` refuses every one of
+  them (no word character or `_` before the prefix, snake-case names excepted, a vendor's own minimum body —
+  `glpat-` 20), and an upper-case name ending in `_TOKEN`, `_KEY`, `_SECRET` or `_PASSWORD`. **Counts change** wherever the `secret` class is read: the SessionStart line, the leak scan's
+  known values and `agent.secret_outside_vault`; the Env page and `observatory_credentials`;
+  `env.tracked_in_git` severity, `env.world_readable` and
+  `env.shared_secret`; `remote.same_as_local` and `remote.unbacked`; the agent-memory redaction set; and the
+  survey's totals.
 - **The 0.24.1 notes name the rotation they shipped** (ENG-017): "The collectors take turns" (OBS-52, #231)
   shipped in 0.24.1 but was missing from that release's notes, and the CHANGELOG packaged in 0.24.1–0.24.4 lists
   it under 0.24.0. The published notes were corrected on 2026-10-12 (the release files are unchanged); this file
@@ -68,6 +209,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   plan records `survey_partial` and `carried` (count and oldest measurement), `cleanup` prints how many checkouts
   wait for a fresh pass (also in its `--json` summary, so the disk guard's report keeps it), and the Machine page
   and the `observatory_machine` overview show the partial survey.
+
+
 
 ## 0.24.4 — 2026-10-12
 

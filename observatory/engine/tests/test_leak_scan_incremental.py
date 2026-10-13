@@ -94,6 +94,8 @@ class LeakScan(unittest.TestCase):
         self.db.write_bytes(b"not a database at all" * 100)
         out = self.scan()
         self.assertFalse(out["companion_store"]["read"])
+        self.assertIn("source-unreadable", {d.get("code") for d in out["degraded"]})
+        self.assertFalse(out["partial"], "an unreadable store is a hole, not a cut: the scan still finished")
         self.assertEqual(json.loads(L.STATE.read_text())["sqlite"]["stores"], before["stores"])
 
     def test_the_mark_holds_no_value(self):
@@ -125,6 +127,9 @@ class LeakScan(unittest.TestCase):
         self.assertTrue(out["partial"])
         self.assertIn("after 0 of 3 targets", out["degraded"][0]["why"])
         self.assertIn("UNMEASURED", out["degraded"][0]["effect"])
+        self.assertEqual(out["degraded"][0]["code"], "deadline-targets", "a machine code beside the prose (ENG-001)")
+        self.assertEqual(out["coverage"]["targets_read"], 0)
+        self.assertEqual(out["coverage"]["stores_unread"], [])
         self.assertTrue(out["companion_store"]["read"], "the stores still fit in the time left")
         self.assertEqual(json.loads(L.STATE.read_text())["offsets"], {}, "no offset moved for an unread file")
         full = self.scan()
@@ -140,6 +145,10 @@ class LeakScan(unittest.TestCase):
         self.assertFalse(out["companion_store"]["read"])
         self.assertEqual(out["coverage"]["companion_store"], "unread")
         self.assertTrue(any("before" in d["why"] and "mark did not move" in d["why"] for d in out["degraded"]))
+        self.assertIn("deadline-store", {d.get("code") for d in out["degraded"]})
+        self.assertTrue(out["coverage"]["stores_unread"], "the unread store is named")
+        self.assertNotIn(str(Path.home()) + "/", json.dumps(out["coverage"]["stores_unread"]),
+                         "a store outside home is named as it is; one under home starts with ~")
         self.assertEqual(json.loads(L.STATE.read_text())["sqlite"]["stores"], before, "the mark did not move")
         later = self.scan()
         self.assertTrue(any(h["where"].startswith(str(self.db)) for h in later["hits"]), "the row is read by the next pass")

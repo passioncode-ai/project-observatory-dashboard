@@ -163,6 +163,7 @@
  "Latest {n} movements": "Последние перемещения: {n}",
  "Leak register unreadable": "Реестр утечек не читается",
  "Leak scan cannot read a source": "Поиск утечек не может прочитать источник",
+ "Leak scan cut short": "Поиск утечек прерван по времени",
  "Leak scan not measured": "Поиск утечек не выполнялся",
  "Leak sightings suppressed": "Обнаруженные утечки подавлены",
  "Leak suppression not applied": "Подавление утечки не применено",
@@ -855,6 +856,13 @@
   "many": "поиск утечек не смог прочитать {n} источников",
   "other": "поиск утечек не смог прочитать {n} источника"
  },
+ "the leak scan read {read} of {n} sources; stores unread: {stores}": {
+  "one": "поиск утечек прочитал {read} из {n} источника; непрочитанных хранилищ: {stores}",
+  "few": "поиск утечек прочитал {read} из {n} источников; непрочитанных хранилищ: {stores}",
+  "many": "поиск утечек прочитал {read} из {n} источников; непрочитанных хранилищ: {stores}",
+  "other": "поиск утечек прочитал {read} из {n} источника; непрочитанных хранилищ: {stores}"
+ },
+ "the leak scan was cut short; this scanner version recorded no coverage": "поиск утечек прерван по времени; эта версия сканера не записала охват",
  "the leak scan did not read {n} sources": {
   "one": "поиск утечек не прочитал {n} источник",
   "few": "поиск утечек не прочитал {n} источника",

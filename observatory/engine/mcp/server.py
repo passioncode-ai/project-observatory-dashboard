@@ -52,7 +52,8 @@ def _home_argument(argv: list[str]) -> None:
 if __name__ == "__main__":
     _home_argument(sys.argv[1:])
 
-from pydantic import AliasChoices, Field                                                        
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from mcp.types import ToolAnnotations
 
 # The capability tools live beside this file. `mcp/` is not a package — the SDK
 # owns the name `mcp` — so the directory itself goes on the path.
@@ -96,7 +97,7 @@ server = InteropServer(
         "job — `fabric.job.get` follows it, `fabric.job.cancel` stops it). "
         "`observatory_search` does not: the query stays on this machine "
         "(embedding-policy/1, lexical); `degraded` says so.\n"
-        "WRITE: `observatory_record` and `observatory_propose` append PROPOSALS with "
+        "WRITE: `observatory_record`, `_lesson` and `_propose` append PROPOSALS with "
         "confidence below 1; only the operator or an independent corroboration promotes one.\n"
         "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run the "
         "`use` command it hands back never open a file.\n"
@@ -151,6 +152,8 @@ def _scope_error(kind: str, value: str | None) -> dict[str, Any] | None:
 # identity, since nothing inside the namespace can reach the operator's
 # three privileges.
 CALLER_ID = re.compile(r"^(agent|service):[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
+#: A record kind as `kinds` names it: `lesson`, `learning`, `note`, `session`, …
+KIND_PATTERN = r"^[a-z][a-z0-9_-]{0,31}$"
 
 
 def _owner_error(owner: str) -> dict[str, Any] | None:
@@ -636,8 +639,20 @@ def observatory_search(
                                  "which `degraded` names.")],
     project_id: Annotated[str | None, Field(description="Limit to one 'project:<slug>'")] = None,
     limit: Annotated[int, Field(ge=1, le=50)] = 10,
+    kinds: Annotated[list[Annotated[str, Field(pattern=KIND_PATTERN)]] | None,
+                     Field(max_length=12,
+                           description="Only records of these kinds, e.g. "
+                                       "[\"lesson\", \"learning\"]. Applied before the "
+                                       "300-match window, so the per-session turn records "
+                                       "cannot crowd a lesson out. Every hit names its "
+                                       "`kind`.")] = None,
 ) -> dict[str, Any]:
     """Recall over recorded narrative, by word forms; similarity only under a trusted context.
+
+    `kinds` filters by record kind INSIDE the candidate query, before the window, and every
+    hit carries `kind`; a `lesson` hit also carries its lesson fields (`classKey`, `title`,
+    `trigger`, `check`, `nouns`, `origin` with the pseudonymous project key and the
+    commit). Across projects: omit `project_id` (lessons belong to no one project).
 
     Conflicting records are returned **together** and unranked. `degraded` names
     every retrieval path that could not run, because absence from a result is not
@@ -655,15 +670,17 @@ def observatory_search(
         grant = MA.authorize("observatory_search", project_id=project_id)
     except MA.Refused as exc:
         return exc.envelope
+    wanted = None if kinds is None else tuple(dict.fromkeys(kinds))
     if grant.local:
-        out = survey_mod.search(query, project_id=project_id, limit=limit)
+        out = survey_mod.search(query, project_id=project_id, limit=limit, kinds=wanted)
     else:
         # A binding vouches for its query at its class ceiling (rule 10) and sees only
         # the classes under it.
         ctx = access_binding.query_context(grant.binding, project_id)
         out = survey_mod.search(query, project_id=project_id, limit=limit,
                                 authority=ctx["authority"], classification=ctx["classification"],
-                                classes=grant.visible_classes, hidden_kinds=grant.hidden_kinds)
+                                classes=grant.visible_classes, hidden_kinds=grant.hidden_kinds,
+                                kinds=wanted)
     # REDACTED ON THE WAY OUT and RECEIPTED (PB-137 N-012): every free-text field passes
     # the shape and known-value filters, and the answer names the receipt
     # `observatory_explain` reads back without searching again.
@@ -726,6 +743,11 @@ def observatory_recall(
                         Field(description="By real-world validity: `current` (default) is "
                                           "inside valid_from/valid_to, `expired` is past "
                                           "valid_to, `all` is the history.")] = "current",
+    kinds: Annotated[list[Annotated[str, Field(pattern=KIND_PATTERN)]] | None,
+                     Field(max_length=12,
+                           description="Only records of these kinds, e.g. [\"lesson\"]; "
+                                       "`total` counts the same scope. Each record names its "
+                                       "`kind`.")] = None,
 ) -> dict[str, Any]:
     """Current ledger records — what has been recorded about projects, and why.
 
@@ -769,10 +791,12 @@ def observatory_recall(
         # answer — and my first attempt peeked with a second connection opened
         # inside a condition and never closed. Over-fetching by one is exact,
         # needs no second query, and leaks nothing.
+        wanted = None if kinds is None else tuple(dict.fromkeys(kinds))
         fetched = L.live(conn, project_id=projectId, limit=limit + 1, cursor=cursor,
-                         classes=classes, validity=validity)
+                         classes=classes, validity=validity, kinds=wanted)
         rows, more = fetched[:limit], len(fetched) > limit
-        total = L.live_count(conn, project_id=projectId, classes=classes, validity=validity)
+        total = L.live_count(conn, project_id=projectId, classes=classes, validity=validity,
+                             kinds=wanted)
     finally:
         conn.close()
     contested = [r["memory_id"] for r in rows if r["state"] == "contested"]
@@ -783,7 +807,9 @@ def observatory_recall(
     # alone is not unique at second resolution.
     rows, redacted = RA.scrub_rows(rows)
     degraded = RA.scrub_degraded(degraded)
-    out = {"projectId": projectId, "validity": validity, "count": len(rows), "total": total,
+    out = {"projectId": projectId, "validity": validity,
+           **({"kinds": list(dict.fromkeys(kinds))} if kinds is not None else {}),
+           "count": len(rows), "total": total,
            "records": rows, "contested": contested, "redacted": redacted,
            "note": "conflicting records are returned together and are not ranked; "
                    "absence here is not proof of absence",
@@ -1075,6 +1101,163 @@ def observatory_learn(
         return _write_error(exc)
     finally:
         conn.close()
+
+
+class LessonOrigin(BaseModel):
+    """Where the lesson was learned: the project's pseudonymous key and the evidence commit."""
+    model_config = ConfigDict(extra="forbid")
+    projectId: str = Field(pattern=r"^p-[0-9a-f]{12}$",
+                           description="The project's pseudonymous key: `p-` and the first 12 "
+                                       "hex digits of the repository's root commit. Never a "
+                                       "`project:<slug>` id.")
+    commit: str = Field(pattern=r"^(?:commit:)?[0-9a-f]{7,40}$",
+                        description="The evidence commit, which resolves in the project's own "
+                                    "clone. Stored as `commit:<12 hex>`.")
+
+
+#: What `observatory_lesson` answers: the accepted record, or a typed refusal. Published as
+#: the tool's outputSchema (set after registration, below), so a client can check an answer
+#: without reading this file; `tests/test_lesson.py` validates real answers against it.
+LESSON_OUTPUT: dict[str, Any] = {
+    "type": "object",
+    "oneOf": [
+        {"title": "accepted",
+         "required": ["memoryId", "revision", "state", "owner", "outcome", "classKey",
+                      "origin", "redacted"],
+         "properties": {
+             "memoryId": {"type": "string", "pattern": "^mem:"},
+             "revision": {"type": "integer", "minimum": 1},
+             "state": {"enum": ["proposed", "observed", "supported", "contested", "stale"]},
+             "owner": {"type": "string"},
+             "outcome": {"enum": ["created", "revised", "replaced", "unchanged"],
+                         "description": "created: a new record; revised: this project's "
+                                        "record of the class got a new revision; replaced: "
+                                        "a promoted record cited a new commit, so it was "
+                                        "archived and this new proposal replaces it; "
+                                        "unchanged: an identical repeat, nothing written"},
+             "replaces": {"type": "string", "pattern": "^mem:[^@]+@[0-9]+$",
+                          "description": "with `replaced`: the archived record and revision"},
+             "classKey": {"type": "string"},
+             "origin": {"type": "object", "additionalProperties": False,
+                        "required": ["projectId", "commit"],
+                        "properties": {"projectId": {"type": "string",
+                                                     "pattern": "^p-[0-9a-f]{12}$"},
+                                       "commit": {"type": "string",
+                                                  "pattern": "^commit:[0-9a-f]{7,12}$"}}},
+             "supersedes": {"type": "array", "items": {"type": "string"}},
+             "consistencyCursor": {"type": "integer"},
+             "createdAt": {"type": "string"},
+             "redacted": {"type": "object",
+                          "description": "what the memory redactor replaced, by count and "
+                                         "field; never the replaced text",
+                          "required": ["shapes", "knownValues", "knownValuesChecked", "fields"],
+                          "properties": {"shapes": {"type": "integer"},
+                                         "knownValues": {"type": "integer"},
+                                         "knownValuesChecked": {"type": "boolean"},
+                                         "fields": {"type": "array",
+                                                    "items": {"type": "string"}}}}},
+         "not": {"required": ["error"]}},
+        {"title": "refused",
+         "required": ["error", "code", "detail", "degraded"],
+         "properties": {"error": {"type": "string"}, "code": {"type": "string"},
+                        "detail": {"type": "string"},
+                        "reasons": {"type": "array", "items": {"type": "string"}},
+                        "hint": {"type": "string"}, "remedy": {"type": "string"},
+                        "degraded": {"type": "array"}}},
+    ],
+}
+
+
+@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False,
+                                         idempotent_hint=True))
+def observatory_lesson(
+    owner: Annotated[str, Field(min_length=1, description="Who records it: `agent:<name>` or "
+                                                          "`service:<name>`, e.g. "
+                                                          "'agent:task-pipeline'.")],
+    classKey: Annotated[str, Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$", max_length=64,
+                                   description="The class as a slug, e.g. "
+                                               "'absence-needs-its-own-check'. Two projects "
+                                               "with one classKey hold one lesson, seen "
+                                               "twice.")],
+    title: Annotated[str, Field(min_length=8, max_length=160,
+                                description="The class in one sentence; never the incident.")],
+    trigger: Annotated[str, Field(min_length=3, max_length=200,
+                                  description="When it applies.")],
+    check: Annotated[str, Field(min_length=3, max_length=200,
+                                description="The check that now catches it, by name.")],
+    nouns: Annotated[list[Annotated[str, Field(min_length=2, max_length=32)]],
+                     Field(min_length=3, max_length=8,
+                           description="3-8 search keys a later task's nouns are matched "
+                                       "against.")],
+    origin: Annotated[LessonOrigin, Field(description="The project's pseudonymous key and "
+                                                      "the evidence commit.")],
+) -> dict[str, Any]:
+    """Record a lesson — a retro entry's class — so agents in OTHER projects find it
+    (`observatory_search(kinds=["lesson"])`, no project). One record per (classKey,
+    project): a repeat from the same project revises it, an identical repeat writes nothing,
+    and a promoted lesson citing a new commit is archived and replaced by a new proposal.
+    Written as a PROPOSAL with confidence 0.5. It becomes `observed` only when a second,
+    distinct project records the same classKey and both commits resolve in clones the
+    registry knows here (the corroborator, `tools/corroborate.py`; an unknown key witnesses
+    nothing); `supported` is the operator's. Kept 365 days while proposed.
+    Refused: a path, a URL, an e-mail address, a line break, a `project:<slug>` id, a
+    classKey the redactor would change.
+    Credential shapes and known values are redacted. Local stdio only."""
+    bad = _owner_error(owner)
+    if bad:
+        return {**bad, "code": "owner-refused"}
+    refused = MA.local_only("observatory_lesson")
+    if refused is not None:
+        return refused
+    from store import lessons as LS
+    import memory_redact
+    from store import workflow as W
+    given = {"classKey": classKey, "title": title, "trigger": trigger, "check": check,
+             "nouns": list(nouns),
+             "origin": origin.model_dump() if isinstance(origin, BaseModel) else origin}
+    def refuse(reasons: list[str]) -> dict[str, Any]:
+        return {"error": "lesson refused", "code": "invalid-lesson",
+                "detail": RA.scrub_text("; ".join(reasons)),
+                "reasons": [RA.scrub_text(r) for r in reasons],
+                "hint": LS.HINT, "degraded": []}
+    reasons = LS.validate(given)
+    if reasons:
+        return refuse(reasons)
+    body = LS.body_of(given)
+    # THE REDACTOR RUNS ON EVERY TEXT FIELD, as on every agent write: a key pasted into
+    # `check` is replaced before the first write. The commit is kept whole because its
+    # stored form, `commit:<12 hex>`, is one the redactor keeps (memory_redact.KEEP).
+    cleaned, report = memory_redact.Redactor().scrub(body)
+    # BUT NOT THE IDENTITY. A slug may be a long hex run, which the redactor replaces; the
+    # stored classKey would stop being a slug and stop matching another project's copy
+    # of the class, so the corroborator could never see the two together. Refused instead.
+    if cleaned["classKey"] != body["classKey"]:
+        return refuse(["classKey carries what the memory redactor replaces (a long hex or "
+                       "random run, or a known value); name the class in words"])
+    try:
+        L.check_text_bounds(LS.statement_of(cleaned), LS.why_of(cleaned))
+    except Exception as exc:
+        return {**_write_error(exc), "code": "invalid-lesson", "degraded": []}
+    conn = store_db.connect()
+    try:
+        out = LS.write(conn, L, owner=owner, body=cleaned,
+                       provenance=[{"source": "observatory_lesson"}])
+        W._journal_known("lesson", None, None, report.as_dict())
+    except Exception as exc:
+        return {**_write_error(exc), "code": type(exc).__name__, "degraded": []}
+    finally:
+        conn.close()
+    rep = report.as_dict()
+    return {**out, "classKey": cleaned["classKey"], "origin": cleaned["origin"],
+            "redacted": {"shapes": rep["shapes"], "knownValues": rep["knownValues"],
+                         "knownValuesChecked": rep["knownValuesChecked"],
+                         "fields": rep["fields"]}}
+
+
+# The SDK derives a tool's outputSchema from its return annotation, which for a dict is
+# "any object"; this tool publishes what it actually answers. FuncMetadata reads the field
+# live, so setting it after registration is what the SDK supports.
+server._tool_manager.get_tool("observatory_lesson").fn_metadata.output_schema = LESSON_OUTPUT
 
 
 @server.tool()

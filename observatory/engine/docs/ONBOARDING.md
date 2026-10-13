@@ -292,16 +292,34 @@ chooses the helper's working directory and `PATH`. The door prints exactly
 `{"Authorization": "Bearer <value>"}` and a newline; `--name X-Api-Key` changes the header and
 `--scheme ""` prints the bare value. It reads the vault only, never an env file or the
 environment, and refuses, printing nothing on stdout, when stdout is a terminal, when
-`CLAUDE_CODE_MCP_SERVER_URL` is unset or names a scheme, host or port other than the binding,
-when the slot is not bound, when `--name` or `--scheme` is not an RFC 7230 token, or when the
+`CLAUDE_CODE_MCP_SERVER_URL` is unset and no `--server-url` was given, when the server URL it
+has names a scheme, host or port other than the binding, when the slot is not bound, when `--name` or `--scheme` is not an RFC 7230 token, or when the
 value carries a control character. `--header-for` takes an https URL or a bare host (https on
-the default port); the path is not part of the binding, and plain http, userinfo, a query or a
-fragment are refused. `vault.py bind … --clear` removes the binding; `vault.py list` shows it;
-both verbs are journalled in the movements journal. Each `header` call adds a row to the
-`secret-use.jsonl` audit (served or refused, the server's name and host, the parent process),
-never the value. The binding narrows an accident (`header … | cat` in an agent's shell is
-refused for want of the server's URL); it is not a sandbox, because anything that can set that
-variable to the bound URL and read stdout receives the value.
+the default port), or plain http to a loopback literal with its port —
+`http://127.0.0.1:<port>` or `http://[::1]:<port>` — since loopback crosses no network;
+`localhost` is refused (a name `/etc/hosts` can remap), as is http to any other host. The path
+is not part of the binding, and userinfo, a query or a fragment are refused. A client that does
+not export the server's URL to its helper — Codex's `http_headers_helper` — passes it with
+`--server-url URL`, used only when `CLAUDE_CODE_MCP_SERVER_URL` is unset; when both are set and
+name different servers the call is refused (`url-conflict`). `vault.py bind … --clear` removes
+the binding; `vault.py list` shows it; both verbs are journalled in the movements journal. Each
+`header` call adds a row to the `secret-use.jsonl` audit (served or refused, the server's name
+and host, the parent process, and the caller — `claude-headersHelper` when the URL came from
+the variable, `codex-helper` when it came from `--server-url`), never the value. The binding
+narrows an accident: a bare `header … | cat` in an agent's shell is refused for want of a server
+URL. It is not a sandbox: anything that names the bound URL — in the variable or with
+`--server-url` — and reads stdout receives the value.
+
+**Codex is untested.** The `--server-url` form follows Codex's documented `http_headers_helper`
+("a local command that prints a JSON object"), but no Codex configuration entry has been
+verified against this door, and Codex documents `http_headers_helper` as supported only for
+local MCP servers. Until an entry is verified, Codex's documented fallback is an environment
+variable read by Codex itself — `bearer_token_env_var = "<ENV>"` for an `Authorization: Bearer`
+header, `env_http_headers = { "<header>" = "<ENV>" }` for any other — with Codex started under
+`use_secret.py serve`. That is weaker than the helper: the value then sits in the agent's own
+environment for the whole session, where any command the agent runs can read it, and none of the
+door's refusals (a terminal, an unbound slot, a server other than the binding, `url-conflict`)
+applies.
 
 Slots are private files under the workspace by default. A separate
 `sources.secret_store` is optional and belongs to the user. File permissions
@@ -309,9 +327,60 @@ limit local access; this is not a claim that the default files are encrypted at
 rest. Protect private backups just as carefully. A configured external store
 is not included in workspace backup snapshots.
 
+**A DigitalOcean managed database's password, without printing it.**
+`tools/digitalocean.py` uses the operator's `doctl` context. `db list` and
+`db consumers CLUSTER` show metadata; the latter lists only apps whose spec binds the
+cluster, so it is not a complete consumer inventory. `db credential CLUSTER USER --db NAME
+--to vault:PROJECT/ENV/NAME` delivers a URL on stdin. `db rotate … --app ID --spec-env ID:KEY`
+resets once and names local `use_secret.py serve` consumers that still need a restart.
+A folder populated with `vault.py inject` keeps the old value until injected again.
+Do not ask a provider MCP tool for credentials: its whole answer may be retained.
+
+DigitalOcean rotation verifies every selected `--spec-env APP:KEY` literal before any reset.
+Its name is not evidence: a plain value must equal the selected database user's current
+provider password, or be a database URL with that password, user, engine and the provider's
+connection host/port. Opaque encrypted values and unverified pool endpoints are refused;
+migrate those consumers to App Platform database bindings before rotation. No command in
+this flow prints the current password. Only the named consumers are moved, with downtime
+between reset and ACTIVE; ACTIVE is not application health verification.
+
+The door writes an owner-only receipt under `store/digitalocean-rotations/` before reset,
+initially `reset: unknown`. A lost or malformed response, timeout or nonzero CLI result can
+follow a committed reset: exit 5 means **unknown**, not “nothing changed”. Never repeat
+`db rotate` to recover it. Use `db credential` to deliver the current value into the selected
+vault slot, then reconcile each consumer without another reset. Exit 1 is a refusal before
+reset; after an attempt, 2 means deployment unconfirmed, 3 vault delivery failed, 4 an app
+update/redeploy or temporary spec cleanup failed, and 6 receipt update failed. The largest
+code wins. Independent consumers continue after a confirmed reset despite another consumer's
+failure. Provider/vault error bodies are withheld. A crash or failed final receipt write
+leaves the earlier uncertain receipt; there is no automatic reconciliation, retry or claim
+of a transaction across provider and vault. A failed temporary-file cleanup may leave its
+owner-only spec file and is reported for local recovery.
+
+Reset, app updates and redeploys each make one attempt; only read calls retry.
+A lost/nonzero mutation response leaves that consumer `unknown`, even if the provider
+already applied it. The receipt distinguishes this from `not_started` for a local
+pre-call failure. Read current spec and deployment state before any retry; a blind
+redeploy is not recovery for a literal. Independent peers still continue. Deployment
+confirmation accepts a validated phase equal to `ACTIVE`, never a suffix or arbitrary
+provider text; malformed metadata remains unconfirmed and its body is not printed.
+
+
 Known-value scanning finds occurrences of values already known locally. It
 cannot prove the absence of unknown, encoded or previously deleted values.
 Rotation changes the local slot; provider revocation is a separate action.
+
+Vault slot discovery reports unreadable ancestors and excludes symbolic links or special files as unmeasured. Session directory links are likewise unmeasured and are never followed.
+
+Leak discovery reports unreadable sessions, log directories, dashboard metadata and
+tracked-tree listings as `source-unreadable`, preserving sightings from readable
+siblings. Permission/stat/timeout errors never become an empty healthy source.
+A package with no Git marker in its ancestry explicitly reports that it has no
+tracked-tree source; a present marker whose Git listing fails is a coverage hole.
+Missing optional paths remain absent. A source expected to be a file but resolving
+to a directory, submodule entry or special file is explicitly unmeasured and is
+never opened as a file. An interrupted or unreadable source is
+unmeasured, not proof that it contains no credential.
 
 A file the scan could not open is listed as unread and raises a warning. It is never counted as
 clean. When a sighting is known and accepted, for example a synthetic value a fixture prints on
@@ -362,6 +431,27 @@ claude mcp list | grep observatory     # Connected
 
 Restart open Claude Code sessions afterwards; they read their MCP servers at
 start.
+
+Agents keep their work memory here. `observatory_record` writes a note about one
+project and `observatory_learn` a lesson inside one project; `observatory_lesson`
+records a lesson for every project — a retro entry's class with the project's
+pseudonymous key (`p-` and 12 hex digits of its root commit, never its name) and
+the evidence commit. Every one is a proposal (confidence 0.5). A lesson becomes
+`observed` without you when a second, distinct project records the same class and
+both commits resolve in clones the registry knows on this machine:
+`tools/corroborate.py`, which the tick runs, asks git for each commit in the clone
+whose root commit gives the project's key. A key no registered clone carries is not
+a witness; its lesson stays proposed and `corroboration.json` lists it as "commit not
+resolvable here". `supported` is yours, through `review.py`.
+Proposed lessons are kept 365 days (`retention.json` → `ledger.kinds.lesson`), and
+an observed one is never erased by age. An agent finds lessons with
+`observatory_search` and `kinds: ["lesson"]`, without a project. task-pipeline
+writes them with `observatory_lesson` where the engine has it and as `lesson:`
+notes through `observatory_record` otherwise. Lessons stay in
+this workspace: they are agents' memory, not the project's. Lessons recorded earlier
+as `lesson:` notes are converted once with
+`python "$(project-observatory full-path)/tools/migrate_lessons.py" --apply`
+(without `--apply` it lists what it would change and writes nothing).
 
 The optional `observatory-log` plugin adds Claude Code hooks; other hosts can
 use the CLI and MCP without those hooks.

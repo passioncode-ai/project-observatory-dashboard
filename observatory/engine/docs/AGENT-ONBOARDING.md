@@ -35,3 +35,48 @@ source time; it is not zero. The largest-file report carries completeness,
 error counts and budget exhaustion. An incomplete empty scan is shown as an
 incomplete measurement. The MCP overview exposes `guard.largeFilesCoverage`
 beside its bounded file list. See [measurement coverage](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/DISK-GUARD.md#measurement-coverage-obs-87-subset).
+
+## Database rotation failure boundary
+
+DigitalOcean rotation verifies every selected `--spec-env APP:KEY` literal before any reset.
+Its name is not evidence: a plain value must equal the selected database user's current
+provider password, or be a database URL with that password, user, engine and the provider's
+connection host/port. Opaque encrypted values and unverified pool endpoints are refused;
+migrate those consumers to App Platform database bindings before rotation. No command in
+this flow prints the current password. Only the named consumers are moved, with downtime
+between reset and ACTIVE; ACTIVE is not application health verification.
+
+The door writes an owner-only receipt under `store/digitalocean-rotations/` before reset,
+initially `reset: unknown`. A lost or malformed response, timeout or nonzero CLI result can
+follow a committed reset: exit 5 means **unknown**, not “nothing changed”. Never repeat
+`db rotate` to recover it. Use `db credential` to deliver the current value into the selected
+vault slot, then reconcile each consumer without another reset. Exit 1 is a refusal before
+reset; after an attempt, 2 means deployment unconfirmed, 3 vault delivery failed, 4 an app
+update/redeploy or temporary spec cleanup failed, and 6 receipt update failed. The largest
+code wins. Independent consumers continue after a confirmed reset despite another consumer's
+failure. Provider/vault error bodies are withheld. A crash or failed final receipt write
+leaves the earlier uncertain receipt; there is no automatic reconciliation, retry or claim
+of a transaction across provider and vault. A failed temporary-file cleanup may leave its
+owner-only spec file and is reported for local recovery.
+
+Reset, app updates and redeploys each make one attempt; only read calls retry.
+A lost/nonzero mutation response leaves that consumer `unknown`, even if the provider
+already applied it. The receipt distinguishes this from `not_started` for a local
+pre-call failure. Read current spec and deployment state before any retry; a blind
+redeploy is not recovery for a literal. Independent peers still continue. Deployment
+confirmation accepts a validated phase equal to `ACTIVE`, never a suffix or arbitrary
+provider text; malformed metadata remains unconfirmed and its body is not printed.
+
+### Leak discovery coverage
+
+Vault slot discovery reports unreadable ancestors and excludes symbolic links or special files as unmeasured. Session directory links are likewise unmeasured and are never followed.
+
+Leak discovery reports unreadable sessions, log directories, dashboard metadata and
+tracked-tree listings as `source-unreadable`, preserving sightings from readable
+siblings. Permission/stat/timeout errors never become an empty healthy source.
+A package with no Git marker in its ancestry explicitly reports that it has no
+tracked-tree source; a present marker whose Git listing fails is a coverage hole.
+Missing optional paths remain absent. A source expected to be a file but resolving
+to a directory, submodule entry or special file is explicitly unmeasured and is
+never opened as a file. An interrupted or unreadable source is
+unmeasured, not proof that it contains no credential.

@@ -35,10 +35,12 @@ files written by that child are outside this filter. Run only trusted commands.
 `tools/use_secret.py header` is the one door that prints a value: one JSON header
 object for Claude Code's MCP `headersHelper`, which Claude Code puts into the HTTP
 request. It reads the vault only and answers only when stdout is not a terminal and
-`CLAUDE_CODE_MCP_SERVER_URL` names the scheme, host and port the operator bound the
-slot to with `tools/vault.py bind`; each call is audited without the value. A
-process that sets that variable to the bound URL and reads stdout receives the
-value, so the binding limits accidents and is not a sandbox.
+`CLAUDE_CODE_MCP_SERVER_URL` (or, for a client that does not export it, `--server-url`)
+names the scheme, host and port the operator bound the slot to with `tools/vault.py bind`;
+each call is audited without the value. A binding is https, or plain http to a loopback
+literal (`127.0.0.0/8`, `[::1]`) with its port, which crosses no network; `localhost` and
+http to any other host are refused. A process that names the bound URL and reads stdout
+receives the value, so the binding limits accidents and is not a sandbox.
 
 The credential UI can reveal a selected inventoried value after an explicit,
 authenticated local request. Reveal is deliberately different from a report;

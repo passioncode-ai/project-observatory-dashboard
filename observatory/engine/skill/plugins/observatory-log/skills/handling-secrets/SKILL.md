@@ -53,8 +53,8 @@ for it. A name or note shaped like a credential is refused, never stored.
 | List slots | `vault.py list PROJECT ENV` |
 | Run a command using a slot | `use_secret.py run [--env ENV] [--vault-only] PROJECT NAME -- COMMAND ARGUMENTS` (flags before PROJECT) |
 | Receive a value from another local command | `use_secret.py pipe NAME -- COMMAND ARGUMENTS` |
-| Bind a slot to the one MCP server allowed to receive it as a header (the operator, once) | `vault.py bind PROJECT ENV NAME --header-for https://HOST[:PORT]` (a bare host means https); `--clear` removes it; both are journalled |
-| Give an HTTP MCP server its bearer through Claude Code's `headersHelper` | `use_secret.py header [--env ENV] [--name Authorization] [--scheme Bearer] PROJECT NAME`, written into the server's `headersHelper` entry, never run by hand |
+| Bind a slot to the one MCP server allowed to receive it as a header (the operator, once) | `vault.py bind PROJECT ENV NAME --header-for https://HOST[:PORT]` (a bare host means https), or `http://127.0.0.1:PORT` / `http://[::1]:PORT` for a loopback server (`localhost` is refused); `--clear` removes it; both are journalled |
+| Give an HTTP MCP server its bearer through the client's header helper | `use_secret.py header [--env ENV] [--name Authorization] [--scheme Bearer] PROJECT NAME`, written into Claude Code's `headersHelper` entry; for Codex's `http_headers_helper` add `--server-url URL`, since Codex exports no server URL. Never run by hand |
 | Populate a project's ignored environment file | `vault.py inject PROJECT ENV DIRECTORY` |
 | Record an exposure | `vault.py leak PROJECT ENV NAME --where "location and evidence, no value"` |
 | Replace a stored value | `vault.py rotate PROJECT ENV NAME`, replacement on stdin |
@@ -80,14 +80,16 @@ not a sandbox: a child process can encode a value, transmit it, or write it to
 another file. Only run the command authorized by the task. Do not claim this
 filter prevents every leak.
 
-**The header door prints a value, so it serves only Claude Code.** `use_secret.py
+**The header door prints a value, so it serves only a client's header helper.** `use_secret.py
 header` writes one JSON object (`{"Authorization": "Bearer …"}`) for a
 `headersHelper`, which Claude Code merges into the MCP request rather than the
 conversation. It reads the vault only (never an env file or the environment), and
-refuses unless stdout is a program, `CLAUDE_CODE_MCP_SERVER_URL` names the scheme,
-host and port the slot is bound to, and the value has no control character. Never
-run it yourself, pipe it, or set `CLAUDE_CODE_MCP_SERVER_URL` to make it answer:
-that prints the value into your transcript. Each call is audited. Binding is the
+refuses unless stdout is a program, `CLAUDE_CODE_MCP_SERVER_URL` (or `--server-url`,
+for a client that exports none) names the scheme, host and port the slot is bound to,
+and the value has no control character; two URLs that disagree are refused
+(`url-conflict`). Never run it yourself, pipe it, or set `CLAUDE_CODE_MCP_SERVER_URL` or
+`--server-url` to make it answer: that prints the value into your transcript. Each call
+is audited, with the caller it claimed. Binding is the
 operator's decision; ask for it, do not run `bind` to make a call succeed.
 
 **Stdin carries one thing.** Never pipe a secret into `python3 -`, `node -` or
@@ -126,11 +128,68 @@ exposure and record it with `vault.py leak`. The design is
 
 ## Provider integrations
 
+**A provider's MCP tool can be the leak.** Some tools return a credential in their
+answer by design, whatever you asked them for: DigitalOcean's `db-cluster-list`,
+`db-cluster-get`, `db-cluster-*-user`, `docr-docker-credentials`, `doks-get-kubeconfig`,
+`spaces-key-create`. The transcript keeps a tool result whole; it cannot be redacted
+afterwards: a `db-cluster-list` call asked for names can return every cluster's
+passwords. Do not call such a tool; get names from the provider CLI with an
+explicit `--format`, and credentials through the door below. Record any sighting with
+`vault.py leak` and rotate.
+
+DigitalOcean managed databases go through `digitalocean.py` in the operator's `doctl`
+context. `db list` and `db consumers CLUSTER` print metadata only; consumer discovery covers
+App Platform bindings, not every possible consumer. `db credential CLUSTER USER --db NAME
+--to vault:PROJECT/ENV/NAME` puts the connection URL in the vault on stdin.
+
+DigitalOcean rotation verifies every selected `--spec-env APP:KEY` literal before any reset.
+Its name is not evidence: a plain value must equal the selected database user's current
+provider password, or be a database URL with that password, user, engine and the provider's
+connection host/port. Opaque encrypted values and unverified pool endpoints are refused;
+migrate those consumers to App Platform database bindings before rotation. No command in
+this flow prints the current password. Only the named consumers are moved, with downtime
+between reset and ACTIVE; ACTIVE is not application health verification.
+
+The door writes an owner-only receipt under `store/digitalocean-rotations/` before reset,
+initially `reset: unknown`. A lost or malformed response, timeout or nonzero CLI result can
+follow a committed reset: exit 5 means **unknown**, not “nothing changed”. Never repeat
+`db rotate` to recover it. Use `db credential` to deliver the current value into the selected
+vault slot, then reconcile each consumer without another reset. Exit 1 is a refusal before
+reset; after an attempt, 2 means deployment unconfirmed, 3 vault delivery failed, 4 an app
+update/redeploy or temporary spec cleanup failed, and 6 receipt update failed. The largest
+code wins. Independent consumers continue after a confirmed reset despite another consumer's
+failure. Provider/vault error bodies are withheld. A crash or failed final receipt write
+leaves the earlier uncertain receipt; there is no automatic reconciliation, retry or claim
+of a transaction across provider and vault. A failed temporary-file cleanup may leave its
+owner-only spec file and is reported for local recovery.
+
+Reset, app updates and redeploys each make one attempt; only read calls retry.
+A lost/nonzero mutation response leaves that consumer `unknown`, even if the provider
+already applied it. The receipt distinguishes this from `not_started` for a local
+pre-call failure. Read current spec and deployment state before any retry; a blind
+redeploy is not recovery for a literal. Independent peers still continue. Deployment
+confirmation accepts a validated phase equal to `ACTIVE`, never a suffix or arbitrary
+provider text; malformed metadata remains unconfirmed and its body is not printed.
+
+
 Cloudflare and OpenRouter have separate tools, `cloudflare.py` and
 `openrouter.py`. Check their installed `--help` and non-secret inventory first.
 They require an explicitly configured integration and the user's own admin or
 provisioning credential. They do not make a new user inherit the author's
 accounts, budgets or tokens. Limit issuance and revocation to the task's scope.
+
+A project's own OpenRouter keys come from its spend policy: `openrouter.py
+issue-for-policy --policy FILE [--dry-run]` keeps their ceilings together within
+the project limit and exits 1 with `OVER LIMIT by $X now ($A against the $L
+limit); it ends after: …` when they are not. `rotate` is the one window past the
+limit: both keys are live while it runs, and until the J-3 change a rotate that
+fails can leave the successor `NAME-next` untracked or the predecessor uncounted —
+delete at the provider the one the slot does not hold, then run
+`issue-for-policy`. A pending row with no hash on an account past the listing is
+cleared with `revoke NAME --forget-pending --reason "…"` once its key is gone. The door must
+record the reason as a pre-action attestation before clearing the row; an
+unwritable journal refuses the change. This is an operator assertion, not
+provider verification. A separate completion event follows the ledger write.
 
 A project that must edit DNS in one zone (a custom domain, a CNAME to its host)
 gets `cloudflare.py issue --preset dns-edit --zone <zone> --vault <project>/<env>/<NAME>`:

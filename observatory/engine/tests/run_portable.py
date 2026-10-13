@@ -117,6 +117,8 @@ BOUNDARY += ('harness',)
 BOUNDARY += ('meter', 'meter_wire', 'spend')
 # docs/design/WINDOWS-LINUX.md W3: a whole tick, through tools/tick.py.
 BOUNDARY += ('tick_py',)
+# ENG-003: the agent's deadline reaches providers.complete().
+BOUNDARY += ('provider_deadline',)
 # One credential-shape heuristic for every door that judges typed text.
 BOUNDARY += ('credential_shape',)
 # PROJECT is the folder name; the registry id names the same folder.
@@ -152,6 +154,8 @@ BOUNDARY += ('embedding_enforcement',)
 BOUNDARY += ('memory_access',)
 # Scope and validity filtered before the candidate window (PB-137 N-009).
 BOUNDARY += ('search_scope',)
+# A lesson as its own record kind, and search filtered by kind before the window (M-7).
+BOUNDARY += ('lesson', 'search')
 # Retrieval receipts, scoped explain, redaction on the way out (PB-137 N-012).
 BOUNDARY += ('retrieval_audit',)
 # Checkpoint prose with field/chunk provenance; replays resurrect nothing (PB-137 N-011).
@@ -170,6 +174,8 @@ BOUNDARY += ('maintenance',)
 BOUNDARY += ('maintain_app',)
 # The disk guard: pressure, the lsof rule, each class; synthetic roots only (2026-10-11).
 BOUNDARY += ('disk_guard',)
+# The DigitalOcean door against a fake `doctl` and a scratch vault (PLN-142).
+BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -192,6 +198,8 @@ HELPERS += (
     # language reads in the other (L10N-01).
     'relocalize.py',
 )
+# task-pipeline's lessons.py emit-observatory output, copied: observatory_lesson's arguments (M-7).
+HELPERS += ('lesson_emitter_fixture.json',)
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', 'tools')
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
@@ -325,7 +333,7 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 #: tools/check_paths.py over the tree since 0.20.0, took 14 s alone and passed 120 s at a load
 #: average near 150).
 #: A larger --timeout still wins; a smaller one never cuts these short.
-SUITE_SECONDS = {'maintenance': 480, 'tick_py': 300, 'conformance_receipt': 360, 'backup_vault': 300, 'dashboard_render': 600,
+SUITE_SECONDS = {'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'conformance_receipt': 360, 'backup_vault': 300, 'dashboard_render': 600,
                  'workspace': 300, 'interop': 300, 'indexer_load': 300, 'api_listings': 300}
 
 
