@@ -67,3 +67,7 @@ review is pending; full5200 is still NOT_RUN in this receipt.
 The [full original 5200-case measurement](full-measurement.md) is now recorded
 for source `6ee4e6c`: 4307 PASS, 891 FAIL, 2 ERROR. This supersedes the earlier
 NOT_RUN status only for that exact source and retains every failed seed.
+
+The [separate CLI-boundary adapter](cli-boundary.md) reproduces the real
+entrypoint's error exit without rolling back modeled effects or skipping
+invariants. Its six bounded replays do not replace the full measurement.

@@ -43,6 +43,25 @@ class ModelBinding(unittest.TestCase):
         self.assertEqual(before[:2], (self.m.ledger(), self.p.keys))
         self.assertEqual(before[3], self.p.writes)
 
+    def test_revoke_cli_boundary_preserves_effect_and_failed_ledger_write(self):
+        name = self.issue(); before = copy.deepcopy(self.m.ledger())
+        handle = before['issued'][name]['hash']
+        self.door['save'] = [1]
+        self.assertEqual(A.remedy_revoke(self.m, self.p, name, {}), 2)
+        self.assertNotIn(handle, self.p.keys)  # DELETE happened before save failed.
+        self.assertEqual(self.m.ledger(), before)
+        self.assertIsNone(self.door['save'])  # The original failure hook was consumed.
+        self.assertEqual(A.untracked(self.m, self.p), [])
+        self.assertEqual(A.remedy_revoke(self.m, self.p, name, {}), 0)
+        self.assertNotIn(name, self.m.ledger()['issued'])
+
+    def test_revoke_cli_boundary_catches_only_the_real_entrypoint_tuple(self):
+        for error in (OSError, ValueError, RuntimeError):
+            with patch.object(self.m, 'cmd_revoke', side_effect=error('synthetic')):
+                self.assertEqual(A.revoke(self.m, 'fixture'), 2)
+        with patch.object(self.m, 'cmd_revoke', side_effect=LookupError('unexpected')):
+            with self.assertRaises(LookupError): A.revoke(self.m, 'fixture')
+
     def test_producer_empty_positive_unlisted_and_stale_negative(self):
         import datetime, json
         name = self.issue(); h = self.m.ledger()['issued'][name]['hash']

@@ -1,0 +1,121 @@
+{
+  "model_source_sha256": "059eeddcea7a08bbe4e92ffa496fc243d72915c1976bb39b3b923be6fb0b88a9",
+  "production_source_sha256": "eda88faa0e7948b9189ad670b19e8b7fb6f9a7c5e5063d9ab4259179dcfbc93f",
+  "cases": [
+    {
+      "seed": 7001556,
+      "issues": [],
+      "status": "PASS",
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': -1, 'page': (5, 3), 'fillers': 3, 'newest_first': False}",
+        "run1 limit=225371 refs=1 kw={'limit_override': 1957.08} -> None ['issued']",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "failrun save -> None ['held-missing']",
+        "failrun mint:unreach-before -> None ['held-missing']",
+        "concurrent[issue] during policy -> None",
+        "remedy revoke project-a-prod-k0 -> 2",
+        "rotate project-a-prod-k0 fault=- -> rc=1",
+        "converge#0 -> None ['held-missing']",
+        "  remedy revoke project-a-prod-k0 (held-missing) -> 0",
+        "converge#1 -> None ['issued']"
+      ]
+    },
+    {
+      "seed": 7003454,
+      "issues": [],
+      "status": "PASS",
+      "trace": [
+        "shape {'echo': '-0.004', 'big': False, 'drift': 0, 'page': (4, 4), 'fillers': 3, 'newest_first': True}",
+        "run1 limit=264355 refs=2 kw={} -> None ['issued', 'issued']",
+        "rotate-kill project-a-prod-k7 fault=mint:unreach-after -> rc=1",
+        "consumer reads 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 by label (listed); revoke -> rc=1 still=True",
+        "rename 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "failrun save -> None ['in-place', 'in-place']",
+        "edit limit=528710 refs=2 kw={}",
+        "remedy revoke project-a-prod-k4 -> 2",
+        "unread 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['ceiling-moved', 'issued', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k4 (not-in-policy) -> 0",
+        "converge#1 -> None ['in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7001212,
+      "issues": [
+        "(L) live project key unknown to the ledger after subcent: f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015(project-a-prod-k0, $368.3328)"
+      ],
+      "status": "FAIL",
+      "trace": [
+        "shape {'echo': 'x1.0001', 'big': True, 'drift': 1, 'page': (3, 2), 'fillers': 9, 'newest_first': True}",
+        "run1 limit=172463 refs=2 kw={} -> None ['issued', 'issued']",
+        "edit limit=172463 refs=3 kw={'limit_override': 368.29}",
+        "rotate-kill project-a-prod-k1 fault=delete -> rc=1",
+        "failrun mint:502-after -> PolicyPartial: partial: 2 of 3 slots served before vault:project-a/prod/K0 failed; a re-run does only what is missing ['ceiling-moved', 'ceiling-moved', 'failed']",
+        "concurrent[issue] during rotate -> rc=1",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "rotate-kill project-a-prod-k0 fault=delete -> rc=1",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 368.3328",
+        "converge#0 -> None ['held-missing', 'ceiling-moved', 'held-pending']",
+        "  remedy revoke project-a-prod-k1 (held-missing) -> 0",
+        "  remedy revoke project-a-prod-k0 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k0 -> operator-attested",
+        "converge#1 -> None ['issued', 'ceiling-moved', 'issued']"
+      ]
+    },
+    {
+      "seed": 7004446,
+      "issues": [
+        "(L) live project key unknown to the ledger after subcent: 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8(project-a-prod-k0, $11.132)"
+      ],
+      "status": "FAIL",
+      "trace": [
+        "shape {'echo': '-0.004', 'big': True, 'drift': -1, 'page': (5, 3), 'fillers': 16, 'newest_first': False}",
+        "run1 limit=1113 refs=1 kw={'split': {'vault:project-a/prod/K7': 10.1}} -> None ['issued']",
+        "rotate-kill project-a-prod-k7 fault=delete -> rc=1",
+        "rename 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "edit limit=2226 refs=2 kw={}",
+        "failrun mint:unreach-after -> PolicyPartial: partial: 0 of 2 slots served before vault:project-a/prod/K0 failed; a re-run does only what is missing ['held-missing', 'failed']",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 11.132",
+        "converge#0 -> None ['held-missing', 'held-pending']",
+        "  remedy revoke project-a-prod-k7 (held-missing) -> 0",
+        "  remedy revoke project-a-prod-k0 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k0 -> operator-attested",
+        "converge#1 -> None ['issued', 'issued']"
+      ]
+    },
+    {
+      "seed": 7000828,
+      "issues": [
+        "(a) POST /keys took the project total to 2792.3201 past 2792.32"
+      ],
+      "status": "FAIL",
+      "trace": [
+        "shape {'echo': '+1e-9', 'big': True, 'drift': -1, 'page': (3, 2), 'fillers': 8, 'newest_first': False}",
+        "run1 limit=279232 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "rename 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 698.0801",
+        "converge#0 -> None ['in-place', 'held-missing', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k0 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'issued', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7000104,
+      "issues": [],
+      "status": "PASS",
+      "trace": [
+        "shape {'echo': '+0.004', 'big': False, 'drift': 0, 'page': (3, 2), 'fillers': 0, 'newest_first': True}",
+        "run1 limit=3 refs=3 kw={} -> None ['issued', 'issued', 'issued']",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 0.01",
+        "edit limit=3 refs=4 kw={}",
+        "consumer reads 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 by label (unlisted); revoke -> rc=1 still=True",
+        "rotate project-a-prod-k6 fault=- -> rc=1",
+        "rename 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "converge#0 -> ValueError: a $0.03 limit over 4 keys leaves less than a cent for each; raise the limit or name fewer project-key sources []",
+        "invalid-input partition: expected rejection, state checked"
+      ]
+    }
+  ]
+}

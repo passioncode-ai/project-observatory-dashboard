@@ -281,6 +281,11 @@ def revoke(m, name):
             return m.cmd_revoke(name)
     except Killed:
         return "killed"
+    except (OSError, ValueError, RuntimeError):
+        # The real openrouter.py entry point returns 2 for this exact tuple.
+        # Preserve provider effects, ledger state and failure hooks; case() still
+        # evaluates representation and every invariant after this failed action.
+        return 2
 
 
 
