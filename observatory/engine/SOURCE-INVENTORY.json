@@ -84,6 +84,13 @@
       "bytes": 1475
     },
     {
+      "path": "cleanup_safety.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "8f12993a5282d787f4ea22dacdbf51c9b86c8ce768064a099ebbad4f38e4628f",
+      "bytes": 2060
+    },
+    {
       "path": "code_freshness.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -4612,7 +4619,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 595,
+  "file_count": 596,
   "excluded": [
     "git-history",
     "operator-registries",
