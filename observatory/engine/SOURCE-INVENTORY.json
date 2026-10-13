@@ -305,8 +305,8 @@
       "path": "collectors/scan_git_hygiene.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c78404a9ea146c87e310e17ee9327cf737a0e6adfe0fe8784482686bc1c48bd2",
-      "bytes": 18867
+      "export_sha256": "d7962dcf8902ea8000be13a581e4705c734fc37a244fdb3f6b700d8e671497a4",
+      "bytes": 20857
     },
     {
       "path": "collectors/scan_github.py",
@@ -2879,8 +2879,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a58543244180487541931481b4de066ba32c46be353f776f5e7099399ae33101",
-      "bytes": 58471
+      "export_sha256": "fa3778fc41faea585a85056be279ca3e57c5854b7cead48bc1b55032afe9d30c",
+      "bytes": 61927
     },
     {
       "path": "tests/test_machine_mcp_inventory.py",

@@ -533,6 +533,75 @@ class WorktreeRegistration(Base):
         self.assertTrue(result["partial"])
         self.assertEqual(result["attempted"], 0)
 
+    def run_full(self):
+        import scan_git_hygiene as h
+        output = self.home / "store/raw/git-hygiene.json"
+        with patch("scan_machine.working_dirs", return_value={}), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(h.main(["scan", str(output)]), 0)
+        return json.loads(output.read_text())
+
+    def test_full_survey_reports_source_failure_while_retaining_survivor(self):
+        root, _ = self.build()
+        self.registry([])
+        (self.home / "registry/repositories.json").write_text("invalid json")
+        (self.home / "registry/projects.json").write_text(json.dumps({"projects": [{"local_folders": [root.name]}]}))
+        doc = self.run_full()
+        self.assertTrue(doc["partial"])
+        self.assertEqual(len(doc["checkouts"]), 1)
+        self.assertTrue(any(d["source"] == "repositories.json" for d in doc["degraded"]))
+
+    def test_full_survey_missing_sources_carries_prior_rows_instead_of_clean_empty(self):
+        root, _ = self.build()
+        self.registry([root])
+        before = self.run_full()
+        for name in ("repositories", "projects"):
+            (self.home / "registry" / (name + ".json")).unlink()
+        doc = self.run_full()
+        self.assertTrue(doc["partial"])
+        self.assertEqual({d["source"] for d in doc["degraded"]}, {"repositories.json", "projects.json"})
+        self.assertEqual(len(doc["checkouts"]), 1)
+        self.assertTrue(doc["checkouts"][0]["stale"])
+        self.assertEqual(doc["checkouts"][0]["measured_at"], before["checkouts"][0]["measured_at"])
+        (self.home / "store/raw/git-hygiene.json").unlink()
+        cold = self.run_full()
+        self.assertTrue(cold["partial"])
+        self.assertEqual(cold["checkouts"], [])
+        self.assertEqual(len(cold["degraded"]), 2)
+
+    def test_full_survey_unresolved_default_preserves_old_classification_as_stale(self):
+        import scan_git_hygiene as h
+        root, _ = self.build()
+        self.registry([root])
+        before = self.run_full()
+        with patch.object(h, "default_branch", return_value=None):
+            doc = self.run_full()
+        self.assertTrue(doc["partial"])
+        self.assertTrue(doc["checkouts"][0]["stale"])
+        self.assertEqual(doc["checkouts"][0]["measured_at"], before["checkouts"][0]["measured_at"])
+
+    def test_full_survey_unreadable_worktree_list_is_partial_and_stale(self):
+        import scan_git_hygiene as h
+        root, _ = self.build()
+        self.registry([root])
+        before = self.run_full()
+        with patch.object(h, "worktree_records", return_value=None):
+            doc = self.run_full()
+        self.assertTrue(doc["partial"])
+        self.assertTrue(doc["checkouts"][0]["stale"])
+        self.assertEqual(doc["checkouts"][0]["worktrees"], before["checkouts"][0]["worktrees"])
+
+    def test_malformed_prior_registration_rows_are_named_and_not_carried(self):
+        root, _ = self.build()
+        self.registry([root])
+        output = self.home / "store/raw/worktree-registration.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps({"kind": "worktree-registration", "repositories": 7}))
+        doc = self.run_registration()
+        self.assertTrue(doc["partial"])
+        self.assertEqual(len(doc["repositories"]), 1)
+        self.assertFalse(doc["repositories"][0]["stale"])
+        self.assertTrue(any(d["source"] == "previous-registration" for d in doc["degraded"]))
+
     def test_zero_budget_keeps_previous_registration_explicitly_stale(self):
         root, linked = self.build()
         self.registry([root])

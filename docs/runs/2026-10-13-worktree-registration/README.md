@@ -68,3 +68,20 @@ cursor and propagate remaining time to any full hygiene refresh child. Those cal
 changes are not implemented by this commit. The complete gate, hosted CI, installed
 upgrade and live acceptance remain separate checks. Disk mutations remain governed
 by the existing holder, ownership, privacy, content and act-time rechecks.
+
+## Independent-review correction: full survey degradation
+
+The full survey originally discarded the new seed reader's errors and marked only
+deadline carries partial. Review reproduced four false-complete outcomes: a failed
+registry with a surviving source, both registries missing, unresolved default, and
+an unreadable worktree list. A malformed prior registration (`repositories: 7`)
+also raised instead of producing a receipt. All five negative cases were observed
+failing before the correction.
+
+Full hygiene now propagates source errors, marks any degraded result partial,
+and retains old unavailable-root classifications explicitly stale with their old
+time. Missing source evidence does not establish that a previously seen checkout
+vanished. An unavailable worktree/current-branch/branch listing cannot publish a
+fresh empty classification. Invalid prior registration rows are named and omitted;
+successful new rows remain independently fresh. The focused registration and
+existing Estate selection passed 23 tests after this correction.

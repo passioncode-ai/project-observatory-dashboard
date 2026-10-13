@@ -106,14 +106,18 @@ def checkout_seeds(degraded: list[dict] | None = None) -> list[dict]:
     return list(unique.values())
 
 
-def checkouts() -> list[dict]:
+def checkouts(degraded: list[dict] | None = None) -> list[dict]:
     """The full hygiene collector's validated anchors, including linked worktrees."""
+    errors = degraded if degraded is not None else []
     out = []
-    for row in checkout_seeds():
+    for row in checkout_seeds(errors):
         marker = os.path.join(row["path"], ".git")
         if os.path.isdir(marker) or (os.path.isfile(marker) and
                                     git(row["path"], "rev-parse", "--git-dir") is not None):
             out.append(row)
+        else:
+            errors.append({"source": row["repository"], "path": row["path"],
+                           "reason": "registered checkout could not be read"})
     return out
 
 
@@ -179,8 +183,10 @@ def worktree_records(repo: str, timeout: float = 60) -> list[dict] | None:
     return rows or None
 
 
-def worktrees(repo: str, busy: set[str], now: float) -> list[dict]:
-    rows = worktree_records(repo) or []
+def worktrees(repo: str, busy: set[str], now: float) -> list[dict] | None:
+    rows = worktree_records(repo)
+    if rows is None:
+        return None
     out = []
     for w in rows[1:]:  # the first entry is the main checkout
         path = w["worktree"]
@@ -205,10 +211,13 @@ def worktrees(repo: str, busy: set[str], now: float) -> list[dict]:
     return out
 
 
-def branches(repo: str, default: str, in_worktree: set[str], now: float) -> list[dict]:
+def branches(repo: str, default: str, in_worktree: set[str], now: float) -> list[dict] | None:
     fmt = "%(refname:short)\t%(committerdate:unix)\t%(ahead-behind:" + default + ")\t%(upstream:short)\t%(upstream:track)"
     out = []
-    for line in (git(repo, "for-each-ref", "--format=" + fmt, "refs/heads") or "").splitlines():
+    listed = git(repo, "for-each-ref", "--format=" + fmt, "refs/heads")
+    if listed is None:
+        return None
+    for line in listed.splitlines():
         parts = line.split("\t")
         if len(parts) != 5:
             continue
@@ -265,9 +274,19 @@ def registrations_only(out_path: pathlib.Path, seconds: float) -> int:
         previous = {}
     degraded: list[dict] = []
     seeds = sorted(checkout_seeds(degraded), key=lambda row: row["path"])
-    prior_rows = previous.get("repositories") or []
-    rows = {row["path"]: {**row, "stale": True} for row in prior_rows
-            if isinstance(row, dict) and isinstance(row.get("path"), str)}
+    prior_rows = previous.get("repositories", [])
+    if not isinstance(prior_rows, list):
+        degraded.append({"source": "previous-registration", "reason": "invalid prior repositories"})
+        prior_rows = []
+    rows = {}
+    for row in prior_rows:
+        if (not isinstance(row, dict) or not isinstance(row.get("path"), str)
+                or not isinstance(row.get("worktrees"), list)
+                or any(not isinstance(w, dict) or not isinstance(w.get("path"), str)
+                       for w in row.get("worktrees", []))):
+            degraded.append({"source": "previous-registration", "reason": "invalid prior repository row"})
+            continue
+        rows[row["path"]] = {**row, "stale": True}
     if not degraded:
         live = {row["path"] for row in seeds}
         rows = {key: row for key, row in rows.items() if key in live}
@@ -341,31 +360,60 @@ def main(argv: list[str]) -> int:
     before = _previous(out_path)
     # The least recently measured first, so a pass the deadline cuts short resumes where the last one stopped
     # instead of measuring the same checkouts every tick (OBS-52: stopped with nothing written 11 times in a day).
-    pending = sorted(checkouts(), key=lambda c: (before.get(c["path"]) or {}).get("measured_at") or "")
-    rows, degraded, carried = [], [], 0
+    degraded: list[dict] = []
+    pending = sorted(checkouts(degraded), key=lambda c: (before.get(c["path"]) or {}).get("measured_at") or "")
+    rows, carried_paths = [], set()
+    carried = 0
+
+    def carry(path: str) -> None:
+        nonlocal carried
+        old = before.get(path)
+        if old and path not in carried_paths:
+            rows.append({**old, "stale": True})
+            carried_paths.add(path)
+            carried += 1
+
+    # Source failure is not evidence that a formerly observed checkout vanished.
+    if degraded:
+        discovered = {row["path"] for row in pending}
+        for path in before:
+            if path not in discovered:
+                carry(path)
     for i, c in enumerate(pending):
         if step_budget.remaining() < RESERVE_S:
             for rest in pending[i:]:
-                old = before.get(rest["path"])
-                if old:
-                    rows.append({**old, "stale": True})
-                    carried += 1
+                carry(rest["path"])
+            never_measured = sum(1 for rest in pending[i:] if not before.get(rest["path"]))
             degraded.append({"source": "git-hygiene", "reason": (
                 f"the step's time ran out after {i} of {len(pending)} checkouts; {carried} carry their last "
-                f"measurement (marked stale) and {len(pending) - i - carried} were never measured; the next pass "
+                f"measurement (marked stale) and {never_measured} were never measured; the next pass "
                 f"starts with them")})
             break
         default = default_branch(c["path"])
         if not default:
             degraded.append({"source": c["repository"], "reason": unresolved_reason(c["path"])})
+            carry(c["path"])
             continue
         wts = worktrees(c["path"], busy, now)
+        if wts is None or any(w.get("state") == "unreadable" for w in wts):
+            degraded.append({"source": c["repository"], "reason": "worktree classification unavailable"})
+            carry(c["path"])
+            continue
         held = {w["branch"] for w in wts if w.get("branch")}
-        current = (git(c["path"], "branch", "--show-current") or "").strip()
-        held.add(current)
+        current = git(c["path"], "branch", "--show-current")
+        if current is None:
+            degraded.append({"source": c["repository"], "reason": "current branch unavailable"})
+            carry(c["path"])
+            continue
+        held.add(current.strip())
+        classified = branches(c["path"], default, held, now)
+        if classified is None:
+            degraded.append({"source": c["repository"], "reason": "branch classification unavailable"})
+            carry(c["path"])
+            continue
         rows.append({**c, "default_branch": default, "worktrees": wts, "measured_at": stamp,
-                     "branches": branches(c["path"], default, held, now)})
-    doc = {"schema_version": 1, "measured_at": stamp, "partial": bool(carried) or any(d.get("source") == "git-hygiene" for d in degraded),
+                     "branches": classified})
+    doc = {"schema_version": 1, "measured_at": stamp, "partial": bool(carried or degraded),
            "checkouts": rows, "degraded": degraded,
            "totals": {"checkouts": len(rows),
                       "worktrees": sum(len(r["worktrees"]) for r in rows),
