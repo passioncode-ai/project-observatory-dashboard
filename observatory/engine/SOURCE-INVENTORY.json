@@ -2433,8 +2433,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7b188477fac60bac714d217e29101795312f19c5628bd605a7a6e303c69addde",
-      "bytes": 86984
+      "export_sha256": "eb2a241f554d5eb0372b606cb520ccd3e5d14ed88fb026d3ca627ec73ff5126b",
+      "bytes": 88512
     },
     {
       "path": "tests/test_docs_current.py",

@@ -16,9 +16,17 @@ zero findings; no private denylist/history scan).
 
 Collector counterpart: commit `778c8f056a4e5e34144b67a53048085006d125f4`,
 `collectors/scan_git_hygiene.py`, with its registration-only contract in
-[the collector handoff](../2026-10-13-worktree-registration/README.md) once integrated.
-Next: combine that collector and run the single synthetic portable disk-guard
-suite, then independently review the combined cleanup candidate.
+[the collector handoff](../2026-10-13-worktree-registration/README.md) integrated locally as `ef67b84`. `RegistrationIntegration` runs the actual
+registration subprocess against a throwaway repository and linked worktree. It
+proves the expired inherited deadline is renewed and old hygiene bytes and mtime
+remain unchanged. Together with the seven fairness tests it passed eight cases.
+
+The combined portable `--suite disk_guard --jobs 1 --timeout 180` passed 118 tests
+with two platform skips in 18.02 seconds on Python 3.14.7; the exact synthetic
+receipt is [verification.json](verification.json). Final inventory/doc-sync/diff
+checks passed. Final public-tree pattern check passed 890 files, zero findings,
+without a private denylist or history scan. Next: independently review and
+integrate the combined cleanup candidate, including the separate archive repair.
 
 No live cleanup or host survey was run. This is fairness across registered
 roots; discovery outside registered repositories and resuming within oversized

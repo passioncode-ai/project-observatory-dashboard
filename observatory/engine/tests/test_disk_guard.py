@@ -1521,6 +1521,33 @@ class SnapshotSafety(Base):
             self.assertEqual(action.get("identity"), {"dev": st.st_dev, "ino": st.st_ino})
 
 
+class RegistrationIntegration(Base):
+    def test_real_registration_child_lists_linked_worktree_without_freshening_hygiene(self):
+        import paths
+        root = self.t1 / "repo"
+        root.mkdir()
+        git(root, "init", "-q")
+        (root / "source").write_text("keep")
+        git(root, "add", ".")
+        git(root, "commit", "-qm", "initial")
+        linked = self.t1 / "linked"
+        git(root, "worktree", "add", "-qb", "topic", str(linked))
+        (self.home / "registry/repositories.json").write_text(json.dumps({"repositories": [
+            {"id": "repository:example-org/repo", "local": {"path": str(root)}}]}))
+        (self.home / "registry/projects.json").write_text(json.dumps({"projects": []}))
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        hygiene = paths.SCRATCH / "git-hygiene.json"
+        hygiene.write_text(json.dumps({"measured_at": "2000-01-01T00:00:00Z", "checkouts": []}))
+        before, stamp = hygiene.read_bytes(), hygiene.stat().st_mtime_ns
+        with patch.dict(os.environ, {"OBSERVATORY_STEP_DEADLINE": "1"}):
+            result = self.g.refresh("collectors/scan_git_hygiene.py", paths.SCRATCH / "worktree-registration.json",
+                                    0, 10, ("--registrations-only", "--budget-seconds", "8"))
+        self.assertEqual(result, "refreshed")
+        self.assertEqual(self.g.checkouts(), sorted([str(root), str(linked)]))
+        self.assertEqual(hygiene.read_bytes(), before)
+        self.assertEqual(hygiene.stat().st_mtime_ns, stamp)
+
+
 class RegistrationFairness(Base):
     def test_current_registration_roots_replace_undated_hygiene(self):
         import paths
