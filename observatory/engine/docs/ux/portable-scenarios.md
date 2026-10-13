@@ -264,6 +264,15 @@ and blocks new issuance or raises under a finite policy cap. The existing
 spend value. Refreshing the provider observation can permit a verified lowering
 and subsequent issuance. Pending mint reservations remain a distinct unresolved
 state. Evidence: `test_or_policy_unread_exposure_is_not_saved_headroom`.
+An unobserved pending mint also supplies no current headroom. Its saved reservation
+and identity fields stay intact. Rotation extras require a current matching hash
+and supported ceiling, or a confirmed 404; unread, malformed and missing extra
+identities remain unknown. A pending delivery with a known identity may count its
+current provider observation. Evidence:
+`test_or_policy_unknown_pending_reservation_is_not_current_headroom` and
+`test_rotation_accounting.py::test_unknown_rotation_extras_never_supply_new_policy_headroom`.
+These checks cannot prevent an external mutation or immediately identify an
+unknown minted key; the original representation failures remain open.
 
 An applied spend policy records its explicit origin and exact digest on new and
 selected existing key rows; dry-run preserves ledger state. Rotation of a marked

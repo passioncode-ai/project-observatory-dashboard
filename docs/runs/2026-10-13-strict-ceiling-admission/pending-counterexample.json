@@ -1,0 +1,16 @@
+{
+  "source_commit": "22bdc06",
+  "source_sha256": "e18eae54e5ffddddf307e3b9d7132ec8858c334f24cfd4090b6948f5f3a8a60b",
+  "pending": true,
+  "has_hash": false,
+  "reservation": 5.0,
+  "externally_changed_actual_ceiling": 8,
+  "before": 8,
+  "after": 13.0,
+  "policy_cap": 10,
+  "posts": 1,
+  "actions": [
+    "held-pending",
+    "issued"
+  ]
+}

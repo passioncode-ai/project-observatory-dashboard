@@ -109,7 +109,8 @@ class RotationAccounting(unittest.TestCase):
         for row in ({'hash': 'foreign', 'limit': 0}, {'limit': 0}, None):
             with self.subTest(row=row):
                 self.m._request = lambda *a, **k: {'data': row}
-                self.assertEqual(self.m._rotation_exposure(rec), 500)
+                self.assertIsNone(self.m._rotation_exposure(rec))
+                self.assertEqual(rec['predecessor_limit_usd'], 5)
                 without_reserve = {k: v for k, v in rec.items() if k != 'predecessor_limit_usd'}
                 self.assertIsNone(self.m._rotation_exposure(without_reserve))
 
@@ -119,7 +120,7 @@ class RotationAccounting(unittest.TestCase):
         state, row, _reason = self.m._read_held('sample-prod-key', rec, 'sample')
         self.assertEqual(state, 'held-unread')
         self.assertIsNone(row)
-        self.assertEqual(self.m._counted(state, row, rec), 1000)
+        self.assertIsNone(self.m._counted(state, row, rec))
 
     def test_hash_lookup_malformed_response_is_not_absence(self):
         self.m.find_key = self.original_find_key
@@ -129,7 +130,7 @@ class RotationAccounting(unittest.TestCase):
                 state, row, _reason = self.m._read_held('sample-prod-key', self.row(), 'sample')
                 self.assertEqual(state, 'held-unread')
                 self.assertIsNone(row)
-                self.assertEqual(self.m._counted(state, row, self.row()), 1000)
+                self.assertIsNone(self.m._counted(state, row, self.row()))
 
     def test_unknown_mint_is_reserved_and_never_retried(self):
         self.fault = 'mint-502'
@@ -196,11 +197,60 @@ class RotationAccounting(unittest.TestCase):
     def test_provider_unread_exposure_and_missing_are_distinct(self):
         rec = {'hash': SUCCESSOR, 'account': 'sample', 'predecessor_hash': 'old', 'predecessor_limit_usd': 5}
         self.m._request = lambda *a, **k: (_ for _ in ()).throw(RuntimeError('openrouter answered HTTP 500'))
-        self.assertEqual(self.m._rotation_exposure(rec), 500)
+        self.assertIsNone(self.m._rotation_exposure(rec))
         del rec['predecessor_limit_usd']
         self.assertIsNone(self.m._rotation_exposure(rec))
         self.m._request = lambda *a, **k: (_ for _ in ()).throw(RuntimeError('openrouter answered HTTP 404'))
         self.assertEqual(self.m._rotation_exposure(rec), 0)
+
+    def test_unknown_rotation_extras_never_supply_new_policy_headroom(self):
+        import test_credential_doors as T
+        for mode in ('unread', 'foreign', 'malformed', 'hashless', 'fresh', 'missing'):
+            with self.subTest(mode=mode):
+                m, p = T._r3_door()
+                m.issue_for_policy(T._pol(1, limit=5), 'example')
+                doc = m.ledger(); name, rec = next(iter(doc['issued'].items()))
+                extra = p('/keys', 'synthetic', {'name': 'synthetic-successor', 'limit': 8,
+                                               'limit_reset': 'monthly'})['data']['hash']
+                rec.update(rotation_status='delivery-unknown', successor_hash=extra, successor_limit_usd=5)
+                if mode == 'hashless':
+                    rec.pop('successor_hash'); rec['rotation_status'] = 'mint-pending'
+                if mode == 'missing': p.keys.pop(extra)
+                if mode == 'unread': p.unread.add(extra)
+                if mode in ('foreign', 'malformed'):
+                    def request(path, *args, _mode=mode, **kwargs):
+                        if path == '/keys/' + extra:
+                            return {'data': {'hash': 'foreign', 'limit': 0}} if _mode == 'foreign' else {}
+                        return p(path, *args, **kwargs)
+                    m._request = request
+                m.save_ledger(doc)
+                before = (p.n, p.patches, p.total())
+                plan = m.issue_for_policy(T._pol(2, limit=30 if mode == 'fresh' else 20), 'example')
+                saved = m.ledger()['issued'][name]
+                self.assertEqual(saved['successor_limit_usd'], 5)
+                self.assertEqual(saved.get('successor_hash'), rec.get('successor_hash'))
+                if mode in ('fresh', 'missing'):
+                    self.assertEqual(p.n, before[0] + 1)
+                    self.assertLessEqual(p.total(), 30 if mode == 'fresh' else 20)
+                    self.assertEqual(m._rotation_exposure(saved), 800 if mode == 'fresh' else 0)
+                else:
+                    self.assertEqual((p.n, p.patches, p.total()), before)
+                    self.assertIsNone(m._rotation_exposure(saved))
+                    self.assertIn('blocked', [row['action'] for row in plan])
+
+    def test_missing_or_malformed_rotation_identity_is_unknown_without_provider_calls(self):
+        self.m._request = lambda *a, **k: self.fail('unknown identity cannot be queried')
+        base = {'hash': 'primary', 'account': 'sample'}
+        for fields in ({'predecessor_limit_usd': 5},
+                       {'rotation_status': 'successor-delivered-predecessor-pending'},
+                       {'successor_limit_usd': 5},
+                       {'rotation_status': 'delivery-unknown'},
+                       {'successor_hash': [], 'successor_limit_usd': 5},
+                       {'rotation_status': 'unknown-phase'}):
+            with self.subTest(fields=fields):
+                self.assertIsNone(self.m._rotation_exposure(dict(base, **fields)))
+        self.m.read_admin = lambda *a: (_ for _ in ()).throw(LookupError('unavailable account'))
+        self.assertIsNone(self.m._rotation_exposure(dict(base, predecessor_hash='known-extra')))
 
     def test_completed_pending_issue_clears_pending(self):
         doc = self.m.ledger(); doc['issued']['sample-prod-key']['pending'] = True; self.m.save_ledger(doc)

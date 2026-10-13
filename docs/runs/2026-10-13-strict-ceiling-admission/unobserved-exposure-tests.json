@@ -1,0 +1,61 @@
+{
+  "production_source_sha256": "82b25a891a8fbadaf97a8fa104f039ba6efc4d774b083fe6ed9a9a54588da3f9",
+  "pending_red": {
+    "pass": 2,
+    "fail": 1,
+    "exit_code": 1
+  },
+  "rotation_red": {
+    "unittest_cases": 20,
+    "failures": 8,
+    "exit_code": 1
+  },
+  "missing_account_red": {
+    "unittest_cases": 1,
+    "errors": 1,
+    "exit_code": 1
+  },
+  "focused_credential_checks": {
+    "assertions_pass": 51,
+    "assertions_fail": 0,
+    "exit_code": 0
+  },
+  "rotation_final": {
+    "schema_version": 1,
+    "coverage": "synthetic-offline",
+    "status": "PASS",
+    "suites": [
+      {
+        "file": "tests/test_rotation_accounting.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 3.88,
+        "pass_assertions": 0,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 21,
+        "unittest_skipped": 0,
+        "log": "rotation_accounting/run.log"
+      }
+    ],
+    "not_run": [
+      {
+        "scope": "live-provider-acceptance",
+        "status": "NOT_RUN",
+        "reason": "Requires independently configured provider accounts and explicit opt-in; no credentials are inherited."
+      },
+      {
+        "scope": "external-mcp-host-admission",
+        "status": "NOT_RUN",
+        "reason": "The local stdio protocol is tested; acceptance by another host requires a separate configured fixture run."
+      },
+      {
+        "scope": "live-secret-rotation-and-delivery",
+        "status": "NOT_RUN",
+        "reason": "Synthetic credential boundaries are tested; real rotation/delivery must be independently authorized."
+      }
+    ],
+    "suite_count": 1,
+    "python": "3.14.7"
+  }
+}

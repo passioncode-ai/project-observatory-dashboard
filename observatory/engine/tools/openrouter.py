@@ -873,15 +873,16 @@ def _counted(state: str | None, row: dict | None, rec: dict) -> int | None:
     """Cents a key the run will NOT move counts toward the project's total (None: unbounded): its
     provider ceiling rounded up, 0 for a confirmed missing key, and unknown for
     an unread provider identity. A saved ceiling is not a current upper bound
-    because another writer can change it. A pending mint retains its separate
-    recorded reservation; that does not establish current provider observation.
+    because another writer can change it. A pending mint retains its recorded
+    reservation, but without a current identity-bound row it also supplies no
+    headroom. Pending delivery with a current row counts that observation.
     """
     if state == "held-missing":
         return 0
-    if state == "held-unread":
+    if state == "held-unread" or (state == "held-pending" and row is None):
         return None
     if row is None:
-        return _cents_up(rec.get("limit_usd"))
+        return None
     return _cents_up(_ceiling_of(row))
 
 
@@ -903,19 +904,29 @@ def _require_resolved_rotation(rec: dict) -> None:
 
 
 def _rotation_exposure(rec: dict) -> int | None:
-    """Additional possible live ceiling, beyond rec.hash; unread is never zero."""
+    """Current extra exposure beyond rec.hash, or unknown; never a saved bound.
+
+    Reservations remain in the ledger to represent uncertain effects. Only a
+    current matching provider row (or confirmed 404) supplies admission evidence.
+    """
     extra = []
-    if rec.get("predecessor_hash"):
-        extra.append((rec["predecessor_hash"], rec.get("predecessor_limit_usd")))
-    if rec.get("successor_hash"):
-        extra.append((rec["successor_hash"], rec.get("successor_limit_usd")))
-    elif rec.get("rotation_status") == "mint-pending":
-        extra.append((None, rec.get("successor_limit_usd")))
+    status = rec.get("rotation_status")
+    if status not in (None, "complete", "mint-pending", "delivery-unknown",
+                      "successor-delivered-predecessor-pending"):
+        return None
+    if ("predecessor_hash" in rec or "predecessor_limit_usd" in rec
+            or status == "successor-delivered-predecessor-pending"):
+        extra.append(rec.get("predecessor_hash"))
+    if ("successor_hash" in rec or status in ("mint-pending", "delivery-unknown")
+            or ("successor_limit_usd" in rec and status != "successor-delivered-predecessor-pending")):
+        extra.append(rec.get("successor_hash"))
     total = 0
-    for digest, reserve in extra:
-        if digest and digest == rec.get("hash"):
+    for digest in extra:
+        if not isinstance(digest, str) or not digest:
+            return None
+        if digest == rec.get("hash"):
             continue
-        counted = _cents_up(reserve)
+        counted = None
         if digest:
             try:
                 _, admin = read_admin(rec.get("account"))
@@ -923,9 +934,8 @@ def _rotation_exposure(rec: dict) -> int | None:
                 row = response.get("data") if isinstance(response, dict) else None
                 if isinstance(row, dict) and row.get("hash") == digest:
                     counted = _cents_up(_ceiling_of(row))
-                # A malformed or foreign response cannot replace the reservation.
-                # Missing reserve stays unbounded until this identity is measured.
-            except (OSError, ValueError, RuntimeError) as exc:
+                # A malformed or foreign response cannot prove current capacity.
+            except (OSError, ValueError, RuntimeError, LookupError) as exc:
                 if isinstance(exc, RuntimeError) and "HTTP 404" in str(exc):
                     counted = 0
         if counted is None:

@@ -50,3 +50,7 @@ actually succeeds. No live provider operation or deployment was performed.
 The follow-up [unread-exposure correction](unread.md) closes the independently
 reproduced saved-ceiling admission gap. Its source and 47-assertion receipt are
 separate from the fractional correction above.
+
+[Unobserved reservations](unobserved-reservations.md) extends the same admission
+rule to pending mints and rotation extras, while retaining their records.
+This is the current source boundary; the earlier counterexamples remain intact.

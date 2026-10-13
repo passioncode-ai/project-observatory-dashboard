@@ -856,8 +856,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "9ab82f0565a59aaf739c549574076427d3eff5f07e48509a374cd415d7d75e6e",
-      "bytes": 82580,
+      "export_sha256": "f1d86cb32e49cd5432c09a4fc73cd53dd5b739fb628897070c868a11ccf27e99",
+      "bytes": 83259,
       "upstream_modified": true
     },
     {
@@ -2451,8 +2451,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "2ff362e7e0be2b1fd48de40f50042302e1b29fd5576950996f0112e232e58915",
-      "bytes": 179864,
+      "export_sha256": "fc628553fd8acf10292d4f3032d26dae8487513203cb8a0c028c9cce4503af9f",
+      "bytes": 181836,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -3590,8 +3590,8 @@
       "path": "tests/test_rotation_accounting.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e662084dd782970b3b7ddc900148eaa268668d768671e14fdbdb043e657ff4bd",
-      "bytes": 14626
+      "export_sha256": "c8993ef321455e9338d7bbd2a64bb3d22a78dee57e6e0caa03e44b9348e124db",
+      "bytes": 17888
     },
     {
       "path": "tests/test_rotation_capacity.py",
@@ -4512,8 +4512,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "e18eae54e5ffddddf307e3b9d7132ec8858c334f24cfd4090b6948f5f3a8a60b",
-      "bytes": 110334,
+      "export_sha256": "82b25a891a8fbadaf97a8fa104f039ba6efc4d774b083fe6ed9a9a54588da3f9",
+      "bytes": 110840,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,

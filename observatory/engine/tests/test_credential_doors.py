@@ -2439,15 +2439,53 @@ def test_or_policy_unread_exposure_is_not_saved_headroom() -> None:
     check("unread counting stays unknown despite saved or supplied old ceiling",
           m._counted("held-unread", None, {"limit_usd": 5}) is None
           and m._counted("held-unread", {"limit": 5}, {"limit_usd": 5}) is None)
-    check("missing identity and pending mint reservation retain distinct semantics",
+    check("confirmed missing identity and unobserved pending mint retain distinct semantics",
           m._counted("held-missing", None, {"limit_usd": 5}) == 0
-          and m._counted("held-pending", None, {"limit_usd": 5}) == 500)
+          and m._counted("held-pending", None, {"limit_usd": 5}) is None)
     p.unread.clear()
     p.start()
     plan = m.issue_for_policy(_pol(2, limit=10), "example")
     check("a fresh provider read permits lowering then issuance within the cap",
           p.max_sum <= 10 and p.total() == 10
           and [row["action"] for row in plan] == ["ceiling-moved", "issued"], str(plan))
+
+
+def test_or_policy_unknown_pending_reservation_is_not_current_headroom() -> None:
+    """Unknown mint reservation is retained, but cannot bound external mutation."""
+    m, p = _r3_door()
+    def unknown_mint(*args, **kwargs):
+        result = p(*args, **kwargs)
+        if args[0] == "/keys":
+            raise RuntimeError("synthetic 502 after mint")
+        return result
+    m._request = unknown_mint
+    try:
+        m.issue_for_policy(_pol(1, limit=5), "example")
+        check("ambiguous mint preserves an unknown-effect failure", False)
+    except m.PolicyPartial:
+        check("ambiguous mint preserves an unknown-effect failure", True)
+    name, reservation = next(iter(m.ledger()["issued"].items()))
+    p.keys[p.by_name("k0")]["limit"] = 8
+    m._request = p
+    before = (p.n, p.patches, p.total())
+    plan = m.issue_for_policy(_pol(2, limit=10), "example")
+    retained = m.ledger()["issued"][name]
+    check("unknown pending exposure refuses extra issuance without erasing the reservation",
+          (p.n, p.patches, p.total()) == before
+          and retained["pending"] and not retained.get("hash")
+          and retained["limit_usd"] == reservation["limit_usd"] == 5
+          and [row["action"] for row in plan] == ["held-pending", "blocked", "over-limit"], str(plan))
+
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(1, limit=5), "example")
+    doc = m.ledger(); name, rec = next(iter(doc["issued"].items()))
+    rec["pending"] = True  # Distinct fixture: known identity, unconfirmed delivery.
+    m.save_ledger(doc)
+    p.keys[p.by_name("k0")]["limit"] = 4
+    plan = m.issue_for_policy(_pol(2, limit=10), "example")
+    check("identity-bound pending delivery counts its fresh provider ceiling",
+          p.total() == 9 and [row["action"] for row in plan] == ["held-pending", "issued"]
+          and m.ledger()["issued"][name]["pending"], str(plan))
 
 
 def test_or_policy_runs_one_at_a_time() -> None:
@@ -3107,6 +3145,7 @@ if __name__ == "__main__":
                test_or_policy_counts_every_key_of_the_project,
                test_or_policy_raises_only_what_fits_beside_unread_or_renamed_keys,
                test_or_policy_unread_exposure_is_not_saved_headroom,
+               test_or_policy_unknown_pending_reservation_is_not_current_headroom,
                test_or_policy_runs_one_at_a_time,
                test_or_policy_counts_every_positive_provider_fraction,
                test_or_policy_amounts_are_whole_cents_against_the_exact_limit,
