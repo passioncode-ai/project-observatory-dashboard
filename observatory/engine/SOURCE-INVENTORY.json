@@ -835,8 +835,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "616ae495424232df4e7bcf8e14e7092c063dbdd835fa19bf9daa5f03e4ff3d97",
-      "bytes": 76335,
+      "export_sha256": "973e546bbcfd614b4c547c15082007fce3c3e5330269841f6d2d9fc3415e15fb",
+      "bytes": 77336,
       "upstream_modified": true
     },
     {
@@ -1742,8 +1742,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "29cd8ac82d5a11454562bc4372420a791c47efa3ddb61e2fa819110777dfc8a9",
-      "bytes": 18843,
+      "export_sha256": "bce9aa1e6f593deefb542c055585fa3de6dba2ee7a33a2ff0b773215ed3b9f20",
+      "bytes": 19121,
       "upstream_modified": true
     },
     {
@@ -2517,15 +2517,15 @@
       "path": "tests/test_digitalocean_door.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2e4caf1df0befa7a1b4e511551f39112089bc005e9b7576bb4de8af7a927b161",
-      "bytes": 29393
+      "export_sha256": "2b190f0e1f2ff0f0a259e1c0fd1b44495f5a976c2c86ae86b9efc8c2049c9e98",
+      "bytes": 40310
     },
     {
       "path": "tests/test_digitalocean_safety.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bd411c8d695784f408c4d9019c4daf0df0e10ea27d2144aefc1fb919b041581b",
-      "bytes": 14758
+      "export_sha256": "c84a6c747231f7c58c93f8f9bb315ebe7196915e989d4f28fadc1c052fedf54d",
+      "bytes": 14881
     },
     {
       "path": "tests/test_disk_guard.py",
@@ -4211,8 +4211,8 @@
       "path": "tools/digitalocean.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a0b82624ff12744389d118a7d45080a3f26dffdafaf94c62c1b495dd51e8c7a5",
-      "bytes": 32731
+      "export_sha256": "4e465a4d843537bff5e54c412eb1d0cd9385ebb948cc05c906dd84a4284553da",
+      "bytes": 36262
     },
     {
       "path": "tools/disk_guard.py",

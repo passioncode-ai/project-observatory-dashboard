@@ -145,7 +145,10 @@ App Platform bindings, not every possible consumer. `db credential CLUSTER USER 
 DigitalOcean rotation verifies every selected `--spec-env APP:KEY` literal before any reset.
 Its name is not evidence: a plain value must equal the selected database user's current
 provider password, or be a database URL with that password, user, engine and the provider's
-connection host/port. Opaque encrypted values and unverified pool endpoints are refused;
+connection host/port. A `${…}` binding is never rewritten, at any level; `--db` must be one of
+the cluster's databases, and `db credential` checks `--db` the same way before it reads a
+password (a cluster the provider lists no databases for, and redis/valkey, refuse `--db` with
+their own reason). Opaque encrypted values and unverified pool endpoints are refused;
 migrate those consumers to App Platform database bindings before rotation. No command in
 this flow prints the current password. Only the named consumers are moved, with downtime
 between reset and ACTIVE; ACTIVE is not application health verification.

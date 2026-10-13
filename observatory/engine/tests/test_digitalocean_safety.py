@@ -30,7 +30,8 @@ class RotationSafety(unittest.TestCase):
         self.door = importlib.util.module_from_spec(spec); spec.loader.exec_module(self.door)
         self.door.POLL = 0
         self.calls = []; self.receipts = []
-        self.cluster = {'id': 'c-one', 'name': 'alpha-db', 'engine': 'pg',
+        # `db_names` as the provider answers it: `--db` is checked against it (round 4).
+        self.cluster = {'id': 'c-one', 'name': 'alpha-db', 'engine': 'pg', 'db_names': ['defaultdb', 'app'],
                         'connection': {'host': 'db.example.invalid', 'port': 25060}}
         self.specs = {'literal': {'name': 'alpha', 'envs': [{'key': 'DB_PASSWORD', 'value': OLD}]}}
         self.reset_result = [{'name': 'doadmin', 'password': NEW}]

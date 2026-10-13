@@ -59,6 +59,19 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
   owner-only receipts and require reconciliation before retry. Nothing
   prints a value. The handling-secrets skill names the provider MCP tools that return a credential by design.
   Its suite runs in the portable gate.
+  - Three more refusals before the reset (exit 1, nothing reset): a `--db` that is not one of the cluster's
+    databases (a cluster the provider lists no databases for, and a redis/valkey cluster, are refused with their
+    own reason, and only identifier-shaped database names are printed); a `--spec-env` key that is a `${…}`
+    binding at every level (name the app with `--app`); and a binding beside a literal of the same key that
+    cannot be proven to hold the selected user's credential. A binding is never rewritten.
+  - `db credential` checks `--db` the same way before it reads the password, so the recovery that rotate's
+    exit 4 and exit 5 point to cannot write a URL to a database that does not exist into the vault.
+    It also checks the cluster's engine, so a mongodb, kafka or opensearch cluster is refused by name: the door
+    builds pg, mysql, redis and valkey URLs only.
+  - `db consumers` lists a key whose `_`-separated name has a database word (`DATABASE`, `DB`, `PG`,
+    `POSTGRES`, `POSTGRESQL`, `MYSQL`, `REDIS`, `VALKEY`, `MONGO`, `MONGODB`) beside `URL`, `URI` or `DSN`
+    anywhere in it, encrypted or not (`APP_DATABASE_DSN`, `PRIMARY_DB_URI`); `SENTRY_DSN`, `OTEL_…_URI`,
+    `DBT_URI` and `DBX_DSN` stay out.
 
 - **The header door serves loopback servers and clients that export no URL** (PB-139): `vault.py bind
   --header-for` accepts plain http to a loopback literal with its port (`http://127.0.0.1:<port>`,

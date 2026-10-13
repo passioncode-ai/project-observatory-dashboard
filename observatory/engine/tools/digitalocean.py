@@ -220,7 +220,22 @@ def credential_literal(key: str, value: str) -> bool:
     k = key.upper()
     if any(s in k for s in CREDENTIAL_KEYS):
         return True
+    # An encrypted value cannot show its scheme, so the name decides: a database
+    # word and an address word, each a whole `_`-separated part, anywhere in the
+    # key (review rounds 4 and 5) — `APP_DATABASE_DSN`, `PRIMARY_DB_URI`. Parts,
+    # not substrings: `DBT_URI` and `DBX_DSN` are not databases, and `SENTRY_DSN`
+    # or `OTEL_…_URI` name no database at all.
+    parts = set(k.split("_"))
+    if parts & DB_NAME_PARTS and parts & ADDRESS_PARTS:
+        return True
     return k.endswith(("_DSN", "_URI")) and value.lower().startswith(DB_SCHEMES)
+
+
+#: Name parts that say "a database's": one of them beside an address part.
+DB_NAME_PARTS = frozenset({"DATABASE", "DB", "PG", "POSTGRES", "POSTGRESQL", "MYSQL", "REDIS",
+                           "VALKEY", "MONGO", "MONGODB"})
+#: Name parts that say "an address": a connection URL, URI or DSN.
+ADDRESS_PARTS = frozenset({"URL", "URI", "DSN"})
 
 
 def literal_form(key: str, value: str) -> str:
@@ -294,8 +309,14 @@ def user_password(c: dict, user: str) -> str:
 
 
 def cmd_credential(ref: str, user: str, db: str | None, to: str) -> int:
+    checked_name(ref, "cluster")
+    checked_name(user, "database user")
     where = plan(to)
     c = cluster(ref)
+    # THE SAME CHECKS AS ROTATE (review round 5): rotate's exit-4/exit-5 hints send
+    # operators here, and a URL to a database that does not exist would be written
+    # into the vault as if valid. Checked before the password is even read.
+    validate_connection(c, user, db)
     pw = user_password(c, user)
     print(f"{c['name']} user {user}: {deliver(connection_url(c, user, pw, db), where)}")
     return 0
@@ -385,14 +406,47 @@ def checked_name(value: str, field: str) -> str:
     return value
 
 
+def _is_name(value: object) -> bool:
+    try:
+        checked_name(value, "name")
+    except DoorError:
+        return False
+    return True
+
+
 def validate_connection(c: dict, user: str, db: str | None) -> None:
     checked_name(c.get("id"), "cluster id")
     checked_name(c.get("name"), "cluster name")
     conn = c.get("connection")
-    if (c.get("engine") not in ("pg", "mysql", "redis", "valkey") or not isinstance(conn, dict)
+    engine = c.get("engine")
+    if engine not in ("pg", "mysql", "redis", "valkey"):
+        # Named, not "incomplete metadata" (review round 6): mongodb, kafka and
+        # opensearch need scheme options this door does not build.
+        shown = engine if _is_name(engine) else "this engine"
+        raise DoorError(f"the door supports pg, mysql, redis and valkey clusters, not {shown}")
+    if (not isinstance(conn, dict)
             or not isinstance(conn.get("host"), str) or not conn["host"]
             or type(conn.get("port")) is not int or not 0 < conn["port"] < 65536):
         raise DoorError("unsupported or incomplete database connection metadata")
+    if db is not None:
+        checked_name(db, "database")
+        # `--db` NAMES ONE OF THE CLUSTER'S DATABASES (review round 4): a URL to a
+        # database that does not exist would be delivered and written as if valid.
+        # Each refusal says what is known (review round 5): an engine without
+        # databases, a provider that listed none, or a list that lacks this one.
+        if c["engine"] in ("redis", "valkey"):
+            raise DoorError(f"--db does not apply to {c['engine']}; leave it out")
+        names = c.get("db_names")
+        if not isinstance(names, list) or not names:
+            raise DoorError(f"the provider listed no databases for this cluster, so --db {db} cannot be "
+                            "checked; read the cluster's databases with doctl before naming one")
+        # Printed names are identifiers only: the provider's list is untrusted.
+        shown = [n for n in names if _is_name(n)]
+        if not shown:
+            raise DoorError(f"the provider listed no readable database names for this cluster, so --db {db} "
+                            "cannot be checked")
+        if db not in shown:
+            raise DoorError(f"--db {db} is not one of this cluster's databases ({', '.join(shown)})")
     # Construct once before mutation so a malformed connection cannot strand apps.
     connection_url(c, user, "synthetic-preflight", db)
 
@@ -478,8 +532,15 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
             missing = [k for k in keys if k not in {e["key"] for e in levels}]
             if missing:
                 raise DoorError(f"app {app} has no env {missing}")
+            # A `${…}` BINDING IS NEVER REWRITTEN (review round 4): App Platform
+            # resolves it at deploy time, so it is left exactly as it is at every
+            # level, even beside a literal of the same key at another level.
+            for k in keys:
+                if all("${" in str(e.get("value", "")) for e in levels if e["key"] == k):
+                    raise DoorError(f"app {app} key {k} is a ${{…}} binding at every level; a binding moves "
+                                    f"with a redeploy, so name the app with --app, not --spec-env")
             for e in levels:
-                if e["key"] in keys:
+                if e["key"] in keys and "${" not in str(e.get("value", "")):
                     forms[id(e)] = check_literal(app, e["key"], str(e.get("value", "")), user, db, c, current)
         del current
         every = list(dict.fromkeys([*apps, *literal]))
@@ -528,7 +589,7 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
         try:
             for scope in _scopes(spec):
                 for e in scope.get("envs") or []:
-                    if e["key"] in keys:
+                    if e["key"] in keys and id(e) in forms:
                         old_value = str(e.get("value", ""))
                         if forms[id(e)] == "password":
                             e["value"] = pw
