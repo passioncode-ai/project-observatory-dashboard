@@ -391,14 +391,35 @@ def test_a_claimed_key_is_never_lost_skipped_or_guessed():
             real_scratch = door.paths.SCRATCH
             door.paths.SCRATCH = pathlib.Path(tmp)
             try:
-                (pathlib.Path(tmp) / "openrouter.json").write_text(json.dumps(
-                    {"keys": [{"label": label, "name": "renamed-in-dashboard", "serves": "an agent"}]}))
+                from datetime import datetime, timedelta, timezone
+                scan_path = pathlib.Path(tmp) / "openrouter.json"
+                # Match scan_openrouter.main's complete receipt. Unknown evidence
+                # must refuse before this test can exercise the actual holder guard.
+                scan = {"schema_version": 1, "scanned_at": datetime.now(timezone.utc).isoformat(),
+                        "keys": [], "destinations": {}, "destination_hashes": {},
+                        "unlisted_destinations": [], "degraded": [], "not_applicable": []}
+                before = json.loads(json.dumps(state))
+                for stale in (False, True):
+                    if stale:
+                        old = dict(scan, scanned_at=(datetime.now(timezone.utc) - timedelta(hours=37)).isoformat())
+                        scan_path.write_text(json.dumps(old))
+                    try:
+                        door.revoke_key("old-tool")
+                        check("unknown consumer evidence refuses claimed-key revoke", False, "revoked")
+                    except RuntimeError as exc:
+                        check("unknown consumer evidence refuses claimed-key revoke",
+                              "refresh the scan" in str(exc) and not deleted and state == before)
+                scan["keys"] = [{"label": label, "name": "renamed-in-dashboard", "serves": "an agent"}]
+                scan["destinations"] = {"an agent": label}
+                scan["destination_hashes"] = {"an agent": {"label": label, "hash": digest}}
+                scan_path.write_text(json.dumps(scan))
                 try:
                     door.revoke_key("old-tool")
                     check("B: revoke refuses a claimed key a consumer reads", False, "revoked")
                 except ValueError as exc:
                     check("B: revoke refuses a claimed key a consumer reads", "reading right now" in str(exc), str(exc))
-                (pathlib.Path(tmp) / "openrouter.json").write_text(json.dumps({"keys": []}))
+                scan.update(keys=[], destinations={}, destination_hashes={})
+                scan_path.write_text(json.dumps(scan))
                 door.revoke_key("old-tool")
                 check("D: revoking a renamed claimed key deletes it at the provider",
                       deleted == [f"/keys/{digest}"] and "old-tool" not in state["issued"], f"{deleted}")

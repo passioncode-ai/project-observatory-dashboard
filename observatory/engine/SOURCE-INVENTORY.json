@@ -3221,8 +3221,8 @@
       "path": "tests/test_openrouter_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "50444668ab4cff4febdc0b95ffeb58682fc82d2e3b634d6155faf8d5821a45ea",
-      "bytes": 25116
+      "export_sha256": "065df9870e27e3ee6b6429268da3622aeb0f563e440699abef0e5948f288ea91",
+      "bytes": 26573
     },
     {
       "path": "tests/test_organizations.py",
