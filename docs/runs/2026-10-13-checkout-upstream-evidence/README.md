@@ -49,3 +49,20 @@ under graph failure. All provider and filesystem inputs are synthetic.
 Next: independent exact-source review, current/history privacy and draft stack on
 PR269. Hosted/platform/installed acceptance remains separate. No merge or release
 is authorized by this packet.
+
+
+## First review and correction
+
+Independent review rejected initial `885d1f6`: early discovery let the graph
+phase consume unused discovery time beyond its declared five-second maximum,
+and a saved binding missing directory/digest fields could still project counts.
+The correction caps the graph phase against both total and phase-specific
+absolute deadlines and validates every required directory/ref/config binding
+field before displaying current counts. Source-hash read failure remains unknown.
+
+A nine-root controlled-clock regression verifies exactly five seconds of graph
+work per twenty-second pass and advancement past the last attempted root on the
+next pass. Missing/null/boolean binding fields, changed candidate HEAD and failed
+source hashing refuse counts; actual complete local graphs still project useful
+results. The initial rejection is preserved; source review of the successor is
+required before draft delivery.

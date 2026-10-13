@@ -50,11 +50,18 @@ def upstream_summary(value, at, candidate=None):
     age = stamp_age(value.get('measured_at'), at)
     out.update(age_seconds=age, stale=age is None or age > MAX_AGE_SECONDS)
     binding = value.get('binding')
+    def directory_binding(entry):
+        return (isinstance(entry, list) and len(entry) == 2 and safe_text(entry[0]) is not None
+                and os.path.isabs(entry[0]) and isinstance(entry[1], list) and len(entry[1]) == 4
+                and all(type(n) is int and n >= 0 for n in entry[1]))
     bound = (isinstance(binding, dict) and isinstance(binding.get('root'), list)
              and len(binding['root']) == 4 and all(type(n) is int and n >= 0 for n in binding['root'])
              and all(isinstance(binding.get(k), str) and re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', binding[k])
                      for k in ('head','upstream_commit'))
-             and binding.get('upstream_kind') == value.get('upstream_kind'))
+             and binding.get('upstream_kind') == value.get('upstream_kind')
+             and all(directory_binding(binding.get(k)) for k in ('git_directory','common_directory'))
+             and all(isinstance(binding.get(k), str) and re.fullmatch(r'[0-9a-f]{64}', binding[k])
+                     for k in ('config_sha256','branch_sha256','upstream_ref_sha256')))
     try: expected_source = checkout_graph.source_hash()
     except OSError: return out
     attempt_age = stamp_age(value.get('attempted_at'), at)
@@ -65,10 +72,12 @@ def upstream_summary(value, at, candidate=None):
         bound = (bound and isinstance(identity, list) and len(identity) == 3 and all(type(n) is int and n >= 0 for n in identity) and len(root) == 4
                  and root[:2] == identity[:2] and root[3] == identity[2]
                  and binding.get('head') == candidate.get('head')
+                 and binding['git_directory'][0] == candidate.get('git_directory')
+                 and binding['common_directory'][0] == candidate.get('common_directory')
                  and candidate.get('stale') is False)
     if (bound and not out['stale'] and value.get('complete') is True and value.get('state') == 'observed'
             and value.get('degraded') == [] and value.get('source_sha256') == expected_source
-            and value.get('scope') == checkout_graph.SCOPE and value.get('remote_durability') == 'unknown'
+            and value.get('actionable') is False and value.get('scope') == checkout_graph.SCOPE and value.get('remote_durability') == 'unknown'
             and value.get('upstream_kind') in ('local-branch', 'remote-tracking')
             and all(type(value.get(k)) is int and 0 <= value[k] <= checkout_graph.MAX_COUNT for k in ('ahead','behind'))):
         out.update(state='observed', ahead=value['ahead'], behind=value['behind'], upstream_kind=value['upstream_kind'])
