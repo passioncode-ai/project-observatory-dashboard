@@ -1149,7 +1149,14 @@ def _git_tier(apply: bool, level: str, seconds: float) -> dict:
         doc = json.loads(line) if line.startswith("{") else {}
     except ValueError:
         doc = {}
-    return doc or {"result": "failed" if p.returncode else "ran", "reason": line[:200]}
+    valid = isinstance(doc, dict) and doc.get("result") in ("busy", "plan-only", "ran")
+    if valid and doc["result"] == "ran":
+        valid = all(type(doc.get(k)) is int and doc[k] >= 0 for k in ("removed", "skipped", "failed"))
+    if valid and doc["result"] == "plan-only":
+        valid = isinstance(doc.get("counts"), dict) and all(
+            type(v) is int and v >= 0 for v in doc["counts"].values())
+    return doc if valid else {"result": "failed", "reason": "cleanup child receipt is invalid",
+                              "reason_code": "invalid-child-receipt", "exit_code": p.returncode}
 
 
 def run(argv: list[str]) -> dict:
@@ -1321,9 +1328,9 @@ def main(argv: list[str]) -> int:
         doc = run(argv)
     except Exception as exc:  # noqa: BLE001 — the job must get a line, never a silent crash
         if "--json" in argv:
-            print(json.dumps({"error": f"{type(exc).__name__}: {str(exc)[:200]}"}))
+            print(json.dumps({"error": type(exc).__name__, "reason_code": "guard-failed"}))
         else:
-            print(f"disk guard: failed — {type(exc).__name__}: {str(exc)[:200]}", file=sys.stderr)
+            print(f"disk guard: failed — {type(exc).__name__}", file=sys.stderr)
         return 2
     if "--json" in argv:
         # The maintenance job reads this line instead of the report file: the file's

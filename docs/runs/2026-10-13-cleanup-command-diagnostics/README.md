@@ -16,3 +16,13 @@ The defect was reproduced with a synthetic marker in child output at source06732
 It demonstrated a persistence path, not an observed live credential incident.
 Automatic cleanup remains disabled on the affected installation; explicit apply
 requires the fixed release and its acceptance before use.
+
+## Error-envelope follow-up
+
+The same privacy rule covers the guard's top-level exception envelope and invalid
+Git-child output: only exception type or a stable failure category is returned.
+An empty, malformed or incomplete child summary is failed even if the child exited0;
+valid counts and carried-source evidence remain intact. Synthetic negative tests first
+failed eight assertions, then passed with the structured error handling. No live
+cleanup or installed settings changed. Full focused guard suite and independent review
+must accept this exact follow-up before release.

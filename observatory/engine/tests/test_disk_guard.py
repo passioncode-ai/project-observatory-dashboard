@@ -1123,6 +1123,38 @@ def stat_is_dir(st) -> bool:
 
 
 class JsonLine(Base):
+    def test_exception_details_are_not_returned_to_cli_consumers(self):
+        import io
+        marker = "SYNTHETIC_PRIVATE_EXCEPTION"
+        for args in ([], ["--json"]):
+            with self.subTest(args=args):
+                out, err = io.StringIO(), io.StringIO()
+                with patch.object(self.g, "run", side_effect=RuntimeError(marker)), \
+                        contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = self.g.main(args)
+                self.assertEqual(code, 2)
+                self.assertNotIn(marker, out.getvalue() + err.getvalue())
+                self.assertIn("RuntimeError", out.getvalue() + err.getvalue())
+
+    def test_invalid_git_child_receipt_is_failed_without_raw_output(self):
+        marker = "SYNTHETIC_PRIVATE_CHILD"
+        for output in (marker, "[]", "null", "{}", "[1]", "true",
+                       json.dumps({"error": marker}), json.dumps({"result": "ran"})):
+            with self.subTest(output=output):
+                child = subprocess.CompletedProcess([], 0, stdout=output, stderr=marker)
+                with patch.object(self.g.subprocess, "run", return_value=child):
+                    row = self.g._git_tier(False, "normal", 30)
+                self.assertIsInstance(row, dict)
+                self.assertEqual(row["result"], "failed")
+                self.assertNotIn(marker, json.dumps(row))
+
+    def test_valid_git_child_summary_retains_failure_and_carried_counts(self):
+        expected = {"result": "ran", "removed": 0, "skipped": 2, "failed": 1,
+                    "carried": {"checkouts": 3, "measured_at": "2026-01-01T00:00:00Z"}}
+        child = subprocess.CompletedProcess([], 0, stdout=json.dumps(expected), stderr="")
+        with patch.object(self.g.subprocess, "run", return_value=child):
+            self.assertEqual(self.g._git_tier(False, "normal", 30), expected)
+
     def test_json_prints_one_line_the_maintenance_job_can_read(self):
         import io, contextlib
         out = io.StringIO()
