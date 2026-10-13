@@ -1465,3 +1465,29 @@ receipts show an explicit unknown state; malformed rows do not erase valid peers
 Read time is separate from measurement time. Reclaimable/allocated totals remain null,
 command arguments are omitted and all rows remain non-actionable. Refresh evidence
 with the separate `--checkouts --root ...` or `--cache-coverage` command when needed.
+
+### Spend for one issued OpenRouter key
+
+Use the provider door's `spend` command with an issued name from its `list`:
+
+```sh
+python "$(project-observatory full-path)/tools/openrouter.py" spend example-agent --json
+```
+
+`--date YYYY-MM-DD` selects one of the last 30 completed UTC days; without it,
+the provider supplies that whole window. The management credential stays in its
+private stash. This command only reads activity. It does not issue keys, run a model,
+change limits, or write the ledger. It groups endpoint records by day/model and sums
+the provider's `usage` field, with `totalBasis` identifying that field. It is not a
+project total or a bill including other providers, BYOK inference or retired keys.
+
+A valid empty response is zero. Missing or invalid usage, an unavailable report,
+an unresolved issuance/rotation, or a key identity changing during the read yields
+no figure. Missing optional request/token counts remain null (`unknown` in text).
+JSON includes `measuredAt`, `scope: current-issued-key-only`, and
+`retiredKeysIncluded: false`. Responses are capped at 4 MiB and 10,000 endpoint rows;
+an exceeded cap refuses the report. Provider bodies, handles and credentials are
+withheld. Exit 2 means an invalid name/date/identity; exit 1 means an unavailable
+report or unresolved/changing identity. Check `list`, management-key access and
+rotation state before retrying this read. Existing unresolved rotations require
+reconciliation; the report does not perform it.

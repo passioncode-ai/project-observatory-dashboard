@@ -7,6 +7,7 @@
     python "$T/openrouter.py" issue --name my-agent --limit 10 [--reset daily] --to vault:PROJECT/prod/OPENROUTER_API_KEY
     python "$T/openrouter.py" issue-for-policy --policy FILE [--limit USD | --split REF=USD,…] [--dry-run]
     python "$T/openrouter.py" list | ping
+    python "$T/openrouter.py" spend my-agent [--date YYYY-MM-DD] [--json]
     python "$T/openrouter.py" limit my-agent --set 25 [--reset daily]
     python "$T/openrouter.py" disable my-agent              # or enable
     python "$T/openrouter.py" rotate my-agent               # or --leaked
@@ -59,6 +60,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 
 
 #: What closes the leak register once the leaked values are dead. It named `vault.py
@@ -122,7 +124,7 @@ class Unreachable(RuntimeError):
 
 
 def _request(path: str, key: str, payload: dict | None = None,
-             method: str | None = None) -> dict:
+             method: str | None = None, *, max_bytes: int | None = None) -> dict:
     """Endpoint and status in errors — never headers, never the body we sent."""
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     req = urllib.request.Request(
@@ -131,7 +133,10 @@ def _request(path: str, key: str, payload: dict | None = None,
                  "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read())
+            raw = r.read() if max_bytes is None else r.read(max_bytes + 1)
+            if max_bytes is not None and len(raw) > max_bytes:
+                raise RuntimeError("Provider response exceeded the read limit; body withheld")
+            return json.loads(raw)
     except urllib.error.HTTPError as e:
         e.close()
         raise RuntimeError(f"openrouter answered HTTP {e.code}; provider response withheld") from None
@@ -1702,6 +1707,127 @@ def cmd_ping() -> int:
     return 1 if bad else 0
 
 
+ACTIVITY_MAX_BYTES = 4 * 1024 * 1024
+ACTIVITY_MAX_ROWS = 10000
+ACTIVITY_COUNTERS = ("requests", "prompt_tokens", "completion_tokens", "reasoning_tokens")
+
+
+def _activity_date(value: str | None, *, provider: bool = False) -> str | None:
+    if value is None and not provider: return None
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise ValueError("Activity date must be a completed UTC day in YYYY-MM-DD form")
+    day = datetime.date.fromisoformat(value)
+    current = datetime.datetime.now(datetime.timezone.utc).date()
+    if not 1 <= (current - day).days <= 30:
+        raise ValueError("Activity date must be one of the last 30 completed UTC days")
+    return value
+
+
+def read_activity(admin: str, key_hash: str, date: str | None = None) -> list[dict]:
+    """One GET for one issued identity; reject malformed evidence without echoing it.
+
+    The endpoint groups by endpoint, so the CLI folds its rows by day/model. Only
+    finite provider usage is money evidence; missing counters remain unknown.
+    Handles and the management credential travel to the provider, never output.
+    """
+    _activity_date(date)
+    if not isinstance(key_hash, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", key_hash):
+        raise ValueError("Issued key has no valid provider hash; repair its ledger metadata")
+    query = {"api_key_hash": key_hash}
+    if date is not None: query["date"] = date
+    try:
+        doc = _request("/activity?" + urllib.parse.urlencode(query), admin, max_bytes=ACTIVITY_MAX_BYTES)
+        rows = doc.get("data") if isinstance(doc, dict) else None
+        if not isinstance(rows, list) or len(rows) > ACTIVITY_MAX_ROWS:
+            raise ValueError
+        clean = []
+        for row in rows:
+            if not isinstance(row, dict): raise ValueError
+            day = row.get("date")
+            # Historical endpoint responses also use the exact UTC midnight form.
+            if isinstance(day, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2} 00:00:00", day): day = day[:10]
+            _activity_date(day, provider=True)
+            if date is not None and day != date: raise ValueError
+            model = row.get("model")
+            if (not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+~-]{0,255}", model)
+                    or (admin and admin in model) or key_hash.lower() in model.lower()
+                    or re.search(r"sk-|gh[pousr]_", model, re.I)):
+                raise ValueError
+            usage = row.get("usage")
+            if type(usage) not in (int, float) or not math.isfinite(usage) or usage < 0: raise ValueError
+            item = {"date": day, "model": model, "usage": usage}
+            for field in ACTIVITY_COUNTERS:
+                value = row.get(field)
+                if value is not None and (type(value) is not int or value < 0): raise ValueError
+                item[field] = value
+            clean.append(item)
+        return clean
+    except (OSError, RuntimeError, ValueError, OverflowError, RecursionError):
+        raise RuntimeError("Activity report unavailable or invalid; no figure. Check management-key access and retry the read") from None
+
+
+def _spend_identity(name: str) -> tuple[str, str]:
+    rec = ledger()["issued"].get(name)
+    if not isinstance(rec, dict):
+        raise LookupError("Unknown issued key; run openrouter.py list")
+    account, handle = rec.get("account"), rec.get("hash")
+    if not isinstance(account, str) or not account or not isinstance(handle, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", handle):
+        raise ValueError("Issued-key identity is incomplete; repair its ledger metadata")
+    if (rec.get("pending") or rec.get("orphan") or rec.get("rotation_status") not in (None, "complete")
+            or rec.get("predecessor_hash") or rec.get("successor_hash")):
+        raise RuntimeError("Issued-key rotation or issuance is unresolved; reconcile it before reading spend")
+    return account, handle
+
+
+def cmd_spend(name: str, date: str | None, as_json: bool) -> int:
+    """Read-only current-key snapshot; it does not total retired keys or projects."""
+    _activity_date(date)
+    identity = _spend_identity(name)
+    _label, admin = read_admin(identity[0])
+    if (not isinstance(name, str) or not 0 < len(name) <= 200 or any(ord(c) < 32 or ord(c) == 127 for c in name)
+            or (admin and admin in name) or identity[1].lower() in name.lower() or re.search(r"sk-|gh[pousr]_", name, re.I)):
+        raise ValueError("Issued-key display name is unsafe; repair its ledger metadata")
+    rows = read_activity(admin, identity[1], date)
+    try: current = _spend_identity(name)
+    except (LookupError, ValueError, RuntimeError):
+        raise RuntimeError("Issued-key identity changed during the read; retry after reconciliation") from None
+    if current != identity:
+        raise RuntimeError("Issued-key identity changed during the read; retry after reconciliation")
+    grouped = {}
+    try:
+        with decimal.localcontext() as ctx:
+            ctx.prec = 340  # finite IEEE doubles plus a bounded 10k-row sum
+            for row in rows:
+                key = (row["date"], row["model"])
+                if key not in grouped:
+                    grouped[key] = {**row, "usage": decimal.Decimal(str(row["usage"]))}
+                    continue
+                target = grouped[key]; target["usage"] += decimal.Decimal(str(row["usage"]))
+                for field in ACTIVITY_COUNTERS:
+                    target[field] = target[field] + row[field] if target[field] is not None and row[field] is not None else None
+            total = sum((r["usage"] for r in grouped.values()), decimal.Decimal(0))
+            total_usd = float(total)
+            if not math.isfinite(total_usd): raise ValueError
+            out = [grouped[k] for k in sorted(grouped)]
+            for row in out: row["usage"] = float(row["usage"])
+    except (ValueError, OverflowError, decimal.DecimalException):
+        raise RuntimeError("Activity totals are outside the supported numeric range; no figure") from None
+    doc = {"key": name, "date": date, "rows": out, "totalUsd": total_usd,
+           "measuredAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+           "scope": "current-issued-key-only", "totalBasis": "sum-of-provider-usage",
+           "retiredKeysIncluded": False}
+    if as_json:
+        print(json.dumps(doc, ensure_ascii=False, allow_nan=False))
+    else:
+        scope = f"on {date}" if date else "in the last 30 completed UTC days"
+        print(f"{name}: {len(out)} day/model row(s) {scope}; current issued key only")
+        for row in out:
+            requests = row['requests'] if row['requests'] is not None else 'unknown'
+            print(f"  {row['date']}  {row['model']}  {requests} req  ${row['usage']:.6f}")
+        print(f"  total ${total_usd:.6f} (provider usage; retired keys excluded)")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1738,6 +1864,10 @@ def main() -> int:
                       "several are stashed and no --account), the slot reads held-unread and the run exits 1")
     sub.add_parser("list", help="what exists — names, ceilings, places; never values")
     sub.add_parser("ping", help="alive? spent how much of its ceiling?")
+    p_sp = sub.add_parser("spend", help="one issued key's cost by day and model (provider activity)")
+    p_sp.add_argument("name")
+    p_sp.add_argument("--date", help="one of the last 30 completed UTC days, YYYY-MM-DD")
+    p_sp.add_argument("--json", action="store_true")
     p_li = sub.add_parser("limit", help="show or move a key's USD ceiling; for a key issued by a spend policy, "
                           "raising it can take it past its share of the project limit until the next "
                           "issue-for-policy run")
@@ -1784,6 +1914,15 @@ def main() -> int:
         return cmd_list()
     if a.cmd == "ping":
         return cmd_ping()
+    if a.cmd == "spend":
+        try:
+            return cmd_spend(a.name, a.date, a.json)
+        except (LookupError, ValueError):
+            print("Spend request refused; check the issued name and a date in the last 30 completed UTC days. Run openrouter.py list", file=sys.stderr)
+            return 2
+        except (OSError, RuntimeError):
+            print("Activity report unavailable or identity unresolved; no figure. Check management-key access and reconcile pending rotation before retrying", file=sys.stderr)
+            return 1
     if a.cmd == "limit":
         return cmd_limit(a.name, a.set_to, a.reset)
     if a.cmd == "disable":
