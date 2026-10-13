@@ -999,10 +999,13 @@ def act(a: dict, holders: Holders) -> dict:
             return {**rec, "result": "failed", "reason": f"{type(exc).__name__}"}
         said = (p.stderr or p.stdout or "").strip()
         if p.returncode and a.get("busy_output") and a["busy_output"] in said:
-            return {**rec, "result": "skipped", "reason": f"its cache is in use: {said[:120]}"}
+            return {**rec, "result": "skipped", "reason": "its cache is in use",
+                    "reason_code": "cache-in-use", "exit_code": p.returncode}
         rec["result"] = "removed" if p.returncode == 0 else "failed"
         if p.returncode:
-            rec["reason"] = f"exit {p.returncode}: {said[:160]}"
+            rec["reason"] = f"exit {p.returncode}"
+            rec["reason_code"] = "command-failed"
+            rec["exit_code"] = p.returncode
     else:
         target = a["target"]
         if not os.path.lexists(target):
