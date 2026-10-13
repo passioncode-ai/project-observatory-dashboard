@@ -312,23 +312,32 @@ Land the source change, then run `node scripts/workspace.mjs sync` from a Fabric
 
 `docs/backlog.md` is canonical for **OBS rows: engine execution** (a bounded change closed by a
 pull request and a release). Product packages, priorities and operator gates live on the
-organization's board (org-index), cited here as `PB-nnn`; a PB row linked to OBS rows takes its
-status from them, so an OBS status is read elsewhere as fact. Two things keep it true:
+organization's board (org-index), cited in a row's Source as `parent: PB-nnn` (at most one); a PB
+row linked to OBS rows takes its status from them, so an OBS status is read elsewhere as fact.
+org-index `scripts/check_observatory_registers.py` reads the board's `## Board` section as an
+allowlisted format, not as Markdown. Two things keep it true:
 
 - **Ids are reserved, not picked.** `.claude/agent-sync.json` declares the `OBS` register
   (`refs/agent-sync/ids/OBS`, compare-and-swap at `origin`), reading the board's
   `**Next free ID:** `OBS-n`` line as its floor:
   `agent_sync.py reserve OBS` before writing a row. Two branches can no longer both write the
   same id (#209 and main both wrote OBS-76).
-- **`tools/check_backlog.py`** (run by `tests/test_backlog_board.py`) refuses a duplicate id, an id
-  at or above the next free one, a status outside `open…`/`blocked…`/`done…`/`closed…`/`superseded
-  by OBS-n…`, wording that is false once merged ("in this PR", "to follow", "merging", "once …
-  restarts"), `done` with something that remains (write `open — partly done: …`), `done in X.Y.Z`
-  without a `## X.Y.Z` heading in CHANGELOG.md, a row wider than the header, and private names in
-  the board and CHANGELOG.md. Private names need the maintainer's local denylist
-  (`--private-denylist FILE` or `OBSERVATORY_PRIVATE_DENYLIST`, the file
-  `tools/check_public_release.py` reads); without it the lint says so and checks shapes only, so
-  run it with the denylist before a release.
+- **`tools/check_backlog.py`** (run by `tests/test_backlog_board.py`) holds the board to that
+  format: one `## Board` heading with the exact header `| ID | Item | Status | Source |`, the
+  separator and contiguous four-cell rows directly under it, nothing but blank lines after the
+  table in its section, and no OBS row outside it; no backslash (so no escaped `|`: word it), no
+  `<` and no control or invisible character in a row; a Status cell of printable ASCII without
+  `& * _ ~` that is exactly one of `done`, `done in X.Y.Z`, `done in X.Y.Z (#n)`,
+  `done — merged (#n)`, `done — merged (#n), unreleased`, `cancelled`, `superseded by OBS-n`, or
+  `open`/`blocked` with an optional note (a closed status takes no note: write what was delivered
+  in the Item column, after "Outcome:"); at most one `parent:` token in Source, followed by a PB id.
+  On top of the format it refuses a duplicate id, an id at or above the next free one, wording
+  that is false once merged ("in this PR", "to follow", "merging", "once … restarts"), `done` with
+  something that remains (write `open — partly done: …`), `done in X.Y.Z` without a `## X.Y.Z`
+  heading in CHANGELOG.md, and private names in the board and CHANGELOG.md. Private names need the
+  maintainer's local denylist (`--private-denylist FILE` or `OBSERVATORY_PRIVATE_DENYLIST`, the
+  file `tools/check_public_release.py` reads); without it the lint says so and checks shapes only,
+  so run it with the denylist before a release.
 
 ## After work
 

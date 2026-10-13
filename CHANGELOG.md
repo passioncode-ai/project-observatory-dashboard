@@ -78,6 +78,18 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
 
 ### Changed
 
+- **The engine board is the organization's canonical format** (L-1): `docs/backlog.md` holds its table in one
+  `## Board` section that org-index's register check reads as an allowlisted format, and `tools/check_backlog.py`
+  refuses what that check refuses — a second or missing `## Board`, a header or separator not exactly the
+  canonical one, text after the table, an OBS row outside the section, a backslash (an escaped `|`), `<` or an
+  invisible character in a row, two `parent:` tokens in a Source. A Status cell is exactly one of `done`, `done in
+  X.Y.Z`, `done in X.Y.Z (#n)`, `done — merged (#n)`, `done — merged (#n), unreleased`, `cancelled` or
+  `superseded by OBS-n`, or `open`/`blocked` with a note; a closed status takes no note, so 42 rows moved theirs to
+  the Item column ("Outcome:"), `closed` became `superseded by OBS-17`, and OBS-63 reads `done in 0.24.4`. Rows
+  name their package as `parent: PB-nnn`. OBS-56 is done for the estate total, its per-project remainder is
+  OBS-93; OBS-74 credits 0.24.0 with the finding only; OBS-75 is done (the old key was revoked on 2026-10-12);
+  OBS-62 reads `done in 0.24.0 (#206)`, the release its code reached; OBS-92 records the loopback header door.
+
 - **A spend policy's keys share its limit** (ENG-002): `openrouter.py issue-for-policy` gave every `project-key`
   source the whole project limit, so a $40 project with two keys could spend $80. The ceilings of every key the plan
   touches now sum to at most `limitUsd`: an equal split rounded down to the cent by default, `--split REF=USD,…` for
