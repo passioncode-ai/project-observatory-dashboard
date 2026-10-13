@@ -68,7 +68,7 @@ STALE_HOURS = 6
 ROTATION_FILE = "tick-rotation.json"
 ROTATION_SCHEMA = 2
 #: How a step ended (`outcome_of`). `ran` is the only one that produced the step's output.
-OUTCOMES = ("ran", "failed", "stopped", "not_started")
+OUTCOMES = ("ran", "failed", "stopped", "not_started", "disabled")
 #: What `tick_lease.py step` prints, first, for a step it did not start for want of time.
 NOT_STARTED = "not started"
 #: Collectors that read another collector's output in the same tick: the reader runs after the
@@ -114,7 +114,7 @@ def outcome_of(rc: int, first: str | None) -> str:
     `stopped`: 124 otherwise (the watchdog stopped it at its limit), or a signal (128 + n, or the
     negative code of a process killed by one); `failed`: any other non-zero exit; `ran`: 0."""
     if rc == 0:
-        return "ran"
+        return "disabled" if (first or "").strip() == "disabled in workspace settings" else "ran"
     if rc == TIMED_OUT:
         return "not_started" if (first or "").startswith(NOT_STARTED) else "stopped"
     if rc < 0 or rc > 128:
@@ -315,7 +315,7 @@ class Rotation:
             log("rotation: " + ", ".join(
                 f"{name} ({_ago(now - started[name] if started.get(name) is not None else None)})"
                 for name in ahead) + " first — the collectors started least recently run first")
-        self.t.order = order
+        self.t.order = list(dict.fromkeys([*self.t.order, *order]))
         for name in order:
             row = rows.setdefault(name, {"started_at": None, "finished_at": None, "outcome": None,
                                          "not_started_streak": 0, "last_ran_at": None})
@@ -336,6 +336,8 @@ class Rotation:
                 self.t.not_started.append(name)
             else:
                 row.update(finished_at=after, not_started_streak=0)
+                if outcome == "disabled":
+                    row["started_at"] = previous["started_at"]
                 if outcome == "ran":
                     row["last_ran_at"] = before
             self.save(rows)
@@ -433,12 +435,17 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     """Every step of one tick, in order."""
     step, bounded = t.step, t.bounded
 
-    step("integrity", PY, "tools/check_store.py", "--print")
-
-    # THE COLLECTORS take turns: each `step(...)` below plans; `rotation.run_in_turn()` runs them.
+    # Integrity remains first, before any collector can observe or change data.
+    # It shares the same receipt contract so repeated skipped checks cannot hide
+    # outside the rotation history merely because they have fixed priority.
     import paths
     rotation = Rotation(t, paths.STATE / ROTATION_FILE)
     step = rotation.step
+    step("integrity", PY, "tools/check_store.py", "--print")
+    rotation.run_in_turn()
+    rotation.planned.clear()
+
+    # THE COLLECTORS take turns: each `step(...)` below plans; `rotation.run_in_turn()` runs them.
 
     step("scan-fs", PY, "collectors/scan_filesystem.py", SCRATCH / "local.json")
     step("scan-gh", PY, "collectors/scan_github.py", SCRATCH / "gh")

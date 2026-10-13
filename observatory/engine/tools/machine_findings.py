@@ -6,7 +6,7 @@ tools/cleanup.py wrote, and turns the parts that need a person into findings.
 Each finding names the biggest contributors and the command that recovers the
 space — the board does not run it: this page reads, the operator acts.
 
-NO TIMESTAMP INSIDE A FINDING beyond the documents' own.
+Memory findings retain the selected source measurement time.
 """
 from __future__ import annotations
 import pathlib as _pathlib
@@ -17,6 +17,7 @@ if _DASHBOARD not in _sys.path:
 from finding_types import titled  # noqa: E402
 
 import json
+from collections import deque
 import pathlib
 from datetime import datetime, timedelta, timezone
 
@@ -30,6 +31,26 @@ def _load(path: pathlib.Path) -> dict | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+def _guard_receipt(path: pathlib.Path) -> dict | None:
+    """Malformed guard evidence degrades coverage without hiding peer findings."""
+    unknown = {"source": "receipt", "reason": "guard receipt has unreadable or invalid coverage data; measurement coverage is unknown"}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return {"degraded": [unknown]}
+    if not isinstance(doc, dict):
+        return {"degraded": [unknown]}
+    notes = doc.get("degraded", [])
+    if not isinstance(notes, list):
+        return {**doc, "degraded": [unknown]}
+    valid = [note for note in notes if isinstance(note, dict)
+             and isinstance(note.get("source"), str) and note["source"]
+             and isinstance(note.get("reason"), str) and note["reason"]]
+    return {**doc, "degraded": valid + ([unknown] if len(valid) != len(notes) else [])}
 
 
 def _age_hours(stamp: str | None, now: datetime) -> float | None:
@@ -53,7 +74,7 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
     out: list[dict] = []
     machine = _load(scratch / "machine.json")
     hygiene = _load(scratch / "git-hygiene.json")
-    guard = _load(scratch / "disk-guard.json")
+    guard = _guard_receipt(scratch / "disk-guard.json")
     auto = _auto_cleanup() if auto_cleanup is None else auto_cleanup
 
     # THE GUARD ITSELF. On 2026-10-11 the self-cleaning had not run for a day and nothing
@@ -69,12 +90,15 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
                                    "first in every pass; without it nothing frees space as the disk fills."),
                         "action": "`project-observatory full maintain status`; `full disk-guard --apply` runs it now"})
 
+    import memory_snapshot
+    selected = memory_snapshot.read_sources(machine, scratch=scratch, at=now)
+    machine = {**(machine if isinstance(machine, dict) else {}), **selected}
     if machine:
         age = _age_hours(machine.get("measured_at"), now)
         if age is not None and age > 2:
             out.append({"type": "machine.stale", "subject": "machine", "severity": "warning",
                         **titled("the machine survey is {hours} hours old", hours=f"{age:.0f}"),
-                        "detail": "Processes and memory change by the minute; this page is reading an old picture.",
+                        "detail": "The full machine survey is old; RAM and processes may have separate newer measurements.",
                         "action": "check the tick log for the `machine` step"})
 
         vol = (machine.get("disk") or {}).get("volume") or {}
@@ -103,13 +127,16 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
 
         mem = machine.get("memory") or {}
         groups = (machine.get("processes") or {}).get("groups") or []
-        swap = mem.get("swap_used_mb") or 0
-        if swap > 4096:
+        swap = mem.get("swap_used_mb")
+        if swap is not None and swap > 4096:
             heavy = ", ".join(f"{g['origin']} {g['rss_mb'] / 1024:.1f} GB" for g in groups[:LISTED])
             out.append({"type": "machine.memory_pressure", "subject": "machine", "severity": "warning",
                         **titled("{gb} GB of memory is swapped to disk", gb=f"{swap / 1024:.1f}"),
-                        "detail": f"Largest by origin: {heavy}.",
-                        "action": "close what the Machine page shows as largest and idle"})
+                        "detail": (f"Largest by origin: {heavy}. Memory measured: {mem.get('measured_at') or 'unknown'}; "
+                                   f"processes measured: {machine['processes'].get('measured_at') or 'unknown'}. "
+                                   "RSS sums can count shared pages more than once."),
+                        "measured_at": mem.get("measured_at"), "stale": mem.get("stale"),
+                        "action": "review current memory use and process ownership on the Machine page before stopping anything"})
         limit = config.get("memory_group_warning_mb", 4096)
         for g in groups:
             if g["rss_mb"] >= limit and not g["origin"].startswith(("system", "agent:")):
@@ -148,17 +175,61 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
 
     since = now - timedelta(hours=24)
     removed, freed, measured = 0, 0, 0
+    summaries = deque(maxlen=3)
+    guard_notes = list((guard or {}).get("degraded") or [])
+    journal_bad = False
     try:
-        for line in (logs / "disk-guard.jsonl").read_text(encoding="utf-8").splitlines():
-            row = json.loads(line)
-            if row.get("kind") != "summary":
-                continue
-            at = datetime.strptime(row.get("at", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-            if at >= since:
-                removed += int(row.get("removed") or 0)
-                measured += max(0, row.get("freed_mb") or 0) * 1024
-    except (OSError, ValueError):
+        # Stream the journal: only three summary rows need to stay in memory.
+        with (logs / "disk-guard.jsonl").open(encoding="utf-8") as stream:
+            for line in stream:
+                try:
+                    row = json.loads(line)
+                    if not isinstance(row, dict):
+                        raise ValueError("object required")
+                    if row.get("kind") != "summary":
+                        continue
+                    at = datetime.strptime(row.get("at", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+                    summaries.append(row)
+                    if at >= since:
+                        removed += int(row.get("removed") or 0)
+                        measured += max(0, row.get("freed_mb") or 0) * 1024
+                except (ValueError, TypeError, OverflowError):
+                    journal_bad = True
+                    summaries.append(None)  # A missing row cannot prove a consecutive streak.
+    except FileNotFoundError:
         pass
+    except (OSError, UnicodeError):
+        journal_bad = True
+    if journal_bad:
+        guard_notes.append({"source": "journal", "reason": "guard journal coverage is incomplete; some run outcomes are unknown"})
+
+    def stopped(row):
+        git = row.get("git") if isinstance(row, dict) else None
+        if not isinstance(git, dict):
+            return 0
+        count = git.get("stopped")
+        return (count if isinstance(count, int) and not isinstance(count, bool) and count > 0
+                else 1 if git.get("result") == "stopped" else 0)
+
+    if len(summaries) == 3 and all(stopped(row) for row in summaries):
+        last = summaries[-1]
+        out.append({"type": "machine.guard_stopping", "subject": "guard:git", "severity": "warning",
+                    **titled("Git cleanup stopped in three consecutive disk guard runs"),
+                    "detail": f"Last run stopped {stopped(last)} Git cleanup action(s) at pressure {last.get('level', 'unknown')}. Every one of the last three summary rows reports a stop.",
+                    "action": "inspect store/logs/disk-guard.jsonl and cleanup.jsonl for the limiting phase; review the time budget and preserved work before a new plan",
+                    "evidence": ["store:logs/disk-guard.jsonl"]})
+    notes_by_source = {}
+    for note in guard_notes:
+        if isinstance(note, dict):
+            notes_by_source.setdefault(str(note.get("source") or "unknown"), []).append(str(note.get("reason") or "measurement unavailable"))
+    for source, reasons in notes_by_source.items():
+        fda = source == "trash" and any("Full Disk Access" in reason for reason in reasons)
+        out.append({"type": "machine.guard_degraded", "subject": "guard:" + source, "severity": "info",
+                    **titled("the disk guard could not measure {source}", source=source),
+                    "detail": "; ".join(reasons[:8]) + (f"; {len(reasons) - 8} further reasons in the receipt" if len(reasons) > 8 else ""),
+                    "action": ("a person can grant the maintenance job's interpreter Full Disk Access in System Settings → Privacy & Security → Full Disk Access, then rerun the guard plan; declining keeps this source unmeasured"
+                               if fda else "inspect the named source and its reason in store/raw/disk-guard.json or the guard journal; resolve that access or time-budget limit and rerun `project-observatory full disk-guard`"),
+                    "evidence": ["store:raw/disk-guard.json", "store:logs/disk-guard.jsonl"]})
     try:
         for line in (logs / "cleanup.jsonl").read_text(encoding="utf-8").splitlines():
             row = json.loads(line)

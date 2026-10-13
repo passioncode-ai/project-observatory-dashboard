@@ -57,6 +57,10 @@ class Base(unittest.TestCase):
         importlib.reload(paths)
         import disk_guard
         self.g = importlib.reload(disk_guard)
+        self.real_refresh_memory = self.g.refresh_memory
+        memory_refresh = patch.object(self.g, "refresh_memory", return_value="fresh")
+        memory_refresh.start()
+        self.addCleanup(memory_refresh.stop)
         self.real_fresh_busy = getattr(self.g, "fresh_busy", None)
         # No test probes the host process table or live holders.
         fresh = patch.object(self.g, "fresh_busy", return_value=False, create=True)

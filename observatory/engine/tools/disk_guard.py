@@ -904,23 +904,41 @@ def large_files(cfg: dict, previous: dict | None, force: bool) -> dict | None:
 def memory_report() -> dict | None:
     """Who holds the memory that swap writes to this disk, from the machine survey."""
     machine = _read(paths.SCRATCH / "machine.json")
-    if not machine:
+    if not machine and not (paths.SCRATCH / "machine-memory.json").exists():
         return None
-    mem = machine.get("memory") if isinstance(machine.get("memory"), dict) else {}
+    import memory_snapshot
+    measured = memory_snapshot.read_sources(machine)
+    mem = measured["memory"]
     swap = mem.get("swap_used_mb")
     valid_swap = (isinstance(swap, (int, float)) and not isinstance(swap, bool)
                   and math.isfinite(swap) and swap >= 0)
-    swap_reason = (None if valid_swap else "missing-swap-measurement" if swap is None
-                   else "invalid-swap-measurement")
-    groups = (machine.get("processes") or {}).get("groups") or []
+    invalid_swap = any(d.get("source") == "swap_used_mb" and d.get("reason") == "invalid-measurement"
+                       for d in mem.get("degraded", []))
+    swap_reason = None if valid_swap else "invalid-swap-measurement" if invalid_swap else "missing-swap-measurement"
+    processes = measured["processes"]
+    groups = [g for g in processes.get("groups") or [] if isinstance(g, dict)]
     sims = [g for g in groups if str(g.get("origin", "")).startswith("simulator:")]
     detached = [g for g in groups if str(g.get("origin", "")).startswith("detached:")]
-    return {"measured_at": machine.get("measured_at"),
+    return {"measured_at": mem.get("measured_at"), "attempted_at": mem.get("attempted_at"),
+            "source": mem.get("source"), "stale": mem.get("stale"),
+            "processes_measured_at": processes.get("measured_at"), "processes_stale": processes.get("stale"),
+            "degraded": mem.get("degraded", []) + processes.get("degraded", []),
+            "rss_semantics": processes.get("rss_semantics"), "attribution": processes.get("attribution"),
+            "simulators_measured": processes.get("source") == "machine.json" and processes.get("count") is not None,
             "swap_gb": round(swap / 1024, 1) if valid_swap else None, "swap_reason": swap_reason,
             "holders": [{k: g.get(k) for k in ("origin", "processes", "rss_mb")} for g in groups[:8]],
             "simulators": [{"name": g["origin"].split(":", 1)[1], "rss_mb": g.get("rss_mb"),
                             "command": f"xcrun simctl shutdown \"{g['origin'].split(':', 1)[1]}\""} for g in sims],
-            "detached_mb": round(sum(g.get("rss_mb") or 0 for g in detached), 1)}
+            "detached_mb": (round(sum(g.get("rss_mb") or 0 for g in detached), 1)
+                            if processes.get("source") == "machine.json" and processes.get("count") is not None else None)}
+
+
+def refresh_memory(timeout: float) -> str:
+    """Small independent refresh before cleanup planning, including disabled auto mode."""
+    if timeout <= 0.2:
+        return "skipped: the run budget is spent"
+    return refresh("collectors/scan_memory.py", paths.SCRATCH / "machine-memory.json", 0,
+                   timeout, ("--budget-seconds", str(max(0, timeout - 0.1))))
 
 
 def refresh(script: str, out: pathlib.Path, hours: float, timeout: int, args: tuple = ()) -> str:
@@ -1144,15 +1162,19 @@ def run(argv: list[str]) -> dict:
     base = {"schema_version": 2, "at": now(), "started_at": started_at, "level": level, "acting": acting,
             "auto_enabled": enabled, "free_gb_before": round(free0 / GB, 1), "free_gb_after": round(free0 / GB, 1),
             "freed_gb": 0.0, "results": {"removed": 0, "skipped": 0, "failed": 0}, "not_due": False, "busy": False}
+    memory_survey = refresh_memory(min(8.0, max(0.0, left() / 10)))
+    base["surveys"] = {"memory": memory_survey}
+    base["degraded"] = ([] if memory_survey in ("refreshed", "fresh") else
+                        [{"source": "memory-refresh", "reason": memory_survey}])
     # HOW OFTEN: at `normal` once per `normal_every_minutes`, measured from the previous
     # run's START with half an interval's tolerance; below `low`, every pass.
     if auto and level == "normal" and previous and previous.get("acting"):
         since = time.time() - (parse_stamp(previous.get("started_at") or previous.get("at")) or 0)
         gap = _number(cfg.get("normal_every_minutes", 60), 60) * 60 - _number(cfg.get("due_tolerance_seconds", 450), 450)
         if since < gap:
-            return {**base, "not_due": True, "acting": False}
-    degraded: list[dict] = []
-    surveys: dict = {}
+            return {**base, "not_due": True, "acting": False, "memory": memory_report()}
+    degraded: list[dict] = list(base["degraded"])
+    surveys: dict = {"memory": memory_survey}
     phases: dict = {}
     plan: list[dict] = []
     rows: list[dict] = []
@@ -1163,7 +1185,8 @@ def run(argv: list[str]) -> dict:
     with cleanup_lock() as mine:
         if not mine:
             return {**base, "busy": True, "acting": False,
-                    "degraded": [{"source": "lock", "reason": "another cleanup is running; this pass skips"}]}
+                    "memory": memory_report(),
+                    "degraded": degraded + [{"source": "lock", "reason": "another cleanup is running; this pass skips"}]}
         try:
             reserve = _number(cfg.get("run_reserve_seconds", 60), 60)
             plan_cap = _number(cfg.get("plan_budget_seconds", 300), 300)

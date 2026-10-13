@@ -564,7 +564,9 @@ def observatory_machine(
            "sections": ["memory", "processes", "disk", "git", "cleanup", "guard"]}
     if full.get("processes"):
         procs = full["processes"]
-        out["processes"] = {"count": procs.get("count"), "top": (procs.get("top") or [])[:MACHINE_TOP],
+        out["processes"] = {**{key: procs.get(key) for key in
+                              ("measured_at", "attempted_at", "source", "stale", "rss_semantics", "attribution", "projects_measured", "degraded")},
+                            "count": procs.get("count"), "top": (procs.get("top") or [])[:MACHINE_TOP],
                             "groups": sorted(procs.get("groups") or [], key=lambda g: -(g.get("rss_mb") or 0))[:MACHINE_TOP]}
     if full.get("disk"):
         disk = full["disk"]

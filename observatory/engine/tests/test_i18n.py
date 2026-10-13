@@ -215,6 +215,8 @@ def untitled_finding_literals() -> list[str]:
 
 #: Ids reached through a variable, each named with where it is used.
 DYNAMIC_IDS = {
+    "Memory", "Processes",  # machine_page per-source freshness labels
+
     "No file above the size line.",        # machine_page.guard_html(): measured empty state via `empty`
     "Projects — the operator's registry",  # build(): the single page's title, via `title`
     "Search",                              # render(): the placeholder when no tab matches

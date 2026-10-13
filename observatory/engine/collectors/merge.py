@@ -19,7 +19,8 @@ for field in ("organizations", "work_organizations"):
         raise ValueError("Ownership organizations must be lists of non-empty names")
 OWNED_ORGS = set(ownership.get("organizations", []))
 WORK_ORGS = set(ownership.get("work_organizations", []))
-degraded: list[dict] = []
+import merge_input_age
+inputs, degraded = merge_input_age.survey(SP)
 OWNED_DOMAINS={d["name"] for d in json.load(open(paths.REGISTRY/"domains.json"))["domains"]}
 # The Heroku chain (a zone's host -> the app serving it -> its project) is
 # joined in emit_registry.py, not here: the app->project link is computed there,
@@ -664,7 +665,7 @@ for _key, _group in sorted(_by_key.items()):
     print(f"  KEY COLLISION {_key!r}: " + ", ".join(p["name"] for p in _group))
 
 out={"repositories":repos,"projects":{p["key"]:p for p in projects.values()},
-     "duplicate_repo_names":duplicates,"degraded":degraded}
+     "duplicate_repo_names":duplicates,"degraded":degraded,"inputs":inputs}
 if moved:
     print(f"followed {len(moved)} transfer(s) — a clone still pointed at the old address:")
     for was, real in sorted(moved.items()):

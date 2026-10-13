@@ -718,8 +718,19 @@ def main(argv: list[str]) -> int:
         previous = json.loads(out.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         previous = None
+    process_start = now()
+    processes = survey_processes()
+    processes["attribution"] = "origin-and-project"
+    processes["projects_measured"] = processes.get("count") is not None
+    processes["rss_semantics"] = "sum-of-process-rss-not-unique-physical-memory"
+    processes["attempted_at"] = process_start
+    processes["measured_at"] = process_start if processes.get("count") is not None else None
+    memory_start = now()
+    memory = survey_memory()
+    memory["attempted_at"] = memory_start
+    memory["measured_at"] = memory_start if memory.get("total_mb") is not None else None
     doc = {"schema_version": 1, "measured_at": now(), "platform": sys.platform,
-           "processes": survey_processes(), "memory": survey_memory(),
+           "processes": processes, "memory": memory,
            "disk": survey_disk(previous, "--disk" in argv),
            "witr": bool(shutil.which("witr"))}
     out.parent.mkdir(parents=True, exist_ok=True)

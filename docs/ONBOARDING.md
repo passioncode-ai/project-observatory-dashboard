@@ -753,6 +753,22 @@ local state, and any tree whose contents cannot be fully inspected within its
 bounded check. Symlinks and special files are retained conservatively.
 Regression coverage: `observatory/engine/tests/test_disk_guard.py`, `GitTierSafety`.
 
+### A lightweight memory refresh
+
+`project-observatory full machine --memory-only` refreshes RAM, swap and per-process
+RSS into `store/raw/machine-memory.json`, without sizing directories or reading process
+arguments. Disk-guard passes reserve up to eight seconds for this before planning, even
+when automatic cleanup is disabled. This measurement never stops a process or removes data.
+
+The Machine page and `observatory_machine` select memory and process observations separately,
+show their timestamps and flag samples older than 30 minutes or with unknown timestamps.
+A failed measurement remains null with a reason; zero means a measured zero. RSS totals
+can count shared pages more than once and do not measure unique physical memory or
+reclaimable disk bytes. Lightweight process groups identify executable basenames only;
+project/simulator attribution still belongs to the full survey and is not inferred here.
+Native Windows has no new memory adapter in this slice and reports unsupported sources.
+Proof: `tests/test_memory_freshness.py` in the engine.
+
 ### The disk guard
 
 The tick is long on a busy machine, and its cleanup step comes late: on a loaded
@@ -1333,3 +1349,46 @@ source time; it is not zero. The largest-file report carries completeness,
 error counts and budget exhaustion. An incomplete empty scan is shown as an
 incomplete measurement. The MCP overview exposes `guard.largeFilesCoverage`
 beside its bounded file list. See [measurement coverage](design/DISK-GUARD.md#measurement-coverage-obs-87-subset).
+
+### Tool configuration coverage
+
+With the harness integration enabled, the scan names credential-shaped fields in
+user tool configs and `.mcp.json` files one level below the configured projects
+root. It never prints their values. Project-scoped names use a measured registry
+id when available and otherwise the directory basename. A malformed config emits
+`harness.scan_degraded`; line-based name recovery is marked `parsed: false` and
+never establishes full coverage. Unreadable, unsupported or oversized files are
+also explicitly unmeasured. Git-tracked plaintext configs raise a critical
+finding; failed tracking checks remain unknown. Follow the reason-specific remedy
+and rerun `project-observatory full harness`. A tracked key may remain in history:
+review exposure and revoke or rotate through its owner before treating it as safe.
+
+### Scheduled measurement freshness
+
+Tick receipts distinguish `disabled`, `not_started`, `stopped`, `failed` and
+`ran`. Disabled steps preserve the last successful measurement time; they do not
+raise starvation. A collector absent from the last tick's `collector_order` is
+not classified as starved. Planned collectors warn after three missed starts or
+six hours without a completed measurement (`config/tick.json` `starve_hours`
+overrides the age bound); leaks and integrity use critical severity. Interrupted
+attempts retain unknown completion. Unsupported rotation schemas are reported as
+`tick.rotation_degraded`, never interpreted as a healthy empty queue.
+
+Merge provenance records `inputs` timestamps and degrades old inputs: local
+filesystem data after two hours, GitHub/remotes after six, daily inputs after
+48. Legacy files without a declared timestamp use file modification time;
+invalid declared timestamps stay unknown. A new merge does not refresh them.
+Rollback to an older engine can reset schema-2 starvation streaks; allow fresh
+receipts before trusting scheduling coverage after rollback.
+
+### Repeated cleanup stops and unmeasured sources
+
+Three consecutive guard summaries reporting stopped Git cleanup produce
+`machine.guard_stopping` (warning), with the latest count and pressure level.
+The guard's own unavailable sources produce `machine.guard_degraded` (info).
+Only a Trash Full Disk Access failure receives the macOS consent instructions:
+a person grants the maintenance job's interpreter access in System Settings →
+Privacy & Security → Full Disk Access, or leaves that source unmeasured. Other
+access, journal and time-budget failures keep their own reason and recovery step.
+The compact agent overview already carries Git `partial` and `carried` evidence;
+carried measurements are not a new cleanup authorization.

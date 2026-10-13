@@ -103,6 +103,11 @@ def summary(explain_pid: int | None = None) -> dict:
         degraded += (machine.get("processes") or {}).get("degraded") or []
         degraded += (machine.get("memory") or {}).get("degraded") or []
         degraded += (machine.get("disk") or {}).get("degraded") or []
+    import memory_snapshot
+    fresh = memory_snapshot.read_sources(machine)
+    for section in ("memory", "processes"):
+        out[section] = fresh[section]
+        degraded += fresh[section]["degraded"]
     if hygiene:
         rows = hygiene.get("checkouts") or []
         out["git"] = {

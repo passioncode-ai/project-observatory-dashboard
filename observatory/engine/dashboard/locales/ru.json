@@ -2136,5 +2136,20 @@
   "many": "неполное обследование: {n} рабочих копий взяты из прохода {date}",
   "one": "неполное обследование: {n} рабочая копия взята из прохода {date}",
   "other": "неполное обследование: {n} рабочей копии взяты из прохода {date}"
- }
+ },
+ "Tool configuration scan incomplete": "Конфигурации инструментов проверены не полностью",
+ "the tool configuration scan is incomplete for {source}": "Конфигурация {source} проверена не полностью",
+ "Collector waiting too long": "Сборщик слишком долго не запускается",
+ "Collector scheduling coverage unknown": "Состояние очереди сборщиков неизвестно",
+ "collector scheduling coverage is unknown": "состояние очереди сборщиков неизвестно",
+ "the scheduled tick did not start `{step}`: its time ran out": "плановый проход не запустил `{step}`: закончилось время",
+ "the scheduled tick stopped `{step}` at its time limit": "плановый проход остановил `{step}` по лимиту времени",
+ "the `{step}` collector has not run for {hours} hours": "сборщик `{step}` не выполнялся {hours} ч",
+ "the `{step}` collector has no completed measurement after repeated skipped attempts": "у сборщика `{step}` нет завершённого измерения после нескольких пропущенных попыток",
+ "Disk guard Git cleanup keeps stopping": "Очистка Git регулярно останавливается",
+ "Disk guard measurement incomplete": "Очистка диска измерена не полностью",
+ "Git cleanup stopped in three consecutive disk guard runs": "Очистка Git остановилась в трёх последовательных проходах",
+ "the disk guard could not measure {source}": "Очистка диска не смогла проверить источник {source}",
+ "RSS totals may count shared pages more than once.": "Сумма RSS может учитывать общие страницы памяти несколько раз.",
+ "stale": "устарело"
 }

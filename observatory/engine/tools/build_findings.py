@@ -2666,7 +2666,7 @@ def collect() -> list[dict]:
         for _t in _h.get("tool_plaintext") or []:
             out.append({
                 "type": "harness.plaintext_secret", "subject": f"harness:plaintext:{_t.get('file')}",
-                "severity": "warning",
+                "severity": "critical" if _t.get("tracked") is True else "warning",
                 **titled("{file} keeps {n} credentials in plaintext", file=_t.get("file"), n=int(_t.get("count") or 0)),
                 "detail": ("Credential-shaped values under " + listed(_t.get("names") or [], 8) + ". Any process of "
                            "this account reads that file, and a value there drifts from the vault on the first "
@@ -2675,6 +2675,21 @@ def collect() -> list[dict]:
                           "have the tool read it through `use_secret.py run` or its own secret helper, then delete "
                           "the line; an OpenRouter key is reissued through the door instead",
                 "evidence": ["store/raw/harness.json#tool_plaintext"]})
+        for _d in _h.get("degraded") or []:
+            if str(_d.get("source", "")).startswith("tool-config:"):
+                _remedy = {
+                    "tracking-unknown": "repair Git access and check whether the named config is tracked",
+                    "discovery-limit": "narrow the configured projects root or review omitted project configurations separately",
+                    "size-limit": "review the named config locally and reduce it below the scanner's text size limit",
+                    "parse-error": "repair the named config's JSON or TOML syntax and object structure",
+                    "unreadable": "restore read access to a regular config file at the named source",
+                }.get(_d.get("code"), "inspect the named configuration source")
+                out.append({"type": "harness.scan_degraded", "subject": "harness:" + _d["source"],
+                            "severity": "warning",
+                            **titled("the tool configuration scan is incomplete for {source}", source=_d["source"]),
+                            "detail": _d.get("reason") or "Configuration coverage is unmeasured.",
+                            "action": _remedy + ", then run `project-observatory full harness`; recovered names do not prove complete coverage",
+                            "evidence": ["store/raw/harness.json#degraded"]})
         for _p in _h.get("projects") or []:
             if _p.get("pushes_over"):
                 out.append({
@@ -4275,29 +4290,18 @@ def collect() -> list[dict]:
     # `store/retention.py apply`, whose non-zero exit means an erasure did not
     # complete — the contract's "completion blocks until every configured
     # backend attests" was true of the function and false of the system.
-    tickf = paths.SCRATCH / "tick.json"
-    if tickf.is_file():
+    import tick_findings
+    def _tick_receipt(path):
         try:
-            tdoc = json.loads(tickf.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            print(f"  tick.json unreadable: {exc}", file=sys.stderr)
-            tdoc = {}
-        for row in tdoc.get("failed_steps", []):
-            name = row.get("step", "unknown")
-            grave = SEVERE_STEPS.get(name)
-            out.append({
-                "type": "tick.step_failed", "subject": f"step:{name}",
-                "severity": "critical" if grave else "warning",
-                **titled("the scheduled tick's `{step}` step exited {code}", step=name, code=row.get("exit")),
-                "detail": (grave or
-                           "The tick does not abort on a degradation, by design — "
-                           "launchd would retry a state that needs reporting rather "
-                           "than repeating. So a failed step is recorded here instead "
-                           "of stopping the cycle.")
-                          + f" Last tick finished {tdoc.get('finished_at', 'unknown')}.",
-                "action": f"read the reason in store/logs/tick.log, then run "
-                          f"`./observatory.py` for that step by hand to see it fail",
-                "evidence": ["store:raw/tick.json", "store:logs/tick.log"]})
+            return json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            return {"schema": "unreadable"}
+    out.extend(tick_findings.findings(
+        _tick_receipt(paths.SCRATCH / "tick.json"),
+        _tick_receipt(paths.STATE / "tick-rotation.json"),
+        config=_tick_receipt(paths.config_file("tick.json")), severe=SEVERE_STEPS))
 
     # WORK GIT CAN NO LONGER PLACE. `tools/corroborate.py` refuses to promote
     # a `session` row whose recorded sha is gone or has fallen off its

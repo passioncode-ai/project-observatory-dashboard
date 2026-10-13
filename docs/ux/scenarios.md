@@ -65,3 +65,11 @@ a retry returns the migrated lesson instead of creating another active identity.
 changed since candidate discovery is skipped. Generic ledger creation/conversion also
 refuses a duplicate identity; erasure committed after its first read still prevents an
 insert. `TheBridgeNotesMigrate` exercises these interleavings with two SQLite connections.
+
+OBS-87 memory freshness: an operator or agent requests `full machine --memory-only`
+while disk sizing is slow. RAM/swap and process RSS refresh independently, with separate
+source timestamps and explicit unavailable values. The Machine page and MCP retain old
+disk timestamps rather than presenting the whole machine as freshly measured. A failed
+new memory attempt shows unknown swap, never zero or a newly dated old measurement.
+Process RSS totals are labelled as sums that can count shared pages more than once.
+The bounded packet is [memory freshness](../runs/2026-10-13-memory-freshness/README.md).

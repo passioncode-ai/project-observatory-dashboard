@@ -171,3 +171,40 @@ and rotate the persisted last-attempted root after a bounded scan or interruptio
 Per-phase holder evidence retains failures even when cache commands need no probe.
 Regression: `test_disk_guard.py::RegistrationFairness`. Oversized roots are not
 resumed within the root; incomplete coverage remains visible.
+
+### Harness configuration recovery (I-2)
+
+An operator or agent running the enabled harness scan sees named credentials from
+user settings and configured project MCP files without values or absolute project
+paths. A malformed config keeps recovered names and adds an incomplete-coverage
+warning. A tracked config raises the plaintext finding to critical. The recovery
+message distinguishes parse, permission, size and unknown Git tracking failures.
+Coverage: `tests/test_harness.py`:
+`test_malformed_tool_config_recovers_names_and_reports_degradation`,
+`test_project_headers_and_user_env_use_path_free_names`,
+`test_tracked_project_config_is_critical`,
+`test_malformed_shape_and_unreadable_config_remain_degraded`,
+`test_project_registry_id_is_used_for_exact_folder_match`.
+Status: implemented; product outcome unobserved.
+
+### Tick scheduling and input age (K-2)
+
+A reader sees an explicit unknown scheduling warning for unsupported receipts.
+Only collectors planned in the recorded tick can trigger starvation; disabled
+collectors preserve historical completion instead of pretending to refresh it.
+Stopped, failed and never-started steps have distinct titles. Never-started
+merge/emit/validate remain warnings, and guarantee-breaking steps remain critical.
+Old merge inputs retain their source timestamps and generate degradation.
+Coverage: `tests/test_tick_findings.py`, `tests/test_merge_input_age.py`.
+Status: implemented; product outcome unobserved.
+
+### Guard stop and coverage findings (K-7)
+
+After three consecutive stopped Git cleanup summaries, the reader sees a warning
+with the count and pressure. An unmeasured guard source stays visible as info;
+only the Trash/FDA cause names the human macOS permission step. Malformed journal
+rows break the consecutive-stop evidence and expose incomplete journal coverage.
+The bounded agent view retains carried Git evidence.
+Coverage: `tests/test_machine_findings.py`,
+`test_machine.Tool.test_the_overview_says_when_the_git_survey_is_partial`.
+Status: implemented; product outcome unobserved.

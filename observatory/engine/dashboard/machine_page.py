@@ -133,7 +133,7 @@ def summary_html(m: dict, t: Translator) -> str:
          t.mark("{percent}% of {total} GB", percent=disk.get("free_percent", "—"), total=total_gb)
          if isinstance(total_gb, (int, float)) else t.mark("{percent}% of {total}", percent=disk.get("free_percent", "—"),
                                                           total="—")),
-        (t.mark("Processes"), _e(procs.get("count", "—")),
+        (t.mark("Processes"), _e(procs.get("count") if procs.get("count") is not None else "—"),
          t.mark("{n} origins", n=len(procs.get("groups") or []))),
         (t.mark("Cleaned in 7 days"), _e(len(done)),
          auto + (" · " + _gigabytes(round(freed, 1), t) if freed else "")),
@@ -196,11 +196,23 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     if m.get("measuredAt"):
         parts.append(t.mark("Machine surveyed {at}", tag="p", attrs=' class="machine-at"', at=stamp(m["measuredAt"])))
     parts.append(summary_html(m, t))
+    for section, label in (("memory", "Memory"), ("processes", "Processes")):
+        sample = m.get(section) or {}
+        if sample.get("source"):
+            state = t.mark("stale") if sample.get("stale") is True else (
+                t.mark("Not measured") if sample.get("stale") is None else "")
+            if sample.get("degraded"):
+                state += " · " + t.mark("incomplete measurement")
+            parts.append(f'<p class="machine-at">{t.mark(label)} · '
+                         f'{t.mark("as of {date}", date=stamp(sample.get("measured_at")))} · {state}</p>')
     procs = m.get("processes") or {}
+    if procs.get("rss_semantics"):
+        parts.append(t.mark("RSS totals may count shared pages more than once.", tag="p", attrs=' class="machine-hint"'))
     names = {r.get("id"): r.get("name") for r in payload.get("rows") or [] if isinstance(r, dict) and r.get("id")}
     parts.append(_table(t, "Memory by origin",
                         [("Origin", False), ("Processes", True), ("Sessions", True), ("Memory", True), ("CPU %", True)],
-                        [[_e(g["origin"]), _e(g["processes"]), _e(g["sessions"]), _size(g["rss_mb"], t), t.number(g["cpu"])]
+                        [[_e(g["origin"]), _e(g["processes"]), _e(g.get("sessions") if g.get("sessions") is not None else "—"), _size(g.get("rss_mb"), t),
+                          t.number(g["cpu"]) if g.get("cpu") is not None else "—"]
                          for g in (procs.get("groups") or [])[:ROWS]],
                         "No process survey yet."))
     parts.append(_table(t, "Largest processes",
