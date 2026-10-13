@@ -231,3 +231,13 @@ survey permits deletion by the recorded hash. Full live vault and remote-holder
 coverage remains open; no force bypass is introduced. The CLI refusal and onboarding
 explain refreshing the configured scan. `tests/test_revoke_consumers.py` pins these
 boundaries, including actual rotate-to-successor followed by destination-only evidence.
+
+### Engine-update backup inventory
+
+`full backups status` counts local `before-update` snapshots alongside snapshot,
+before-upgrade and daily copies. `full backups migrate` verifies and encrypts those
+known kinds under the existing retention policy; damaged copies remain with a skipped
+receipt, and foreign kinds remain untouched. Unknown kinds are outside the reported
+known-snapshot count. No automatic migration is added. Synthetic coverage:
+`test_backup_vault.BeforeUpdateInventory` checks count/warning, encrypted restoration,
+foreign-kind preservation and invalid-copy reporting. Live backup migration is unobserved.

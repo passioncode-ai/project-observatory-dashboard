@@ -963,8 +963,12 @@ elsewhere.
 Each workspace writes into its own subfolder (`<home-name>-<instance>`), so two
 workspaces sharing one root never rotate each other's files. Three artifacts
 per kind are kept (`observatory-db-*.obsdb`, `snapshot-*.obsnap`,
-`before-upgrade-*.obsnap`); a new one is decrypted in full before anything
-older is pruned.
+`before-upgrade-*.obsnap`, `before-update-*.obsnap` and `daily-*.obsnap`); a new
+one is decrypted in full before anything older is pruned. Local status and migration
+use the same snapshot kinds, including snapshots left by engine updates. Migration
+exports verified copies under the existing three-per-kind policy; an unverifiable
+copy is reported and retained. Unrecognized kinds are outside this inventory and
+remain untouched by migration; the count is not a survey of every backup-like directory.
 
 The format is `OBSENC1`: AES-256-GCM in authenticated chunks, key derived from
 the passphrase by scrypt (N=2^17, r=8, p=1), header bound as associated data,
