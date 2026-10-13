@@ -208,6 +208,10 @@
   {
    "token": "valkey",
    "reason": "Public database product and connection URI scheme handled by the provider door."
+  },
+  {
+   "token": "opensearch",
+   "reason": "a public database engine name (OpenSearch, one of DigitalOcean's managed database engines), named by the DigitalOcean door when it refuses an engine it does not build URLs for; it reaches a private list only through generic environment variable names"
   }
  ]
 }
