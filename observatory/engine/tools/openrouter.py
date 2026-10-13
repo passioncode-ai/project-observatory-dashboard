@@ -814,11 +814,11 @@ def _ceiling_of(row: dict | None) -> float | None:
 
 def _cents_up(usd) -> int | None:
     """A ceiling the provider holds, in cents rounded UP (3.334 is 334), so a total never reads
-    lower than what can be spent. Float noise below a hundredth of a cent (an echo of 3.330000001)
-    is not a cent. None (no ceiling) is unbounded."""
+    lower than what can be spent. Float noise below a millionth of a dollar (an echo of 3.330000001)
+    is not a cent; a provider holding $0.0001 more than asked is (fix 5). None is unbounded."""
     if not isinstance(usd, (int, float)) or isinstance(usd, bool) or not math.isfinite(usd):
         return None
-    exact = decimal.Decimal(repr(float(usd))) * 100 - decimal.Decimal("0.01")
+    exact = decimal.Decimal(repr(float(usd))) * 100 - decimal.Decimal("0.0001")
     return max(int(exact.to_integral_value(rounding=decimal.ROUND_CEILING)), 0)
 
 
@@ -1481,6 +1481,12 @@ def cmd_revoke(name: str, forget_pending: bool = False, reason: str | None = Non
         r = revoke_key(name)
     except (ValueError, LookupError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    except OSError as exc:
+        # The ledger could not be written (a full disk): the provider may already have deleted the
+        # key; the row stays, and the next revoke finds it gone (404) and clears it.
+        print(f"refused: the ledger could not be written ({type(exc).__name__}: {exc})\n  the ledger row was "
+              f"kept; run the revoke again once the disk takes writes", file=sys.stderr)
         return 1
     except RuntimeError as exc:
         rec = (ledger().get("issued", {}).get(name) or {}) if LEDGER.exists() else {}

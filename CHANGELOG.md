@@ -14,9 +14,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   observatory_lesson` prints (where the engine lacks the tool, the emitter writes `lesson:` notes through
   `observatory_record`); `tests/lesson_emitter_fixture.json` holds that shape and the published schema is
   checked against it. One record per (classKey, project): a repeat revises it or writes nothing. A
-  path, a URL, an e-mail address, a line break or a `classKey` the redactor would change is refused before any write (`invalid-lesson`, every reason
-  listed); credential shapes and known values are redacted. Written `proposed`, confidence 0.5, local stdio only.
-  The tool publishes its outputSchema.
+  path, a URL, an e-mail address, a line break or a `classKey` the redactor would change is refused before any
+  write (`invalid-lesson`, every reason listed); credential shapes and known values are redacted. A promoted
+  lesson that cites a new commit, or whose evidence stops resolving in two known projects, is archived and
+  replaced by a new proposal (`outcome: replaced`), which is promoted again only once its commit resolves.
+  Written `proposed`, confidence 0.5, local stdio only. The tool publishes its outputSchema.
 - **`observatory_search` and `observatory_recall` take `kinds`**, applied inside the candidate query before the
   300-match window, and every hit names its `kind`; a lesson hit carries its fields as `lesson`. Across projects
   the search abstained with the window full of per-session turn records (measured: `count 0, abstain: true`);
@@ -37,6 +39,36 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 Lessons are agents' work memory and stay in Observatory; an export of project-grade lessons to Fabric project
 memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#lessons)).
+
+- **A DigitalOcean door: database credentials to the vault, and a rotation that moves every consumer you name** (PLN-142):
+  `tools/digitalocean.py` over the operator's `doctl` context. `db list` names clusters and which are open to
+  the internet; `db consumers CLUSTER` names the App Platform apps that bind one and the password keys they keep
+  in their own spec, each marked `url` or `password`; `db credential CLUSTER USER --db NAME --to
+  vault:<project>/<env>/<NAME>` delivers a connection URL on stdin ("unchanged" when the slot holds it);
+  `db rotate` moves every consumer you name (`db consumers` lists the App Platform ones; services started with
+  `use_secret.py serve` are named for restart): it prints the doctl context and team, asks the vault for the
+  slot and reads every spec before the reset, resets once, writes the URL or the password into each
+  `--spec-env APP:KEY` literal as the key expects, redeploys each `--app`, retries read calls only and
+  waits for exact ACTIVE. Mutations are attempted once; uncertain outcomes remain unknown in
+  owner-only receipts and require reconciliation before retry. Nothing
+  prints a value. The handling-secrets skill names the provider MCP tools that return a credential by design.
+  Its suite runs in the portable gate.
+
+- **The header door serves loopback servers and clients that export no URL** (PB-139): `vault.py bind
+  --header-for` accepts plain http to a loopback literal with its port (`http://127.0.0.1:<port>`,
+  `http://[::1]:<port>`); `localhost` and http to any other host stay refused. `use_secret.py header` gains
+  `--server-url URL` for Codex's `http_headers_helper`, used only when `CLAUDE_CODE_MCP_SERVER_URL` is unset;
+  two URLs that name different servers are refused (`url-conflict`), and the audit row names the `caller`.
+- **A manifest never pins a tag its release lacks** (ENG-018): 0.24.0 shipped `fabric-agent.json` with the
+  `grant.check` schemas at `/v0.24.1/`, a tag that did not exist until the next release, so a host admitting
+  0.24.0 read 404s. `observatory/engine/tools/check_manifest_urls.py` refuses a pinned tag newer than the release
+  and any moving ref (a commit sha is admitted); the release workflow's `manifest` job runs it, reads every URL
+  once on a publishing run, and `publish` waits for it.
+- **The board lint and the OBS id register**: `tools/check_backlog.py` (run by the root tests) refuses what is
+  false on the engine board once merged — duplicate or unreserved ids, statuses outside the vocabulary, "in this
+  PR"/"to follow"/"once … restarts", `done` with a remainder, a `done in X.Y.Z` with no such release here, rows
+  wider than the header, and private names in the board and this file (with the maintainer's local denylist).
+  `.claude/agent-sync.json` declares the `OBS` register, so a branch reserves its row's id before writing it.
 
 ### Changed
 
@@ -74,11 +106,21 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
   answers: a run killed between the mint and its record, or a cleanup delete that failed (the row is then kept as an
   orphan), leaves a row that holds its slot — the next run mints nothing there, reads `held-pending` and names
   `revoke` (or, with no hash, `claim` or a delete at the provider) — so an account listing past `PAGES_MAX` no
-  longer mints a second key. Whenever the total a run leaves is past the limit it prints `OVER LIMIT by $X now; it
-  ends after: revoke A, B` (`unbounded` when a key has no ceiling) and exits 1, a total past the limit only within
+  longer mints a second key. Whenever the total a run leaves is past the limit it prints `OVER LIMIT by $X now ($A
+  against the $L limit); it ends after: revoke A, B` (`OVER LIMIT: unbounded now` when a key has no ceiling) and exits 1, a total past the limit only within
   the half-cent tolerance included. `revoke` refuses a key a consumer reads, found by its hash in the scan or by the
   label recorded at issue, whatever the key is now called at the provider. The one window in which a project's
   keys can sum past its limit is `rotate`'s, while the successor and the predecessor are both live.
+  **Until the J-3 change, a `rotate` that fails is not counted:** a provider error after the mint, a timeout, a kill,
+  a vault put that fails or a predecessor delete that fails can leave the successor `NAME-next` live and untracked,
+  or the predecessor live and uncounted (the row reads `rotation_status: successor-delivered-predecessor-pending`
+  with its `predecessor_hash`), and `issue-for-policy` does not see either; delete at the provider whichever of the
+  two the slot does not hold, then run `issue-for-policy`. A mint answered with a 5xx or a timeout keeps its pending
+  row (only a 4xx proves nothing was minted), so an account listing past `PAGES_MAX` never mints the slot twice;
+  `revoke NAME --forget-pending --reason "…"` clears a pending row with no hash there once its key is gone, after
+  journaling the reason as an attestation (no journal, no clearing). `revoke` also refuses a key whose label a
+  destination holds in the scan (`destinations`, the only trace of a key past the listing), and a ledger write that
+  fails inside it exits 1 instead of a traceback. A provider ceiling $0.0001 above the plan counts as the next cent.
 - **The agent's deadline reaches the model call** (ENG-003): `agent` started a project's call while 150 s were
   left, but `providers.complete()` walks a chain of models, each attempt allowed 120 s, so three Retryable models
   took 360 s and the watchdog killed a step that had paid for calls. `complete(…, deadline=)` now gets the step's
@@ -116,38 +158,6 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
   clones hold a tenth of the place (and 100 MB) the Machine page and `machine.disk_low` name the floor. The walk
   costs about three times `du`'s time (6.3 GB of caches: 7.6 s against 24.7 s under load); one that does not
   finish keeps the last walk's figures, dated, and says so (ENG-006 below).
-
-### Added
-
-- **A DigitalOcean door: database credentials to the vault, and a rotation that moves every consumer you name** (PLN-142):
-  `tools/digitalocean.py` over the operator's `doctl` context. `db list` names clusters and which are open to
-  the internet; `db consumers CLUSTER` names the App Platform apps that bind one and the password keys they keep
-  in their own spec, each marked `url` or `password`; `db credential CLUSTER USER --db NAME --to
-  vault:<project>/<env>/<NAME>` delivers a connection URL on stdin ("unchanged" when the slot holds it);
-  `db rotate` moves every consumer you name (`db consumers` lists the App Platform ones; services started with
-  `use_secret.py serve` are named for restart): it prints the doctl context and team, asks the vault for the
-  slot and reads every spec before the reset, resets once, writes the URL or the password into each
-  `--spec-env APP:KEY` literal as the key expects, redeploys each `--app`, retries read calls only and
-  waits for exact ACTIVE. Mutations are attempted once; uncertain outcomes remain unknown in
-  owner-only receipts and require reconciliation before retry. Nothing
-  prints a value. The handling-secrets skill names the provider MCP tools that return a credential by design.
-  Its suite runs in the portable gate.
-
-- **The header door serves loopback servers and clients that export no URL** (PB-139): `vault.py bind
-  --header-for` accepts plain http to a loopback literal with its port (`http://127.0.0.1:<port>`,
-  `http://[::1]:<port>`); `localhost` and http to any other host stay refused. `use_secret.py header` gains
-  `--server-url URL` for Codex's `http_headers_helper`, used only when `CLAUDE_CODE_MCP_SERVER_URL` is unset;
-  two URLs that name different servers are refused (`url-conflict`), and the audit row names the `caller`.
-- **A manifest never pins a tag its release lacks** (ENG-018): 0.24.0 shipped `fabric-agent.json` with the
-  `grant.check` schemas at `/v0.24.1/`, a tag that did not exist until the next release, so a host admitting
-  0.24.0 read 404s. `observatory/engine/tools/check_manifest_urls.py` refuses a pinned tag newer than the release
-  and any moving ref (a commit sha is admitted); the release workflow's `manifest` job runs it, reads every URL
-  once on a publishing run, and `publish` waits for it.
-- **The board lint and the OBS id register**: `tools/check_backlog.py` (run by the root tests) refuses what is
-  false on the engine board once merged — duplicate or unreserved ids, statuses outside the vocabulary, "in this
-  PR"/"to follow"/"once … restarts", `done` with a remainder, a `done in X.Y.Z` with no such release here, rows
-  wider than the header, and private names in the board and this file (with the maintainer's local denylist).
-  `.claude/agent-sync.json` declares the `OBS` register, so a branch reserves its row's id before writing it.
 
 ### Fixed
 
@@ -209,8 +219,6 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
   plan records `survey_partial` and `carried` (count and oldest measurement), `cleanup` prints how many checkouts
   wait for a fresh pass (also in its `--json` summary, so the disk guard's report keeps it), and the Machine page
   and the `observatory_machine` overview show the partial survey.
-
-
 
 ## 0.24.4 — 2026-10-12
 
