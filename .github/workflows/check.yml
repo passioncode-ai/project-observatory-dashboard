@@ -235,6 +235,12 @@ jobs:
         name: Synthetic runtime and privacy tests
         continue-on-error: true
         run: python -m unittest discover -s tests
+      - id: holder_safety
+        name: Unknown Windows holders preserve paths; shared-delete rename is not evidence
+        if: always()
+        run: |
+          cd observatory/engine
+          python tests/test_disk_guard.py -v WindowsHolderUnknown
       - name: Outcomes
         if: always()
         run: |
@@ -254,4 +260,5 @@ jobs:
             echo "| CLI | ${{ steps.cli.outcome }} |"
             echo "| A whole tick | ${{ steps.tick.outcome }} |"
             echo "| Top-level tests | ${{ steps.tests.outcome }} |"
+            echo "| Holder safety (enforced) | ${{ steps.holder_safety.outcome }} |"
           } >> "$GITHUB_STEP_SUMMARY"
