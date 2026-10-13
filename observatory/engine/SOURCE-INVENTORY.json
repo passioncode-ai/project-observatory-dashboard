@@ -828,8 +828,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "2f7e43debb48dd23ced7184f4a0c799547c820f777a667ccfae25b7f6231e452",
-      "bytes": 11161,
+      "export_sha256": "3c3ca3a5bc3861de6aae3231e45ef11b935b1d57c12b8985b6d7b877feb7c8e5",
+      "bytes": 11741,
       "upstream_modified": true
     },
     {
@@ -849,15 +849,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c68d683993d225785f69b55b80d5a5b5eba7e5c04b58e3544a7f24133cd02aca",
-      "bytes": 98589,
+      "export_sha256": "3a9a01da10779e3846e0cca685ab90c22e3576be458f8b6bc9b31e1216a98706",
+      "bytes": 100076,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "616ae495424232df4e7bcf8e14e7092c063dbdd835fa19bf9daa5f03e4ff3d97",
-      "bytes": 76335,
+      "export_sha256": "768ba97717aaee59004757ee75ecc3e972bba435cb4a86eef6c20fdd4f801227",
+      "bytes": 76943,
       "upstream_modified": true
     },
     {
@@ -2125,8 +2125,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "f2271c2a8cbe566154bc5f00a2ec5eb867193ba602f4daba5e5bf122ecccf634",
-      "bytes": 26556,
+      "export_sha256": "7ad2c6e043785239c734bc6f09d589f6b5bc5fd17e1977bb2d29b338edff17b2",
+      "bytes": 26571,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2917,6 +2917,13 @@
       "upstream_modified": true,
       "export_sha256": "1edd3e0e27f4a68a5d921ed3c62086efde89fc2430745b0a3e55ddb194139113",
       "bytes": 19378
+    },
+    {
+      "path": "tests/test_issued_spend.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "dd9e9c1c6e6d0bc9332f89a15a8fb0128457f4ce45e3ea48fe286530058e7910",
+      "bytes": 7771
     },
     {
       "path": "tests/test_j1_evidence.py",
@@ -4470,8 +4477,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "6471b65a64a3f7fc23a971be22e54b2bae507a19dbd8ae0a8105373d7e3b1aca",
-      "bytes": 95030,
+      "export_sha256": "24545701e754a59926ba4454ca8b17c8d8ef1578765108414eae50441f9a5420",
+      "bytes": 103120,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
@@ -4850,7 +4857,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 629,
+  "file_count": 630,
   "excluded": [
     "git-history",
     "operator-registries",

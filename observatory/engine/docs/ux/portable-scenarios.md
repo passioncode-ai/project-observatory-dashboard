@@ -208,3 +208,14 @@ The bounded agent view retains carried Git evidence.
 Coverage: `tests/test_machine_findings.py`,
 `test_machine.Tool.test_the_overview_says_when_the_git_survey_is_partial`.
 Status: implemented; product outcome unobserved.
+
+
+### Issued-key spend read
+
+An operator or agent selects an existing issued name and requests `openrouter.py spend
+NAME [--date YYYY-MM-DD] [--json]`. A bounded read aggregates provider endpoint rows by
+completed UTC day/model, labels the current-key-only scope and keeps optional unknown
+counters null. A valid empty report yields zero; invalid rows or unavailable source
+produce no figure and a nonzero exit. A concurrent rotation refuses identity drift.
+No provider/vault/ledger mutation occurs. Synthetic coverage: `test_issued_spend.py`.
+Product outcome and live-provider acceptance remain unobserved.

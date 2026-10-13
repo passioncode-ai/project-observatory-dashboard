@@ -123,3 +123,12 @@ Privacy & Security → Full Disk Access, or leaves that source unmeasured. Other
 access, journal and time-budget failures keep their own reason and recovery step.
 The compact agent overview already carries Git `partial` and `carried` evidence;
 carried measurements are not a new cleanup authorization.
+
+
+For a single issued OpenRouter key, use `tools/openrouter.py spend NAME [--date
+YYYY-MM-DD] [--json]` beneath `project-observatory full-path`. This is a management-key
+activity read, not an inference call or a mutation. It reports the current ledger
+identity only, excluding retired keys; do not call it a project spend total. Null
+optional counters remain unknown. An unavailable/malformed report or changed identity
+returns no figure and nonzero exit, never a measured zero. See the
+[operator guide](ONBOARDING.md#spend-for-one-issued-openrouter-key) for bounds and recovery.

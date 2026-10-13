@@ -107,3 +107,15 @@ UI elements: CLI flag, MCP section enum and JSON result; no template changes.
 States covered: absent, partial, fresh saved snapshot, stale, invalid and bounded.
 Status: draft. Coverage: `tests/test_coverage_view.py` (eight cases),
 `tests/test_mcp_wire.py` (coverage schema and real stdio call). Product: unobserved.
+
+### Read the provider's activity for one issued key
+
+An operator or agent runs `openrouter.py spend NAME [--date YYYY-MM-DD] [--json]`.
+The door reads the selected key's provider activity and returns UTC-day/model totals
+with a measurement time and explicit current-key-only scope. It mutates no key or
+local ledger. A valid empty report is zero; an unreadable or malformed report yields
+no figure and nonzero exit. Missing optional token counts remain unknown. Invalid or
+out-of-window dates are refused before a provider read. A rotation or identity change
+during the read refuses a potentially misattributed result. Provider bodies, hashes,
+credential values and arbitrary extra fields are withheld. Status: draft; synthetic
+coverage: `test_issued_spend.py`; product outcome unobserved.
