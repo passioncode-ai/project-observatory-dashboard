@@ -460,24 +460,35 @@ def build_plan(cfg: dict, busy: set[str], artifacts: bool = True) -> dict:
 
 # --- acting, with a re-check ---------------------------------------------------
 
-def still_safe_branch(a: dict) -> str:
-    """"" when the branch may still be deleted under its class, else why not."""
-    repo, name, default = a["repo"], a["target"], a["default_branch"]
-    if git(repo, "rev-parse", "--verify", "-q", "refs/heads/" + name).returncode:
-        return "branch no longer exists"
-    held = {l.split(" ", 1)[1].replace("refs/heads/", "") for l in git(repo, "worktree", "list", "--porcelain").stdout.splitlines()
-            if l.startswith("branch ")}
-    if name in held:
+def still_safe_branch(a: dict, expected: str | None = None) -> str:
+    """Prove eligibility for a fixed tip and refuse unreadable checkout state."""
+    repo, name, default = a["repo"], a["target"], a.get("default_branch")
+    tip = git(repo, "rev-parse", "--verify", "refs/heads/" + name)
+    if tip.returncode or not tip.stdout.strip():
+        return "branch no longer exists or could not be read"
+    sha = tip.stdout.strip()
+    if expected is not None and sha != expected:
+        return "branch tip changed since its cleanup proof"
+    worktrees = git(repo, "worktree", "list", "--porcelain")
+    if worktrees.returncode or not worktrees.stdout.startswith("worktree "):
+        return "worktree attachments could not be read"
+    held = {line.split(" ", 1)[1] for line in worktrees.stdout.splitlines() if line.startswith("branch ")}
+    if "refs/heads/" + name in held:
         return "branch is checked out in a worktree now"
     if a["class"] == "branch-merged":
-        ahead = git(repo, "rev-list", "--count", f"{default}..{name}").stdout.strip()
-        if ahead != "0":
-            cherry = git(repo, "cherry", default, name).stdout
-            if not cherry or not all(c.startswith("-") for c in cherry.splitlines()):
+        ahead = git(repo, "rev-list", "--count", f"{default}..{sha}")
+        if ahead.returncode:
+            return "branch merge proof could not be read"
+        if ahead.stdout.strip() != "0":
+            cherry = git(repo, "cherry", default, sha)
+            if cherry.returncode or not cherry.stdout or not all(c.startswith("-") for c in cherry.stdout.splitlines()):
                 return "branch has commits the default branch lacks now"
     if a["class"] == "branch-pushed":
-        up = git(repo, "rev-parse", "--abbrev-ref", name + "@{upstream}").stdout.strip()
-        if not up or git(repo, "rev-list", "--count", f"{up}..{name}").stdout.strip() != "0":
+        up = git(repo, "rev-parse", "--abbrev-ref", name + "@{upstream}")
+        if up.returncode or not up.stdout.strip():
+            return "branch upstream could not be read"
+        ahead = git(repo, "rev-list", "--count", f"{up.stdout.strip()}..{sha}")
+        if ahead.returncode or ahead.stdout.strip() != "0":
             return "branch is no longer identical to its upstream"
     return ""
 
@@ -523,26 +534,88 @@ def ignored_keepers(target: str, artifacts: set[str]) -> list[str]:
     return keep
 
 
+def index_visibility_reason(target: str) -> str:
+    """Status/diff can conceal content behind assume-unchanged or skip-worktree."""
+    try:
+        result = git(target, "ls-files", "-v", "-z")
+        if result.returncode:
+            return "index flags could not be read; nothing removed"
+        rows = result.stdout.split("\0")
+        if any(row and (not row.startswith("H ") or len(row) <= 2) for row in rows):
+            return "index has hidden or unsupported entries; nothing removed"
+        return ""
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return "index flags could not be read; nothing removed"
+
+
+def retain_worktree_head(repo: str, target: str, head: str) -> str:
+    """Prove current HEAD remains reachable without trusting the survey's branch."""
+    try:
+        if not head:
+            return "HEAD could not be read; nothing removed"
+        symbolic = git(target, "symbolic-ref", "--quiet", "HEAD")
+        if symbolic.returncode == 0:
+            ref = symbolic.stdout.strip()
+            if not ref.startswith("refs/heads/"):
+                return "HEAD branch could not be verified; nothing removed"
+        elif symbolic.returncode == 1:
+            name = f"archive/wt-{head[:8]}"
+            ref = "refs/heads/" + name
+            existing = git(repo, "show-ref", "--verify", "--quiet", ref)
+            if existing.returncode == 0:
+                resolved = git(repo, "rev-parse", "--verify", ref)
+                if resolved.returncode or resolved.stdout.strip() != head:
+                    return "detached HEAD archive ref conflicts; nothing removed"
+            elif existing.returncode == 1:
+                made = git(repo, "branch", name, head)
+                if made.returncode:
+                    return "detached HEAD archive ref could not be created; nothing removed"
+            else:
+                return "detached HEAD archive ref could not be read; nothing removed"
+        else:
+            return "HEAD attachment could not be read; nothing removed"
+        retained = git(repo, "rev-parse", "--verify", ref)
+        current = git(target, "rev-parse", "--verify", "HEAD")
+        if (retained.returncode or current.returncode or retained.stdout.strip() != head
+                or current.stdout.strip() != head):
+            return "HEAD retention changed or could not be verified; nothing removed"
+        return ""
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return "HEAD retention could not be read; nothing removed"
+
+
 def act(a: dict, archive: pathlib.Path) -> dict:
     cls, repo, target = a["class"], a.get("repo"), a["target"]
     rec = {"at": now(), "class": cls, "tier": a["tier"], "target": target, **({"repository": a["repository"]} if "repository" in a else {})}
     if cls.startswith("branch-"):
-        why = still_safe_branch(a) if cls != "branch-unique" else ""
+        tip = git(repo, "rev-parse", "--verify", "refs/heads/" + target)
+        if tip.returncode or not tip.stdout.strip():
+            return {**rec, "result": "skipped", "reason": "branch tip could not be read"}
+        sha = tip.stdout.strip()
+        rec["sha"] = sha
+        why = still_safe_branch(a, sha)
         if why:
             return {**rec, "result": "skipped", "reason": why}
-        sha = git(repo, "rev-parse", "refs/heads/" + target).stdout.strip()
-        rec["sha"] = sha
         if cls == "branch-unique":
             archive.mkdir(parents=True, exist_ok=True, mode=0o700)
-            bundle = archive / (a["repository"].split(":", 1)[-1].replace("/", "__") + "__" + target.replace("/", "__") + ".bundle")
+            folder = pathlib.Path(tempfile.mkdtemp(prefix="branch-" + sha[:8] + "-", dir=archive))
+            bundle = folder / "branch.bundle"
+            rec["archive"] = str(bundle)
             made = git(repo, "bundle", "create", str(bundle), "refs/heads/" + target, "^" + a["default_branch"])
             if made.returncode or git(repo, "bundle", "verify", str(bundle)).returncode:
                 return {**rec, "result": "failed", "reason": "bundle could not be written and verified; nothing deleted"}
             os.chmod(bundle, 0o600)
-            rec["archive"] = str(bundle)
-        done = git(repo, "branch", "-D", target)
+            heads = git(repo, "bundle", "list-heads", str(bundle))
+            if heads.returncode or heads.stdout.splitlines() != [sha + " refs/heads/" + target]:
+                return {**rec, "result": "failed", "reason": "bundle does not contain the proven branch tip; nothing deleted"}
+        why = still_safe_branch(a, sha)
+        if why:
+            return {**rec, "result": "skipped", "reason": why}
+        # Expected-old-value deletion cannot remove a newer tip. Worktree attachment
+        # is checked above; an unrelated checkout still has a final check/use race.
+        done = git(repo, "update-ref", "-d", "refs/heads/" + target, sha)
         return {**rec, "result": "removed" if done.returncode == 0 else "failed",
-                **({"reason": done.stderr.strip()[:200]} if done.returncode else {})}
+                **({"reason": "branch changed or could not be deleted; nothing deleted"} if done.returncode else {})}
     if cls == "worktree-missing":
         if os.path.exists(target):
             return {**rec, "result": "skipped", "reason": "the directory exists again"}
@@ -551,6 +624,9 @@ def act(a: dict, archive: pathlib.Path) -> dict:
     if cls in ("worktree-clean", "worktree-dirty"):
         if busy_now(target):
             return {**rec, "result": "skipped", "reason": "a process works inside it now"}
+        why = index_visibility_reason(target)
+        if why:
+            return {**rec, "result": "skipped", "reason": why}
         status = git(target, "status", "--porcelain", "--untracked-files=normal")
         if status.returncode:
             return {**rec, "result": "skipped", "reason": "git status could not be read"}
@@ -587,9 +663,6 @@ def act(a: dict, archive: pathlib.Path) -> dict:
         if cls == "worktree-dirty" and ignored_keepers(target, set()):
             return {**rec, "result": "skipped", "reason": "ignored files appeared during archiving; "
                     "preserve or move them first, then rerun full cleanup --apply --include manual"}
-        if not a.get("branch") and rec["head"]:
-            # A detached HEAD's commits must stay reachable after the worktree goes.
-            git(repo, "branch", f"archive/wt-{rec['head'][:8]}", rec["head"])
         if cls == "worktree-dirty":
             try:
                 global _LISTING
@@ -603,6 +676,9 @@ def act(a: dict, archive: pathlib.Path) -> dict:
             except (ArchiveRefused, OSError, subprocess.SubprocessError, tarfile.TarError, ValueError) as exc:
                 reason = str(exc) if isinstance(exc, ArchiveRefused) else f"manual archive recheck failed ({type(exc).__name__})"
                 return {**rec, "result": "failed", "reason": (reason + "; nothing removed")[:200]}
+        why = index_visibility_reason(target) or retain_worktree_head(repo, target, rec["head"])
+        if why:
+            return {**rec, "result": "skipped", "reason": why}
         args = ["worktree", "remove", target] + (["--force", "--force"] if cls == "worktree-dirty" else [])
         done = git(repo, *args)
         return {**rec, "result": "removed" if done.returncode == 0 else "failed",

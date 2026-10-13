@@ -74,6 +74,15 @@ Given an accepted sighting with a reason and expiry, the operator copies its sec
 
 ### Cleanup preservation: ignored local data
 
+Both worktree tiers skip an unreadable or hidden index (`assume-unchanged` or
+`skip-worktree`) without modifying its flags, including flags appearing after
+the initial status read. Detached HEAD removal requires a verified archive ref
+for its exact commit. Branch cleanup verifies the bundle's advertised tip and
+uses expected-tip deletion; changed tips and unreadable/checked-out worktree
+attachments retain the branch. `CleanupNeverLosesWork` covers these cases with
+real Git repositories. An external checkout writer can still race the last
+attachment observation; stop writers before explicit cleanup.
+
 Manual cleanup revalidates its archive before force removal: HEAD, status,
 working and staged patches, and every untracked file's listing, mode, size and
 SHA-256 must still match. Nested repositories, symlinks, special files, read or

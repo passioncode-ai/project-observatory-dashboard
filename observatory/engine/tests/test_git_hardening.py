@@ -673,6 +673,203 @@ class CleanupNeverLosesWork(unittest.TestCase):
         self.assertIn("index changed", rec["reason"])
         self.assertEqual(bare(self.wt, "show", ":old.txt").stdout, "new staged only copy\n")
 
+    def _worktree_action(self, cls="worktree-dirty", branch="topic") -> dict:
+        return self.cleanup.act({"class": cls, "tier": "manual" if cls.endswith("dirty") else "auto",
+                                 "repo": str(self.repo), "target": str(self.wt), "branch": branch}, self.d / "archive")
+
+    def _hidden_index_case(self, flag, cls):
+        bare(self.wt, "update-index", flag, "old.txt")
+        (self.wt / "old.txt").write_text("hidden only copy\n")
+        if cls.endswith("dirty"):
+            (self.wt / "visible.txt").write_text("visible edit\n")
+        rec = self._worktree_action(cls)
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual((self.wt / "old.txt").read_text(), "hidden only copy\n")
+        self.assertIn("index", rec["reason"])
+
+    def test_assume_unchanged_refuses_manual_and_auto_removal(self):
+        for cls in ("worktree-dirty", "worktree-clean"):
+            with self.subTest(cls=cls):
+                self.setUp()
+                self._hidden_index_case("--assume-unchanged", cls)
+
+    def test_skip_worktree_refuses_manual_and_auto_removal(self):
+        for cls in ("worktree-dirty", "worktree-clean"):
+            with self.subTest(cls=cls):
+                self.setUp()
+                self._hidden_index_case("--skip-worktree", cls)
+
+    def test_index_flag_appearing_during_archive_refuses_removal(self):
+        original = self.cleanup.archive_manual
+        def revise(*args, **kwargs):
+            result = original(*args, **kwargs)
+            bare(self.wt, "update-index", "--assume-unchanged", "old.txt")
+            return result
+        with patch.object(self.cleanup, "archive_manual", side_effect=revise):
+            rec = self.act()
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertTrue(self.wt.exists())
+
+    def test_unreadable_index_flags_refuse_removal(self):
+        original = self.cleanup.git
+        def unreadable(repo, *args, **kwargs):
+            if args[:2] == ("ls-files", "-v"):
+                return subprocess.CompletedProcess(args, 1, "", "synthetic read failure")
+            return original(repo, *args, **kwargs)
+        with patch.object(self.cleanup, "git", side_effect=unreadable):
+            rec = self.act()
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertTrue(self.wt.exists())
+
+    def _detached_unique_head(self):
+        bare(self.wt, "checkout", "--detach", "-q")
+        bare(self.wt, "add", "old.txt")
+        bare(self.wt, "commit", "-qm", "unique detached change")
+        head = bare(self.wt, "rev-parse", "HEAD").stdout.strip()
+        with (self.wt / "old.txt").open("a") as f:
+            f.write("new working edit\n")
+        return head, "archive/wt-" + head[:8]
+
+    def test_detached_archive_ref_conflict_retains_unique_head(self):
+        head, name = self._detached_unique_head()
+        bare(self.repo, "branch", name, "main")
+        rec = self._worktree_action(branch=None)
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.wt, "rev-parse", "HEAD").stdout.strip(), head)
+
+    def test_detached_archive_ref_creation_failure_retains_worktree(self):
+        head, name = self._detached_unique_head()
+        original = self.cleanup.git
+        def refuse(repo, *args, **kwargs):
+            if args[:2] == ("branch", name):
+                return subprocess.CompletedProcess(args, 1, "", "synthetic ref failure")
+            return original(repo, *args, **kwargs)
+        with patch.object(self.cleanup, "git", side_effect=refuse):
+            rec = self._worktree_action(branch=None)
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertTrue(self.wt.exists())
+
+    def test_matching_detached_archive_ref_permits_removal(self):
+        head, name = self._detached_unique_head()
+        bare(self.repo, "branch", name, head)
+        rec = self._worktree_action(branch=None)
+        self.assertEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "rev-parse", name).stdout.strip(), head)
+
+    def test_detached_head_drift_after_ref_creation_refuses_removal(self):
+        head, name = self._detached_unique_head()
+        original = self.cleanup.git
+        def revise(repo, *args, **kwargs):
+            result = original(repo, *args, **kwargs)
+            if args[:2] == ("branch", name):
+                bare(self.wt, "add", "old.txt")
+                bare(self.wt, "commit", "-qm", "new detached head")
+            return result
+        with patch.object(self.cleanup, "git", side_effect=revise):
+            rec = self._worktree_action(branch=None)
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertTrue(self.wt.exists())
+
+    def test_new_detached_archive_ref_retains_unique_head(self):
+        head, name = self._detached_unique_head()
+        rec = self._worktree_action(branch="stale-survey-branch")
+        self.assertEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "rev-parse", name).stdout.strip(), head)
+
+    def _unique_branch(self):
+        bare(self.wt, "add", "old.txt")
+        bare(self.wt, "commit", "-qm", "unique branch change")
+        head = bare(self.wt, "rev-parse", "HEAD").stdout.strip()
+        bare(self.wt, "checkout", "--detach", "-q")
+        return head
+
+    def _branch_action(self, cls="branch-unique"):
+        return self.cleanup.act({"class": cls, "tier": "manual", "repo": str(self.repo),
+                                 "target": "topic", "default_branch": "main",
+                                 "repository": "repository:example-org/alpha-web"}, self.d / "archive")
+
+    def _advance_topic(self):
+        head = bare(self.repo, "rev-parse", "topic").stdout.strip()
+        tree = bare(self.repo, "rev-parse", "topic^{tree}").stdout.strip()
+        new = bare(self.repo, "commit-tree", tree, "-p", head, input="new only commit\n").stdout.strip()
+        bare(self.repo, "update-ref", "refs/heads/topic", new)
+        return new
+
+    def test_unique_branch_drift_during_bundle_verification_is_retained(self):
+        self._unique_branch()
+        original = self.cleanup.git
+        advanced = []
+        def drift(repo, *args, **kwargs):
+            result = original(repo, *args, **kwargs)
+            if args[:2] == ("bundle", "verify"):
+                advanced.append(self._advance_topic())
+            return result
+        with patch.object(self.cleanup, "git", side_effect=drift):
+            rec = self._branch_action()
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "rev-parse", "topic").stdout.strip(), advanced[0])
+
+    def test_wrong_bundle_tip_refuses_branch_removal(self):
+        self._unique_branch()
+        original = self.cleanup.git
+        def wrong(repo, *args, **kwargs):
+            if args[:2] == ("bundle", "list-heads"):
+                return subprocess.CompletedProcess(args, 0, "0" * 40 + " refs/heads/topic\n", "")
+            return original(repo, *args, **kwargs)
+        with patch.object(self.cleanup, "git", side_effect=wrong):
+            rec = self._branch_action()
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "show-ref", "--verify", "--quiet", "refs/heads/topic", check=False).returncode, 0)
+
+    def test_unique_branch_verified_tip_is_archived_and_removed(self):
+        head = self._unique_branch()
+        rec = self._branch_action()
+        self.assertEqual(rec["result"], "removed", rec)
+        self.assertIn(head + " refs/heads/topic", bare(self.repo, "bundle", "list-heads", rec["archive"]).stdout)
+
+    def test_auto_branch_drift_at_delete_is_refused_by_cas(self):
+        bare(self.wt, "checkout", "--detach", "-q")
+        original = self.cleanup.git
+        advanced = []
+        def drift(repo, *args, **kwargs):
+            if args[:2] in (("branch", "-D"), ("update-ref", "-d")):
+                advanced.append(self._advance_topic())
+            return original(repo, *args, **kwargs)
+        with patch.object(self.cleanup, "git", side_effect=drift):
+            rec = self._branch_action("branch-merged")
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual(bare(self.repo, "rev-parse", "topic").stdout.strip(), advanced[0])
+
+    def test_index_flag_appearing_after_auto_status_refuses_removal(self):
+        bare(self.wt, "checkout", "--", "old.txt")
+        original = self.cleanup.ignored_keepers
+        def revise(*args, **kwargs):
+            result = original(*args, **kwargs)
+            bare(self.wt, "update-index", "--skip-worktree", "old.txt")
+            (self.wt / "old.txt").write_text("hidden late copy\n")
+            return result
+        with patch.object(self.cleanup, "ignored_keepers", side_effect=revise):
+            rec = self._worktree_action("worktree-clean")
+        self.assertNotEqual(rec["result"], "removed", rec)
+        self.assertEqual((self.wt / "old.txt").read_text(), "hidden late copy\n")
+
+    def test_unique_branch_checked_out_is_never_deleted(self):
+        rec = self._branch_action()
+        self.assertEqual(rec["result"], "skipped", rec)
+        self.assertIn("checked out", rec["reason"])
+
+    def test_unknown_branch_worktree_listing_refuses_deletion(self):
+        self._unique_branch()
+        original = self.cleanup.git
+        def unreadable(repo, *args, **kwargs):
+            if args[:2] == ("worktree", "list"):
+                return subprocess.CompletedProcess(args, 1, "", "unreadable")
+            return original(repo, *args, **kwargs)
+        with patch.object(self.cleanup, "git", side_effect=unreadable):
+            rec = self._branch_action()
+        self.assertEqual(rec["result"], "skipped", rec)
+        self.assertIn("could not be read", rec["reason"])
+
 
 class RemoteReason(unittest.TestCase):
     """An unreachable remote is reported with git's CAUSE, not its boilerplate.
