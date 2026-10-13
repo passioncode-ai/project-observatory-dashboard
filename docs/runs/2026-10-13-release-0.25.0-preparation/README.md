@@ -1,5 +1,38 @@
 # Release 0.25.0 preparation
 
+## Current integrated candidate
+
+The accepted wave4 source `7d260bcd5b44e75a31468b76783a369454cf1593` is now merged
+with the local version preparation. It includes the accepted rotation, checkout, scoped
+Heroku and cache coverage work plus the pipeline contract-test dependency correction.
+Application 0.25.0 and plugin 0.22.1 remain unchanged. The cache changelog addition
+records metadata coverage and its limits, without promising safe reclamation.
+
+The independently accepted saved-coverage reader source
+`5aa9eac9477398e39eb60466c695a9363e290df5` is included as a fix-only cherry-pick.
+Its inventory conflict was resolved by regenerating against this candidate after
+clearing the unmerged index state; the first generation refused that state safely.
+The separate per-key activity/spend PR #249 is excluded and remains open: its activity
+functions and CLI are not present here.
+No tag, installation or release was attempted. Final checks are appended in checks.json;
+the earlier preparation record below remains historical.
+
+Next: route the exact integrated source through the release PR and required hosted
+checks; tag only its actual main merge SHA after exact-SHA acceptance. Recheck signing
+configuration and tag availability before publication.
+
+## Integrated source checks
+
+[checks.json](checks.json) now records 27 focused root cases and three portable suites:
+67 unittest cases plus 131 MCP wire assertions, no skips. Three strict plugin validators,
+source inventory, document copies, static manifest URLs, signed Windows preflight and
+whitespace checks pass. The private identifier gate passes for the current tree and new
+history since `fadba69`; its precise file/blob counts and source hashes are in the receipt.
+Brand lint remains zero errors and 2043 warnings. These are synthetic/source checks;
+hosted release-SHA, native assets, provider and installed-runtime acceptance are not run.
+
+## Initial preparation snapshot (superseded integration status)
+
 This is a local release-preparation candidate, not a published or installed release.
 Application versions are 0.25.0; the companion plugin version is 0.22.1. The source
 base is `fadba69ff3d7438aadd97c6b98c3b9e2bf83702f`.

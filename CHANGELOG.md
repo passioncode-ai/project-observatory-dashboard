@@ -25,6 +25,16 @@ is 0.22.1, with updated credential-handling guidance.
   `full machine --checkouts --root PATH` records read-only checkout candidates under
   explicit roots, with bounded traversal and honest unknown/stale rows. A candidate is
   not an abandoned checkout or permission to delete it; no cleanup planner consumes it.
+- **Cache coverage separates declarations from measurements** (OBS-87):
+  `full machine --cache-coverage` records configured roots, available executables and
+  previously measured sizes with their original dates. Unreadable sources, protected
+  system areas and missing ownership or regeneration evidence stay explicitly unknown.
+  The command does not scan contents, run cache tools or authorize deletion; reclaimable
+  bytes and current use remain unmeasured.
+- **Saved coverage is readable from the CLI and MCP**: `full machine --coverage` and
+  `observatory_machine(section="coverage")` return bounded checkout/cache summaries
+  without starting scans. Missing, partial, stale and invalid receipts remain explicit;
+  sample rows never claim whole-machine totals or permission to clean up.
 - **A failed check retains its peers' receipts** (OBS-85): setup, execution and report-write
   failures produce error evidence without losing completed suite results. Unknown
   completion fails the run instead of becoming a passing or empty summary.
