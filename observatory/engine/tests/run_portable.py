@@ -377,6 +377,25 @@ def nothing_ran(result: dict) -> bool:
     return executed <= 0 and (result['skip_assertions'] + result['unittest_skipped']) > 0
 
 
+def run_suite_recorded(name: str, base: Path, template: Path, timeout: int) -> dict:
+    """Keep one receipt per selection even when sandbox setup or log I/O fails.
+
+    Pool.map otherwise raises on the first exception and discards the other suites'
+    completed evidence. Exception bodies may contain local paths, so retain only type.
+    ERROR means completion could not be established, never a successful test run.
+    """
+    started = time.monotonic()
+    try:
+        return run_suite(name, base, template, timeout)
+    except Exception as exc:
+        result = {'file': 'tests/test_' + name + '.py', 'status': 'ERROR',
+                  'exit_code': None, 'seconds': round(time.monotonic() - started, 2),
+                  'error_type': type(exc).__name__,
+                  'reason': 'suite setup, execution or evidence capture failed; completion unknown'}
+        print('ERROR ' + result['file'], file=sys.stderr, flush=True)
+        return result
+
+
 def overall(results: list[dict]) -> str:
     """FAIL when any suite failed or timed out; SKIP when no suite ran anything; else PASS.
 
@@ -393,6 +412,8 @@ def not_run(results: list[dict], node: str | None) -> list[dict]:
     rows = list(NOT_RUN)
     rows += [{'scope': 'suite:' + row['file'], 'status': 'NOT_RUN', 'reason': row['skip_reason']}
              for row in results if row['status'] == 'SKIP']
+    rows += [{'scope': 'suite:' + row['file'], 'status': 'NOT_RUN', 'reason': row['reason']}
+             for row in results if row['status'] == 'ERROR']
     if node is None:
         rows.append({'scope': 'dashboard-execution', 'status': 'NOT_RUN',
                      'reason': 'node is not on PATH: checks that execute the built dashboard '
@@ -423,18 +444,26 @@ def main() -> int:
     try:
         template=base/'template';template.mkdir();copy_source(template)
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            results=list(pool.map(lambda name:run_suite(name,base,template,args.timeout),names))
+            results=list(pool.map(lambda name:run_suite_recorded(name,base,template,args.timeout),names))
         report={'schema_version':1,'coverage':'synthetic-offline',
                 'status':overall(results),
                 'suites':results,'not_run':not_run(results, shutil.which('node')),
                 'suite_count':len(results),'python':sys.version.split()[0]}
         if args.report_dir:
-            args.report_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
-            for row in results:
-                target=args.report_dir / row['log']; target.parent.mkdir(mode=0o700)
-                shutil.copyfile(base / row['log'], target); target.chmod(0o600)
-            summary=args.report_dir / 'summary.json'
-            summary.write_text(json.dumps(report, indent=2) + '\n'); summary.chmod(0o600)
+            try:
+                args.report_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+                for row in results:
+                    if 'log' not in row:
+                        continue
+                    target=args.report_dir / row['log']; target.parent.mkdir(mode=0o700)
+                    shutil.copyfile(base / row['log'], target); target.chmod(0o600)
+                summary=args.report_dir / 'summary.json'
+                summary.write_text(json.dumps(report, indent=2) + '\n'); summary.chmod(0o600)
+            except OSError as exc:
+                # A full disk or refused destination must not erase the stdout receipt.
+                # Files already copied are partial evidence, never a completed report.
+                report['status'] = 'FAIL'
+                report['report_error_type'] = type(exc).__name__
         if args.keep:report['private_logs']=str(base)
         print(json.dumps(report,indent=2))
         return 0 if report['status']=='PASS' else 1

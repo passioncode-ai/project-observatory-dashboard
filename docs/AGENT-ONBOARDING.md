@@ -10,3 +10,12 @@ Read ONBOARDING.md and COMPATIBILITY.md first: under `docs/` in a checkout of th
 5. Run a first observation and show its coverage, findings and unavailable inputs. A disconnected source is not a clean security finding.
 6. Explain how to update, preview a migration and restore a backup. If this is an existing installation, stop writers before migration and keep the original until the new copy is verified. Do not start a second scheduler over the same data.
 7. Finish with the local dashboard address, commands for another scan, and the list of enabled integrations. Keep the public marketing site separate from the private dashboard.
+
+## Reading offline verification receipts
+
+`full check` emits JSON. A suite whose setup, execution or log capture raises is
+`ERROR` with `error_type` and unknown completion; completed peers keep their rows.
+An `ERROR` row is also listed under `not_run` to prevent treating missing evidence
+as PASS. If saving `--report-dir` fails, the overall result is FAIL and stdout
+keeps the suite rows with `report_error_type`; the destination may be partial.
+Fix the named filesystem/runtime problem and rerun the affected verification.

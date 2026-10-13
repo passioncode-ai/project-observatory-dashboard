@@ -786,8 +786,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "67e1ced5592d92445ee79cbfbd8414878b97bd77e7d3286dcda7bffbd70db336",
-      "bytes": 3235,
+      "export_sha256": "ade4334e1c0816c31409dc6e13403ae8bbd5bdc6e703f08cf19d0f5db9b6fa2c",
+      "bytes": 3761,
       "upstream_modified": true
     },
     {
@@ -2013,8 +2013,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "7a0e9e5795879e1c1b36d627c0f994006fff5efc71c7933292641ada954173f3",
-      "bytes": 23917,
+      "export_sha256": "3b36848eece696ef561d009a14f930356e6d267089d4edfe98e8bb27a6532f69",
+      "bytes": 25472,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
