@@ -33,3 +33,15 @@ The adapter now passes known-empty, known-holder, unlisted, stale and missing so
 checks. A separate regression retains the observed consumer through convergence.
 
 Next task: replay the bounded baseline and request independent fixture review. No production reconciliation remedy is authorized by this packet.
+
+## Bounded source receipt
+
+Source `532b70911ec39fcb4590a6632283dc63dfcaecf5` passes the11-case
+[focused suite](raw/tests.json). The [128-case replay](raw/baseline-128.json)
+completed128/128 with104PASS,24FAIL,0ERROR, exit1. This is a failing adversarial
+run. The [comparison](raw/comparison.json) preserves every previous failure and
+identifies46 resolved seeds and zero newly failing seeds against the prior70-failure
+receipt. All remaining findings are the original convergence assertion `(c')`.
+Last-trace categories are diagnostics, not independently established root causes.
+Independent fixture review is pending. Full5200, real collector pagination, live
+providers, installed acceptance and full remote/vault consumer coverage remain open.
