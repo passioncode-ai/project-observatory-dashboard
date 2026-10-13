@@ -110,6 +110,25 @@ class SuiteEvidence(unittest.TestCase):
         self.assertEqual(row['status'],'ERROR')
         self.assertEqual(row['unittest_cases'],0)
 
+    def test_earlier_unittest_failure_is_sticky_across_later_runs(self):
+        for later in ('self.assertTrue(True)', 'self.skipTest("synthetic")'):
+            source = ('import unittest\n'
+                      'class First(unittest.TestCase):\n def test_bad(self): self.fail("synthetic")\n'
+                      'class Last(unittest.TestCase):\n def test_last(self): '+later+'\n'
+                      'for case in (First, Last):\n'
+                      ' unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(case))\n')
+            with self.subTest(later=later):
+                row=self.run_case(source)
+                self.assertEqual(row['status'],'FAIL')
+                self.assertEqual(row['reason_code'],'reported_test_failure')
+                self.assertEqual(row['exit_code'],0)
+
+    def test_trailing_incomplete_summary_cannot_borrow_completed_result(self):
+        row=self.run_case('print("Ran 1 test in 0.001s\\n\\nOK\\nRan 0 tests in 0.001s")\n')
+        self.assertEqual(row['status'],'ERROR')
+        self.assertEqual(row['reason_code'],'invalid_test_evidence')
+        self.assertEqual(row['executed_checks'],0)
+
     def test_well_formed_reports_are_a_protocol_not_authentication(self):
         # An adversarial suite can lie; this gate does not authenticate its author.
         row=self.run_case('print("Ran 1 test in 0.001s\\n\\nOK")\n')

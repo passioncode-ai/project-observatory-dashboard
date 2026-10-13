@@ -27,7 +27,9 @@ with a fixed `reason_code`, and is included in `not_run`. An explicit all-skippe
 suite remains SKIP. Reported failures remain FAIL even when the script swallows
 its exit. Nonzero exits and timeouts keep their actual code and status. A PASS
 line cannot substitute for missing unittest cases, and an earlier complete
-summary cannot lend its cases to a final complete zero-case summary. Malformed
+summary cannot lend its cases to a final zero-case or incomplete summary. A
+failed complete summary stays FAIL even after a later successful or all-skipped
+run; final-block counts never erase earlier failure evidence. Malformed
 or impossible skip counters are unknown evidence, never zero skips.
 
 This is a protocol for trusted repository tests. A script can forge a complete
@@ -37,7 +39,7 @@ minimums are explicit source metadata, not inferred from yesterday's count.
 
 ## Evidence and resume
 
-[Checks](checks.json) bind the runner source: 22 root runner/fault cases pass,
+[Checks](checks.json) bind the runner source: 24 root runner/fault cases pass,
 including a forgotten main, misleading PASS, all-skipped unittest, stderr
 failures, swallowed exit, malformed counters and the protocol's forgery limit.
 Six real compatible suites pass: unittest health plus five line reporters,
