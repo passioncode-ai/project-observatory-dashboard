@@ -21,7 +21,6 @@ marker are retained. No source implementation, release or installation is includ
 | Local checkout state | [PR265](https://github.com/passioncode-ai/project-observatory-dashboard/pull/265),2e2de84 | Draft; hosted/installed acceptance and separate owner/lifecycle proof |
 | Independent pressure observation | [PR266](https://github.com/passioncode-ai/project-observatory-dashboard/pull/266),8b86dfa | Draft; hosted/installed acceptance; no lifecycle authority |
 | Portable suite evidence | [PR267](https://github.com/passioncode-ai/project-observatory-dashboard/pull/267), `476d392` | Production `469d316` and fixture correction independently reviewed; hosted acceptance remains |
-
 | Financial reconciliation evidence | [PR268](https://github.com/passioncode-ai/project-observatory-dashboard/pull/268), `f6e393b` | Draft; full original model at `153a160`: 2,147 pass, 3,053 fail, zero errors; not accepted |
 | Offline checkout observation | [PR269](https://github.com/passioncode-ai/project-observatory-dashboard/pull/269), `284bc39` | Scoped source review passed; hosted/installed acceptance and upstream graph work remain |
 
