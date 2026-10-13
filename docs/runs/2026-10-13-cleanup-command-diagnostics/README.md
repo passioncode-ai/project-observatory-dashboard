@@ -26,3 +26,9 @@ valid counts and carried-source evidence remain intact. Synthetic negative tests
 failed eight assertions, then passed with the structured error handling. No live
 cleanup or installed settings changed. Full focused guard suite and independent review
 must accept this exact follow-up before release.
+
+Independent review of c5d39b8 rejected the initial child-envelope fix: accepted JSON
+could still carry arbitrary text, and exit7 could look successful. The corrected
+reader reconstructs the producer's allowlisted typed fields, rejects arbitrary plan
+keys and malformed carried evidence, and gives nonzero exit status precedence.
+Regression coverage includes legitimate carried counts and unknown measurement time.

@@ -1148,6 +1148,34 @@ class JsonLine(Base):
                 self.assertEqual(row["result"], "failed")
                 self.assertNotIn(marker, json.dumps(row))
 
+    def test_git_child_envelope_is_typed_and_exit_status_wins(self):
+        marker = "SYNTHETIC_PRIVATE_CHILD"
+        good = {"result": "ran", "removed": 0, "skipped": 0, "failed": 0}
+        cases = [
+            ({**good, "reason": marker}, 0, "ran"),
+            ({"result": "busy", "reason": marker}, 0, "busy"),
+            ({"result": "plan-only", "counts": {marker: 1}}, 0, "failed"),
+            (good, 7, "failed"),
+            ({**good, "plan_seconds": float("nan")}, 0, "failed"),
+            ({**good, "plan_seconds": True}, 0, "failed"),
+            ({**good, "stopped": -1}, 0, "failed"),
+            ({**good, "level": marker}, 0, "failed"),
+            ({**good, "carried": {"checkouts": 1, "measured_at": marker}}, 0, "failed"),
+            ({**good, "carried": {"checkouts": True, "measured_at": None}}, 0, "failed"),
+            ({**good, "carried": {"checkouts": 1, "measured_at": None, "extra": marker}}, 0, "ran"),
+            ({"result": "plan-only", "counts": {"worktree-clean": 2},
+              "carried": {"checkouts": 1, "measured_at": None}}, 0, "plan-only"),
+        ]
+        for doc, code, expected in cases:
+            with self.subTest(doc=doc, code=code):
+                child = subprocess.CompletedProcess([], code, stdout=json.dumps(doc), stderr=marker)
+                with patch.object(self.g.subprocess, "run", return_value=child):
+                    row = self.g._git_tier(False, "normal", 30)
+                self.assertEqual(row["result"], expected)
+                self.assertNotIn(marker, json.dumps(row))
+                if code:
+                    self.assertEqual(row["exit_code"], code)
+
     def test_valid_git_child_summary_retains_failure_and_carried_counts(self):
         expected = {"result": "ran", "removed": 0, "skipped": 2, "failed": 1,
                     "carried": {"checkouts": 3, "measured_at": "2026-01-01T00:00:00Z"}}

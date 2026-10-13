@@ -1144,19 +1144,58 @@ def _git_tier(apply: bool, level: str, seconds: float) -> dict:
         return {"result": "stopped", "reason": f"past {seconds:.0f} s"}
     except (OSError, subprocess.SubprocessError) as exc:
         return {"result": "failed", "reason": type(exc).__name__}
+    failure = {"result": "failed", "reason": "cleanup child receipt is invalid",
+               "reason_code": "invalid-child-receipt", "exit_code": p.returncode}
+    if p.returncode:
+        return {**failure, "reason": "cleanup child failed", "reason_code": "child-exit"}
     line = (p.stdout.strip().splitlines() or [""])[-1]
     try:
         doc = json.loads(line) if line.startswith("{") else {}
     except ValueError:
-        doc = {}
-    valid = isinstance(doc, dict) and doc.get("result") in ("busy", "plan-only", "ran")
-    if valid and doc["result"] == "ran":
-        valid = all(type(doc.get(k)) is int and doc[k] >= 0 for k in ("removed", "skipped", "failed"))
-    if valid and doc["result"] == "plan-only":
-        valid = isinstance(doc.get("counts"), dict) and all(
-            type(v) is int and v >= 0 for v in doc["counts"].values())
-    return doc if valid else {"result": "failed", "reason": "cleanup child receipt is invalid",
-                              "reason_code": "invalid-child-receipt", "exit_code": p.returncode}
+        return failure
+    if not isinstance(doc, dict) or doc.get("result") not in ("busy", "plan-only", "ran"):
+        return failure
+    # Reconstruct the producer's typed envelope. Unknown fields and arbitrary count
+    # names never become durable output, even when the surrounding JSON looks valid.
+    out = {"result": doc["result"]}
+    if doc["result"] == "busy":
+        return out
+    integer = lambda value: type(value) is int and value >= 0
+    if doc["result"] == "ran":
+        for key in ("removed", "skipped", "failed"):
+            if not integer(doc.get(key)):
+                return failure
+            out[key] = doc[key]
+        if "stopped" in doc:
+            if not integer(doc["stopped"]):
+                return failure
+            out["stopped"] = doc["stopped"]
+        if "level" in doc:
+            if doc["level"] not in LEVELS:
+                return failure
+            out["level"] = doc["level"]
+        if "plan_seconds" in doc:
+            value = doc["plan_seconds"]
+            if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+                return failure
+            out["plan_seconds"] = value
+    else:
+        keys = {"branch-merged", "branch-pushed", "worktree-missing", "worktree-clean",
+                "build-artifacts", "branch-unique", "worktree-dirty"}
+        counts = doc.get("counts")
+        if not isinstance(counts, dict) or not counts or not set(counts) <= keys or not all(
+                integer(value) for value in counts.values()):
+            return failure
+        out["counts"] = counts
+    if "carried" in doc:
+        carried = doc["carried"]
+        if not isinstance(carried, dict) or not integer(carried.get("checkouts")) or "measured_at" not in carried:
+            return failure
+        stamp = carried["measured_at"]
+        if stamp is not None and (not isinstance(stamp, str) or parse_stamp(stamp) is None):
+            return failure
+        out["carried"] = {"checkouts": carried["checkouts"], "measured_at": stamp}
+    return out
 
 
 def run(argv: list[str]) -> dict:
