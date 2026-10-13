@@ -1931,8 +1931,8 @@
       "path": "tests/adv_j1_property.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "78016782f85e9d1fa7bffe5bcdf16cada1a5899938083c39ea822b4af71c9c1e",
-      "bytes": 23123
+      "export_sha256": "df0f0f03b178fae42a5219e7e90c0b571c1b7918f4249e041c4128f96eff98e6",
+      "bytes": 25497
     },
     {
       "path": "tests/adv_j1_property_forget.py",
@@ -2125,8 +2125,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "7ad2c6e043785239c734bc6f09d589f6b5bc5fd17e1977bb2d29b338edff17b2",
-      "bytes": 26571,
+      "export_sha256": "a0b9b5585c4296516fe2ae908339a4eea762e050875c7247d613dd0a122a4af3",
+      "bytes": 26608,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -2931,6 +2931,13 @@
       "upstream_modified": true,
       "export_sha256": "4b5fc2f406707b1956b80e0c77f75498cc2fd136fd375aefb0face7567efc6f2",
       "bytes": 7463
+    },
+    {
+      "path": "tests/test_j3_adversary.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "75e26bbee78df702cb2a7f20e325f0f60682672fcc5fe5d95537486aabcc4310",
+      "bytes": 5156
     },
     {
       "path": "tests/test_key.py",
@@ -4857,7 +4864,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 630,
+  "file_count": 631,
   "excluded": [
     "git-history",
     "operator-registries",
