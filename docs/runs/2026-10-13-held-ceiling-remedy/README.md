@@ -30,9 +30,9 @@ consumer 7000072, pending 7002628 and external `(L)` 7003708 retain their failur
 A truthful unknown/held result is not substituted for convergence.
 
 The [prior full 5200 matrix](../2026-10-13-near-target-headroom/measurement.md)
-remains 2102 PASS / 3098 FAIL / 0 ERROR. This narrow helper correction has not
-rerun or passed that full gate. Its first next task is independent review of the
-actual emitted-command path, negative controls and unchanged invariant bodies.
+remains 2102 PASS / 3098 FAIL / 0 ERROR. Independent review passed 11 direct controls and 12 original replays. The
+[subsequent full measurement](measurement.md) remains FAIL: 2147 PASS /
+3053 FAIL / 0 ERROR. The original gate has not passed.
 Only after that review may another bounded full measurement inform the next
 source decision. The no-order1/no-guidance product gap is separate work.
 
