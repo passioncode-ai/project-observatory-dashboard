@@ -47,6 +47,32 @@ class CheckoutState(Base):
         self.assertEqual(row['skip_worktree_records'], 1)
         self.assertEqual(row['state'], 'unknown')
 
+    @unittest.skipIf(os.name == 'nt', 'bounded pipe observation currently POSIX only')
+    def test_redirected_worktree_before_or_during_probe_is_unknown(self):
+        import checkout_state as subject
+        for during in (False, True):
+            with self.subTest(during=during):
+                path = self.data / ('during' if during else 'before'); path.mkdir()
+                git(path, 'init', '-q'); commit(path, 'tracked')
+                other = self.data / ('other-during' if during else 'other-before'); other.mkdir()
+                (other / 'tracked').write_bytes((path / 'tracked').read_bytes())
+                (path / 'tracked').write_text('unsaved local work')
+                metadata = {'classification': 'clone', 'git_directory': str(path / '.git')}
+                original = subject.query
+                def redirected(candidate, args, deadline):
+                    output = original(candidate, args, deadline)
+                    if args[0] == 'ls-files':
+                        git(path, 'config', 'core.worktree', str(other))
+                    return output
+                if not during:
+                    git(path, 'config', 'core.worktree', str(other))
+                with patch.object(subject, 'query', side_effect=redirected if during else original):
+                    row = subject.probe(path, metadata)
+                self.assertEqual(row['state'], 'unknown')
+                self.assertFalse(row['complete'])
+                self.assertIn('identity-changed', row['degraded'])
+                self.assertIsNone(row['tracked_records'])
+
     def test_index_and_worktree_not_changed_by_probe(self):
         path = self.repo(); index = path / '.git/index'
         before = (index.read_bytes(), index.stat().st_mtime_ns)

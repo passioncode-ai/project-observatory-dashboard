@@ -16,7 +16,8 @@ command before parsing. Status paths, content, stderr and argv are not retained
 in the local-state result. Counters are Git records, not recursive file counts.
 Ignored directories may represent many files.
 
-HEAD, root, Git directory, marker and index metadata are checked before and after.
+Effective Git worktree root and inside-work-tree state, HEAD, root, Git directory,
+marker and index metadata are checked before and after.
 Changed or unreadable bindings refuse a clean observation. This is a point-in-time
 observation, not a lock against concurrent writers or a filesystem-wide inventory.
 Assume-unchanged and skip-worktree flags leave the state unknown. Bare repositories
@@ -39,7 +40,11 @@ NUL-delimited rename source records and non-UTF8 filenames are parsed as bytes.
   module lacked its script entry point. That invocation is not acceptance.
 - Corrected portable invocation:11 local-state,12 inventory,8 coverage and12
   open-unlinked tests passed under Python3.14.7 in isolated offline fixtures.
-- Hosted Windows/Linux/macOS and independent review are pending at this entry.
+- Independent review of173933c rejected a false-clean claim after core.worktree
+  redirected Git to another clean directory. Both binding checks now revalidate
+  the effective root. A real Git before/during-redirection regression was red
+  before the correction;44 portable cases pass after it. Independent correction
+  review and hosted Windows/Linux/macOS checks remain pending.
 
 Tests: `observatory/engine/tests/test_checkout_state.py`,
 `test_checkout_inventory.py`, `test_coverage_view.py`, `test_open_unlinked.py`.
