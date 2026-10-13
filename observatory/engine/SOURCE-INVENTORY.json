@@ -849,15 +849,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "21e1263bf172feb11fca7f92734eba117edacc4ac8c1130de53e41ccfece92c8",
-      "bytes": 104199,
+      "export_sha256": "093151631a6e284ebd3b1a9825a698afe3ba9780c86e0f97655e63e1f5698137",
+      "bytes": 104464,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "51f1a05c8da1be3cfcf491dd822c527aa63d1ec2638c6deeb120184357886153",
-      "bytes": 80936,
+      "export_sha256": "44ba96cf9ea328819ca7d98d6f397b2e700106331c578770642e8d36a6db4ed1",
+      "bytes": 81120,
       "upstream_modified": true
     },
     {

@@ -34,7 +34,9 @@ Partial Linux process inspection can conservatively refuse cleanup. Missing
 `lsof` cannot grant POSIX worktree removal. Final observations are not locks
 against a newly arriving external writer; worktree idle age remains a planning
 condition. Prune still has repository-wide scope and has no exact removed-count
-proof. No blanket cleanup enablement follows from these source tests.
+proof. Windows Git worktree deletion does not use the disk guard's explicit
+rename probe; its native handle behavior remains unverified. No blanket cleanup
+enablement follows from these source tests.
 
 Original full rotation reconciliation remains open: the policy source's 128-case
 baseline retains 58 PASS / 70 convergence FAIL, and full 5,200 acceptance is

@@ -815,16 +815,20 @@ activity, ignore rules, tracked files and new writes immediately before acting.
 Each path action also makes a fresh, target-scoped holder probe within five
 seconds; unknown, partial or timed-out results skip the path. On POSIX this
 last probe requires `lsof`; without it the plan is available but path removal
-waits. Windows retains the rename probe. See [the preservation contract](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
+waits. Windows disk-guard path removal retains its explicit rename probe.
+See [the preservation contract](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
 and `tests/test_disk_guard.py::TargetRevalidation` / `FreshTargetProbe`.
-Clean and archived dirty worktrees also repeat this target check immediately
+On POSIX, clean and archived dirty worktrees repeat this target check immediately
 before removal, after Git/archive verification. The earlier shared process
-listing never grants final removal. Incomplete or unparseable `lsof`/`ps` output
-and Linux `/proc` read failures mean unknown, so cleanup can conservatively skip
+listing never grants final removal. Nonzero, diagnostic or undecodable `lsof`/`ps`
+output, unparseable global `lsof` names and Linux `/proc` read failures mean
+unknown, so cleanup can conservatively skip
 work even if a partial survey showed no holder. Cache-tool commands likewise
 skip when their process survey is unknown. Worktree idle age is still a planning
 condition, not a fresh action-time measurement. A process starting after the
 final check remains a race; these checks are not an exclusive filesystem lock.
+Git worktree removal on Windows relies on Git/native deletion behavior, not the
+disk guard's explicit rename probe; native handle behavior is not verified here.
 
 Build planning first refreshes explicit Git worktree registrations within a
 reserved budget. Root attempts rotate across passes with a persisted cursor and
@@ -833,9 +837,10 @@ safe-to-delete status. Failed path-holder readings remain visible per phase.
 See [registration and fairness](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/DISK-GUARD.md#registration-refresh-and-build-root-fairness-obs-87-subset).
 
 **On every system.** What a process holds is read with `lsof` on macOS and Linux, from
-`/proc` on a Linux without `lsof`, and on Windows by renaming the folder aside before
-removing it — Windows refuses to rename a folder something holds, so a refusal is a skip
-and nothing of it is deleted. The schedule is the same maintenance job everywhere: launchd,
+`/proc` for planning on a Linux without `lsof`, and for Windows disk-guard path
+actions by renaming the folder aside before removal. A refused rename skips the
+path. This does not establish Git worktree handle behavior on Windows. The
+schedule is the same maintenance job everywhere: launchd,
 a systemd user timer, or a Task Scheduler task, every 15 minutes. "Nobody worked in" means no
 checkout or commit and no uncommitted file changed since — never the index,
 which every `git status` rewrites.
