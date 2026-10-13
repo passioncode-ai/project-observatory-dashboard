@@ -43,6 +43,7 @@ LEGACY = (
     'agent', 'agent_queue', 'blank_page', 'budget_subject', 'dashboard_store', 'erasure_bytes', 'estate_history', 'footprint', 'index', 'key_shape', 'project_surface', 'projection', 'reclaimable_pressure', 'temporary_block', 'traps', 'write_surface',
 )
 BOUNDARY = (
+    'heroku_scoped',
     'workspace', 'workspace_upgrade', 'workspace_boundaries', 'dashboard_shell',
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'handed_commands', 'dashboard_portability',
@@ -151,7 +152,7 @@ BOUNDARY += ('embedding_policy',)
 # embedding-policy/1 enforced at the provider, the indexer, the query path and the CLI (N-003).
 BOUNDARY += ('embedding_enforcement',)
 # access-bindings/1 enforced at every business entry point (PB-137 N-008).
-BOUNDARY += ('memory_access', 'memory_freshness')
+BOUNDARY += ('memory_access', 'memory_freshness', 'checkout_inventory', 'cache_coverage')
 # Scope and validity filtered before the candidate window (PB-137 N-009).
 BOUNDARY += ('search_scope',)
 # A lesson as its own record kind, and search filtered by kind before the window (M-7).
@@ -176,6 +177,7 @@ BOUNDARY += ('maintain_app',)
 BOUNDARY += ('disk_guard',)
 # The DigitalOcean door against a fake `doctl` and a scratch vault (PLN-142).
 BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
+BOUNDARY += ('rotation_accounting',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -205,7 +207,7 @@ ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py',
     'identity_map.py', 'identifiers.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'workspace.py',
-    'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'memory_snapshot.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
+    'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'cache_coverage.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'log_policy.py', 'code_freshness.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
     # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).

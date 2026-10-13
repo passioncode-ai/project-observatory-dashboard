@@ -17,6 +17,12 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-13 — Rotation and inventory follow-up](runs/2026-10-13-recovery-wave-4/README.md):
+reviewed identity/reservation corrections, explicit-root checkout inventory and
+lossless scoped provider measurements. Next: combined independent acceptance,
+protected integration and fixed release installation. All candidates remain
+non-actionable; cleanup authority and live provider acceptance are separate.
+
 [2026-10-13 — Findings and measurement recovery](runs/2026-10-13-recovery-wave-3/README.md):
 OBS-88–90 preserve configuration coverage, measurement age and repeated guard errors;
 OBS-87 adds independent memory observations. Next: combined source acceptance,

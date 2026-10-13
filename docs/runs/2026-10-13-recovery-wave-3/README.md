@@ -61,3 +61,14 @@ Finish combined independent review and focused checks, publish through a protect
 PR, then prepare a tagged fixed release and installed acceptance. Continue OBS-87
 inventory and rotation accounting independently; keep auto cleanup disabled until
 its fixed installation is verified. Human admission/provider gates stay explicit.
+
+## Hosted dependency-graph correction
+
+The full hosted suite found the pipeline contract test stopped reading at the first
+rotation pass, which now contains integrity only. Its reader includes every planned
+phase through the final pass; the existing deliberately dropped dependency and
+planted-cycle controls still must fail. The harness now reads prior registry project
+identities, so that read is declared with an explicit cross-tick attribution rule.
+This changes the validation graph, not production scheduling or collector behavior.
+
+The corrected portable pipeline, tick and harness suites pass; all deliberate inversion, dropped-read and cycle controls remain enforced.

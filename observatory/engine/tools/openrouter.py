@@ -48,6 +48,7 @@ import contextlib
 import datetime
 import decimal
 import hashlib
+import functools
 import json
 import math
 import os
@@ -374,7 +375,10 @@ def find_key(admin: str, name: str) -> dict | None:
     rec = ledger().get("issued", {}).get(name) or {}
     if rec.get("hash"):
         try:
-            row = _request(f"/keys/{rec['hash']}", admin).get("data") or None
+            response = _request(f"/keys/{rec['hash']}", admin)
+            row = response.get("data") if isinstance(response, dict) else None
+            if not isinstance(row, dict) or row.get("hash") != rec["hash"]:
+                raise RuntimeError("Provider identity is unreadable or does not match the recorded key")
         except RuntimeError as exc:
             if "HTTP 404" in str(exc):
                 return None
@@ -431,7 +435,21 @@ def _reset(value: str | None) -> str:
     return value
 
 
+def _ledger_writer(function):
+    @functools.wraps(function)
+    def locked(*args, **kwargs):
+        with _policy_lock():
+            return function(*args, **kwargs)
+    return locked
+
+
 def issue_key(name: str, limit: float, account: str | None, to: str,
+              project: str | None, reset: str = "monthly") -> dict:
+    with _policy_lock():
+        return _issue_key_locked(name, limit, account, to, project, reset)
+
+
+def _issue_key_locked(name: str, limit: float, account: str | None, to: str,
               project: str | None, reset: str = "monthly") -> dict:
     """Mint, deliver, record. The ONE issuer: `tools/keyserver.py`'s HTTP
     `mint` calls this, so a key born from a button and a key born from the
@@ -446,6 +464,7 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     reset = _reset(reset)
     to = vault_destination(to)
     doc = ledger()
+    _require_resolved_rotation(doc["issued"].get(name) or {})
     if (doc["issued"].get(name) or {}).get("pending"):
         raise ValueError(f"an issue of {name!r} is recorded as pending: {PENDING_REMEDY.format(name=name)}")
     label, admin = read_admin(account)
@@ -750,12 +769,13 @@ HELD_NOT_SERVING = {"held-disabled": "`enable {name}` lets it spend again, or `r
                     "held-unread": "the provider could not be read; re-run when it answers",
                     "blocked": "the project's other keys leave no room under the limit; the lines above say which",
                     "not-in-policy": "`revoke {name}` if nothing spends it, or name its slot in the policy",
+                    "held-rotation": "reconcile the rotation identities and destination before another mutation; do not blindly retry",
                     "held-pending": PENDING_REMEDY}
 
 
 @contextlib.contextmanager
 def _policy_lock():
-    """One `issue-for-policy` run at a time, across processes: an exclusive lock on a file beside the
+    """One ledger writer at a time, across processes: an exclusive lock on a file beside the
     ledger, held from the plan through the last provider write. Two runs at once each read the
     other's keys before either moved them, and opposite splits ended both keys high (round 3: $16
     against a $10 limit). A second run waits up to POLICY_LOCK_WAIT_S, then refuses."""
@@ -769,7 +789,7 @@ def _policy_lock():
                 break
             except BlockingIOError:
                 if time.monotonic() >= give_up:
-                    raise RuntimeError(f"another issue-for-policy run has held the policy lock for "
+                    raise RuntimeError(f"another key writer has held the policy lock for "
                                        f"{POLICY_LOCK_WAIT_S:.0f} s; nothing was read or moved — run again "
                                        f"when it is done") from None
                 time.sleep(0.05)
@@ -799,6 +819,10 @@ def _read_held(name: str, rec: dict, account: str | None) -> tuple[str | None, d
         return "held-unread", None, f"read failed ({type(exc).__name__})"
     if not row:
         return "held-missing", None, ""
+    if not isinstance(row, dict) or (rec.get("hash") and row.get("hash") != rec["hash"]):
+        return "held-unread", None, "provider identity does not match the ledger"
+    if rec.get("rotation_status") not in (None, "complete") or rec.get("predecessor_hash") or rec.get("successor_hash"):
+        return "held-rotation", row, "rotation is unresolved; reconcile both identities and destination before another mutation"
     if rec.get("pending"):
         return "held-pending", row, "minted, but its delivery was never recorded" + (
             " (its cleanup delete failed)" if rec.get("orphan") else "")
@@ -832,6 +856,55 @@ def _counted(state: str | None, row: dict | None, rec: dict) -> int | None:
     if row is None:
         return _cents_up(rec.get("limit_usd"))
     return _cents_up(_ceiling_of(row))
+
+
+def _identity_refs(rec: dict) -> set[str]:
+    return {value for field in ("hash", "predecessor_hash", "successor_hash")
+            if isinstance(value := rec.get(field), str) and value}
+
+
+def _require_resolved_rotation(rec: dict) -> None:
+    if rec.get("rotation_status") not in (None, "complete") or rec.get("predecessor_hash") or rec.get("successor_hash"):
+        raise RuntimeError("Unresolved rotation: reconcile provider identities and destination before another mutation")
+    refs = _identity_refs(rec)
+    if refs:
+        for other in ledger().get("issued", {}).values():
+            unresolved = (other.get("rotation_status") not in (None, "complete")
+                          or other.get("predecessor_hash") or other.get("successor_hash"))
+            if unresolved and refs & _identity_refs(other):
+                raise RuntimeError("Identity belongs to an unresolved rotation; no alias mutation is allowed")
+
+
+def _rotation_exposure(rec: dict) -> int | None:
+    """Additional possible live ceiling, beyond rec.hash; unread is never zero."""
+    extra = []
+    if rec.get("predecessor_hash"):
+        extra.append((rec["predecessor_hash"], rec.get("predecessor_limit_usd")))
+    if rec.get("successor_hash"):
+        extra.append((rec["successor_hash"], rec.get("successor_limit_usd")))
+    elif rec.get("rotation_status") == "mint-pending":
+        extra.append((None, rec.get("successor_limit_usd")))
+    total = 0
+    for digest, reserve in extra:
+        if digest and digest == rec.get("hash"):
+            continue
+        counted = _cents_up(reserve)
+        if digest:
+            try:
+                _, admin = read_admin(rec.get("account"))
+                response = _request(f"/keys/{digest}", admin)
+                row = response.get("data") if isinstance(response, dict) else None
+                if isinstance(row, dict) and row.get("hash") == digest:
+                    counted = _cents_up(_ceiling_of(row))
+                # A malformed or foreign response cannot replace the reservation.
+                # Missing reserve stays unbounded until this identity is measured.
+            except (OSError, ValueError, RuntimeError) as exc:
+                if isinstance(exc, RuntimeError) and "HTTP 404" in str(exc):
+                    counted = 0
+        if counted is None:
+            return None
+        total += counted
+    return total
 
 
 class _Total:
@@ -900,6 +973,15 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
             read_admin(account)         # the account a new key is minted from, resolved before anything moves
         after, end = _Total(), _Total()  # the total if every planned write happens / what the run leaves
         work, settle = [], []
+        for rotation_name, rotation_rec in scope.items():
+            extra = _rotation_exposure(rotation_rec)
+            if extra != 0:
+                after.add(extra)
+                end.add(extra)
+                settle.append(f"reconcile rotation {rotation_name} at the provider and destination; do not blindly retry")
+                plan.append({"ref": rotation_rec.get("destination"), "name": rotation_name,
+                             "action": "held-rotation-exposure", "counted": None if extra is None else _usd(extra),
+                             "why": "Additional rotation exposure retained until provider identity and destination are reconciled"})
         named = set(primary.values())
         for step in slots:
             planned = _cents(step["limit"], "a planned ceiling")
@@ -913,7 +995,7 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
             state, row, why = _read_held(name, rec, account)
             if why:
                 step["why"] = why
-            if state in ("held-missing", "held-unread", "held-pending"):
+            if state in ("held-missing", "held-unread", "held-pending", "held-rotation"):
                 step["action"] = state
                 counted = _counted(state, row, rec)
                 after.add(counted)
@@ -967,9 +1049,9 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                 continue
             try:
                 if moving:
-                    set_limit(name, step["limit"], step["reset"])
+                    _set_limit_locked(name, step["limit"], step["reset"])
                 else:
-                    issue_key(step["name"], step["limit"], account, step["to"], step["project"], step["reset"])
+                    _issue_key_locked(step["name"], step["limit"], account, step["to"], step["project"], step["reset"])
             except (ValueError, RuntimeError, LookupError, OSError, subprocess.SubprocessError) as exc:
                 step.pop("held", None)
                 step["action"] = "failed"
@@ -1039,6 +1121,11 @@ def cmd_issue_for_policy(path: str, account: str | None, limit_override: float |
             not_serving = True
             print(step["why"])
             continue
+        if step.get("action") == "held-rotation-exposure":
+            not_serving = True
+            total += step["counted"] if step["counted"] is not None else math.inf
+            print(f"{step['ref']}: held-rotation-exposure — {step['why']}")
+            continue
         if step.get("action") == "not-in-policy":
             not_serving = True
             total += step["counted"] if step["counted"] is not None else math.inf
@@ -1091,11 +1178,17 @@ def resolve_issued(name_or_label: str) -> tuple[str, dict]:
 
 
 def set_limit(name_or_label: str, limit: float, reset: str | None = None) -> dict:
+    with _policy_lock():
+        return _set_limit_locked(name_or_label, limit, reset)
+
+
+def _set_limit_locked(name_or_label: str, limit: float, reset: str | None = None) -> dict:
     """Moves a key's ceiling. Without a `reset` the key keeps the period it has: moving a daily
     ceiling never turns it into a monthly one behind the caller's back."""
     if not math.isfinite(limit) or limit <= 0:
         raise ValueError("a positive ceiling is required")
     name, rec = resolve_issued(name_or_label)
+    _require_resolved_rotation(rec)
     reset = _reset(reset if reset is not None else (rec.get("limit_reset") or "monthly"))
     label, admin = read_admin(rec["account"])
     row = find_key(admin, name)
@@ -1142,6 +1235,7 @@ def cmd_limit(name: str, set_to: float | None, reset: str | None = None) -> int:
     return 0
 
 
+@_ledger_writer
 def toggle_key(name: str, disabled: bool) -> dict:
     """Stop or resume one issued key's spending, reversibly, at the provider.
 
@@ -1154,6 +1248,7 @@ def toggle_key(name: str, disabled: bool) -> dict:
     rec = doc["issued"].get(name)
     if not rec:
         raise LookupError(f"no issued key called {name!r}")
+    _require_resolved_rotation(rec)
     _label, admin = read_admin(rec["account"])
     row = find_key(admin, name)
     if not row:
@@ -1188,53 +1283,84 @@ def _delivery_failed(admin: str, row: dict) -> None:
 
 
 def rotate_one(name: str, doc: dict | None = None) -> dict:
-    """Deliver and verify a successor before revoking the predecessor; keep recovery metadata."""
-    if ((doc or ledger()).get("issued", {}).get(name) or {}).get("claimed"):
-        raise ValueError(f"{name!r} was claimed, not issued: there is nowhere to deliver a successor; "
-                         f"`issue` its replacement to a destination, then `revoke {name}`")
-    doc = doc if doc is not None else ledger()
+    """Persist each uncertain transition before doing it. Never repeat an unknown mint.
+
+    `doc` remains accepted for callers, but is never trusted across the writer lock.
+    A delivery timeout can already have changed the vault: neither key is deleted
+    until delivery was confirmed. No credential value is written to this receipt.
+    """
+    with _policy_lock():
+        try:
+            return _rotate_one_locked(name)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError(f"Rotation incomplete ({type(exc).__name__}); inspect its ledger phase before retrying") from None
+
+
+def _rotate_one_locked(name: str) -> dict:
+    doc = ledger()
     rec = doc["issued"].get(name)
     if not rec:
         raise LookupError("not in the ledger")
+    if rec.get("claimed"):
+        raise ValueError("claimed key has no successor destination; issue its replacement before revocation")
+    if rec.get("rotation_status") not in (None, "complete") or rec.get("predecessor_hash") or rec.get("successor_hash"):
+        raise RuntimeError("Previous rotation outcome is unresolved; reconcile the provider identities and destination before another rotation; no new key was minted")
+    _require_resolved_rotation(rec)
     rotations = rec.get("rotations", 0)
     if type(rotations) is not int or rotations < 0:
-        raise RuntimeError("Invalid rotation count; repair ledger before rotating")
-    limit = rec.get("limit_usd") or 10
-    if not isinstance(limit, (int, float)) or not math.isfinite(limit) or limit <= 0:
-        raise ValueError("A finite positive ceiling is required")
+        raise ValueError("Invalid rotation count; repair ledger before rotating")
     private_io.check(LEDGER)
     label, admin = read_admin(rec["account"])
     old = find_key(admin, name)
-    d = _request("/keys", admin,
-                 {"name": f"{name}-next", "limit": limit,
-                  "limit_reset": rec.get("limit_reset") or "monthly"})
-    value = d.get("key") or (d.get("data") or {}).get("key")
-    new_row = d.get("data") or d
-    if not value:
-        _delivery_failed(admin, new_row)
+    if not isinstance(old, dict) or not isinstance(old.get("hash"), str) or not old["hash"]:
+        raise ValueError("Predecessor identity could not be established; nothing was minted")
+    if not isinstance(rec.get("hash"), str) or old["hash"] != rec["hash"]:
+        raise RuntimeError("Predecessor identity does not match the ledger; nothing was minted or changed")
+    limit = old.get("limit")
+    if isinstance(limit, bool) or not isinstance(limit, (int, float)) or not math.isfinite(limit) or limit <= 0:
+        raise ValueError("A finite positive provider ceiling is required; nothing was minted")
+    reset = old.get("limit_reset")
+    if reset not in (None, "daily", "weekly", "monthly"):
+        raise ValueError("Unknown provider reset period; nothing was minted")
+    # A lost POST response still reserves this exposure. This write precedes POST.
+    rec.update(hash=old["hash"], limit_usd=limit, limit_reset=reset,
+               rotation_status="mint-pending", successor_limit_usd=limit)
+    save_ledger(doc)
+    try:
+        d = _request("/keys", admin, {"name": f"{name}-next", "limit": limit, "limit_reset": reset})
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        raise RuntimeError("Successor creation outcome unknown; its reservation remains; reconcile at the provider before any retry") from None
+    new_row = d.get("data") if isinstance(d, dict) else None
+    value = d.get("key") if isinstance(d, dict) else None
+    if not isinstance(new_row, dict) or not isinstance(new_row.get("hash"), str) or not new_row["hash"] or new_row["hash"] == old["hash"]:
+        raise RuntimeError("Successor identity unknown; its reservation remains; reconcile at the provider before any retry")
+    rec.update(successor_hash=new_row["hash"], rotation_status="delivery-unknown")
+    save_ledger(doc)  # if interrupted next, both identities remain represented
+    if not isinstance(value, str) or not value:
+        raise RuntimeError("Successor value unavailable; delivery unconfirmed; reconcile the recorded identities before retrying")
+    if hashlib.sha256(value.encode("utf-8")).hexdigest() != new_row["hash"]:
+        raise RuntimeError("Successor value identity does not match its provider receipt; no delivery or revocation attempted; reconcile before retrying")
     try:
         place = deliver(value, rec["destination"], rotate=True)
-    except (OSError, ValueError, RuntimeError):
-        _delivery_failed(admin, new_row)
-    rec.update({"hash": new_row.get("hash"), "label": new_row.get("label"), "delivered_to": place,
-                "rotated_on": today(), "rotations": rotations + 1,
-                "rotation_status": "successor-delivered-predecessor-pending",
-                "predecessor_hash": old.get("hash") if old else None})
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        raise RuntimeError("Successor delivery outcome unknown; both keys retained; verify the destination before reconciliation") from None
+    rec.update(hash=new_row["hash"], delivered_to=place, limit_usd=limit, limit_reset=reset,
+               rotated_on=today(), rotations=rotations + 1,
+               rotation_status="successor-delivered-predecessor-pending",
+               predecessor_hash=old["hash"], predecessor_limit_usd=limit)
+    rec.pop("successor_hash", None)
+    save_ledger(doc)
     try:
-        save_ledger(doc)
-        if old:
-            _request(f"/keys/{old['hash']}", admin, method="DELETE")
+        _request(f"/keys/{old['hash']}", admin, method="DELETE")
         _request(f"/keys/{new_row['hash']}", admin, {"name": name}, method="PATCH")
-        rec["rotation_status"] = "complete"
-        rec.pop("predecessor_hash", None)
-        save_ledger(doc)
-    except (OSError, ValueError, RuntimeError):
-        _journal("rotation-partial", f"openrouter/{label}/{name}",
-                 status="successor-delivered-provider-or-ledger-finalization-failed")
-        raise RuntimeError("Partial failure: successor delivered, but provider or ledger finalization failed; inspect provider keys and ledger before retrying") from None
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        raise RuntimeError("Rotation finalization outcome unknown; successor delivered and predecessor exposure retained; reconcile before retrying") from None
+    rec["rotation_status"] = "complete"
+    for field in ("predecessor_hash", "predecessor_limit_usd", "successor_limit_usd", "pending", "orphan"):
+        rec.pop(field, None)
+    save_ledger(doc)
     _journal("rotate", f"openrouter/{label}/{name}", to=rec["destination"])
-    return {"name": name, "delivered_to": place, "rotations": rec["rotations"],
-            "rotated_on": rec["rotated_on"]}
+    return {"name": name, "delivered_to": place, "rotations": rec["rotations"], "rotated_on": rec["rotated_on"]}
 
 
 def cmd_rotate(name: str | None, leaked: bool) -> int:
@@ -1290,6 +1416,7 @@ def _label_of(value: str) -> str:
     return label_of(value)
 
 
+@_ledger_writer
 def claim_key(name: str, value: str, account: str | None = None, where: str = "") -> dict:
     """Bring a key this door did NOT mint under its control, so `disable`, `limit` and
     `revoke` reach it — the door hashes the value and never stores or prints it.
@@ -1316,13 +1443,13 @@ def claim_key(name: str, value: str, account: str | None = None, where: str = ""
     doc = ledger()
     if name in doc["issued"]:
         raise ValueError(f"the ledger already has a key called {name!r}")
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    if any(digest in _identity_refs(r) for r in doc["issued"].values()):
+        raise ValueError("this key is already in the ledger")
     accounts = [(account, read_admin(account)[1])] if account else \
         [(lbl, read_admin(lbl)[1]) for lbl, _p in admins()]
     if not accounts:
         raise RuntimeError("no provisioning key is stashed; `stash --as <label>` first")
-    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
-    if any(r.get("hash") == digest for r in doc["issued"].values()):
-        raise ValueError("this key is already in the ledger")
     found: list[tuple[str, dict]] = []
     for acct, admin in accounts:
         try:
@@ -1364,7 +1491,7 @@ def claim_key(name: str, value: str, account: str | None = None, where: str = ""
     # second claim in the meantime would otherwise be overwritten (review 2026-10-12).
     if name in doc["issued"]:
         raise ValueError(f"the ledger already has a key called {name!r}")
-    if any(r.get("hash") == row.get("hash") for r in doc["issued"].values()):
+    if any(row.get("hash") in _identity_refs(r) for r in doc["issued"].values()):
         raise ValueError("this key is already in the ledger")
     doc["issued"][name] = {
         "account": acct, "hash": row.get("hash"), "destination": place, "delivered_to": place,
@@ -1393,6 +1520,7 @@ def cmd_claim(name: str, account: str | None, where: str) -> int:
     return 0
 
 
+@_ledger_writer
 def forget_pending_key(name: str, reason: str) -> dict:
     """Clear a pending row with no hash WITHOUT reading the provider: the one remedy that works on an
     account listing past PAGES_MAX, where the name cannot be looked up (fix 5). Only after the key
@@ -1418,12 +1546,14 @@ def forget_pending_key(name: str, reason: str) -> dict:
     return {"name": name, "forgotten": True}
 
 
+@_ledger_writer
 def revoke_key(name_or_label: str) -> dict:
     """Delete at the provider, then clear the ledger row — in that order: a
     forgotten live key is worse than a stale row. REFUSED for a key something
     is reading right now (`serves` in the OpenRouter scan): revoking the key a
     consumer holds takes the consumer down with no way back."""
     name, rec = resolve_issued(name_or_label)
+    _require_resolved_rotation(rec)
     scan = paths.SCRATCH / "openrouter.json"
     if scan.is_file():
         try:

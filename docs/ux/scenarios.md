@@ -73,3 +73,19 @@ disk timestamps rather than presenting the whole machine as freshly measured. A 
 new memory attempt shows unknown swap, never zero or a newly dated old measurement.
 Process RSS totals are labelled as sums that can count shared pages more than once.
 The bounded packet is [memory freshness](../runs/2026-10-13-memory-freshness/README.md).
+
+### OBS-87: inspect checkout candidates beneath explicit roots
+
+The operator supplies each search root to the read-only checkout inventory command.
+The receipt identifies its budgets, independent source times, omissions and cursor;
+missing or failed observations remain unknown. A discovered checkout, including an
+unregistered or old one, is never presented as abandoned or safe to remove. Unmeasured
+allocated/reclaimable bytes stay null. The command grants no cleanup authority.
+
+### OBS-87: understand cache coverage without cleaning
+
+`full machine --cache-coverage` reports configured cache/runtime roots and command
+availability without walking their contents or running those commands. Presence, prior
+size evidence and source age are separate. Owner/use/regeneration and reclaimable bytes
+stay unknown until separately proved. Protected containers and OS-managed caches remain
+explicitly uncovered, and no inventory row authorizes removal.

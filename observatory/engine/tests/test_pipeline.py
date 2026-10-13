@@ -71,6 +71,10 @@ ACROSS_TICKS: dict[tuple[str, str], str] = {
         "registry the emit has not yet rewritten.",
     ("scan-sessions", "registry/repositories.json"):
         "the same fixpoint as the project list below.",
+    ("scan-harness", "registry/projects.json"):
+        "exact-folder attribution reads the previously emitted project registry; "
+        "the current tick has not emitted its replacement yet. A new project gains "
+        "its registry identity on the next scan, while this scan keeps its folder label.",
     ("scan-sessions", "registry/projects.json"):
         "attribution needs the project list, and the project list needs sessions for its "
         "activity date — a fixpoint over ticks. A project's first sessions attach on the "
@@ -105,7 +109,7 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
     "scan-vault": {"writes": ["store/raw/vault.json"], "reads": ["registry/domains.json"]},
     "scan-cloudflare": {"writes": ["store/raw/cloudflare_zones.json"], "reads": []},
     "scan-mcp": {"writes": ["store/raw/mcp.json"], "reads": []},
-    "scan-harness": {"writes": ["store/raw/harness.json"], "reads": []},
+    "scan-harness": {"writes": ["store/raw/harness.json"], "reads": ["registry/projects.json"]},
     "scan-spend": {"writes": ["store/raw/spend.json"], "reads": []},
     # READS the registry it will later help write, and that is a fixpoint over
     # ticks rather than a cycle: attribution needs the project list, so a
@@ -544,11 +548,12 @@ def test_the_check_would_catch_an_inversion() -> None:
 
 def rotated_collectors() -> list[tuple[str, str]]:
     """(name in the tick, name in `observatory.py`) for every collector the tick plans for its
-    rotation — the `step(...)` calls between `Rotation(...)` and `rotation.run_in_turn()`."""
+    rotation, including its fixed-priority integrity phase and the ordinary phase."""
     import tick_reader
     lines = (ROOT / "tools/tick.py").read_text(encoding="utf-8").splitlines()
     start = next(i for i, l in enumerate(lines, 1) if "rotation = Rotation(" in l)
-    end = next(i for i, l in enumerate(lines, 1) if l.strip() == "rotation.run_in_turn()")
+    # Integrity has its own first pass; every planned phase must remain in the graph.
+    end = max(i for i, l in enumerate(lines, 1) if l.strip() == "rotation.run_in_turn()")
     by_sig = {step_signature(argv): name for name, argv in obs.STEPS.items() if step_signature(argv)}
     out = []
     for line, fn, name, words in tick_reader.tick_calls(ROOT):

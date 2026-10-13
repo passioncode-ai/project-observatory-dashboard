@@ -1392,3 +1392,58 @@ Privacy & Security → Full Disk Access, or leaves that source unmeasured. Other
 access, journal and time-budget failures keep their own reason and recovery step.
 The compact agent overview already carries Git `partial` and `carried` evidence;
 carried measurements are not a new cleanup authorization.
+
+### Inspect checkout candidates beneath explicit roots
+
+```sh
+project-observatory full machine --checkouts --root /path/to/checkouts --root /path/to/other-checkouts
+```
+
+This read-only command writes `store/raw/checkout-candidates.json` with a persisted
+cursor. The default pass allows 20 seconds overall, 2 seconds and 250 entries per
+root, depth 8, and at most 10,000 retained candidates. Repeating the command resumes
+unfinished roots and rotates the root last attempted before expensive work. Symlinks
+are not traversed; Git metadata for a linked checkout may reference its common Git
+directory outside these roots. Repository contents are not recursively surveyed.
+
+The receipt distinguishes clones, linked worktrees, bare repositories and unknown
+Git results. A fresh registration receipt may establish listed path membership;
+missing, partial or old registration evidence leaves absence unknown. Allocated and
+reclaimable bytes, local changes, ownership, upstream containment and active use are
+not measured here. No candidate is actionable and none enters cleanup planning.
+Depth/time/entry limits and source failures keep a pass incomplete. Directory offsets
+are resumable hints; a changed directory identity resets its position, and huge
+or continually changing directories can need additional passes. Filesystem calls
+are checked between operations; a kernel-blocked filesystem read is not a hard
+real-time deadline. Git probes run in owned bounded child groups.
+
+A competing inventory writer refuses while the receipt lock is held; it never resets
+another scan's cursor. The command is not scheduled automatically.
+
+### Read cache and runtime coverage without cleaning
+
+```sh
+project-observatory full machine --cache-coverage
+```
+
+The receipt is `store/raw/cache-coverage.json`. It reads machine/cleanup declarations,
+checks non-protected root metadata, and locates executable tools without running them.
+It does not enumerate directory contents or start application-managed cleanup commands.
+Protected app containers and uncovered OS cache areas have unknown presence and size.
+A configured `regenerable` label remains an unverified declaration; tool availability
+means only that an executable was found, not that its daemon runs or the cache is idle.
+
+Old `du` figures retain their own dates as rounded reported sizes with unknown
+completeness. Exact allocated bytes, reclaimable bytes, owner, current use, restoration
+cost and regeneration proof remain unknown. Neither command estimates of zero nor
+APFS clone/private-size hints are promoted into reclamation promises by this adapter.
+The receipt always says coverage is partial. `measurement_complete` describes only
+completion of this narrow metadata pass, and never lifecycle safety.
+
+The default pass allows three seconds, capped at ten, and 128 attempted rows. Its
+persisted cursor advances before each probe so repeated bounded passes rotate through
+locations and tools. Input documents are capped at 1 MiB and source collections at 128
+rows; omissions are explicit. A kernel-blocked metadata read is not preempted. A failed
+source preserves old observations and dates; a missing current policy leaves those rows
+stale and does not authorize probing them again. A single-writer lock protects cursor
+progress. Nothing schedules this command or adds its rows to a cleanup planner.

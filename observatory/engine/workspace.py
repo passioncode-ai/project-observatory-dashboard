@@ -611,6 +611,9 @@ def machine_parser(name: str) -> argparse.ArgumentParser:
         mode = ap.add_mutually_exclusive_group()
         mode.add_argument("--disk", action="store_true", help="also size the disk's largest places (slower)")
         mode.add_argument("--memory-only", action="store_true", help="refresh RAM, swap and process RSS without disk sizing")
+        mode.add_argument("--checkouts", action="store_true", help="inventory checkout candidates beneath explicit roots; never clean them")
+        mode.add_argument("--cache-coverage", action="store_true", help="inspect declared cache roots and available tools without walking or cleaning")
+        ap.add_argument("--root", action="append", type=Path, help="explicit checkout search root; repeat for each root")
         ap.add_argument("--explain", type=int, metavar="PID", help="why one process runs, and print nothing else")
         return ap
     if name == "disk-guard":
@@ -846,6 +849,19 @@ def machine_command(name: str, argv: list[str]) -> int:
                                + (["--large-files", "--refresh"] if a.large_files else ["--refresh"]))
     import scan_machine
     if name == "machine":
+        if a.cache_coverage:
+            if a.root: machine_parser(name).error("--root requires --checkouts")
+            import cache_coverage
+            print(json.dumps(cache_coverage.collect(), indent=1))
+            return 0
+        if a.checkouts:
+            if not a.root:
+                machine_parser(name).error("--checkouts requires at least one --root")
+            import checkout_inventory
+            print(json.dumps(checkout_inventory.scan(paths.SCRATCH / "checkout-candidates.json", a.root), indent=1))
+            return 0
+        if a.root:
+            machine_parser(name).error("--root requires --checkouts")
         if a.explain is not None:
             print(json.dumps(scan_machine.explain(a.explain), indent=1, ensure_ascii=False))
             return 0
