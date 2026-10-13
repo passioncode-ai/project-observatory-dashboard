@@ -586,7 +586,7 @@ class Estate(Base):
         self.assertFalse((self.base / "wt-clean").exists())
         self.assertTrue((self.base / "wt-dirty" / "notes.txt").exists())   # manual tier
         self.assertNotIn("wt-gone", git(repo, "worktree", "list"))
-        self.assertFalse((repo / "node_modules").exists())
+        self.assertTrue((repo / "node_modules").exists())  # legacy action requires disk-guard replan
         rows = [json.loads(l) for l in (self.home / "store/logs/cleanup.jsonl").read_text().splitlines()]
         merged = next(r for r in rows if r["target"] == "merged-one")
         self.assertEqual(len(merged["sha"]), 40)          # enough to bring it back

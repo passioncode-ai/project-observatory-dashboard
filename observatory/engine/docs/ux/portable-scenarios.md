@@ -74,6 +74,18 @@ Given an accepted sighting with a reason and expiry, the operator copies its sec
 
 ### Cleanup preservation: ignored local data
 
+Manual cleanup revalidates its archive before force removal: HEAD, status,
+working and staged patches, and every untracked file's listing, mode, size and
+SHA-256 must still match. Nested repositories, symlinks, special files, read or
+archive errors and exhausted budgets retain the worktree with a reason. A failed
+attempt names its partial archive without overwriting previous attempts. Working
+and staged versions are independently recoverable; a final observation/removal
+race remains, so writers must be stopped before explicit manual cleanup.
+`tests/test_git_hardening.py` `CleanupNeverLosesWork` tests drift, positive restore,
+separate staged content, nested repositories, errors and limits. The legacy
+build-artifact action skips and directs the operator to `full disk-guard` to
+replan (`test_legacy_artifact_plan_cannot_delete_newly_tracked_output`).
+
 When `full cleanup --apply --include manual` reaches a dirty worktree with ignored
 files, it leaves the worktree in place and reports a skip with a recovery command.
 The operator preserves or moves those files before retrying; an archive of tracked

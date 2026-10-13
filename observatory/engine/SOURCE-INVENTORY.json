@@ -814,15 +814,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c431f748e4540c2f21064966c56d76622976f4a181b22101accd4fc6bb61125b",
-      "bytes": 80300,
+      "export_sha256": "16173219f25f22bec2ce48eb75c088cba97e2d297ccfea4b7dfddc9b7fab4f9e",
+      "bytes": 81605,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "07f54e0443f2d61e05ade293e22a37606e4d87f3101eb188056db8708b81f2c3",
-      "bytes": 68044,
+      "export_sha256": "c8f9db96a7841d271e8f252d5cffed661ba9962aa7a147602e121ddaf87d71f3",
+      "bytes": 68904,
       "upstream_modified": true
     },
     {
@@ -2628,8 +2628,8 @@
       "path": "tests/test_git_hardening.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d519cf17aca2479482d338af0634324119aab4ace6218d8d6ff8d5d5ccedbed7",
-      "bytes": 29431
+      "export_sha256": "5e1e9699ff187d64e58dbd3fd869c241a3eb461e106ae2ca41b965ed5128eb0f",
+      "bytes": 37563
     },
     {
       "path": "tests/test_git_locale.py",
@@ -2879,8 +2879,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9a288c28e062197dcd74e135d7bfd751558582c6557e26ab959a132c4739c16b",
-      "bytes": 51750
+      "export_sha256": "2ba81509ef0c72eddcf8bd1cccca59f8d4f33cb08b1be8c0c9e52f9869811fe4",
+      "bytes": 51793
     },
     {
       "path": "tests/test_machine_mcp_inventory.py",
@@ -3993,8 +3993,8 @@
       "path": "tools/cleanup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "84d10968e2118daf1983c79a0605a92ddf12f892658c503aee32357c84317869",
-      "bytes": 29557
+      "export_sha256": "cd271388d831d3e7e96888a27fbb8ae62a0e0b6c16cded792011cd5f55a6ef25",
+      "bytes": 40477
     },
     {
       "path": "tools/cloudflare.py",
