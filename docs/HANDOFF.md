@@ -17,6 +17,16 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-13 — Release 0.25.0 preparation](runs/2026-10-13-release-0.25.0-preparation/README.md):
+application 0.25.0 and companion plugin 0.22.1 combine independently reviewed waves
+four through six: rotation identity/accounting, checkout/cache coverage and saved readers,
+scoped Heroku preservation, cleanup diagnostic privacy and read-only issued-key activity.
+Source is prepared; no tag, published assets or installed acceptance is claimed. Next:
+protected exact-source CI and merge, tag the accepted main SHA, verify signed release
+assets, then verify installed code and scheduled receipts with automatic cleanup off.
+Full rotation reconciliation/5200-case acceptance, retired-key/project spend accounting
+and typed ownership/reclamation proof remain open on the canonical board.
+
 [2026-10-13 — Rotation and inventory follow-up](runs/2026-10-13-recovery-wave-4/README.md):
 reviewed identity/reservation corrections, explicit-root checkout inventory and
 lossless scoped provider measurements. Next: combined independent acceptance,
