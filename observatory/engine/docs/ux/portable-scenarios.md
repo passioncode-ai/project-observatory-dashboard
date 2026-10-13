@@ -311,3 +311,15 @@ no cleanup authority and does not prove absence of a concurrent writer.
 Tests: `test_checkout_state.py::CheckoutState` (real Git changes and index flags,
 unchanged index, byte filenames, parser limits, binding change, incomplete reads,
 bare/unborn/Windows, saved-reader validation).
+
+### Current memory pressure independently of swap
+
+A person or agent reads the existing memory summary and sees a separately dated
+macOS pressure level alongside RAM and swap amounts. A normal pressure reading
+does not erase high swap or claim reclaimed memory. Failed, unsupported, stale,
+future or malformed pressure stays unknown. Extra saved fields are not projected.
+Pressure cannot refresh the timestamp of missing RAM/swap measurements and never
+authorizes stopping a process. The original swap finding retains its measured
+swap-based wording; it is not reclassified as an OS pressure notification.
+Tests: `test_memory_freshness.py::MemoryFreshness` pressure mapping, own age,
+malformed fields, unsupported source and independent timestamp controls.

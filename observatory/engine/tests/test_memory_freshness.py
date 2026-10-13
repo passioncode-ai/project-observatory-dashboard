@@ -18,6 +18,58 @@ class MemoryFreshness(Base):
                 "processes": {"attempted_at": stamp, "measured_at": stamp, "count": 1,
                               "groups": [], "top": [], "projects": [], "degraded": []}}
 
+    def test_macos_pressure_mapping_and_unknown_are_separate_from_swap(self):
+        import memory_snapshot as ms
+        for raw, level in [('1\n', 'normal'), ('2\n', 'warning'), ('4\n', 'critical'),
+                           ('0', 'unknown'), ('3', 'unknown'), ('true', 'unknown'),
+                           ('1\n2', 'unknown'), (None, 'unknown')]:
+            def command(args, deadline):
+                if args[-1] == 'kern.memorystatus_vm_pressure_level':
+                    return raw, 'command-timeout' if raw is None else None
+                if args[-1] == 'hw.memsize': return '8589934592', None
+                if args[-1] == 'vm.swapusage': return 'used = 8192.0M', None
+                if args[0] == 'vm_stat': return 'page size of 4096 bytes\nPages free: 100.', None
+                return '1 1024 fixture', None
+            with self.subTest(raw=raw), patch.object(ms.sys, 'platform', 'darwin'), patch.object(ms, '_run', side_effect=command):
+                row = ms.collect()['memory']
+            self.assertEqual(row['pressure']['level'], level)
+            self.assertEqual(row['swap_used_mb'], 8192)
+            self.assertEqual(row['pressure']['measured_at'] is None, level == 'unknown')
+            self.assertFalse(row['pressure']['actionable'])
+
+    def test_saved_pressure_age_and_types_never_promote_unknown_to_normal(self):
+        import memory_snapshot as ms
+        stamp = '2026-10-13T10:00:00Z'
+        at = datetime(2026, 10, 13, 10, 1, tzinfo=timezone.utc)
+        good = {'level': 'normal', 'raw_level': 1, 'measured_at': stamp,
+                'attempted_at': stamp, 'source': 'macos-sysctl', 'reason': None}
+        for change in ({}, {'raw_level': True}, {'level': 'critical'},
+                       {'measured_at': '2026-10-13T09:00:00Z'},
+                       {'measured_at': '2026-10-13T10:02:00Z'}, {'reason': 'command-timeout'},
+                       {'attempted_at': '2099-01-01T00:00:00Z'}, {'reason': []}, {'raw_level': 10 ** 1000}):
+            doc = self.light(); doc['memory']['pressure'] = {**good, **change, 'private': 'DO NOT COPY'}
+            row = ms.select_sources({}, doc, at=at)['memory']['pressure']
+            self.assertEqual(row['level'], 'unknown' if change else 'normal')
+            self.assertNotIn('private', row)
+            self.assertFalse(row['actionable'])
+        self.assertEqual(ms.select_sources({}, self.light(), at=at)['memory']['pressure']['level'], 'unknown')
+
+    def test_pressure_does_not_freshen_other_memory_and_unsupported_is_unknown(self):
+        import memory_snapshot as ms
+        def command(args, deadline):
+            if args == ['/usr/sbin/sysctl', '-n', 'kern.memorystatus_vm_pressure_level']:
+                return '1', None
+            return None, 'command-unavailable'
+        with patch.object(ms.sys, 'platform', 'darwin'), patch.object(ms, '_run', side_effect=command):
+            row = ms.collect()['memory']
+        self.assertEqual(row['pressure']['level'], 'normal')
+        self.assertIsNone(row['measured_at'])
+        self.assertIsNone(row['swap_used_mb'])
+        with patch.object(ms.sys, 'platform', 'win32'), patch.object(ms, '_run', return_value=(None, 'command-unavailable')):
+            row = ms.collect()['memory']
+        self.assertEqual(row['pressure']['level'], 'unknown')
+        self.assertEqual(row['pressure']['reason'], 'unsupported-platform')
+
     def test_reader_uses_light_receipt_without_freshening_disk(self):
         import machine_view
         old = {"measured_at": "2026-10-12T10:00:00Z", "memory": {"swap_used_mb": 4096},
@@ -140,7 +192,7 @@ class MemoryFreshness(Base):
 
     def test_collector_is_bounded_and_never_asks_for_args_or_disk(self):
         import memory_snapshot as ms
-        outputs = {"hw.memsize": "8589934592", "vm.swapusage": "total = 0.00M used = 0.00M free = 0.00M",
+        outputs = {"kern.memorystatus_vm_pressure_level": "1", "hw.memsize": "8589934592", "vm.swapusage": "total = 0.00M used = 0.00M free = 0.00M",
                    "vm_stat": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free: 20.\nPages inactive: 5.\n",
                    "ps": "7 1024 /usr/bin/python3\n8 2048 /usr/bin/python3\n"}
         seen = []

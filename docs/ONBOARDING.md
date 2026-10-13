@@ -1590,3 +1590,11 @@ Ownership and any supported supervisor action require separate evidence.
 
 Contract tests: `observatory/engine/tests/test_open_unlinked.py`, including a
 disposable open-then-unlinked file owned by the test; no host process is stopped.
+
+### Memory pressure observation
+
+The saved memory summary includes an independently dated macOS pressure level.
+It reads the platform's read-only sysctl; unknown codes, failed commands and
+unsupported platforms stay unknown. Swap usage remains a separate measurement.
+Saved pressure observations expire after30minutes and never authorize a lifecycle
+action. RAM/swap timestamps are not refreshed by a successful pressure-only read.
