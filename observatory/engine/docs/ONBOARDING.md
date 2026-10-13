@@ -1447,3 +1447,21 @@ rows; omissions are explicit. A kernel-blocked metadata read is not preempted. A
 source preserves old observations and dates; a missing current policy leaves those rows
 stale and does not authorize probing them again. A single-writer lock protects cursor
 progress. Nothing schedules this command or adds its rows to a cleanup planner.
+
+
+### Read saved checkout and cache coverage
+
+`project-observatory full machine --coverage` summarizes the two saved inventory
+receipts without running their collectors. The agent tool is
+`observatory_machine(section="coverage")`; its default overview includes the same
+summary. Each source retains its own attempt age and partial state. Snapshot counts
+count validated saved rows within the declared scope, never every checkout or cache
+on the machine. Current snapshot counts remain null for stale, partial or invalid
+sources. Cache lifecycle coverage remains partial even after all metadata probes finish.
+
+The reader caps each source at 4 MiB, each collection at 10,000 inspected rows, and
+returns ten rows per source. Its stale threshold is 30 minutes. Oversized or malformed
+receipts show an explicit unknown state; malformed rows do not erase valid peers.
+Read time is separate from measurement time. Reclaimable/allocated totals remain null,
+command arguments are omitted and all rows remain non-actionable. Refresh evidence
+with the separate `--checkouts --root ...` or `--cache-coverage` command when needed.

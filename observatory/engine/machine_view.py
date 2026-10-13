@@ -93,7 +93,8 @@ def summary(explain_pid: int | None = None) -> dict:
     plan, d3 = _load("cleanup-plan.json", "cleanup")
     guard, d4 = _load("disk-guard.json", "disk-guard")
     degraded += [d for d in (d1, d2, d3, d4) if d]
-    out: dict = {"degraded": degraded}
+    import coverage_view
+    out: dict = {"degraded": degraded, "coverage": coverage_view.summary()}
     if machine:
         out["measuredAt"] = machine.get("measured_at")
         out["memory"] = machine.get("memory")
