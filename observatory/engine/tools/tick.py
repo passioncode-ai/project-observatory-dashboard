@@ -353,20 +353,28 @@ class Tick:
         self.outcomes: dict[str, str] = {}
         self.order: list[str] = []
         self.not_started: list[str] = []
+        from tick_progress import Progress
+        self.progress = Progress(scratch, log)
 
     def step(self, name: str, *argv) -> str:
         """Run a step under the watchdog; log every line it prints under its name; record a
         non-zero exit as a failed step and go on. Returns how it ended (`outcome_of`)."""
-        proc = subprocess.Popen([PY, LEASE, "step", name, "--", *_text(argv)], cwd=ROOT,
-                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                                errors="replace")
-        first = None
-        for line in proc.stdout:
-            first = line if first is None else first
-            log(f"{name}: {line.rstrip()}")
-        rc = proc.wait()
+        self.progress.start(name)
+        try:
+            proc = subprocess.Popen([PY, LEASE, "step", name, "--", *_text(argv)], cwd=ROOT,
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                    errors="replace")
+            first = None
+            for line in proc.stdout:
+                first = line if first is None else first
+                log(f"{name}: {line.rstrip()}")
+            rc = proc.wait()
+        except BaseException:
+            self.progress.finish(None, "unknown")
+            raise
         outcome = outcome_of(rc, first)
+        self.progress.finish(rc, outcome)
         if rc != 0:
             log(f"{name}: EXIT {rc} — recorded as a failed step ({outcome.replace('_', ' ')})")
             self.failed.append((name, rc))
@@ -375,10 +383,18 @@ class Tick:
 
     def bounded(self, name: str, *argv) -> tuple[int, str]:
         """The same watchdog, ungated, for a command whose exit and output the tick reads itself."""
-        p = subprocess.run([PY, LEASE, "step", "--ungated", name, "--", *_text(argv)], cwd=ROOT,
-                           stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace")
-        return p.returncode, p.stdout + p.stderr
+        self.progress.start(name)
+        try:
+            p = subprocess.run([PY, LEASE, "step", "--ungated", name, "--", *_text(argv)], cwd=ROOT,
+                               stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace")
+        except BaseException:
+            self.progress.finish(None, "unknown")
+            raise
+        output = p.stdout + p.stderr
+        first = output.splitlines()[0] if output else None
+        self.progress.finish(p.returncode, outcome_of(p.returncode, first))
+        return p.returncode, output
 
     def write_report(self) -> None:
         try:
@@ -391,6 +407,7 @@ class Tick:
                                  for s, rc in self.failed],
                 "collector_order": self.order,
                 "not_started": self.not_started,
+                "progress": self.progress.document(),
             })
         except Exception:  # noqa: BLE001 — the report is best effort; the log says it is missing
             log("tick: could not record the step report")
