@@ -348,3 +348,21 @@ authorizes stopping a process. The original swap finding retains its measured
 swap-based wording; it is not reclassified as an OS pressure notification.
 Tests: `test_memory_freshness.py::MemoryFreshness` pressure mapping, own age,
 malformed fields, unsupported source and independent timestamp controls.
+
+
+### Maintenance log-retention evidence
+
+After maintenance, the person or agent reads per-scope log-retention evidence
+through `full maintain status` and doctor; Health shows their incomplete/stale
+warning and retains the typed result in its payload. Engine, updater and hook log
+scopes have separate measured times, observed counts, completed rotations,
+refusals and failures. Missing/unreadable scopes are unknown, not measured empty;
+a failed scope does not suppress peers. A report older than one hour is stale
+and never presented as a new attempt. Reasons are bounded codes, without file
+paths, log contents or exception text. Existing rotation/list APIs retain their
+contracts. No new retention policy or filesystem-lock guarantee is introduced.
+
+Acceptance: synthetic small-file tests for empty/missing/unreadable directories,
+linked files/parents/generations, copy and fsync failure, independent peer scopes,
+persistence, stale/malformed receipt projection and private marker omission.
+Implementation acceptance and installed observation remain pending.

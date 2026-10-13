@@ -1,0 +1,47 @@
+{
+  "schema": "log-retention-evidence/1",
+  "base": "12b7343277004aa408283fb4aef06ccbae935954",
+  "coverage": "synthetic isolated HOME/TMPDIR; no live logs or service mutations",
+  "checks": [
+    {
+      "suite": "LogRetentionEvidence+OneRotationPolicy",
+      "cases": 18,
+      "exit_code": 0
+    },
+    {
+      "suite": "maintenance targeted",
+      "cases": 4,
+      "exit_code": 0
+    },
+    {
+      "suite": "osprivacy.Boundary",
+      "cases": 3,
+      "exit_code": 0
+    },
+    {
+      "suite": "documentation contracts",
+      "exit_code": 0
+    },
+    {
+      "suite": "source inventory",
+      "exit_code": 0
+    },
+    {
+      "suite": "generated doc copies",
+      "exit_code": 0
+    },
+    {
+      "suite": "diff whitespace",
+      "exit_code": 0
+    }
+  ],
+  "source_sha256": {
+    "observatory/engine/log_policy.py": "dd6841a99414fc056f08b6deda867566aa4939a5c5c45148f8ca33707ebaa90e",
+    "observatory/engine/maintenance.py": "b0f0f03669a2251d6974bacfa501564a930f4aae25ef7b4ef16d1c41237e08dc",
+    "observatory/engine/dashboard/build_dashboard.py": "d5b6b7acb5d0d032dffea678845255e03cf79ae41f7097bc287fed7123736ed2",
+    "observatory/engine/tests/test_lifecycle.py": "e983c5066e4f1242fb2655210f44aec92fc776f908d1b8776172d3b2ac8360ec",
+    "observatory/engine/tests/test_maintenance.py": "3d6f89fdf35a6425fec9231b594e145e261eca0dd57239b75275d243ef032bc3"
+  },
+  "independent_review": "PENDING",
+  "installed_acceptance": "NOT_RUN"
+}
