@@ -325,8 +325,10 @@ allowlisted format, not as Markdown. Two things keep it true:
 - **`tools/check_backlog.py`** (run by `tests/test_backlog_board.py`) holds the board to that
   format: one `## Board` heading with the exact header `| ID | Item | Status | Source |`, the
   separator and contiguous four-cell rows directly under it, nothing but blank lines after the
-  table in its section, and no OBS row outside it; no backslash (so no escaped `|`: word it), no
-  `<` and no control or invisible character in a row; a Status cell of printable ASCII without
+  table in its section, and no OBS row outside it; no CR anywhere in the file and nothing HTML or
+  fenced above the board; no backslash (so no escaped `|`: word it), no `<` and no control,
+  format, separator or invisible character (any space but U+0020) in a row; ids in ASCII digits,
+  `OBS-01` and `OBS-1` being one id; a Status cell of printable ASCII without
   `& * _ ~` that is exactly one of `done`, `done in X.Y.Z`, `done in X.Y.Z (#n)`,
   `done — merged (#n)`, `done — merged (#n), unreleased`, `cancelled`, `superseded by OBS-n`, or
   `open`/`blocked` with an optional note (a closed status takes no note: write what was delivered

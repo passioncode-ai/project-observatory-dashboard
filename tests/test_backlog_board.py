@@ -274,8 +274,9 @@ class BoardLint(unittest.TestCase):
 
     def test_the_live_board_is_clean(self):
         """The live board must remain reservable and meet the same rules as fixtures."""
-        text = (ROOT / "docs/backlog.md").read_text(encoding="utf-8")
-        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        # Raw bytes: read_text would turn a CR or CRLF into LF and hide what the organization refuses.
+        text = (ROOT / "docs/backlog.md").read_bytes().decode("utf-8")
+        changelog = (ROOT / "CHANGELOG.md").read_bytes().decode("utf-8")
         self.assertEqual(self.lint.check_board(text, changelog), [])
 
     def test_the_live_board_says_it_is_canonical_for_obs_rows(self):
@@ -360,6 +361,105 @@ class Parents(unittest.TestCase):
         for source in ("parent: PB-140, parent: PB-138", "parent: OBS-63", "parent:", "parent: PB-14x"):
             found = self.row(source)
             self.assertTrue(any(p.startswith("OBS-01") and "parent" in p for p in found), (source, found))
+
+class Hardening(unittest.TestCase):
+    """Round-1 findings on #277: what the organization's reader refuses and an earlier lint let through.
+
+    Each case below also pins one line of the lint, so reverting that line turns a test red
+    (the planted reverts of round 1: the dash class, CR, NBSP, a comment opened mid-line, a
+    table's lazy continuation)."""
+
+    def setUp(self):
+        self.lint = load()
+
+    def problems(self, text: str) -> list[str]:
+        return self.lint.check_board(text, CHANGELOG)
+
+    def with_row(self, item: str = "an engine task", status: str = "open", source: str = "x") -> list[str]:
+        return self.problems(board({"OBS-01": "open"}, extra=f"| OBS-02 | {item} | {status} | {source} |\n"))
+
+    # F1 — a CR anywhere, as the organization reads the raw document.
+    def test_a_crlf_board_is_refused(self):
+        found = self.problems(board(CORRECTED).replace("\n", "\r\n"))
+        self.assertTrue(any("CR" in p for p in found), found)
+
+    def test_a_cr_above_the_board_is_refused(self):
+        found = self.problems("# B\rx\n" + board(CORRECTED))
+        self.assertTrue(any("CR" in p and "line 1" in p for p in found), found)
+
+    def test_the_command_reads_raw_bytes_so_a_crlf_file_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            b, c = Path(tmp, "backlog.md"), Path(tmp, "CHANGELOG.md")
+            b.write_bytes(board(CORRECTED).replace("\n", "\r\n").encode("utf-8"))
+            c.write_text(CHANGELOG, encoding="utf-8")
+            env = {**os.environ}
+            env.pop("OBSERVATORY_PRIVATE_DENYLIST", None)
+            run = subprocess.run([sys.executable, str(ROOT / "tools/check_backlog.py"), "--board", str(b),
+                                  "--changelog", str(c)], capture_output=True, text=True, timeout=60, env=env)
+            self.assertEqual(run.returncode, 1, run.stderr)
+            self.assertIn("CR", run.stderr)
+
+    # F2 — a line starting with `<` opens an HTML block until the next blank line.
+    def test_a_line_starting_with_lt_directly_above_the_board_hides_it(self):
+        for above in ("<3 not a tag\n", "   < spaced\n", "<x\nstill inside\n"):
+            found = self.problems(board(CORRECTED).replace("## Board\n", above + "## Board\n"))
+            self.assertTrue(any("HTML block" in p and "## Board" in p for p in found), (above, found))
+
+    def test_a_lt_line_closed_by_a_blank_line_does_not_hide_the_board(self):
+        text = board(CORRECTED).replace("## Board\n", "<3 not a tag\n\n## Board\n")
+        self.assertEqual(self.problems(text), [])
+
+    def test_a_comment_opened_mid_line_above_the_board_is_refused(self):
+        # Closed or not: nothing HTML sits above the board.
+        for above in ("Prose <!-- a note -->\n\n", "Prose <!-- open\n\n-->\n\n"):
+            found = self.problems(board(CORRECTED).replace("## Board\n", above + "## Board\n"))
+            self.assertTrue(any("HTML" in p for p in found), (above, found))
+
+    # F3 — ids are ASCII digits; one number is one id however it is padded.
+    def test_an_id_with_non_ascii_digits_is_refused(self):
+        found = self.problems(board({"OBS-01": "open"}, extra="| OBS-١ | an engine task | open | x |\n"))
+        self.assertTrue(any("canonical row" in p for p in found), found)
+
+    def test_an_id_padded_beyond_the_two_digit_form_is_refused(self):
+        for rid in ("OBS-001", "OBS-0", "OBS-010"):
+            found = self.problems(board({"OBS-01": "open"}, extra=f"| {rid} | an engine task | open | x |\n"))
+            self.assertTrue(any("canonical row" in p for p in found), (rid, found))
+
+    def test_obs_01_beside_obs_1_is_one_id_written_twice(self):
+        found = self.problems(board({"OBS-01": "open"}, extra="| OBS-1 | an engine task | open | x |\n"))
+        self.assertTrue(any("twice" in p for p in found), found)
+
+    def test_a_parent_with_non_ascii_digits_is_refused(self):
+        found = self.with_row(source="parent: PB-١٣")
+        self.assertTrue(any(p.startswith("OBS-02") and "parent" in p for p in found), found)
+
+    def test_a_superseded_successor_with_non_ascii_digits_is_refused(self):
+        found = self.with_row(status="superseded by OBS-١")
+        self.assertTrue(any(p.startswith("OBS-02") for p in found), found)
+
+    # F4 — no control, format, separator or invisible character in any cell.
+    def test_invisible_characters_are_refused_in_item_and_source(self):
+        for ch in ("­", "͏", "᠎", "ㅤ", "￹", "\U000e0041", "ᅟ", "ᅠ", "ﾠ",
+                   " ", " ", " ", " ", "​", "‮", "\t", "\x0b", "️"):
+            for cell in ("item", "source"):
+                kw = {cell: f"a{ch}b"}
+                found = self.with_row(**kw)
+                self.assertTrue(any(p.startswith("OBS-02") and "invisible" in p for p in found),
+                                (hex(ord(ch)), cell, found))
+
+    def test_visible_non_ascii_text_passes_in_item_and_source(self):
+        self.assertEqual(self.with_row(item="«готовим релиз» — 12/12 × 0.5 → é", source="parent: PB-137; ü"), [])
+
+    # F5 — the dash class of the forms: em dash, en dash and hyphen all read.
+    def test_every_dash_of_the_forms_reads(self):
+        for status in ("done – merged (#1)", "done - merged (#1), unreleased", "open – a note", "blocked - a note",
+                       "done — merged (#1)"):
+            self.assertEqual(self.with_row(status=status), [], status)
+
+    def test_a_lazy_continuation_of_a_table_outside_the_board_is_an_obs_row(self):
+        found = self.problems(board(CORRECTED, after="\n## Archive\n\n| a | b |\nOBS-02 continues the row\n"))
+        self.assertTrue(any("outside the board" in p for p in found), found)
+
 
 if __name__ == "__main__":
     unittest.main()

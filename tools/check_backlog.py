@@ -6,20 +6,29 @@ and a release. Product packages, priorities and operator gates are on the organi
 board and are cited here as `parent: PB-nnn`; a PB row's status is derived from the OBS rows
 it lists, so an OBS status written here is read by another board as fact. That board's check
 (org-index `scripts/check_observatory_registers.py`, as merged in org-index #67) reads this file
-as an allowlisted format, not as Markdown, and this lint holds the board to the same format:
+as an allowlisted format, not as Markdown, and this lint holds the board to that format. It
+reads the raw bytes as that check does, and is stricter in the places marked (stricter):
 
-- one `## Board` heading; from it to the next heading only blank lines, the header exactly
-  `| ID | Item | Status | Source |`, the separator `|---|---|---|---|` and contiguous rows
-  `| OBS-n | item | status | source |` (four cells; no backslash, so no escaped `|`; no `<`;
-  no CR, VT, FF, NBSP, zero-width or other invisible character); the rows end at the first blank
-  line, and nothing but blank lines follows them before the next heading; no line outside the
-  section holds a `|` and an OBS id; no code fence, HTML comment or HTML block above the board;
+- no CR anywhere in the document (a CRLF file included);
+- one `## Board` heading, not hidden by a code fence, an HTML comment or an HTML block (a line
+  starting with `<` opens one until the next blank line) left open above it, and (stricter) no
+  fence, HTML comment or HTML block above it at all; from it to the next heading only blank
+  lines, the header exactly `| ID | Item | Status | Source |`, the separator `|---|---|---|---|`
+  and contiguous rows `| OBS-n | item | status | source |` (four cells; no backslash, so no
+  escaped `|`; no `<`; no character of Unicode category Cc, Cf, Zl or Zp, no space but U+0020,
+  no Hangul filler or default-ignorable combining mark (stricter: the check refuses a fixed
+  list of these)); the rows end at the first blank line, and nothing but blank lines follows
+  them before the next heading; no line outside the section holds a `|` and an OBS id, and no
+  line right under a table line names one;
+- an OBS id of ASCII digits, `OBS-1` or the two-digit `OBS-01` the first rows use, never
+  `OBS-001`; one number is one id however it is written (stricter: the check compares strings);
 - a Status cell of printable ASCII without `& * _ ~` (the dashes of the forms aside) that is,
   whole, exactly one of: `done`, `done in X.Y.Z`, `done in X.Y.Z (#n[, #m…])`,
   `done — merged (#n[, #m…])`, `done — merged (#n[, #m…]), unreleased`, `cancelled`,
   `superseded by OBS-n` (one successor), or `open`/`blocked` with an optional note after
   ` — `, `: `, `; `, `, ` or ` (`. A closed form takes no note: notes go in the Item column;
-- at most one `parent:` token in Source, followed by a `PB-n` id.
+- at most one `parent:` token in Source, followed by a `PB-n` id of ASCII digits (stricter: the
+  check reads `\\d`, which admits other scripts' digits).
 
 On top of the format it refuses:
 
@@ -47,6 +56,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import unicodedata
 
 ROOT = Path(__file__).resolve().parents[1]
 BOARD = ROOT / "docs/backlog.md"
@@ -67,8 +77,14 @@ STALE = (
 BOARD_HEADING = "## Board"
 HEADER = "| ID | Item | Status | Source |"
 SEPARATOR = re.compile(r"\|(?: ?:?-{3,}:? ?\|){4}")
-ROW = re.compile(r"\| (OBS-\d+) \|(.*)\|")
-ROW_ID = re.compile(r"^\|\s*(OBS-\d+)\s*\|")
+#: An OBS id: ASCII digits only (`\d` would admit `OBS-١`), and no padding beyond the two-digit
+#: form the first rows were written in (OBS-01…OBS-09 are stable ids); `OBS-001` and `OBS-0` are
+#: refused, and `OBS-01` beside `OBS-1` is one number written twice (see `check_board`).
+OBS_ID = r"OBS-(?:0[1-9]|[1-9][0-9]*)"
+#: A PB id, as org-index writes it (zero-padded, `PB-012`): ASCII digits only.
+PB_ID = r"PB-[0-9]+"
+ROW = re.compile(rf"\| ({OBS_ID}) \|(.*)\|")
+ROW_ID = re.compile(r"^\|\s*(OBS-\S*?)\s*\|")
 HEADING_LINE = re.compile(r"#{1,6}(?:\s|$)")
 #: Any line holding a `|` and naming an OBS id (however wrapped) is a row to that check.
 OBS_NAMED = re.compile(r"\bOBS(?:-|&#?[0-9A-Za-z]+;)\d+")
@@ -78,9 +94,12 @@ HTML_BLOCK_1_5 = re.compile(r" {0,3}(?:<(?:script|pre|style|textarea)(?:[\s>]|$)
                             re.I)
 HTML_BLOCK_6_7 = re.compile(r" {0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[\s/>]|$)")
 FENCE_OPEN = re.compile(r" {0,3}(`{3,}|~{3,})")
-#: Characters read as line breaks or spaces that a reader does not see.
-ODD_CHARS = re.compile("[\r\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x85\xa0؜  -‏ - "
-                       " -⁤⁦-⁩　﻿]")
+#: Characters a reader does not see that are not in a Unicode category `invisible` refuses:
+#: the Hangul fillers (letters, Lo) and the default-ignorable combining marks (Mn) — the combining
+#: grapheme joiner, the Khmer inherent vowels, the Mongolian and Unicode variation selectors.
+INVISIBLE_EXTRA = frozenset(
+    [0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180F, 0x3164, 0xFFA0]
+    + list(range(0xFE00, 0xFE10)) + list(range(0xE0100, 0xE01F0)))
 _V = r"\d+\.\d+\.\d+"
 _PRS = r"\(#\d+(?:, #\d+)*\)"
 _D = r"[—–-]"
@@ -91,13 +110,13 @@ EXACT_FORMS = (
     (re.compile(rf"done in ({_V})(?: {_PRS})?", re.I), "released"),
     (re.compile(r"done", re.I), "closed"),
     (re.compile(r"cancelled", re.I), "closed"),
-    (re.compile(r"superseded by OBS-\d+", re.I), "superseded"),
+    (re.compile(rf"superseded by {OBS_ID}", re.I), "superseded"),
 )
 OPEN_FORM = re.compile(rf"(?:open|blocked)(?:(?: {_D} |: |; |, | \().+)?", re.I | re.S)
 #: Printable ASCII without & * _ ~, plus the two dashes the forms use.
 STATUS_CHARS = re.compile(r"[ !-%'-)+-^`-}—–]*")
 PARENT_TOKEN = re.compile(r"\bparent:", re.I)
-PARENT = re.compile(r"\bparent:\s*PB-\d+(?![\w-])", re.I)
+PARENT = re.compile(rf"\bparent:\s*{PB_ID}(?![\w-])", re.I)
 FORMS_HELP = ("`done`, `done in X.Y.Z`, `done in X.Y.Z (#n)`, `done — merged (#n)`, "
               "`done — merged (#n), unreleased`, `cancelled`, `superseded by OBS-n`, or `open`/`blocked` "
               "with an optional note")
@@ -142,10 +161,24 @@ def privacy_problems(where: str, text: str, deny: list[str]) -> list[str]:
     return [f"{where}: {kind} ×{count} (value not printed)" for kind, count in sorted(hits.items())]
 
 
+def invisible(text: str) -> str | None:
+    """The first character of `text` a reader does not see, or None.
+
+    Refused: categories Cc (controls, tab and CR among them), Cf (format: soft hyphen, zero-width
+    and bidi controls, tags), Zl and Zp (line and paragraph separators), every Zs space but U+0020
+    (NBSP, figure and ideographic spaces), and INVISIBLE_EXTRA."""
+    for ch in text:
+        category = unicodedata.category(ch)
+        if (category in ("Cc", "Cf", "Zl", "Zp") or (category == "Zs" and ch != " ")
+                or ord(ch) in INVISIBLE_EXTRA):
+            return ch
+    return None
+
+
 def _line_problem(line: str) -> str | None:
-    odd = ODD_CHARS.search(line)
+    odd = invisible(line)
     if odd:
-        return f"a control or invisible character U+{ord(odd.group()):04X}"
+        return f"a control or invisible character U+{ord(odd):04X}"
     if "\\" in line:
         return "a backslash (the organization's reader refuses any; word a `|` instead of escaping it)"
     if "<" in line:
@@ -172,7 +205,50 @@ def _hidden_above(lines: list[str], start: int) -> list[str]:
             continue
         if HTML_BLOCK_1_5.match(line) or HTML_BLOCK_6_7.match(line) or "<!--" in line:
             problems.append(f"docs/backlog.md line {n + 1}: HTML above the board (a comment or an HTML block)")
+    hidden = _hidden_at(lines, start)
+    if hidden:
+        problems.append(f"docs/backlog.md line {start + 1}: `{BOARD_HEADING}` sits inside {hidden}; GitHub does "
+                        "not render it, so the organization's check does not read it")
     return problems
+
+
+def _hidden_at(lines: list[str], start: int) -> str | None:
+    """What hides line `start` from a reader on GitHub: an HTML comment opened anywhere on a line,
+    an HTML block (any line starting with up to three spaces and `<`, open until a blank line) or a
+    code fence opened above it and still open there; None when nothing does. The same rule as the
+    organization's `_hidden_at`, conservative on purpose: `<3` opens a block as `<div>` does."""
+    state, opened, fence = None, 0, ""
+    for n in range(start):
+        line = lines[n]
+        if state == "comment":
+            if "-->" not in line:
+                continue
+            state, line = None, line.split("-->", 1)[1]
+        if state == "html":
+            if not line.strip():
+                state = None
+            continue
+        if state == "fence":
+            m = re.match(r" {0,3}(`{3,}|~{3,})\s*$", line)
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                state = None
+            continue
+        m = FENCE_OPEN.match(line)
+        if m:
+            state, opened, fence = "fence", n, m.group(1)
+            continue
+        rest = line
+        while "<!--" in rest:
+            rest = rest.split("<!--", 1)[1]
+            if "-->" in rest:
+                rest = rest.split("-->", 1)[1]
+            else:
+                state, opened = "comment", n
+                break
+        if state is None and re.match(r" {0,3}<", line):
+            state, opened = "html", n
+    names = {"comment": "an HTML comment", "html": "an HTML block", "fence": "a code fence"}
+    return f"{names[state]} opened on line {opened + 1}" if state else None
 
 
 def check_board(text: str, changelog: str, deny: list[str] | None = None) -> list[str]:
@@ -184,8 +260,14 @@ def check_board(text: str, changelog: str, deny: list[str] | None = None) -> lis
     if next_free is None:
         problems.append("docs/backlog.md: no `**Next free ID:** `OBS-n`` line, so the OBS register "
                         "(.claude/agent-sync.json idRegisters.OBS) cannot reserve an id")
+    if "\r" in text:
+        # The organization reads the raw document and refuses a CR anywhere (a CRLF file included):
+        # GitHub and Python split lines on it where a reader of the text does not.
+        at = text.count("\n", 0, text.index("\r")) + 1
+        problems.append(f"docs/backlog.md line {at}: the document holds a CR (U+000D); the board is read only "
+                        "from LF-only text")
     lines = text.split("\n")
-    board_at = [n for n, line in enumerate(lines) if line.rstrip() == BOARD_HEADING]
+    board_at =[n for n, line in enumerate(lines) if line.rstrip() == BOARD_HEADING]
     if len(board_at) != 1:
         where = ("no `## Board` heading" if not board_at else
                  "`## Board` on lines " + ", ".join(str(n + 1) for n in board_at))
@@ -204,7 +286,7 @@ def check_board(text: str, changelog: str, deny: list[str] | None = None) -> lis
     def refuse(n: int, why: str, rid: str | None = None) -> None:
         problems.append(f"{rid}: {why} (line {n + 1})" if rid else f"docs/backlog.md line {n + 1}: {why}")
 
-    seen: dict[str, int] = {}
+    seen: dict[int, int] = {}
     phase = "before"
     rows = 0
     for n in range(start + 1, end):
@@ -250,9 +332,11 @@ def check_board(text: str, changelog: str, deny: list[str] | None = None) -> lis
             continue
         rows += 1
         _item, status, source = parts
-        if rid in seen:
-            problems.append(f"{rid}: written twice (lines {seen[rid]} and {n + 1}); reserve a new id")
-        seen.setdefault(rid, n + 1)
+        number = int(rid.split("-")[1])
+        if number in seen:
+            problems.append(f"{rid}: written twice (lines {seen[number]} and {n + 1}; `OBS-01` and `OBS-1` "
+                            "are one id); reserve a new id")
+        seen.setdefault(number, n + 1)
         if next_free is not None and int(rid.split("-")[1]) >= next_free:
             problems.append(f"{rid}: at or above the register's next free id OBS-{next_free}; "
                             "reserve it (agent-sync `reserve OBS`) and move the line")
@@ -317,8 +401,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--private-denylist", type=Path)
     args = parser.parse_args(argv)
     try:
-        text = args.board.read_text(encoding="utf-8")
-        changelog = args.changelog.read_text(encoding="utf-8")
+        # Raw bytes: read_text turns CR and CRLF into LF and would hide a CR the organization refuses.
+        text = args.board.read_bytes().decode("utf-8")
+        changelog = args.changelog.read_bytes().decode("utf-8")
         deny, note = load_denylist(args.private_denylist)
     except (OSError, ValueError) as exc:
         print(f"check_backlog: {type(exc).__name__}: {exc}", file=sys.stderr)

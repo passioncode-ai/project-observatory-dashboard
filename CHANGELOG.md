@@ -80,9 +80,13 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
 
 - **The engine board is the organization's canonical format** (L-1): `docs/backlog.md` holds its table in one
   `## Board` section that org-index's register check reads as an allowlisted format, and `tools/check_backlog.py`
-  refuses what that check refuses — a second or missing `## Board`, a header or separator not exactly the
+  holds the board to that format, reading the raw bytes as that check does: a CR anywhere, a second or missing
+  `## Board` or one hidden by an HTML block, comment or fence above it, a header or separator not exactly the
   canonical one, text after the table, an OBS row outside the section, a backslash (an escaped `|`), `<` or an
-  invisible character in a row, two `parent:` tokens in a Source. A Status cell is exactly one of `done`, `done in
+  invisible character in a row, two `parent:` tokens in a Source. It is stricter in four places, named in its
+  docstring: no HTML or fence above the board at all; every Unicode control, format and separator character and
+  every space but U+0020 is refused, not a fixed list; ids are ASCII digits and `OBS-01` beside `OBS-1` is one id
+  written twice; a `parent:` PB id is ASCII digits. A Status cell is exactly one of `done`, `done in
   X.Y.Z`, `done in X.Y.Z (#n)`, `done — merged (#n)`, `done — merged (#n), unreleased`, `cancelled` or
   `superseded by OBS-n`, or `open`/`blocked` with a note; a closed status takes no note, so 42 rows moved theirs to
   the Item column ("Outcome:"), `closed` became `superseded by OBS-17`, and OBS-63 reads `done in 0.24.4`. Rows
@@ -465,7 +469,8 @@ companion plugin `observatory-log` is unchanged.
   the token names has `credentialSource {kind: project-key, ref: PROJECT/ENV/NAME}`, never read a `.env`, and
   remove the token before the child starts. `slotsRequireGrant` in `config/meter.json`: `when-token` (default
   on the operator's own machines; METER.md M0), `always`, `off`.
-- **The keyserver trusts the delegation token** (OBS-62): with a valid token for the action's scope (`keys.*`,
+- **The keyserver trusts the delegation token** (OBS-62; corrected after release: its code, #206, merged after
+  the v0.23.0 tag and first shipped in 0.24.0, not in this release): with a valid token for the action's scope (`keys.*`,
   `ledger.*`), the journal names the hub's signed caller, principal, chain and grant (`caller_verified: true`).
   `reveal` is never served to a token. `keyserverRequiresDelegation: agents` demands a token from non-page callers.
 - **The agent harness scan** (`integrations.harness`, `sources.harness_root`; off until turned on): what every
