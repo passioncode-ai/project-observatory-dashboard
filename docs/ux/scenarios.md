@@ -45,3 +45,7 @@ the workspace's dashboard (SCN-007–009: live, saved pages with Start server, r
 the Dock); the conversational assistant is its own window, never a widget inside the
 dashboard pages (SCN-001–006). The [specification](../macos/SPEC.md) and
 [delivery plan](../macos/PLAN.md) own the surface and its verification scope.
+
+Offline verification also serves agents and contributors: a failed suite setup or
+report export must retain completed evidence and never publish a successful final
+summary. See [offline verification](../../observatory/engine/docs/ux/portable-scenarios.md#offline-verification-receipts).
