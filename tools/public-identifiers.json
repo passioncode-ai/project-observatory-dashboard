@@ -156,6 +156,14 @@
   {
    "token": "pubkey",
    "reason": "the key name Tauri's updater configuration requires (desktop/src-tauri/tauri.conf.json → plugins.updater.pubkey); it holds the updater's public key"
+  },
+  {
+   "token": "sendmail",
+   "reason": "The public Unix mail command matched by the harness egress detector (observatory/engine/collectors/scan_harness.py), not an estate identity."
+  },
+  {
+   "token": "deepseek",
+   "reason": "The public provider/model namespace in synthetic usage receipts (observatory/engine/tests/test_fabric_service.py), not a private project identity."
   }
  ]
 }
