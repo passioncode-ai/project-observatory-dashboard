@@ -50,3 +50,17 @@ are regenerated and checked.
 Next: independent review at the committed source, privacy current/history gate,
 then a draft branch handoff. Do not merge or release the measured-red parent as
 a consequence of this scoped fix.
+
+
+## Hosted compatibility follow-up
+
+At `469d316`, the Ubuntu 3.11 run reported inherited credential-door failures
+(518 passing assertions, 5 failing) and one CLI-compatibility fixture error. Two
+invented line-reporting suites in that fixture had no protocol declaration. The
+fixture now explicitly declares only those two reporters; production admission
+is unchanged, and unknown suites still default to unittest. The initial failed
+hosted run remains evidence: [job](https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/38365448986/job/115189358208).
+
+Independent review of `469d316` accepted the original counterexamples and 12
+additional subprocess controls. The follow-up reruns all 19 CLI compatibility
+cases and 24 root runner cases; this does not close inherited provider failures.

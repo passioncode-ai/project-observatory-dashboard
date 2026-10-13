@@ -120,5 +120,17 @@
       "incomplete final summary borrowed prior cases"
     ],
     "corrected_root_cases": 24
+  },
+  "hosted_followup": {
+    "source": "469d316b5cb92063cbbe4d245ca8650ceed5a007",
+    "job": 115189358208,
+    "verdict": "FAIL",
+    "failures": [
+      "inherited credential_doors: 518 pass/5 fail",
+      "cli_compatibility synthetic line reporter lacks declaration"
+    ],
+    "correction": "test-only explicit protocol for printed/partly fixtures",
+    "cli_cases": 19,
+    "cli_exit": 0
   }
 }
