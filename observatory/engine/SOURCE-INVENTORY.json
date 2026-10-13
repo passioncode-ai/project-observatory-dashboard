@@ -2712,8 +2712,8 @@
       "path": "tests/test_i18n.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a0ceef9c8c0dcab3f93afcbdd399072cad4d80650a8d8f33c34027214efb5c53",
-      "bytes": 44928
+      "export_sha256": "c976a57692d59cf4570e811229a735d344ffe7077cb88c481144f9edf2a63510",
+      "bytes": 45033
     },
     {
       "path": "tests/test_identifiers.py",
@@ -3993,8 +3993,8 @@
       "path": "tools/cleanup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fac3a4b748b6ec6c9a5de336b7dfc0f87bfd8c9644b63e02345108c01b67f4df",
-      "bytes": 45676
+      "export_sha256": "9b9d126623be78a6499d7e36525bb3d8772f002bc90a39bfb984948faae3fa66",
+      "bytes": 45694
     },
     {
       "path": "tools/cloudflare.py",

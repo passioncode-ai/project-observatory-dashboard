@@ -51,6 +51,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "collectors"))
 import configuration  # noqa: E402
 import paths  # noqa: E402
+import osprivacy  # noqa: E402
 import safe_git  # noqa: E402
 from cleanup_safety import protected_tree_reason  # noqa: E402
 
@@ -238,8 +239,8 @@ def untracked_manifest(target: str, deadline: float) -> dict:
         before = os.lstat(path)
         if not stat.S_ISREG(before.st_mode):
             raise ArchiveRefused("an untracked directory, symlink or special file is outside the manual archive")
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-        fd = os.open(path, flags)
+        flags = os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK
+        fd = osprivacy.open(path, flags)
         with os.fdopen(fd, "rb") as source:
             opened = os.fstat(source.fileno())
             if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
