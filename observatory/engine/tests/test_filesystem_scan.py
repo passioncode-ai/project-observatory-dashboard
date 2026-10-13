@@ -437,7 +437,7 @@ def test_a_stopping_tick_records_why_it_stopped() -> None:
     if f.is_file():
         doc = json.loads(f.read_text(encoding="utf-8"))
         check("naming the step that stopped it",
-              doc["failed_steps"] == [{"step": "emit", "exit": 1}],
+              doc["failed_steps"] == [{"step": "emit", "exit": 1, "outcome": "failed"}],
               str(doc["failed_steps"]))
         check("with a fresh finished_at", doc["finished_at"].startswith("20"),
               doc["finished_at"])

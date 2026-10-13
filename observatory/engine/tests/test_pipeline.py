@@ -598,6 +598,22 @@ def test_the_rotation_keeps_every_reader_after_its_writer() -> None:
           any("remote-env" in p for p in rotation_reads_problems(planted)), "")
 
 
+def test_the_rotation_reads_have_no_cycle() -> None:
+    """ENG-007: `rotation_order` moves each writer before its readers; a cycle in READS_FROM has no
+    such order. The tick now gives up on one and runs the planned order, but a cycle is a mistake in
+    the declaration, refused here at review rather than met by a tick."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("tick_for_cycles", ROOT / "tools/tick.py")
+    tick = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tick)
+    names = sorted(set(tick.READS_FROM) | {w for ws in tick.READS_FROM.values() for w in ws})
+    check("READS_FROM is acyclic", tick.reads_cycle(tick.READS_FROM, names) == [],
+          str(tick.reads_cycle(tick.READS_FROM, names)))
+    planted = dict(tick.READS_FROM, env=("leaks",))
+    check("and the check catches a planted cycle (env reading leaks)",
+          set(tick.reads_cycle(planted, names)) >= {"env", "leaks"}, str(tick.reads_cycle(planted, names)))
+
+
 def files_a_script_opens(script: pathlib.Path) -> set[str]:
     """Every registry document and scratch receipt named in one script.
 
@@ -775,6 +791,7 @@ if __name__ == "__main__":
                test_every_traced_exemption_is_still_needed,
                test_the_check_would_catch_an_inversion,
                test_the_rotation_keeps_every_reader_after_its_writer,
+               test_the_rotation_reads_have_no_cycle,
                test_every_step_declares_the_files_its_script_opens,
                test_the_path_a_step_is_HANDED_is_declared_too,
                test_every_test_a_suite_defines_is_dispatched):
