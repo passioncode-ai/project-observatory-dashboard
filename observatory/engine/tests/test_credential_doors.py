@@ -2637,6 +2637,58 @@ def test_or_policy_refuses_unknown_fresh_capacity_before_lowering() -> None:
                   and all(r["limit_usd"] == 8 for r in m.ledger()["issued"].values()), str(plan))
 
 
+
+def test_or_policy_reconciles_near_targets_only_for_blocked_admission() -> None:
+    """The declared target, not a new allocation, repairs measurable fractional drift."""
+    for mode in ("exact", "round", "downward", "floor", "uncertain", "room", "fresh-lower", "fresh-unknown"):
+        m, p = _r3_door(); m.issue_for_policy(_pol(1, limit=3.33), "example")
+        p.keys[p.by_name("k0")]["limit"] = 3.3301
+        p.echo = {"exact": lambda x: x, "round": lambda x: round(x, 2),
+                  "downward": lambda x: x - .004, "floor": lambda x: max(x, 3.3301),
+                  "uncertain": lambda x: x, "room": lambda x: x,
+                  "fresh-lower": lambda x: x, "fresh-unknown": lambda x: x}[mode]
+        events = []; p.start()
+        def request(path, admin, payload=None, method=None):
+            result = p(path, admin, payload, method)
+            if method == "PATCH" or path == "/keys": events.append((method or "POST", payload["limit"]))
+            if mode == "uncertain" and method == "PATCH": raise m.Unreachable("synthetic lost receipt")
+            return result
+        m._request = request
+        original = m.find_key; reads = [0]
+        def fresh(admin, name):
+            row = original(admin, name); reads[0] += 1
+            if mode.startswith("fresh-") and reads[0] == 2:
+                p.keys[row["hash"]]["limit"] = 3.32
+                row = dict(row); row["limit"] = 3.32
+                if mode == "fresh-unknown": row.pop("limit")
+            return row
+        m.find_key = fresh
+        try:
+            plan = m.issue_for_policy(_pol(2, limit=7 if mode == "room" else 6.66), "example",
+                split={"vault:project-a/prod/K0": 3.33, "vault:project-a/prod/K1": 3.33})
+            partial = False
+        except m.PolicyPartial as exc: plan, partial = exc.plan, True
+        if mode in ("exact", "round", "downward"):
+            check(f"{mode}: verified near-target decrease precedes new issuance under the original cap",
+                  not partial and events == [("PATCH", 3.33), ("POST", 3.33)]
+                  and p.n == 2 and p.max_sum <= 6.66
+                  and [s["action"] for s in plan] == ["ceiling-moved", "issued"], str(plan))
+        elif mode == "floor":
+            check("an unchanged fractional floor supplies no headroom and is attempted only once",
+                  not partial and events == [("PATCH", 3.33)] and p.n == 1
+                  and [s["action"] for s in plan] == ["held-ceiling", "blocked"], str(plan))
+        elif mode == "uncertain":
+            check("an uncertain corrective decrease cannot release headroom",
+                  partial and events == [("PATCH", 3.33)] and p.n == 1, str(plan))
+        elif mode.startswith("fresh-"):
+            check(f"{mode}: queued near-target correction revalidates before any mutation",
+                  partial and not events and p.n == 1 and p.total() == 3.32, str(plan))
+        else:
+            check("near-target mutation tolerance is retained when admission already fits",
+                  not partial and events == [("POST", 3.33)] and p.n == 2 and p.max_sum <= 7
+                  and [s["action"] for s in plan] == ["held-ceiling", "issued"], str(plan))
+
+
 def test_or_policy_runs_one_at_a_time() -> None:
     """Round 3, probe F2: two runs at once with opposite splits read each other's keys before either
     moved them and ended both at $8 ($16 against $10). A run holds an exclusive lock beside the ledger
@@ -2704,6 +2756,9 @@ def test_or_policy_counts_every_positive_provider_fraction() -> None:
         m, p = _r3_door()
         m.issue_for_policy(_pol(1, limit=3.33), "example")
         p.keys[p.by_name("k0")]["limit"] = observed
+        # A provider floor that the admitted correction cannot reduce still
+        # supplies no headroom; a verified actual decrease is tested separately.
+        p.echo = lambda requested, floor=observed: max(requested, floor)
         before = (p.n, p.patches)
         p.start()
         plan = m.issue_for_policy(_pol(2, limit=6.66), "example")
@@ -2714,7 +2769,7 @@ def test_or_policy_counts_every_positive_provider_fraction() -> None:
                   and [row["action"] for row in plan] == ["in-place", "issued"])
         else:
             check(f"observed {observed!r} blocks minting into insufficient exact headroom",
-                  (p.n, p.patches) == before and total <= Decimal("6.66")
+                  p.n == before[0] and p.patches == before[1] + 1 and total <= Decimal("6.66")
                   and [row["action"] for row in plan] == ["held-ceiling", "blocked"]
                   and plan[0]["observed_limit"] == observed, str(plan))
 
@@ -3299,6 +3354,7 @@ if __name__ == "__main__":
                test_or_policy_confirms_lowered_exposure_before_spending_headroom,
                test_or_policy_progresses_observed_nonincreasing_lowerings,
                test_or_policy_refuses_unknown_fresh_capacity_before_lowering,
+               test_or_policy_reconciles_near_targets_only_for_blocked_admission,
                test_or_policy_runs_one_at_a_time,
                test_or_policy_counts_every_positive_provider_fraction,
                test_or_policy_amounts_are_whole_cents_against_the_exact_limit,

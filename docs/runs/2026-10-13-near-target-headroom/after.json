@@ -1,0 +1,235 @@
+{
+  "checkout_base": "5acbb8eaa011ace4dec551048416fe1299de3b00",
+  "working_tree_modified": true,
+  "source_bindings": {
+    "tests/adv_j1_property.py": "059eeddcea7a08bbe4e92ffa496fc243d72915c1976bb39b3b923be6fb0b88a9",
+    "tests/test_credential_doors.py": "3fae97d50337e3354d834791b6fccc576b8ebe0fe972d97daf781405f18c6592",
+    "tools/openrouter.py": "602d50bd7f594c74585c10eff3388bd68a16d90a0d5e26cb85c4c50e826e31ba"
+  },
+  "cases": [
+    {
+      "seed": 7000906,
+      "issues": [],
+      "near_target_above_share": [],
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': 1, 'page': (3, 2), 'fillers': 3, 'newest_first': False}",
+        "run1 limit=8380 refs=2 kw={} -> None ['issued', 'issued']",
+        "unread 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "concurrent[policy] during policy -> None",
+        "rotate project-a-prod-k4 fault=- -> rc=1",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 41.9001",
+        "failrun deliver-timeout -> None ['in-place', 'held-unread', 'over-limit']",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 41.906",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['held-missing', 'held-ceiling']",
+        "  remedy revoke project-a-prod-k1 (held-missing) -> 0",
+        "converge#1 -> None ['issued', 'ceiling-moved']"
+      ]
+    },
+    {
+      "seed": 7001367,
+      "issues": [],
+      "near_target_above_share": [],
+      "trace": [
+        "shape {'echo': 'round2', 'big': True, 'drift': 0, 'page': (3, 2), 'fillers': 8, 'newest_first': False}",
+        "run1 limit=388 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 0.9701",
+        "rotate project-a-prod-k3 fault=- -> rc=1",
+        "converge#0 -> None ['held-ceiling', 'in-place', 'held-missing', 'in-place']",
+        "  remedy revoke project-a-prod-k5 (held-missing) -> 0",
+        "converge#1 -> None ['ceiling-moved', 'in-place', 'issued', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7001538,
+      "issues": [],
+      "near_target_above_share": [],
+      "trace": [
+        "shape {'echo': 'id', 'big': True, 'drift': 0, 'page': (3, 2), 'fillers': 6, 'newest_first': False}",
+        "run1 limit=64 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "subcent db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4 -> 0.1601",
+        "rename db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4",
+        "unread db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4",
+        "converge#0 -> None ['in-place', 'in-place', 'held-missing', 'held-ceiling']",
+        "  remedy revoke project-a-prod-k1 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'in-place', 'issued', 'ceiling-moved']"
+      ]
+    },
+    {
+      "seed": 7002134,
+      "issues": [],
+      "near_target_above_share": [],
+      "trace": [
+        "shape {'echo': 'round2', 'big': True, 'drift': 0, 'page': (3, 2), 'fillers': 8, 'newest_first': False}",
+        "run1 limit=64 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "rotate project-a-prod-k7 fault=- -> rc=1",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 0.164",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "subcent db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4 -> 0.164",
+        "concurrent[issue] during policy -> None",
+        "subcent db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4 -> 0.17",
+        "converge#0 -> None ['held-missing', 'in-place', 'held-ceiling', 'ceiling-moved']",
+        "  remedy revoke project-a-prod-k0 (held-missing) -> 0",
+        "converge#1 -> None ['issued', 'in-place', 'ceiling-moved', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7002311,
+      "issues": [],
+      "near_target_above_share": [],
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': 0, 'page': (3, 2), 'fillers': 3, 'newest_first': False}",
+        "run1 limit=389372 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 973.4301",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 973.4301",
+        "provider deleted 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "failrun mint:500-before -> None ['held-ceiling', 'held-missing', 'held-ceiling', 'in-place']",
+        "remedy revoke project-a-prod-k2 -> 0",
+        "rotate project-a-prod-k0 fault=- -> rc=1",
+        "unread 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['ceiling-moved', 'issued', 'ceiling-moved', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7002432,
+      "issues": [],
+      "near_target_above_share": [],
+      "trace": [
+        "shape {'echo': 'round2', 'big': True, 'drift': 0, 'page': (4, 4), 'fillers': 16, 'newest_first': False}",
+        "run1 limit=135171 refs=3 kw={} -> None ['issued', 'issued', 'issued']",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 450.574",
+        "rotate-kill project-a-prod-k1 fault=mint:unreach-after -> rc=1",
+        "failrun kill -> None ['in-place', 'held-ceiling', 'in-place', 'over-limit']",
+        "provider deleted f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "converge#0 -> None ['in-place', 'held-ceiling', 'held-missing']",
+        "  remedy revoke project-a-prod-k2 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'ceiling-moved', 'issued']"
+      ]
+    },
+    {
+      "seed": 7002478,
+      "issues": [],
+      "near_target_above_share": [],
+      "trace": [
+        "shape {'echo': 'id', 'big': True, 'drift': 0, 'page': (3, 2), 'fillers': 9, 'newest_first': True}",
+        "run1 limit=681060 refs=5 kw={} -> None ['issued', 'issued', 'issued', 'issued', 'issued']",
+        "failrun kill -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "failrun deliver -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 1362.1201",
+        "consumer reads db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4 by label (listed); revoke -> rc=1 still=True",
+        "provider deleted 5963446a776ad19649eac8523b897d97b2edc9786b1cbdad64d207255908533c",
+        "failrun kill -> None ['in-place', 'held-ceiling', 'in-place', 'in-place', 'held-missing']",
+        "converge#0 -> None ['in-place', 'held-ceiling', 'in-place', 'in-place', 'held-missing']",
+        "  remedy revoke project-a-prod-k4 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'ceiling-moved', 'in-place', 'in-place', 'issued']"
+      ]
+    },
+    {
+      "seed": 7002514,
+      "issues": [],
+      "near_target_above_share": [],
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': 0, 'page': (3, 2), 'fillers': 3, 'newest_first': True}",
+        "run1 limit=8871 refs=3 kw={} -> None ['issued', 'issued', 'issued']",
+        "rotate project-a-prod-k0 fault=- -> rc=1",
+        "provider deleted f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "concurrent[rotate] during policy -> None",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 29.574",
+        "rename 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['held-ceiling', 'in-place', 'held-missing']",
+        "  remedy revoke project-a-prod-k7 (held-missing) -> 0",
+        "converge#1 -> None ['ceiling-moved', 'in-place', 'issued']"
+      ]
+    },
+    {
+      "seed": 7002543,
+      "issues": [],
+      "near_target_above_share": [],
+      "trace": [
+        "shape {'echo': '-0.004', 'big': False, 'drift': 0, 'page': (3, 2), 'fillers': 2, 'newest_first': True}",
+        "run1 limit=956236 refs=2 kw={} -> None ['issued', 'issued']",
+        "unread 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "provider deleted 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 4781.18",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 4781.184",
+        "rename 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "failrun deliver -> None ['held-unread', 'held-missing', 'over-limit']",
+        "rename 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['held-ceiling', 'held-missing']",
+        "  remedy revoke project-a-prod-k7 (held-missing) -> 0",
+        "converge#1 -> None ['ceiling-moved', 'issued']"
+      ]
+    },
+    {
+      "seed": 7002785,
+      "issues": [],
+      "near_target_above_share": [],
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': 1, 'page': (3, 2), 'fillers': 0, 'newest_first': True}",
+        "run1 limit=95748 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 239.3701",
+        "converge#0 -> None ['in-place', 'held-missing', 'held-ceiling', 'in-place']",
+        "  remedy revoke project-a-prod-k3 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'issued', 'ceiling-moved', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7003074,
+      "issues": [],
+      "near_target_above_share": [],
+      "trace": [
+        "shape {'echo': 'id', 'big': False, 'drift': -1, 'page': (5, 3), 'fillers': 5, 'newest_first': True}",
+        "run1 limit=49086 refs=6 kw={} -> None ['issued', 'issued', 'issued', 'issued', 'issued', 'issued']",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 81.814",
+        "consumer reads db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4 by label (unlisted); revoke -> rc=1 still=True",
+        "provider deleted 3d03f305010cfcbdc75d488a71baeae526dbc30e915e01ab003fee0f4ce359ec",
+        "  concurrent rotate -> rc=1",
+        "concurrent[rotate] during policy -> None",
+        "converge#0 -> None ['held-ceiling', 'in-place', 'in-place', 'in-place', 'in-place', 'held-missing']",
+        "  remedy revoke project-a-prod-k5 (held-missing) -> 0",
+        "converge#1 -> None ['ceiling-moved', 'in-place', 'in-place', 'in-place', 'in-place', 'issued']"
+      ]
+    },
+    {
+      "seed": 7003447,
+      "issues": [],
+      "near_target_above_share": [],
+      "trace": [
+        "shape {'echo': 'id', 'big': False, 'drift': -1, 'page': (3, 2), 'fillers': 3, 'newest_first': True}",
+        "run1 limit=1860 refs=5 kw={} -> None ['issued', 'issued', 'issued', 'issued', 'issued']",
+        "concurrent[limit] during policy -> None",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 3.7201",
+        "failrun deliver -> None ['held-ceiling', 'in-place', 'in-place', 'in-place', 'in-place', 'over-limit']",
+        "provider deleted 5963446a776ad19649eac8523b897d97b2edc9786b1cbdad64d207255908533c",
+        "rotate project-a-prod-k4 fault=- -> rc=1",
+        "consumer reads 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 by label (unlisted); revoke -> rc=1 still=True",
+        "rotate project-a-prod-k5 fault=- -> rc=1",
+        "converge#0 -> None ['held-ceiling', 'in-place', 'in-place', 'in-place', 'held-missing']",
+        "  remedy revoke project-a-prod-k4 (held-missing) -> 0",
+        "converge#1 -> None ['ceiling-moved', 'in-place', 'in-place', 'in-place', 'issued']"
+      ]
+    },
+    {
+      "seed": 7003549,
+      "issues": [],
+      "near_target_above_share": [],
+      "trace": [
+        "shape {'echo': 'round2', 'big': True, 'drift': 0, 'page': (4, 4), 'fillers': 19, 'newest_first': False}",
+        "run1 limit=5910 refs=3 kw={} -> None ['issued', 'issued', 'issued']",
+        "unread f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "rename 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "provider deleted f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 19.7001",
+        "concurrent[rotate] during rotate -> rc=1",
+        "rotate project-a-prod-k6 fault=- -> rc=1",
+        "unread 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "converge#0 -> None ['in-place', 'held-ceiling', 'held-missing']",
+        "  remedy revoke project-a-prod-k3 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'ceiling-moved', 'issued']"
+      ]
+    }
+  ]
+}

@@ -1047,7 +1047,7 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
         if len(primary) < len(slots):
             read_admin(account)         # the account a new key is minted from, resolved before anything moves
         after, end = _Total(), _Total()  # the total if every planned write happens / what the run leaves
-        work, settle = [], []
+        work, settle, near_targets = [], [], []
         for rotation_name, rotation_rec in scope.items():
             extra = _rotation_exposure(rotation_rec)
             if extra != 0:
@@ -1089,6 +1089,7 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                     step["observed_limit"] = current
                     step["why"] = "The provider ceiling remains above the requested share; no automatic retry"
                     settle.append(f"limit {name} --set {step['limit']:g}")
+                    near_targets.append((step, name, held, current, state))
                 continue
             step["previous"] = current
             step["held"] = state
@@ -1109,6 +1110,20 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                          "why": (f"a key of this project the policy does not name, counted at "
                                  + ("an unbounded ceiling" if counted is None else f"${_usd(counted):.2f}")
                                  + (f" ({why})" if why else "") + "; not moved by this run")})
+        if (not after.unbounded and after.over(limit_cents)
+                and any(order == 1 for order, *_ in work)):
+            # Close-value no-ops must not strand otherwise admissible slots.
+            # Reapply only the caller's existing share, once, through the same
+            # fresh-bound and actual-response guards as every other decrease.
+            # If admission already fits, retain the no-op tolerance.
+            for step, name, held, current, state in near_targets:
+                planned = _cents(step["limit"], "a planned ceiling")
+                after.add(planned - held)
+                end.add(-held)
+                step["previous"], step["held"] = current, state
+                step.pop("why", None)
+                step.pop("observed_limit", None)
+                work.append((0, step, name, held))
         room = not after.over(limit_cents)
         for _order, step, name, _held in sorted(work, key=lambda w: w[0]):
             step["action"] = "not-reached"
