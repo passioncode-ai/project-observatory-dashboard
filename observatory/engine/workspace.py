@@ -513,6 +513,7 @@ def doctor(base: Path) -> dict:
             "features": _switches(doc, "features"),
             "interface": {"locale": doc.get("interface", {}).get("locale", "en")},
             "coverage_warnings": coverage_warnings(doc),
+            "open_unlinked": __import__("open_unlinked").saved_summary(base=base),
             "backups": __import__("backup_vault").status(base),
             # Updates that arrive by themselves and the daily encrypted backup: whether the
             # job is scheduled, what it last found, and what needs a person (maintenance.py).
@@ -614,6 +615,7 @@ def machine_parser(name: str) -> argparse.ArgumentParser:
         mode.add_argument("--checkouts", action="store_true", help="inventory checkout candidates beneath explicit roots; never clean them")
         mode.add_argument("--coverage", action="store_true", help="summarize saved checkout/cache coverage without rescanning")
         mode.add_argument("--cache-coverage", action="store_true", help="inspect declared cache roots and available tools without walking or cleaning")
+        mode.add_argument("--open-unlinked", action="store_true", help="observe open deleted files on macOS/Linux; logical sizes, unknown reclaimability, no cleanup")
         ap.add_argument("--root", action="append", type=Path, help="explicit checkout search root; repeat for each root")
         ap.add_argument("--explain", type=int, metavar="PID", help="why one process runs, and print nothing else")
         return ap
@@ -850,6 +852,11 @@ def machine_command(name: str, argv: list[str]) -> int:
                                + (["--large-files", "--refresh"] if a.large_files else ["--refresh"]))
     import scan_machine
     if name == "machine":
+        if a.open_unlinked:
+            if a.root or a.explain is not None: machine_parser(name).error("--open-unlinked cannot be combined with --root or --explain")
+            import open_unlinked
+            print(json.dumps(open_unlinked.collect(), indent=1))
+            return 0
         if a.coverage:
             if a.root or a.explain is not None: machine_parser(name).error("--coverage cannot be combined with --root or --explain")
             import coverage_view
