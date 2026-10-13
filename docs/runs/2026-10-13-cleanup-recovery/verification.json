@@ -109,5 +109,15 @@
     "root_exit_code": 0,
     "native_windows": "NOT_RUN",
     "hosted_rerun": "PENDING"
+  },
+  "path_hygiene_correction": {
+    "source_head": "196f0be",
+    "trigger": "The hosted 238-suite run at bb7296e found two persistent archives classified as leaked test temporary directories.",
+    "change": "Two local documented exceptions; runtime AST unchanged. Recovery archives must survive process exit.",
+    "api_listings_assertions": 62,
+    "git_hardening_cases": 56,
+    "local_status": "PASS",
+    "independent_review": "Scoped source review accepted the archive lifetime rationale.",
+    "hosted_rerun": "PENDING"
   }
 }

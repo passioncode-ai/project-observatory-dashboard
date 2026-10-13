@@ -47,6 +47,12 @@ osprivacy (17), i18n (44), and Git hardening (56) passed independently. The root
 suite still passes 172 cases. Native Windows was not run locally. Required hosted
 checks on the corrected candidate remain the integration gate.
 
+The next hosted 238-suite run exposed a path-hygiene classification error: the
+branch/worktree recovery archives intentionally survive process exit, unlike test
+temporary directories. `196f0be` adds two documented local exceptions; the runtime
+AST is unchanged. API-listing/path checks (62 assertions) and Git hardening (56
+cases) pass, and independent review accepted the archive-lifetime rationale.
+
 ## Remaining work and next task
 
 Next: integrate the reviewed candidate under the repository's required checks,
