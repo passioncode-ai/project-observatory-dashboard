@@ -2123,10 +2123,17 @@
       "upstream_modified": true
     },
     {
+      "path": "tests/rotation_capacity_model.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "62b7cc7c2c7ed418e1e8027996b46ae7e003e6ca0e02b6de30602f289367de97",
+      "bytes": 7565
+    },
+    {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "03d728ef65104b900337864aeb258fcad4822dd0df5628a6edddaca96a162841",
-      "bytes": 26628,
+      "export_sha256": "182a1c8ae72c6e08cb5a0de8aff445ed2b7ccf9cf07951da087980744e42585e",
+      "bytes": 26679,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -3580,6 +3587,13 @@
       "bytes": 14626
     },
     {
+      "path": "tests/test_rotation_capacity.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5f2242e144d879cdbdbe3aa68f9558b41adfbf602a24175cee35e1b598381cae",
+      "bytes": 7691
+    },
+    {
       "path": "tests/test_runtime_identity.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -4871,7 +4885,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 632,
+  "file_count": 634,
   "excluded": [
     "git-history",
     "operator-registries",
