@@ -55,11 +55,16 @@ SHAPES = {
 # `finding_types.titled` (OBS-64): a Russian demo shows Russian titles because the real
 # ones are translated, not because the demo carries its own copy. The detail and the
 # action stay in English, as a real rule writes them.
+#
+# A date in a detail is never a literal (ENG-019): the leak's title counts LEAK_DAYS
+# back from the build and its detail names the day that count lands on, `{seen}`,
+# filled from the same `now` when the demo is built, so the two agree on every day.
+LEAK_DAYS = 18
 FINDINGS = (
     ("critical", "secret.leaked_unrotated", "project:atlas-billing",
      "{secret} was seen leaking {n} days ago and has no recorded settlement",
-     {"secret": "PAYMENTS_SIGNING_SECRET", "n": 18},
-     "The value of PAYMENTS_SIGNING_SECRET was seen in a session log on 2026-09-24.",
+     {"secret": "PAYMENTS_SIGNING_SECRET", "n": LEAK_DAYS},
+     "The value of PAYMENTS_SIGNING_SECRET was seen in a session log on {seen}.",
      "Rotate the secret at the provider, then record the rotation with vault.py rotate."),
     ("warning", "clone.ahead", "project:orbit-agents", "{repo} holds commits that are on no remote",
      {"repo": "northwind-labs/orbit-agents"},
@@ -188,9 +193,10 @@ def main(argv: list[str]) -> int:
     counts = {s: sum(1 for f in FINDINGS if f[0] == s) for s in ("critical", "warning", "info")}
     sys.path.insert(0, str(ENGINE / "dashboard"))
     from finding_types import titled
+    seen = (now - timedelta(days=LEAK_DAYS)).strftime("%Y-%m-%d")
     (root / "registry/findings.json").write_text(json.dumps({"counts": counts, "built_at": stamp, "findings": [
         {"id": f"finding:demo-{i}", "severity": sev, "type": kind, "subject": subject, **titled(msgid, **args),
-         "detail": detail, "action": action, "evidence": ["demo"]}
+         "detail": detail.format(seen=seen), "action": action, "evidence": ["demo"]}
         for i, (sev, kind, subject, msgid, args, detail, action) in enumerate(FINDINGS)]}))
     from collectors.env_registry import document
     files = [{"path": f"{project}/{'.env' if kind == 'env' else '.env.example'}", "project": project, "kind": kind,

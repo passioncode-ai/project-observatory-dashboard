@@ -59,6 +59,26 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
+  # The manifest a host admits pins its schemas at raw.githubusercontent.com/<repo>/<tag>/: every tag
+  # must be this release or an older one, or a commit sha (0.24.0 pinned v0.24.1 and answered 404 until
+  # the next release, ENG-018). The tag this run was started by exists now, so a publishing run also
+  # reads every URL once; a rehearsal (vX.Y.Z-rc.N) checks the order only, its vX.Y.Z tag not pushed yet.
+  manifest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Every pinned URL names this release or an older tag, and resolves
+        env:
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+        run: |
+          release="${GITHUB_REF_NAME%%-*}"
+          resolve=(); if [ "$PUBLISH" = true ]; then resolve=(--resolve); fi
+          python observatory/engine/tools/check_manifest_urls.py --release "$release" "${resolve[@]}"
+
   macos:
     needs: [guard]
     runs-on: macos-latest
@@ -284,7 +304,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [wheel, macos, windows, linux, feed]
+    needs: [wheel, manifest, macos, windows, linux, feed]
     permissions:
       contents: write
       id-token: write

@@ -25,10 +25,17 @@ ones at the back of a fixed order were `not started` tick after tick: on one mac
 and the lifecycle watch had not run for two days while the folder scan and the store check took
 the first thirteen minutes of every tick (2026-10-12, load average 26-30). So the collectors after
 `integrity` are planned first and then run least recently started first (`rotation_order`), with
-the start times kept in `store/tick-rotation.json`. A step that was `not started` keeps its old
-time and goes first next tick; one that ran goes to the back. A collector that reads another's
-output in the same tick still runs after it (`READS_FROM`, kept equal to the artefact graph by
-`tests/test_pipeline.py`).
+what happened to each kept in `store/tick-rotation.json` (schema 2, `Rotation`): when it last
+started — stamped BEFORE the step —, when it finished, how it ended (`ran`, `failed`, `stopped`,
+`not_started`), how many ticks in a row it was not started and when it last ran to the end. A step
+that was `not started` keeps its old start and goes first next tick; one that started goes to the
+back. A collector that reads another's output in the same tick still runs after it (`READS_FROM`,
+kept equal to the artefact graph and acyclic by `tests/test_pipeline.py`); a cycle there is named in
+the log and the planned order runs, rather than the tick spinning on it.
+
+**How a step ended is a class, not an exit code** (`outcome_of`): the watchdog's 124 means both a
+step it did not start and one it stopped at its limit. Every `failed_steps` row in `tick.json`
+carries `outcome` beside `exit`.
 
 **The three early stops** — merge, emit, validate — go through `bail`, which writes the report
 and then stops, so the most consequential outcomes leave a record. The one quiet exit is the
@@ -36,6 +43,7 @@ lease stand-down: another run holds the registry and the next tick is 30 minutes
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 import shutil
@@ -56,8 +64,11 @@ TIMED_OUT = 124
 LEASE = "tools/tick_lease.py"
 #: Hours before the remotes and Bitbucket listings are read again.
 STALE_HOURS = 6
-#: Where the rotation keeps the last time each collector actually started (epoch seconds).
+#: Where the rotation keeps what happened to each collector (`Rotation`, schema 2).
 ROTATION_FILE = "tick-rotation.json"
+ROTATION_SCHEMA = 2
+#: How a step ended (`outcome_of`). `ran` is the only one that produced the step's output.
+OUTCOMES = ("ran", "failed", "stopped", "not_started")
 #: What `tick_lease.py step` prints, first, for a step it did not start for want of time.
 NOT_STARTED = "not started"
 #: Collectors that read another collector's output in the same tick: the reader runs after the
@@ -96,14 +107,72 @@ def lease(verb: str) -> tuple[int, str]:
     return p.returncode, (p.stdout + p.stderr).strip()
 
 
+def outcome_of(rc: int, first: str | None) -> str:
+    """How a step ended, from the watchdog's exit and the first line the step printed.
+
+    `not_started`: 124 and the watchdog's own `not started` line — no time was left for it;
+    `stopped`: 124 otherwise (the watchdog stopped it at its limit), or a signal (128 + n, or the
+    negative code of a process killed by one); `failed`: any other non-zero exit; `ran`: 0."""
+    if rc == 0:
+        return "ran"
+    if rc == TIMED_OUT:
+        return "not_started" if (first or "").startswith(NOT_STARTED) else "stopped"
+    if rc < 0 or rc > 128:
+        return "stopped"
+    return "failed"
+
+
+def reads_cycle(reads: dict[str, tuple[str, ...]], names) -> list[str]:
+    """The steps of one cycle in `reads` among `names`, in order; [] when there is none.
+
+    A cycle has no order in which every writer runs before its readers, so `rotation_order` could
+    only spin on it (ENG-007). `tests/test_pipeline.py` asserts READS_FROM has none."""
+    present = set(names)
+    edges = {reader: [w for w in writers if w in present]
+             for reader, writers in reads.items() if reader in present}
+    state: dict[str, int] = {}                  # 1 on the current path, 2 finished
+    path: list[str] = []
+
+    def visit(node: str) -> list[str]:
+        state[node] = 1
+        path.append(node)
+        for nxt in edges.get(node, ()):
+            if state.get(nxt) == 1:
+                return path[path.index(nxt):]
+            if nxt not in state:
+                found = visit(nxt)
+                if found:
+                    return found
+        state[node] = 2
+        path.pop()
+        return []
+
+    for node in sorted(edges):
+        if node not in state:
+            found = visit(node)
+            if found:
+                return list(found)
+    return []
+
+
 def rotation_order(planned: list[str], started: dict[str, float],
                    reads: dict[str, tuple[str, ...]] = READS_FROM) -> list[str]:
     """`planned` least recently started first; a step never started goes first, and ties keep the
     planned order. Then a writer that would run after a step reading its output is moved to just
-    before that reader, so the starved reader stays early and still reads this tick's output."""
-    order = sorted(planned, key=lambda name: started.get(name, 0.0))
-    moved = True
-    while moved:
+    before that reader, so the starved reader stays early and still reads this tick's output. A
+    start of None (never started) sorts as the oldest; only this ordering reads it as 0.
+
+    Bounded: a cycle in `reads` among the planned steps has no such order, and the loop that moved
+    writers forward used to spin on it for ever (ENG-007). A cycle is named in the log and the
+    planned order runs. The len(planned)² cap on passes is a second guard that acyclic reads never
+    reach — each pass that moves a writer settles one edge for good — kept so no later change to the
+    loop can make it spin again."""
+    cycle = reads_cycle(reads, planned)
+    if cycle:
+        log(f"rotation: READS_FROM has a cycle through {', '.join(cycle)} — the planned order this tick")
+        return list(planned)
+    order = sorted(planned, key=lambda name: started.get(name) or 0.0)
+    for _ in range(max(len(order), 1) ** 2):
         moved = False
         for reader, writers in reads.items():
             for writer in writers:
@@ -111,7 +180,10 @@ def rotation_order(planned: list[str], started: dict[str, float],
                     order.remove(writer)
                     order.insert(order.index(reader), writer)
                     moved = True
-    return order
+        if not moved:
+            return order
+    log("rotation: the writers-before-readers order did not settle — the planned order this tick")
+    return list(planned)
 
 
 def _ago(seconds: float | None) -> str:
@@ -121,52 +193,152 @@ def _ago(seconds: float | None) -> str:
     return f"last started {hours:.1f} h ago" if hours < 48 else f"last started {hours / 24:.1f} days ago"
 
 
+def _epoch(value) -> float | None:
+    """A time from the record, or None: not a number, a bool, or not finite (JSON's Infinity, NaN)."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    value = float(value)
+    return value if math.isfinite(value) else None
+
+
 class Rotation:
-    """The collectors of one tick: planned by the same `step(...)` calls, run by `rotation_order`."""
+    """The collectors of one tick: planned by the same `step(...)` calls, run by `rotation_order`.
+
+    The record (`store/tick-rotation.json`), schema 2 — per collector:
+
+        {"schema": 2, "collectors": {name: {"started_at": epoch, "finished_at": epoch,
+            "outcome": "ran|failed|stopped|not_started", "not_started_streak": int,
+            "last_ran_at": epoch|null}}}
+
+    `started_at` is stamped BEFORE the step (schema 1 kept the time after it, so a slow collector
+    looked recently started by its own duration) and saved, provisionally, before the step is
+    called, so a tick killed inside a step still moves it back. A step not started keeps its
+    previous `started_at` — null for one never started — and grows its `not_started_streak`, so it
+    goes first next tick and a reader can tell starvation from rotation. `last_ran_at` is the start
+    of the last attempt that ran to the end (`ran`): a failed or stopped attempt moves the collector
+    back without producing its output. `outcome` null with `finished_at` null means the step was
+    started and the tick was killed before it returned. Schema 1 (`{"started": {name: epoch}}`) is
+    still read, its times seeding `started_at` and `last_ran_at` — schema 1 kept no outcome, so a
+    seeded `last_ran_at` may belong to a run that failed —; the first save writes schema 2. A bad
+    row is coerced or skipped, never the whole record; a field that is not a finite number reads as
+    null. A schema that is an int past 2 (a newer engine's) is logged and left untouched: the
+    planned order runs and nothing is written over it. Any other unreadable shape is logged and
+    rewritten as schema 2 by the first save."""
 
     def __init__(self, t: "Tick", record: Path):
         self.t, self.record = t, record
         self.planned: list[tuple[str, tuple]] = []
+        #: True when the record holds a schema this engine does not know (a newer engine's): it is
+        #: then not rewritten this tick, so running an older engine never erases it.
+        self.foreign = False
 
     def step(self, name: str, *argv) -> None:
         self.planned.append((name, argv))
 
-    def load(self) -> dict[str, float]:
+    def _row(self, name: str, row) -> dict | None:
+        """One schema-2 row, its fields coerced; None (skipped, and said) when it is not a row."""
+        if not isinstance(row, dict):
+            log(f"rotation: {self.record.name} row {name!r} is not a record — skipped")
+            return None
+        try:
+            streak = max(int(row.get("not_started_streak") or 0), 0)
+        except (TypeError, ValueError, OverflowError):       # "x", Infinity, NaN
+            streak = 0
+        return {"started_at": _epoch(row.get("started_at")),
+                "finished_at": _epoch(row.get("finished_at")),
+                "outcome": row.get("outcome") if row.get("outcome") in OUTCOMES else None,
+                "not_started_streak": streak,
+                "last_ran_at": _epoch(row.get("last_ran_at"))}
+
+    def load(self) -> dict[str, dict]:
         try:
             import json
             doc = json.loads(self.record.read_text(encoding="utf-8"))
-            return {str(k): float(v) for k, v in (doc.get("started") or {}).items()}
+            if not isinstance(doc, dict):
+                raise TypeError("not an object")
+            if doc.get("schema") == ROTATION_SCHEMA:
+                collectors = doc.get("collectors") or {}
+                if not isinstance(collectors, dict):
+                    raise TypeError("collectors is not an object")
+                rows = {str(name): self._row(str(name), row) for name, row in collectors.items()}
+                return {name: row for name, row in rows.items() if row is not None}
+            if "schema" not in doc and isinstance(doc.get("started"), dict):
+                # Schema 1: the time it kept was taken when a step RETURNED, and only for a step that
+                # was started — the nearest thing it holds to a start and to the last run, so it seeds
+                # both and an upgrade does not read as every collector starved.
+                rows = {}
+                for k, v in doc["started"].items():
+                    at = _epoch(v)
+                    rows[str(k)] = {"started_at": at, "finished_at": None, "outcome": None,
+                                    "not_started_streak": 0, "last_ran_at": at}
+                return rows
+            schema = doc.get("schema")
+            if isinstance(schema, int) and not isinstance(schema, bool) and schema > ROTATION_SCHEMA:
+                # A NEWER engine's record: kept as it is, so running an older engine never erases it.
+                log(f"rotation: {self.record.name} unreadable (schema {schema}, newer than {ROTATION_SCHEMA}) "
+                    f"— the planned order this tick, and the record is not rewritten")
+                self.foreign = True
+                return {}
+            # Any other shape ({}, a string schema, schema 1 without `started`) is damage, not a newer
+            # engine: pinning it would run the planned order every tick and starve the tail again.
+            log(f"rotation: {self.record.name} unreadable (schema {schema!r}) — the planned order this tick; "
+                f"it is rewritten as schema {ROTATION_SCHEMA}")
+            return {}
         except FileNotFoundError:
             return {}
         except (OSError, ValueError, TypeError, AttributeError) as exc:
             log(f"rotation: {self.record.name} unreadable ({type(exc).__name__}) — the planned order this tick")
             return {}
 
-    def save(self, started: dict[str, float]) -> None:
+    def save(self, rows: dict[str, dict]) -> None:
+        if self.foreign:
+            return                      # a newer engine's record: kept as it is (said once, in load)
         try:
             import atomic
-            atomic.write_json(self.record, {"started": started})
+            atomic.write_json(self.record, {"schema": ROTATION_SCHEMA, "collectors": rows})
         except Exception as exc:  # noqa: BLE001 — losing the record costs fairness, never the tick
             log(f"rotation: could not keep {self.record.name} ({type(exc).__name__})")
 
     def run_in_turn(self) -> None:
-        started = self.load()
+        rows = self.load()
+        started = {name: row["started_at"] for name, row in rows.items()}
         argv_of = dict(self.planned)
         planned = [name for name, _ in self.planned]
+        for name in planned:
+            streak = (rows.get(name) or {}).get("not_started_streak") or 0
+            if streak:
+                log(f"rotation: {name} not started for {streak} tick{'s' if streak != 1 else ''}")
         order = rotation_order(planned, started)
         ahead = [name for name in order if order.index(name) < planned.index(name)]
         if ahead:
             now = time.time()
             log("rotation: " + ", ".join(
-                f"{name} ({_ago(now - started[name] if name in started else None)})" for name in ahead)
-                + " first — the collectors started least recently run first")
+                f"{name} ({_ago(now - started[name] if started.get(name) is not None else None)})"
+                for name in ahead) + " first — the collectors started least recently run first")
         self.t.order = order
         for name in order:
-            if self.t.step(name, *argv_of[name]):
-                started[name] = time.time()
-                self.save(started)
-            else:
+            row = rows.setdefault(name, {"started_at": None, "finished_at": None, "outcome": None,
+                                         "not_started_streak": 0, "last_ran_at": None})
+            previous = dict(row)
+            before = time.time()
+            # A PROVISIONAL row first: a tick killed inside this step still moves it to the back
+            # next time, instead of running the same heavy step first for ever.
+            row.update(started_at=before, finished_at=None, outcome=None)
+            self.save(rows)
+            outcome = self.t.step(name, *argv_of[name])
+            after = time.time()
+            row["outcome"] = outcome
+            if outcome == "not_started":
+                # It keeps the start it had — null for a collector never started — so it goes first
+                # next tick, and its streak says how long it has waited.
+                row.update(started_at=previous["started_at"], finished_at=previous["finished_at"],
+                           not_started_streak=int(previous.get("not_started_streak") or 0) + 1)
                 self.t.not_started.append(name)
+            else:
+                row.update(finished_at=after, not_started_streak=0)
+                if outcome == "ran":
+                    row["last_ran_at"] = before
+            self.save(rows)
 
 
 class Tick:
@@ -174,13 +346,15 @@ class Tick:
 
     def __init__(self, scratch: Path):
         self.scratch = scratch
+        #: (step, exit) of every step that did not end `ran`, and how each ended (`outcome_of`).
         self.failed: list[tuple[str, int]] = []
+        self.outcomes: dict[str, str] = {}
         self.order: list[str] = []
         self.not_started: list[str] = []
 
-    def step(self, name: str, *argv) -> bool:
+    def step(self, name: str, *argv) -> str:
         """Run a step under the watchdog; log every line it prints under its name; record a
-        non-zero exit as a failed step and go on. False when the watchdog did not start it."""
+        non-zero exit as a failed step and go on. Returns how it ended (`outcome_of`)."""
         proc = subprocess.Popen([PY, LEASE, "step", name, "--", *_text(argv)], cwd=ROOT,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, encoding="utf-8",
@@ -190,10 +364,12 @@ class Tick:
             first = line if first is None else first
             log(f"{name}: {line.rstrip()}")
         rc = proc.wait()
+        outcome = outcome_of(rc, first)
         if rc != 0:
-            log(f"{name}: EXIT {rc} — recorded as a failed step")
+            log(f"{name}: EXIT {rc} — recorded as a failed step ({outcome.replace('_', ' ')})")
             self.failed.append((name, rc))
-        return not (rc == TIMED_OUT and (first or "").startswith(NOT_STARTED))
+            self.outcomes[name] = outcome
+        return outcome
 
     def bounded(self, name: str, *argv) -> tuple[int, str]:
         """The same watchdog, ungated, for a command whose exit and output the tick reads itself."""
@@ -207,18 +383,23 @@ class Tick:
             import atomic
             atomic.write_json(self.scratch / "tick.json", {
                 "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "failed_steps": [{"step": s, "exit": rc} for s, rc in self.failed],
+                # `exit` for the readers that know only it; `outcome` tells a step not started from
+                # one stopped at its limit, which share the watchdog's 124.
+                "failed_steps": [{"step": s, "exit": rc, "outcome": self.outcomes.get(s) or outcome_of(rc, None)}
+                                 for s, rc in self.failed],
                 "collector_order": self.order,
                 "not_started": self.not_started,
             })
         except Exception:  # noqa: BLE001 — the report is best effort; the log says it is missing
             log("tick: could not record the step report")
 
-    def bail(self, name: str, rc: int, message: str) -> None:
+    def bail(self, name: str, rc: int, message: str, first: str | None = None) -> None:
         """Stop the tick at `name`, and leave the report that says so. Exits 0: a scheduler must
-        not retry a state that has been reported."""
+        not retry a state that has been reported. `first` is what the step printed (its first line
+        decides `not_started` from `stopped` under the watchdog's 124)."""
         log(message)
         self.failed.append((name, rc))
+        self.outcomes[name] = outcome_of(rc, (first or "").splitlines()[0] if first else None)
         self.write_report()
         log(f"tick stopped at {name}")
         raise SystemExit(0)
@@ -312,12 +493,18 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     step = t.step
 
     # THE TAIL. Every step from here on is in tick_lease.TAIL_STEPS, so it keeps its reserve.
-    if bounded("merge", PY, "collectors/merge.py", SCRATCH)[0] != 0:
-        t.bail("merge", 1, "merge failed — stopping, the registry is not rewritten")
-    if bounded("emit", PY, "collectors/emit_registry.py", SCRATCH)[0] != 0:
-        t.bail("emit", 1, "emit failed or REFUSED a wholesale change — the registry keeps the last good version")
-    if bounded("validate", PY, "tools/validate_registry.py")[0] != 0:
-        t.bail("validate", 1, "VALIDATOR RED — the registry is not projected and the agent is not called")
+    # Each bails with its OWN exit and first line, so a stopped or never-started merge is not
+    # reported as a failure (verification round 2: a literal 1 read every bail as `failed`).
+    rc, out = bounded("merge", PY, "collectors/merge.py", SCRATCH)
+    if rc != 0:
+        t.bail("merge", rc, "merge failed — stopping, the registry is not rewritten", first=out)
+    rc, out = bounded("emit", PY, "collectors/emit_registry.py", SCRATCH)
+    if rc != 0:
+        t.bail("emit", rc, "emit failed or REFUSED a wholesale change — the registry keeps the last good version",
+               first=out)
+    rc, out = bounded("validate", PY, "tools/validate_registry.py")
+    if rc != 0:
+        t.bail("validate", rc, "VALIDATOR RED — the registry is not projected and the agent is not called", first=out)
     if bounded("events", PY, "collectors/scan_events.py")[0] != 0:
         log("events degraded")
     if bounded("snapshot", PY, "collectors/compute_deltas.py", "snapshot")[0] != 0:

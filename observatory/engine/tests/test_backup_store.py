@@ -5,8 +5,9 @@ The tool kept the ledger's only backups for a week with no test naming it
 . Driven on a planted store: a
 copy is taken through SQLite's backup API, the newest three are kept, SQLite's
 own `-wal`/`-shm` companions are never mistaken for backups, a second run in
-the same minute takes nothing, and an empty result is removed rather than
-counted.
+the same minute takes nothing, the next minute takes one and prunes to three
+(both driven by `--stamp`, never the wall clock), and an empty result is
+removed rather than counted.
 """
 from __future__ import annotations
 import importlib.util
@@ -80,24 +81,65 @@ def test_companions_are_never_counted_as_backups() -> None:
 
 
 def test_the_newest_three_are_kept_and_the_rest_pruned_only_after_the_new_one_exists() -> None:
+    """Driven through `--stamp`, so the minute is the test's and not the wall clock's
+    (ENG-008): the earlier version retried when the minute turned between two runs,
+    and the turned-minute path itself was never asserted."""
     bs = load()
     db = planted()
     store = db.parent
     for name in ("2026-09-10T1000Z", "2026-09-11T1000Z", "2026-09-12T1000Z"):
-        (store / f"{bs.PREFIX}{name}").write_bytes(b"old")
-    p = run(db)
-    check("the run succeeds", p.returncode == 0, p.stderr[-200:])
-    names = sorted(x.name for x in bs.existing(store))
-    check("three remain, the oldest is gone, the new one is among them",
-          len(names) == bs.KEEP and f"{bs.PREFIX}2026-09-10T1000Z" not in names
-          and any(n > f"{bs.PREFIX}2026-09-12" for n in names), str(names))
-    p2 = run(db)
-    if p2.returncode == 0 and "already exists" not in p2.stdout:
-        # The minute turned between the two runs (CI, 2026-10-12T05:24Z): that pair took two
-        # stamps and proves nothing about one minute, so ask again inside the new one.
-        p2 = run(db)
+        p = run(db, "--stamp", name)
+        check(f"--stamp {name} takes that copy", p.returncode == 0 and f"backup {bs.PREFIX}{name}" in p.stdout,
+              (p.stdout + p.stderr)[-200:])
+    check("three copies exist before the fourth", len(bs.existing(store)) == bs.KEEP,
+          str([x.name for x in bs.existing(store)]))
+    again = run(db, "--stamp", "2026-09-12T1000Z")
     check("a second run inside the same minute takes nothing",
-          p2.returncode == 0 and "already exists" in p2.stdout, p2.stdout[-120:])
+          again.returncode == 0 and "already exists" in again.stdout, (again.stdout + again.stderr)[-200:])
+    check("and prunes nothing", len(bs.existing(store)) == bs.KEEP)
+    turned = run(db, "--stamp", "2026-09-12T1001Z")
+    check("the next minute takes a copy", turned.returncode == 0 and "pruned 1" in turned.stdout,
+          (turned.stdout + turned.stderr)[-200:])
+    names = [x.name for x in bs.existing(store)]
+    check("exactly KEEP remain: the oldest is gone, the new one is among them",
+          names == [f"{bs.PREFIX}2026-09-12T1001Z", f"{bs.PREFIX}2026-09-12T1000Z", f"{bs.PREFIX}2026-09-11T1000Z"],
+          str(names))
+
+
+def test_a_stamp_that_is_not_a_past_minute_is_refused() -> None:
+    """`--stamp` names the minute a copy is taken in. A malformed one, or one in the
+    future, would sort a copy after every real one and keep it out of the rotation for
+    as long as that future lasts, so both are refused before anything is copied."""
+    bs = load()
+    db = planted()
+    for bad, why in (("2026-09-12 10:00", "malformed"), ("2026-09-12T10:00Z", "malformed"),
+                     ("2026-13-40T1000Z", "not a date"), ("2999-01-01T0000Z", "in the future")):
+        p = run(db, "--stamp", bad)
+        check(f"--stamp {bad!r} ({why}) is refused with exit 2 and a reason",
+              p.returncode == 2 and "--stamp" in p.stderr, (p.stdout + p.stderr)[-200:])
+    check("and nothing was copied", bs.existing(db.parent) == [], str(bs.existing(db.parent)))
+    missing = run(db, "--stamp")
+    check("--stamp with no value is refused", missing.returncode == 2, (missing.stdout + missing.stderr)[-200:])
+
+
+def test_a_stamp_older_than_the_kept_window_is_refused() -> None:
+    """A past `--stamp` older than every copy kept would take a copy and prune it in the
+    same run while printing success (round-1 seam finding F-1 on #250): the copy that
+    proves the rotation would be the one rotated away. It is refused before anything is
+    copied, and the kept copies stay as they were."""
+    bs = load()
+    db = planted()
+    for name in ("2026-09-10T1000Z", "2026-09-11T1000Z", "2026-09-12T1000Z"):
+        run(db, "--stamp", name)
+    before = [x.name for x in bs.existing(db.parent)]
+    stale = run(db, "--stamp", "2026-09-01T1000Z")
+    check("a stamp older than the kept window is refused with exit 2 and a reason",
+          stale.returncode == 2 and "older than" in stale.stderr, (stale.stdout + stale.stderr)[-200:])
+    check("and the kept copies are untouched", [x.name for x in bs.existing(db.parent)] == before,
+          str([x.name for x in bs.existing(db.parent)]))
+    between = run(db, "--stamp", "2026-09-11T1200Z")
+    check("a past stamp inside the window is still taken", between.returncode == 0
+          and f"backup {bs.PREFIX}2026-09-11T1200Z" in between.stdout, (between.stdout + between.stderr)[-200:])
 
 
 def test_a_missing_store_is_not_a_failure_and_list_names_what_exists() -> None:
@@ -156,6 +198,8 @@ if __name__ == "__main__":
     for fn in (test_a_copy_is_taken_and_reads_back_whole,
                test_companions_are_never_counted_as_backups,
                test_the_newest_three_are_kept_and_the_rest_pruned_only_after_the_new_one_exists,
+               test_a_stamp_that_is_not_a_past_minute_is_refused,
+               test_a_stamp_older_than_the_kept_window_is_refused,
                test_a_missing_store_is_not_a_failure_and_list_names_what_exists,
                test_the_tick_takes_one_a_day):
         fn()

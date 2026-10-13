@@ -288,6 +288,11 @@ tasks are the operator's and which a contributor can take.
      step and installs. `tools/check_package.py` refuses a marker naming another version, so
      delete it in the next release. Engines before 0.19.0 do not read it: make the release's
      own `upgrade --apply` refuse until the step is done as well.
+   - The `manifest` job runs `observatory/engine/tools/check_manifest_urls.py`: every
+     `raw.githubusercontent.com/<repo>/<ref>/` URL in `fabric-agent.json` names a tag no newer than
+     the release (or a commit sha), and on a publishing run every URL answers 200. `publish` waits
+     for it. A capability added in this release pins its schemas at THIS release's tag, never the
+     next one (0.24.0 pinned `v0.24.1`, ENG-018).
    - To rehearse first, push `vX.Y.Z-rc.N` and run
      `gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false`.
    - A locally signed build (`build-app.sh` + `notarize.sh`) is for debugging and is never attached.
@@ -304,6 +309,26 @@ closure receipts, and declare any new source in the manifest. Do not edit genera
 status in the workspace or copy another repository's task into a second editable row.
 Land the source change, then run `node scripts/workspace.mjs sync` from a Fabric checkout
 (or use the scheduled sync); check the published source commit before calling it current.
+
+`docs/backlog.md` is canonical for **OBS rows: engine execution** (a bounded change closed by a
+pull request and a release). Product packages, priorities and operator gates live on the
+organization's board (org-index), cited here as `PB-nnn`; a PB row linked to OBS rows takes its
+status from them, so an OBS status is read elsewhere as fact. Two things keep it true:
+
+- **Ids are reserved, not picked.** `.claude/agent-sync.json` declares the `OBS` register
+  (`refs/agent-sync/ids/OBS`, compare-and-swap at `origin`), reading the board's
+  `**Next free ID:** `OBS-n`` line as its floor:
+  `agent_sync.py reserve OBS` before writing a row. Two branches can no longer both write the
+  same id (#209 and main both wrote OBS-76).
+- **`tools/check_backlog.py`** (run by `tests/test_backlog_board.py`) refuses a duplicate id, an id
+  at or above the next free one, a status outside `open…`/`blocked…`/`done…`/`closed…`/`superseded
+  by OBS-n…`, wording that is false once merged ("in this PR", "to follow", "merging", "once …
+  restarts"), `done` with something that remains (write `open — partly done: …`), `done in X.Y.Z`
+  without a `## X.Y.Z` heading in CHANGELOG.md, a row wider than the header, and private names in
+  the board and CHANGELOG.md. Private names need the maintainer's local denylist
+  (`--private-denylist FILE` or `OBSERVATORY_PRIVATE_DENYLIST`, the file
+  `tools/check_public_release.py` reads); without it the lint says so and checks shapes only, so
+  run it with the denylist before a release.
 
 ## After work
 

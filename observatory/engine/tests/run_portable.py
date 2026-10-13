@@ -138,6 +138,8 @@ BOUNDARY += ('textkeys',)
 BOUNDARY += ('secret_header',)
 # access-bindings/1: who may do what with agent memory, from the transport (PB-137 N-007).
 BOUNDARY += ('access_binding',)
+# ENG-018: a manifest never pins a tag its release does not have.
+BOUNDARY += ('manifest_urls',)
 # Vector namespaces: one index per pinned model identity, legacy quarantined (PB-137 N-005).
 BOUNDARY += ('vector_namespaces',)
 # The SDK properties the HTTP memory service relies on (PB-137 N-015).
