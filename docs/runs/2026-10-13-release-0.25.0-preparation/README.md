@@ -31,6 +31,20 @@ history since `fadba69`; its precise file/blob counts and source hashes are in t
 Brand lint remains zero errors and 2043 warnings. These are synthetic/source checks;
 hosted release-SHA, native assets, provider and installed-runtime acceptance are not run.
 
+## Final source follow-up
+
+Accepted guard diagnostic source `da3299321dc987b5c61c2ab15d27da41c7648f34` is
+included: failed/busy cache commands record structured reasons and exit codes without
+copying child stdout/stderr into cleanup receipts or the journal. The focused real-child
+regression passes all four cases; version consistency also passes four cases.
+
+Handling-secrets guidance now matches retained rotation reservations, identity checks
+and uncertain exposure. It explicitly leaves reconciliation/full 5200-case convergence
+acceptance open and does not imply standalone commands enforce every project policy.
+Plugin 0.22.1 is unchanged. Four manifest cases, strict plugin validation, inventory
+and diff checks pass. These documentation and diagnostic corrections do not establish
+live provider, installed-runtime or native asset acceptance.
+
 ## Initial preparation snapshot (superseded integration status)
 
 This is a local release-preparation candidate, not a published or installed release.

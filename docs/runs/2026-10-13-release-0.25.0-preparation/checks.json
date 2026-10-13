@@ -453,5 +453,37 @@
         "exit_code": 0
       }
     ]
+  },
+  "post_source_followup": {
+    "guard_source": "da3299321dc987b5c61c2ab15d27da41c7648f34",
+    "guard_local": "7926ffb3e3866f5ec8dc069ef9ecaef801c7e008",
+    "guidance_correction": "0741e46b730f097de66d0945b4c62c8ee1dfa51e",
+    "tests": [
+      {
+        "name": "Acting.test_child_diagnostics_never_enter_receipts_or_journal",
+        "cases": 1,
+        "subcases": 4,
+        "exit_code": 0
+      },
+      {
+        "name": "test_version_consistency",
+        "cases": 4,
+        "exit_code": 0
+      },
+      {
+        "name": "test_plugin_manifests",
+        "cases": 4,
+        "exit_code": 0
+      }
+    ],
+    "strict_plugin_validation": 0,
+    "inventory_check": 0,
+    "diff_check": 0,
+    "hashes": {
+      "observatory/engine/tools/disk_guard.py": "51e9804b1461ee47badbd25aa320d7b6cd0b7edd2b3d225dc3567eb5be0eedaa",
+      "observatory/engine/tests/test_disk_guard.py": "d8c848612ebaa9bbe752e326cd734b4f157c5f396a084cff7a3659734ac9ae3a",
+      "observatory/engine/skill/plugins/observatory-log/skills/handling-secrets/SKILL.md": "477d66534ad25d493cfbb389165a64ae9d24853467af42113020bc91a32841c2",
+      "observatory/engine/SOURCE-INVENTORY.json": "22fd6b4ddd6e737c4a3bf8c4eccbd6c90eb7d49d0ea9e7a29a598908b520fa6b"
+    }
   }
 }
