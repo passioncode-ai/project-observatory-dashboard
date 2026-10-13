@@ -33,6 +33,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 #: `\xNN` as lsof writes a byte outside its locale's printable set.
 _ESCAPE = re.compile(r"(?:\\x[0-9a-fA-F]{2})+")
@@ -52,11 +53,12 @@ def _decode_escapes(name: str) -> str:
 def _run(cmd: list[str], timeout: float, env: dict | None = None) -> str | None:
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=max(1.0, timeout),
-                           errors="replace", env=env, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError):
+                           errors="strict", env=env, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError, UnicodeError):
         return None
-    # lsof exits 1 when one process could not be read and still lists the rest.
-    return p.stdout if p.returncode in (0, 1) and p.stdout else None
+    # Partial output cannot prove the absence of a holder. Even exit-zero
+    # diagnostics can report an inaccessible process or filesystem.
+    return p.stdout if p.returncode == 0 and not p.stderr and p.stdout else None
 
 
 def _utf8_env() -> dict:
@@ -70,42 +72,37 @@ def _utf8_env() -> dict:
 def lsof_paths(timeout: float = 120) -> list[str] | None:
     if not shutil.which("lsof"):
         return None
-    out = _run(["lsof", "-n", "-P", "-w", "-Fn"], timeout, _utf8_env())
+    out = _run(["lsof", "-n", "-P", "-Fn"], timeout, _utf8_env())
     if out is None:
         return None
     return [_decode_escapes(line[1:]) for line in out.splitlines() if line.startswith("n/")]
 
 
 def proc_paths() -> list[str] | None:
-    """Linux without lsof: this account's processes' files, maps, cwd, root and executable."""
+    """All visible Linux processes; any unreadable entry makes coverage unknown.
+
+    Process/descriptor exit races also refuse this observation. A fresh complete
+    observation may succeed later; a partial inventory never grants removal.
+    """
     if not os.path.isdir("/proc/self/fd"):
         return None
     found: list[str] = []
-    for pid in os.listdir("/proc"):
-        if not pid.isdigit():
-            continue
-        base = f"/proc/{pid}"
-        for link in ("cwd", "root", "exe"):
-            try:
+    try:
+        for pid in os.listdir("/proc"):
+            if not pid.isdigit():
+                continue
+            base = f"/proc/{pid}"
+            for link in ("cwd", "root", "exe"):
                 found.append(os.readlink(f"{base}/{link}"))
-            except OSError:
-                pass
-        try:
             for fd in os.listdir(f"{base}/fd"):
-                try:
-                    found.append(os.readlink(f"{base}/fd/{fd}"))
-                except OSError:
-                    pass
-        except OSError:
-            continue
-        try:
-            with open(f"{base}/maps", encoding="utf-8", errors="replace") as f:
+                found.append(os.readlink(f"{base}/fd/{fd}"))
+            with open(f"{base}/maps", encoding="utf-8", errors="strict") as f:
                 for line in f:
                     parts = line.split(None, 5)
                     if len(parts) == 6 and parts[5].startswith("/"):
                         found.append(parts[5].strip())
-        except OSError:
-            pass
+    except (OSError, UnicodeError):
+        return None
     return [p.removesuffix(" (deleted)") for p in found if p.startswith("/") and p != "/"]
 
 
@@ -187,3 +184,44 @@ def running(names: list[str], timeout: float = 20) -> bool | None:
             if os.path.basename(word) in wanted:
                 return True
     return False
+
+
+def fresh_busy(target: str, timeout: float = 5.0) -> bool | None:
+    """Fresh, target-scoped holder check. Unknown is never a free target.
+
+    POSIX uses a bounded lsof query for this subtree plus fresh command paths. This
+    avoids another full-machine open-file inventory per action. Missing lsof, warnings,
+    partial output or timeout preserve the target; there is no unbounded /proc fallback.
+    Windows keeps the rename probe. This is a point-in-time check, not a filesystem lock.
+    """
+    if os.name == "nt":
+        return False
+    tool = shutil.which("lsof")
+    if not tool or timeout <= 0:
+        return None
+    end = time.monotonic() + min(5.0, timeout)
+    try:
+        selector = ["+D", target] if os.path.isdir(target) else ["--", target]
+        p = subprocess.run([tool, "-n", "-P", "-Fn", *selector], capture_output=True,
+                           text=True, errors="strict", timeout=max(0.001, end - time.monotonic()),
+                           env=_utf8_env(), stdin=subprocess.DEVNULL)
+        if p.returncode == 0 and p.stdout:
+            return True
+        if p.returncode != 1 or p.stdout or p.stderr:
+            return None
+        left = end - time.monotonic()
+        if left <= 0:
+            return None
+        p = subprocess.run(["ps", "-axww", "-o", "args="], capture_output=True,
+                           text=True, errors="strict", timeout=left, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return None
+    if p.returncode or p.stderr or not p.stdout:
+        return None
+    paths_held = []
+    for line in p.stdout.splitlines():
+        for word in line.split():
+            word = word.split("=", 1)[-1] if word.startswith("-") and "=" in word else word
+            if word.startswith("/") and len(word) > 1:
+                paths_held.append(word.rstrip(",;:"))
+    return Holders(paths_held).busy(target)

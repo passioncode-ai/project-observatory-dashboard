@@ -366,44 +366,9 @@ def git_ancestry(path: str) -> bool:
 
 
 def fresh_busy(target: str, timeout: float = 5.0) -> bool | None:
-    """Fresh, target-scoped holder check. Unknown is never a free target.
-
-    POSIX uses a bounded lsof query for this subtree plus fresh command paths. This
-    avoids another full-machine open-file inventory per action. Missing lsof, warnings,
-    partial output or timeout preserve the target; there is no unbounded /proc fallback.
-    Windows keeps the rename probe. This is a point-in-time check, not a filesystem lock.
-    """
-    if os.name == "nt":
-        return False
-    tool = shutil.which("lsof")
-    if not tool or timeout <= 0:
-        return None
-    end = time.monotonic() + min(5.0, timeout)
-    try:
-        selector = ["+D", target] if os.path.isdir(target) else ["--", target]
-        p = subprocess.run([tool, "-n", "-P", "-Fn", *selector], capture_output=True,
-                           text=True, errors="replace", timeout=max(0.001, end - time.monotonic()),
-                           env=_utf8_env(), stdin=subprocess.DEVNULL)
-        if p.returncode == 0 and p.stdout:
-            return True
-        if p.returncode != 1 or p.stdout or p.stderr:
-            return None
-        left = end - time.monotonic()
-        if left <= 0:
-            return None
-        p = subprocess.run(["ps", "-axww", "-o", "args="], capture_output=True,
-                           text=True, errors="replace", timeout=left, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if p.returncode or p.stderr or not p.stdout:
-        return None
-    paths_held = []
-    for line in p.stdout.splitlines():
-        for word in line.split():
-            word = word.split("=", 1)[-1] if word.startswith("-") and "=" in word else word
-            if word.startswith("/") and len(word) > 1:
-                paths_held.append(word.rstrip(",;:"))
-    return Holders(paths_held).busy(target)
+    """Compatibility entry point for the shared action-time holder probe."""
+    from holders import fresh_busy as probe
+    return probe(target, timeout)
 
 
 def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget | None = None,

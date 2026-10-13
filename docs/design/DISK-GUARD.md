@@ -107,6 +107,26 @@ There is deliberately no unbounded per-action `/proc` fallback: on a POSIX host
 without `lsof`, planning remains available but path actions skip. Windows keeps
 the rename probe. `FreshTargetProbe` pins the bounded and unknown outcomes.
 
+The shared full listing accepts only exit-zero, diagnostic-free, decodable
+`lsof`/`ps` output. `lsof` warnings are no longer suppressed. A nonzero partial
+listing cannot declare an omitted worktree free, and `running()` returns unknown
+for an incomplete cache-command process survey. The Linux `/proc` fallback
+returns unknown on any failed directory, link or mapping read, including an exit
+race; this can conservatively prevent cleanup on hosts where some visible
+processes cannot be inspected. No external diagnostic text is retained.
+`HoldersCompleteness` covers these negative and complete positive observations.
+
+Both clean and archived dirty worktrees now use the same target-scoped
+`holders.fresh_busy` after Git/archive validation and immediately before removal.
+The shared 20-second inventory is only a preliminary refusal cache. The final
+probe has at most five seconds or the smaller remaining action/archive budget;
+held, unknown or exhausted observations preserve the worktree. The disk tier
+already used this strict final probe; the change closes the git tier's cached
+observation gap. `WorktreeFinalHolders` exercises both tiers with held, unknown,
+free and expired-budget outcomes. Worktree age remains a planning-time condition;
+this change does not add an action-time idle-age measurement. Windows keeps its
+existing removal behavior; the shared POSIX probe is not a new Windows proof.
+
 These checks reduce the planning-to-action race; they are not an exclusive
 filesystem lock against an arbitrary writer starting after the final probe.
 The existing cleanup lock serializes Observatory writers only.

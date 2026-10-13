@@ -1,0 +1,55 @@
+{
+  "schema": "holder-completeness-checks/1",
+  "base_sha": "93223f5c095b9c688f24214aeb38f16bb9bc3e90",
+  "coverage": "synthetic-only isolated HOME and resolved TMPDIR; no live process inventories or cleanup",
+  "source_sha256": {
+    "observatory/engine/holders.py": "db601d61b921fbe1cad7f9ba1ebb514967bac8e7f7b135dfc9f03d693e0aa828",
+    "observatory/engine/tools/cleanup.py": "13770d956ad2eed7eb3adc3d5ef11861eb3565e35727a3b7c9975d48ebe9c597",
+    "observatory/engine/tools/disk_guard.py": "3e5548d7173817edd3a39817508935814c824a7b4a1712cb619f566a41cae3ad",
+    "observatory/engine/tests/test_disk_guard.py": "c2c7bddd09ad8a412d126285ddf8d04c327f05161c87de96ff31399d6beb3d38"
+  },
+  "checks": [
+    {
+      "name": "disk_guard",
+      "cases": 135,
+      "skips": 0,
+      "exit_code": 0
+    },
+    {
+      "name": "osprivacy.Boundary",
+      "cases": 3,
+      "skips": 0,
+      "exit_code": 0
+    },
+    {
+      "name": "documentation-contracts",
+      "command": "python3 observatory/engine/tools/check_docs.py",
+      "exit_code": 0
+    },
+    {
+      "name": "source-inventory",
+      "command": "python3 tools/update_inventory.py --check",
+      "exit_code": 0
+    },
+    {
+      "name": "engine-doc-copies",
+      "command": "python3 tools/sync_engine_docs.py --check",
+      "exit_code": 0
+    },
+    {
+      "name": "diff-whitespace",
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "independent_review": "PENDING",
+  "hosted_ci": "NOT_RUN",
+  "installed_acceptance": "NOT_RUN",
+  "baseline_test_attempt": {
+    "methods": 6,
+    "failures": 20,
+    "errors": 1,
+    "exit_code": 1,
+    "qualification": "Includes two synthetic /tmp path-alias fixture failures, corrected to /srv before final checks; not 20 independent defects."
+  }
+}
