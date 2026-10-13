@@ -31,12 +31,12 @@ admission; this change does not claim otherwise.
 
 ## Tests and scope preservation
 
-Twelve dedicated cases cover pre-mint provenance, pre-request rotation refusal,
+Thirteen dedicated cases cover pre-mint provenance, pre-request rotation refusal,
 unchanged standalone rotation, explicit re-attestation, idempotent snapshot writes,
 policy changes, dry-run, sanitized origins, failed/unknown mint, write failure,
 malformed bindings, preserved provenance on reissue and untouched unnamed peers.
 The first nine-test run failed four assertions and three missing-field checks before
-implementation. The final twelve-case suite passes.
+implementation. The final thirteen-case suite passes.
 
 Compatibility checks pass:16 conditional capacity cases,19 rotation accounting cases,
 eight model-binding cases and12 consumer-revoke cases. The low-level rotation/revoke
@@ -57,10 +57,14 @@ provider credential or operational vault is used.
 
 Review of `3a006c1` found an existing unmarked ledger alias with the same account/hash
 could rotate the marked identity. The regression failed before repair. Admission now
-checks policy binding on every same-account ledger row sharing a primary, predecessor
+checks policy binding on every ledger row sharing a primary, predecessor
 or successor identity. Exact identity aliasing is not inferred project membership;
 a distinct hash keeps the standalone positive path. Both direct and reserved-identity
 alias cases are covered, and no label/folder comparison is introduced.
+A second review of `f6161ac` showed that local account labels can alias the same
+provider credential. The final guard matches the exact hash across account labels,
+consistent with the existing unresolved-rotation identity guard. A tests-first
+real-door probe pins this additional refusal before provider reads.
 
 ## Exact next task
 

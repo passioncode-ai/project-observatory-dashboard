@@ -1352,12 +1352,12 @@ def _rotate_one_locked(name: str) -> dict:
         raise LookupError("not in the ledger")
     identities = _identity_refs(rec)
     bound_alias = any(isinstance(peer, dict) and "policy_binding" in peer
-                      and peer.get("account") == rec.get("account")
                       and identities.intersection(_identity_refs(peer))
                       for peer in doc["issued"].values())
     if "policy_binding" in rec or bound_alias:
-        # Exact account/hash aliases share the restriction, including reserved
-        # predecessor/successor identities. A different display name is no bypass.
+        # Exact hash aliases share the restriction, including reserved identities.
+        # Account names are local aliases, not provider ownership proofs; changing
+        # a local account/display name cannot bypass a key's policy provenance.
         # Presence refuses even if corrupted/stale; it is not headroom proof.
         raise RuntimeError("Rotation refused: policy-managed key has no verified current aggregate headroom; its policy snapshot is not authorization to mint overlap. No provider call or ledger change was made")
     if rec.get("claimed"):

@@ -249,7 +249,7 @@ An applied spend policy records its explicit origin and exact digest on new and
 selected existing key rows; dry-run preserves ledger state. Rotation of a marked
 row refuses before a provider request because current aggregate headroom is unknown.
 An invalid, stale or unfamiliar marker cannot grant permission. An unmarked alias of
-a marked same-account primary/predecessor/successor hash also refuses; a distinct hash
+a marked primary/predecessor/successor hash also refuses; a distinct hash
 is not inferred to share its policy. Standalone reissue
 preserves an existing marker. The same project/folder on an unmarked key does not
 classify it: unmarked standalone rotation remains supported, with its documented

@@ -100,6 +100,16 @@ class PolicyAdmission(unittest.TestCase):
         self.assertEqual(calls,self.p.calls)
         self.assertEqual(doc,self.m.ledger())
 
+    def test_local_account_alias_cannot_bypass_exact_identity_binding(self):
+        self.policy();doc=self.m.ledger();row=copy.deepcopy(doc['issued'][self.name]);row.pop('policy_binding')
+        row['account']='another-local-alias';doc['issued']['legacy-alias']=row;self.m.save_ledger(doc)
+        original=self.m.read_admin
+        self.m.read_admin=lambda account:original('example')
+        calls=self.p.calls
+        with self.assertRaisesRegex(RuntimeError,'policy'):self.m.rotate_one('legacy-alias')
+        self.assertEqual(calls,self.p.calls)
+        self.assertEqual(doc,self.m.ledger())
+
     def test_reserved_identity_alias_is_guarded_but_distinct_hash_is_not(self):
         self.direct();doc=self.m.ledger();h=doc['issued'][self.name]['hash']
         doc['issued']['marked']={'account':'example','hash':'different','successor_hash':h,'policy_binding':None}
