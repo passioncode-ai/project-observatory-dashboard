@@ -26,6 +26,14 @@ records unknown completion and fails the run while completed peers keep their
 receipts. If `--report-dir` cannot be saved, stdout retains the rows with
 `report_error_type`; partially copied files are not a completed report.
 
+Engine suites default to `unittest` reporting: keep `unittest.main()` and a
+complete summary with at least one executed case. The existing compatibility
+scripts listed in `ASSERTION_LINE_SUITES` in `observatory/engine/tests/run_portable.py` report
+PASS/FAIL/SKIP lines; a silent direct assertion is not enough. Suite metadata can
+raise the positive minimum with `SUITE_MINIMUMS`. Zero or insufficient evidence
+is ERROR even on exit zero. Tests for the runner itself live in root `tests/`;
+`test_runner_evidence.py` includes forgotten-main and misleading-output cases.
+
 The complete checks need:
 
 - **Python 3.11 or newer** with loadable SQLite extensions (`requires-python` in

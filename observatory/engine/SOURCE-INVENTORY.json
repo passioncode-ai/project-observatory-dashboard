@@ -842,8 +842,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "28ecd068a6ba015067cadc14cc776dc6976b9b1459ae82fc95fa5fc1fdc381ba",
-      "bytes": 19603,
+      "export_sha256": "1b27bc3241889e1052ce3d8572c8f3cf4ceae8f79f3b5cbf9e22b9f3652ea393",
+      "bytes": 20320,
       "upstream_modified": true
     },
     {
@@ -863,15 +863,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "776b9ce34203d006f475dd16babc6193ece7f235e940461d176f67d2d4321b26",
-      "bytes": 111545,
+      "export_sha256": "8bda148b42880b1060d5c0e5f00f7b962cb7d1fc053627a3a0ffbf72040c5d37",
+      "bytes": 112273,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "07c5af15263ae4e987cd08b676a5dd9490eed049b8ccb8bf1669702ef2f78369",
-      "bytes": 86551,
+      "export_sha256": "6dfc3f0ae75a7a0e0752e9211316e1531c2dced0e6f59096348112d21796723b",
+      "bytes": 87218,
       "upstream_modified": true
     },
     {
@@ -2153,8 +2153,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "53c313503eb09467ffefbd4d798b21559ecc5879ab50df28e78864e011d962e6",
-      "bytes": 26846,
+      "export_sha256": "352623b9f8be22ee76b88db7a5371dcbbe45d4edea2af00bd24a72e52a1cf35b",
+      "bytes": 33047,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,

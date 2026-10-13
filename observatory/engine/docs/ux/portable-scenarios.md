@@ -377,3 +377,14 @@ refusal is `not_started`; a whole-run timeout does not prove a particular stage
 timed out. The last completed `tick.json` top-level report stays available during
 a new run. Coverage: `tests/test_tick_progress.py` (silent tail, supervisor stop,
 write failures, stale input and exit preservation).
+
+### Offline verification reports executed tests
+
+A person or agent running `full check` receives an ERROR when a suite exits zero
+without the minimum evidence for its declared protocol. It retains the process
+exit separately, names the reason and preserves completed peer receipts. Explicit
+all-skipped suites stay SKIP. A PASS marker cannot fill in missing unittest cases;
+legacy assertion-line suites retain their reporting contract. Coverage:
+`tests/test_runner_evidence.py` (root suite), including malformed counters and
+swallowed failures. Well-formed forged reports remain outside this trusted-test
+protocol's proof; a minimum is not exhaustive test coverage.

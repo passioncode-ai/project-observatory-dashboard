@@ -19,6 +19,17 @@ An `ERROR` row is also listed under `not_run` to prevent treating missing eviden
 as PASS. If saving `--report-dir` fails, the overall result is FAIL and stdout
 keeps the suite rows with `report_error_type`; the destination may be partial.
 Fix the named filesystem/runtime problem and rerun the affected verification.
+
+An exit code of zero is separate from observed test evidence. Each suite declares
+`test_protocol`, `minimum_executed`, `executed_checks` and `skipped_checks`.
+`unittest` requires its final complete summary; compatibility `assertion-lines`
+suites count explicit PASS/FAIL lines. Missing or insufficient executed checks
+produce `ERROR` with `reason_code`, even on exit zero. A valid all-skipped suite
+remains `SKIP`; reported failures are `FAIL` even if a script swallowed its exit.
+Restore the suite's entry point or reporting contract, then rerun that suite.
+These are reports from trusted repository tests, not authentication: forged,
+well-formed counters can lie. A positive minimum does not prove full coverage.
+
 ### Disk cleanup revalidation
 
 `full disk-guard --apply` preserves Git repositories and linked worktrees inside
