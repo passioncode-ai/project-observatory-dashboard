@@ -26,3 +26,11 @@ truncation; a lifecycle change to make the producer reopen its log is separate w
 Log sweep refusal still uses the existing boolean/list API; maintenance's swallowed
 rotation exceptions need a separate observable result contract. No live log was
 rotated or removed by this change. A missing source is not a successful rotation.
+
+## Hosted portability correction
+
+The full hosted OS boundary check rejected the platform flag lookup in931c1d6.
+Both descriptor opens now use `osprivacy.NOFOLLOW`, preserving the existing POSIX
+refusal while invoking the Windows adapter's own link check and binary mode.
+`test_osprivacy.Boundary.test_every_open_goes_through_osprivacy` is required beside
+the filesystem regressions; the rule was not weakened or excluded.

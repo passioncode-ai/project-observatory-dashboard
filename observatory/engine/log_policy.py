@@ -95,7 +95,7 @@ def rotate(path: Path, *, max_bytes: int | None = None, generations: int | None 
         if gen(n).exists():
             os.replace(gen(n), gen(n + 1))
     if copy_truncate:
-        fd = osprivacy.open(path, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+        fd = osprivacy.open(path, os.O_RDWR | osprivacy.NOFOLLOW)
         with os.fdopen(fd, "r+b") as source:
             current = os.fstat(source.fileno())
             if (current.st_dev, current.st_ino, current.st_nlink) != (info.st_dev, info.st_ino, 1):
@@ -103,7 +103,7 @@ def rotate(path: Path, *, max_bytes: int | None = None, generations: int | None 
             # Exclusive creation cannot follow a destination link introduced after
             # preflight. Truncate only the verified source descriptor after copying.
             target = osprivacy.open(gen(1), os.O_WRONLY | os.O_CREAT | os.O_EXCL |
-                                    getattr(os, "O_NOFOLLOW", 0), 0o600)
+                                    osprivacy.NOFOLLOW, 0o600)
             with os.fdopen(target, "wb") as backup:
                 shutil.copyfileobj(source, backup)
                 backup.flush()

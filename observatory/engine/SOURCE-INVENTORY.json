@@ -1325,8 +1325,8 @@
       "path": "log_policy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6b88aaab99aa469e9ac1192a4c6476b41efddcbbff8810592eae622e32ee2de5",
-      "bytes": 6016
+      "export_sha256": "051fcc4bac2590e315758c6b17a348eac31b8ddf68d664b2339bdea0e071d787",
+      "bytes": 5996
     },
     {
       "path": "machine_view.py",
