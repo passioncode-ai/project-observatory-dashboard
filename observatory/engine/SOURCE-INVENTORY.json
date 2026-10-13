@@ -2371,8 +2371,8 @@
     {
       "path": "tests/test_cli_compatibility.py",
       "source_sha256": "59111d8bce5d3eebd62232099c022bc49611e0dfb875fb5a3514c499b4851324",
-      "export_sha256": "80d0da384e5eb53080878e3fb3eb1a426e2b59a8bb281315d350e32a506f30d6",
-      "bytes": 13143,
+      "export_sha256": "00f3450c9435061cd3e90a3ac35c89bcecc0cef41588d4f9877c377eb05826b7",
+      "bytes": 13365,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
