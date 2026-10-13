@@ -1127,6 +1127,26 @@ Nothing needs to be run after a release. One job per workspace runs every 15 min
   (`snapshot-*`) rotate separately and are never removed by the daily ones. See
   [Encrypted backups off this disk](#encrypted-backups-off-this-disk).
 
+After a maintenance pass, `project-observatory full maintain status` and
+`full doctor` include `log_retention`: separate engine, updater and hook-log
+scope receipts. Each scope has its attempt time, directory-entry count and
+counts of completed rotations, refusals and failures. Missing/unreadable scopes
+have unknown coverage and `observed_count: null`; an observed empty directory
+has zero entries. Action counts describe only attempted work, not remaining
+logs or reclaimed bytes. A lost whole-scope receipt also keeps action counts null,
+since effects may have occurred before the error. A failed scope does not suppress peer results.
+
+The receipt is saved in the workspace store as `maintenance.json`; its readers retain the original
+measurement time and mark evidence older than one hour stale. The Health page
+shows the same incomplete/stale warning, and its payload contains the typed
+scope result. Reasons are fixed codes, without paths, log contents or exception
+text. This adds evidence to the existing five-generation size policy; it does
+not enable automatic cleanup or change retention limits. A failed operation may
+already have moved older generations; no rollback is claimed. Copy/truncate
+still has its concurrent-append race, and external directory writers are not
+excluded. Synthetic evidence: `test_lifecycle.LogRetentionEvidence` and the
+`test_maintenance.Pass.test_log_retention_*` cases.
+
 **The switch, "Install updates automatically"**, is the file `auto-update` in the workspace
 home. Without it, updates are on; only the word `off` in it turns them off. The commands
 below write it, and you can write it yourself. An update, a reinstall or an uninstall never
