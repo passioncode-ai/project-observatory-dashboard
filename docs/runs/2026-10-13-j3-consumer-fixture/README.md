@@ -45,3 +45,7 @@ receipt. All remaining findings are the original convergence assertion `(c')`.
 Last-trace categories are diagnostics, not independently established root causes.
 Independent fixture review is pending. Full5200, real collector pagination, live
 providers, installed acceptance and full remote/vault consumer coverage remain open.
+
+[Proposed next remedy design](remedy-design.md) separates explicit operator action,
+provider observation and unresolved consumer/metadata conditions. Implementation
+waits for independent design review.
