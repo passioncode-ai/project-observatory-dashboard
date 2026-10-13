@@ -164,12 +164,22 @@ def guard_html(g: dict | None, t: Translator) -> str:
                         "15 minutes below the low line; never anything a process holds, maps, runs from or works inside: "
                         "project-observatory full disk-guard --apply",
                         tag="p", attrs=' class="machine-hint"'))
-    files = ((g.get("largeFiles") or {}).get("files") or [])[:ROWS]
+    coverage = g.get("largeFiles") or {}
+    files = (coverage.get("files") or [])[:ROWS]
+    measured = coverage.get("complete") is True
+    empty = "No file above the size line." if measured else "incomplete measurement" if coverage else "Not measured"
+    if coverage and not measured:
+        errors = coverage.get("errors")
+        count = (sum(n for n in errors.values() if isinstance(n, int) and n > 0)
+                 if isinstance(errors, dict) else None)
+        shown = t.number(count) if count is not None else t.mark("Not measured")
+        parts.append(f'<p class="machine-hint">{t.mark("incomplete measurement")} · '
+                     f'{_e(stamp(coverage.get("measured_at")))} · {t.mark("unreadable")}: {shown}</p>')
     parts.append(_table(t, "Largest files",
                         [("File", False), ("Size", True), ("Modified", False)],
                         [[f'<span class="mono">{_e(f["path"])}</span>', _gigabytes(f.get("gb"), t), t.date(f.get("modified"))]
                          for f in files],
-                        "No file above the size line."))
+                        empty))
     sims = (g.get("memory") or {}).get("simulators") or []
     if sims:
         parts.append(_table(t, "Running simulators",

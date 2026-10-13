@@ -195,13 +195,18 @@ def _guard_detail(guard: dict | None) -> str:
              f"{(guard.get('results') or {}).get('removed', 0)} item(s) removed, "
              f"free {guard.get('free_gb_before')} → {guard.get('free_gb_after')} GB."]
     mem = guard.get("memory") or {}
+    if mem and mem.get("swap_gb") is None:
+        parts.append(" Swap measurement is unavailable.")
     if (mem.get("swap_gb") or 0) >= 2:
         holders = ", ".join(f"{h['origin']} {(h.get('rss_mb') or 0) / 1024:.1f} GB" for h in (mem.get("holders") or [])[:3])
         parts.append(f" Swap holds {mem['swap_gb']} GB of this disk; memory is held by {holders}.")
         sims = mem.get("simulators") or []
         if sims:
             parts.append(" Running simulators: " + "; ".join(f"`{x['command']}`" for x in sims[:LISTED]) + ".")
-    files = ((guard.get("large_files") or {}).get("files") or [])[:3]
+    coverage = guard.get("large_files") or {}
+    if coverage and coverage.get("complete") is not True:
+        parts.append(" The largest-file survey is incomplete.")
+    files = (coverage.get("files") or [])[:3]
     if files:
         parts.append(" Largest files: " + ", ".join(f"{f['path']} {f['gb']} GB" for f in files) + ".")
     return "".join(parts)

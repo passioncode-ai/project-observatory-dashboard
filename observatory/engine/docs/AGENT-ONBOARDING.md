@@ -29,3 +29,9 @@ deadline; unknown evidence skips it. POSIX actions require `lsof` for this final
 target-scoped probe; Windows retains rename-based protection. A skipped target
 is not proof of zero reclaimable space. Replan after resolving the reported
 reason. [Design and regression cases](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/DISK-GUARD.md#apply-time-preservation-2026-10-13).
+
+Disk-guard measurement limits: unknown swap remains `null` with a reason and
+source time; it is not zero. The largest-file report carries completeness,
+error counts and budget exhaustion. An incomplete empty scan is shown as an
+incomplete measurement. The MCP overview exposes `guard.largeFilesCoverage`
+beside its bounded file list. See [measurement coverage](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/DISK-GUARD.md#measurement-coverage-obs-87-subset).

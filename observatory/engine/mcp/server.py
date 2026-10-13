@@ -534,6 +534,8 @@ def observatory_machine(
     and the largest cache/VM/history locations, worktrees and branches by class,
     the cleanup plan with its journal, and the disk guard's last run (pressure,
     what it freed by the disk's own count, the largest files, who holds the swap).
+    Missing swap remains null with its reason/time; largest-file coverage carries
+    completeness and error counts even when the bounded file list is empty.
 
     Read-only. It never kills a process or deletes a file: the auto tier of the
     cleanup and the disk guard run in the maintenance job (every 15 minutes) when the operator
@@ -580,7 +582,12 @@ def observatory_machine(
         g = full["guard"]
         out["guard"] = {k: g.get(k) for k in ("at", "level", "acting", "freeGbBefore", "freeGbAfter", "freedGb",
                                               "planned", "plannedGb", "results")}
-        out["guard"]["largeFiles"] = ((g.get("largeFiles") or {}).get("files") or [])[:MACHINE_TOP]
+        coverage = g.get("largeFiles") or {}
+        out["guard"]["largeFiles"] = (coverage.get("files") or [])[:MACHINE_TOP]
+        out["guard"]["largeFilesCoverage"] = {k: coverage.get(k) for k in
+                                                ("measured_at", "complete", "errors", "budget_exhausted", "scope")}
+        memory = g.get("memory") or {}
+        out["guard"]["memory"] = {k: memory.get(k) for k in ("measured_at", "swap_gb", "swap_reason")}
     return out
 
 

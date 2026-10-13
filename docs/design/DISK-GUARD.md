@@ -101,3 +101,22 @@ the rename probe. `FreshTargetProbe` pins the bounded and unknown outcomes.
 These checks reduce the planning-to-action race; they are not an exclusive
 filesystem lock against an arbitrary writer starting after the final probe.
 The existing cleanup lock serializes Observatory writers only.
+
+## Measurement coverage (OBS-87 subset)
+
+`memory_report` preserves an unavailable swap measurement as `swap_gb: null`,
+with `swap_reason` and the source measurement timestamp. A measured zero remains
+zero. Invalid negative, nonnumeric or nonfinite values are unknown too.
+
+`large_files` records `complete`, `errors` counts (`root_stat`,
+`directory_read`, `entry_stat`) and `budget_exhausted`. Failure reasons are
+fixed categories: OS error bodies are not returned. Successful observations
+survive a later failed path; an empty partial scan never proves no large files.
+Completeness applies to `home-with-policy-exclusions`, not every mounted volume
+or privacy-protected folder. Reused reports retain their measurement time.
+
+The bounded MCP overview keeps `largeFiles` as a list for compatibility and adds
+`largeFilesCoverage`; its guard memory summary retains the nullable swap value
+and reason. The dashboard labels incomplete coverage even when some files were
+found. `test_disk_guard.py::CoverageTruth` covers these producer/consumer seams.
+This subset does not complete worktree discovery or survey scheduling fairness.

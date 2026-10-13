@@ -38,6 +38,7 @@ from __future__ import annotations
 import contextlib
 import fnmatch
 import json
+import math
 import os
 import pathlib
 import shutil
@@ -703,30 +704,50 @@ def large_files(cfg: dict, previous: dict | None, force: bool) -> dict | None:
     budget = _number(cfg.get("large_files_budget_seconds", 120), 120)
     skip = set(cfg.get("large_files_skip") or [])
     top = int(_number(cfg.get("large_files_top", 30), 30))
-    started, found, complete = time.monotonic(), [], True
-    dev = os.lstat(home).st_dev
-    stack = [str(home)]
+    started, found = time.monotonic(), []
+    errors = {"root_stat": 0, "directory_read": 0, "entry_stat": 0}
+    exhausted = False
+    try:
+        dev = os.lstat(home).st_dev
+        stack = [str(home)]
+    except OSError:
+        errors["root_stat"] += 1
+        stack = []
     while stack:
-        if time.monotonic() - started > budget:
-            complete = False
+        if time.monotonic() - started >= budget:
+            exhausted = True
             break
         d = stack.pop()
-        for e in _scan(d):
-            try:
-                s = e.stat(follow_symlinks=False)
-            except OSError:
-                continue
-            if s.st_dev != dev:
-                continue
-            if stat.S_ISDIR(s.st_mode):
-                if e.name in skip or protected_place(pathlib.Path(e.path), home):
-                    continue
-                stack.append(e.path)
-            elif stat.S_ISREG(s.st_mode) and s.st_size >= floor:
-                found.append({"path": e.path, "gb": round(s.st_size / GB, 2),
-                              "modified": datetime.fromtimestamp(s.st_mtime, timezone.utc).strftime("%Y-%m-%d")})
+        try:
+            # Unlike planning's best-effort _scan, a coverage receipt cannot swallow an
+            # unreadable directory and call an empty enumeration complete.
+            with os.scandir(d) as entries:
+                for e in entries:
+                    if time.monotonic() - started >= budget:
+                        exhausted = True
+                        break
+                    try:
+                        s = e.stat(follow_symlinks=False)
+                    except OSError:
+                        errors["entry_stat"] += 1
+                        continue
+                    if s.st_dev != dev:
+                        continue
+                    if stat.S_ISDIR(s.st_mode):
+                        if e.name in skip or protected_place(pathlib.Path(e.path), home):
+                            continue
+                        stack.append(e.path)
+                    elif stat.S_ISREG(s.st_mode) and s.st_size >= floor:
+                        found.append({"path": e.path, "gb": round(s.st_size / GB, 2),
+                                      "modified": datetime.fromtimestamp(s.st_mtime, timezone.utc).strftime("%Y-%m-%d")})
+        except OSError:
+            errors["directory_read"] += 1
+        if exhausted:
+            break
     found.sort(key=lambda f: -f["gb"])
-    return {"measured_at": now(), "min_mb": int(floor / 1048576), "complete": complete, "files": found[:top]}
+    return {"measured_at": now(), "min_mb": int(floor / 1048576),
+            "complete": not exhausted and not any(errors.values()), "errors": errors,
+            "budget_exhausted": exhausted, "scope": "home-with-policy-exclusions", "files": found[:top]}
 
 
 def memory_report() -> dict | None:
@@ -734,11 +755,17 @@ def memory_report() -> dict | None:
     machine = _read(paths.SCRATCH / "machine.json")
     if not machine:
         return None
-    mem = machine.get("memory") or {}
+    mem = machine.get("memory") if isinstance(machine.get("memory"), dict) else {}
+    swap = mem.get("swap_used_mb")
+    valid_swap = (isinstance(swap, (int, float)) and not isinstance(swap, bool)
+                  and math.isfinite(swap) and swap >= 0)
+    swap_reason = (None if valid_swap else "missing-swap-measurement" if swap is None
+                   else "invalid-swap-measurement")
     groups = (machine.get("processes") or {}).get("groups") or []
     sims = [g for g in groups if str(g.get("origin", "")).startswith("simulator:")]
     detached = [g for g in groups if str(g.get("origin", "")).startswith("detached:")]
-    return {"measured_at": machine.get("measured_at"), "swap_gb": round((mem.get("swap_used_mb") or 0) / 1024, 1),
+    return {"measured_at": machine.get("measured_at"),
+            "swap_gb": round(swap / 1024, 1) if valid_swap else None, "swap_reason": swap_reason,
             "holders": [{k: g.get(k) for k in ("origin", "processes", "rss_mb")} for g in groups[:8]],
             "simulators": [{"name": g["origin"].split(":", 1)[1], "rss_mb": g.get("rss_mb"),
                             "command": f"xcrun simctl shutdown \"{g['origin'].split(':', 1)[1]}\""} for g in sims],

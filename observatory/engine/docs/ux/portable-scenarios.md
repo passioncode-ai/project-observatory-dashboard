@@ -130,3 +130,9 @@ OSS-22 apply revalidation: temporary candidates with Git ancestry or nested Git
 markers are preserved; build output repeats checkout-idle, ignored/tracked and
 new-write checks. Regression: `test_disk_guard.py::TargetRevalidation` and
 `FreshTargetProbe`. These point-in-time checks do not lock out arbitrary writers.
+
+OSS-22 measurement coverage: unavailable swap is null with source time/reason;
+measured zero remains zero. A missing/unreadable root or entry, or exhausted
+large-file scan budget, is incomplete. Partial successes remain visible, with
+coverage metadata in the MCP overview and an incomplete label on the page.
+Regression: `test_disk_guard.py::CoverageTruth`.

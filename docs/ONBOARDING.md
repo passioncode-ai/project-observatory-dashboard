@@ -1189,3 +1189,9 @@ the engine's absolute path and an initialized workspace in **Settings**. The ass
 needs the setup in [Enable background or paid actions deliberately](#enable-background-or-paid-actions-deliberately).
 It runs the installed engine's `full assistant` command; it needs no MCP server and registers none. Details:
 [macOS app](macos/README.md).
+
+Disk-guard measurement limits: unknown swap remains `null` with a reason and
+source time; it is not zero. The largest-file report carries completeness,
+error counts and budget exhaustion. An incomplete empty scan is shown as an
+incomplete measurement. The MCP overview exposes `guard.largeFilesCoverage`
+beside its bounded file list. See [measurement coverage](design/DISK-GUARD.md#measurement-coverage-obs-87-subset).

@@ -1352,5 +1352,89 @@ class FreshTargetProbe(Base):
             self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
 
 
+class CoverageTruth(Base):
+    def test_missing_swap_is_unknown_and_measured_zero_is_zero(self):
+        for memory, expected in (({}, None), ({"swap_used_mb": None}, None),
+                                 ({"swap_used_mb": 0}, 0.0), ({"swap_used_mb": 2048}, 2.0)):
+            with self.subTest(memory=memory), patch.object(self.g, "_read", return_value={
+                    "measured_at": "2026-01-01T00:00:00Z", "memory": memory}):
+                report = self.g.memory_report()
+            self.assertEqual(report["swap_gb"], expected)
+            self.assertEqual(report["measured_at"], "2026-01-01T00:00:00Z")
+            self.assertEqual(report.get("swap_reason"), "missing-swap-measurement" if expected is None else None)
+
+    def test_unreadable_directory_is_incomplete_with_count_not_error_body(self):
+        broken = self.base / "unreadable"
+        broken.mkdir()
+        original = self.g.os.scandir
+        def scan(path):
+            if str(path) == str(broken):
+                raise PermissionError("private error body")
+            return original(path)
+        with patch.object(self.g.os, "scandir", side_effect=scan):
+            report = self.g.large_files(self.cfg(), None, True)
+        self.assertFalse(report["complete"])
+        self.assertEqual(report["errors"]["directory_read"], 1)
+        self.assertNotIn("private error body", json.dumps(report))
+
+    def test_missing_root_is_an_incomplete_measurement_not_exception(self):
+        with patch.object(self.g.pathlib.Path, "home", return_value=self.base / "missing"):
+            report = self.g.large_files(self.cfg(), None, True)
+        self.assertFalse(report["complete"])
+        self.assertEqual(report["errors"]["root_stat"], 1)
+        self.assertEqual(report["files"], [])
+        self.assertTrue(report["measured_at"])
+
+    def test_stat_failure_is_counted_and_prior_success_is_retained(self):
+        from types import SimpleNamespace
+        good = self.base / "good.bin"
+        good.write_bytes(b"x" * 2048)
+        good_entry = SimpleNamespace(name=good.name, path=str(good), stat=lambda **kw: good.stat())
+        def unavailable(**kw):
+            raise FileNotFoundError("removed during traversal")
+        bad_entry = SimpleNamespace(name="gone", path=str(self.base / "gone"), stat=unavailable)
+        class Entries(list):
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+        with patch.object(self.g.os, "scandir", return_value=Entries([good_entry, bad_entry])):
+            report = self.g.large_files(self.cfg(large_file_min_mb=0.001), None, True)
+        self.assertFalse(report["complete"])
+        self.assertEqual(report["errors"]["entry_stat"], 1)
+        self.assertEqual([r["path"] for r in report["files"]], [str(good)])
+
+    def test_complete_empty_measurement_has_explicit_zero_errors(self):
+        empty = self.base / "empty"
+        empty.mkdir()
+        with patch.object(self.g.pathlib.Path, "home", return_value=empty):
+            report = self.g.large_files(self.cfg(), None, True)
+        self.assertTrue(report["complete"])
+        self.assertEqual(report.get("errors"), {"root_stat": 0, "directory_read": 0, "entry_stat": 0})
+        self.assertIs(report.get("budget_exhausted"), False)
+
+    def test_page_does_not_call_failed_empty_scan_no_large_files(self):
+        sys.path.insert(0, str(ROOT / "dashboard"))
+        import machine_page
+        from i18n import Translator
+        guard = {"largeFiles": {"complete": False, "files": [], "errors": {"directory_read": 1}}}
+        html = machine_page.guard_html(guard, Translator("en"))
+        self.assertIn("incomplete measurement", html)
+        self.assertNotIn("No file above the size line.", html)
+        guard["largeFiles"]["complete"] = True
+        self.assertIn("No file above the size line.", machine_page.guard_html(guard, Translator("en")))
+
+    def test_mcp_overview_retains_coverage_and_unknown_swap(self):
+        sys.path.insert(0, str(ROOT / "mcp"))
+        import server, machine_view
+        sample = {"degraded": [], "guard": {"largeFiles": {"measured_at": "2026-01-01T00:00:00Z",
+                    "complete": False, "files": [], "errors": {"directory_read": 1}},
+                    "memory": {"measured_at": "2026-01-01T00:00:00Z", "swap_gb": None,
+                               "swap_reason": "missing-swap-measurement"}}}
+        with patch.object(machine_view, "summary", return_value=sample):
+            result = server.observatory_machine()
+        self.assertFalse(result["guard"]["largeFilesCoverage"]["complete"])
+        self.assertEqual(result["guard"]["largeFilesCoverage"]["errors"]["directory_read"], 1)
+        self.assertIsNone(result["guard"]["memory"]["swap_gb"])
+
+
 if __name__ == "__main__":
     unittest.main()
