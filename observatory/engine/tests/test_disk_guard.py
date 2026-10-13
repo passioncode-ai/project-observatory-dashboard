@@ -630,28 +630,21 @@ class RunBudget(Base):
 
 
 class AnyDevice(Base):
-    """The guard on macOS, Linux and Windows: one rule, three ways to know what is held."""
+    """Supported holder observations and explicit unknown platforms preserve paths."""
 
-    def test_windows_probes_by_renaming_and_skips_what_is_held(self):
+    def test_legacy_rename_state_preserves_paths_without_trying_a_rename(self):
         (self.t1 / "held").mkdir()
-        (self.t1 / "free").mkdir()
+        (self.t1 / "apparently-free").mkdir()
         h = self.g.Holders([])
-        h.mode = "rename"
-        self.assertFalse(h.busy(self.t1 / "held"), "Windows cannot know beforehand; the rename decides")
-        real_rename = os.rename
-
-        def rename(src, dst):
-            if pathlib_name(src) == "held":
-                raise PermissionError(32, "being used by another process")
-            return real_rename(src, dst)
-        with patch.object(self.g.os, "rename", side_effect=rename):
-            held = self.g.act({"class": "temp", "target": str(self.t1 / "held"), "identity": self.identity(self.t1 / "held"), "bytes": 0}, h)
-            free = self.g.act({"class": "temp", "target": str(self.t1 / "free"), "identity": self.identity(self.t1 / "free"), "bytes": 0}, h)
-        self.assertEqual(held["result"], "skipped")
-        self.assertTrue((self.t1 / "held").exists(), "nothing of a held folder is deleted")
-        self.assertEqual(free["result"], "removed")
-        self.assertFalse((self.t1 / "free").exists())
-        self.assertFalse(list(self.t1.glob("*.observatory-removing")))
+        h.mode = "rename"  # Even an old in-memory state cannot grant permission.
+        self.assertTrue(h.busy(self.t1 / "held"))
+        with patch.object(self.g.os, "rename") as rename:
+            for target in (self.t1 / "held", self.t1 / "apparently-free"):
+                result = self.g.act({"class": "temp", "target": str(target),
+                                     "identity": self.identity(target), "bytes": 0}, h)
+                self.assertEqual(result["result"], "skipped")
+                self.assertTrue(target.exists())
+            rename.assert_not_called()
 
     def test_linux_without_lsof_reads_proc(self):
         import holders
@@ -933,6 +926,64 @@ class SecondIteration(Base):
                 self.g.remove(str(self.t1 / "keep"), probe=True)
         self.assertTrue((self.t1 / "keep" / "f").exists())
         self.assertFalse(list(self.t1.glob("*.observatory-removing")))
+
+
+class WindowsHolderUnknown(Base):
+    """Rename success is not a holder inventory: FILE_SHARE_DELETE allows it."""
+
+    def test_windows_inventory_is_unknown_without_process_commands(self):
+        import holders
+        from types import SimpleNamespace
+        with patch.object(holders, "os", SimpleNamespace(name="nt", path=os.path)), \
+                patch.object(holders.subprocess, "run") as command:
+            observed = holders.Holders.take()
+            self.assertFalse(observed.known)
+            self.assertTrue(observed.busy(str(self.t1)))
+            self.assertIsNone(holders.fresh_busy(str(self.t1)))
+            command.assert_not_called()
+
+    def test_legacy_rename_mode_cannot_authorize_a_path(self):
+        import holders
+        observed = holders.Holders([], "rename")
+        self.assertFalse(observed.known)
+        self.assertTrue(observed.busy(str(self.t1)))
+
+    def test_current_windows_unknown_preserves_target_even_with_old_free_snapshot(self):
+        import holders
+        from types import SimpleNamespace
+        target = self.t1 / "candidate"
+        target.mkdir()
+        data = target / "state"
+        data.write_text("preserve")
+        action = {"class": "temp", "target": str(target), "identity": self.identity(target), "bytes": 0}
+        with patch.object(holders, "os", SimpleNamespace(name="nt", path=os.path)), \
+                patch.object(self.g, "fresh_busy", holders.fresh_busy), \
+                patch.object(self.g, "remove") as remove:
+            result = self.g.act(action, self.free())
+        self.assertEqual(result["result"], "skipped")
+        remove.assert_not_called()
+        self.assertEqual(data.read_text(), "preserve")
+
+    @unittest.skipUnless(os.name == "nt", "Native Windows FILE_SHARE_DELETE control")
+    def test_native_open_shared_delete_file_can_be_renamed(self):
+        import ctypes
+        from ctypes import wintypes
+        api = ctypes.WinDLL("kernel32", use_last_error=True)
+        api.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                   wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        api.CreateFileW.restype = wintypes.HANDLE
+        api.CloseHandle.argtypes = [wintypes.HANDLE]
+        api.CloseHandle.restype = wintypes.BOOL
+        source = self.t1 / "open-file"
+        source.write_text("held")
+        handle = api.CreateFileW(str(source), 0x80000000, 1 | 2 | 4, None, 3, 0x80, None)
+        self.assertNotEqual(handle, wintypes.HANDLE(-1).value)
+        try:
+            target = self.t1 / "renamed-file"
+            os.rename(source, target)
+            self.assertTrue(target.exists(), "rename is permitted while the handle remains open")
+        finally:
+            self.assertTrue(api.CloseHandle(handle))
 
 
 class HoldersModule(unittest.TestCase):
@@ -1563,7 +1614,7 @@ class TargetRevalidation(Builds):
         self.assertTrue(entry.exists())
 
 
-@unittest.skipIf(os.name == "nt", "POSIX target probe; Windows uses rename")
+@unittest.skipIf(os.name == "nt", "POSIX target probe; Windows reports unknown")
 class FreshTargetProbe(Base):
     def test_target_probe_is_bounded_and_unknown_never_means_free(self):
         self.assertIsNotNone(self.real_fresh_busy, "fresh target probe must exist")
