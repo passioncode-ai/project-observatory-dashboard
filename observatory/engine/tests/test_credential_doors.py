@@ -2571,6 +2571,9 @@ def test_or_policy_progresses_observed_nonincreasing_lowerings() -> None:
             check("near-target echo stays explicitly unserved on a read-only rerun",
                   rc == 1 and p.patches == patches and "held-ceiling" in out.getvalue()
                   and '2.0004' in out.getvalue(), out.getvalue())
+            check("CLI observed total rounds each positive fraction upward and names that basis",
+                  "ceilings: $10.02" in out.getvalue()
+                  and "observed ceilings rounded up" in out.getvalue(), out.getvalue())
 
     for mode in ("missing", "foreign", "timeout", "increase"):
         m, p = _r3_door(); m.issue_for_policy(_pol(2, limit=16), "example")
@@ -2601,6 +2604,37 @@ def test_or_policy_progresses_observed_nonincreasing_lowerings() -> None:
     except m.PolicyPartial: partial = True
     check("a stale lowering classification never turns into a fresh provider raise",
           partial and p.patches == 0 and p.total() == 1)
+
+
+
+def test_or_policy_refuses_unknown_fresh_capacity_before_lowering() -> None:
+    """Unknown capacity cannot prove that a planned decrease is still a decrease."""
+    for mode in ("missing", "nonfinite", "negative", "boolean", "range", "unlimited"):
+        m, p = _r3_door(); m.issue_for_policy(_pol(2, limit=16), "example")
+        original = m.find_key; reads = {}
+        def fresh(admin, name):
+            row = original(admin, name); reads[name] = reads.get(name, 0) + 1
+            if name.endswith("k0") and reads[name] == 2:
+                p.keys[row["hash"]]["limit"] = None if mode == "unlimited" else 1
+                row = dict(row)
+                if mode == "missing": row.pop("limit")
+                elif mode == "nonfinite": row["limit"] = float("nan")
+                elif mode == "negative": row["limit"] = -1
+                elif mode == "boolean": row["limit"] = True
+                elif mode == "range": row["limit"] = 10**100
+                else: row["limit"] = None
+            return row
+        m.find_key = fresh
+        try:
+            plan = m.issue_for_policy(_pol(2, limit=4), "example"); partial = False
+        except m.PolicyPartial as exc: plan, partial = exc.plan, True
+        if mode == "unlimited":
+            check("explicit provider unlimited null permits a verified finite decrease",
+                  not partial and p.patches == 2 and p.total() == 4)
+        else:
+            check(f"{mode} fresh capacity refuses before any PATCH and preserves prior records",
+                  partial and p.patches == 0 and p.n == 2 and p.total() == 9
+                  and all(r["limit_usd"] == 8 for r in m.ledger()["issued"].values()), str(plan))
 
 
 def test_or_policy_runs_one_at_a_time() -> None:
@@ -3264,6 +3298,7 @@ if __name__ == "__main__":
                test_or_policy_unknown_pending_reservation_is_not_current_headroom,
                test_or_policy_confirms_lowered_exposure_before_spending_headroom,
                test_or_policy_progresses_observed_nonincreasing_lowerings,
+               test_or_policy_refuses_unknown_fresh_capacity_before_lowering,
                test_or_policy_runs_one_at_a_time,
                test_or_policy_counts_every_positive_provider_fraction,
                test_or_policy_amounts_are_whole_cents_against_the_exact_limit,

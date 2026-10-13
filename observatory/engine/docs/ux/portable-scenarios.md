@@ -285,11 +285,15 @@ Two independent $8 keys lowered toward $2 may both reach $2.0004; those observed
 amounts block a new $6 key under a $10 cap and allow it under $11. Both original
 slots remain `held-ceiling`, so the command exits 1 and reports the unmet shares.
 Near-target observations do not become falsely served on the next read-only run.
-Unknown fresh bounds cannot authorize above-request effects; raises retain the
-strict planned bound. This is same-operation provider evidence, not an atomic
+Missing or malformed fresh bounds refuse before PATCH. Only a present, explicit
+provider `null` denotes an unlimited ceiling that can be decreased to a verified
+finite amount. Raises retain the strict planned bound. Observed CLI totals round
+each reported amount upward and say so, while per-key hints preserve actual
+values. This is same-operation provider evidence, not an atomic
 external snapshot or a guarantee that a provider can satisfy an exact split.
 Evidence: `test_or_policy_confirms_lowered_exposure_before_spending_headroom` and
-`test_or_policy_progresses_observed_nonincreasing_lowerings`.
+`test_or_policy_progresses_observed_nonincreasing_lowerings` and
+`test_or_policy_refuses_unknown_fresh_capacity_before_lowering`.
 
 An applied spend policy records its explicit origin and exact digest on new and
 selected existing key rows; dry-run preserves ledger state. Rotation of a marked

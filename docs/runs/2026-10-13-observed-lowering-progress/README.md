@@ -46,6 +46,27 @@ provider behavior was changed. This is not a full 5200-case result for this sour
 The two earlier full failure matrices remain immutable in the composed-source
 measurement packet.
 
+## Independent fresh-bound correction
+
+Independent review rejected `0e53527`: missing, nonfinite or negative fresh
+capacity could still conceal a decrease that had become an increase. The
+[new regression](fresh-bound-red.json) reproduced five failing variants, adding
+boolean and out-of-range metadata. A present, explicit provider `null` remains a
+distinct unlimited ceiling and passes the finite-decrease control. Missing or
+malformed fresh capacity now refuses before PATCH, even when the eventual
+response could have fitted the request. This closes the unsafe admission
+premise before an irreversible provider effect.
+
+[A replay of all six corrective red assertions](fresh-correction-red.json) on
+the exact prior blob also showed two $2.0004 observations plus $6 printed as $10.
+The observed summary now counts each positive fraction upward and labels that
+basis, displaying $10.02; exact per-key observed hints remain $2.0004. It no longer
+hides the excess in a nearest-cent total. The initial 100-case receipt and
+17-case priority replay above remain bound to the initial source, not this
+correction. [The corrected focused receipt](fresh-bound-focused.json) records
+107 PASS, 0 FAIL, including all previous 13 regression functions. Full 5200 was
+not rerun on this correction. Independent re-review is required.
+
 ## Unresolved outcomes
 
 | Boundary | Meaning and next step |

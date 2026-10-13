@@ -1210,6 +1210,7 @@ def cmd_issue_for_policy(path: str, account: str | None, limit_override: float |
         return 1
     not_serving = False
     total = 0.0
+    display_total = _Total()
     for step in plan:
         if step.get("action") == "over-limit":
             not_serving = True
@@ -1218,11 +1219,13 @@ def cmd_issue_for_policy(path: str, account: str | None, limit_override: float |
         if step.get("action") == "held-rotation-exposure":
             not_serving = True
             total += step["counted"] if step["counted"] is not None else math.inf
+            display_total.add(_cents_up(step["counted"]))
             print(f"{step['ref']}: held-rotation-exposure — {step['why']}")
             continue
         if step.get("action") == "not-in-policy":
             not_serving = True
             total += step["counted"] if step["counted"] is not None else math.inf
+            display_total.add(_cents_up(step["counted"]))
             print(f"{step['ref']}: not-in-policy {step['name']!r} — {step['why']}")
             print("  " + HELD_NOT_SERVING["not-in-policy"].format(name=step["name"]))
             continue
@@ -1230,6 +1233,7 @@ def cmd_issue_for_policy(path: str, account: str | None, limit_override: float |
             print(f"{step['ref']}: skipped — {step['why']}")
             continue
         total += step.get("observed_limit", step["limit"])
+        display_total.add(_cents_up(step.get("observed_limit", step["limit"])))
         extra = ((f" (was ${step['previous']:g})" if step["previous"] is not None else " (was unbounded)")
                  if "previous" in step else "")
         why = f" — {step['why']}" if step.get("why") else ""
@@ -1237,9 +1241,11 @@ def cmd_issue_for_policy(path: str, account: str | None, limit_override: float |
         if step["action"] in HELD_NOT_SERVING:
             not_serving = True
             print(f"  the slot is not served as planned: " + HELD_NOT_SERVING[step["action"]].format(name=step["name"]))
-    total_basis = (" in all (observed where confirmed; otherwise planned)"
-                   if any("observed_limit" in step for step in plan) else " in all as planned")
-    print("ceilings: " + ("unbounded" if math.isinf(total) else f"${round(total, 2):g}") + total_basis + (f", project limit ${policy['limitUsd']:g}"
+    has_observed = any("observed_limit" in step for step in plan)
+    total_basis = (" in all (observed ceilings rounded up; other amounts planned)"
+                   if has_observed else " in all as planned")
+    shown_total = display_total.text() if has_observed else ("unbounded" if math.isinf(total) else f"${round(total, 2):g}")
+    print("ceilings: " + shown_total + total_basis + (f", project limit ${policy['limitUsd']:g}"
                                                                  if policy.get("mode") == "limited"
                                                                  else ", no project limit (L0 binds)"))
     # The meter's L0 per key (docs/design/METER.md M4) is configured, not read from the provider: once a
@@ -1295,6 +1301,9 @@ def _set_limit_locked(name_or_label: str, limit: float, reset: str | None = None
     if policy_ceiling_cents is not None and (not rec.get("hash") or row.get("hash") != rec["hash"]):
         raise RuntimeError("Policy ceiling identity is unresolved; no limit was changed")
     before_ceiling = _ceiling_of(row) if policy_ceiling_cents is not None else None
+    if (policy_ceiling_cents is not None and before_ceiling is None
+            and not ("limit" in row and row["limit"] is None)):
+        raise RuntimeError("Policy fresh ceiling is unknown; no limit was changed")
     if policy_lowering and before_ceiling is not None and limit > before_ceiling:
         raise RuntimeError("Policy lowering is no longer non-increasing; refresh before changing the limit")
     response = _request(f"/keys/{row['hash']}", admin, {"limit": limit, "limit_reset": reset},
