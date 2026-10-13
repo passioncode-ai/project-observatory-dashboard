@@ -423,11 +423,13 @@ class Private(NamedTuple):
 
 class Unmeasured(NamedTuple):
     """A private walk with no figure, and why. `timeout`: the walk did not finish within
-    `seconds` (the last figures are kept and the survey says so). `not-applicable`: no
-    reader on this platform, or a file system that keeps no private size (nothing to keep,
-    nothing to report). Before ENG-006 all of these were one `None`."""
+    `seconds`. `unreadable`: the place itself could not be opened (`detail` names the error).
+    Both keep the last figures and the survey says so. `not-applicable`: no reader on this
+    platform, or a file system that keeps no private size (nothing to keep, nothing to
+    report). Before ENG-006 all of these were one `None`."""
     reason: str
     seconds: float | None = None
+    detail: str | None = None
 
 
 def private_kb(path: pathlib.Path, timeout: float, reader=None) -> Private | Unmeasured:
@@ -449,8 +451,8 @@ def private_kb(path: pathlib.Path, timeout: float, reader=None) -> Private | Unm
     deadline = time.monotonic() + allowed
     try:
         root = os.lstat(path)
-    except OSError:
-        return Unmeasured("not-applicable")
+    except OSError as exc:
+        return Unmeasured("unreadable", None, type(exc).__name__)
     total, seen, stack, visited, files, read = 0, set(), [str(path)], 0, 0, 0
     while stack:
         try:
@@ -545,21 +547,29 @@ def frees(kb: int, private: "Private | Unmeasured | int | None") -> dict:
     # `clones_matter`: clones hold enough of the place that `du` alone would mislead. Decided on
     # the KB, not the rounded GB: 0.098 GB rounds to the 0.1 GB line.
     return {"frees_at_least_gb": round(private / 1048576, 2), "clone_shared_gb": round(shared / 1048576, 2),
-            "clones_matter": shared >= CLONE_NOTE_GB * 1048576 and shared >= CLONE_NOTE_SHARE * kb}
+            "clones_matter": clones_matter(shared, kb)}
+
+
+def clones_matter(shared_kb: float, kb: float) -> bool:
+    """Clones hold enough of a place that `du` alone would mislead: at least CLONE_NOTE_GB and
+    at least CLONE_NOTE_SHARE of it. One rule for a fresh walk and for carried figures."""
+    return shared_kb >= CLONE_NOTE_GB * 1048576 and shared_kb >= CLONE_NOTE_SHARE * kb
 
 
 def carried_frees(old: dict | None, gb: float) -> dict:
     """The last private walk's figures for a row `du` just re-sized, with their own date.
 
     A row written before `frees_measured_at` existed had its figures measured with its
-    `gb`, so its `measured_at` dates them. `frees_at_least_gb` is a floor of what removal
-    gives back, so it never exceeds the fresh size."""
+    `gb`, so its `measured_at` dates them. A place can shrink between walks, so the split is
+    fitted inside the fresh size: the floor never exceeds it, the clone share never exceeds
+    what is left beside the floor, and `clones_matter` is decided again on those numbers."""
     if not old or "frees_at_least_gb" not in old:
         return {}
-    kept = {k: old[k] for k in FREES_FIELDS if k in old}
-    kept["frees_measured_at"] = old.get("frees_measured_at") or old.get("measured_at")
-    kept["frees_at_least_gb"] = min(kept["frees_at_least_gb"], gb)
-    return kept
+    floor = min(old["frees_at_least_gb"], gb)
+    shared = max(0.0, min(old.get("clone_shared_gb", 0.0), gb - floor))
+    return {"frees_at_least_gb": round(floor, 2), "clone_shared_gb": round(shared, 2),
+            "clones_matter": clones_matter(round(shared, 2) * 1048576, gb * 1048576),
+            "frees_measured_at": old.get("frees_measured_at") or old.get("measured_at")}
 
 
 def survey_disk(previous: dict | None, force: bool) -> dict:
@@ -619,17 +629,23 @@ def survey_disk(previous: dict | None, force: bool) -> dict:
         if last and not force and _stamp_age(last["frees_measured_at"]) < private_every:
             measured[loc["path"]].update(last)          # walked recently: the budget goes to `du`
             continue
+        kept = "the last figures are kept" if last else "no earlier figure to keep"
         left = budget - (time.monotonic() - started)
         if left <= 1:
             measured[loc["path"]].update(last)
+            degraded.append({"source": loc["path"],
+                             "reason": f"private size not measured: the survey's budget was spent; {kept}"})
             continue
         private = private_kb(path, min(per, left))
         if isinstance(private, Unmeasured):
             if private.reason == "timeout":
                 measured[loc["path"]].update(last)
-                kept = "the last figures are kept" if last else "no earlier figure to keep"
                 degraded.append({"source": loc["path"],
                                  "reason": f"private size not measured within {private.seconds:.0f} s; {kept}"})
+            elif private.reason == "unreadable":
+                measured[loc["path"]].update(last)
+                degraded.append({"source": loc["path"],
+                                 "reason": f"private size could not be read ({private.detail}); {kept}"})
             continue
         measured[loc["path"]].update(frees(kb, private), frees_measured_at=measured[loc["path"]]["measured_at"])
     rows = []

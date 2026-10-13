@@ -2121,5 +2121,12 @@
   "other": "{file} хранит открытым текстом учётные данные: {n}"
  },
  "Provider credential in a tool's config in plaintext": "Учётные данные провайдера открытым текстом в конфиге инструмента",
- "removing it frees at least {size} GB; APFS clones share {shared} GB": "удаление освободит не меньше {size} ГБ; клоны APFS делят {shared} ГБ"
+ "removing it frees at least {size} GB; APFS clones share {shared} GB": "удаление освободит не меньше {size} ГБ; клоны APFS делят {shared} ГБ",
+ "as of {date}": "на {date}",
+ "partial survey: {n} checkouts carried from {date}": {
+  "few": "неполное обследование: {n} рабочие копии взяты из прохода {date}",
+  "many": "неполное обследование: {n} рабочих копий взяты из прохода {date}",
+  "one": "неполное обследование: {n} рабочая копия взята из прохода {date}",
+  "other": "неполное обследование: {n} рабочей копии взяты из прохода {date}"
+ }
 }

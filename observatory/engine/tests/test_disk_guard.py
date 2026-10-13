@@ -697,41 +697,72 @@ class StaleRows(Base):
     no person present, so it waits for a fresh pass. The manual tier only proposes: its rows
     stay, marked with the age a person needs to see."""
 
-    def hygiene(self, stale: bool) -> dict:
-        row = {"repository": "example-org/alpha-web", "path": str(self.base / "alpha-web"),
-               "default_branch": "main", "measured_at": "2026-10-01T09:00:00Z",
+    def checkout(self, name: str, measured_at: str, stale: bool) -> dict:
+        row = {"repository": f"example-org/{name}", "path": str(self.base / name),
+               "default_branch": "main", "measured_at": measured_at,
                "branches": [{"name": "old-feature", "class": "merged", "idle_days": 40},
                             {"name": "spike", "class": "unique", "ahead": 2, "idle_days": 40}],
-               "worktrees": [{"path": str(self.base / "wt-gone"), "state": "missing", "idle_days": 40},
-                             {"path": str(self.base / "wt-clean"), "state": "clean", "branch": "x", "idle_days": 40},
-                             {"path": str(self.base / "wt-dirty"), "state": "dirty", "branch": "y",
+               "worktrees": [{"path": str(self.base / f"{name}-gone"), "state": "missing", "idle_days": 40},
+                             {"path": str(self.base / f"{name}-clean"), "state": "clean", "branch": "x", "idle_days": 40},
+                             {"path": str(self.base / f"{name}-dirty"), "state": "dirty", "branch": "y",
                               "dirty_files": 3, "idle_days": 40}]}
-        return {"measured_at": "2026-10-12T09:00:00Z", "partial": stale,
-                "checkouts": [{**row, "stale": True} if stale else row]}
+        return {**row, "stale": True} if stale else row
+
+    def hygiene(self, stale: bool, quiet_fresh: bool = False) -> dict:
+        """One checkout this pass measured and, when `stale`, one it carried from an earlier pass:
+        a reader that counted every row as carried, or none, gets a different number."""
+        fresh = self.checkout("beta-api", "2026-10-12T09:00:00Z", stale=False)
+        if quiet_fresh:
+            fresh.update(branches=[], worktrees=[])
+        rows = [fresh,
+                self.checkout("alpha-web", "2026-10-01T09:00:00Z", stale=stale)]
+        return {"measured_at": "2026-10-12T09:00:00Z", "partial": stale, "checkouts": rows}
 
     def test_a_stale_checkout_yields_no_auto_action_and_marked_manual_ones(self):
         import cleanup
         cfg = cleanup.load_config()
+        stale_repo, fresh_repo = str(self.base / "alpha-web"), str(self.base / "beta-api")
         fresh = cleanup.plan_git(self.hygiene(stale=False), cfg)
-        self.assertEqual(sorted(a["class"] for a in fresh if a["tier"] == "auto"),
+        self.assertEqual(sorted(a["class"] for a in fresh if a["tier"] == "auto" and a["repo"] == stale_repo),
                          ["branch-merged", "worktree-clean", "worktree-missing"], "the fixture must plan auto work")
         plan = cleanup.plan_git(self.hygiene(stale=True), cfg)
-        self.assertEqual([a for a in plan if a["tier"] == "auto"], [], "an auto action from a carried row")
-        manual = [a for a in plan if a["tier"] == "manual"]
+        self.assertEqual([a for a in plan if a["tier"] == "auto" and a["repo"] == stale_repo], [],
+                         "an auto action from a carried row")
+        self.assertEqual(sorted(a["class"] for a in plan if a["tier"] == "auto" and a["repo"] == fresh_repo),
+                         ["branch-merged", "worktree-clean", "worktree-missing"], "the fresh checkout still plans")
+        manual = [a for a in plan if a["tier"] == "manual" and a["repo"] == stale_repo]
         self.assertEqual(sorted(a["class"] for a in manual), ["branch-unique", "worktree-dirty"])
         for a in manual:
             self.assertIs(a.get("stale"), True)
             self.assertEqual(a.get("measured_at"), "2026-10-01T09:00:00Z")
         self.assertTrue(all("stale" not in a for a in fresh), "a fresh row is not marked")
+        self.assertTrue(all("stale" not in a for a in plan if a["repo"] == fresh_repo))
 
-    def test_the_plan_and_the_auto_run_say_what_waits_for_a_fresh_pass(self):
+    def test_the_plan_and_the_page_count_carried_rows_with_one_function(self):
+        import cleanup, machine_view
+        # Reloaded in order, since other cases reload machine_view: cleanup must take the function
+        # machine_view defines, not a copy of its own.
+        machine_view = importlib.reload(machine_view)
+        cleanup = importlib.reload(cleanup)
+        self.assertIs(cleanup.carried, machine_view.carried, "two readers of `stale` would drift apart")
+        self.assertEqual(cleanup.carried(self.hygiene(stale=True)),
+                         {"checkouts": 1, "measured_at": "2026-10-01T09:00:00Z"})
+        self.assertIsNone(cleanup.carried(self.hygiene(stale=False)))
+
+    def enable_auto(self):
         import paths
         settings = self.home / "config" / "settings.json"
         doc = json.loads(settings.read_text())
         doc.setdefault("features", {})["auto_cleanup"] = True
         settings.write_text(json.dumps(doc))
         paths.SCRATCH.mkdir(parents=True, exist_ok=True)
-        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps(self.hygiene(stale=True)))
+        # The fresh checkout holds nothing to clean here, so the run has nothing to act on at all and
+        # every count it prints is the carried one.
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps(self.hygiene(stale=True, quiet_fresh=True)))
+        return paths
+
+    def test_the_plan_and_the_auto_run_say_what_waits_for_a_fresh_pass(self):
+        paths = self.enable_auto()
         done = subprocess.run([sys.executable, str(ROOT / "tools/cleanup.py"), "--auto", "--git-only"],
                               cwd=ROOT, env={**os.environ}, capture_output=True, text=True, timeout=300)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
@@ -741,6 +772,17 @@ class StaleRows(Base):
         plan = json.loads((paths.SCRATCH / "cleanup-plan.json").read_text())
         self.assertEqual(plan["carried"], {"checkouts": 1, "measured_at": "2026-10-01T09:00:00Z"})
         self.assertIs(plan["survey_partial"], True)
+
+    def test_the_guards_report_keeps_the_carried_count(self):
+        """Under `--json` the line goes to stderr and the guard keeps only the JSON summary, so the
+        count travels inside the summary and reaches the guard's report and journal."""
+        self.enable_auto()
+        done = subprocess.run([sys.executable, str(ROOT / "tools/cleanup.py"), "--auto", "--git-only", "--json"],
+                              cwd=ROOT, env={**os.environ}, capture_output=True, text=True, timeout=300)
+        summary = json.loads(done.stdout.strip().splitlines()[-1])
+        self.assertEqual(summary.get("carried"), {"checkouts": 1, "measured_at": "2026-10-01T09:00:00Z"})
+        tier = self.g._git_tier(False, "normal", 120)
+        self.assertEqual(tier.get("carried"), {"checkouts": 1, "measured_at": "2026-10-01T09:00:00Z"})
 
     def test_the_machine_view_shows_the_partial_survey_and_its_carried_count(self):
         import paths

@@ -634,5 +634,9 @@
  "{file} keeps {n} credentials in plaintext": {
   "one": "{file} keeps {n} credential in plaintext",
   "other": "{file} keeps {n} credentials in plaintext"
+ },
+ "partial survey: {n} checkouts carried from {date}": {
+  "one": "partial survey: {n} checkout carried from {date}",
+  "other": "partial survey: {n} checkouts carried from {date}"
  }
 }

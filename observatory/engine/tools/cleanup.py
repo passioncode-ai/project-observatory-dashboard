@@ -132,14 +132,7 @@ def protected(name: str, cfg: dict) -> bool:
 
 # --- the plan -----------------------------------------------------------------
 
-def carried(hygiene: dict) -> dict | None:
-    """The checkouts a cut-short hygiene pass carried from an earlier one (`stale: true`), and the
-    oldest measurement among them; None when every row is fresh."""
-    rows = [c for c in hygiene.get("checkouts") or [] if c.get("stale")]
-    if not rows:
-        return None
-    stamps = [c["measured_at"] for c in rows if c.get("measured_at")]
-    return {"checkouts": len(rows), "measured_at": min(stamps) if stamps else None}
+from machine_view import carried  # noqa: E402 — the one reader of `stale` (ENG-009)
 
 
 def plan_git(hygiene: dict, cfg: dict) -> list[dict]:
@@ -468,15 +461,18 @@ def main(argv: list[str]) -> int:
         os.replace(tmp, out)
         counts = ", ".join(f"{k} {v}" for k, v in plan["counts"].items() if v) or "nothing"
         held_back = plan.get("carried")
+        # In the JSON summary too: under `--json` the line goes to stderr, and the disk guard keeps
+        # only the summary, so this is how the count reaches its report and journal.
+        held = {"carried": held_back} if held_back else {}
         if held_back:
             # Said on every path, so a run that removes nothing does not read as "nothing to do".
             print(f"cleanup: {held_back['checkouts']} checkouts carried from {held_back['measured_at']}; "
                   "their auto actions wait for a fresh pass", file=sys.stderr if as_json else sys.stdout)
         if "--auto" in argv and not plan["auto_enabled"]:
-            return say({"result": "plan-only", "counts": plan["counts"]},
+            return say({"result": "plan-only", "counts": plan["counts"], **held},
                        f"cleanup: plan only (features.auto_cleanup is off) — {counts}")
         if "--auto" not in argv and "--apply" not in argv:
-            return say({"result": "plan-only", "counts": plan["counts"]},
+            return say({"result": "plan-only", "counts": plan["counts"], **held},
                        f"cleanup plan{' at ' + level if level else ''}: {counts}. Nothing removed; `--apply` removes "
                        f"the auto tier, `--apply --include manual` also archives and removes the manual tier.")
         tiers = {"auto"} | ({"manual"} if "--apply" in argv and "manual" in argv else set())
@@ -501,7 +497,7 @@ def main(argv: list[str]) -> int:
         failed = sum(1 for r in rows if r["result"] == "failed")
         freed = sum(r.get("kb") or 0 for r in rows) / 1048576
         summary = {"result": "ran", "removed": done, "skipped": skipped, "failed": failed,
-                   "stopped": stopped, "level": level or "normal", "plan_seconds": plan["plan_seconds"]}
+                   "stopped": stopped, "level": level or "normal", "plan_seconds": plan["plan_seconds"], **held}
         text = (f"cleanup: {done} removed, {skipped} skipped on re-check, {failed} failed"
                 + (f"; {freed:.1f} GB of build output freed" if freed else "")
                 + (f"; {stopped} left for the next run (deadline)" if stopped else ""))

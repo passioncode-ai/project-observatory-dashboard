@@ -67,9 +67,14 @@ def _frees(row: dict, t: Translator) -> str:
     (OBS-66): `du` counted 19 browser clones as 13 GB, and removing them freed nothing."""
     if not row.get("clones_matter"):
         return ""
-    return "<br>" + t.mark("removing it frees at least {size} GB; APFS clones share {shared} GB",
+    hint = "<br>" + t.mark("removing it frees at least {size} GB; APFS clones share {shared} GB",
                            attrs=' class="machine-hint"', size=round(row["frees_at_least_gb"], 1),
                            shared=round(row["clone_shared_gb"], 1))
+    # Figures carried from an earlier private walk say when that walk ran (ENG-006).
+    walked = row.get("frees_measured_at")
+    if walked and walked != row.get("measured_at"):
+        hint += " " + t.mark("as of {date}", attrs=' class="machine-hint"', date=str(walked)[:10])
+    return hint
 
 
 def _word(t: Translator, msgid) -> str:
@@ -212,6 +217,13 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                         "No disk location measured yet."))
     parts.append(guard_html(m.get("guard"), t))
     git = m.get("git") or {}
+    # A pass the deadline cut short carried some checkouts from an earlier one; their rows below
+    # are that old, and they plan no automatic removal until a fresh pass (ENG-009).
+    held = git.get("carried") or {}
+    if git.get("partial") and held.get("checkouts"):
+        parts.append(t.mark("partial survey: {n} checkouts carried from {date}", tag="p",
+                            attrs=' class="machine-hint"', n=held["checkouts"],
+                            date=str(held.get("measured_at") or "")[:10]))
     # Worth a look: a stale record, one git cannot read, or one nobody has touched
     # in a week. Uncommitted edits in a worktree someone works in today are work.
     idle = [w for w in git.get("worktrees") or []

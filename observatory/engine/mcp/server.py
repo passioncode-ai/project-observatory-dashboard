@@ -567,7 +567,9 @@ def observatory_machine(
     if full.get("git"):
         git = full["git"]
         out["git"] = {"measuredAt": git.get("measuredAt"), "totals": git.get("totals"),
-                      "branches": git.get("branches"), "uniqueBranches": len(git.get("uniqueBranches") or [])}
+                      "branches": git.get("branches"), "uniqueBranches": len(git.get("uniqueBranches") or []),
+                      # A pass the deadline cut short: its carried checkouts plan no automatic removal.
+                      "partial": git.get("partial", False), "carried": git.get("carried")}
     if full.get("cleanup"):
         plan = full["cleanup"]
         out["cleanup"] = {"plannedAt": plan.get("plannedAt"), "autoEnabled": plan.get("autoEnabled"),

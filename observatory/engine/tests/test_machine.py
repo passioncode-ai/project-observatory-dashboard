@@ -348,6 +348,64 @@ class ApfsFrees(DiskBudget):
         self.assertNotIn("frees_at_least_gb", row, "a file system with no private size carries no old figure")
         self.assertNotIn("degraded", out, "not applicable is not a failure to measure")
 
+    def test_a_carried_split_never_claims_more_than_the_fresh_size(self):
+        """A place that shrank from 13 GB to 0.6 GB kept the old walk's "APFS clones share 12.6 GB".
+        Carried figures are clamped to the fresh `du` size, and `clones_matter` is decided again
+        on the clamped numbers by the same rule a walk uses."""
+        import scan_machine as sm
+        self.config(disk_budget_seconds=30)
+        for floor, shared, want in ((0.4, 12.6, (0.4, 0.2, True)), (0.0, 13.0, (0.0, 0.6, True)),
+                                    (0.55, 12.45, (0.55, 0.05, False))):
+            previous = self.previous(frees_hours_ago=20)
+            previous["disk"]["locations"][0].update(gb=13.0, frees_at_least_gb=floor, clone_shared_gb=shared,
+                                                    clones_matter=True)
+            with patch.object(sm, "size_kb", return_value=int(0.6 * 1048576)), \
+                    patch.object(sm, "private_kb", return_value=sm.Private(1)):
+                out = sm.survey_disk(previous, force=False)
+            row = next(r for r in out["locations"] if r["path"] == str(self.base / "a"))
+            self.assertEqual(row["gb"], 0.6)
+            self.assertEqual((row["frees_at_least_gb"], row["clone_shared_gb"], row["clones_matter"]), want,
+                             f"from {floor}/{shared} GB of 13")
+            self.assertLessEqual(row["frees_at_least_gb"] + row["clone_shared_gb"], row["gb"] + 0.01)
+
+    def test_a_due_walk_the_budget_cannot_fit_is_named(self):
+        """`du` spent the budget, so the private walk that was due never started: the last figures
+        are kept, and the survey says why rather than staying silent."""
+        import scan_machine as sm
+        self.config(disk_budget_seconds=2)
+        previous = self.previous(frees_hours_ago=100, measured_hours_ago=14)
+        # b and c were sized more recently than a, so a is the first place due and the only one sized.
+        for name in ("b", "c"):
+            later = self.previous(frees_hours_ago=100, measured_hours_ago=13)["disk"]["locations"][0]
+            previous["disk"]["locations"].append({**later, "path": str(self.base / name), "label": name})
+        slow_du = lambda path, timeout: (time.sleep(1.4), 2 * 1048576)[1]
+        with patch.object(sm, "size_kb", side_effect=slow_du), patch.object(sm, "private_kb") as walked:
+            out = sm.survey_disk(previous, force=False)
+        self.assertNotIn(call(self.base / "a", ANY), walked.call_args_list)
+        row = next(r for r in out["locations"] if r["path"] == str(self.base / "a"))
+        self.assertEqual(row["frees_at_least_gb"], 0.2)
+        named = [d for d in out.get("degraded") or [] if d["source"] == str(self.base / "a")]
+        self.assertEqual(len(named), 1, out.get("degraded"))
+        self.assertIn("the survey's budget was spent", named[0]["reason"])
+        self.assertIn("the last figures are kept", named[0]["reason"])
+
+    def test_a_place_that_cannot_be_read_is_unmeasured_with_its_reason(self):
+        """A failed `lstat` is not "this file system keeps no private size": it is a place the walk
+        could not open, reported as such and named in the survey."""
+        import scan_machine as sm
+        got = sm.private_kb(self.base / "no-such-place", 30, reader=lambda path: 0)
+        self.assertEqual((got.reason, got.detail), ("unreadable", "FileNotFoundError"))
+        self.config(disk_budget_seconds=30)
+        previous = self.previous(frees_hours_ago=100)
+        with patch.object(sm, "size_kb", return_value=2 * 1048576), \
+                patch.object(sm, "private_kb", return_value=sm.Unmeasured("unreadable", None, "PermissionError")):
+            out = sm.survey_disk(previous, force=True)
+        row = next(r for r in out["locations"] if r["path"] == str(self.base / "a"))
+        self.assertEqual(row["frees_at_least_gb"], 0.2)
+        named = [d for d in out.get("degraded") or [] if d["source"] == str(self.base / "a")]
+        self.assertEqual(len(named), 1, out.get("degraded"))
+        self.assertIn("could not be read (PermissionError)", named[0]["reason"])
+
     def test_clones_are_named_only_when_they_hold_enough(self):
         import scan_machine as sm
         self.assertTrue(sm.frees(2 * 1048576, 0)["clones_matter"])
@@ -683,6 +741,40 @@ class PageFrees(Base):
             self.assertTrue(got == want, f"{built}→{reader}: " + relocalize.first_difference(got, want))
 
 
+class PageCarried(Base):
+    """K-b and K-c on the page: carried clone figures say when they were measured, and a git
+    survey the deadline cut short says how many checkouts it carried and from when."""
+
+    def test_the_page_dates_carried_figures_and_names_a_partial_git_survey(self):
+        import machine_view, machine_page
+        from i18n import Translator
+        (self.home / "store/raw/machine.json").write_text(json.dumps({
+            "measured_at": "2026-01-01T00:00:00Z", "memory": {}, "processes": {},
+            "disk": {"volume": {"free_gb": 4, "free_percent": 2, "total_gb": 250},
+                     "locations": [{"path": "~/clones", "label": "Clones", "kind": "cache", "reclaim": "regenerable",
+                                    "gb": 13.0, "measured_at": "2026-01-01T00:00:00Z", "frees_at_least_gb": 0.4,
+                                    "clone_shared_gb": 12.6, "clones_matter": True,
+                                    "frees_measured_at": "2025-12-29T08:00:00Z"}]}}))
+        (self.home / "store/raw/git-hygiene.json").write_text(json.dumps({
+            "measured_at": "2026-01-01T00:00:00Z", "partial": True,
+            "checkouts": [{"repository": "example-org/alpha-web", "path": "/x/alpha-web", "default_branch": "main",
+                           "measured_at": "2025-12-30T09:00:00Z", "stale": True, "worktrees": [], "branches": []},
+                          {"repository": "example-org/beta-api", "path": "/x/beta-api", "default_branch": "main",
+                           "measured_at": "2026-01-01T00:00:00Z", "worktrees": [], "branches": []}]}))
+        summary = machine_view.summary()
+        en = machine_page.machine_html({"machine": summary}, Translator("en"))
+        ru = machine_page.machine_html({"machine": summary}, Translator("ru"))
+        self.assertIn("as of 2025-12-29", en)
+        self.assertIn("partial survey: 1 checkout carried from 2025-12-30", en)
+        self.assertIn("2025-12-29", ru)
+        sys.path.insert(0, str(ROOT / "tests"))
+        import relocalize
+        for built, reader in (("en", "ru"), ("ru", "en")):
+            got = relocalize.relocalize({"en": en, "ru": ru}[built], reader)
+            want = {"en": en, "ru": ru}[reader]
+            self.assertTrue(got == want, f"{built}→{reader}: " + relocalize.first_difference(got, want))
+
+
 class Unmeasured(Base):
     def test_nothing_measured_is_never_shown_as_all_clean(self):
         # With no git-hygiene survey and no cleanup plan the page said "Every
@@ -732,6 +824,17 @@ class Tool(Base):
         self.assertEqual(out["processes"]["count"], 30)                            # the total stays whole
         self.assertIn("processes", out["sections"])
         self.assertIn("degraded", out)
+
+    def test_the_overview_says_when_the_git_survey_is_partial(self):
+        """An agent reading the bounded overview sees that some checkouts are carried, not only a
+        person reading the page or an agent asking for the git section in full."""
+        (self.home / "store/raw/git-hygiene.json").write_text(json.dumps({
+            "measured_at": "2026-01-01T00:00:00Z", "partial": True,
+            "checkouts": [{"repository": "example-org/alpha-web", "path": "/x/alpha-web", "default_branch": "main",
+                           "measured_at": "2025-12-30T09:00:00Z", "stale": True, "worktrees": [], "branches": []}]}))
+        out = self.server.observatory_machine()
+        self.assertIs(out["git"]["partial"], True)
+        self.assertEqual(out["git"]["carried"], {"checkouts": 1, "measured_at": "2025-12-30T09:00:00Z"})
 
     def test_a_named_section_is_whole(self):
         out = self.server.observatory_machine(section="processes")
