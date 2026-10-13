@@ -16,6 +16,30 @@ spec.loader.exec_module(runner)
 
 
 class SuiteFailureReceipts(unittest.TestCase):
+    def test_failed_summary_permissions_publish_no_success_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / 'report'
+            stream = io.StringIO()
+            row = {'file': 'tests/test_time.py', 'status': 'PASS', 'exit_code': 0}
+            argv = ['runner', '--suite', 'time', '--report-dir', str(destination)]
+            chmod = Path.chmod
+
+            def fail_summary(path, mode, **kwargs):
+                if path.name.startswith('summary'):
+                    raise PermissionError('synthetic permission refusal')
+                return chmod(path, mode, **kwargs)
+
+            with mock.patch.object(sys, 'argv', argv), \
+                 mock.patch.object(runner, 'copy_source'), \
+                 mock.patch.object(runner, 'run_suite', return_value=row), \
+                 mock.patch.object(Path, 'chmod', fail_summary), \
+                 contextlib.redirect_stdout(stream):
+                code = runner.main()
+            result = json.loads(stream.getvalue())
+            self.assertEqual(1, code)
+            self.assertEqual([row], result['suites'])
+            self.assertFalse((destination / 'summary.json').exists())
+
     def test_report_write_failure_keeps_stdout_receipts(self):
         with tempfile.TemporaryDirectory() as temporary:
             stream = io.StringIO()

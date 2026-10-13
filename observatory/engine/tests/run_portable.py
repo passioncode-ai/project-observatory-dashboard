@@ -458,7 +458,11 @@ def main() -> int:
                     target=args.report_dir / row['log']; target.parent.mkdir(mode=0o700)
                     shutil.copyfile(base / row['log'], target); target.chmod(0o600)
                 summary=args.report_dir / 'summary.json'
-                summary.write_text(json.dumps(report, indent=2) + '\n'); summary.chmod(0o600)
+                pending=args.report_dir / 'summary.json.tmp'
+                # Publish last: failure to write or restrict the receipt must not
+                # leave a final PASS artifact while stdout correctly says FAIL.
+                pending.write_text(json.dumps(report, indent=2) + '\n'); pending.chmod(0o600)
+                pending.replace(summary)
             except OSError as exc:
                 # A full disk or refused destination must not erase the stdout receipt.
                 # Files already copied are partial evidence, never a completed report.

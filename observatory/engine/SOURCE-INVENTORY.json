@@ -2013,8 +2013,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "3b36848eece696ef561d009a14f930356e6d267089d4edfe98e8bb27a6532f69",
-      "bytes": 25472,
+      "export_sha256": "1c791f12fa381d6bf9164b2768f031bff0d12c6305d24d4159f5019de4739b04",
+      "bytes": 25736,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,

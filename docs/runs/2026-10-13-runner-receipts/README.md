@@ -15,3 +15,12 @@ were not exercised. Source inventory regenerated; independent acceptance remains
 
 Next task: independent review of the diff and failure receipts, then required repository
 checks and PR integration. No installed engine was changed.
+
+## Independent review correction
+
+The first review planted a permission failure after summary writing: stdout failed
+but the saved summary still claimed PASS. A third regression reproduced it. The
+summary is now written and restricted under a temporary name and published by rename
+only after those operations succeed. All three regressions pass. Partial exports do
+not publish a final success summary. This review changed the implementation; it was
+not counted as acceptance of the earlier commit.
