@@ -321,3 +321,18 @@ Missing required objects leave local state unknown and non-actionable. Ordinary
 complete local checkouts remain observable. Proof:
 `test_checkout_state.py::OfflineGitObservation`, including the actual bounded
 checkout query and unchanged synthetic object-store contents.
+
+
+### Local upstream graph is not remote recovery evidence
+
+After publishing local-state results, the explicit checkout scan independently
+attempts bounded offline ahead/behind counts with a persistent phase cursor.
+Equal local remote-tracking commits do not establish current server contents:
+remote durability stays unknown and disposal remains unauthorized. Missing,
+shallow, promisor, replacement/grafted or alternate-backed history yields unknown
+counts. Saved CLI/MCP coverage projects only whitelisted counts/kind/scope and
+own age; source/binding changes and stale/future/bool counters refuse currentness.
+A graph timeout must not erase an already saved local-state result.
+
+Proof: `test_checkout_state.py::UpstreamGraph` and `GraphPhase`, using disposable
+local file remotes including a separately changed server branch after last fetch.

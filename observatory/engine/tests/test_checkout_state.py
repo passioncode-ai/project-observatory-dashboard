@@ -228,5 +228,172 @@ class OfflineGitObservation(Base):
         self.assertEqual(self.objects(target), before)
 
 
+class UpstreamGraph(Base):
+    def repo(self):
+        path=self.data/'graph';path.mkdir();git(path,'init','-qb','main');commit(path,'initial')
+        git(path,'branch','peer');git(path,'branch','--set-upstream-to=peer','main')
+        return path
+
+    def observe(self,path):
+        import checkout_graph
+        return checkout_graph.probe(path,seconds=5)
+
+    def test_local_equal_ahead_behind_and_diverged(self):
+        path=self.repo()
+        for expected, action in [((0,0),None),((1,0),'ahead'),((0,1),'behind'),((1,1),'diverged')]:
+            if action=='ahead':commit(path,'ahead')
+            elif action=='behind':git(path,'branch','-f','peer','main');git(path,'reset','--hard','HEAD~1')
+            elif action=='diverged':commit(path,'other')
+            row=self.observe(path)
+            self.assertTrue(row['complete'],row)
+            self.assertEqual((row['ahead'],row['behind']),expected)
+            self.assertEqual(row['upstream_kind'],'local-branch')
+            self.assertEqual(row['remote_durability'],'unknown')
+            self.assertFalse(row['actionable'])
+
+    def test_stale_remote_tracking_cannot_claim_remote_durability(self):
+        path=self.repo();origin=self.data/'remote';git(self.data,'clone','--bare',str(path),str(origin))
+        git(path,'remote','add','origin',origin.as_uri());git(path,'fetch','origin')
+        git(path,'branch','--set-upstream-to=origin/main','main')
+        elsewhere=self.data/'elsewhere';git(self.data,'clone',str(origin),str(elsewhere));commit(elsewhere,'remote-only');git(elsewhere,'push','origin','main')
+        tracked=git(path,'rev-parse','refs/remotes/origin/main')
+        row=self.observe(path)
+        self.assertTrue(row['complete'],row);self.assertEqual((row['ahead'],row['behind']),(0,0))
+        self.assertEqual(row['upstream_kind'],'remote-tracking');self.assertEqual(row['remote_durability'],'unknown')
+        self.assertEqual(git(path,'rev-parse','refs/remotes/origin/main'),tracked)
+
+    def test_detached_unborn_and_missing_upstream_are_unknown(self):
+        path=self.repo();git(path,'checkout','--detach','-q')
+        self.assertEqual(self.observe(path)['state'],'unknown')
+        git(path,'checkout','-q','main');git(path,'branch','-D','peer')
+        self.assertIsNone(self.observe(path)['ahead'])
+        unborn=self.data/'unborn';unborn.mkdir();git(unborn,'init','-q')
+        self.assertFalse(self.observe(unborn)['complete'])
+
+    def test_shallow_promisor_replacement_graft_and_alternates_refuse(self):
+        path=self.repo();head=git(path,'rev-parse','HEAD').strip()
+        for filename,content,reason in [('shallow',head+'\n','shallow-history'),('info/grafts',head+'\n','grafted-history'),('objects/info/alternates','/synthetic/missing\n','alternate-object-store')]:
+            marker=path/'.git'/filename;marker.parent.mkdir(parents=True,exist_ok=True);marker.write_text(content)
+            row=self.observe(path);self.assertIn(reason,row['degraded']);self.assertIsNone(row['ahead']);marker.unlink()
+        git(path,'config','remote.origin.promisor','true')
+        self.assertIn('promisor-history',self.observe(path)['degraded']);git(path,'config','--unset','remote.origin.promisor')
+        git(path,'update-ref','refs/replace/'+head,head)
+        self.assertIn('replacement-history',self.observe(path)['degraded'])
+
+    def test_graph_drift_and_bad_counts_are_unknown(self):
+        import checkout_graph as subject
+        path=self.repo();original=subject.query
+        def drift(candidate,args,deadline,**kwargs):
+            value=original(candidate,args,deadline,**kwargs)
+            if args[0]=='rev-list':git(path,'config','branch.main.merge','refs/heads/missing')
+            return value
+        with patch.object(subject,'query',side_effect=drift):
+            row=self.observe(path)
+        self.assertFalse(row['complete']);self.assertIsNone(row['ahead'])
+        for value in (b'1 -1\n',b'1 2 3\n',b'1.5 0\n',b'99999999999999999999 0\n'):
+            with self.assertRaises(ValueError):subject.parse_counts(value)
+        self.assertEqual(subject.parse_counts(b'2\t3\n'),(2,3))
+
+    def test_saved_graph_counts_reject_stale_future_bool_and_wrong_source(self):
+        import checkout_graph,coverage_view
+        from datetime import datetime,timezone,timedelta
+        row=self.observe(self.repo());at=datetime.now(timezone.utc)
+        good=coverage_view.upstream_summary(row,at)
+        self.assertEqual(good['ahead'],0);self.assertFalse(good['actionable'])
+        for changes in ({'ahead':True},{'measured_at':(at-timedelta(hours=1)).isoformat()},
+                        {'measured_at':(at+timedelta(seconds=5)).isoformat()}, {'source_sha256':'0'*64}, {'complete':False}):
+            bad=coverage_view.upstream_summary({**row,**changes},at)
+            self.assertIsNone(bad['ahead']);self.assertEqual(bad['remote_durability'],'unknown')
+
+
+class GraphPhase(Base):
+    def test_failed_graph_keeps_published_local_state_and_advances_cursor(self):
+        import checkout_inventory,checkout_graph
+        from unittest.mock import patch
+        root=self.data/'roots';root.mkdir()
+        for name in ('a','b'):
+            path=root/name;path.mkdir();git(path,'init','-q');commit(path,'tracked')
+        out=self.home/'store/raw/checkout-candidates.json';seen=[]
+        def failure(path,seconds):
+            self.assertLessEqual(seconds,2)  # seconds=8 reserves at most a quarter for this phase
+            published=json.loads(out.read_text())
+            row=next(r for r in published['candidates'] if r['path']==str(path))
+            self.assertEqual(row['local_state']['state'],'clean-observed')
+            self.assertEqual(published['upstream_cursor']['last_attempted'],str(path))
+            seen.append(str(path));raise TimeoutError('PRIVATE DETAIL')
+        with patch.object(checkout_graph,'observe',side_effect=failure):
+            result=checkout_inventory.scan(out,[root],seconds=8,root_seconds=6)
+        self.assertEqual(len(seen),2)
+        self.assertTrue(all(r['local_state']['state']=='clean-observed' for r in result['candidates']))
+        self.assertTrue(all(r['upstream']['ahead'] is None for r in result['candidates']))
+        self.assertNotIn('PRIVATE DETAIL',json.dumps(result))
+
+    def test_actual_scan_publishes_bound_positive_graph_for_saved_reader(self):
+        import checkout_inventory,coverage_view
+        from datetime import datetime,timezone
+        path=self.data/'positive';path.mkdir();git(path,'init','-qb','main');commit(path,'tracked')
+        git(path,'branch','peer');git(path,'branch','--set-upstream-to=peer','main')
+        out=self.home/'store/raw/checkout-candidates.json'
+        result=checkout_inventory.scan(out,[path],seconds=8,root_seconds=4)
+        row=result['candidates'][0]
+        self.assertEqual(row['local_state']['state'],'clean-observed')
+        self.assertTrue(row['upstream']['complete'],row['upstream'])
+        summary=coverage_view.upstream_summary(row['upstream'],datetime.now(timezone.utc),row)
+        self.assertEqual((summary['ahead'],summary['behind']),(0,0))
+        for key in ('git_directory','common_directory','config_sha256','branch_sha256','upstream_ref_sha256'):
+            incomplete={**row['upstream'],'binding':{k:v for k,v in row['upstream']['binding'].items() if k!=key}}
+            with self.subTest(missing=key):
+                self.assertIsNone(coverage_view.upstream_summary(incomplete,datetime.now(timezone.utc),row)['ahead'])
+        for key in ('git_directory','common_directory','root','config_sha256'):
+            invalid={**row['upstream'],'binding':{**row['upstream']['binding'],key:True}}
+            self.assertIsNone(coverage_view.upstream_summary(invalid,datetime.now(timezone.utc),row)['ahead'])
+        import checkout_graph
+        with patch.object(checkout_graph,'source_hash',side_effect=OSError('PRIVATE SOURCE FAILURE')):
+            failed=coverage_view.upstream_summary(row['upstream'],datetime.now(timezone.utc),row)
+        self.assertIsNone(failed['ahead']);self.assertNotIn('PRIVATE SOURCE FAILURE',json.dumps(failed))
+        changed={**row,'head':'0'*40}
+        self.assertIsNone(coverage_view.upstream_summary(row['upstream'],datetime.now(timezone.utc),changed)['ahead'])
+
+    def test_phase_budget_cannot_borrow_discovery_time_and_cursor_is_fair(self):
+        import checkout_inventory,checkout_graph
+        clock=[0.0];seen=[];durations=[];roots=[]
+        for index in range(9):
+            root=self.data/str(index);root.mkdir();(root/'.git').mkdir();roots.append(root)
+        out=self.home/'store/raw/checkout-candidates.json'
+        def classify(path,seconds):
+            return {'classification':'clone','head':'a'*40,'local_state':{'state':'clean-observed'}}
+        def observe(path,seconds):
+            seen.append(path);durations.append(seconds);clock[0]+=seconds
+            return checkout_graph.unknown('synthetic-failure')
+        with patch.object(checkout_inventory.time,'monotonic',side_effect=lambda:clock[0]), \
+             patch.object(checkout_inventory,'classify',side_effect=classify), \
+             patch.object(checkout_graph,'observe',side_effect=observe):
+            first=checkout_inventory.scan(out,roots,seconds=20)
+            self.assertEqual(sum(durations),5)
+            last=first['upstream_cursor']['last_attempted'];count=len(seen)
+            second=checkout_inventory.scan(out,roots,seconds=20)
+            self.assertEqual(sum(durations),10)
+        self.assertGreater(seen[count],last)
+        self.assertTrue(all(r['local_state']['state']=='clean-observed' for r in second['candidates']))
+
+    def test_graph_query_bounds_and_identity_drifts_stay_unknown(self):
+        import checkout_graph
+        from unittest.mock import patch
+        path=self.data/'r';path.mkdir();git(path,'init','-qb','main');commit(path,'first');git(path,'branch','peer');git(path,'branch','--set-upstream-to=peer','main')
+        original=checkout_graph.query
+        def changed(candidate,args,deadline,**kwargs):
+            value=original(candidate,args,deadline,**kwargs)
+            if args[0]=='rev-list':commit(path,'second')
+            return value
+        with patch.object(checkout_graph,'query',side_effect=changed):
+            row=checkout_graph.probe(path,seconds=5)
+        self.assertIsNone(row['ahead']);self.assertFalse(row['complete'])
+        self.assertEqual(checkout_graph.probe(path,seconds=0)['degraded'],['command-timeout'])
+        for change in ({'truncated':True},{'stderr_seen':True},{'reason':'command-timeout'}):
+            response={'truncated':False,'stderr_seen':False,'reason':None,'returncode':0,'stdout':b'0\t0\n',**change}
+            with patch.object(checkout_graph.open_unlinked,'capture',return_value=response),self.assertRaises(ValueError):
+                checkout_graph.query(path,['rev-list','HEAD'],__import__('time').monotonic()+1)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -147,7 +147,10 @@ def _scan(out, roots, *, seconds=20, entries=250, depth=8, root_seconds=2):
         raise ValueError('Name between one and 64 explicit roots')
     roots = sorted({os.path.abspath(p) for p in roots})
     entries, depth = max(1, min(10000, int(entries))), max(1, min(32, int(depth)))
-    end = time.monotonic() + min(60, max(0, seconds), max(0, step_budget.remaining()))
+    total_budget = min(60, max(0, seconds), max(0, step_budget.remaining()))
+    graph_budget = min(5, total_budget / 4)
+    graph_end = time.monotonic() + total_budget
+    end = graph_end - graph_budget
     degraded = []
     registered, registration_complete, registration_at = registration_evidence(out.parent / "worktree-registration.json")
     def error(path, reason):
@@ -174,12 +177,13 @@ def _scan(out, roots, *, seconds=20, entries=250, depth=8, root_seconds=2):
         states[root] = {'attempted_at': None, 'measured_at': None, 'complete': False, **states[root], 'stale': True}
     last = old.get('cursor', {}).get('last_attempted') if isinstance(old.get('cursor'), dict) else None
     order = [r for r in roots if not isinstance(last, str) or r > last] + [r for r in roots if isinstance(last, str) and r <= last]
+    graph_last = old.get('upstream_cursor', {}).get('last_attempted') if isinstance(old.get('upstream_cursor'), dict) else None
     def save():
         doc = {'schema_version': 1, 'kind': 'checkout-candidates', 'attempted_at': started,
                'roots': [states[r] for r in roots], 'candidates': sorted(candidates.values(), key=lambda r: r['path']),
-               'cursor': {'last_attempted': last}, 'partial': bool(degraded) or any(r['stale'] or not r['complete'] for r in states.values()) or any(r['stale'] for r in candidates.values()),
+               'cursor': {'last_attempted': last}, 'upstream_cursor': {'last_attempted': graph_last}, 'partial': bool(degraded) or any(r['stale'] or not r['complete'] for r in states.values()) or any(r['stale'] for r in candidates.values()),
                'degraded': degraded, 'limits': {'seconds': seconds, 'entries_per_root': entries, 'depth': depth,
-                                               'root_seconds': root_seconds, 'candidate_limit': 10000},
+                                               'root_seconds': root_seconds, 'candidate_limit': 10000, 'upstream_seconds': graph_budget},
                'authority': 'inventory-only'}
         atomic.write_json(out, doc)
         return doc
@@ -228,6 +232,7 @@ def _scan(out, roots, *, seconds=20, entries=250, depth=8, root_seconds=2):
                                'active_use': 'unknown', 'restore_cost': None, 'regeneration_command': None,
                                'retention_policy': None, 'actionable': False,
                                'blockers': ['inventory-only', 'ownership-unmeasured', 'local-state-unmeasured', 'holders-unmeasured']}
+                        row['upstream'] = candidates.get(str(path), {}).get('upstream')
                         candidates[str(path)] = row; save()
                         evidence = ({'classification': 'unknown', 'reason': 'unsupported-git-marker'} if kind == 'unsupported-git-marker'
                                     else classify(path, min(2, max(0, stop - time.monotonic()))))
@@ -265,6 +270,25 @@ def _scan(out, roots, *, seconds=20, entries=250, depth=8, root_seconds=2):
                 if stack and stack[-1] is frame: stack.pop()
         state.update(measured_at=now(), stale=False, complete=not stack and len(degraded) == root_errors,
                      incomplete_reason=('entry-budget' if visited >= entries else 'time-budget') if stack else ('source-error' if len(degraded) > root_errors else None))
+        save()
+    save()  # local-state publication survives every independent graph attempt
+    import checkout_graph
+    graph_end = min(graph_end, time.monotonic() + graph_budget)
+    graph_paths = sorted(candidates)
+    graph_order = [p for p in graph_paths if not isinstance(graph_last, str) or p > graph_last] + [p for p in graph_paths if isinstance(graph_last, str) and p <= graph_last]
+    for candidate in graph_order:
+        if time.monotonic() >= graph_end: break
+        row = candidates[candidate]
+        if row.get('stale') or row.get('classification') not in ('clone', 'linked-worktree'): continue
+        graph_last = candidate
+        save()  # advance before the child, including failed attempts
+        try:
+            if not safe_path(Path(candidate), Path(row['root'])) or identity(Path(candidate)) != row['identity']:
+                row['upstream'] = checkout_graph.unknown('identity-changed')
+            else:
+                row['upstream'] = checkout_graph.observe(candidate, min(2.5, max(0, graph_end-time.monotonic())))
+        except (OSError, ValueError, TypeError, KeyError):
+            row['upstream'] = checkout_graph.unknown('graph-probe-unavailable')
         save()
     return save()
 
