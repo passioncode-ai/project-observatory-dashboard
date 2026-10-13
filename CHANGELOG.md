@@ -52,6 +52,14 @@ is 0.22.1, with updated credential-handling guidance.
 - **Findings follow the measured cause**: collector deadlines distinguish work not started
   from interrupted work; partial leak scans retain sightings; memory and swap findings use
   their own measurement freshness and preserve unreadable-source degradation.
+- **Policy admission retains uncertain capacity**: every positive observed provider
+  ceiling fraction counts upward; an unread held key has unknown exposure rather
+  than its saved historical ceiling. Hashless pending keys and unread rotation
+  extras also cannot provide current headroom. A policy limit change must return
+  the matching identity, reset period and bounded ceiling before later increases.
+  This confirms the PATCH response, not a separate GET. Unconfirmed effects stop
+  the run without a mutation retry.
+  This does not reconcile external changes or serialize provider-side writers.
 - **Policy-managed keys refuse unproved rotation headroom**: applying an explicit
   policy records provenance on its selected keys. Rotation refuses marked identities
   and exact hash aliases before provider calls; a stored policy snapshot is not live

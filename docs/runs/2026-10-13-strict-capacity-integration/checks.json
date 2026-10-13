@@ -1,0 +1,35 @@
+{
+  "checkpoint": "87d6d0f86880c0c40e01fe11131da47bf4410d32",
+  "credential_doors": {
+    "status": "INTERMEDIATE_SOURCE_PASS",
+    "exit_code": 0,
+    "assertions_passed": 511,
+    "duration_seconds": 248.58,
+    "isolated_home": true,
+    "providers": "synthetic",
+    "limitation": "Pending and rotation-extra capacity corrections not yet included; final broad rerun required"
+  },
+  "version_consistency": {
+    "exit_code": 0,
+    "tests": 4
+  },
+  "engine_doc_copies": {
+    "exit_code": 0,
+    "tests": 6
+  },
+  "docs_check": {
+    "exit_code": 0
+  },
+  "inventory_check": {
+    "exit_code": 0
+  },
+  "doc_copy_check": {
+    "exit_code": 0
+  },
+  "diff_check": {
+    "exit_code": 0
+  },
+  "full_5200": "NOT_RUN_ON_COMPOSITION",
+  "final_credential_doors": "NOT_RUN_AT_FREEZE",
+  "final_source_checkpoint": "746cb228c2d20b8ca63a11db1dea5acef03110fd"
+}

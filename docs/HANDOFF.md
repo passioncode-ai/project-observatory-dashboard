@@ -17,6 +17,17 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-13 — Strict capacity admission and replay](runs/2026-10-13-strict-capacity-integration/README.md):
+positive provider ceiling fractions count upward; unread held keys retain unknown
+exposure and cannot authorize new issuance. Hashless reservations and unread
+rotation extras provide no current headroom. A policy PATCH must confirm its
+identity, period and bounded ceiling before later increases, without a separate
+GET or automatic mutation retry. Synthetic producer/remedy fixtures
+and revoke replay now follow the actual CLI exception boundary. The original
+full measurement remains 4307 PASS / 891 FAIL / 2 ERROR, not acceptance; final
+combined replay and independent binding are next. Protected CI, merge, tagged
+assets and installed acceptance remain pending. No live provider work occurred.
+
 [2026-10-13 — Final holder coverage and prune receipts](runs/2026-10-13-cleanup-holder-integration/README.md):
 partial or unreadable process evidence no longer declares an omitted target free;
 clean and archived dirty worktrees require a fresh bounded final target observation.

@@ -1,0 +1,87 @@
+{
+  "base": "12b7343277004aa408283fb4aef06ccbae935954",
+  "runtime_checkpoint": "746cb228c2d20b8ca63a11db1dea5acef03110fd",
+  "mapping": [
+    {
+      "source_commit": "f24b3ca25ee762018106c1550f9a8cd80e27947d",
+      "delivery_commit": "7fc90f066955060ac3154de61b47681c79ab1a05",
+      "subject": "fix: count every observed provider ceiling fraction"
+    },
+    {
+      "source_commit": "24531d1a446f60a1ada96e063796067bf6ccc27a",
+      "delivery_commit": "4e8c154e703dffe4ba4851b5bf9202261b2930c5",
+      "subject": "docs(cli): qualify the disk guard holder observation"
+    },
+    {
+      "source_commit": "532b70911ec39fcb4590a6632283dc63dfcaecf5",
+      "delivery_commit": "402c2ab34ced219b9464c5224f4f31da023c3323",
+      "subject": "test: refresh adversarial remedies through current consumer producer"
+    },
+    {
+      "source_commit": "10e58264f7b1904b739871b2cfbcfd993162d3c5",
+      "delivery_commit": "2f2aa34c08fb4070a422eb97b58838d18f347106",
+      "subject": "docs: retain failing current-producer baseline and comparison"
+    },
+    {
+      "source_commit": "e8f5d61177f45bdffae843e84435aea30d90d3c8",
+      "delivery_commit": "eae5929453f047a18e10c74d54163829a62224c1",
+      "subject": "docs: classify every residual consumer-fixture counterexample"
+    },
+    {
+      "source_commit": "d17b47753dd1df3a042751d15f6f037d01a22377",
+      "delivery_commit": "be4e705b7e462e56c6f3341f1caba620efcaf590",
+      "subject": "docs: specify explicit adversarial remedy proof boundaries"
+    },
+    {
+      "source_commit": "f3ffea10d5151c67b0b907281a405220198e44c8",
+      "delivery_commit": "37d8572a1da17131be1b3146cdbb6e28589b9b5f",
+      "subject": "test: exercise documented decreases and explicit pending attestations"
+    },
+    {
+      "source_commit": "6ee4e6c26a1f403b57584417ea380c193438eb38",
+      "delivery_commit": "5a3be2831d9034b75a1e63bda04074ac06441d9e",
+      "subject": "test: refuse pending attestation with unknown owned identities"
+    },
+    {
+      "source_commit": "f1dc6a787479ffde976b9fa3e1935f1f62f9a419",
+      "delivery_commit": "cab672826e89d12d8cbdae7470dd75c4338e2873",
+      "subject": "docs: bind corrected remedy replay and retained failures"
+    },
+    {
+      "source_commit": "2e418e653106918cfb9b8e3c83d44dcd4b052e09",
+      "delivery_commit": "45addd74007bbe5359bf3ac9b207f83da05f63ae",
+      "subject": "docs: preserve full 5200-case adversarial failure measurement"
+    },
+    {
+      "source_commit": "22bdc0629378b44d6ce18862eafa796b0b10e544",
+      "delivery_commit": "1231df8ab62f632adca72ea41570b3048a6abb5a",
+      "subject": "fix: refuse new policy exposure beside unread keys"
+    },
+    {
+      "source_commit": "5d5a40256fd710db6484f0597b0cf4bfb325eae6",
+      "delivery_commit": "87d6d0f86880c0c40e01fe11131da47bf4410d32",
+      "subject": "test: preserve revoke CLI failure boundary in adversary"
+    },
+    {
+      "source_commit": "1274cc3c621d3ea8209448f498684594e086f4eb",
+      "delivery_commit": "7d0f1de6475d62b894858a68609d2294b01d61eb",
+      "subject": "fix: require current evidence for reserved policy exposure"
+    },
+    {
+      "source_commit": "ea4581db694aaa2fec84494b7a4a3967edf2c35d",
+      "delivery_commit": "746cb228c2d20b8ca63a11db1dea5acef03110fd",
+      "subject": "fix: confirm policy ceiling effects before using headroom"
+    }
+  ],
+  "source_sha256": {
+    "observatory/engine/tools/openrouter.py": "8c74363dca294ff62291df2bb8aac71e8fb7b9ca795db5f81bb0be6cc48b503b",
+    "observatory/engine/tests/adv_j1_property.py": "059eeddcea7a08bbe4e92ffa496fc243d72915c1976bb39b3b923be6fb0b88a9",
+    "observatory/engine/tests/test_j3_adversary.py": "ae6bc6ed2ccceceb2b49aaa86f92fb25e4571776e9128cffde3441e45f768902",
+    "observatory/engine/tests/test_credential_doors.py": "8959aeb83911ff285418dae2b8e9bfea4c095c47f019d0e0408fe1018d116a1f",
+    "observatory/engine/workspace.py": "af8ad90c56497569570841c133d55b9da2702b18025259730a6d4bbf88e26598",
+    "observatory/engine/tests/test_rotation_accounting.py": "c8993ef321455e9338d7bbd2a64bb3d22a78dee57e6e0caa03e44b9348e124db"
+  },
+  "source_commit_resolution": "Original commits are local provenance and may not resolve in a fresh public checkout. Delivery commits and source hashes bind the published lineage.",
+  "scope": "synthetic source corrections; not deployment or full J-3 acceptance",
+  "observatory_tree": "58eb053d1240a722822ad5dde55d044f337a8e39"
+}
