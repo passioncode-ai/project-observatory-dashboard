@@ -1,0 +1,2486 @@
+{
+  "source_commit": "f1dc6a787479ffde976b9fa3e1935f1f62f9a419",
+  "cases": [
+    {
+      "category": "convergence:repeated-limit",
+      "seed": 7000009,
+      "plans": [
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "action": "issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 292400
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "why": "read failed (Unreachable)",
+              "action": "held-unread"
+            },
+            {
+              "ref": "vault:project-a/",
+              "name": "project-a",
+              "action": "over-limit",
+              "why": "OVER LIMIT by $0.01 now ($2924.01 against the $2924.00 limit); it ends after: limit project-a-prod-k0 --set 1462"
+            }
+          ],
+          "error": null,
+          "limit_cents": 292400
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/",
+              "name": "project-a",
+              "action": "over-limit",
+              "why": "OVER LIMIT by $0.02 now ($2924.02 against the $2924.00 limit); it ends after: limit project-a-prod-k0 --set 1462, limit project-a-prod-k3 --set 1462"
+            }
+          ],
+          "error": null,
+          "limit_cents": 292400
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/",
+              "name": "project-a",
+              "action": "over-limit",
+              "why": "OVER LIMIT by $0.02 now ($2924.02 against the $2924.00 limit); it ends after: limit project-a-prod-k0 --set 1462, limit project-a-prod-k3 --set 1462"
+            }
+          ],
+          "error": null,
+          "limit_cents": 292400
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/",
+              "name": "project-a",
+              "action": "over-limit",
+              "why": "OVER LIMIT by $0.02 now ($2924.02 against the $2924.00 limit); it ends after: limit project-a-prod-k0 --set 1462, limit project-a-prod-k3 --set 1462"
+            }
+          ],
+          "error": null,
+          "limit_cents": 292400
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/",
+              "name": "project-a",
+              "action": "over-limit",
+              "why": "OVER LIMIT by $0.02 now ($2924.02 against the $2924.00 limit); it ends after: limit project-a-prod-k0 --set 1462, limit project-a-prod-k3 --set 1462"
+            }
+          ],
+          "error": null,
+          "limit_cents": 292400
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1462.0,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/",
+              "name": "project-a",
+              "action": "over-limit",
+              "why": "OVER LIMIT by $0.02 now ($2924.02 against the $2924.00 limit); it ends after: limit project-a-prod-k0 --set 1462, limit project-a-prod-k3 --set 1462"
+            }
+          ],
+          "error": null,
+          "limit_cents": 292400
+        }
+      ],
+      "refusals": [],
+      "shape": {
+        "echo": "+0.0004",
+        "big": false,
+        "drift": 0,
+        "page": [
+          5,
+          3
+        ],
+        "fillers": 2,
+        "newest_first": true
+      },
+      "issues": [
+        "(c') no convergence after the door's own remedies:   explicit operator limit project-a-prod-k3 -> operator-applied"
+      ],
+      "trace": [
+        "shape {'echo': '+0.0004', 'big': False, 'drift': 0, 'page': (5, 3), 'fillers': 2, 'newest_first': True}",
+        "run1 limit=292400 refs=2 kw={} -> None ['issued', 'issued']",
+        "rename 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "concurrent[policy] during rotate -> rc=1",
+        "unread 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "unread 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "rotate project-a-prod-k3 fault=- -> rc=1",
+        "converge#0 -> None ['in-place', 'in-place', 'over-limit']",
+        "  explicit operator limit project-a-prod-k0 -> operator-applied",
+        "  explicit operator limit project-a-prod-k3 -> operator-applied",
+        "converge#1 -> None ['in-place', 'in-place', 'over-limit']",
+        "  explicit operator limit project-a-prod-k0 -> operator-applied",
+        "  explicit operator limit project-a-prod-k3 -> operator-applied",
+        "converge#2 -> None ['in-place', 'in-place', 'over-limit']",
+        "  explicit operator limit project-a-prod-k0 -> operator-applied",
+        "  explicit operator limit project-a-prod-k3 -> operator-applied",
+        "converge#3 -> None ['in-place', 'in-place', 'over-limit']",
+        "  explicit operator limit project-a-prod-k0 -> operator-applied",
+        "  explicit operator limit project-a-prod-k3 -> operator-applied",
+        "converge#4 -> None ['in-place', 'in-place', 'over-limit']",
+        "  explicit operator limit project-a-prod-k0 -> operator-applied",
+        "  explicit operator limit project-a-prod-k3 -> operator-applied"
+      ]
+    },
+    {
+      "category": "convergence:blocked-capacity",
+      "seed": 7000013,
+      "plans": [
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.16,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.25,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.19,
+              "action": "issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 60
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.16,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.25,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.19,
+              "action": "held-missing"
+            }
+          ],
+          "error": null,
+          "limit_cents": 60
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.16,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.25,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.19,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $0.62, past its $0.60 limit; nothing is raised or issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 60
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.16,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.25,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.19,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $0.62, past its $0.60 limit; nothing is raised or issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 60
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.16,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.25,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.19,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $0.62, past its $0.60 limit; nothing is raised or issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 60
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.16,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.25,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.19,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $0.62, past its $0.60 limit; nothing is raised or issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 60
+        }
+      ],
+      "refusals": [
+        {
+          "name": "project-a-prod-k4",
+          "type": "ValueError",
+          "reason": "A known consumer is reading right now from this key; deliver its replacement and refresh the OpenRouter scan before revocation"
+        }
+      ],
+      "shape": {
+        "echo": "+0.0004",
+        "big": false,
+        "drift": 1,
+        "page": [
+          5,
+          3
+        ],
+        "fillers": 4,
+        "newest_first": true
+      },
+      "issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'blocked']"
+      ],
+      "trace": [
+        "shape {'echo': '+0.0004', 'big': False, 'drift': 1, 'page': (5, 3), 'fillers': 4, 'newest_first': True}",
+        "run1 limit=60 refs=3 kw={'split': {'vault:project-a/prod/K4': 0.16, 'vault:project-a/prod/K7': 0.25, 'vault:project-a/prod/K2': 0.19}} -> None ['issued', 'issued', 'issued']",
+        "rotate project-a-prod-k7 fault=- -> rc=1",
+        "provider deleted f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "consumer reads 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 by label (listed); revoke -> rc=1 still=True",
+        "converge#0 -> None ['in-place', 'in-place', 'held-missing']",
+        "  remedy revoke project-a-prod-k2 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'in-place', 'blocked']",
+        "converge#2 -> None ['in-place', 'in-place', 'blocked']",
+        "converge#3 -> None ['in-place', 'in-place', 'blocked']",
+        "converge#4 -> None ['in-place', 'in-place', 'blocked']"
+      ]
+    },
+    {
+      "category": "convergence:missing-consumed-identity",
+      "seed": 7000025,
+      "plans": [
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1.45,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.73,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.83,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.08,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.11,
+              "action": "issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 336
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1.45,
+              "action": "held-missing"
+            },
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.73,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.83,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.11,
+              "action": "in-place"
+            }
+          ],
+          "error": null,
+          "limit_cents": 336
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1.45,
+              "action": "held-missing"
+            },
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.73,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.83,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.11,
+              "action": "in-place"
+            }
+          ],
+          "error": null,
+          "limit_cents": 336
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1.45,
+              "action": "held-missing"
+            },
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.73,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.83,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.11,
+              "action": "in-place"
+            }
+          ],
+          "error": null,
+          "limit_cents": 336
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1.45,
+              "action": "held-missing"
+            },
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.73,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.83,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.11,
+              "action": "in-place"
+            }
+          ],
+          "error": null,
+          "limit_cents": 336
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1.45,
+              "action": "held-missing"
+            },
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.73,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.83,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.11,
+              "action": "in-place"
+            }
+          ],
+          "error": null,
+          "limit_cents": 336
+        }
+      ],
+      "refusals": [
+        {
+          "name": "project-a-prod-k6",
+          "type": "ValueError",
+          "reason": "A known consumer is reading right now from this key; deliver its replacement and refresh the OpenRouter scan before revocation"
+        },
+        {
+          "name": "project-a-prod-k1",
+          "type": "RuntimeError",
+          "reason": "Consumer evidence unavailable: OpenRouter scan is missing, unreadable, changed, malformed, degraded or outside its 36-hour window; refresh the scan before retrying; no key was revoked"
+        },
+        {
+          "name": "project-a-prod-k6",
+          "type": "RuntimeError",
+          "reason": "Consumer evidence unavailable: OpenRouter scan is missing, unreadable, changed, malformed, degraded or outside its 36-hour window; refresh the scan before retrying; no key was revoked"
+        },
+        {
+          "name": "project-a-prod-k6",
+          "type": "RuntimeError",
+          "reason": "Consumer evidence unavailable: OpenRouter scan is missing, unreadable, changed, malformed, degraded or outside its 36-hour window; refresh the scan before retrying; no key was revoked"
+        },
+        {
+          "name": "project-a-prod-k6",
+          "type": "RuntimeError",
+          "reason": "Consumer evidence unavailable: OpenRouter scan is missing, unreadable, changed, malformed, degraded or outside its 36-hour window; refresh the scan before retrying; no key was revoked"
+        },
+        {
+          "name": "project-a-prod-k6",
+          "type": "RuntimeError",
+          "reason": "Consumer evidence unavailable: OpenRouter scan is missing, unreadable, changed, malformed, degraded or outside its 36-hour window; refresh the scan before retrying; no key was revoked"
+        },
+        {
+          "name": "project-a-prod-k6",
+          "type": "RuntimeError",
+          "reason": "Consumer evidence unavailable: OpenRouter scan is missing, unreadable, changed, malformed, degraded or outside its 36-hour window; refresh the scan before retrying; no key was revoked"
+        }
+      ],
+      "shape": {
+        "echo": "x1.0001",
+        "big": true,
+        "drift": 0,
+        "page": [
+          4,
+          4
+        ],
+        "fillers": 17,
+        "newest_first": false
+      },
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (held-missing) -> 1"
+      ],
+      "trace": [
+        "shape {'echo': 'x1.0001', 'big': True, 'drift': 0, 'page': (4, 4), 'fillers': 17, 'newest_first': False}",
+        "run1 limit=336 refs=5 kw={'split': {'vault:project-a/prod/K6': 1.45, 'vault:project-a/prod/K3': 0.73, 'vault:project-a/prod/K1': 0.83, 'vault:project-a/prod/K5': 0.08, 'vault:project-a/prod/K7': 0.11}} -> None ['issued', 'issued', 'issued', 'issued', 'issued']",
+        "consumer reads 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 by label (listed); revoke -> rc=1 still=True",
+        "consumer reads f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 by label (listed); revoke -> rc=1 still=True",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['held-missing', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k6 (held-missing) -> 1",
+        "converge#1 -> None ['held-missing', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k6 (held-missing) -> 1",
+        "converge#2 -> None ['held-missing', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k6 (held-missing) -> 1",
+        "converge#3 -> None ['held-missing', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k6 (held-missing) -> 1",
+        "converge#4 -> None ['held-missing', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k6 (held-missing) -> 1"
+      ]
+    },
+    {
+      "category": "convergence:extra-policy-holder",
+      "seed": 7000072,
+      "plans": [
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.05,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.05,
+              "action": "issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 58
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.19,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.35,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.43,
+              "previous": 0.05,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "action": "not-in-policy",
+              "counted": 0.05,
+              "why": "a key of this project the policy does not name, counted at $0.05; not moved by this run"
+            }
+          ],
+          "error": null,
+          "limit_cents": 100
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.19,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.35,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.43,
+              "previous": 0.05,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "action": "not-in-policy",
+              "counted": 0.05,
+              "why": "a key of this project the policy does not name, counted at $0.05; not moved by this run"
+            }
+          ],
+          "error": null,
+          "limit_cents": 100
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.19,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.35,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.43,
+              "previous": 0.05,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "action": "not-in-policy",
+              "counted": 0.05,
+              "why": "a key of this project the policy does not name, counted at $0.05; not moved by this run"
+            }
+          ],
+          "error": null,
+          "limit_cents": 100
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.19,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.35,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.43,
+              "previous": 0.05,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "action": "not-in-policy",
+              "counted": 0.05,
+              "why": "a key of this project the policy does not name, counted at $0.05; not moved by this run"
+            }
+          ],
+          "error": null,
+          "limit_cents": 100
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.19,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.35,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.43,
+              "previous": 0.05,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "action": "not-in-policy",
+              "counted": 0.05,
+              "why": "a key of this project the policy does not name, counted at $0.05; not moved by this run"
+            }
+          ],
+          "error": null,
+          "limit_cents": 100
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.19,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.35,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 0.43,
+              "previous": 0.05,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $1.02, past its $1.00 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "action": "not-in-policy",
+              "counted": 0.05,
+              "why": "a key of this project the policy does not name, counted at $0.05; not moved by this run"
+            }
+          ],
+          "error": null,
+          "limit_cents": 100
+        }
+      ],
+      "refusals": [
+        {
+          "name": "project-a-prod-k6",
+          "type": "RuntimeError",
+          "reason": "Consumer evidence unavailable: OpenRouter scan is missing, unreadable, changed, malformed, degraded or outside its 36-hour window; refresh the scan before retrying; no key was revoked"
+        },
+        {
+          "name": "project-a-prod-k6",
+          "type": "ValueError",
+          "reason": "A known consumer is reading right now from this key; deliver its replacement and refresh the OpenRouter scan before revocation"
+        },
+        {
+          "name": "project-a-prod-k6",
+          "type": "ValueError",
+          "reason": "A known consumer is reading right now from this key; deliver its replacement and refresh the OpenRouter scan before revocation"
+        },
+        {
+          "name": "project-a-prod-k6",
+          "type": "ValueError",
+          "reason": "A known consumer is reading right now from this key; deliver its replacement and refresh the OpenRouter scan before revocation"
+        },
+        {
+          "name": "project-a-prod-k6",
+          "type": "ValueError",
+          "reason": "A known consumer is reading right now from this key; deliver its replacement and refresh the OpenRouter scan before revocation"
+        },
+        {
+          "name": "project-a-prod-k6",
+          "type": "ValueError",
+          "reason": "A known consumer is reading right now from this key; deliver its replacement and refresh the OpenRouter scan before revocation"
+        }
+      ],
+      "shape": {
+        "echo": "id",
+        "big": true,
+        "drift": 1,
+        "page": [
+          4,
+          4
+        ],
+        "fillers": 20,
+        "newest_first": true
+      },
+      "issues": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (not-in-policy) -> 1"
+      ],
+      "trace": [
+        "shape {'echo': 'id', 'big': True, 'drift': 1, 'page': (4, 4), 'fillers': 20, 'newest_first': True}",
+        "run1 limit=58 refs=2 kw={'limit_override': 0.05} -> None ['issued', 'issued']",
+        "edit limit=58 refs=3 kw={}",
+        "edit limit=100 refs=3 kw={'split': {'vault:project-a/prod/K2': 0.19, 'vault:project-a/prod/K4': 0.35, 'vault:project-a/prod/K5': 0.43}}",
+        "consumer reads 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 by label (unlisted); revoke -> rc=1 still=True",
+        "concurrent[policy] during policy -> None",
+        "converge#0 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1",
+        "converge#1 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1",
+        "converge#2 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1",
+        "converge#3 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1",
+        "converge#4 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1"
+      ]
+    },
+    {
+      "category": "convergence:pending-attestation-refusal",
+      "seed": 7000261,
+      "plans": [
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 3074.38,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 3074.38,
+              "action": "issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 614877
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 3074.38,
+              "previous": 3074.687438,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 3074.38,
+              "previous": 3074.6834,
+              "action": "ceiling-moved"
+            }
+          ],
+          "error": null,
+          "limit_cents": 614877
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 4804.05,
+              "previous": 3074.687438,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2392.62,
+              "previous": 3074.687438,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2719.85,
+              "action": "failed",
+              "why": "Unreachable: openrouter unreachable: TimeoutError"
+            }
+          ],
+          "error": "PolicyPartial: partial: 2 of 3 slots served before vault:project-a/prod/K2 failed; a re-run does only what is missing",
+          "limit_cents": 1000000
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 4804.05,
+              "previous": 4804.530405,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2392.62,
+              "previous": 2392.859262,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2719.85,
+              "why": "whether its key was minted is unknown (no hash was recorded)",
+              "action": "held-pending"
+            }
+          ],
+          "error": null,
+          "limit_cents": 1000000
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 4804.05,
+              "previous": 4804.530405,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2392.62,
+              "previous": 2392.859262,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2719.85,
+              "why": "whether its key was minted is unknown (no hash was recorded)",
+              "action": "held-pending"
+            }
+          ],
+          "error": null,
+          "limit_cents": 1000000
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 4804.05,
+              "previous": 4804.530405,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2392.62,
+              "previous": 2392.859262,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2719.85,
+              "why": "whether its key was minted is unknown (no hash was recorded)",
+              "action": "held-pending"
+            }
+          ],
+          "error": null,
+          "limit_cents": 1000000
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 4804.05,
+              "previous": 4804.530405,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2392.62,
+              "previous": 2392.859262,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2719.85,
+              "why": "whether its key was minted is unknown (no hash was recorded)",
+              "action": "held-pending"
+            }
+          ],
+          "error": null,
+          "limit_cents": 1000000
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 4804.05,
+              "previous": 4804.530405,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K6",
+              "to": "vault:project-a/prod/K6",
+              "name": "project-a-prod-k6",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2392.62,
+              "previous": 2392.859262,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2719.85,
+              "why": "whether its key was minted is unknown (no hash was recorded)",
+              "action": "held-pending"
+            }
+          ],
+          "error": null,
+          "limit_cents": 1000000
+        }
+      ],
+      "refusals": [
+        {
+          "name": "project-a-prod-k6",
+          "type": "RuntimeError",
+          "reason": "Consumer evidence unavailable: OpenRouter scan is missing, unreadable, changed, malformed, degraded or outside its 36-hour window; refresh the scan before retrying; no key was revoked"
+        },
+        {
+          "name": "project-a-prod-k2",
+          "type": "RuntimeError",
+          "reason": "Recorded key identity is unresolved; no key was revoked"
+        },
+        {
+          "name": "project-a-prod-k2",
+          "type": "RuntimeError",
+          "reason": "Recorded key identity is unresolved; no key was revoked"
+        },
+        {
+          "name": "project-a-prod-k2",
+          "type": "RuntimeError",
+          "reason": "Recorded key identity is unresolved; no key was revoked"
+        },
+        {
+          "name": "project-a-prod-k2",
+          "type": "RuntimeError",
+          "reason": "Recorded key identity is unresolved; no key was revoked"
+        },
+        {
+          "name": "project-a-prod-k2",
+          "type": "RuntimeError",
+          "reason": "Recorded key identity is unresolved; no key was revoked"
+        }
+      ],
+      "shape": {
+        "echo": "x1.0001",
+        "big": false,
+        "drift": -1,
+        "page": [
+          3,
+          2
+        ],
+        "fillers": 0,
+        "newest_first": false
+      },
+      "issues": [
+        "(c') no convergence after the door's own remedies:   explicit operator attestation project-a-prod-k2 -> refused"
+      ],
+      "trace": [
+        "shape {'echo': 'x1.0001', 'big': False, 'drift': -1, 'page': (3, 2), 'fillers': 0, 'newest_first': False}",
+        "run1 limit=614877 refs=2 kw={} -> None ['issued', 'issued']",
+        "consumer reads 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 by label (unlisted); revoke -> rc=1 still=True",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 3074.6834",
+        "failrun mint:unreach-after -> None ['ceiling-moved', 'ceiling-moved']",
+        "edit limit=1000000 refs=3 kw={'split': {'vault:project-a/prod/K3': 4804.05, 'vault:project-a/prod/K6': 2392.62, 'vault:project-a/prod/K2': 2719.85}}",
+        "rotate-kill project-a-prod-k6 fault=deliver -> rc=1",
+        "concurrent[issue] during rotate -> rc=1",
+        "converge#0 -> None ['ceiling-moved', 'ceiling-moved', 'held-pending']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused",
+        "converge#1 -> None ['ceiling-moved', 'ceiling-moved', 'held-pending']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused",
+        "converge#2 -> None ['ceiling-moved', 'ceiling-moved', 'held-pending']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused",
+        "converge#3 -> None ['ceiling-moved', 'ceiling-moved', 'held-pending']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused",
+        "converge#4 -> None ['ceiling-moved', 'ceiling-moved', 'held-pending']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused"
+      ]
+    },
+    {
+      "category": "(a)",
+      "seed": 7000828,
+      "plans": [
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 279232
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            }
+          ],
+          "error": null,
+          "limit_cents": 279232
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "held-missing"
+            },
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            }
+          ],
+          "error": null,
+          "limit_cents": 279232
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            }
+          ],
+          "error": null,
+          "limit_cents": 279232
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K3",
+              "to": "vault:project-a/prod/K3",
+              "name": "project-a-prod-k3",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 698.08,
+              "action": "in-place"
+            }
+          ],
+          "error": null,
+          "limit_cents": 279232
+        }
+      ],
+      "refusals": [],
+      "shape": {
+        "echo": "+1e-9",
+        "big": true,
+        "drift": -1,
+        "page": [
+          3,
+          2
+        ],
+        "fillers": 8,
+        "newest_first": false
+      },
+      "issues": [
+        "(a) POST /keys took the project total to 2792.3201 past 2792.32"
+      ],
+      "trace": [
+        "shape {'echo': '+1e-9', 'big': True, 'drift': -1, 'page': (3, 2), 'fillers': 8, 'newest_first': False}",
+        "run1 limit=279232 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "rename 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 698.0801",
+        "converge#0 -> None ['in-place', 'held-missing', 'in-place', 'in-place']",
+        "  remedy revoke project-a-prod-k0 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'issued', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "category": "(L)",
+      "seed": 7001212,
+      "plans": [
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 862.31,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 862.31,
+              "action": "issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 172463
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 368.29,
+              "previous": 862.396231,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 368.29,
+              "previous": 862.396231,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 368.29,
+              "action": "failed",
+              "why": "RuntimeError: openrouter answered HTTP 502; provider response withheld"
+            }
+          ],
+          "error": "PolicyPartial: partial: 2 of 3 slots served before vault:project-a/prod/K0 failed; a re-run does only what is missing",
+          "limit_cents": 172463
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 368.29,
+              "action": "held-missing"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 368.29,
+              "previous": 368.32682900000003,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 368.29,
+              "why": "whether its key was minted is unknown (no hash was recorded)",
+              "action": "held-pending"
+            }
+          ],
+          "error": null,
+          "limit_cents": 172463
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 368.29,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 368.29,
+              "previous": 368.32682900000003,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 368.29,
+              "action": "issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 172463
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K1",
+              "to": "vault:project-a/prod/K1",
+              "name": "project-a-prod-k1",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 368.29,
+              "previous": 368.32682900000003,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K2",
+              "to": "vault:project-a/prod/K2",
+              "name": "project-a-prod-k2",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 368.29,
+              "previous": 368.32682900000003,
+              "action": "ceiling-moved"
+            },
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 368.29,
+              "previous": 368.32682900000003,
+              "action": "ceiling-moved"
+            }
+          ],
+          "error": null,
+          "limit_cents": 172463
+        }
+      ],
+      "refusals": [
+        {
+          "name": "project-a-prod-k0",
+          "type": "ListingTooLong",
+          "reason": "the provider listed more than 2 pages of keys; refusing a partial answer \u2014 re-issue the key through this door, or record its hash in the ledger, so it is read by hash"
+        }
+      ],
+      "shape": {
+        "echo": "x1.0001",
+        "big": true,
+        "drift": 1,
+        "page": [
+          3,
+          2
+        ],
+        "fillers": 9,
+        "newest_first": true
+      },
+      "issues": [
+        "(L) live project key unknown to the ledger after subcent: f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015(project-a-prod-k0, $368.3328)"
+      ],
+      "trace": [
+        "shape {'echo': 'x1.0001', 'big': True, 'drift': 1, 'page': (3, 2), 'fillers': 9, 'newest_first': True}",
+        "run1 limit=172463 refs=2 kw={} -> None ['issued', 'issued']",
+        "edit limit=172463 refs=3 kw={'limit_override': 368.29}",
+        "rotate-kill project-a-prod-k1 fault=delete -> rc=1",
+        "failrun mint:502-after -> PolicyPartial: partial: 2 of 3 slots served before vault:project-a/prod/K0 failed; a re-run does only what is missing ['ceiling-moved', 'ceiling-moved', 'failed']",
+        "concurrent[issue] during rotate -> rc=1",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "rotate-kill project-a-prod-k0 fault=delete -> rc=1",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 368.3328",
+        "converge#0 -> None ['held-missing', 'ceiling-moved', 'held-pending']",
+        "  remedy revoke project-a-prod-k1 (held-missing) -> 0",
+        "  remedy revoke project-a-prod-k0 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k0 -> operator-attested",
+        "converge#1 -> None ['issued', 'ceiling-moved', 'issued']"
+      ]
+    },
+    {
+      "category": "OSError",
+      "seed": 7001556,
+      "plans": [
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1957.08,
+              "action": "issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 225371
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1957.08,
+              "action": "held-missing"
+            }
+          ],
+          "error": null,
+          "limit_cents": 225371
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1957.08,
+              "action": "held-missing"
+            }
+          ],
+          "error": null,
+          "limit_cents": 225371
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1957.08,
+              "action": "held-missing"
+            }
+          ],
+          "error": null,
+          "limit_cents": 225371
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1957.08,
+              "action": "held-missing"
+            }
+          ],
+          "error": null,
+          "limit_cents": 225371
+        }
+      ],
+      "refusals": [
+        {
+          "name": "project-a-prod-k0",
+          "type": "OSError",
+          "reason": "the disk refused the ledger write"
+        }
+      ],
+      "shape": {
+        "echo": "round2",
+        "big": false,
+        "drift": -1,
+        "page": [
+          5,
+          3
+        ],
+        "fillers": 3,
+        "newest_first": false
+      },
+      "exception_type": "OSError",
+      "exception_reason": "the disk refused the ledger write",
+      "stack": [
+        {
+          "file": "<stdin>",
+          "function": "<module>",
+          "line": 35
+        },
+        {
+          "file": "adv_j1_property.py",
+          "function": "case",
+          "line": 603
+        },
+        {
+          "file": "adv_j1_property.py",
+          "function": "remedy_revoke",
+          "line": 319
+        },
+        {
+          "file": "adv_j1_property.py",
+          "function": "revoke",
+          "line": 281
+        },
+        {
+          "file": "openrouter.py",
+          "function": "cmd_revoke",
+          "line": 1720
+        },
+        {
+          "file": "<stdin>",
+          "function": "revoke",
+          "line": 27
+        },
+        {
+          "file": "openrouter.py",
+          "function": "locked",
+          "line": 443
+        },
+        {
+          "file": "openrouter.py",
+          "function": "revoke_key",
+          "line": 1700
+        },
+        {
+          "file": "adv_j1_property.py",
+          "function": "save",
+          "line": 209
+        }
+      ],
+      "trace": []
+    },
+    {
+      "category": "error:7001556",
+      "seed": 7001556,
+      "plans": [
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1957.08,
+              "action": "issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 225371
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1957.08,
+              "action": "held-missing"
+            }
+          ],
+          "error": null,
+          "limit_cents": 225371
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1957.08,
+              "action": "held-missing"
+            }
+          ],
+          "error": null,
+          "limit_cents": 225371
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1957.08,
+              "action": "held-missing"
+            }
+          ],
+          "error": null,
+          "limit_cents": 225371
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K0",
+              "to": "vault:project-a/prod/K0",
+              "name": "project-a-prod-k0",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1957.08,
+              "action": "held-missing"
+            }
+          ],
+          "error": null,
+          "limit_cents": 225371
+        }
+      ],
+      "refusals": [
+        {
+          "name": "project-a-prod-k0",
+          "type": "OSError",
+          "reason": "the disk refused the ledger write"
+        }
+      ],
+      "shape": {
+        "echo": "round2",
+        "big": false,
+        "drift": -1,
+        "page": [
+          5,
+          3
+        ],
+        "fillers": 3,
+        "newest_first": false
+      },
+      "exception_type": "OSError",
+      "exception_reason": "the disk refused the ledger write",
+      "stack": [
+        {
+          "file": "<stdin>",
+          "function": "<module>",
+          "line": 35
+        },
+        {
+          "file": "adv_j1_property.py",
+          "function": "case",
+          "line": 603
+        },
+        {
+          "file": "adv_j1_property.py",
+          "function": "remedy_revoke",
+          "line": 319
+        },
+        {
+          "file": "adv_j1_property.py",
+          "function": "revoke",
+          "line": 281
+        },
+        {
+          "file": "openrouter.py",
+          "function": "cmd_revoke",
+          "line": 1720
+        },
+        {
+          "file": "<stdin>",
+          "function": "revoke",
+          "line": 27
+        },
+        {
+          "file": "openrouter.py",
+          "function": "locked",
+          "line": 443
+        },
+        {
+          "file": "openrouter.py",
+          "function": "revoke_key",
+          "line": 1700
+        },
+        {
+          "file": "adv_j1_property.py",
+          "function": "save",
+          "line": 209
+        }
+      ],
+      "trace": []
+    },
+    {
+      "category": "error:7003454",
+      "seed": 7003454,
+      "plans": [
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1321.77,
+              "action": "issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1321.77,
+              "action": "issued"
+            }
+          ],
+          "error": null,
+          "limit_cents": 264355
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1321.77,
+              "action": "in-place"
+            },
+            {
+              "ref": "vault:project-a/prod/K4",
+              "to": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 1321.77,
+              "action": "in-place"
+            }
+          ],
+          "error": null,
+          "limit_cents": 264355
+        },
+        {
+          "plan": [
+            {
+              "ref": "vault:project-a/prod/K7",
+              "to": "vault:project-a/prod/K7",
+              "name": "project-a-prod-k7",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2643.55,
+              "previous": 1321.766,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $6608.87, past its $5287.10 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K5",
+              "to": "vault:project-a/prod/K5",
+              "name": "project-a-prod-k5",
+              "project": "project-a",
+              "reset": "monthly",
+              "limit": 2643.55,
+              "action": "blocked",
+              "why": "after this run the project's keys would total $6608.87, past its $5287.10 limit; nothing is raised or issued"
+            },
+            {
+              "ref": "vault:project-a/prod/K4",
+              "name": "project-a-prod-k4",
+              "action": "not-in-policy",
+              "counted": 1321.77,
+              "why": "a key of this project the policy does not name, counted at $1321.77; not moved by this run"
+            }
+          ],
+          "error": null,
+          "limit_cents": 528710
+        }
+      ],
+      "refusals": [
+        {
+          "name": "project-a-prod-k7",
+          "type": "ValueError",
+          "reason": "A known consumer is reading right now from this key; deliver its replacement and refresh the OpenRouter scan before revocation"
+        },
+        {
+          "name": "project-a-prod-k4",
+          "type": "OSError",
+          "reason": "the disk refused the ledger write"
+        }
+      ],
+      "shape": {
+        "echo": "-0.004",
+        "big": false,
+        "drift": 0,
+        "page": [
+          4,
+          4
+        ],
+        "fillers": 3,
+        "newest_first": true
+      },
+      "exception_type": "OSError",
+      "exception_reason": "the disk refused the ledger write",
+      "stack": [
+        {
+          "file": "<stdin>",
+          "function": "<module>",
+          "line": 35
+        },
+        {
+          "file": "adv_j1_property.py",
+          "function": "case",
+          "line": 603
+        },
+        {
+          "file": "adv_j1_property.py",
+          "function": "remedy_revoke",
+          "line": 319
+        },
+        {
+          "file": "adv_j1_property.py",
+          "function": "revoke",
+          "line": 281
+        },
+        {
+          "file": "openrouter.py",
+          "function": "cmd_revoke",
+          "line": 1720
+        },
+        {
+          "file": "<stdin>",
+          "function": "revoke",
+          "line": 27
+        },
+        {
+          "file": "openrouter.py",
+          "function": "locked",
+          "line": 443
+        },
+        {
+          "file": "openrouter.py",
+          "function": "revoke_key",
+          "line": 1700
+        },
+        {
+          "file": "adv_j1_property.py",
+          "function": "save",
+          "line": 209
+        }
+      ],
+      "trace": []
+    }
+  ]
+}

@@ -63,3 +63,7 @@ The [same128 seeds](raw/documented-remedies-128.json) now complete109PASS,19FAIL
 No original invariant or five-attempt bound changed. Explicit operator actions are
 recorded in traces and stay separate from spontaneous recovery. Corrective source
 review is pending; full5200 is still NOT_RUN in this receipt.
+
+The [full original 5200-case measurement](full-measurement.md) is now recorded
+for source `6ee4e6c`: 4307 PASS, 891 FAIL, 2 ERROR. This supersedes the earlier
+NOT_RUN status only for that exact source and retains every failed seed.

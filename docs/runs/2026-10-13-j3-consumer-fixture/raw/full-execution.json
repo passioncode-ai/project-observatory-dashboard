@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "status": "FINISHED",
+  "source_code_commit": "6ee4e6c26a1f403b57584417ea380c193438eb38",
+  "checkout_commit": "f1dc6a787479ffde976b9fa3e1935f1f62f9a419",
+  "start_seed": 7000000,
+  "requested": 5200,
+  "jobs": 1,
+  "allocated_estimate_bytes": 65561600,
+  "estimated_seconds": 216,
+  "timeout_seconds": 900,
+  "exit_code": 1,
+  "seconds": 264.0736332079978,
+  "checkout_after": "f1dc6a787479ffde976b9fa3e1935f1f62f9a419",
+  "remaining_owned_entries_after_harness_cleanup": 0,
+  "owned_temp_removed": true
+}
