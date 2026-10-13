@@ -181,11 +181,17 @@ accounts, budgets or tokens. Limit issuance and revocation to the task's scope.
 A project's own OpenRouter keys come from its spend policy: `openrouter.py
 issue-for-policy --policy FILE [--dry-run]` keeps their ceilings together within
 the project limit and exits 1 with `OVER LIMIT by $X now ($A against the $L
-limit); it ends after: …` when they are not. `rotate` is the one window past the
-limit: both keys are live while it runs, and until the J-3 change a rotate that
-fails can leave the successor `NAME-next` untracked or the predecessor uncounted —
-delete at the provider the one the slot does not hold, then run
-`issue-for-policy`. A pending row with no hash on an account past the listing is
+limit); it ends after: …` when they are not. `rotate` records a successor reservation
+before minting, verifies returned identities before delivery, and retains predecessor
+exposure until deletion is confirmed. Failed or ambiguous effects remain accounted for;
+repeating rotation or mutating an identity held by unresolved rotation is refused.
+Overlapping ceilings can remain above the limit until reconciled. There is no automatic
+reconciliation command, and the full 5200-case rotation/convergence acceptance remains
+open. Read-only evidence must establish provider state and the value each consumer uses
+before any recovery mutation; a local receipt alone does not prove an effect completed.
+The shared local writer lock does not serialize external account changes or enforce a
+project's policy on every standalone mutation command. A pending issuance row with no
+hash on an account past the listing is
 cleared with `revoke NAME --forget-pending --reason "…"` once its key is gone. The door must
 record the reason as a pre-action attestation before clearing the row; an
 unwritable journal refuses the change. This is an operator assertion, not
