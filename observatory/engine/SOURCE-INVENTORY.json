@@ -2538,8 +2538,8 @@
       "path": "tests/test_decrease_repair.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "af9ff4ae91e6b10016e07e2b8898f65f3a762a9c439d5f116ba9f28aa13c1938",
-      "bytes": 19768
+      "export_sha256": "972962c12356067915b04e631e00e486e704d93c7041546239d7983c7ad5b26d",
+      "bytes": 23881
     },
     {
       "path": "tests/test_degradations.py",
@@ -4519,8 +4519,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "bee881aaef145fa4631ea122932be2b0771dcec5c55b8e5b8728cdbaff0bc6d8",
-      "bytes": 134286,
+      "export_sha256": "ab101de3553bf18895f39efbc07aea8347daefbc6099ce95aacc9c77de51749d",
+      "bytes": 136159,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,

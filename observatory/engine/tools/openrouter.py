@@ -1056,6 +1056,7 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                 same = isinstance(prior, dict) and all(prior.get(k) == v for k, v in binding.items()
                                                       if k != "recorded_at")
                 if not same:
+                    _guard_repair_before_attestation(selected, rec)
                     rec["policy_binding"] = dict(binding)
                     changed = True
             if changed:
@@ -1392,7 +1393,10 @@ def _validate_repair(rec: dict) -> dict | None:
                     or proof.get("basis") not in ("same-operation-response", "subsequent-current-read")
                     or proof.get("reason") is not None
                     or (proof["status"] == "observed-satisfied") != (proof["actual"] <= proof["target"])
-                    or (proof["basis"] == "same-operation-response" and proof["actual"] > proof["before"])
+                    or (proof["basis"] == "same-operation-response" and
+                        (proof["actual"] > proof["before"] or effect["status"] != "observed"
+                         or effect.get("actual") != proof["actual"]
+                         or effect.get("observed_at") != proof["observed_at"]))
                     or datetime.datetime.fromisoformat(proof["observed_at"]) < datetime.datetime.fromisoformat(proof["attempted_at"])):
                 raise ValueError
         elif proof.get("actual") is not None or proof.get("observed_at") is not None:
@@ -1402,6 +1406,10 @@ def _validate_repair(rec: dict) -> dict | None:
                 or _cents_up(prior.get("actual")) is None or prior["actual"] <= 0
                 or not _repair_stamp(prior.get("observed_at"))
                 or prior.get("basis") not in ("same-operation-response", "subsequent-current-read")):
+            raise ValueError
+        if prior and prior["basis"] == "same-operation-response" and (
+                effect["status"] != "observed" or effect.get("actual") != prior["actual"]
+                or effect.get("observed_at") != prior["observed_at"]):
             raise ValueError
     except (TypeError, ValueError, RuntimeError, RecursionError):
         raise RuntimeError("Ceiling repair evidence is malformed or its identity context changed; no mutation is allowed") from None
@@ -1426,6 +1434,24 @@ def _guard_ceiling_repair(rec: dict, *, allow_name: str | None = None) -> None:
         held = _validate_repair(other)
         if held and held["status"] not in REPAIR_RESOLVED and name != allow_name:
             raise RuntimeError("Identity belongs to an unresolved ceiling repair; no alias mutation is allowed")
+
+
+def _guard_repair_before_attestation(name: str, rec: dict) -> None:
+    # A legacy record with no hash has not yet disclosed its provider identity.
+    # When repair evidence exists, resolve that identity before local provenance
+    # publication too; a display name is not an alias-absence proof.
+    if rec.get("hash") or not any(isinstance(peer, dict) and "ceiling_repair" in peer
+                                 for peer in ledger()["issued"].values()):
+        return
+    try:
+        _, admin = read_admin(rec["account"])
+        row = find_key(admin, name)
+        if (not isinstance(row, dict) or not isinstance(row.get("hash"), str)
+                or not re.fullmatch(r"[a-fA-F0-9]{64}", row["hash"])):
+            raise RuntimeError
+        _require_resolved_rotation(row)
+    except (OSError, ValueError, RuntimeError, LookupError, subprocess.SubprocessError):
+        raise RuntimeError("Legacy identity is unresolved or protected; no policy provenance was published") from None
 
 
 def _guard_repair_publication(before: dict, after: dict) -> None:
@@ -1538,6 +1564,9 @@ def decrease_limit(name: str, limit: float) -> dict:
         before = _repair_observation(row, rec)
         if limit > before: raise RuntimeError("Requested repair is no longer a decrease; no limit was changed")
         if limit == before:
+            if ledger() != doc:
+                raise RuntimeError("Ledger context changed during ceiling observation; no repair was recorded")
+            _guard_ceiling_repair(rec)
             return {"status": "observed-satisfied", "actual": before, "observed_at": _repair_now(),
                     "basis": "subsequent-current-read", "target": limit}
         proof = {"schema_version": 1, "attempt_id": os.urandom(16).hex(), "status": "intent",
@@ -1604,6 +1633,7 @@ def _set_limit_locked(name_or_label: str, limit: float, reset: str | None = None
     if not row:
         raise LookupError(f"the ledger records {name!r} but {label!r} holds no such key — "
                           f"it was deleted at the provider; `revoke {name}` clears the row")
+    _require_resolved_rotation(row)
     if policy_ceiling_cents is not None and (not rec.get("hash") or row.get("hash") != rec["hash"]):
         raise RuntimeError("Policy ceiling identity is unresolved; no limit was changed")
     before_ceiling = _ceiling_of(row) if policy_ceiling_cents is not None else None
@@ -1702,6 +1732,7 @@ def toggle_key(name: str, disabled: bool) -> dict:
     row = find_key(admin, name)
     if not row:
         raise LookupError(f"{name!r} is not at the provider any more")
+    _require_resolved_rotation(row)
     _request(f"/keys/{row['hash']}", admin, {"disabled": disabled}, method="PATCH")
     _journal("disable" if disabled else "enable", f"openrouter/{_label}/{name}")
     return {"name": name, "disabled": disabled}
@@ -1774,6 +1805,7 @@ def _rotate_one_locked(name: str) -> dict:
     old = find_key(admin, name)
     if not isinstance(old, dict) or not isinstance(old.get("hash"), str) or not old["hash"]:
         raise ValueError("Predecessor identity could not be established; nothing was minted")
+    _require_resolved_rotation(old)
     if not isinstance(rec.get("hash"), str) or old["hash"] != rec["hash"]:
         raise RuntimeError("Predecessor identity does not match the ledger; nothing was minted or changed")
     limit = old.get("limit")
@@ -2092,6 +2124,8 @@ def revoke_key(name_or_label: str) -> dict:
     _scan, receipt = _revoke_scan()
     _label, admin = read_admin(rec["account"])
     row = find_key(admin, name)
+    if row:
+        _require_resolved_rotation(row)
     # Never let an unrelated name lookup supply the deletion identity.
     if row and (not rec.get("hash") or row.get("hash") != rec["hash"]):
         raise RuntimeError("Recorded key identity is unresolved; no key was revoked")

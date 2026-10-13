@@ -247,7 +247,9 @@ class DecreaseRepair(unittest.TestCase):
         self.assertEqual(self.invoke(), 0)
         good = copy.deepcopy(self.record()['ceiling_repair'])
         for changes in ({'status':'observed-unmet'}, {'actual':11}, {'before':8},
-                        {'reason':'not-observed'}, {'basis':'unknown'}, {'observed_at':None}):
+                        {'reason':'not-observed'}, {'basis':'unknown'}, {'observed_at':None},
+                        {'effect':{'status':'unconfirmed', 'actual':None, 'observed_at':None}},
+                        {'effect':dict(good['effect'], actual=8)}):
             with self.subTest(changes=changes):
                 self.tamper(lambda doc: doc['issued'][self.name].update(ceiling_repair=dict(good, **changes)))
                 before = (self.m.ledger(), self.p.writes)
@@ -344,6 +346,80 @@ class DecreaseRepair(unittest.TestCase):
         self.assertEqual(self.record()['destination'], 'vault:project-a/prod/OTHER')
         self.assertEqual(self.record()['ceiling_repair']['status'], 'intent')
         self.assertEqual(self.record()['limit_usd'], 10)
+
+
+    def test_hashless_alias_discovery_cannot_bypass_unresolved_identity(self):
+        self.leave_unknown()
+        self.p.keys[self.handle]['name'] = 'legacy-alias'
+        def add(doc):
+            doc['issued']['legacy-alias'] = {k:v for k,v in doc['issued'][self.name].items()
+                                            if k not in ('hash', 'ceiling_repair')}
+            doc['issued']['legacy-alias']['pending'] = True
+        self.tamper(add)
+        before = (self.m.ledger(), self.p.writes)
+        for operation in (lambda: self.m.set_limit('legacy-alias', 8),
+                          lambda: self.m.toggle_key('legacy-alias', True)):
+            with self.subTest(operation=operation):
+                with self.assertRaises(RuntimeError): operation()
+                self.assertEqual((self.m.ledger(), self.p.writes), before)
+
+    def test_equal_target_refuses_context_drift_after_read(self):
+        original = self.m.find_key
+        def read(*args):
+            row = original(*args)
+            self.tamper(lambda d: d['issued'][self.name].update(destination='vault:project-a/prod/OTHER'))
+            return row
+        self.m.find_key = read; before = self.p.writes
+        self.assertEqual(self.invoke(10), 1)
+        self.assertEqual(self.p.writes, before)
+        self.assertNotIn('ceiling_repair', self.record())
+        self.assertEqual(self.record()['destination'], 'vault:project-a/prod/OTHER')
+
+    def test_distinct_hashless_alias_retains_general_manual_semantics(self):
+        self.leave_unknown()
+        self.m.issue_key('independent', 10, 'example', 'vault:project-b/prod/K0', 'project-b')
+        self.tamper(lambda d: d['issued']['independent'].pop('hash'))
+        before = self.p.writes
+        self.assertEqual(self.m.set_limit('independent', 12)['limit'], 12)
+        self.m.toggle_key('independent', True)
+        self.assertEqual(self.p.writes, before + 2)
+        self.assertEqual(self.record()['ceiling_repair']['status'], 'effect-unknown')
+
+
+
+    def test_hashless_alias_policy_provenance_cannot_precede_identity_guard(self):
+        self.tamper(lambda d: d['issued'][self.name].update(destination='vault:project-b/prod/K0'))
+        self.leave_unknown()
+        self.p.keys[self.handle]['name'] = 'legacy-alias'
+        def add(doc):
+            row = {k:v for k,v in doc['issued'][self.name].items() if k not in ('hash', 'ceiling_repair')}
+            row.update(destination='vault:project-a/prod/K0', pending=True)
+            doc['issued']['legacy-alias'] = row
+        self.tamper(add)
+        before = (self.m.ledger(), self.p.writes)
+        with self.assertRaises(RuntimeError): self.m.issue_for_policy(A.T._pol(1, limit=9), 'example')
+        self.assertEqual((self.m.ledger(), self.p.writes), before)
+
+
+
+    def test_hashless_attestation_unknown_refuses_and_distinct_identity_passes(self):
+        self.tamper(lambda d: d['issued'][self.name].update(destination='vault:project-b/prod/K0'))
+        self.leave_unknown()
+        self.m.issue_key('independent', 10, 'example', 'vault:project-a/prod/K0', 'project-a')
+        self.tamper(lambda d: d['issued']['independent'].pop('hash'))
+        original = self.m.find_key
+        for result in (None, {}, {'name':'independent', 'hash':'unknown'}):
+            self.m.find_key = lambda *a, **kw: result
+            before = (self.m.ledger(), self.p.writes)
+            with self.assertRaises(RuntimeError): self.m.issue_for_policy(A.T._pol(1, limit=10), 'example')
+            self.assertEqual((self.m.ledger(), self.p.writes), before)
+        self.m.find_key = original
+        before = self.p.writes
+        plan = self.m.issue_for_policy(A.T._pol(1, limit=10), 'example')
+        self.assertEqual(plan[0]['action'], 'in-place')
+        self.assertIn('policy_binding', self.m.ledger()['issued']['independent'])
+        self.assertEqual(self.p.writes, before)
+        self.assertEqual(self.record()['ceiling_repair']['status'], 'effect-unknown')
 
 
 if __name__ == '__main__': unittest.main()

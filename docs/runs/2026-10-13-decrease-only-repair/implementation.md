@@ -107,3 +107,26 @@ source-copy selector includes its test module and the existing adversary helper.
 Parser and membership checks pass without copying a workspace. The future combined
 runner must include the independently owned reporting correction `476d392`; no
 portable execution against that composition is claimed here.
+
+
+## Independent review correction
+
+The first source candidate `5abd295` was rejected for a real hashless-alias bypass:
+manual limit and toggle could discover a protected provider identity after their
+initial ledger guard. The correction checks the actual discovered row before
+set/toggle/rotate/revoke mutation. A reproduced adjacent local-publication seam
+now resolves a selected hashless legacy row before policy re-attestation whenever
+repair evidence exists; unknown discovery refuses publication. Distinct known
+identities retain general manual and attestation behavior.
+
+The equal-target no-op now rechecks the ledger snapshot and repair aliases after
+GET before reporting success. It still writes nothing. Evidence validation also
+requires a `same-operation-response` observation to match its historical effect's
+status, amount and timestamp; a later current read can legitimately retain an
+unknown historical effect. All findings were observed red before these changes.
+
+[Correction checks](correction-focused.json) contain 27 repair tests plus the
+same 115 prior safety assertions. The [initial receipt](implementation-focused.json)
+remains the original source-bound snapshot, not a current verdict. Independent
+rereview of the correction is pending; no integration, push or full-model outcome
+is implied by these focused checks.
