@@ -824,7 +824,7 @@ On POSIX, clean and archived dirty worktrees repeat this target check immediatel
 before removal, after Git/archive verification. The preliminary admission snapshot never grants final removal. Planning now
 requests an explicit unknown snapshot without collecting a full process listing;
 per-phase `observation=not-attempted` and `measured_at=null` disclose that choice. Nonzero, diagnostic or undecodable `lsof`/`ps`
-output, unparseable global `lsof` names and Linux `/proc` read failures mean
+output and unparseable global `lsof` names mean
 unknown, so cleanup can conservatively skip
 work even if a partial survey showed no holder. Cache-tool commands likewise
 skip when their process survey is unknown. In particular, a nonempty `busy_if`
@@ -843,8 +843,11 @@ See [registration and fairness](design/DISK-GUARD.md#registration-refresh-and-bu
 
 **On every system.** Cleanup admission currently skips process-table collection
 because its negative result cannot authorize a path action. Explicit positive-hint
-readers retain the `lsof`/`ps` and Linux `/proc` observation path; their output-memory
-limits remain a separate unfinished unit. Windows has no supported holder inventory
+readers use bounded `lsof`/`ps` capture: 2 MiB combined pipe output, bounded
+parsing and one shared deadline. The unbounded Linux `/proc` fallback is retired.
+Limit or capture failures remain unknown; this is not a measurement of RAM saved.
+[Capture limits and regression cases](design/DISK-GUARD.md#bounded-explicit-holder-observations)
+explain the owned-child cleanup and timing limits. Windows has no supported holder inventory
 here, so path actions skip instead of treating rename as proof. The
 schedule is the same maintenance job everywhere: launchd,
 a systemd user timer, or a Task Scheduler task, every 15 minutes. "Nobody worked in" means no
