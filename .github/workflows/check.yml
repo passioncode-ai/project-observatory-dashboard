@@ -70,7 +70,8 @@ jobs:
           DISABLE_AUTOUPDATER: '1'
         run: |
           npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
-          export CLAUDE_CONFIG_DIR="$(mktemp -d)"
+          CLAUDE_CONFIG_DIR="$(mktemp -d)"
+          export CLAUDE_CONFIG_DIR
           claude --version
           for dir in . observatory/engine/skill observatory/engine/skill/plugins/observatory-log; do
             claude plugin validate --strict "$dir"

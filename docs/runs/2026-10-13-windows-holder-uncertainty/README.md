@@ -25,7 +25,9 @@ remains pending; no new holder inventory or global exclusion lock is claimed.
 - `.github/workflows/check.yml` selects `WindowsHolderUnknown` on Windows with an
   enforced step. The native test holds a FILE_SHARE_DELETE handle while renaming
   an isolated temporary file. Other historical informative Windows steps are not
-  thereby converted to acceptance gates. Workflow actionlint passed.
+  thereby converted to acceptance gates. The first actionlint run reported inherited SC2155 in the plugin validation
+  step. Separating the existing temporary-directory assignment from export
+  prevents masking its return code; the corrected full actionlint run passed.
 
 [Microsoft CreateFile sharing contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)
 is the primary API evidence. The local synthetic tests exercise the refusal
