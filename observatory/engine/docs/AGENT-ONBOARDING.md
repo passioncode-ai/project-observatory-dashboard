@@ -181,3 +181,30 @@ exit, timeout or launch error is `failed`; its effect remains unknown and it is 
 counted as a successful prune. Reasons omit Git output and exception bodies.
 Inspect `git worktree list --porcelain` in the owning repository before retrying.
 Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` in the engine.
+
+### Open files absent from directory scans
+
+`project-observatory full machine --open-unlinked` records files that have been
+unlinked but remain open on macOS or Linux when `lsof` is available. It never
+stops a process, removes data or changes cleanup settings. Windows and a missing
+source return unknown, not zero. There is no scheduled observation.
+
+The bounded receipt `store/raw/open-unlinked.json` stores numeric process IDs and
+snapshot-local device/inode identities, logical sizes, source start/end times and
+the parser source hash. It collects no paths, process commands or environment.
+The command has a five-second deadline, a combined two-MiB output ceiling,
+100,000 fields and 10,000 distinct file records. Missing sizes, conflicting sizes
+for a shared identity, diagnostics, malformed output and partial execution remain
+degraded. Known-size peers survive as a separately labelled subtotal.
+
+`full machine --coverage`, `full doctor` and
+`observatory_machine(section="coverage")` read the saved observation only. The
+reader exposes up to ten size/PID-count samples and marks snapshots older than
+30 minutes stale. Shared files count once, so process totals must not be added.
+A successful command does not establish visibility of every process or namespace.
+Logical bytes are neither allocated blocks nor reclaimable memory or disk space:
+allocated/reclaimable values stay null and every observation remains non-actionable.
+Ownership and any supported supervisor action require separate evidence.
+
+Contract tests: `tests/test_open_unlinked.py`, including a
+disposable open-then-unlinked file owned by the test; no host process is stopped.

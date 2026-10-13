@@ -109,12 +109,14 @@ def _source(name, kind, collections, at):
 
 
 def summary():
+    import open_unlinked
     at = datetime.now(timezone.utc)
     return {'read_at': at.isoformat(), 'scope': 'saved-inventory-only', 'actionable': False,
             'limits': {'bytes_per_source': MAX_BYTES, 'rows_per_collection': MAX_ROWS,
                        'sample_rows_per_source': SAMPLE_ROWS, 'max_age_seconds': MAX_AGE_SECONDS},
             'checkouts': _source('checkout-candidates.json', 'checkout-candidates', ('candidates',), at),
-            'caches': _source('cache-coverage.json', 'cache-coverage', ('locations', 'commands'), at)}
+            'caches': _source('cache-coverage.json', 'cache-coverage', ('locations', 'commands'), at),
+            'open_unlinked': open_unlinked.saved_summary(at)}
 
 
 # Shared by the actual MCP tool schema; other machine sections retain their schema.
@@ -137,5 +139,8 @@ OUTPUT_SCHEMA = {
     'type': 'object', 'required': ['read_at', 'scope', 'actionable', 'checkouts', 'caches', 'limits'],
     'properties': {'read_at': {'type': 'string'}, 'scope': {'const': 'saved-inventory-only'},
                    'actionable': {'const': False}, 'checkouts': SOURCE_SCHEMA, 'caches': SOURCE_SCHEMA,
-                   'limits': {'type': 'object'}},
+                   'limits': {'type': 'object'},
+                   'open_unlinked': {'type': 'object', 'required': ['partial', 'actionable', 'reclaimable_bytes'],
+                                     'properties': {'partial': {'const': True}, 'actionable': {'const': False},
+                                                    'reclaimable_bytes': {'type': 'null'}}}},
 }

@@ -286,3 +286,15 @@ unknown effects, never `pruned`. Successful command completion does not invent a
 registration count. A path that reappears is skipped. Inspect current registrations
 before retrying; raw command output is absent from reasons.
 Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` (five cases).
+
+### Open-deleted-file visibility
+
+When directory totals do not explain disk use, a person runs
+`full machine --open-unlinked` on macOS/Linux. The result is a bounded observation
+of logical bytes held through open handles. It never offers a delete or kill action.
+Shared inode references count once; incomplete visibility and unknown reclaimability
+remain visible. An agent reads the same saved result through
+`observatory_machine(section="coverage")`, without launching a new scan.
+Missing, unsupported, malformed and stale receipts are distinguishable from a
+current successful empty observation. `full doctor` carries the same saved state.
+Tests: `test_open_unlinked.py::Observation`, `test_open_unlinked.py::SavedObservation`.
