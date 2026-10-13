@@ -66,11 +66,29 @@ provider credential. The final guard matches the exact hash across account label
 consistent with the existing unresolved-rotation identity guard. A tests-first
 real-door probe pins this additional refusal before provider reads.
 
+## Exact source receipts
+
+The accepted source is `1536adddaadb427a6830fa2343774801f87a60c8`.
+[Review bindings](raw/review.json) record source SHA256/Git blobs and the independent
+14-probe scoped acceptance; [focused tests](raw/focused-tests.json) record13 passing
+cases. Independent review retained both earlier alias counterexamples and checked
+the corrected guard with synthetic fixtures. No operational credentials were read.
+
+The [exact-source128-case replay](raw/baseline-128.json), seeds7000000–7000127,
+completed128/128:58PASS,70FAIL,0ERROR, exit1. All70 failures are the unchanged
+convergence assertion `(c')`; this remains a failing adversarial run. The preceding
+consumer-safety baseline had28PASS/100FAIL and remains in its own receipt. Absence
+of ceiling, untracked-key and consumer-deletion findings in this bounded slice is
+not general acceptance. Seed7000104 now passes because policy rotation refuses
+before minting and invalid policy input is rejected unchanged; it does not prove a
+capacity-transfer implementation. The original0.034>0.03 counterexample is retained
+in the earlier baseline. Full5200 acceptance remains NOT_RUN.
+
 ## Exact next task
 
-Independent review must challenge fresh/malformed/stale provenance, each persistence
-boundary, unintended legacy classification and all actual rotation entry points.
-Then design a read-only legacy re-attestation proposal binding an operator-selected
+Scoped independent review is complete. Investigate remaining convergence failures
+against the current producer and remediation contract without weakening invariants.
+Separately design a read-only legacy re-attestation proposal binding an operator-selected
 policy to exact ledger revision, account/hash and named source, reporting unknown
 peers separately. Do not infer membership from a display name or folder. Any future
 apply path needs its own CAS/durable receipt and cannot manufacture current headroom.
