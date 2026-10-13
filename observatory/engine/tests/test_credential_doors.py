@@ -2517,7 +2517,10 @@ def test_or_policy_confirms_lowered_exposure_before_spending_headroom() -> None:
         except m.PolicyPartial:
             partial = True
         rec = next(iter(m.ledger()["issued"].values()))
-        if mode in ("exact", "lower"):
+        if mode == "higher":
+            check("complete non-increasing above-share observation blocks later issuance using its actual amount",
+                  not partial and p.n == posts and p.patches == 1 and rec["limit_usd"] == 2.0004)
+        elif mode in ("exact", "lower"):
             check(f"{mode} confirmed lowering permits a bounded later issue",
                   not partial and p.n == posts + 1 and p.total() <= 10
                   and rec["limit_usd"] == (2 if mode == "exact" else 1.5))
@@ -2525,6 +2528,165 @@ def test_or_policy_confirms_lowered_exposure_before_spending_headroom() -> None:
             check(f"{mode} lowering observation stops before later issuance and retains the old ledger bound",
                   partial and p.n == posts and p.patches == 1 and rec["limit_usd"] == 8,
                   f"partial={partial}, posts={p.n-posts}, patches={p.patches}, recorded={rec['limit_usd']}")
+
+
+
+def test_or_policy_progresses_observed_nonincreasing_lowerings() -> None:
+    """An above-share observation is real exposure, not permission to stop safe peers."""
+    for cap in (10, 11):
+        m, p = _r3_door(); m.issue_for_policy(_pol(2, limit=16), "example")
+        posts = p.n
+        def echo(path, admin, payload=None, method=None):
+            result = p(path, admin, payload, method)
+            if method == "PATCH":
+                handle = path.rsplit("/", 1)[-1]
+                p.keys[handle]["limit"] = payload["limit"] + .0004
+                return {"data": dict(p.keys[handle])}
+            return result
+        m._request = echo
+        try:
+            plan = m.issue_for_policy(_pol(3, limit=cap), "example",
+                split={"vault:project-a/prod/K0": 2, "vault:project-a/prod/K1": 2,
+                       "vault:project-a/prod/K2": 6})
+            partial = False
+        except m.PolicyPartial as exc:
+            plan, partial = exc.plan, True
+        check(f"cap {cap}: both confirmed decreases progress and preserve actual exposure",
+              not partial and p.patches == 2
+              and all(m.ledger()["issued"][s["name"]]["limit_usd"] == 2.0004 for s in plan[:2]), str(plan))
+        check(f"cap {cap}: actual rounded peer exposure governs new admission",
+              p.n == posts + int(cap == 11) and p.total() <= cap
+              and plan[2]["action"] == ("issued" if cap == 11 else "blocked"), str(plan))
+        check(f"cap {cap}: unmet requested shares remain explicitly held",
+              all(s["action"] == "held-ceiling" and s["observed_limit"] == 2.0004 for s in plan[:2]), str(plan))
+        if cap == 11:
+            import contextlib, io
+            policy_path = pathlib.Path(tmpdir.mkdtemp()) / "policy.json"
+            policy_path.write_text(json.dumps(_pol(3, limit=cap)))
+            out = io.StringIO(); patches = p.patches
+            with contextlib.redirect_stdout(out):
+                rc = m.cmd_issue_for_policy(str(policy_path), "example", None, False,
+                    {"vault:project-a/prod/K0": 2, "vault:project-a/prod/K1": 2,
+                     "vault:project-a/prod/K2": 6})
+            check("near-target echo stays explicitly unserved on a read-only rerun",
+                  rc == 1 and p.patches == patches and "held-ceiling" in out.getvalue()
+                  and '2.0004' in out.getvalue(), out.getvalue())
+            check("CLI observed total rounds each positive fraction upward and names that basis",
+                  "ceilings: $10.02" in out.getvalue()
+                  and "observed ceilings rounded up" in out.getvalue(), out.getvalue())
+
+    for mode in ("missing", "foreign", "timeout", "increase"):
+        m, p = _r3_door(); m.issue_for_policy(_pol(2, limit=16), "example")
+        def uncertain(path, admin, payload=None, method=None):
+            result = p(path, admin, payload, method)
+            if method == "PATCH":
+                if mode == "missing": result["data"].pop("limit")
+                if mode == "foreign": result["data"]["hash"] = "foreign"
+                if mode == "timeout": raise m.Unreachable("synthetic uncertain effect")
+                if mode == "increase": result["data"]["limit"] = 9
+            return result
+        m._request = uncertain
+        try:
+            m.issue_for_policy(_pol(2, limit=4), "example"); partial = False
+        except m.PolicyPartial: partial = True
+        check(f"{mode}: uncertainty stops later peers without mutation retry",
+              partial and p.patches == 1 and p.n == 2)
+
+    m, p = _r3_door(); m.issue_for_policy(_pol(1, limit=8), "example")
+    original = m.find_key; reads = [0]
+    def drift(admin, name):
+        reads[0] += 1
+        if reads[0] == 2: p.keys[p.by_name("k0")]["limit"] = 1
+        return original(admin, name)
+    m.find_key = drift
+    try:
+        m.issue_for_policy(_pol(1, limit=2), "example"); partial = False
+    except m.PolicyPartial: partial = True
+    check("a stale lowering classification never turns into a fresh provider raise",
+          partial and p.patches == 0 and p.total() == 1)
+
+
+
+def test_or_policy_refuses_unknown_fresh_capacity_before_lowering() -> None:
+    """Unknown capacity cannot prove that a planned decrease is still a decrease."""
+    for mode in ("missing", "nonfinite", "negative", "boolean", "range", "unlimited"):
+        m, p = _r3_door(); m.issue_for_policy(_pol(2, limit=16), "example")
+        original = m.find_key; reads = {}
+        def fresh(admin, name):
+            row = original(admin, name); reads[name] = reads.get(name, 0) + 1
+            if name.endswith("k0") and reads[name] == 2:
+                p.keys[row["hash"]]["limit"] = None if mode == "unlimited" else 1
+                row = dict(row)
+                if mode == "missing": row.pop("limit")
+                elif mode == "nonfinite": row["limit"] = float("nan")
+                elif mode == "negative": row["limit"] = -1
+                elif mode == "boolean": row["limit"] = True
+                elif mode == "range": row["limit"] = 10**100
+                else: row["limit"] = None
+            return row
+        m.find_key = fresh
+        try:
+            plan = m.issue_for_policy(_pol(2, limit=4), "example"); partial = False
+        except m.PolicyPartial as exc: plan, partial = exc.plan, True
+        if mode == "unlimited":
+            check("explicit provider unlimited null permits a verified finite decrease",
+                  not partial and p.patches == 2 and p.total() == 4)
+        else:
+            check(f"{mode} fresh capacity refuses before any PATCH and preserves prior records",
+                  partial and p.patches == 0 and p.n == 2 and p.total() == 9
+                  and all(r["limit_usd"] == 8 for r in m.ledger()["issued"].values()), str(plan))
+
+
+
+def test_or_policy_reconciles_near_targets_only_for_blocked_admission() -> None:
+    """The declared target, not a new allocation, repairs measurable fractional drift."""
+    for mode in ("exact", "round", "downward", "floor", "uncertain", "room", "fresh-lower", "fresh-unknown"):
+        m, p = _r3_door(); m.issue_for_policy(_pol(1, limit=3.33), "example")
+        p.keys[p.by_name("k0")]["limit"] = 3.3301
+        p.echo = {"exact": lambda x: x, "round": lambda x: round(x, 2),
+                  "downward": lambda x: x - .004, "floor": lambda x: max(x, 3.3301),
+                  "uncertain": lambda x: x, "room": lambda x: x,
+                  "fresh-lower": lambda x: x, "fresh-unknown": lambda x: x}[mode]
+        events = []; p.start()
+        def request(path, admin, payload=None, method=None):
+            result = p(path, admin, payload, method)
+            if method == "PATCH" or path == "/keys": events.append((method or "POST", payload["limit"]))
+            if mode == "uncertain" and method == "PATCH": raise m.Unreachable("synthetic lost receipt")
+            return result
+        m._request = request
+        original = m.find_key; reads = [0]
+        def fresh(admin, name):
+            row = original(admin, name); reads[0] += 1
+            if mode.startswith("fresh-") and reads[0] == 2:
+                p.keys[row["hash"]]["limit"] = 3.32
+                row = dict(row); row["limit"] = 3.32
+                if mode == "fresh-unknown": row.pop("limit")
+            return row
+        m.find_key = fresh
+        try:
+            plan = m.issue_for_policy(_pol(2, limit=7 if mode == "room" else 6.66), "example",
+                split={"vault:project-a/prod/K0": 3.33, "vault:project-a/prod/K1": 3.33})
+            partial = False
+        except m.PolicyPartial as exc: plan, partial = exc.plan, True
+        if mode in ("exact", "round", "downward"):
+            check(f"{mode}: verified near-target decrease precedes new issuance under the original cap",
+                  not partial and events == [("PATCH", 3.33), ("POST", 3.33)]
+                  and p.n == 2 and p.max_sum <= 6.66
+                  and [s["action"] for s in plan] == ["ceiling-moved", "issued"], str(plan))
+        elif mode == "floor":
+            check("an unchanged fractional floor supplies no headroom and is attempted only once",
+                  not partial and events == [("PATCH", 3.33)] and p.n == 1
+                  and [s["action"] for s in plan] == ["held-ceiling", "blocked"], str(plan))
+        elif mode == "uncertain":
+            check("an uncertain corrective decrease cannot release headroom",
+                  partial and events == [("PATCH", 3.33)] and p.n == 1, str(plan))
+        elif mode.startswith("fresh-"):
+            check(f"{mode}: queued near-target correction revalidates before any mutation",
+                  partial and not events and p.n == 1 and p.total() == 3.32, str(plan))
+        else:
+            check("near-target mutation tolerance is retained when admission already fits",
+                  not partial and events == [("POST", 3.33)] and p.n == 2 and p.max_sum <= 7
+                  and [s["action"] for s in plan] == ["held-ceiling", "issued"], str(plan))
 
 
 def test_or_policy_runs_one_at_a_time() -> None:
@@ -2594,6 +2756,9 @@ def test_or_policy_counts_every_positive_provider_fraction() -> None:
         m, p = _r3_door()
         m.issue_for_policy(_pol(1, limit=3.33), "example")
         p.keys[p.by_name("k0")]["limit"] = observed
+        # A provider floor that the admitted correction cannot reduce still
+        # supplies no headroom; a verified actual decrease is tested separately.
+        p.echo = lambda requested, floor=observed: max(requested, floor)
         before = (p.n, p.patches)
         p.start()
         plan = m.issue_for_policy(_pol(2, limit=6.66), "example")
@@ -2604,8 +2769,9 @@ def test_or_policy_counts_every_positive_provider_fraction() -> None:
                   and [row["action"] for row in plan] == ["in-place", "issued"])
         else:
             check(f"observed {observed!r} blocks minting into insufficient exact headroom",
-                  (p.n, p.patches) == before and total <= Decimal("6.66")
-                  and [row["action"] for row in plan] == ["in-place", "blocked"], str(plan))
+                  p.n == before[0] and p.patches == before[1] + 1 and total <= Decimal("6.66")
+                  and [row["action"] for row in plan] == ["held-ceiling", "blocked"]
+                  and plan[0]["observed_limit"] == observed, str(plan))
 
 
 def test_or_policy_amounts_are_whole_cents_against_the_exact_limit() -> None:
@@ -3186,6 +3352,9 @@ if __name__ == "__main__":
                test_or_policy_unread_exposure_is_not_saved_headroom,
                test_or_policy_unknown_pending_reservation_is_not_current_headroom,
                test_or_policy_confirms_lowered_exposure_before_spending_headroom,
+               test_or_policy_progresses_observed_nonincreasing_lowerings,
+               test_or_policy_refuses_unknown_fresh_capacity_before_lowering,
+               test_or_policy_reconciles_near_targets_only_for_blocked_admission,
                test_or_policy_runs_one_at_a_time,
                test_or_policy_counts_every_positive_provider_fraction,
                test_or_policy_amounts_are_whole_cents_against_the_exact_limit,

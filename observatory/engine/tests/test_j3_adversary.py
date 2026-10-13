@@ -101,6 +101,46 @@ class ModelBinding(unittest.TestCase):
                 {'action': 'over-limit', 'why': f'OVER LIMIT; it ends after: limit {name} --set 9'}]
         return name, row['hash'], plan
 
+    def held_limit_fixture(self):
+        name = self.issue(); handle = self.m.ledger()['issued'][name]['hash']
+        self.p.keys[handle]['limit'] = 10.004
+        plan = self.m.issue_for_policy(self.pol, 'example')
+        self.assertEqual(plan[0]['action'], 'held-ceiling')
+        self.assertIn(f'limit {name} --set 10', plan[-1]['why'])
+        return name, handle, plan
+
+    def test_actual_emitted_held_ceiling_remedy_uses_same_declared_target(self):
+        name, handle, plan = self.held_limit_fixture()
+        before = (self.p.calls, self.p.writes, copy.deepcopy(self.m.ledger()))
+        proposals = A.limit_remedies(self.m, self.p, plan)
+        self.assertEqual(len(proposals), 1)
+        proposal, = proposals
+        self.assertEqual((self.p.calls, self.p.writes, self.m.ledger()), before)
+        self.assertEqual(proposal['amount'], 10)
+        self.assertEqual(A.apply_limit_remedy(self.m, self.p, plan, proposal)['status'], 'operator-applied')
+        self.assertEqual(self.p.keys[handle]['limit'], 10)
+        self.assertEqual(self.p.writes, before[1] + 1)
+        self.assertEqual(self.m.issue_for_policy(self.pol, 'example')[0]['action'], 'in-place')
+
+    def test_held_ceiling_remedy_still_requires_emission_identity_and_unchanged_revision(self):
+        name, handle, plan = self.held_limit_fixture()
+        proposals = A.limit_remedies(self.m, self.p, plan)
+        self.assertEqual(len(proposals), 1)
+        proposal, = proposals
+        writes = self.p.writes
+        self.assertEqual(A.limit_remedies(self.m, self.p, plan[:-1]), [])
+        bad = copy.deepcopy(plan); bad[-1]['why'] = f'limit {name} --set 10'
+        self.assertEqual(A.limit_remedies(self.m, self.p, bad), [])
+        for update in ({'hash': 'foreign'}, {'limit': None}, {'limit': 9}):
+            saved = copy.deepcopy(self.p.keys[handle]); self.p.keys[handle].update(update)
+            self.assertEqual(A.limit_remedies(self.m, self.p, plan), [])
+            self.p.keys[handle] = saved
+        bad = copy.deepcopy(plan); bad[0]['limit'] = 9
+        self.assertEqual(A.apply_limit_remedy(self.m, self.p, bad, proposal)['status'], 'refused')
+        doc = self.m.ledger(); doc['issued'][name]['limit_usd'] = 11; self.m.save_ledger(doc)
+        self.assertEqual(A.apply_limit_remedy(self.m, self.p, plan, proposal)['status'], 'refused')
+        self.assertEqual(self.p.writes, writes)
+
     def test_emitted_limit_remedy_uses_real_command_and_preserves_source(self):
         name, h, plan = self.limit_fixture()
         calls = self.p.calls

@@ -1,0 +1,43 @@
+{
+  "source_production_sha256": "602d50bd7f594c74585c10eff3388bd68a16d90a0d5e26cb85c4c50e826e31ba",
+  "source_commit": "153a1605fbbaf2caf1674a3f70cf2da3557934f3",
+  "scope": "synthetic actual cmd_limit semantics, not an original-model mutation",
+  "cases": [
+    {
+      "mode": "exact",
+      "exit": 0,
+      "provider_writes": 1,
+      "actual_limit": 10,
+      "ledger_limit": 10
+    },
+    {
+      "mode": "missing",
+      "exit": 1,
+      "provider_writes": 0,
+      "actual_limit": null,
+      "ledger_limit": 10
+    },
+    {
+      "mode": "unread",
+      "exit": 1,
+      "provider_writes": 0,
+      "actual_limit": 10.004,
+      "ledger_limit": 10
+    },
+    {
+      "mode": "fresh-lower",
+      "exit": 0,
+      "provider_writes": 1,
+      "actual_limit": 10,
+      "ledger_limit": 10
+    },
+    {
+      "mode": "higher-response",
+      "exit": 0,
+      "provider_writes": 1,
+      "actual_limit": 10.004,
+      "ledger_limit": 10
+    }
+  ],
+  "conclusion": "Manual set is a requested target command, not a current decrease-only admission or verified actual observation; missing/unread refuse, fresh-lower may raise and higher response is recorded as requested."
+}

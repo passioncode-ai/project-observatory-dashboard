@@ -348,7 +348,8 @@ def limit_remedies(m, p, plan):
                 match = re.fullmatch(r'limit ([a-z0-9_-]+) --set ([0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)', command)
                 if not match: continue
                 name, amount = match.group(1), float(match.group(2))
-                slots = [r for r in plan if r.get('name') == name and r.get('action') == 'in-place']
+                slots = [r for r in plan if r.get('name') == name and
+                         r.get('action') in ('in-place', 'held-ceiling')]
                 rec = doc['issued'].get(name); handle = rec.get('hash') if isinstance(rec, dict) else None
                 row = p.keys.get(handle)
                 if len(slots) != 1 or type(slots[0].get('limit')) not in (int,float) or slots[0]['limit'] != amount: continue

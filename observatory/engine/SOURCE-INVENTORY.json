@@ -856,8 +856,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "5cdab03ef42d9caf8bdcb3535b60050c10876dc53709ffacc37902b93d2de9e6",
-      "bytes": 83812,
+      "export_sha256": "f08cf44ed30cf2ed8ef210f89a7d8bb350700e30af694eaa3d8921203ee77a47",
+      "bytes": 85407,
       "upstream_modified": true
     },
     {
@@ -1931,8 +1931,8 @@
       "path": "tests/adv_j1_property.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "059eeddcea7a08bbe4e92ffa496fc243d72915c1976bb39b3b923be6fb0b88a9",
-      "bytes": 33782
+      "export_sha256": "374eee9807585e7599771c23866026746c924f9f8c586abb4025bc5a068c1a6b",
+      "bytes": 33825
     },
     {
       "path": "tests/adv_j1_property_forget.py",
@@ -2451,8 +2451,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "8959aeb83911ff285418dae2b8e9bfea4c095c47f019d0e0408fe1018d116a1f",
-      "bytes": 184182,
+      "export_sha256": "3fae97d50337e3354d834791b6fccc576b8ebe0fe972d97daf781405f18c6592",
+      "bytes": 193990,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -2943,8 +2943,8 @@
       "path": "tests/test_j3_adversary.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ae6bc6ed2ccceceb2b49aaa86f92fb25e4571776e9128cffde3441e45f768902",
-      "bytes": 16193
+      "export_sha256": "b013f4e1a57858a18ef0f696658ce74a2ec4daef8a133f62e337b6a2bbf5fa28",
+      "bytes": 18580
     },
     {
       "path": "tests/test_key.py",
@@ -4512,8 +4512,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "8c74363dca294ff62291df2bb8aac71e8fb7b9ca795db5f81bb0be6cc48b503b",
-      "bytes": 112154,
+      "export_sha256": "602d50bd7f594c74585c10eff3388bd68a16d90a0d5e26cb85c4c50e826e31ba",
+      "bytes": 115786,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,

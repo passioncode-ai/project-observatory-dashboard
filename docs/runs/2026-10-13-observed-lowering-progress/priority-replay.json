@@ -1,0 +1,410 @@
+{
+  "model_source_commit": "4118486ebbadfb98decfdd6685f5ef16f655bd9d",
+  "production_base": "e22b986e837125ce715a319bd7c47b5527081349",
+  "candidate_source_sha256": "cb20653a70483167b63e55b8b38e8e4d2774e60b573a4e192c8a5fb8a6ff6b41",
+  "no_assertion_rng_changes": true,
+  "cases": [
+    {
+      "seed": 7000000,
+      "before_issues": [],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['held-ceiling', 'blocked', 'blocked']"
+      ],
+      "trace": [
+        "shape {'echo': '+0.004', 'big': False, 'drift': 0, 'page': (5, 3), 'fillers': 4, 'newest_first': False}",
+        "run1 limit=4047 refs=5 kw={'limit_override': 5.54} -> None ['issued', 'issued', 'issued', 'issued', 'issued']",
+        "subcent 5963446a776ad19649eac8523b897d97b2edc9786b1cbdad64d207255908533c -> 5.548",
+        "  concurrent policy -> RuntimeError: another key writer has held the policy lock for 0 s; nothing was read or moved \u2014 run again when it is done",
+        "concurrent[policy] during policy -> None",
+        "unread 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "edit limit=4047 refs=4 kw={'limit_override': 2.22}",
+        "edit limit=8094 refs=3 kw={}",
+        "converge#0 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k0 (not-in-policy) -> 0",
+        "  remedy revoke project-a-prod-k4 (not-in-policy) -> 0",
+        "converge#1 -> PolicyPartial: partial: 0 of 3 slots served before vault:project-a/prod/K6 failed; a re-run does only what is missing ['failed', 'not-reached', 'not-reached']",
+        "converge#2 -> None ['held-ceiling', 'blocked', 'blocked']",
+        "converge#3 -> None ['held-ceiling', 'blocked', 'blocked']",
+        "converge#4 -> None ['held-ceiling', 'blocked', 'blocked']"
+      ]
+    },
+    {
+      "seed": 7000002,
+      "before_issues": [],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']"
+      ],
+      "trace": [
+        "shape {'echo': 'x1.0001', 'big': True, 'drift': -1, 'page': (3, 2), 'fillers': 9, 'newest_first': False}",
+        "run1 limit=467410 refs=6 kw={} -> None ['issued', 'issued', 'issued', 'issued', 'issued', 'issued']",
+        "failrun mint:unreach-after -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']",
+        "rotate-kill project-a-prod-k1 fault=mint:unreach-after -> rc=1",
+        "rotate-kill project-a-prod-k6 fault=mint:502-after -> rc=1",
+        "converge#0 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']",
+        "converge#1 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']",
+        "converge#2 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']",
+        "converge#3 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']",
+        "converge#4 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']"
+      ]
+    },
+    {
+      "seed": 7000005,
+      "before_issues": [],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']"
+      ],
+      "trace": [
+        "shape {'echo': 'x1.0001', 'big': True, 'drift': 1, 'page': (4, 4), 'fillers': 20, 'newest_first': True}",
+        "run1 limit=99 refs=3 kw={} -> None ['issued', 'issued', 'issued']",
+        "rename 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "rotate-kill project-a-prod-k1 fault=deliver -> rc=1",
+        "failrun lower -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']",
+        "failrun mint:500-before -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']",
+        "converge#0 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']",
+        "converge#1 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']",
+        "converge#2 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']",
+        "converge#3 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']",
+        "converge#4 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling', 'over-limit']"
+      ]
+    },
+    {
+      "seed": 7000828,
+      "before_issues": [
+        "(a) POST /keys took the project total to 2792.3201 past 2792.32"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'held-ceiling']"
+      ],
+      "trace": [
+        "shape {'echo': '+1e-9', 'big': True, 'drift': -1, 'page': (3, 2), 'fillers': 8, 'newest_first': False}",
+        "run1 limit=279232 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "rename 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 698.0801",
+        "converge#0 -> None ['held-ceiling', 'held-missing', 'held-ceiling', 'held-ceiling']",
+        "  remedy revoke project-a-prod-k0 (held-missing) -> 0",
+        "converge#1 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'held-ceiling']",
+        "converge#2 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'held-ceiling']",
+        "converge#3 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'held-ceiling']",
+        "converge#4 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'held-ceiling']"
+      ]
+    },
+    {
+      "seed": 7000906,
+      "before_issues": [
+        "(a) POST /keys took the project total to 83.8001 past 83.8"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['blocked', 'held-ceiling']"
+      ],
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': 1, 'page': (3, 2), 'fillers': 3, 'newest_first': False}",
+        "run1 limit=8380 refs=2 kw={} -> None ['issued', 'issued']",
+        "unread 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "concurrent[policy] during policy -> None",
+        "rotate project-a-prod-k4 fault=- -> rc=1",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 41.9001",
+        "failrun deliver-timeout -> None ['in-place', 'held-unread', 'over-limit']",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 41.906",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['held-missing', 'held-ceiling']",
+        "  remedy revoke project-a-prod-k1 (held-missing) -> 0",
+        "converge#1 -> None ['blocked', 'held-ceiling']",
+        "converge#2 -> None ['blocked', 'held-ceiling']",
+        "converge#3 -> None ['blocked', 'held-ceiling']",
+        "converge#4 -> None ['blocked', 'held-ceiling']"
+      ]
+    },
+    {
+      "seed": 7001212,
+      "before_issues": [
+        "(L) live project key unknown to the ledger after subcent: f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015(project-a-prod-k0, $368.3328)"
+      ],
+      "after_issues": [
+        "(L) live project key unknown to the ledger after subcent: f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015(project-a-prod-k0, $368.3328)",
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling']"
+      ],
+      "trace": [
+        "shape {'echo': 'x1.0001', 'big': True, 'drift': 1, 'page': (3, 2), 'fillers': 9, 'newest_first': True}",
+        "run1 limit=172463 refs=2 kw={} -> None ['issued', 'issued']",
+        "edit limit=172463 refs=3 kw={'limit_override': 368.29}",
+        "rotate-kill project-a-prod-k1 fault=delete -> rc=1",
+        "failrun mint:502-after -> PolicyPartial: partial: 0 of 3 slots served before vault:project-a/prod/K0 failed; a re-run does only what is missing ['held-ceiling', 'held-ceiling', 'failed']",
+        "concurrent[issue] during rotate -> rc=1",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "rotate-kill project-a-prod-k0 fault=delete -> rc=1",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 368.3328",
+        "converge#0 -> None ['held-missing', 'held-ceiling', 'held-pending', 'over-limit']",
+        "  remedy revoke project-a-prod-k1 (held-missing) -> 0",
+        "  remedy revoke project-a-prod-k0 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k0 -> operator-attested",
+        "converge#1 -> None ['issued', 'held-ceiling', 'issued']",
+        "converge#2 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling']",
+        "converge#3 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling']",
+        "converge#4 -> None ['held-ceiling', 'held-ceiling', 'held-ceiling']"
+      ]
+    },
+    {
+      "seed": 7001367,
+      "before_issues": [
+        "(a) POST /keys took the project total to 3.8801 past 3.88"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['held-ceiling', 'in-place', 'blocked', 'in-place']"
+      ],
+      "trace": [
+        "shape {'echo': 'round2', 'big': True, 'drift': 0, 'page': (3, 2), 'fillers': 8, 'newest_first': False}",
+        "run1 limit=388 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 0.9701",
+        "rotate project-a-prod-k3 fault=- -> rc=1",
+        "converge#0 -> None ['held-ceiling', 'in-place', 'held-missing', 'in-place']",
+        "  remedy revoke project-a-prod-k5 (held-missing) -> 0",
+        "converge#1 -> None ['held-ceiling', 'in-place', 'blocked', 'in-place']",
+        "converge#2 -> None ['held-ceiling', 'in-place', 'blocked', 'in-place']",
+        "converge#3 -> None ['held-ceiling', 'in-place', 'blocked', 'in-place']",
+        "converge#4 -> None ['held-ceiling', 'in-place', 'blocked', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7001538,
+      "before_issues": [
+        "(a) POST /keys took the project total to 0.6401 past 0.64"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'blocked', 'held-ceiling']"
+      ],
+      "trace": [
+        "shape {'echo': 'id', 'big': True, 'drift': 0, 'page': (3, 2), 'fillers': 6, 'newest_first': False}",
+        "run1 limit=64 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "subcent db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4 -> 0.1601",
+        "rename db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4",
+        "unread db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4",
+        "converge#0 -> None ['in-place', 'in-place', 'held-missing', 'held-ceiling']",
+        "  remedy revoke project-a-prod-k1 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'in-place', 'blocked', 'held-ceiling']",
+        "converge#2 -> None ['in-place', 'in-place', 'blocked', 'held-ceiling']",
+        "converge#3 -> None ['in-place', 'in-place', 'blocked', 'held-ceiling']",
+        "converge#4 -> None ['in-place', 'in-place', 'blocked', 'held-ceiling']"
+      ]
+    },
+    {
+      "seed": 7001556,
+      "before_issues": [
+        "OSError: the disk refused the ledger write"
+      ],
+      "after_issues": [],
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': -1, 'page': (5, 3), 'fillers': 3, 'newest_first': False}",
+        "run1 limit=225371 refs=1 kw={'limit_override': 1957.08} -> None ['issued']",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "failrun save -> None ['held-missing']",
+        "failrun mint:unreach-before -> None ['held-missing']",
+        "concurrent[issue] during policy -> None",
+        "remedy revoke project-a-prod-k0 -> 2",
+        "rotate project-a-prod-k0 fault=- -> rc=1",
+        "converge#0 -> None ['held-missing']",
+        "  remedy revoke project-a-prod-k0 (held-missing) -> 0",
+        "converge#1 -> None ['issued']"
+      ]
+    },
+    {
+      "seed": 7002311,
+      "before_issues": [
+        "(a) POST /keys took the project total to 3893.7202 past 3893.72"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'in-place']"
+      ],
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': 0, 'page': (3, 2), 'fillers': 3, 'newest_first': False}",
+        "run1 limit=389372 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 973.4301",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 973.4301",
+        "provider deleted 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "failrun mint:500-before -> None ['held-ceiling', 'held-missing', 'held-ceiling', 'in-place']",
+        "remedy revoke project-a-prod-k2 -> 0",
+        "rotate project-a-prod-k0 fault=- -> rc=1",
+        "unread 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'in-place']",
+        "converge#1 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'in-place']",
+        "converge#2 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'in-place']",
+        "converge#3 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'in-place']",
+        "converge#4 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7002478,
+      "before_issues": [
+        "(a) POST /keys took the project total to 6810.6001 past 6810.6"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'held-ceiling', 'in-place', 'in-place', 'blocked']"
+      ],
+      "trace": [
+        "shape {'echo': 'id', 'big': True, 'drift': 0, 'page': (3, 2), 'fillers': 9, 'newest_first': True}",
+        "run1 limit=681060 refs=5 kw={} -> None ['issued', 'issued', 'issued', 'issued', 'issued']",
+        "failrun kill -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "failrun deliver -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 1362.1201",
+        "consumer reads db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4 by label (listed); revoke -> rc=1 still=True",
+        "provider deleted 5963446a776ad19649eac8523b897d97b2edc9786b1cbdad64d207255908533c",
+        "failrun kill -> None ['in-place', 'held-ceiling', 'in-place', 'in-place', 'held-missing']",
+        "converge#0 -> None ['in-place', 'held-ceiling', 'in-place', 'in-place', 'held-missing']",
+        "  remedy revoke project-a-prod-k4 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'held-ceiling', 'in-place', 'in-place', 'blocked']",
+        "converge#2 -> None ['in-place', 'held-ceiling', 'in-place', 'in-place', 'blocked']",
+        "converge#3 -> None ['in-place', 'held-ceiling', 'in-place', 'in-place', 'blocked']",
+        "converge#4 -> None ['in-place', 'held-ceiling', 'in-place', 'in-place', 'blocked']"
+      ]
+    },
+    {
+      "seed": 7002785,
+      "before_issues": [
+        "(a) POST /keys took the project total to 957.4801 past 957.48"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'blocked', 'held-ceiling', 'in-place']"
+      ],
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': 1, 'page': (3, 2), 'fillers': 0, 'newest_first': True}",
+        "run1 limit=95748 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 239.3701",
+        "converge#0 -> None ['in-place', 'held-missing', 'held-ceiling', 'in-place']",
+        "  remedy revoke project-a-prod-k3 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'blocked', 'held-ceiling', 'in-place']",
+        "converge#2 -> None ['in-place', 'blocked', 'held-ceiling', 'in-place']",
+        "converge#3 -> None ['in-place', 'blocked', 'held-ceiling', 'in-place']",
+        "converge#4 -> None ['in-place', 'blocked', 'held-ceiling', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7002924,
+      "before_issues": [
+        "(a) POST /keys took the project total to 7082.3701 past 7082.37"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['blocked', 'held-ceiling', 'held-ceiling']"
+      ],
+      "trace": [
+        "shape {'echo': '+1e-9', 'big': True, 'drift': 1, 'page': (5, 3), 'fillers': 19, 'newest_first': False}",
+        "run1 limit=708237 refs=3 kw={} -> None ['issued', 'issued', 'issued']",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "failrun delete -> None ['held-missing', 'held-ceiling', 'held-ceiling']",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 2360.7901",
+        "failrun deliver -> None ['held-missing', 'held-ceiling', 'held-ceiling']",
+        "rotate-kill project-a-prod-k2 fault=delete -> rc=1",
+        "converge#0 -> None ['held-missing', 'held-ceiling', 'held-ceiling']",
+        "  remedy revoke project-a-prod-k2 (held-missing) -> 0",
+        "converge#1 -> None ['blocked', 'held-ceiling', 'held-ceiling']",
+        "converge#2 -> None ['blocked', 'held-ceiling', 'held-ceiling']",
+        "converge#3 -> None ['blocked', 'held-ceiling', 'held-ceiling']",
+        "converge#4 -> None ['blocked', 'held-ceiling', 'held-ceiling']"
+      ]
+    },
+    {
+      "seed": 7003447,
+      "before_issues": [
+        "(a) POST /keys took the project total to 18.6001 past 18.6"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['held-ceiling', 'in-place', 'in-place', 'in-place', 'blocked']"
+      ],
+      "trace": [
+        "shape {'echo': 'id', 'big': False, 'drift': -1, 'page': (3, 2), 'fillers': 3, 'newest_first': True}",
+        "run1 limit=1860 refs=5 kw={} -> None ['issued', 'issued', 'issued', 'issued', 'issued']",
+        "concurrent[limit] during policy -> None",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 3.7201",
+        "failrun deliver -> None ['held-ceiling', 'in-place', 'in-place', 'in-place', 'in-place', 'over-limit']",
+        "provider deleted 5963446a776ad19649eac8523b897d97b2edc9786b1cbdad64d207255908533c",
+        "rotate project-a-prod-k4 fault=- -> rc=1",
+        "consumer reads 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 by label (unlisted); revoke -> rc=1 still=True",
+        "rotate project-a-prod-k5 fault=- -> rc=1",
+        "converge#0 -> None ['held-ceiling', 'in-place', 'in-place', 'in-place', 'held-missing']",
+        "  remedy revoke project-a-prod-k4 (held-missing) -> 0",
+        "converge#1 -> None ['held-ceiling', 'in-place', 'in-place', 'in-place', 'blocked']",
+        "converge#2 -> None ['held-ceiling', 'in-place', 'in-place', 'in-place', 'blocked']",
+        "converge#3 -> None ['held-ceiling', 'in-place', 'in-place', 'in-place', 'blocked']",
+        "converge#4 -> None ['held-ceiling', 'in-place', 'in-place', 'in-place', 'blocked']"
+      ]
+    },
+    {
+      "seed": 7003454,
+      "before_issues": [
+        "OSError: the disk refused the ledger write"
+      ],
+      "after_issues": [],
+      "trace": [
+        "shape {'echo': '-0.004', 'big': False, 'drift': 0, 'page': (4, 4), 'fillers': 3, 'newest_first': True}",
+        "run1 limit=264355 refs=2 kw={} -> None ['issued', 'issued']",
+        "rotate-kill project-a-prod-k7 fault=mint:unreach-after -> rc=1",
+        "consumer reads 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 by label (listed); revoke -> rc=1 still=True",
+        "rename 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "failrun save -> None ['in-place', 'in-place']",
+        "edit limit=528710 refs=2 kw={}",
+        "remedy revoke project-a-prod-k4 -> 2",
+        "unread 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['ceiling-moved', 'issued', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k4 (not-in-policy) -> 0",
+        "converge#1 -> None ['in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7003549,
+      "before_issues": [
+        "(a) POST /keys took the project total to 59.1001 past 59.1"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'held-ceiling', 'blocked']"
+      ],
+      "trace": [
+        "shape {'echo': 'round2', 'big': True, 'drift': 0, 'page': (4, 4), 'fillers': 19, 'newest_first': False}",
+        "run1 limit=5910 refs=3 kw={} -> None ['issued', 'issued', 'issued']",
+        "unread f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "rename 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "provider deleted f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 19.7001",
+        "concurrent[rotate] during rotate -> rc=1",
+        "rotate project-a-prod-k6 fault=- -> rc=1",
+        "unread 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "converge#0 -> None ['in-place', 'held-ceiling', 'held-missing']",
+        "  remedy revoke project-a-prod-k3 (held-missing) -> 0",
+        "converge#1 -> None ['in-place', 'held-ceiling', 'blocked']",
+        "converge#2 -> None ['in-place', 'held-ceiling', 'blocked']",
+        "converge#3 -> None ['in-place', 'held-ceiling', 'blocked']",
+        "converge#4 -> None ['in-place', 'held-ceiling', 'blocked']"
+      ]
+    },
+    {
+      "seed": 7004446,
+      "before_issues": [
+        "(L) live project key unknown to the ledger after subcent: 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8(project-a-prod-k0, $11.132)"
+      ],
+      "after_issues": [
+        "(L) live project key unknown to the ledger after subcent: 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8(project-a-prod-k0, $11.132)"
+      ],
+      "trace": [
+        "shape {'echo': '-0.004', 'big': True, 'drift': -1, 'page': (5, 3), 'fillers': 16, 'newest_first': False}",
+        "run1 limit=1113 refs=1 kw={'split': {'vault:project-a/prod/K7': 10.1}} -> None ['issued']",
+        "rotate-kill project-a-prod-k7 fault=delete -> rc=1",
+        "rename 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "provider deleted 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "edit limit=2226 refs=2 kw={}",
+        "failrun mint:unreach-after -> PolicyPartial: partial: 0 of 2 slots served before vault:project-a/prod/K0 failed; a re-run does only what is missing ['held-missing', 'failed']",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 11.132",
+        "converge#0 -> None ['held-missing', 'held-pending', 'over-limit']",
+        "  remedy revoke project-a-prod-k7 (held-missing) -> 0",
+        "  remedy revoke project-a-prod-k0 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k0 -> operator-attested",
+        "converge#1 -> None ['issued', 'issued']"
+      ]
+    }
+  ],
+  "model_bindings": {
+    "observatory/engine/tests/adv_j1_property.py": "059eeddcea7a08bbe4e92ffa496fc243d72915c1976bb39b3b923be6fb0b88a9",
+    "observatory/engine/tests/test_credential_doors.py": "cad91eb2029563733eab1cfdeac4d4aa487440aa240747deb44646c129cab079"
+  },
+  "execution_scope": "Unchanged model module and helper loaded from bound model checkout; only openrouter loader redirected to candidate source. Production candidate identified by SHA256."
+}

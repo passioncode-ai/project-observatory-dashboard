@@ -274,12 +274,33 @@ current provider observation. Evidence:
 These checks cannot prevent an external mutation or immediately identify an
 unknown minted key; the original representation failures remain open.
 Before a policy run uses a requested limit decrease as headroom, the PATCH receipt
-must match the recorded key, reset period and a supported positive ceiling no
-higher than the planned amount. A missing, foreign, malformed or higher receipt
-stops the partial run before later issuance or raises; the old ledger amount is
-retained and no PATCH is retried. A confirmed amount is recorded as observed.
-This is same-operation provider evidence, not an atomic external snapshot.
-Evidence: `test_or_policy_confirms_lowered_exposure_before_spending_headroom`.
+must match the recorded key and reset period and contain a supported positive
+ceiling. A missing, foreign or malformed receipt stops the partial run before
+later writes, retains the old ledger amount and is never retried automatically.
+A complete amount above the requested share may progress a lowering only if it
+is no greater than the freshly read pre-PATCH ceiling. A stale lowering that has
+become an increase is refused before PATCH. Confirmed actual amounts replace
+planned amounts in aggregate accounting before any subsequent increase.
+Two independent $8 keys lowered toward $2 may both reach $2.0004; those observed
+amounts block a new $6 key under a $10 cap and allow it under $11. Both original
+slots remain `held-ceiling`, so the command exits 1 and reports the unmet shares.
+Near-target observations do not become falsely served on the next read-only run.
+If their upward-counted exposure blocks a planned issue or increase under a
+known finite aggregate, the same policy call may first reapply those existing
+requested targets once. It never invents a lower share. Fresh-bound and actual
+response checks still control each decrease; unchanged or uncertain exposure
+never supplies headroom. When admission already fits, no increase is planned or
+aggregate exposure is unknown, the close-value no-op remains.
+Missing or malformed fresh bounds refuse before PATCH. Only a present, explicit
+provider `null` denotes an unlimited ceiling that can be decreased to a verified
+finite amount. Raises retain the strict planned bound. Observed CLI totals round
+each reported amount upward and say so, while per-key hints preserve actual
+values. This is same-operation provider evidence, not an atomic
+external snapshot or a guarantee that a provider can satisfy an exact split.
+Evidence: `test_or_policy_confirms_lowered_exposure_before_spending_headroom` and
+`test_or_policy_progresses_observed_nonincreasing_lowerings` and
+`test_or_policy_refuses_unknown_fresh_capacity_before_lowering` and
+`test_or_policy_reconciles_near_targets_only_for_blocked_admission`.
 
 An applied spend policy records its explicit origin and exact digest on new and
 selected existing key rows; dry-run preserves ledger state. Rotation of a marked

@@ -780,6 +780,7 @@ def policy_key_plan(policy: dict, limit_override: float | None = None,
 HELD_NOT_SERVING = {"held-disabled": "`enable {name}` lets it spend again, or `revoke {name}` and re-run to issue anew",
                     "held-missing": "`revoke {name}` clears the ledger row; re-run to issue anew",
                     "held-unread": "the provider could not be read; re-run when it answers",
+                    "held-ceiling": "the observed ceiling remains above the requested share; reconcile provider precision before retrying",
                     "blocked": "the project's other keys leave no room under the limit; the lines above say which",
                     "not-in-policy": "`revoke {name}` if nothing spends it, or name its slot in the policy",
                     "held-rotation": "reconcile the rotation identities and destination before another mutation; do not blindly retry",
@@ -993,8 +994,8 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
       meaning at the provider is not something this door has verified, and `revoke` is the verb for
       a key nobody names — it is counted at its provider ceiling, reported `not-in-policy` and the
       run exits 1.
-    * **A key that could not be read counts at its last known ceiling** (the ledger's; unbounded if
-      none); one the provider answers 404 for counts 0; a renamed key is still live and is read.
+    * **A key that could not be read has unknown current exposure**, never saved headroom;
+      one the provider answers 404 for counts 0; a renamed key is still live and is read.
     * **A pending row** (a key minted whose delivery was never recorded, or whose minting is
       unknown) holds its slot: nothing is minted there, the slot reads `held-pending` and the run
       exits 1 naming `revoke` or `claim` (PENDING_REMEDY).
@@ -1009,7 +1010,9 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
     headroom proof. Unmarked legacy/standalone rotation still permits overlap.
 
     A failure in the middle stops the run and raises `PolicyPartial` carrying the plan: what was
-    done, what failed, what was not reached. Idempotent: run it again and nothing moves.
+    done, what failed, what was not reached. Completed exact targets are reused.
+    Above-share observations remain explicitly held; unsupported provider precision
+    does not promise convergence on another run.
     """
     plan = policy_key_plan(policy, limit_override, split)
     limit_cents = _policy_limit_cents(policy)
@@ -1044,7 +1047,7 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
         if len(primary) < len(slots):
             read_admin(account)         # the account a new key is minted from, resolved before anything moves
         after, end = _Total(), _Total()  # the total if every planned write happens / what the run leaves
-        work, settle = [], []
+        work, settle, near_targets = [], [], []
         for rotation_name, rotation_rec in scope.items():
             extra = _rotation_exposure(rotation_rec)
             if extra != 0:
@@ -1082,7 +1085,11 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                 after.add(held)
                 end.add(held)
                 if held is not None and held > planned:
+                    step["action"] = "held-ceiling"
+                    step["observed_limit"] = current
+                    step["why"] = "The provider ceiling remains above the requested share; no automatic retry"
                     settle.append(f"limit {name} --set {step['limit']:g}")
+                    near_targets.append((step, name, held, current, state))
                 continue
             step["previous"] = current
             step["held"] = state
@@ -1103,6 +1110,20 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                          "why": (f"a key of this project the policy does not name, counted at "
                                  + ("an unbounded ceiling" if counted is None else f"${_usd(counted):.2f}")
                                  + (f" ({why})" if why else "") + "; not moved by this run")})
+        if (not after.unbounded and after.over(limit_cents)
+                and any(order == 1 for order, *_ in work)):
+            # Close-value no-ops must not strand otherwise admissible slots.
+            # Reapply only the caller's existing share, once, through the same
+            # fresh-bound and actual-response guards as every other decrease.
+            # If admission already fits, retain the no-op tolerance.
+            for step, name, held, current, state in near_targets:
+                planned = _cents(step["limit"], "a planned ceiling")
+                after.add(planned - held)
+                end.add(-held)
+                step["previous"], step["held"] = current, state
+                step.pop("why", None)
+                step.pop("observed_limit", None)
+                work.append((0, step, name, held))
         room = not after.over(limit_cents)
         for _order, step, name, _held in sorted(work, key=lambda w: w[0]):
             step["action"] = "not-reached"
@@ -1121,8 +1142,18 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                 continue
             try:
                 if moving:
-                    _set_limit_locked(name, step["limit"], step["reset"],
-                                      policy_ceiling_cents=_cents(step["limit"], "a planned ceiling"))
+                    observed = _set_limit_locked(name, step["limit"], step["reset"],
+                                      policy_ceiling_cents=_cents(step["limit"], "a planned ceiling"),
+                                      policy_lowering=order == 0)
+                    # Every confirmed delta replaces the projected request. A
+                    # larger-than-requested but non-increasing observation can
+                    # progress safe peers; it never creates fictional headroom.
+                    actual = _cents_up(observed["limit"])
+                    delta = actual - _cents(step["limit"], "a planned ceiling")
+                    after.add(delta)
+                    end.add(delta)
+                    room = not after.over(limit_cents)
+                    step["observed_limit"] = observed["limit"]
                 else:
                     _issue_key_locked(step["name"], step["limit"], account, step["to"], step["project"], step["reset"],
                                       policy_binding=dict(binding))
@@ -1139,6 +1170,10 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
             # A disabled key's ceiling still moves (it would spend that much once enabled), but the
             # slot stays named as not served.
             step["action"] = step.pop("held", None) or ("ceiling-moved" if moving else "issued")
+            if moving and actual > _cents(step["limit"], "a planned ceiling"):
+                step["action"] = "held-ceiling"
+                step["why"] = (f"The provider reported ${observed['limit']:g}; the requested share is unmet; "
+                               "actual exposure counts before any increase")
         if end.over(limit_cents):
             head = ("OVER LIMIT: unbounded now" if end.unbounded
                     else f"OVER LIMIT by ${_usd(end.cents - limit_cents):.2f} now")
@@ -1190,6 +1225,7 @@ def cmd_issue_for_policy(path: str, account: str | None, limit_override: float |
         return 1
     not_serving = False
     total = 0.0
+    display_total = _Total()
     for step in plan:
         if step.get("action") == "over-limit":
             not_serving = True
@@ -1198,18 +1234,21 @@ def cmd_issue_for_policy(path: str, account: str | None, limit_override: float |
         if step.get("action") == "held-rotation-exposure":
             not_serving = True
             total += step["counted"] if step["counted"] is not None else math.inf
+            display_total.add(_cents_up(step["counted"]))
             print(f"{step['ref']}: held-rotation-exposure — {step['why']}")
             continue
         if step.get("action") == "not-in-policy":
             not_serving = True
             total += step["counted"] if step["counted"] is not None else math.inf
+            display_total.add(_cents_up(step["counted"]))
             print(f"{step['ref']}: not-in-policy {step['name']!r} — {step['why']}")
             print("  " + HELD_NOT_SERVING["not-in-policy"].format(name=step["name"]))
             continue
         if "to" not in step:
             print(f"{step['ref']}: skipped — {step['why']}")
             continue
-        total += step["limit"]
+        total += step.get("observed_limit", step["limit"])
+        display_total.add(_cents_up(step.get("observed_limit", step["limit"])))
         extra = ((f" (was ${step['previous']:g})" if step["previous"] is not None else " (was unbounded)")
                  if "previous" in step else "")
         why = f" — {step['why']}" if step.get("why") else ""
@@ -1217,12 +1256,16 @@ def cmd_issue_for_policy(path: str, account: str | None, limit_override: float |
         if step["action"] in HELD_NOT_SERVING:
             not_serving = True
             print(f"  the slot is not served as planned: " + HELD_NOT_SERVING[step["action"]].format(name=step["name"]))
-    print("ceilings: " + ("unbounded" if math.isinf(total) else f"${round(total, 2):g}") + " in all as planned" + (f", project limit ${policy['limitUsd']:g}"
+    has_observed = any("observed_limit" in step for step in plan)
+    total_basis = (" in all (observed ceilings rounded up; other amounts planned)"
+                   if has_observed else " in all as planned")
+    shown_total = display_total.text() if has_observed else ("unbounded" if math.isinf(total) else f"${round(total, 2):g}")
+    print("ceilings: " + shown_total + total_basis + (f", project limit ${policy['limitUsd']:g}"
                                                                  if policy.get("mode") == "limited"
                                                                  else ", no project limit (L0 binds)"))
     # The meter's L0 per key (docs/design/METER.md M4) is configured, not read from the provider: once a
     # ceiling moves here, `keyCeilingsUsd` in config/meter.json must say the same, by the policy's ref.
-    implied = {step["ref"]: step["limit"] for step in plan if "to" in step}
+    implied = {step["ref"]: step.get("observed_limit", step["limit"]) for step in plan if "to" in step}
     print("keyCeilingsUsd for config/meter.json (the meter's L0 per key; set it to match): "
           + json.dumps(implied, ensure_ascii=False))
     if partial:
@@ -1257,7 +1300,7 @@ def set_limit(name_or_label: str, limit: float, reset: str | None = None) -> dic
 
 
 def _set_limit_locked(name_or_label: str, limit: float, reset: str | None = None, *,
-                      policy_ceiling_cents: int | None = None) -> dict:
+                      policy_ceiling_cents: int | None = None, policy_lowering: bool = False) -> dict:
     """Moves a key's ceiling. Without a `reset` the key keeps the period it has: moving a daily
     ceiling never turns it into a monthly one behind the caller's back."""
     if not math.isfinite(limit) or limit <= 0:
@@ -1272,18 +1315,27 @@ def _set_limit_locked(name_or_label: str, limit: float, reset: str | None = None
                           f"it was deleted at the provider; `revoke {name}` clears the row")
     if policy_ceiling_cents is not None and (not rec.get("hash") or row.get("hash") != rec["hash"]):
         raise RuntimeError("Policy ceiling identity is unresolved; no limit was changed")
+    before_ceiling = _ceiling_of(row) if policy_ceiling_cents is not None else None
+    if (policy_ceiling_cents is not None and before_ceiling is None
+            and not ("limit" in row and row["limit"] is None)):
+        raise RuntimeError("Policy fresh ceiling is unknown; no limit was changed")
+    if policy_lowering and before_ceiling is not None and limit > before_ceiling:
+        raise RuntimeError("Policy lowering is no longer non-increasing; refresh before changing the limit")
     response = _request(f"/keys/{row['hash']}", admin, {"limit": limit, "limit_reset": reset},
                         method="PATCH")
     confirmed_limit = limit
     if policy_ceiling_cents is not None:
-        # A requested lowering is not released capacity. Confirm this PATCH's
-        # identity, amount and reset before recording success or allowing the
-        # policy loop to issue/raise another key. Never retry an uncertain effect.
+        # Confirm the same-operation observation, not the requested amount.
+        # A complete non-increasing observation may exceed the request; the
+        # caller counts it and retains an unmet-share outcome. Unknown effects
+        # and raises beyond the admitted request still stop without retry.
         current = response.get("data") if isinstance(response, dict) else None
         observed = _ceiling_of(current) if isinstance(current, dict) else None
         if (not isinstance(current, dict) or current.get("hash") != rec["hash"]
                 or observed is None or observed <= 0
-                or _cents_up(observed) > policy_ceiling_cents
+                or (_cents_up(observed) > policy_ceiling_cents
+                    and not (policy_lowering and before_ceiling is not None
+                             and observed <= before_ceiling))
                 or current.get("limit_reset") != reset):
             raise RuntimeError("Policy ceiling effect is unconfirmed; the provider may have changed; refresh its evidence before further increases")
         confirmed_limit = observed
