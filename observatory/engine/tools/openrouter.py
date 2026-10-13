@@ -456,7 +456,7 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
 
 
 def _issue_key_locked(name: str, limit: float, account: str | None, to: str,
-              project: str | None, reset: str = "monthly") -> dict:
+              project: str | None, reset: str = "monthly", *, policy_binding: dict | None = None) -> dict:
     """Mint, deliver, record. The ONE issuer: `tools/keyserver.py`'s HTTP
     `mint` calls this, so a key born from a button and a key born from the
     command line are the same key, in the same ledger, with the same ceiling.
@@ -470,7 +470,10 @@ def _issue_key_locked(name: str, limit: float, account: str | None, to: str,
     reset = _reset(reset)
     to = vault_destination(to)
     doc = ledger()
-    _require_resolved_rotation(doc["issued"].get(name) or {})
+    previous = doc["issued"].get(name) or {}
+    has_binding = policy_binding is not None or "policy_binding" in previous
+    binding = policy_binding if policy_binding is not None else previous.get("policy_binding")
+    _require_resolved_rotation(previous)
     if (doc["issued"].get(name) or {}).get("pending"):
         raise ValueError(f"an issue of {name!r} is recorded as pending: {PENDING_REMEDY.format(name=name)}")
     label, admin = read_admin(account)
@@ -484,6 +487,8 @@ def _issue_key_locked(name: str, limit: float, account: str | None, to: str,
     # key, its slot and its ceiling, and gets the hash the moment the provider answers.
     doc["issued"][name] = {"account": label, "hash": None, "destination": to, "project": project,
                            "limit_usd": limit, "limit_reset": reset, "issued_on": today(), "pending": True}
+    if has_binding:
+        doc["issued"][name]["policy_binding"] = binding
     save_ledger(doc)
     # A RESET, never a lifetime cap (trap T17): a lifetime cap works until the
     # total is reached and then stops — months later, with no warning. Found in
@@ -518,6 +523,8 @@ def _issue_key_locked(name: str, limit: float, account: str | None, to: str,
         "delivered_to": place, "project": project,
         "limit_usd": limit, "limit_reset": reset, "issued_on": today(),
         "rotated_on": None, "rotations": 0, "name_check": name_check}
+    if has_binding:
+        doc["issued"][name]["policy_binding"] = binding
     save_ledger(doc)
     _journal("issue", f"openrouter/{label}/{name}", to=to, limit_usd=limit, name_check=name_check)
     return {"name": name, "account": label, "label": row.get("label"),
@@ -932,6 +939,24 @@ class _Total:
         return "unbounded" if self.unbounded else f"${_usd(self.cents):.2f}"
 
 
+def _policy_provenance(policy: dict, folder: str, limit_cents: int | None) -> dict:
+    """Historical caller-supplied policy evidence, never current headroom authority.
+
+    Only an origin kind and exact digest are stored, never the source filename or
+    arbitrary policy fields. A later policy application explicitly re-attests its
+    named key rows; existing unrelated/legacy rows are not classified by a name.
+    """
+    try:
+        raw = json.dumps(policy, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("Policy cannot be bound to an exact canonical digest") from None
+    return {"schema_version": 1, "origin": "issue-for-policy",
+            "policy_sha256": hashlib.sha256(raw).hexdigest(), "project": folder,
+            "mode": policy["mode"], "period": policy["period"],
+            "limit_usd": None if limit_cents is None else _usd(limit_cents),
+            "headroom": "not-verified"}
+
+
 def issue_for_policy(policy: dict, account: str | None = None, limit_override: float | None = None,
                      dry_run: bool = False, split: dict | None = None) -> list[dict]:
     """Carries out `policy_key_plan` so that the project's key ceilings never sum past its limit — not
@@ -956,8 +981,8 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
     * **One run at a time** (`_policy_lock`), the ledger and the provider re-read under the lock.
     * The issuing account for a new key is resolved before anything moves, in a dry run too.
 
-    The one window this door opens in which the total can pass the limit is `rotate`'s: the
-    successor is live before the predecessor is deleted (docs/design/AGENT-SECRETS.md).
+    Explicit policy provenance now prevents rotation without a current aggregate
+    headroom proof. Unmarked legacy/standalone rotation still permits overlap.
 
     A failure in the middle stops the run and raises `PolicyPartial` carrying the plan: what was
     done, what failed, what was not reached. Idempotent: run it again and nothing moves.
@@ -966,6 +991,8 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
     limit_cents = _policy_limit_cents(policy)
     slots = [step for step in plan if "to" in step]
     folder = slots[0]["project"]
+    binding = _policy_provenance(policy, folder, limit_cents)
+    binding["recorded_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     with _policy_lock():
         issued = ledger().get("issued", {})
         scope = {n: r for n, r in sorted(issued.items())
@@ -975,6 +1002,21 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
             holders = [n for n, r in scope.items() if r.get("destination") == step["to"]]
             if holders:
                 primary[step["to"]] = step["name"] if step["name"] in holders else holders[0]
+        if not dry_run:
+            # Exact named sources, not every row sharing a project/folder. Save
+            # provenance before any provider write, including an in-place row.
+            doc = ledger()
+            changed = False
+            for selected in primary.values():
+                rec = doc["issued"][selected]
+                prior = rec.get("policy_binding")
+                same = isinstance(prior, dict) and all(prior.get(k) == v for k, v in binding.items()
+                                                      if k != "recorded_at")
+                if not same:
+                    rec["policy_binding"] = dict(binding)
+                    changed = True
+            if changed:
+                save_ledger(doc)
         if len(primary) < len(slots):
             read_admin(account)         # the account a new key is minted from, resolved before anything moves
         after, end = _Total(), _Total()  # the total if every planned write happens / what the run leaves
@@ -1057,7 +1099,8 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                 if moving:
                     _set_limit_locked(name, step["limit"], step["reset"])
                 else:
-                    _issue_key_locked(step["name"], step["limit"], account, step["to"], step["project"], step["reset"])
+                    _issue_key_locked(step["name"], step["limit"], account, step["to"], step["project"], step["reset"],
+                                      policy_binding=dict(binding))
             except (ValueError, RuntimeError, LookupError, OSError, subprocess.SubprocessError) as exc:
                 step.pop("held", None)
                 step["action"] = "failed"
@@ -1307,6 +1350,10 @@ def _rotate_one_locked(name: str) -> dict:
     rec = doc["issued"].get(name)
     if not rec:
         raise LookupError("not in the ledger")
+    if "policy_binding" in rec:
+        # Presence is enough to refuse, even if corrupted or stale. This source
+        # snapshot is not a current aggregate/external-writer headroom proof.
+        raise RuntimeError("Rotation refused: policy-managed key has no verified current aggregate headroom; its policy snapshot is not authorization to mint overlap. No provider call or ledger change was made")
     if rec.get("claimed"):
         raise ValueError("claimed key has no successor destination; issue its replacement before revocation")
     if rec.get("rotation_status") not in (None, "complete") or rec.get("predecessor_hash") or rec.get("successor_hash"):
@@ -1935,12 +1982,14 @@ def main() -> int:
     p_di.add_argument("name")
     p_en = sub.add_parser("enable", help="let a disabled key spend again")
     p_en.add_argument("name")
-    p_ro = sub.add_parser("rotate", help="reserve successor, verify identity, deliver, then delete predecessor. "
+    p_ro = sub.add_parser("rotate", help="Policy-marked keys refuse rotation without verified aggregate headroom. "
+                          "Unmarked legacy/standalone keys reserve successor, verify identity, deliver, then delete predecessor. "
                           "Unknown outcomes retain possible exposure and refuse another rotation or mutation of "
                           "the unresolved identity. Overlapping ceilings can remain above the policy limit. "
                           "Reconcile provider identities and consumer state before recovery; no automatic "
                           "reconciliation is implemented. Local writer locking does not serialize external "
-                          "account changes or enforce every standalone command's project policy")
+                          "account changes or enforce every standalone command's project policy",
+                          description="Policy-marked keys refuse before provider calls: a stored policy snapshot is not current headroom proof. No bypass or automatic migration exists. Unmarked legacy/standalone keys retain the overlap workflow; their project-wide capacity is unverified.")
     p_ro.add_argument("name", nargs="?")
     p_ro.add_argument("--leaked", action="store_true",
                       help="rotate every issued key named in an open leak")

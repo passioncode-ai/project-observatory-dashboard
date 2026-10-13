@@ -23,7 +23,11 @@ class CapacityModel(unittest.TestCase):
             name,row=next(iter(first.ledger()['issued'].items()))
             second, _, _, _ = A.make_door(random.Random(7))
             second.issue_key(name,row['limit_usd'],row['account'],row['destination'],row['project'],row['limit_reset'])
-            self.assertEqual(row,second.ledger()['issued'][name])
+            # New explicit provenance differs; legacy fields still cannot classify.
+            self.assertIn('policy_binding',row)
+            standalone=second.ledger()['issued'][name]
+            self.assertNotIn('policy_binding',standalone)
+            self.assertEqual({k:v for k,v in row.items() if k != 'policy_binding'},standalone)
 
     def test_larger_successor_keeps_prior_upper_until_restore_is_confirmed(self):
         plan=self.plan(policy='100',predecessor='20',successor='50')

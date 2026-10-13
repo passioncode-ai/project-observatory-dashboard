@@ -149,3 +149,23 @@ yet prove that every live vault slot or remote environment is unused, and a save
 scan is not a transaction with external consumer changes. There is no unread-evidence
 bypass. `--forget-pending --reason` remains a separate journaled operator attestation
 for a hashless pending row; it never deletes a provider key.
+
+## Policy-managed rotation admission
+
+`openrouter.py issue-for-policy --policy FILE` records explicit policy provenance
+for new keys and existing rows selected by that policy's named sources. The record
+contains a version, normalized project, policy digest, origin kind and observation
+time. It stores no policy filename. `--dry-run` does not write this provenance.
+A later policy application updates the snapshot when the policy changes.
+
+`rotate NAME` and `rotate --leaked` refuse policy-marked rows before provider calls
+because no current aggregate headroom proof is implemented. The stored policy
+snapshot does not authorize overlapping capacity; stale or malformed provenance
+also refuses. There is no force option or automatic recovery command. Re-applying
+a policy does not make its snapshot a live headroom proof.
+
+Existing unmarked rows are not classified by project names or destination folders.
+Unmarked legacy and standalone rotation retain their previous behavior and can leave
+overlapping capacity after a failure. Their project-wide capacity remains unverified.
+Explicit legacy re-attestation and a bound headroom/reconciliation protocol remain
+open; no existing operational rows are migrated by installation.

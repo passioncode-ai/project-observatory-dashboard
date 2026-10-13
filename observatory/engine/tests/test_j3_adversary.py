@@ -21,7 +21,9 @@ class ModelBinding(unittest.TestCase):
         self.pol = A.T._pol(1, limit=10)
 
     def issue(self):
-        self.m.issue_for_policy(self.pol, 'example')
+        # Standalone scope exercises actual rotation mechanics; policy-managed
+        # admission now refuses overlap separately. The full adversary is unchanged.
+        self.m.issue_key('project-a-prod-k0',10,'example','vault:project-a/prod/K0','project-a')
         return next(iter(self.m.ledger()['issued']))
 
     def test_unique_values_bind_real_hash_and_positive_rotation_reaches_delivery(self):

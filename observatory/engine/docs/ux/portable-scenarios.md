@@ -241,3 +241,16 @@ receipt, and foreign kinds remain untouched. Unknown kinds are outside the repor
 known-snapshot count. No automatic migration is added. Synthetic coverage:
 `test_backup_vault.BeforeUpdateInventory` checks count/warning, encrypted restoration,
 foreign-kind preservation and invalid-copy reporting. Live backup migration is unobserved.
+
+
+### Policy provenance and rotation refusal (OSS-54)
+
+An applied spend policy records its explicit origin and exact digest on new and
+selected existing key rows; dry-run preserves ledger state. Rotation of a marked
+row refuses before a provider request because current aggregate headroom is unknown.
+An invalid, stale or unfamiliar marker cannot grant permission. Standalone reissue
+preserves an existing marker. The same project/folder on an unmarked key does not
+classify it: unmarked standalone rotation remains supported, with its documented
+capacity limits. CLI help and onboarding name these scopes and the absence of a
+bypass/reconciliation command. `tests/test_policy_rotation_admission.py` covers
+these refusals and positive controls. No operational migration is performed.

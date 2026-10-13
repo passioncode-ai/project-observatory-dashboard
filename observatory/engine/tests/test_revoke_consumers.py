@@ -18,7 +18,8 @@ class RevokeConsumers(unittest.TestCase):
         self.p.drift = 0
         self.p.page = self.m.PAGE = 100
         self.m.PAGES_MAX = 100
-        self.m.issue_for_policy(A.T._pol(1, limit=10), 'example')
+        # Actual rotation remains supported for explicitly standalone issuance.
+        self.m.issue_key('project-a-prod-k0',10,'example','vault:project-a/prod/K0','project-a')
         self.name = next(iter(self.m.ledger()['issued']))
         self.scan = self.m.paths.SCRATCH / 'openrouter.json'
         self.receipt = {'schema_version': 1, 'scanned_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
