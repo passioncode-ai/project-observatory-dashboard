@@ -10,18 +10,27 @@ as an allowlisted format, not as Markdown, and this lint holds the board to that
 reads the raw bytes as that check does, and is stricter in the places marked (stricter):
 
 - no CR anywhere in the document (a CRLF file included);
-- one `## Board` heading, not hidden by a code fence, an HTML comment or an HTML block (a line
-  starting with `<` opens one until the next blank line) left open above it, and (stricter) no
-  fence, HTML comment or HTML block above it at all; from it to the next heading only blank
-  lines, the header exactly `| ID | Item | Status | Source |`, the separator `|---|---|---|---|`
-  and contiguous rows `| OBS-n | item | status | source |` (four cells; no backslash, so no
-  escaped `|`; no `<`; no character of Unicode category Cc, Cf, Zl or Zp, no space but U+0020,
-  no Hangul filler or default-ignorable combining mark (stricter: the check refuses a fixed
-  list of these)); the rows end at the first blank line, and nothing but blank lines follows
-  them before the next heading; no line outside the section holds a `|` and an OBS id, and no
-  line right under a table line names one;
-- an OBS id of ASCII digits, `OBS-1` or the two-digit `OBS-01` the first rows use, never
-  `OBS-001`; one number is one id however it is written (stricter: the check compares strings);
+- one `## Board` heading, not hidden by a code fence, an HTML comment or an HTML block left open
+  above it (any line starting with up to three spaces and `<` opens a block until the next blank
+  line, so `<3 text` directly above the heading hides it). Above the heading, a line that starts
+  an HTML block of CommonMark types 1–7 (`<div>`, `<script`, `<!-- `, …) is refused as the
+  check refuses it, and (stricter) so is any code fence, even closed, and any `<!--`, even
+  mid-line and closed. Inline tags mid-line, and a `<`-line that is no tag (`<3`) closed by a
+  blank line, pass. From the heading to the next heading only blank lines, the header exactly
+  `| ID | Item | Status | Source |`, the separator `|---|---|---|---|` and contiguous rows
+  `| OBS-n | item | status | source |` (four cells; no backslash, so no escaped `|`; no `<`; no
+  character of Unicode category Cc, Cf, Zl or Zp and no space but U+0020 (stricter: the check
+  refuses a fixed list of these), and (stricter) no Hangul filler U+115F/U+1160/U+3164/U+FFA0,
+  no U+034F, no Khmer inherent vowel, no Mongolian or Unicode variation selector, and no
+  unassigned default-ignorable code point (U+2065, U+FFF0–FFF8, U+E0000, …)); the rows end at
+  the first blank line, and nothing but blank lines follows them before the next heading; no
+  line outside the section holds a `|` and an OBS id, and no line right under a table line
+  names one;
+- an OBS id of ASCII digits, `OBS-1` or the two-digit `OBS-01` the first rows use (stricter:
+  `OBS-001` and `OBS-0` are refused, and `OBS-01` beside `OBS-1` is one id written twice; the
+  check reads `\\d` and compares strings);
+- (stricter) `superseded by OBS-n` names an existing row, spelled as that row spells it (the
+  check reads an unknown successor as open and refuses nothing);
 - a Status cell of printable ASCII without `& * _ ~` (the dashes of the forms aside) that is,
   whole, exactly one of: `done`, `done in X.Y.Z`, `done in X.Y.Z (#n[, #m…])`,
   `done — merged (#n[, #m…])`, `done — merged (#n[, #m…]), unreleased`, `cancelled`,
@@ -100,6 +109,20 @@ FENCE_OPEN = re.compile(r" {0,3}(`{3,}|~{3,})")
 INVISIBLE_EXTRA = frozenset(
     [0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180B, 0x180C, 0x180D, 0x180F, 0x3164, 0xFFA0]
     + list(range(0xFE00, 0xFE10)) + list(range(0xE0100, 0xE01F0)))
+#: The ranges of Unicode's Default_Ignorable_Code_Point (DerivedCoreProperties.txt). A code point in
+#: them that is still unassigned (category Cn: U+2065, U+FFF0–FFF8, U+E0000, U+E0002–E001F, …)
+#: renders as nothing once a later Unicode assigns it, so it is refused now; the assigned ones are
+#: Cf, or listed in INVISIBLE_EXTRA.
+DEFAULT_IGNORABLE = (
+    (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+    (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
+    (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF),
+)
+
+
+def _default_ignorable(cp: int) -> bool:
+    return any(low <= cp <= high for low, high in DEFAULT_IGNORABLE)
 _V = r"\d+\.\d+\.\d+"
 _PRS = r"\(#\d+(?:, #\d+)*\)"
 _D = r"[—–-]"
@@ -110,7 +133,7 @@ EXACT_FORMS = (
     (re.compile(rf"done in ({_V})(?: {_PRS})?", re.I), "released"),
     (re.compile(r"done", re.I), "closed"),
     (re.compile(r"cancelled", re.I), "closed"),
-    (re.compile(rf"superseded by {OBS_ID}", re.I), "superseded"),
+    (re.compile(rf"superseded by ({OBS_ID})", re.I), "superseded"),
 )
 OPEN_FORM = re.compile(rf"(?:open|blocked)(?:(?: {_D} |: |; |, | \().+)?", re.I | re.S)
 #: Printable ASCII without & * _ ~, plus the two dashes the forms use.
@@ -135,10 +158,11 @@ def cells(line: str) -> list[str]:
 
 
 def parse_status(text: str) -> tuple[str, str | None] | str:
-    """(kind, version) for a Status cell, or the reason the grammar refuses it (a str).
+    """(kind, detail) for a Status cell, or the reason the grammar refuses it (a str).
 
-    kind is `closed`, `released` (`done in X.Y.Z`, with its version), `partial`, `superseded`
-    or `open`. The characters are checked on the raw cell, before spaces collapse."""
+    kind is `closed`, `released` (detail: the version of `done in X.Y.Z`), `partial`,
+    `superseded` (detail: the successor id as written) or `open`. The characters are checked on
+    the raw cell, before spaces collapse."""
     if not STATUS_CHARS.fullmatch(text):
         bad = next(ch for ch in text if not STATUS_CHARS.fullmatch(ch))
         return (f"status holds {bad!r} (U+{ord(bad):04X}); a Status cell is printable ASCII without "
@@ -147,7 +171,7 @@ def parse_status(text: str) -> tuple[str, str | None] | str:
     for pattern, kind in EXACT_FORMS:
         m = pattern.fullmatch(s)
         if m:
-            return kind, (m.group(1) if kind == "released" else None)
+            return kind, (m.group(1) if kind in ("released", "superseded") else None)
     if OPEN_FORM.fullmatch(s):
         return "open", None
     if re.match(r"(?:done|cancelled|superseded)\b", s, re.I):
@@ -166,11 +190,12 @@ def invisible(text: str) -> str | None:
 
     Refused: categories Cc (controls, tab and CR among them), Cf (format: soft hyphen, zero-width
     and bidi controls, tags), Zl and Zp (line and paragraph separators), every Zs space but U+0020
-    (NBSP, figure and ideographic spaces), and INVISIBLE_EXTRA."""
+    (NBSP, figure and ideographic spaces), INVISIBLE_EXTRA, and an unassigned (Cn) code point in
+    the DEFAULT_IGNORABLE ranges."""
     for ch in text:
         category = unicodedata.category(ch)
         if (category in ("Cc", "Cf", "Zl", "Zp") or (category == "Zs" and ch != " ")
-                or ord(ch) in INVISIBLE_EXTRA):
+                or ord(ch) in INVISIBLE_EXTRA or (category == "Cn" and _default_ignorable(ord(ch)))):
             return ch
     return None
 
@@ -267,7 +292,7 @@ def check_board(text: str, changelog: str, deny: list[str] | None = None) -> lis
         problems.append(f"docs/backlog.md line {at}: the document holds a CR (U+000D); the board is read only "
                         "from LF-only text")
     lines = text.split("\n")
-    board_at =[n for n, line in enumerate(lines) if line.rstrip() == BOARD_HEADING]
+    board_at = [n for n, line in enumerate(lines) if line.rstrip() == BOARD_HEADING]
     if len(board_at) != 1:
         where = ("no `## Board` heading" if not board_at else
                  "`## Board` on lines " + ", ".join(str(n + 1) for n in board_at))
@@ -287,6 +312,7 @@ def check_board(text: str, changelog: str, deny: list[str] | None = None) -> lis
         problems.append(f"{rid}: {why} (line {n + 1})" if rid else f"docs/backlog.md line {n + 1}: {why}")
 
     seen: dict[int, int] = {}
+    successors: list[tuple[str, str]] = []
     phase = "before"
     rows = 0
     for n in range(start + 1, end):
@@ -359,9 +385,19 @@ def check_board(text: str, changelog: str, deny: list[str] | None = None) -> lis
         if isinstance(parsed, str):
             problems.append(f"{rid}: {parsed}")
             continue
-        kind, version = parsed
-        if kind == "released" and version not in headings:
-            problems.append(f"{rid}: `done in {version}` but CHANGELOG.md has no `## {version}` heading")
+        kind, detail = parsed
+        if kind == "released" and detail not in headings:
+            problems.append(f"{rid}: `done in {detail}` but CHANGELOG.md has no `## {detail}` heading")
+        if kind == "superseded":
+            successors.append((rid, detail))
+    # A successor is an existing row, spelled as that row spells its id: `OBS-1` for `OBS-01` (or
+    # `obs-01`) names no row to a reader of strings, and the organization's check then reads the
+    # chain as open (stricter: that check does not refuse it).
+    spelled = {line.split(" | ", 1)[0][2:] for line in lines[start + 1:end] if ROW.fullmatch(line)}
+    for rid, successor in successors:
+        if successor not in spelled:
+            problems.append(f"{rid}: `superseded by {successor}` names no row on the board spelled that way; "
+                            "write the successor's id exactly as its row does")
     if found_table and phase in ("before", "separator"):
         problems.append(f"docs/backlog.md: the board section (line {start + 1}) has no header and separator")
     elif found_table and not rows and not any(p.startswith(("OBS-", "docs/backlog.md line")) for p in problems):

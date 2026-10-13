@@ -96,10 +96,15 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
   holds the board to that format, reading the raw bytes as that check does: a CR anywhere, a second or missing
   `## Board` or one hidden by an HTML block, comment or fence above it, a header or separator not exactly the
   canonical one, text after the table, an OBS row outside the section, a backslash (an escaped `|`), `<` or an
-  invisible character in a row, two `parent:` tokens in a Source. It is stricter in four places, named in its
-  docstring: no HTML or fence above the board at all; every Unicode control, format and separator character and
-  every space but U+0020 is refused, not a fixed list; ids are ASCII digits and `OBS-01` beside `OBS-1` is one id
-  written twice; a `parent:` PB id is ASCII digits. A Status cell is exactly one of `done`, `done in
+  invisible character in a row, two `parent:` tokens in a Source. Above the board, a line starting with `<` opens
+  an HTML block until the next blank line, so `<3 text` right above `## Board` hides it; inline tags mid-line, and a
+  `<`-line that is no tag closed by a blank line, pass. It is stricter than that check in these places, each named
+  in its docstring: any code fence above the board, even closed, and any `<!--`, even mid-line and closed; every
+  Unicode control, format and separator character and every space but U+0020, not a fixed list; the Hangul
+  fillers (U+115F, U+1160, U+3164, U+FFA0), U+034F, the Khmer inherent vowels, the Mongolian and Unicode
+  variation selectors, and unassigned default-ignorable code points (U+2065, U+FFF0–FFF8, U+E0000, …); ids in
+  ASCII digits, `OBS-001` and `OBS-0` refused, `OBS-01` beside `OBS-1` one id written twice; a `parent:` PB id
+  in ASCII digits; `superseded by OBS-n` naming a row spelled exactly so. A Status cell is exactly one of `done`, `done in
   X.Y.Z`, `done in X.Y.Z (#n)`, `done — merged (#n)`, `done — merged (#n), unreleased`, `cancelled` or
   `superseded by OBS-n`, or `open`/`blocked` with a note; a closed status takes no note, so 42 rows moved theirs to
   the Item column ("Outcome:"), `closed` became `superseded by OBS-17`, and OBS-63 reads `done in 0.24.4`. Rows

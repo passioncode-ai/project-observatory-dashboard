@@ -160,7 +160,7 @@ class BoardLint(unittest.TestCase):
 
     def test_a_status_outside_the_vocabulary_fails(self):
         # `closed` is not a form: a duplicate is `superseded by OBS-n`, a dropped row `cancelled`.
-        found = self.problems(board({"OBS-01": "shipped, mostly", "OBS-02": "superseded by OBS-63",
+        found = self.problems(board({"OBS-01": "shipped, mostly", "OBS-02": "superseded by OBS-04",
                                      "OBS-03": "closed — a duplicate", "OBS-04": "blocked — the operator's call",
                                      "OBS-05": "done — merged (#243), unreleased", "OBS-06": "cancelled",
                                      "OBS-07": "opened", "OBS-08": "open—no space"}))
@@ -455,6 +455,23 @@ class Hardening(unittest.TestCase):
         for status in ("done – merged (#1)", "done - merged (#1), unreleased", "open – a note", "blocked - a note",
                        "done — merged (#1)"):
             self.assertEqual(self.with_row(status=status), [], status)
+
+    # Round 2 — N1: a successor is an existing row, spelled exactly as that row spells it.
+    def test_a_successor_must_be_an_existing_row_spelled_as_written(self):
+        rows = {"OBS-01": "open", "OBS-02": "superseded by OBS-01", "OBS-03": "superseded by OBS-1",
+                "OBS-04": "superseded by OBS-77", "OBS-05": "Superseded by obs-01"}
+        found = self.problems(board(rows))
+        refused = sorted({p.split(":")[0] for p in found if "successor" in p})
+        self.assertEqual(refused, ["OBS-03", "OBS-04", "OBS-05"], found)
+
+    def test_a_successor_written_later_on_the_board_is_found(self):
+        self.assertEqual(self.problems(board({"OBS-01": "superseded by OBS-02", "OBS-02": "open"})), [])
+
+    # Round 2 — N3: unassigned default-ignorable code points (Cn) are invisible too.
+    def test_default_ignorable_code_points_are_refused_assigned_or_not(self):
+        for cp in (0x2065, 0xFFF0, 0xFFF8, 0xE0000, 0xE0002, 0xE001F, 0xE0080, 0xE0FFF, 0x1BCA0, 0x1D173):
+            found = self.with_row(item=f"a{chr(cp)}b")
+            self.assertTrue(any(p.startswith("OBS-02") and "invisible" in p for p in found), (hex(cp), found))
 
     def test_a_lazy_continuation_of_a_table_outside_the_board_is_an_obs_row(self):
         found = self.problems(board(CORRECTED, after="\n## Archive\n\n| a | b |\nOBS-02 continues the row\n"))
