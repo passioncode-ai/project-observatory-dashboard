@@ -863,15 +863,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "bfd9853758cc28254c5fb82c4864167a0e883b35abf00ffec2445899ba83dcdb",
-      "bytes": 108659,
+      "export_sha256": "af9c7dabda20860611a57f00739fe86552fe7bb15cbabc15af04578a34f04f4b",
+      "bytes": 109092,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "f05afc155083e5661fa5c4e1db46bb42e90a80de9d4daa084e448c28e35a98d9",
-      "bytes": 84051,
+      "export_sha256": "220382631369bdcd5d896da86eca195ed52ed9129a3a36e3d07146fa16fb67b1",
+      "bytes": 84809,
       "upstream_modified": true
     },
     {
@@ -1412,8 +1412,8 @@
       "path": "memory_snapshot.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9ab7789f28b427fe00d6f1c08b7890fa6b69224d3205865bea1e7597a441f41c",
-      "bytes": 15726
+      "export_sha256": "952190b9144893e8472577a3f9a9ed1f1eb807794810d6947660d9c17b3afcf6",
+      "bytes": 18381
     },
     {
       "path": "meter.py",
@@ -3169,8 +3169,8 @@
       "path": "tests/test_memory_freshness.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0d692e19d36fa9f4392ff5eedf32d594347bef10c40dd5026dba952593efbfaa",
-      "bytes": 17563
+      "export_sha256": "2f2f92dbbf7dbdcf04d2715c667b66b341a4bcf52523ccb358e7ffda8b295e0c",
+      "bytes": 20994
     },
     {
       "path": "tests/test_memory_http.py",

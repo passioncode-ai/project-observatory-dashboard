@@ -1627,3 +1627,11 @@ it never refreshes graph evidence from another phase's success. After 30 minutes
 a malformed receipt or a source/binding mismatch, counts are unknown. Git output,
 remote URLs, commit subjects and ref names are absent from this aggregate view.
 Proof: `tests/test_checkout_state.py::UpstreamGraph` and `GraphPhase` in the engine.
+
+### Memory pressure observation
+
+The saved memory summary includes an independently dated macOS pressure level.
+It reads the platform's read-only sysctl; unknown codes, failed commands and
+unsupported platforms stay unknown. Swap usage remains a separate measurement.
+Saved pressure observations expire after30minutes and never authorize a lifecycle
+action. RAM/swap timestamps are not refreshed by a successful pressure-only read.

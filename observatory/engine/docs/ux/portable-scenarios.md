@@ -336,3 +336,15 @@ A graph timeout must not erase an already saved local-state result.
 
 Proof: `test_checkout_state.py::UpstreamGraph` and `GraphPhase`, using disposable
 local file remotes including a separately changed server branch after last fetch.
+
+### Current memory pressure independently of swap
+
+A person or agent reads the existing memory summary and sees a separately dated
+macOS pressure level alongside RAM and swap amounts. A normal pressure reading
+does not erase high swap or claim reclaimed memory. Failed, unsupported, stale,
+future or malformed pressure stays unknown. Extra saved fields are not projected.
+Pressure cannot refresh the timestamp of missing RAM/swap measurements and never
+authorizes stopping a process. The original swap finding retains its measured
+swap-based wording; it is not reclassified as an OS pressure notification.
+Tests: `test_memory_freshness.py::MemoryFreshness` pressure mapping, own age,
+malformed fields, unsupported source and independent timestamp controls.
