@@ -11,6 +11,7 @@ import json
 import math
 import os
 import re
+import stat
 import time
 import uuid
 from datetime import datetime, timezone
@@ -39,7 +40,14 @@ def valid_id(value) -> bool:
 
 def read(path: Path) -> dict:
     # A damaged/foreign receipt must not cause an unbounded allocation.
-    with path.open("rb") as handle:
+    import osprivacy
+    if any(p.is_symlink() for p in path.parents):
+        raise ValueError("receipt parent link")
+    fd = osprivacy.open(path, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
+    with os.fdopen(fd, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
+            raise ValueError("receipt source")
         data = handle.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
         raise ValueError("receipt size")
@@ -63,6 +71,12 @@ class Progress:
         return {"schema": 1, "run_id": self.run_id, "stages": self.stages,
                 "write_failures": self.write_failures}
 
+    def warn(self, message: str) -> None:
+        try:
+            self.logger(message)
+        except Exception:  # noqa: BLE001 — a broken diagnostic sink cannot stop the command
+            pass
+
     def save(self) -> None:
         try:
             try:
@@ -75,13 +89,13 @@ class Progress:
             atomic.write_json(self.path, doc)
         except Exception:  # noqa: BLE001 — instrumentation cannot change the step's exit
             self.write_failures += 1
-            self.logger("tick: stage receipt unavailable")
+            self.warn("tick: stage receipt unavailable")
 
     def start(self, name: str) -> None:
         self.began = time.monotonic()
         if len(self.stages) >= MAX_STAGES:
             self.write_failures += 1
-            self.logger("tick: stage receipt limit reached")
+            self.warn("tick: stage receipt limit reached")
             self.save()
             return
         self.stages.append({"step": name if name in STAGES else "unknown",
@@ -155,5 +169,5 @@ def snapshot(scratch: Path, run_id: str | None) -> dict:
         partial = failures > 0 or any(r["outcome"] == "unknown" or r["step"] == "unknown" for r in clean)
         return {"schema": 1, "run_id": run_id, "coverage": "partial" if partial else "observed",
                 "write_failures": failures, "stages": clean}
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, OverflowError):
         return unknown

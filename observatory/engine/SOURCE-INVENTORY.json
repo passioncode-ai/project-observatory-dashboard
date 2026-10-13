@@ -3831,8 +3831,8 @@
       "path": "tests/test_tick_progress.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e71705545c04eabe29e3c0965712bb725af636ffa5f0e606766725119ee95372",
-      "bytes": 10266
+      "export_sha256": "093b11e471c4a93ca0009962b68fca227401d95305d5eea7d373d28412fa2b87",
+      "bytes": 13740
     },
     {
       "path": "tests/test_tick_py.py",
@@ -4134,8 +4134,8 @@
       "path": "tick_progress.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7c1cc30ad0331c9192d13bae4f17e849c1a3b54d9921159dfcbf092e9183fafb",
-      "bytes": 6838
+      "export_sha256": "aefe3feb2d14e85c259fa595bdcaddf83fce9c636ec21a1a22294b3e4a28154c",
+      "bytes": 7429
     },
     {
       "path": "tools/access_binding_cli.py",
@@ -4790,8 +4790,8 @@
     {
       "path": "tools/tick_lease.py",
       "source_sha256": "e77182b3838aba63707e5e182c066b17fed6e195b2f18c67ee938c80236bad84",
-      "export_sha256": "2860d81a74a6261a62582f40fca577b6736f0acb4e944c26c1482f22156685d3",
-      "bytes": 31525,
+      "export_sha256": "ef5eaf048bb83f4717c5c1eac4d2708344bb389fce1695aff8df380aed92cddd",
+      "bytes": 31923,
       "python_comments_removed": 45,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,

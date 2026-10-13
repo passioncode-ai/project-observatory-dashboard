@@ -534,16 +534,25 @@ def record_run(started: str, outcome: str, code: int | None, reason: str,
     stage metadata is copied, with unfinished stages unknown."""
     doc = {"started_at": started, "ended_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "outcome": outcome, "exit": code, "reason": reason}
+    # Optional stage evidence must never suppress the authoritative whole-run outcome.
+    doc["stage_progress"] = {"schema": 1, "coverage": "unknown",
+                             "reason": "stage_receipt_unavailable", "stages": []}
     try:
         import tick_progress
         doc["stage_progress"] = tick_progress.snapshot(paths.SCRATCH, run_id)
+    except Exception:  # noqa: BLE001 — malformed optional metadata stays unknown
+        pass
+    try:
         import atomic
         paths.SCRATCH.mkdir(parents=True, exist_ok=True)
         atomic.write_json(paths.SCRATCH / "tick-run.json", doc)
         import tick_health
         tick_health.record(paths.SCRATCH, doc)
     except Exception:                                                             # noqa: BLE001
-        print("the tick-run receipt could not be written", file=sys.stderr)
+        try:
+            print("the tick-run receipt could not be written", file=sys.stderr)
+        except OSError:
+            pass
 # endregion tick-watchdog
 
 
