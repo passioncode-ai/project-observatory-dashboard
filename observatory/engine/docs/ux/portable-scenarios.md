@@ -322,3 +322,14 @@ unknown effects, never `pruned`. Successful command completion does not invent a
 registration count. A path that reappears is skipped. Inspect current registrations
 before retrying; raw command output is absent from reasons.
 Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` (five cases).
+
+### Offline verification reports executed tests
+
+A person or agent running `full check` receives an ERROR when a suite exits zero
+without the minimum evidence for its declared protocol. It retains the process
+exit separately, names the reason and preserves completed peer receipts. Explicit
+all-skipped suites stay SKIP. A PASS marker cannot fill in missing unittest cases;
+legacy assertion-line suites retain their reporting contract. Coverage:
+`tests/test_runner_evidence.py` (root suite), including malformed counters and
+swallowed failures. Well-formed forged reports remain outside this trusted-test
+protocol's proof; a minimum is not exhaustive test coverage.

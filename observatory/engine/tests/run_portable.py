@@ -343,6 +343,47 @@ def suite_timeout(name: str, timeout: int) -> int:
     return max(timeout, SUITE_SECONDS.get(name, 0))
 
 
+# Bootstrap groups above are not test protocols: some LEGACY suites use unittest.
+# New suites default to unittest, requiring a complete summary and at least one
+# executed case. These audited compatibility suites report PASS/FAIL/SKIP lines,
+# including direct assertions and the ENV JavaScript helper. Silence is never a
+# compatibility exemption. Add a reporter here only with an exercised contract.
+ASSERTION_LINE_SUITES = frozenset((
+    'ledger', 'time', 'provider_boundary', 'provider_health', 'credential_doors', 'vault',
+    'plugins', 'wire_contract', 'metric_series', 'analytics_plugins', 'mcp_wire', 'wire_inputs',
+    'retention', 'provenance', 'events', 'fingerprints', 'pages', 'dashboard_render',
+    'atomic_writers', 'ack', 'rollup', 'runtime_identity', 'remote_env', 'project_identity',
+    'sessions', 'env_page', 'metric_labels', 'hosting_groups', 'action_outcomes', 'absent_fields',
+    'agent_faults', 'api_listings', 'caller_identity', 'clone_sync', 'companion', 'companion_hook',
+    'dark_domain_cost', 'docs_current', 'export_scope', 'filesystem_scan', 'finding_rules',
+    'heroku', 'interpretation_contract', 'keyserver', 'page_omission', 'plugin_reporting',
+    'projection_mirror', 'queue_order', 'rdap_keys', 'recall', 'recount', 'release_cadence',
+    'remedy_fits', 'render_surface', 'review_queue', 'serverd', 'stale_is_expected', 'store_modes',
+    'tick_standdown', 'trace_opens', 'two_surfaces', 'work_tiles', 'agent', 'agent_queue',
+    'blank_page', 'budget_subject', 'dashboard_store', 'erasure_bytes', 'estate_history',
+    'footprint', 'index', 'key_shape', 'project_surface', 'projection', 'reclaimable_pressure',
+    'temporary_block', 'traps', 'write_surface', 'local_folders', 'delta_fold', 'mcp_inventory',
+    'openrouter_keys', 'scan_ids', 'secrets', 'signature', 'skill_check', 'use_secret',
+    'validator_rules', 'cause_and_symptom', 'collector_state', 'corroboration', 'credentials',
+    'curation_paths', 'degradations', 'domain_probe', 'google', 'handoff', 'install_key',
+    'ledger_export', 'mechanical_confidence', 'notification', 'portfolio_review', 'project_secrets',
+    'publish_contract', 'recovery', 'reveals', 'session_start', 'tick', 'tick_failures',
+    'trap_efficacy', 'trap_map', 'unpublished_work', 'wire_survives', 'witness', 'activity',
+    'at_stake', 'backup_store', 'checkout_subject', 'companion_faults', 'conformance_receipt',
+    'dead_data', 'delivery', 'emit_purity', 'env_inventory', 'estate_surfaces', 'fixture_sweep',
+    'foreign_vocabulary', 'freshness', 'gate_purity', 'gate_skips', 'git_locale', 'horizon',
+    'indexer_load', 'interpretation', 'key', 'ledger_pointer', 'lost_projects', 'merge_membership',
+    'no_silent_truncation', 'pipeline', 'plugin_pair', 'policy_residue', 'registry_shape',
+    'rollup_sessions', 'scrub', 'search_path', 'shared_ancestry', 'side_effect_attribution',
+    'skill', 'skip_site_kinds', 'stale_collapse', 'store_faults', 'store_integrity', 'tick_repo',
+    'unobservable', 'step_references', 'honest_absence', 'identifiers', 'memory_eval', 'textkeys',
+    'manifest_urls', 'digitalocean_door'
+))
+# Per-suite positive minimums may strengthen the default of one executed check.
+# Skips never satisfy a minimum; all-skipped selections remain explicitly SKIP.
+SUITE_MINIMUMS: dict[str, int] = {}
+
+
 def run_suite(name: str, base: Path, template: Path, timeout: int) -> dict:
     timeout = suite_timeout(name, timeout)
     started = time.monotonic(); work = base / name; work.mkdir()
@@ -365,9 +406,9 @@ def run_suite(name: str, base: Path, template: Path, timeout: int) -> dict:
               'pass_assertions': len(re.findall(r'^\s*PASS\b',output,re.M)),
               'fail_assertions': len(re.findall(r'^\s*FAIL\b',output,re.M)),
               'skip_assertions': len(re.findall(r'^\s*SKIP\b',output,re.M)),
-              'unittest_cases': sum(map(int,re.findall(r'Ran (\d+) tests? in',output))),
-              'unittest_skipped': sum(map(int,re.findall(r'\bskipped=(\d+)',output)))}
-    if code == 0 and nothing_ran(result):
+              'unittest_cases': 0, 'unittest_skipped': 0}
+    assess_evidence(name, output, result)
+    if result['status'] == 'SKIP':
         # A suite that exits 0 having run nothing — every check printed SKIP, or every
         # unittest case was skipped (no `node` on PATH, audit A46) — did not pass.
         result['status'] = 'SKIP'
@@ -380,11 +421,66 @@ def run_suite(name: str, base: Path, template: Path, timeout: int) -> dict:
     return result
 
 
+# A counter mentioned in a log is not a unittest result. The final summary start
+# must have a complete block; earlier failures remain binding across later runs.
+UNITTEST_SUMMARY_START = re.compile(r'^Ran \d+ tests? in\b', re.M)
+UNITTEST_SUMMARY = re.compile(
+    r'^Ran (\d+) tests? in [0-9.eE+-]+s[ \t]*\r?\n[ \t]*\r?\n'
+    r'(OK(?: \([^\r\n]*\))?|FAILED(?: \([^\r\n]*\))?)[ \t]*$', re.M)
+
+
+def assess_evidence(name: str, output: str, result: dict) -> None:
+    """Retain interpreter exit separately from observed test evidence.
+
+    This is a reporting contract for trusted repository tests, not authentication:
+    a script can forge a complete summary. It detects missing entry points, silent
+    exits, incompatible/contradictory counts and reported failures, not adversarial
+    test authors or complete assertion coverage.
+    """
+    protocol = 'assertion-lines' if name in ASSERTION_LINE_SUITES else 'unittest'
+    minimum = SUITE_MINIMUMS.get(name, 1)
+    summaries = list(UNITTEST_SUMMARY.finditer(output))
+    starts = list(UNITTEST_SUMMARY_START.finditer(output))
+    terminal = summaries[-1] if summaries else None
+    incomplete_final = bool(starts and (terminal is None or starts[-1].start() != terminal.start()))
+    reported_failure = any(summary.group(2).startswith('FAILED') for summary in summaries)
+    if incomplete_final:
+        terminal = None
+    invalid_counter = False
+    if terminal:
+        result['unittest_cases'] = int(terminal.group(1))
+        skip_fields = re.findall(r'\bskipped=([^,)]+)', terminal.group(2))
+        invalid_counter = len(skip_fields) > 1 or any(not value.isdecimal() for value in skip_fields)
+        result['unittest_skipped'] = int(skip_fields[0]) if skip_fields and not invalid_counter else 0
+    executed = (result['pass_assertions'] + result['fail_assertions'] if protocol == 'assertion-lines'
+                else result['unittest_cases'] - result['unittest_skipped'])
+    skipped = result['skip_assertions'] if protocol == 'assertion-lines' else result['unittest_skipped']
+    result.update(test_protocol=protocol, minimum_executed=minimum,
+                  executed_checks=executed, skipped_checks=skipped)
+    if result['exit_code'] != 0:
+        return                              # preserve nonzero/timeout and the actual code
+    if type(minimum) is not int or minimum < 1:
+        result.update(status='ERROR', reason_code='invalid_evidence_contract',
+                      reason='suite evidence minimum must be a positive integer')
+    elif ((protocol == 'assertion-lines' and result['fail_assertions'])
+          or (protocol == 'unittest' and reported_failure)):
+        result.update(status='FAIL', reason_code='reported_test_failure',
+                      reason='suite reported failed checks despite a successful interpreter exit')
+    elif protocol == 'unittest' and (incomplete_final or invalid_counter
+                                   or result['unittest_skipped'] > result['unittest_cases']):
+        result.update(status='ERROR', reason_code='invalid_test_evidence',
+                      reason='final summary is incomplete or its skipped count is invalid')
+    elif nothing_ran(result):
+        result['status'] = 'SKIP'
+    elif executed < minimum:
+        result.update(status='ERROR',
+                      reason_code='no_test_evidence' if executed == 0 else 'insufficient_test_evidence',
+                      reason='suite did not report the minimum executed checks for its test protocol')
+
+
 def nothing_ran(result: dict) -> bool:
-    """No check executed, and at least one said it was skipped."""
-    executed = result['pass_assertions'] + result['fail_assertions'] \
-        + result['unittest_cases'] - result['unittest_skipped']
-    return executed <= 0 and (result['skip_assertions'] + result['unittest_skipped']) > 0
+    """Every check of the declared protocol was explicitly skipped."""
+    return result['executed_checks'] == 0 and result['skipped_checks'] > 0
 
 
 def run_suite_recorded(name: str, base: Path, template: Path, timeout: int) -> dict:
