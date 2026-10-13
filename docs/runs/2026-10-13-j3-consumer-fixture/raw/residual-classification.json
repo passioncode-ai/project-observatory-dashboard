@@ -1,0 +1,74 @@
+{
+  "source_commit": "532b70911ec39fcb4590a6632283dc63dfcaecf5",
+  "review_status": "PENDING",
+  "all_failures_preserved": true,
+  "cases_examined": 24,
+  "groups": [
+    {
+      "category": "documented limit remedy not exercised",
+      "seeds": [
+        7000008,
+        7000018,
+        7000029
+      ],
+      "classification": "harness remediation gap with external sub-cent drift",
+      "evidence": "Exact model total exceeds policy after subcent event. Final over-limit why explicitly names limit NAME --set TARGET. Harness convergence handles revoke only. SAME_CEILING_USD tolerance leaves these small deviations in-place; no new raising write is demonstrated.",
+      "next": "Tests-first bounded exact limit-command fixture for explicit emitted remedies; no assertion relaxation."
+    },
+    {
+      "category": "persistent upward provider metadata echo",
+      "seeds": [
+        7000009,
+        7000015,
+        7000026,
+        7000037,
+        7000049,
+        7000057,
+        7000065,
+        7000074,
+        7000081,
+        7000095
+      ],
+      "classification": "provider representation challenge; convergence assumption unresolved",
+      "evidence": "Final exact observer total is at/below limit, but metadata limit echo is above asked ceilings and conservative cents-up accounting reports over-limit. Repeating the same PATCH need not erase persistent echo.",
+      "next": "Keep failing seeds. Specify authoritative provider capacity semantics; do not replace observed exposure with requested limits or mark convergence achieved."
+    },
+    {
+      "category": "replacement blocked by rounded reported exposure",
+      "seeds": [
+        7000013,
+        7000031,
+        7000097
+      ],
+      "classification": "provider representation challenge and incomplete remediation guidance",
+      "evidence": "All use +0.0004 echo; missing identity has been safely removed, yet new slot plus rounded-up held metadata exceeds budget. No new issue occurs. Blocked why names aggregate insufficiency but does not emit the limit remedies in an over-limit row because current end is below policy.",
+      "next": "Read-only typed reconciliation proposal may expose the constraints; no headroom guessed from hidden fake _asked values."
+    },
+    {
+      "category": "explicit remaining consumer or dead destination",
+      "seeds": [
+        7000025,
+        7000028,
+        7000045,
+        7000072,
+        7000087,
+        7000089
+      ],
+      "classification": "external consumer repair required; safe refusal is not convergence",
+      "evidence": "Four held-missing cases retain a consumer whose key was deleted externally; producer degrades that destination. Two not-in-policy cases retain an actively read key, so exact current holder guard refuses. Consumer replacement/removal is not represented by this event model.",
+      "next": "Model explicit authorized consumer transition and source refresh as a distinct prerequisite; never erase observations just to make convergence pass."
+    },
+    {
+      "category": "hashless pending identity beyond bounded listing",
+      "seeds": [
+        7000083,
+        7000093
+      ],
+      "classification": "documented attestation remedy not exercised; proof boundary remains",
+      "evidence": "Provider name listing exceeds pages; ordinary revoke refuses. Actual cmd_revoke documents --forget-pending --reason after independently established absence. Harness already removes matching synthetic keys but does not call the attested branch.",
+      "next": "Tests-first explicit synthetic absence proof plus actual documented attestation command; negative unknown/live identity controls. No automatic production absence inference."
+    }
+  ],
+  "production_bug_assessment": "No additional production mutation safety defect established by this classification. Guidance and reconciliation remain incomplete. Five categories do not turn the failing original c-prime property into acceptance.",
+  "scope": "Actual plans, refusal reasons and traces replayed for all24 seeds; provider/vault interactions are synthetic only."
+}
