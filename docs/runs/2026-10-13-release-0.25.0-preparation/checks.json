@@ -1,0 +1,204 @@
+{
+  "schema": "release-preparation/1",
+  "application_version": "0.25.0",
+  "plugin_version": "0.22.1",
+  "base": "fadba69ff3d7438aadd97c6b98c3b9e2bf83702f",
+  "state": "local preparation, not a release",
+  "requires_integration": [
+    "f07ff79beefafb45741511654864786e5f7c9498",
+    "aafcfd5d78f38d5fb41813cb04473bb78cec0985",
+    "da10f4c0c3cd177dbdd2c03c3e9b1222f1929057"
+  ],
+  "checks": [
+    {
+      "name": "versions",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_version_consistency.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "plugin_manifests",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_plugin_manifests.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "desktop_contract",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_desktop_app.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "doc_copies",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_engine_doc_copies.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "release_workflow",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_release_workflow.py",
+        "-v"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "inventory",
+      "command": [
+        "python3",
+        "tools/update_inventory.py",
+        "--check"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "manifest",
+      "command": [
+        "python3",
+        "observatory/engine/tools/check_manifest_urls.py",
+        "--release",
+        "0.25.0"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "desktop_signing",
+      "command": [
+        "python3",
+        "tools/desktop_release.py",
+        "preflight",
+        "--tag",
+        "v0.25.0",
+        "--signing",
+        "true"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "brand",
+      "command": [
+        "python3",
+        "docs/brand/lint.py",
+        "--brief"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "diff",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "test_counts": {
+    "version": 4,
+    "plugin": 4,
+    "desktop": 11,
+    "doc_copies": 6,
+    "release_workflow": 2
+  },
+  "brand_lint": {
+    "errors": 0,
+    "warnings": 2043,
+    "claim": "warnings remain; not a clean brand pack"
+  },
+  "windows_signing_readback": {
+    "command": "gh api repos/passioncode-ai/project-observatory-dashboard/environments/release/variables/AZURE_SIGNING_ENABLED",
+    "name": "AZURE_SIGNING_ENABLED",
+    "value": "true",
+    "checked_on": "2026-10-13"
+  },
+  "manifest": {
+    "urls": 25,
+    "problems": 0,
+    "network_resolved": false
+  },
+  "not_run": [
+    "final integrated exact-SHA hosted checks",
+    "native release builds",
+    "asset signatures/digests/attestations",
+    "installed update acceptance"
+  ],
+  "release_marker": "No RELEASE.json introduced: no required manual upgrade step established in this preparation; reassess after final source integration.",
+  "plugin_validation": [
+    {
+      "target": ".",
+      "command": [
+        "claude",
+        "plugin",
+        "validate",
+        "--strict",
+        "."
+      ],
+      "exit_code": 0
+    },
+    {
+      "target": "observatory/engine/skill",
+      "command": [
+        "claude",
+        "plugin",
+        "validate",
+        "--strict",
+        "observatory/engine/skill"
+      ],
+      "exit_code": 0
+    },
+    {
+      "target": "observatory/engine/skill/plugins/observatory-log",
+      "command": [
+        "claude",
+        "plugin",
+        "validate",
+        "--strict",
+        "observatory/engine/skill/plugins/observatory-log"
+      ],
+      "exit_code": 0
+    }
+  ]
+}

@@ -3,7 +3,46 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.25.0 — 2026-10-13
+
+Cleanup preserves local work and checks removal evidence again before acting. Partial
+surveys retain their known results and name what they could not measure. This release
+also adds lesson records and filtered search. The companion plugin `observatory-log`
+is 0.22.1, with updated credential-handling guidance.
+
+### Recovery fixes
+
+- **Cleanup preserves unverified local state** (OBS-84, OBS-86): ignored files, nested
+  repositories, hidden index flags and unresolved worktree state prevent automatic
+  removal. A manual dirty-worktree removal verifies its archive against current tracked,
+  staged and untracked content. Branch cleanup binds archive/proof and deletion to the
+  same commit and refuses symbolic refs. Disk-guard actions recheck target identity and
+  safety evidence before removal; the legacy unverified build-artifact action is refused.
+  External writers can still race the final filesystem check: use an idle workspace.
+- **Survey gaps stay visible** (OBS-87): bounded checkout registration and fairer scans
+  preserve older measurements with their dates. Unknown swap, failed file walks and
+  incomplete registration are not reported as measured zero or fresh coverage.
+  `full machine --checkouts --root PATH` records read-only checkout candidates under
+  explicit roots, with bounded traversal and honest unknown/stale rows. A candidate is
+  not an abandoned checkout or permission to delete it; no cleanup planner consumes it.
+- **A failed check retains its peers' receipts** (OBS-85): setup, execution and report-write
+  failures produce error evidence without losing completed suite results. Unknown
+  completion fails the run instead of becoming a passing or empty summary.
+- **Findings follow the measured cause**: collector deadlines distinguish work not started
+  from interrupted work; partial leak scans retain sightings; memory and swap findings use
+  their own measurement freshness and preserve unreadable-source degradation.
+- **Rotation retains uncertain exposure before external effects**: OpenRouter records a
+  successor reservation before minting, validates returned identities before delivery or
+  predecessor deletion, and serializes local ledger writers. A failed or ambiguous result
+  retains possible capacity and refuses another mutation; aliases cannot bypass unresolved
+  ownership. This is not automatic reconciliation or a guarantee that overlapping provider
+  ceilings have already converged; external account writers are not serialized.
+- **Scoped Heroku refreshes preserve the rest of the survey** (OBS-80): `scan_heroku --only`
+  updates only successfully measured apps, retains unrequested rows and the global survey
+  timestamp, and records per-scope results. Missing apps, malformed responses and invalid
+  costs preserve old measurements with degradation. Provider-only refreshes retain local
+  checkout information and its unknown state until a full scan measures it. Full and scoped
+  collector invocations share a writer lock; no provider state is changed by the collector.
 
 ### Added
 
@@ -77,8 +116,9 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
   longer mints a second key. Whenever the total a run leaves is past the limit it prints `OVER LIMIT by $X now; it
   ends after: revoke A, B` (`unbounded` when a key has no ceiling) and exits 1, a total past the limit only within
   the half-cent tolerance included. `revoke` refuses a key a consumer reads, found by its hash in the scan or by the
-  label recorded at issue, whatever the key is now called at the provider. The one window in which a project's
-  keys can sum past its limit is `rotate`'s, while the successor and the predecessor are both live.
+  label recorded at issue, whatever the key is now called at the provider. Rotation can leave overlapping
+  successor/predecessor exposure while an external result is unresolved. That capacity remains accounted for
+  and further mutation is refused until reconciliation; the rotation recovery limits above still apply.
 - **The agent's deadline reaches the model call** (ENG-003): `agent` started a project's call while 150 s were
   left, but `providers.complete()` walks a chain of models, each attempt allowed 120 s, so three Retryable models
   took 360 s and the watchdog killed a step that had paid for calls. `complete(…, deadline=)` now gets the step's
