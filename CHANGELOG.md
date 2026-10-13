@@ -30,7 +30,7 @@ while the major version is 0, a minor release may change behaviour and says so h
   (`getattrlist(ATTR_CMNEXT_PRIVATESIZE)`); the row gains `frees_at_least_gb` and `clone_shared_gb`, and where
   clones hold a tenth of the place (and 100 MB) the Machine page and `machine.disk_low` name the floor. The walk
   costs about three times `du`'s time (6.3 GB of caches: 7.6 s against 24.7 s under load); one that does not
-  finish leaves `du`'s number alone.
+  finish keeps the last walk's figures, dated, and says so (ENG-006 below).
 
 ### Added
 
@@ -56,6 +56,18 @@ while the major version is 0, a minor release may change behaviour and says so h
   three copies kept is refused with exit 2 before anything is copied; the tick never passes the flag.
 - **The demo's leak finding dates its detail to the day its title counts back to**, instead of a fixed date that
   drifted from the title as the demo aged.
+- **The private-size walk says when it could not measure** (ENG-006): a walk that ran out of time returned nothing,
+  the row lost the figures the last walk had measured, and nothing said so; a place of few slow files never reached
+  the deadline check. The walk now runs once per `private_every_hours` (`config/machine.json`, default 72), so the
+  budget goes to `du`; `full machine --disk` always walks. A walk that times out, that the budget cannot fit, or
+  whose place cannot be read keeps the last figures with their `frees_measured_at` (fitted inside the fresh size)
+  and is named in the survey's `degraded`; the Machine page shows those figures "as of" their date.
+- **No automatic removal from a carried git-hygiene row** (ENG-009): a hygiene pass the deadline cut short carries
+  its unreached checkouts marked `stale`, and the cleanup planned automatic actions from them as from fresh rows.
+  It now plans none from a carried checkout; its manual actions stay, marked `stale` with their `measured_at`. The
+  plan records `survey_partial` and `carried` (count and oldest measurement), `cleanup` prints how many checkouts
+  wait for a fresh pass (also in its `--json` summary, so the disk guard's report keeps it), and the Machine page
+  and the `observatory_machine` overview show the partial survey.
 
 ## 0.24.4 — 2026-10-12
 

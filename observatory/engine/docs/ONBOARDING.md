@@ -586,7 +586,10 @@ same summary.
   and `du -x` never counts a mounted image as the host disk. `du` counts an APFS clone in full, so
   on macOS a place of 512 MB or more is walked a second time, inside the same budget, for the
   private size of its files: where clones hold at least a tenth of it (and 100 MB), the row says
-  what removing it frees at least. Swap files are a row too: on
+  what removing it frees at least. That walk is repeated only every `private_every_hours` (72;
+  `--disk` always walks); one that runs out of time or budget keeps the last figures, dated "as of",
+  and is named under "Not measured", and a git-hygiene pass cut short carries its unreached
+  checkouts with their old date, from which the cleanup takes no automatic action. Swap files are a row too: on
   macOS they share the disk's container, so memory pressure is disk pressure.
 - **Git hygiene**: every registered checkout's worktrees (clean, dirty,
   missing, in use, idle days) and branches (merged, patch-merged, pushed,
