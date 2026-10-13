@@ -13,6 +13,8 @@ door is `limit NAME --repair-status [--refresh]`. `NAME` is an exact issued ledg
 name. Reset changes and mixed status/set modes refuse. General manual `limit --set`
 keeps its previous semantics and does not become an automatically safe repair.
 No original-model adapter or emitted policy remedy changed in this implementation.
+Integration status for automatic policy guidance is **NOT_WIRED**. A separate
+accepted source-to-parser-to-model seam is required before a full remeasurement.
 
 ## Durable ordering and evidence
 
@@ -99,3 +101,9 @@ claimed. The provider may change state between GET and PATCH despite the local l
 - `evidence-docs`: source-bound checks.
 - `copywriting`: CLI copy.
 - `agent-sync`: shared strings lease.
+
+Portable registration: `decrease_repair` is in `run_portable.BOUNDARY`, so the
+source-copy selector includes its test module and the existing adversary helper.
+Parser and membership checks pass without copying a workspace. The future combined
+runner must include the independently owned reporting correction `476d392`; no
+portable execution against that composition is claimed here.
