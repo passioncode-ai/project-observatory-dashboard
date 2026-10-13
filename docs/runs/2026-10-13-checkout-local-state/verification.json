@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "coverage": "synthetic-offline",
+  "status": "PASS",
+  "suites": [
+    {
+      "file": "tests/test_checkout_state.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 3.98,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 11,
+      "unittest_skipped": 0,
+      "log": "checkout_state/run.log"
+    },
+    {
+      "file": "tests/test_checkout_inventory.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 2.37,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 12,
+      "unittest_skipped": 0,
+      "log": "checkout_inventory/run.log"
+    },
+    {
+      "file": "tests/test_coverage_view.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 1.22,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 8,
+      "unittest_skipped": 0,
+      "log": "coverage_view/run.log"
+    },
+    {
+      "file": "tests/test_open_unlinked.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "seconds": 0.55,
+      "pass_assertions": 0,
+      "fail_assertions": 0,
+      "skip_assertions": 0,
+      "unittest_cases": 12,
+      "unittest_skipped": 0,
+      "log": "open_unlinked/run.log"
+    }
+  ],
+  "not_run": [
+    {
+      "scope": "live-provider-acceptance",
+      "status": "NOT_RUN",
+      "reason": "Requires independently configured provider accounts and explicit opt-in; no credentials are inherited."
+    },
+    {
+      "scope": "external-mcp-host-admission",
+      "status": "NOT_RUN",
+      "reason": "The local stdio protocol is tested; acceptance by another host requires a separate configured fixture run."
+    },
+    {
+      "scope": "live-secret-rotation-and-delivery",
+      "status": "NOT_RUN",
+      "reason": "Synthetic credential boundaries are tested; real rotation/delivery must be independently authorized."
+    }
+  ],
+  "suite_count": 4,
+  "python": "3.14.7",
+  "observed_at": "2026-10-13T07:20:18.313177+00:00",
+  "source_files": {
+    "checkout_state.py": "2b9bd4cfe1194fabbe57c7ed107b729f4d46cf396be24c643944094630bd59e5",
+    "checkout_inventory.py": "2c0c382846db53b8fec709f478679fd01d5c93ec3d4a2ca8631aadc17c38bd8a",
+    "coverage_view.py": "13fd98606a5427262a96c741d5349f4304f9eba4dc2ed03984e9d1f5c5b11df8",
+    "open_unlinked.py": "9f761f6be51fb08afbdee6c187003427c9f27125920638dc63d85deb679a750e",
+    "tests/test_checkout_state.py": "5a2c21a8753c033ccf58e736c9c58ad518b5e9587dff3d6971f4d801819e0a74"
+  },
+  "additional_checks": {
+    "engine_doc_copies_cases": 6,
+    "sync_engine_docs": "PASS",
+    "source_inventory": "PASS",
+    "python311_syntax_only": "PASS",
+    "git_diff_check": "PASS"
+  },
+  "earlier_portable_zero_new_cases": "Rejected as acceptance; missing unittest.main corrected and43 actual cases executed."
+}

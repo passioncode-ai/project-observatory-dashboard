@@ -15,6 +15,31 @@ SAMPLE_ROWS = 10
 MAX_AGE_SECONDS = 1800
 
 
+def local_state_summary(value, at, current):
+    """Project saved counters only; never promote malformed/stale clean evidence."""
+    keys = ('tracked_records', 'untracked_records', 'ignored_records', 'index_records',
+            'assume_unchanged_records', 'skip_worktree_records')
+    result = {'recorded_state': 'unknown', 'current_state': 'unknown', 'stale': True,
+              'age_seconds': None, 'actionable': False, **dict.fromkeys(keys)}
+    if not isinstance(value, dict): return result
+    state = value.get('state')
+    if state not in ('clean-observed', 'changes-observed', 'unknown', 'not-applicable'):
+        return result
+    counts = {key: value.get(key) for key in keys}
+    valid = all(type(n) is int and 0 <= n <= 10000 for n in counts.values())
+    if valid: result.update(counts)
+    age = stamp_age(value.get('measured_at'), at)
+    fresh = current and age is not None and age <= MAX_AGE_SECONDS
+    result.update(recorded_state=state, age_seconds=age, stale=not fresh)
+    if (fresh and valid and value.get('complete') is True and value.get('degraded') == []
+            and not counts['assume_unchanged_records'] and not counts['skip_worktree_records']
+            and state in ('clean-observed', 'changes-observed')):
+        changed = any(counts[k] for k in keys[:3])
+        if changed == (state == 'changes-observed'):
+            result['current_state'] = state
+    return result
+
+
 def stamp_age(value, at):
     if not isinstance(value, str): return None
     try:
@@ -99,6 +124,7 @@ def _source(name, kind, collections, at):
                     sample['classification'] = value if value in ('clone', 'linked-worktree', 'bare-repository', 'unknown') else 'unknown'
                     value = row.get('registration_status')
                     sample['recorded_registration'] = value if value in ('listed-current', 'not-listed-in-current-pass', 'unknown', 'not-measured') else 'unknown'
+                    sample['local_state'] = local_state_summary(row.get('local_state'), at, current)
                 out['rows'].append(sample)
     out['snapshot_count'] = count if known_collection else None
     out['rows_omitted'] = count - len(out['rows']) if known_collection else None

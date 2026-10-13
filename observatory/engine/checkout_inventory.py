@@ -73,9 +73,12 @@ def _probe(path):
     classification = 'bare-repository' if bare == 'true' else ('linked-worktree' if common != gitdir else 'clone')
     head = query('rev-parse', '--verify', 'HEAD')
     branch = query('symbolic-ref', '--quiet', '--short', 'HEAD')
-    return {'classification': classification, 'head': head, 'branch': branch,
+    result = {'classification': classification, 'head': head, 'branch': branch,
             'git_directory': gitdir, 'common_directory': common,
             'registration_status': 'not-measured', 'reason': None}
+    import checkout_state
+    result['local_state'] = checkout_state.probe(candidate, result)
+    return result
 
 
 def classify(path, seconds):
@@ -231,6 +234,11 @@ def _scan(out, roots, *, seconds=20, entries=250, depth=8, root_seconds=2):
                         if identity(path) != current:
                             evidence = {'classification': 'unknown', 'reason': 'candidate-identity-changed'}
                         row.update(evidence)
+                        local = evidence.get('local_state')
+                        if isinstance(local, dict):
+                            row['blockers'].remove('local-state-unmeasured')
+                            if local.get('state') != 'clean-observed':
+                                row['blockers'].append('local-state-not-clean-or-unknown')
                         row['git_attempted_at'] = stamp
                         row['git_measured_at'] = now() if evidence.get('classification') != 'unknown' else None
                         row['registration'] = {'status': 'listed-current' if str(path) in registered else ('not-listed-in-current-pass' if registration_complete else 'unknown'),

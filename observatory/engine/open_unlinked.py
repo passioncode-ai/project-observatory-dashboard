@@ -30,7 +30,7 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def capture(argv, *, seconds=5, max_bytes=MAX_BYTES):
+def capture(argv, *, seconds=5, max_bytes=MAX_BYTES, env=None):
     """Stop only this owned observation child on its deadline/output ceiling."""
     out = bytearray()
     result = {'stdout': b'', 'returncode': None, 'stderr_seen': False,
@@ -39,7 +39,7 @@ def capture(argv, *, seconds=5, max_bytes=MAX_BYTES):
     process = None
     try:
         process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, env={'PATH': os.defpath, 'LC_ALL': 'C'})
+                                   stderr=subprocess.PIPE, env=env if env is not None else {'PATH': os.defpath, 'LC_ALL': 'C'})
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ, 'out')
             selector.register(process.stderr, selectors.EVENT_READ, 'err')

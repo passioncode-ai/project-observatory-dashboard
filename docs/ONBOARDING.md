@@ -1468,6 +1468,12 @@ progress. Nothing schedules this command or adds its rows to a cleanup planner.
 
 ### Read saved checkout, cache and open-deleted-file coverage
 
+On macOS/Linux, the explicit checkout scan also records bounded local Git state.
+Its counters are status/index records, not recursive file totals. Hidden index
+flags, changed metadata and incomplete reads remain unknown. The saved coverage
+view shows current versus recorded state and age; a clean observation does not
+authorize removal. Windows currently reports this additional probe as unavailable.
+
 `project-observatory full machine --coverage` summarizes saved inventory
 receipts without running their collectors. The agent tool is
 `observatory_machine(section="coverage")`; its default overview includes the same
