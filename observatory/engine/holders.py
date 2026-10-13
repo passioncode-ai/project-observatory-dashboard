@@ -1,4 +1,4 @@
-"""What the processes of this account hold, so nothing they use is removed — on every OS.
+"""Observed process holds and conservative refusal when coverage is incomplete.
 
 ONE answer for the disk guard (tools/disk_guard.py) and the cleanup's git tier
 (tools/cleanup.py). Before 2026-10-12 each had its own: the guard read one `lsof` listing
@@ -9,8 +9,8 @@ held open was "free". An independent review found both (docs/design/DISK-GUARD.m
 A path is HELD when a process of this account
   * has a file under it open or memory-mapped (lsof; /proc/<pid>/fd and maps),
   * works inside it (cwd) or runs from it (its executable), or
-  * names it in its command line — a program an `npx` or a virtualenv runs closes its
-    script files once loaded, so only its arguments still say where it runs from.
+  * has a recognized path in rendered command text. Such text supplies positive
+    hints only: closed scripts, relative paths, spaces and aliases can be missed.
 
 How it is known, per system:
   lsof     macOS and Linux; run under a UTF-8 locale, and `\\xNN` escapes decoded, because
@@ -20,6 +20,10 @@ How it is known, per system:
            may allow rename/delete through FILE_SHARE_DELETE, so rename success cannot
            prove that a target is unused. Path removal therefore refuses unknown coverage;
   unknown  none of these: every path is held, and nothing is removed.
+
+Production snapshots remain incomplete because rendered argv cannot prove absence.
+Explicitly constructed complete snapshots are a legacy test/consumer API, not an
+assertion that take() observes every process use.
 
 Values never leave this module: a command line is cut to its absolute-path words, kept in
 memory for one decision, never logged, printed or written.
@@ -110,9 +114,11 @@ def proc_paths() -> list[str] | None:
 
 
 def argument_paths(timeout: float = 20) -> list[str] | None:
-    """The absolute-path words of every process's command line (POSIX `ps`).
+    """Positive lexical path hints from rendered POSIX `ps`, never complete argv.
 
-    None when `ps` cannot be read — the caller then knows less, and says so."""
+    Argument boundaries, relative launch paths and symlink identity are not preserved.
+    None means unreadable; even a returned list cannot prove an unmatched target free.
+    """
     if os.name == "nt":
         return []
     out = _run(["ps", "-axww", "-o", "args="], timeout)
@@ -130,8 +136,10 @@ def argument_paths(timeout: float = 20) -> list[str] | None:
 class Holders:
     """The paths held right now. `known` False means "cannot tell": every path is held."""
 
-    def __init__(self, names: list[str] | None, mode: str = "lsof"):
-        self.known = names is not None and mode != "rename"
+    def __init__(self, names: list[str] | None, mode: str = "lsof", *, complete: bool = True):
+        # Explicit constructed snapshots retain the legacy API (used by synthetic
+        # consumers); production take() must supply its actual coverage condition.
+        self.known = names is not None and mode != "rename" and complete is True
         self.mode = mode if self.known else "unknown"
         self.names = sorted({os.path.normpath(n) for n in names or [] if n.startswith("/")})
 
@@ -150,7 +158,9 @@ class Holders:
             # Without the command lines, a program running from a cache folder is invisible;
             # refuse to know rather than guess.
             return cls(None)
-        return cls(files + args, mode)
+        # ps is a display, not a lossless argv protocol. Preserve positive hints,
+        # but neither lsof nor /proc file lists cover a script closed after loading.
+        return cls(files + args, mode, complete=False)
 
     def busy(self, path: str | os.PathLike) -> bool:
         if not self.known:
@@ -172,8 +182,9 @@ class Holders:
 def running(names: list[str], timeout: float = 20) -> bool | None:
     """Whether a process of one of these tools runs now: True, False, or None (cannot tell).
 
-    By the basenames of the first words of every command line, so `brew` (bash, then ruby)
-    and `pnpm` (node) are seen as what they are, not as their interpreter."""
+    Rendered command words can provide positive hints for interpreters and tools.
+    An unmatched nonempty request remains unknown because argv boundaries are lost.
+    """
     if not names:
         return False
     if os.name == "nt":
@@ -186,7 +197,7 @@ def running(names: list[str], timeout: float = 20) -> bool | None:
         for word in line.split()[:3]:
             if os.path.basename(word) in wanted:
                 return True
-    return False
+    return None
 
 
 def fresh_busy(target: str, timeout: float = 5.0) -> bool | None:
@@ -195,8 +206,9 @@ def fresh_busy(target: str, timeout: float = 5.0) -> bool | None:
     POSIX uses a bounded lsof query for this subtree plus fresh command paths. This
     avoids another full-machine open-file inventory per action. Missing lsof, warnings,
     partial output or timeout preserve the target; there is no unbounded /proc fallback.
-    Windows returns unknown until a supported holder inventory exists. This is a
-    point-in-time check, not a filesystem lock.
+    Rendered ps supplies only positive hints: an empty lsof result and unmatched
+    command display remain unknown, including closed scripts. Windows is unknown
+    until a supported inventory exists. This is not a lifecycle or filesystem lock.
     """
     if os.name == "nt":
         return None
@@ -228,4 +240,4 @@ def fresh_busy(target: str, timeout: float = 5.0) -> bool | None:
             word = word.split("=", 1)[-1] if word.startswith("-") and "=" in word else word
             if word.startswith("/") and len(word) > 1:
                 paths_held.append(word.rstrip(",;:"))
-    return Holders(paths_held).busy(target)
+    return True if Holders(paths_held).busy(target) else None
