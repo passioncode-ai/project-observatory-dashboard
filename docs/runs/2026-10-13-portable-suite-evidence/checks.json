@@ -1,17 +1,17 @@
 {
   "status": "SCOPED_PASS_REVIEW_PENDING",
-  "source_sha256": "ca07e507cbdeb827a5e13d0d403fe87f3a6e6bb9585ec1dd2ddaf5bfcdad6e2c",
+  "source_sha256": "621204e19bd6c03f45e7709f8da24083e0b29b8c4d9d495798f12f9a336fcb43",
   "root_runner_tests": {
     "command": "python -m unittest discover -s tests -p 'test_runner*.py'",
     "exit_code": 0,
-    "cases": 22
+    "cases": 24
   },
   "compatibility": [
     {
       "file": "tests/test_tick_health.py",
       "status": "PASS",
       "exit_code": 0,
-      "seconds": 0.36,
+      "seconds": 0.35,
       "pass_assertions": 0,
       "fail_assertions": 0,
       "skip_assertions": 0,
@@ -26,7 +26,7 @@
       "file": "tests/test_tick_failures.py",
       "status": "PASS",
       "exit_code": 0,
-      "seconds": 2.24,
+      "seconds": 2.06,
       "pass_assertions": 22,
       "fail_assertions": 0,
       "skip_assertions": 0,
@@ -41,7 +41,7 @@
       "file": "tests/test_time.py",
       "status": "PASS",
       "exit_code": 0,
-      "seconds": 1.88,
+      "seconds": 1.73,
       "pass_assertions": 23,
       "fail_assertions": 0,
       "skip_assertions": 0,
@@ -56,7 +56,7 @@
       "file": "tests/test_env_page.py",
       "status": "PASS",
       "exit_code": 0,
-      "seconds": 2.34,
+      "seconds": 2.09,
       "pass_assertions": 22,
       "fail_assertions": 0,
       "skip_assertions": 0,
@@ -71,7 +71,7 @@
       "file": "tests/test_provider_boundary.py",
       "status": "PASS",
       "exit_code": 0,
-      "seconds": 2.14,
+      "seconds": 1.93,
       "pass_assertions": 34,
       "fail_assertions": 0,
       "skip_assertions": 0,
@@ -86,7 +86,7 @@
       "file": "tests/test_manifest_urls.py",
       "status": "PASS",
       "exit_code": 0,
-      "seconds": 0.45,
+      "seconds": 0.35,
       "pass_assertions": 17,
       "fail_assertions": 0,
       "skip_assertions": 0,
@@ -110,5 +110,15 @@
     "hosted-CI",
     "installed-runtime",
     "live-providers"
-  ]
+  ],
+  "review_correction": {
+    "initial_source": "266e237d7dcac34bbc069bb2478a378ba02960c3",
+    "verdict": "CHANGES_REQUIRED",
+    "tests_first_failures": 3,
+    "findings": [
+      "earlier FAILED overwritten by later PASS or SKIP",
+      "incomplete final summary borrowed prior cases"
+    ],
+    "corrected_root_cases": 24
+  }
 }

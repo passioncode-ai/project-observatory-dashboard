@@ -421,8 +421,9 @@ def run_suite(name: str, base: Path, template: Path, timeout: int) -> dict:
     return result
 
 
-# A counter mentioned in a log is not a unittest result. Select the final complete
-# summary block, so an earlier nested runner cannot lend cases to a final Ran 0.
+# A counter mentioned in a log is not a unittest result. The final summary start
+# must have a complete block; earlier failures remain binding across later runs.
+UNITTEST_SUMMARY_START = re.compile(r'^Ran \d+ tests? in\b', re.M)
 UNITTEST_SUMMARY = re.compile(
     r'^Ran (\d+) tests? in [0-9.eE+-]+s[ \t]*\r?\n[ \t]*\r?\n'
     r'(OK(?: \([^\r\n]*\))?|FAILED(?: \([^\r\n]*\))?)[ \t]*$', re.M)
@@ -439,7 +440,12 @@ def assess_evidence(name: str, output: str, result: dict) -> None:
     protocol = 'assertion-lines' if name in ASSERTION_LINE_SUITES else 'unittest'
     minimum = SUITE_MINIMUMS.get(name, 1)
     summaries = list(UNITTEST_SUMMARY.finditer(output))
+    starts = list(UNITTEST_SUMMARY_START.finditer(output))
     terminal = summaries[-1] if summaries else None
+    incomplete_final = bool(starts and (terminal is None or starts[-1].start() != terminal.start()))
+    reported_failure = any(summary.group(2).startswith('FAILED') for summary in summaries)
+    if incomplete_final:
+        terminal = None
     invalid_counter = False
     if terminal:
         result['unittest_cases'] = int(terminal.group(1))
@@ -456,13 +462,14 @@ def assess_evidence(name: str, output: str, result: dict) -> None:
     if type(minimum) is not int or minimum < 1:
         result.update(status='ERROR', reason_code='invalid_evidence_contract',
                       reason='suite evidence minimum must be a positive integer')
-    elif protocol == 'unittest' and (invalid_counter or result['unittest_skipped'] > result['unittest_cases']):
-        result.update(status='ERROR', reason_code='invalid_test_evidence',
-                      reason='reported skipped count is malformed or exceeds reported test cases')
     elif ((protocol == 'assertion-lines' and result['fail_assertions'])
-          or (protocol == 'unittest' and terminal and terminal.group(2).startswith('FAILED'))):
+          or (protocol == 'unittest' and reported_failure)):
         result.update(status='FAIL', reason_code='reported_test_failure',
                       reason='suite reported failed checks despite a successful interpreter exit')
+    elif protocol == 'unittest' and (incomplete_final or invalid_counter
+                                   or result['unittest_skipped'] > result['unittest_cases']):
+        result.update(status='ERROR', reason_code='invalid_test_evidence',
+                      reason='final summary is incomplete or its skipped count is invalid')
     elif nothing_ran(result):
         result['status'] = 'SKIP'
     elif executed < minimum:
