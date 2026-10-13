@@ -40,13 +40,10 @@ _ESCAPE = re.compile(r"(?:\\x[0-9a-fA-F]{2})+")
 
 
 def _decode_escapes(name: str) -> str:
-    """lsof's `\\xd1\\x84` back to the UTF-8 text it stands for; anything else unchanged."""
+    """lsof's `\\xd1\\x84` back to UTF-8; invalid encoded bytes refuse the listing."""
     def one(m: re.Match) -> str:
         raw = codecs.decode(m.group(0).replace("\\x", ""), "hex")
-        try:
-            return raw.decode("utf-8")
-        except UnicodeDecodeError:
-            return m.group(0)
+        return raw.decode("utf-8")
     return _ESCAPE.sub(one, name)
 
 
@@ -75,7 +72,13 @@ def lsof_paths(timeout: float = 120) -> list[str] | None:
     out = _run(["lsof", "-n", "-P", "-Fn"], timeout, _utf8_env())
     if out is None:
         return None
-    return [_decode_escapes(line[1:]) for line in out.splitlines() if line.startswith("n/")]
+    try:
+        names = [_decode_escapes(line[1:]) for line in out.splitlines() if line.startswith("n/")]
+    except (UnicodeError, ValueError):
+        return None
+    # A successful global process inventory should name at least one absolute
+    # path. Unexpected text (or only headers) is not proof of an empty machine.
+    return names or None
 
 
 def proc_paths() -> list[str] | None:

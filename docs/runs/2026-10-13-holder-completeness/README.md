@@ -16,7 +16,8 @@ used a cached observation; dirty worktrees refreshed before potentially lengthy
 archive revalidation.
 
 The shared inventory now requires successful, diagnostic-free and decodable
-command output. Linux enumeration/read errors return unknown instead of a partial
+command output, including at least one parsed absolute path in global `lsof`.
+Linux enumeration/read errors return unknown instead of a partial
 list. The existing bounded target probe moved to `holders.fresh_busy`, retaining
 `disk_guard.fresh_busy` as a compatibility entry point. Both worktree classes call
 it after content and ref verification, immediately before removal. Unknown/held
@@ -35,7 +36,10 @@ run isolated a synthetic `/tmp`
 versus resolved-path fixture mismatch, corrected to stable synthetic `/srv` paths.
 The final check receipt is [checks.json](checks.json). All process observations
 are synthetic; the former live Linux fallback test now supplies a controlled
-inventory. An isolated HOME and resolved temporary root prevent host state use.
+inventory. Existing Git-hardening and machine-estate fixtures supply both
+preliminary and final probe outcomes explicitly; an initial test-variable
+shadowing error in the fixture correction was repaired before the final full
+Git-hardening pass. An isolated HOME and resolved temporary root prevent host state use.
 
 ## Limits and next task
 

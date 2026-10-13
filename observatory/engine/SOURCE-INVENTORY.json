@@ -849,15 +849,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "91fb2cc1e86bd15a2c168432d2a70fa4adb1fb3af06021de270b5ad8c6e7a79d",
-      "bytes": 102957,
+      "export_sha256": "9c28e9baf1634737169ff899748c96b795cc79e15b9bbe9da524c7cab9586dad",
+      "bytes": 103585,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "8e7142c2c33613a8c19f7edb8a40ca7b3b9e93f4fb0e0dae7158d74a614954ff",
-      "bytes": 79299,
+      "export_sha256": "3d56c69547ffe5d52510d3fceb8323f19f4a07d4346c39c820c1bf1c3949970c",
+      "bytes": 80432,
       "upstream_modified": true
     },
     {
@@ -1273,8 +1273,8 @@
       "path": "holders.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "db601d61b921fbe1cad7f9ba1ebb514967bac8e7f7b135dfc9f03d693e0aa828",
-      "bytes": 9522
+      "export_sha256": "0a59bfd18d465f2373974a4bb2627214830582edb17dbac6e773c3df90ce54cc",
+      "bytes": 9690
     },
     {
       "path": "identifiers.py",
@@ -2580,8 +2580,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c2c7bddd09ad8a412d126285ddf8d04c327f05161c87de96ff31399d6beb3d38",
-      "bytes": 105729
+      "export_sha256": "269d5779a31459dfa54f26e71fbf1fadc4924323851fac9b4a359b5ded0a7b67",
+      "bytes": 106325
     },
     {
       "path": "tests/test_docs_current.py",
@@ -2775,8 +2775,8 @@
       "path": "tests/test_git_hardening.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2a5c24e66cde6f43abd106b75c8976d40dd0ac2b52c995c04cfe08bcf4cf24c9",
-      "bytes": 49466
+      "export_sha256": "c667cce974aeada27d2c6564e036573c4a8de1f149f87e00dd2b3c37e4d8edd1",
+      "bytes": 50072
     },
     {
       "path": "tests/test_git_locale.py",
@@ -3061,8 +3061,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fa3778fc41faea585a85056be279ca3e57c5854b7cead48bc1b55032afe9d30c",
-      "bytes": 61927
+      "export_sha256": "b7f1981f9d07a0ffd639409e26ae4e7268391fd6ebaa272ab7af0d022d93a0da",
+      "bytes": 62037
     },
     {
       "path": "tests/test_machine_findings.py",

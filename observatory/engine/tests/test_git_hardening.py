@@ -395,7 +395,12 @@ class HookAndTools(HostileBase):
 
     def test_cleanup_archives_and_removes_without_running_anything(self) -> None:
         import cleanup
-        cleanup.busy_now = lambda path: False
+        # Holder behavior has separate synthetic negative/positive coverage in
+        # test_disk_guard; this suite only exercises the hostile Git boundary.
+        for name in ("busy_now", "fresh_busy"):
+            probe = patch.object(cleanup, name, return_value=False)
+            probe.start()
+            self.addCleanup(probe.stop)
         archive = self.f.d / "archive"
         # Its own branch and worktree: the other cases read the shared ones.
         wt = self.f.projects / "beta-cleanup-wt"
@@ -414,8 +419,8 @@ class HookAndTools(HostileBase):
                            "target": str(wt), "branch": "cleanup-topic",
                            "repository": "repository:example-org/beta-api"}, archive)
         self.assertEqual(rec["result"], "removed", rec)
-        patch = (pathlib.Path(rec["archive"]) / "tracked.patch").read_text(encoding="utf-8")
-        self.assertIn("+uncommitted edit", patch)
+        archived_patch = (pathlib.Path(rec["archive"]) / "tracked.patch").read_text(encoding="utf-8")
+        self.assertIn("+uncommitted edit", archived_patch)
         self.assertNothingRan("cleanup")
 
 
@@ -428,7 +433,12 @@ class CleanupNeverLosesWork(unittest.TestCase):
     def setUp(self) -> None:
         import cleanup
         self.cleanup = cleanup
-        cleanup.busy_now = lambda path: False
+        # Holder behavior has separate synthetic negative/positive coverage in
+        # test_disk_guard; this suite only exercises the hostile Git boundary.
+        for name in ("busy_now", "fresh_busy"):
+            probe = patch.object(cleanup, name, return_value=False)
+            probe.start()
+            self.addCleanup(probe.stop)
         self.d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-cleanup-loss-")).resolve()
         self.repo, self.wt = self.d / "alpha-web", self.d / "alpha-wt"
         bare(self.d, "init", "-q", "-b", "main", str(self.repo))

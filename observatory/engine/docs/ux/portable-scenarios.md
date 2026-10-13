@@ -256,3 +256,22 @@ classify it: unmarked standalone rotation remains supported, with its documented
 capacity limits. CLI help and onboarding name these scopes and the absence of a
 bypass/reconciliation command. `tests/test_policy_rotation_admission.py` covers
 these refusals and positive controls. No operational migration is performed.
+
+
+### OSS-22: incomplete holders and final worktree observation
+
+When a process survey returns partial output, diagnostics, undecodable or
+unparseable `lsof` names, or an unreadable Linux process entry, cleanup treats
+holder coverage as unknown. No omitted path is called free, and an incomplete
+`ps` observation does not authorize a cache-tool command. Before removing either
+a clean or an archived dirty worktree, a fresh target probe runs after all
+Git/archive checks, bounded by five seconds and the remaining action budget.
+Held, unknown or exhausted outcomes keep the worktree and report the refusal;
+a valid free result retains ordinary removal behavior. The prior 20-second
+inventory cache cannot override this final observation. Age remains measured
+when planning, and later writers remain outside the cleanup lock's guarantee.
+
+Evidence: `tests/test_disk_guard.py::HoldersCompleteness`,
+`WorktreeFinalHolders`, and `FreshTargetProbe` (synthetic listings plus disposable
+Git worktrees). `tests/test_git_hardening.py` injects both preliminary and final
+holder outcomes so its Git tests do not inspect the host process table.

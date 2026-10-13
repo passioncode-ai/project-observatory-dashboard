@@ -974,6 +974,15 @@ class HoldersCompleteness(unittest.TestCase):
                 with patch.object(holders, "lsof_paths", return_value=[]):
                     self.assertFalse(holders.Holders.take().known)
 
+    def test_unparseable_global_lsof_output_is_unknown(self):
+        import holders
+        for output in ("unexpected output\n", "p123\n", "n/socket\\xff\n", ""):
+            with self.subTest(output=output), patch.object(holders.shutil, "which", return_value="lsof"), \
+                    patch.object(holders.subprocess, "run", return_value=subprocess.CompletedProcess(
+                        [], 0, output, "")), patch.object(holders, "proc_paths", return_value=None):
+                self.assertIsNone(holders.lsof_paths())
+                self.assertFalse(holders.Holders.take().known)
+
     def test_undecodable_command_output_is_unknown(self):
         import holders
         with patch.object(holders.subprocess, "run", side_effect=UnicodeDecodeError(

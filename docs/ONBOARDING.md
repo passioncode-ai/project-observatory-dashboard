@@ -817,6 +817,14 @@ seconds; unknown, partial or timed-out results skip the path. On POSIX this
 last probe requires `lsof`; without it the plan is available but path removal
 waits. Windows retains the rename probe. See [the preservation contract](design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
 and `tests/test_disk_guard.py::TargetRevalidation` / `FreshTargetProbe`.
+Clean and archived dirty worktrees also repeat this target check immediately
+before removal, after Git/archive verification. The earlier shared process
+listing never grants final removal. Incomplete or unparseable `lsof`/`ps` output
+and Linux `/proc` read failures mean unknown, so cleanup can conservatively skip
+work even if a partial survey showed no holder. Cache-tool commands likewise
+skip when their process survey is unknown. Worktree idle age is still a planning
+condition, not a fresh action-time measurement. A process starting after the
+final check remains a race; these checks are not an exclusive filesystem lock.
 
 Build planning first refreshes explicit Git worktree registrations within a
 reserved budget. Root attempts rotate across passes with a persisted cursor and
