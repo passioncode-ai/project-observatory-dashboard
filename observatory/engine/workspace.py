@@ -612,6 +612,7 @@ def machine_parser(name: str) -> argparse.ArgumentParser:
         mode.add_argument("--disk", action="store_true", help="also size the disk's largest places (slower)")
         mode.add_argument("--memory-only", action="store_true", help="refresh RAM, swap and process RSS without disk sizing")
         mode.add_argument("--checkouts", action="store_true", help="inventory checkout candidates beneath explicit roots; never clean them")
+        mode.add_argument("--coverage", action="store_true", help="summarize saved checkout/cache coverage without rescanning")
         mode.add_argument("--cache-coverage", action="store_true", help="inspect declared cache roots and available tools without walking or cleaning")
         ap.add_argument("--root", action="append", type=Path, help="explicit checkout search root; repeat for each root")
         ap.add_argument("--explain", type=int, metavar="PID", help="why one process runs, and print nothing else")
@@ -849,6 +850,11 @@ def machine_command(name: str, argv: list[str]) -> int:
                                + (["--large-files", "--refresh"] if a.large_files else ["--refresh"]))
     import scan_machine
     if name == "machine":
+        if a.coverage:
+            if a.root or a.explain is not None: machine_parser(name).error("--coverage cannot be combined with --root or --explain")
+            import coverage_view
+            print(json.dumps(coverage_view.summary(), indent=1))
+            return 0
         if a.cache_coverage:
             if a.root: machine_parser(name).error("--root requires --checkouts")
             import cache_coverage
@@ -873,7 +879,8 @@ def machine_command(name: str, argv: list[str]) -> int:
         out = paths.SCRATCH / "machine.json"
         scan_machine.main(["scan_machine.py", str(out), *(["--disk"] if a.disk else [])])
         doc = json.loads(out.read_text(encoding="utf-8"))
-        print(json.dumps({"memory": doc["memory"], "volume": doc["disk"]["volume"],
+        import coverage_view
+        print(json.dumps({"coverage": coverage_view.summary(), "memory": doc["memory"], "volume": doc["disk"]["volume"],
                           "largest_origins": doc["processes"].get("groups", [])[:12],
                           "largest_locations": (doc["disk"].get("locations") or [])[:12],
                           # The split dashboard's own page; the single page this named
