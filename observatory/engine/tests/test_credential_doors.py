@@ -1628,6 +1628,9 @@ def test_or_stash_demands_a_label_because_the_provider_names_nothing() -> None:
 def test_or_rotation_creates_and_delivers_before_deleting() -> None:
     """The order is the contract: a delete-first rotation that fails halfway
     leaves the consumer with a dead key and a silent fallback."""
+    import hashlib
+    successor_value = "sk-or-v1-" + "n" * 40
+    successor_hash = hashlib.sha256(successor_value.encode()).hexdigest()
     m = orr()
     d = pathlib.Path(tmpdir.mkdtemp()).resolve()
     m.ADMIN_STORE = d / "openrouter-admin"
@@ -1650,7 +1653,7 @@ def test_or_rotation_creates_and_delivers_before_deleting() -> None:
             return {"data": [{"name": "fabric-agent", "hash": "h-old",
                               "limit": 10, "usage": 3}]}
         if path == "/keys" and payload:
-            return {"data": {"hash": "h-new"}, "key": "sk-or-v1-" + "n" * 40}
+            return {"data": {"hash": successor_hash}, "key": successor_value}
         # The door reads an issued key by the hash its ledger recorded (GET /keys/{hash}).
         if path == "/keys/h-old" and method is None and payload is None:
             return {"data": {"name": "fabric-agent", "hash": "h-old", "limit": 10, "usage": 3}}
@@ -1669,7 +1672,7 @@ def test_or_rotation_creates_and_delivers_before_deleting() -> None:
           and delivered[0][2].get("rotate") is True, "delivery must request replacement")
     led = json.loads(m.LEDGER.read_text())
     check("the ledger moved to the successor",
-          led["issued"]["fabric-agent"]["hash"] == "h-new"
+          led["issued"]["fabric-agent"]["hash"] == successor_hash
           and led["issued"]["fabric-agent"]["rotations"] == 1, str(led)[:200])
 
 
@@ -2216,7 +2219,8 @@ def test_or_policy_round_two() -> None:
 
     def mint_fails(*a, **k):
         raise RuntimeError("openrouter answered 500 for /keys")
-    m.issue_key = mint_fails
+    # Policy already owns the ledger lock and calls the locked implementation.
+    m._issue_key_locked = mint_fails
     try:
         m.issue_for_policy(_two_slots(), "example")
         check("the partial run raises", False, "returned")
