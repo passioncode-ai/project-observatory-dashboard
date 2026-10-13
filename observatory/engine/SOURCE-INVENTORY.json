@@ -835,8 +835,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "616ae495424232df4e7bcf8e14e7092c063dbdd835fa19bf9daa5f03e4ff3d97",
-      "bytes": 76335,
+      "export_sha256": "3295a808b8bcf60f59a430910d211891b9cf748464d3a52951a8369c880b58c5",
+      "bytes": 76793,
       "upstream_modified": true
     },
     {
@@ -1742,8 +1742,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "29cd8ac82d5a11454562bc4372420a791c47efa3ddb61e2fa819110777dfc8a9",
-      "bytes": 18843,
+      "export_sha256": "6c31c6a6853cc6df8c4334d09457fd18afbd4399e716b1e06b261b5dfab6355b",
+      "bytes": 18943,
       "upstream_modified": true
     },
     {
@@ -2517,8 +2517,8 @@
       "path": "tests/test_digitalocean_door.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2e4caf1df0befa7a1b4e511551f39112089bc005e9b7576bb4de8af7a927b161",
-      "bytes": 29393
+      "export_sha256": "5545c19c5de9f52d45fb0c79ed85a11fb91e40cbd55dd558700636ef3ea8daf1",
+      "bytes": 32981
     },
     {
       "path": "tests/test_digitalocean_safety.py",
@@ -4211,8 +4211,8 @@
       "path": "tools/digitalocean.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a0b82624ff12744389d118a7d45080a3f26dffdafaf94c62c1b495dd51e8c7a5",
-      "bytes": 32731
+      "export_sha256": "308c0da0b38cd31dd8f9a2fd7dfec07a96e99e437f3117efed375d45f1e2ac7b",
+      "bytes": 34195
     },
     {
       "path": "tools/disk_guard.py",

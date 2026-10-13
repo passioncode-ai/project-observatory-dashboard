@@ -91,7 +91,7 @@ def setup(tmp: pathlib.Path, flaky: dict | None = None, **extra) -> dict:
         "calls": [], "flaky": flaky or {}, "password": OLD, "next": NEW,
         "cluster": {"id": "c-1", "name": "shop-db", "engine": "pg", "region": "fra1",
                     "connection": {"host": "shop-db.example", "port": 25060, "user": "doadmin", "password": OLD},
-                    "users": [{"name": "doadmin", "password": OLD}]},
+                    "users": [{"name": "doadmin", "password": OLD}], "db_names": ["defaultdb", "shop"]},
         "apps": [{"id": "app-bind", "spec": {"name": "api", "databases": [{"name": "db", "cluster_name": "shop-db"}],
                                              "services": [{"name": "api", "envs": [{"key": "DATABASE_URL", "value": "${db.DATABASE_URL}"}]}]}},
                  {"id": "app-lit", "spec": {"name": "web", "databases": [{"name": "db", "cluster_name": "shop-db", "db_user": "doadmin"}],
@@ -173,6 +173,7 @@ def main() -> int:
     review_round_one()
     review_round_two()
     review_round_three()
+    review_round_four()
     print(f"{len(FAILURES)} failed" if FAILURES else "all passed")
     return 1 if FAILURES else 0
 
@@ -492,6 +493,59 @@ def review_round_three() -> None:
         check("DB_URL, POSTGRES_URL and a database-scheme DSN are listed as literals",
               "DB_URL (url)" in r.stdout and "POSTGRES_URL (url)" in r.stdout and "ANALYTICS_DSN (url)" in r.stdout,
               r.stdout)
+
+
+def review_round_four() -> None:
+    """Round 4 (PLN-142), what #256's door did not already close: `--db` is one of
+    the cluster's databases; a `${…}` binding is left alone at every level; an
+    encrypted DSN or URI under a database name is listed by `db consumers`."""
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp)
+        st = json.loads((tmp / "state.json").read_text())
+        st["cluster"]["db_names"] = ["defaultdb", "shop"]
+        (tmp / "state.json").write_text(json.dumps(st))
+        r = rotate(env, "--db", "nosuchdb", "--app", "app-bind")
+        check("--db that is not one of the cluster's databases is refused before the reset",
+              r.returncode == 1 and "nosuchdb" in r.stderr and "nothing was reset" in r.stderr
+              and not reset_called(tmp), r.stderr[-300:])
+        r = rotate(env, "--db", "shop", "--app", "app-bind")
+        check("one of the cluster's databases is accepted", r.returncode == 0, (r.stdout + r.stderr)[-300:])
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp)
+        url = "postgresql://doadmin:" + OLD + "@shop-db.example:25060/shop?sslmode=require"
+        with_spec(tmp, "app-mix", {"name": "mix", "envs": [{"key": "DATABASE_URL", "value": url, "type": "SECRET"}],
+                                   "services": [{"name": "api", "envs": [{"key": "DATABASE_URL",
+                                                                          "value": "${db.DATABASE_URL}"}]}]})
+        r = rotate(env, "--spec-env", "app-mix:DATABASE_URL")
+        spec = json.loads((tmp / "state.json").read_text())["specs"]["app-mix"]
+        check("a ${…} binding at one level is left alone while the literal at another moves",
+              r.returncode == 0 and spec["services"][0]["envs"][0]["value"] == "${db.DATABASE_URL}"
+              and spec["envs"][0]["value"] == url.replace(OLD, NEW), (r.stdout + r.stderr)[-300:])
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp)
+        with_spec(tmp, "app-bound", {"name": "bound", "envs": [{"key": "DATABASE_URL", "value": "${db.DATABASE_URL}"}]})
+        r = rotate(env, "--spec-env", "app-bound:DATABASE_URL")
+        check("a key that is only a binding is refused before the reset, naming --app and never --db",
+              r.returncode == 1 and "--app" in r.stderr and "--db" not in r.stderr and not reset_called(tmp),
+              r.stderr[-300:])
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t).resolve()
+        env = setup(tmp)
+        st = json.loads((tmp / "state.json").read_text())
+        st["apps"].append({"id": "app-dsn", "spec": {"name": "dsn", "databases": [{"name": "db", "cluster_name": "shop-db"}],
+                                                      "envs": [{"key": "DATABASE_DSN", "value": "EV[1:a]", "type": "SECRET"},
+                                                               {"key": "DB_URI", "value": "EV[1:b]", "type": "SECRET"},
+                                                               {"key": "SENTRY_DSN", "value": "EV[1:c]", "type": "SECRET"}]}})
+        (tmp / "state.json").write_text(json.dumps(st))
+        r = run(env, "db", "consumers", "shop-db")
+        check("db consumers lists an encrypted DATABASE_DSN and DB_URI, and still not SENTRY_DSN",
+              "DATABASE_DSN" in r.stdout and "DB_URI" in r.stdout and "SENTRY_DSN" not in r.stdout, r.stdout)
 
 
 if __name__ == "__main__":

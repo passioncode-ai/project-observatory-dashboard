@@ -220,7 +220,15 @@ def credential_literal(key: str, value: str) -> bool:
     k = key.upper()
     if any(s in k for s in CREDENTIAL_KEYS):
         return True
-    return k.endswith(("_DSN", "_URI")) and value.lower().startswith(DB_SCHEMES)
+    if not k.endswith(("_DSN", "_URI")):
+        return False
+    # An encrypted `DATABASE_DSN` or `DB_URI` cannot show its scheme; its name
+    # says database (review round 4). `SENTRY_DSN` says neither.
+    return k.startswith(DB_KEY_PREFIXES) or value.lower().startswith(DB_SCHEMES)
+
+
+#: Names that say "this DSN/URI is a database's".
+DB_KEY_PREFIXES = ("DATABASE_", "DB_", "POSTGRES", "PG_", "MYSQL", "REDIS", "VALKEY", "MONGO")
 
 
 def literal_form(key: str, value: str) -> str:
@@ -393,6 +401,13 @@ def validate_connection(c: dict, user: str, db: str | None) -> None:
             or not isinstance(conn.get("host"), str) or not conn["host"]
             or type(conn.get("port")) is not int or not 0 < conn["port"] < 65536):
         raise DoorError("unsupported or incomplete database connection metadata")
+    if db is not None:
+        # `--db` NAMES ONE OF THE CLUSTER'S DATABASES (review round 4): a URL to a
+        # database that does not exist would be delivered and written as if valid.
+        names = c.get("db_names")
+        if not isinstance(names, list) or db not in names:
+            raise DoorError(f"--db {db} is not one of this cluster's databases"
+                            + (f" ({', '.join(str(n) for n in names)})" if isinstance(names, list) and names else ""))
     # Construct once before mutation so a malformed connection cannot strand apps.
     connection_url(c, user, "synthetic-preflight", db)
 
@@ -478,8 +493,15 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
             missing = [k for k in keys if k not in {e["key"] for e in levels}]
             if missing:
                 raise DoorError(f"app {app} has no env {missing}")
+            # A `${…}` BINDING IS NEVER REWRITTEN (review round 4): App Platform
+            # resolves it at deploy time, so it is left exactly as it is at every
+            # level, even beside a literal of the same key at another level.
+            for k in keys:
+                if all("${" in str(e.get("value", "")) for e in levels if e["key"] == k):
+                    raise DoorError(f"app {app} key {k} is a ${{…}} binding at every level; a binding moves "
+                                    f"with a redeploy, so name the app with --app, not --spec-env")
             for e in levels:
-                if e["key"] in keys:
+                if e["key"] in keys and "${" not in str(e.get("value", "")):
                     forms[id(e)] = check_literal(app, e["key"], str(e.get("value", "")), user, db, c, current)
         del current
         every = list(dict.fromkeys([*apps, *literal]))
@@ -528,7 +550,7 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
         try:
             for scope in _scopes(spec):
                 for e in scope.get("envs") or []:
-                    if e["key"] in keys:
+                    if e["key"] in keys and id(e) in forms:
                         old_value = str(e.get("value", ""))
                         if forms[id(e)] == "password":
                             e["value"] = pw
