@@ -85,6 +85,12 @@ def identity(path, *, directory=False, missing=False):
 
 
 def binding(path, metadata, deadline):
+    # Revalidate Git's effective root on both sides: core.worktree can redirect
+    # status without replacing the directory, marker, HEAD or index.
+    inside = query(path, ['rev-parse', '--is-inside-work-tree'], deadline).rstrip(b'\n')
+    top = query(path, ['rev-parse', '--show-toplevel'], deadline).rstrip(b'\n')
+    if inside != b'true' or Path(os.fsdecode(top)).resolve() != path.resolve():
+        raise ValueError('identity-changed')
     gitdir = Path(metadata['git_directory'])
     actual = query(path, ['rev-parse', '--absolute-git-dir'], deadline).rstrip(b'\n')
     if os.fsdecode(actual) != str(gitdir):
