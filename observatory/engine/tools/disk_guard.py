@@ -1235,11 +1235,13 @@ def run(argv: list[str]) -> dict:
                                                                     f"the rest is looked at next pass"})
                     break
                 mark = time.monotonic()
-                # A FRESH LISTING for every class: one taken at the start was minutes old by the
-                # time the last removal used it (review, 2026-10-12).
-                holders = (Holders([], "none") if name == "cache-command"      # a command needs no listing
-                           else Holders.take(min(120.0, max(5.0, share / 2))))
-                holders_by_phase[name] = {"mode": holders.mode, "known": holders.known, "measured_at": now()}
+                # Current holder observations cannot prove non-use. Path admission
+                # stays unknown without repeatedly buffering a full process listing.
+                holders = (Holders([], "none") if name == "cache-command"
+                           else Holders.take(collect_hints=False))
+                holders_by_phase[name] = {"mode": holders.mode, "known": holders.known,
+                                          "observation": holders.observation,
+                                          "measured_at": now() if holders.observation == "partial" else None}
                 if name != "cache-command":
                     holders_mode = "unavailable" if not holders.known or holders_mode == "unavailable" else holders.mode
                 if not holders.known and name != "cache-command":

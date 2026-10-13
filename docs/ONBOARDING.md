@@ -821,9 +821,10 @@ snapshots therefore remain incomplete, and path removal is refused. Windows repo
 See [the preservation contract](design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
 and `tests/test_disk_guard.py::TargetRevalidation` / `FreshTargetProbe`.
 On POSIX, clean and archived dirty worktrees repeat this target check immediately
-before removal, after Git/archive verification. The earlier shared process
-listing never grants final removal. Nonzero, diagnostic or undecodable `lsof`/`ps`
-output, unparseable global `lsof` names and Linux `/proc` read failures mean
+before removal, after Git/archive verification. The preliminary admission snapshot never grants final removal. Planning now
+requests an explicit unknown snapshot without collecting a full process listing;
+per-phase `observation=not-attempted` and `measured_at=null` disclose that choice. Nonzero, diagnostic or undecodable `lsof`/`ps`
+output and unparseable global `lsof` names mean
 unknown, so cleanup can conservatively skip
 work even if a partial survey showed no holder. Cache-tool commands likewise
 skip when their process survey is unknown. In particular, a nonempty `busy_if`
@@ -840,9 +841,14 @@ a five-second default quantum. Registration lists membership, not abandoned or
 safe-to-delete status. Failed path-holder readings remain visible per phase.
 See [registration and fairness](design/DISK-GUARD.md#registration-refresh-and-build-root-fairness-obs-87-subset).
 
-**On every system.** What a process holds is read with `lsof` on macOS and Linux, from
-`/proc` for planning on a Linux without `lsof`. Windows has no supported holder
-inventory here, so path actions skip instead of treating rename as proof. The
+**On every system.** Cleanup admission currently skips process-table collection
+because its negative result cannot authorize a path action. Explicit positive-hint
+readers use bounded `lsof`/`ps` capture: 2 MiB combined pipe output, bounded
+parsing and one shared deadline. The unbounded Linux `/proc` fallback is retired.
+Limit or capture failures remain unknown; this is not a measurement of RAM saved.
+[Capture limits and regression cases](design/DISK-GUARD.md#bounded-explicit-holder-observations)
+explain the owned-child cleanup and timing limits. Windows has no supported holder inventory
+here, so path actions skip instead of treating rename as proof. The
 schedule is the same maintenance job everywhere: launchd,
 a systemd user timer, or a Task Scheduler task, every 15 minutes. "Nobody worked in" means no
 checkout or commit and no uncommitted file changed since — never the index,

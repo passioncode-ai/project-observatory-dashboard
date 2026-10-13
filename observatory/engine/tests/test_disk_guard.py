@@ -17,7 +17,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -26,6 +26,24 @@ for sub in ("collectors", "tools"):
 import workspace
 
 DAY = 86400
+
+
+@contextlib.contextmanager
+def captured_commands(**kwargs):
+    """Replay complete/failing capture at its boundary, never execute host tools."""
+    import holders
+    command = Mock(**kwargs)
+    def capture(*args, **options):
+        try:
+            p = command(*args, **options)
+        except (OSError, subprocess.SubprocessError, UnicodeError):
+            return {"stdout": b"", "returncode": None, "stderr_seen": False,
+                    "complete": False, "reason": "command-unavailable", "reaped": True}
+        raw = p.stdout if isinstance(p.stdout, bytes) else p.stdout.encode("utf-8")
+        return {"stdout": raw, "returncode": p.returncode, "stderr_seen": bool(p.stderr),
+                "complete": True, "reason": None, "reaped": True}
+    with patch.object(holders, "_capture", side_effect=capture):
+        yield command
 
 
 def git(repo, *args):
@@ -137,6 +155,67 @@ class Holding(Base):
         h = self.g.Holders(None)
         self.assertFalse(h.known)
         self.assertTrue(h.busy(self.t1))
+
+
+class CheapHolderAdmission(Base):
+    def no_inventory(self):
+        import holders
+        stack = contextlib.ExitStack()
+        for name in ("lsof_paths", "proc_paths", "argument_paths"):
+            stack.enter_context(patch.object(holders, name, side_effect=AssertionError("unexpected inventory")))
+        return stack
+
+    def test_explicit_unknown_admission_has_no_inventory_io(self):
+        import holders
+        with self.no_inventory():
+            observed = holders.Holders.take(0, collect_hints=False)
+        self.assertFalse(observed.known)
+        self.assertEqual(observed.observation, "not-attempted")
+        self.assertEqual(observed.names, [])
+        self.assertTrue(observed.busy(self.t1))
+
+    def test_cached_preliminary_cleanup_refusal_has_no_inventory_io(self):
+        import cleanup
+        with patch.object(cleanup, "_LISTING", (0.0, None)), self.no_inventory():
+            self.assertTrue(cleanup.busy_now(str(self.t1)))
+            self.assertEqual(cleanup._LISTING[1].observation, "not-attempted")
+
+    def test_cleanup_plan_uses_unknown_without_collecting(self):
+        import cleanup
+        seen = []
+        def plan(cfg, busy, **kwargs):
+            seen.append(busy)
+            return {"counts": {}, "actions": [], "auto_enabled": False}
+        with self.no_inventory(), patch.object(cleanup, "load_config", return_value={}), \
+                patch.object(cleanup, "build_plan", side_effect=plan), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cleanup.main(["--json"]), 0)
+        self.assertEqual(len(seen), 1)
+        self.assertFalse(seen[0].known)
+        self.assertEqual(seen[0].observation, "not-attempted")
+
+    def test_guard_phases_have_no_inventory_or_measurement_claim(self):
+        with self.no_inventory(), patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g, "planners", return_value=[(n, lambda b: []) for n in self.g.CLASSES]):
+            doc = self.g.run([])
+        phases = [v for k, v in doc["holders_by_phase"].items() if k != "cache-command"]
+        self.assertTrue(phases)
+        for row in phases:
+            self.assertFalse(row["known"])
+            self.assertEqual(row["observation"], "not-attempted")
+            self.assertIsNone(row["measured_at"])
+        self.assertTrue(self.t1.exists())
+
+    def test_default_positive_hint_contract_remains_incomplete(self):
+        import holders
+        with patch.object(holders, "lsof_paths", return_value=["/srv/held/file"]), \
+                patch.object(holders, "argument_paths", return_value=["/srv/script.py"]):
+            observed = holders.Holders.take()
+        self.assertFalse(observed.known)
+        self.assertIn("/srv/held/file", observed.names)
+        self.assertIn("/srv/script.py", observed.names)
 
 
 class Temp(Base):
@@ -646,15 +725,15 @@ class AnyDevice(Base):
                 self.assertTrue(target.exists())
             rename.assert_not_called()
 
-    def test_linux_without_lsof_reads_proc(self):
+    def test_linux_without_lsof_preserves_unknown_without_proc(self):
         import holders
         with patch.object(holders, "lsof_paths", return_value=None), \
-                patch.object(holders, "proc_paths", return_value=[str(self.t1 / "held")]), \
-                patch.object(holders, "argument_paths", return_value=[]):
+                patch.object(holders, "proc_paths", side_effect=AssertionError("unbounded fallback")), \
+                patch.object(holders, "argument_paths", side_effect=AssertionError("no first observation")):
             h = self.g.Holders.take()
         self.assertEqual(h.mode, "unknown")
         self.assertFalse(h.known)
-        self.assertIn(str(self.t1 / "held"), h.names)
+        self.assertEqual(h.names, [])
         self.assertTrue(h.busy(self.t1))
 
     def test_no_way_to_know_means_nothing_is_removed(self):
@@ -1013,7 +1092,7 @@ class HoldersCompleteness(unittest.TestCase):
         for code, err in ((1, "inspection failed"), (1, ""), (0, "inspection failed"), (2, "")):
             with self.subTest(code=code, err=err), \
                     patch.object(holders.shutil, "which", return_value="lsof"), \
-                    patch.object(holders.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    captured_commands(return_value=subprocess.CompletedProcess(
                         [], code, "n/srv/unrelated-file\n", err)), \
                     patch.object(holders, "proc_paths", return_value=None), \
                     patch.object(holders, "argument_paths", return_value=[]):
@@ -1025,7 +1104,7 @@ class HoldersCompleteness(unittest.TestCase):
         import holders
         for code, err in ((1, ""), (2, "inspection failed"), (0, "warning")):
             with self.subTest(code=code, err=err), \
-                    patch.object(holders.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    captured_commands(return_value=subprocess.CompletedProcess(
                         [], code, "/usr/bin/unrelated\n", err)):
                 self.assertIsNone(holders.argument_paths())
                 self.assertIsNone(holders.running(["npm"]))
@@ -1036,14 +1115,14 @@ class HoldersCompleteness(unittest.TestCase):
         import holders
         for output in ("unexpected output\n", "p123\n", "n/socket\\xff\n", ""):
             with self.subTest(output=output), patch.object(holders.shutil, "which", return_value="lsof"), \
-                    patch.object(holders.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    captured_commands(return_value=subprocess.CompletedProcess(
                         [], 0, output, "")), patch.object(holders, "proc_paths", return_value=None):
                 self.assertIsNone(holders.lsof_paths())
                 self.assertFalse(holders.Holders.take().known)
 
     def test_undecodable_command_output_is_unknown(self):
         import holders
-        with patch.object(holders.subprocess, "run", side_effect=UnicodeDecodeError(
+        with captured_commands(side_effect=UnicodeDecodeError(
                 "utf-8", b"\xff", 0, 1, "synthetic")):
             self.assertIsNone(holders.argument_paths())
             self.assertIsNone(holders.running(["npm"]))
@@ -1053,13 +1132,13 @@ class HoldersCompleteness(unittest.TestCase):
 
     def test_complete_command_positive_controls(self):
         import holders
-        with patch.object(holders.subprocess, "run", return_value=subprocess.CompletedProcess(
+        with captured_commands(return_value=subprocess.CompletedProcess(
                 [], 0, "/usr/bin/node /srv/active-worktree/script.js\n", "")):
             self.assertIn("/srv/active-worktree/script.js", holders.argument_paths())
             self.assertTrue(holders.running(["node"]))
             self.assertIsNone(holders.running(["npm"]))
         with patch.object(holders.shutil, "which", return_value="lsof"), \
-                patch.object(holders.subprocess, "run", return_value=subprocess.CompletedProcess(
+                captured_commands(return_value=subprocess.CompletedProcess(
                     [], 0, "p123\nn/srv/active-worktree/open\n", "")), \
                 patch.object(holders, "argument_paths", return_value=[]):
             observed = holders.Holders.take()
@@ -1067,33 +1146,14 @@ class HoldersCompleteness(unittest.TestCase):
             self.assertTrue(observed.busy("/srv/active-worktree"))
             self.assertTrue(observed.busy("/srv/other-worktree"))
 
-    def test_proc_partial_reads_are_unknown_and_complete_reads_hold_paths(self):
+    def test_retired_proc_never_enumerates_or_claims_coverage(self):
         import holders
-        seams = (None, "/proc", "/proc/123/cwd", "/proc/123/root", "/proc/123/exe",
-                 "/proc/123/fd", "/proc/123/fd/4", "/proc/123/maps")
-        for seam in seams:
-            def listing(path):
-                if path == seam:
-                    raise PermissionError("SYNTHETIC_PRIVATE_INSPECTION")
-                return ["self", "123"] if path == "/proc" else ["4"]
-            def link(path):
-                if path == seam:
-                    raise FileNotFoundError("SYNTHETIC_PRIVATE_INSPECTION")
-                return "/srv/active-worktree/open"
-            def opened(path, **kwargs):
-                if path == seam:
-                    raise PermissionError("SYNTHETIC_PRIVATE_INSPECTION")
-                return io.StringIO("100-200 r-xp 0 00:00 1 /srv/mapped/file\n")
-            with self.subTest(seam=seam), patch.object(holders.os.path, "isdir", return_value=True), \
-                    patch.object(holders.os, "listdir", side_effect=listing), \
-                    patch.object(holders.os, "readlink", side_effect=link), \
-                    patch("builtins.open", side_effect=opened):
-                observed = holders.Holders(holders.proc_paths(), "proc")
-                self.assertEqual(observed.known, seam is None)
-                self.assertTrue(observed.busy("/srv/active-worktree"))
-                if seam is None:
-                    self.assertTrue(observed.busy("/srv/mapped"))
-                    self.assertFalse(observed.busy("/srv/other"))
+        with patch.object(holders.os, "listdir", side_effect=AssertionError("no enumeration")), \
+                patch.object(holders.os, "readlink", side_effect=AssertionError("no links")), \
+                patch("builtins.open", side_effect=AssertionError("no reads")):
+            observed = holders.Holders(holders.proc_paths(), "proc")
+            self.assertFalse(observed.known)
+            self.assertTrue(observed.busy("/srv/active-worktree"))
 
 
 @unittest.skipIf(os.name == "nt", "POSIX rendered argv contract")
@@ -1118,7 +1178,7 @@ class LossyArgvEvidence(unittest.TestCase):
                 results = [subprocess.CompletedProcess([], 1, "", ""),
                            subprocess.CompletedProcess([], 0, "python " + arg + "\n", "")]
                 with self.subTest(label=label), patch.object(holders.shutil, "which", return_value="lsof"), \
-                        patch.object(holders.subprocess, "run", side_effect=results):
+                        captured_commands(side_effect=results):
                     self.assertIsNone(holders.fresh_busy(str(target)))
 
     def test_production_snapshot_retains_positives_but_is_incomplete(self):
@@ -1138,7 +1198,7 @@ class LossyArgvEvidence(unittest.TestCase):
                         [subprocess.CompletedProcess([], 1, "", ""),
                          subprocess.CompletedProcess([], 0, "python /srv/target/app.py\n", "")]):
             with self.subTest(results=len(results)), patch.object(holders.shutil, "which", return_value="lsof"), \
-                    patch.object(holders.subprocess, "run", side_effect=results):
+                    captured_commands(side_effect=results):
                 self.assertTrue(holders.fresh_busy("/srv/target"))
 
     def test_unmatched_cache_tool_is_unknown_and_empty_request_is_vacuous(self):
@@ -1158,13 +1218,12 @@ class LossyArgvAdmission(Base):
         return lambda name, *args, **kwargs: "lsof" if name == "lsof" else real_which(name, *args, **kwargs)
 
     def ps_only(self, output="python relative/app.py\n"):
-        real_run = subprocess.run
         def run(argv, **kwargs):
             if Path(argv[0]).name == "lsof":
                 return subprocess.CompletedProcess(argv, 1, "", "")
             if argv[0] == "ps":
                 return subprocess.CompletedProcess(argv, 0, output, "")
-            return real_run(argv, **kwargs)
+            raise AssertionError("unexpected capture command")
         return run
 
     def test_disk_action_refuses_after_stale_free_snapshot(self):
@@ -1174,7 +1233,7 @@ class LossyArgvAdmission(Base):
         (target / "kept").write_text("only copy")
         with patch.object(self.g, "fresh_busy", holders.fresh_busy), \
                 patch.object(holders.shutil, "which", side_effect=self.lsof_tool()), \
-                patch.object(holders.subprocess, "run", side_effect=self.ps_only()):
+                captured_commands(side_effect=self.ps_only()):
             result = self.g.act({"class": "temp", "target": str(target),
                                  "identity": self.identity(target)}, self.free())
         self.assertEqual(result["result"], "skipped", result)
@@ -1194,7 +1253,7 @@ class LossyArgvAdmission(Base):
                 with patch.object(cleanup, "busy_now", return_value=False), \
                         patch.object(cleanup, "fresh_busy", holders.fresh_busy), \
                         patch.object(holders.shutil, "which", side_effect=self.lsof_tool()), \
-                        patch.object(holders.subprocess, "run", side_effect=self.ps_only()):
+                        captured_commands(side_effect=self.ps_only()):
                     result = cleanup.act({"class": "worktree-dirty" if dirty else "worktree-clean",
                                           "tier": "manual" if dirty else "auto", "repo": str(repo),
                                           "target": str(wt), "branch": "topic"}, self.base / "archive")
@@ -1207,6 +1266,19 @@ class LossyArgvAdmission(Base):
         import holders
         with patch.object(self.g, "running", holders.running), \
                 patch.object(holders, "_run", return_value="/usr/bin/editor\n"), \
+                patch.object(self.g.subprocess, "run") as run:
+            result = self.g.act({"class": "cache-command", "target": "synthetic cache",
+                                 "argv": ["synthetic-cache", "prune"], "busy_if": ["npm"]}, self.free())
+        self.assertEqual(result["result"], "skipped", result)
+        run.assert_not_called()
+
+
+    def test_cache_busy_if_capped_capture_executes_no_cache_command(self):
+        import holders
+        result_capture = {"stdout": b"npm", "complete": False, "reason": "output-limit",
+                          "returncode": -15, "stderr_seen": False, "reaped": True}
+        with patch.object(self.g, "running", holders.running), \
+                patch.object(holders, "_capture", return_value=result_capture), \
                 patch.object(self.g.subprocess, "run") as run:
             result = self.g.act({"class": "cache-command", "target": "synthetic cache",
                                  "argv": ["synthetic-cache", "prune"], "busy_if": ["npm"]}, self.free())
@@ -1745,19 +1817,20 @@ class FreshTargetProbe(Base):
         self.assertIsNotNone(self.real_fresh_busy, "fresh target probe must exist")
         command_results = [subprocess.CompletedProcess([], 1, "", ""),
                            subprocess.CompletedProcess([], 0, "/usr/bin/editor", "")]
+        started = time.monotonic()
         with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
-                patch.object(self.g.subprocess, "run", side_effect=command_results) as call:
+                captured_commands(side_effect=command_results) as call:
             self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
         self.assertTrue(any(str(self.t1) in c.args[0] for c in call.call_args_list))
-        self.assertTrue(all(0 < c.kwargs["timeout"] <= 5 for c in call.call_args_list))
+        self.assertTrue(all(started < c.kwargs["deadline"] <= started + 5.05 for c in call.call_args_list))
         with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
-                patch.object(self.g.subprocess, "run", side_effect=subprocess.TimeoutExpired("lsof", 5)):
+                captured_commands(side_effect=subprocess.TimeoutExpired("lsof", 5)):
             self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
 
     def test_target_probe_refuses_partial_listing(self):
         self.assertIsNotNone(self.real_fresh_busy, "fresh target probe must exist")
         with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
-                patch.object(self.g.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "permission denied")):
+                captured_commands(return_value=subprocess.CompletedProcess([], 1, "", "permission denied")):
             self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
 
 

@@ -514,14 +514,14 @@ def still_safe_branch(a: dict, expected: str | None = None) -> str:
 
 
 def busy_now(path: str) -> bool:
-    """Preliminary cached refusal; only the final target probe may grant removal."""
+    """Preliminary cached refusal; unknown coverage never grants removal."""
     import holders
     global _LISTING
-    # Share the expensive full inventory for preliminary refusals. Every actual
-    # worktree removal also needs an uncached bounded target probe below.
+    # Current process observations cannot prove a path unused. Cache explicit
+    # non-observation without collecting hints that cannot alter this refusal.
     taken, listing = _LISTING
     if listing is None or time.monotonic() - taken > RECHECK_FRESH_SECONDS:
-        listing = holders.Holders.take(60)
+        listing = holders.Holders.take(60, collect_hints=False)
         _LISTING = (time.monotonic(), listing)
     return listing.busy(path)
 
@@ -783,12 +783,10 @@ def main(argv: list[str]) -> int:
         cfg = under_pressure(load_config(), level)
         import holders
         started = time.monotonic()
-        # THE PLAN FITS THE DEADLINE (2026-10-12): under load the listing and the walk for build
-        # output took the git tier's whole share inside the guard, and 116 planned actions were
-        # never reached. The guard has its own build-output class, so it asks for the git plan
-        # only (`--git-only`), and the listing is bounded by what is left.
-        listing_s = 120.0 if deadline is None else max(5.0, min(120.0, (deadline - time.monotonic()) / 3))
-        busy = holders.Holders.take(listing_s)
+        # The current inventory can only refuse path actions. Do not spend the
+        # plan budget collecting a machine-wide process table that cannot admit one.
+        # The unknown snapshot preserves existing planning/refusal semantics.
+        busy = holders.Holders.take(collect_hints=False)
         plan = build_plan(cfg, busy, artifacts="--git-only" not in argv)
         plan["level"] = level or "normal"
         plan["plan_seconds"] = round(time.monotonic() - started, 1)
