@@ -1749,13 +1749,12 @@ def main() -> int:
     p_di.add_argument("name")
     p_en = sub.add_parser("enable", help="let a disabled key spend again")
     p_en.add_argument("name")
-    p_ro = sub.add_parser("rotate", help="create successor, deliver, delete predecessor. While it runs the slot "
-                          "holds two live keys (the one window past a spend policy's limit). Until the J-3 change "
-                          "counts them, a rotate that FAILS can leave the successor NAME-next live and untracked, "
-                          "or the predecessor live and uncounted (the row then says rotation_status "
-                          "successor-delivered-predecessor-pending with its predecessor_hash): delete at the "
-                          "provider whichever of the two the slot does not hold, then run issue-for-policy, which "
-                          "names any total still past the limit")
+    p_ro = sub.add_parser("rotate", help="reserve successor, verify identity, deliver, then delete predecessor. "
+                          "Unknown outcomes retain possible exposure and refuse another rotation or mutation of "
+                          "the unresolved identity. Overlapping ceilings can remain above the policy limit. "
+                          "Reconcile provider identities and consumer state before recovery; no automatic "
+                          "reconciliation is implemented. Local writer locking does not serialize external "
+                          "account changes or enforce every standalone command's project policy")
     p_ro.add_argument("name", nargs="?")
     p_ro.add_argument("--leaked", action="store_true",
                       help="rotate every issued key named in an open leak")
