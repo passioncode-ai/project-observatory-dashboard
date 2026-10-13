@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,8 +84,12 @@ class WholeTick(unittest.TestCase):
         self.assertEqual(order[0], "scan-fs", order)          # no record yet: the planned order
         self.assertNotIn("integrity", order)
         self.assertEqual(report["not_started"], [])
-        started = json.loads((self.home / "store/tick-rotation.json").read_text(encoding="utf-8"))["started"]
-        self.assertEqual(set(started), set(order))
+        record = json.loads((self.home / "store/tick-rotation.json").read_text(encoding="utf-8"))
+        self.assertEqual(record["schema"], 2)
+        self.assertEqual(set(record["collectors"]), set(order))
+        for name, row in record["collectors"].items():
+            self.assertIn(row["outcome"], ("ran", "failed", "stopped"), (name, row))
+            self.assertLessEqual(row["started_at"], row["finished_at"], (name, row))
 
 
 def load_tick():
@@ -155,8 +160,10 @@ class StepStarted(unittest.TestCase):
             os.environ.pop("OBSERVATORY_STATE", None)
             try:
                 t = tick.Tick(Path(tmp))
-                ran = t.step("rotation-probe", sys.executable, "-c", "print('ran')")
-                return ran, t.failed
+                outcome = t.step("rotation-probe", sys.executable, "-c", "print('ran')")
+                t.write_report()
+                self.report = json.loads((Path(tmp) / "tick.json").read_text(encoding="utf-8"))
+                return outcome, t.failed
             finally:
                 for k, v in saved.items():
                     if v is None:
@@ -166,15 +173,86 @@ class StepStarted(unittest.TestCase):
 
     def test_a_step_past_the_ceiling_is_not_started(self):
         import time
-        ran, failed = self.run_step(time.time() - 5)
-        self.assertFalse(ran)
+        outcome, failed = self.run_step(time.time() - 5)
+        self.assertEqual(outcome, "not_started")
         self.assertEqual(failed, [("rotation-probe", 124)])
+
+    def test_the_report_row_of_a_step_not_started_says_so(self):
+        """ENG-007: a not-started step was one more "exited 124" in `failed_steps`, read exactly like
+        one the watchdog stopped. Its row now carries `outcome`, and keeps `exit` for old readers."""
+        import time
+        self.run_step(time.time() - 5)
+        self.assertEqual(self.report["failed_steps"],
+                         [{"step": "rotation-probe", "exit": 124, "outcome": "not_started"}])
 
     def test_a_step_inside_the_ceiling_ran(self):
         import time
-        ran, failed = self.run_step(time.time() + 3600)
-        self.assertTrue(ran)
+        outcome, failed = self.run_step(time.time() + 3600)
+        self.assertEqual(outcome, "ran")
         self.assertEqual(failed, [])
+        self.assertEqual(self.report["failed_steps"], [])
+
+
+class Outcome(unittest.TestCase):
+    """How a step ended is a class, not an exit code (ENG-007): the watchdog's 124 meant both
+    "not started for want of time" and "stopped at its limit"."""
+
+    def test_each_exit_is_classed(self):
+        tick = load_tick()
+        cases = [(0, "", "ran"), (124, "not started — the tick's ceiling has been reached\n", "not_started"),
+                 (124, "half of a scan\n", "stopped"), (124, None, "stopped"), (137, "", "stopped"),
+                 (143, "x", "stopped"), (-9, "", "stopped"), (1, "", "failed"), (2, "not started", "failed")]
+        for rc, first, want in cases:
+            self.assertEqual(tick.outcome_of(rc, first), want, (rc, first))
+
+    def test_a_bail_row_carries_its_outcome(self):
+        tick = load_tick()
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit):
+                tick.Tick(Path(tmp)).bail("emit", 1, "emit REFUSED a wholesale change")
+            doc = json.loads((Path(tmp) / "tick.json").read_text(encoding="utf-8"))
+        self.assertEqual(doc["failed_steps"], [{"step": "emit", "exit": 1, "outcome": "failed"}])
+
+
+class BoundedRotation(unittest.TestCase):
+    """ENG-007: `rotation_order` moved writers before readers in an unbounded `while moved` loop, so
+    a cycle in READS_FROM hung the tick (exit 142 in the audit). It now gives up, says which names
+    form the cycle, and runs the planned order."""
+
+    def setUp(self):
+        self.tick = load_tick()
+        self.said: list[str] = []
+        self.tick.log = self.said.append
+
+    def order_within(self, seconds, *args):
+        import threading
+        box = {}
+        worker = threading.Thread(target=lambda: box.setdefault("order", self.tick.rotation_order(*args)),
+                                  daemon=True)
+        worker.start()
+        worker.join(seconds)
+        self.assertFalse(worker.is_alive(), f"rotation_order did not return within {seconds} s")
+        return box["order"]
+
+    def test_a_two_cycle_returns_within_a_second_with_the_planned_order(self):
+        planned = ["scan-fs", "a", "b", "leaks"]
+        order = self.order_within(1.0, planned, {"a": 5.0, "b": 1.0, "leaks": 0.0, "scan-fs": 9.0},
+                                  {"a": ("b",), "b": ("a",)})
+        self.assertEqual(order, planned)
+        cycle = [line for line in self.said if "cycle" in line]
+        self.assertTrue(cycle and "a" in cycle[0] and "b" in cycle[0] and "planned order" in cycle[0], self.said)
+
+    def test_a_longer_cycle_is_named_too(self):
+        planned = ["x", "y", "z"]
+        order = self.order_within(1.0, planned, {}, {"x": ("z",), "y": ("x",), "z": ("y",)})
+        self.assertEqual(order, planned)
+        self.assertTrue(any("x" in l and "y" in l and "z" in l and "cycle" in l for l in self.said), self.said)
+
+    def test_a_cycle_outside_the_planned_steps_is_not_a_cycle_here(self):
+        order = self.order_within(1.0, ["scan-fs", "env", "leaks"], {"env": 5.0, "leaks": 1.0},
+                                  {"leaks": ("env",), "a": ("b",), "b": ("a",)})
+        self.assertEqual(order, ["scan-fs", "env", "leaks"])
+        self.assertFalse(any("cycle" in l for l in self.said), self.said)
 
 
 class RotationRun(unittest.TestCase):
@@ -187,13 +265,17 @@ class RotationRun(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.record = Path(tmp.name).resolve() / "tick-rotation.json"
 
-    def stub(self, refuse=()):
+    def stub(self, refuse=(), outcomes=None, sleep=0.0):
+        outcomes = outcomes or {}
         tick = self.tick.Tick(self.record.parent)
         ran = []
 
         def step(name, *argv):
             ran.append(name)
-            return name not in refuse
+            if sleep:
+                import time
+                time.sleep(sleep)
+            return outcomes.get(name, "not_started" if name in refuse else "ran")
         tick.step = step
         return tick, ran
 
@@ -221,7 +303,195 @@ class RotationRun(unittest.TestCase):
         tick, ran = self.stub()
         self.plan(tick).run_in_turn()
         self.assertEqual(ran, ["scan-fs", "scan-gh", "leaks", "lifecycle"])
-        self.assertEqual(set(json.loads(self.record.read_text(encoding="utf-8"))["started"]), set(ran))
+        self.assertEqual(set(json.loads(self.record.read_text(encoding="utf-8"))["collectors"]), set(ran))
+
+
+class RotationRecord(unittest.TestCase):
+    """The rotation record, schema 2 (ENG-005, ENG-007): per collector the start stamped BEFORE the
+    step (the time after it was recorded as the start), when it finished, how it ended, how many
+    ticks in a row it was not started and when it last ran to the end. Schema 1 is still read."""
+
+    def setUp(self):
+        self.tick = load_tick()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.record = Path(tmp.name).resolve() / "tick-rotation.json"
+        self.said: list[str] = []
+        self.tick.log = self.said.append
+
+    def run_tick(self, outcomes=None, sleep=0.0):
+        tick = self.tick.Tick(self.record.parent)
+        ran = []
+
+        def step(name, *argv):
+            ran.append(name)
+            if sleep:
+                import time
+                time.sleep(sleep)
+            return (outcomes or {}).get(name, "ran")
+        tick.step = step
+        rotation = self.tick.Rotation(tick, self.record)
+        for name in ("scan-fs", "leaks", "lifecycle"):
+            rotation.step(name, "x.py")
+        rotation.run_in_turn()
+        return ran, json.loads(self.record.read_text(encoding="utf-8"))
+
+    def test_the_start_is_stamped_before_the_step(self):
+        _, doc = self.run_tick(sleep=0.05)
+        self.assertEqual(doc["schema"], 2)
+        for name, row in doc["collectors"].items():
+            self.assertLess(row["started_at"], row["finished_at"], (name, row))
+            self.assertGreaterEqual(row["finished_at"] - row["started_at"], 0.04, (name, row))
+            self.assertEqual(row["outcome"], "ran")
+            self.assertEqual(row["last_ran_at"], row["started_at"])
+            self.assertEqual(row["not_started_streak"], 0)
+
+    def test_every_outcome_is_kept_and_a_streak_counts_ticks_not_started(self):
+        self.run_tick()
+        _, doc = self.run_tick(outcomes={"leaks": "not_started", "lifecycle": "failed", "scan-fs": "stopped"})
+        rows = doc["collectors"]
+        self.assertEqual({n: r["outcome"] for n, r in rows.items()},
+                         {"leaks": "not_started", "lifecycle": "failed", "scan-fs": "stopped"})
+        ran_at = rows["leaks"]["last_ran_at"]
+        _, doc = self.run_tick(outcomes={"leaks": "not_started"})
+        _, doc = self.run_tick(outcomes={"leaks": "not_started"})
+        leaks = doc["collectors"]["leaks"]
+        self.assertEqual(leaks["not_started_streak"], 3)
+        self.assertEqual(leaks["last_ran_at"], ran_at, "a tick that did not start it does not move its last run")
+        self.assertTrue(any("leaks not started for 2 ticks" in l for l in self.said), self.said)
+        self.assertIsNotNone(doc["collectors"]["lifecycle"]["last_ran_at"])
+        _, doc = self.run_tick()
+        self.assertEqual(doc["collectors"]["leaks"]["not_started_streak"], 0)
+        self.assertGreater(doc["collectors"]["leaks"]["last_ran_at"], ran_at)
+
+    def test_a_failed_or_stopped_step_moves_back_but_has_not_run(self):
+        _, doc = self.run_tick(outcomes={"scan-fs": "failed", "leaks": "stopped"})
+        rows = doc["collectors"]
+        self.assertIsNone(rows["scan-fs"]["last_ran_at"])
+        self.assertIsNone(rows["leaks"]["last_ran_at"])
+        self.assertIsNotNone(rows["scan-fs"]["started_at"])
+
+    def test_a_collector_never_started_keeps_a_null_start(self):
+        """Verification round 1: a collector the watchdog never started was given `started_at: 0.0`,
+        which reads as a start in 1970. It keeps null and its streak; only the ordering treats null as
+        oldest, and the log says "never started"."""
+        self.run_tick(outcomes={"leaks": "not_started"})
+        _, doc = self.run_tick(outcomes={"leaks": "not_started"})
+        leaks = doc["collectors"]["leaks"]
+        self.assertIsNone(leaks["started_at"])
+        self.assertEqual(leaks["not_started_streak"], 2)
+        self.assertIsNone(leaks["last_ran_at"])
+        self.assertTrue(any("leaks (never started)" in l for l in self.said), self.said)
+
+    def test_the_start_is_kept_before_the_step_runs(self):
+        """A tick killed inside a step must still move that step back: a provisional row (its start,
+        no outcome yet) is saved before the step is called."""
+        seen = {}
+        tick = self.tick.Tick(self.record.parent)
+
+        def step(name, *argv):
+            seen[name] = json.loads(self.record.read_text(encoding="utf-8"))["collectors"][name]
+            return "ran"
+        tick.step = step
+        rotation = self.tick.Rotation(tick, self.record)
+        rotation.step("leaks", "x.py")
+        rotation.run_in_turn()
+        self.assertIsNotNone(seen["leaks"]["started_at"])
+        self.assertIsNone(seen["leaks"]["outcome"])
+
+    def test_a_bad_row_is_skipped_not_the_whole_record(self):
+        self.record.write_text(json.dumps({"schema": 2, "collectors": {
+            "scan-fs": "not a row", "leaks": {"started_at": "yesterday", "not_started_streak": "x"},
+            "lifecycle": {"started_at": 50.0, "outcome": "ran", "not_started_streak": 0, "last_ran_at": 50.0}}}),
+            encoding="utf-8")
+        ran, doc = self.run_tick(outcomes={"leaks": "not_started", "lifecycle": "not_started"})
+        self.assertEqual(ran[0], "scan-fs", ran)
+        self.assertEqual(doc["collectors"]["leaks"]["not_started_streak"], 1, "a bad streak is coerced to 0")
+        self.assertIsNone(doc["collectors"]["leaks"]["started_at"])
+        # The good row was READ: not started this tick, it keeps exactly what the record held.
+        self.assertEqual(doc["collectors"]["lifecycle"]["started_at"], 50.0)
+        self.assertEqual(doc["collectors"]["lifecycle"]["last_ran_at"], 50.0)
+        self.assertTrue(any("scan-fs" in l and "skipped" in l for l in self.said), self.said)
+
+    def test_non_finite_numbers_are_not_times(self):
+        self.record.write_text('{"schema": 2, "collectors": {"leaks": {"started_at": Infinity, '
+                               '"not_started_streak": Infinity, "last_ran_at": NaN}}}', encoding="utf-8")
+        ran, doc = self.run_tick(outcomes={"leaks": "not_started"})
+        self.assertEqual(ran, ["scan-fs", "leaks", "lifecycle"], "the tick completes")
+        leaks = doc["collectors"]["leaks"]
+        self.assertIsNone(leaks["started_at"])
+        self.assertIsNone(leaks["last_ran_at"])
+        self.assertEqual(leaks["not_started_streak"], 1)
+
+    def test_an_unreadable_shape_that_is_not_a_newer_schema_is_rewritten(self):
+        """Confirming read of round 2: every unknown shape was pinned as a newer engine's record, so
+        `{}` or a string schema ran the planned order on every tick for ever. Only an int schema past
+        this engine's is kept; anything else is logged and the first save writes schema 2."""
+        for body in ({}, {"schema": "2", "collectors": {}}):
+            self.record.write_text(json.dumps(body), encoding="utf-8")
+            _, doc = self.run_tick()
+            self.assertEqual(doc["schema"], 2, body)
+            self.assertEqual(set(doc["collectors"]), {"scan-fs", "leaks", "lifecycle"}, body)
+
+    def test_a_schema_it_does_not_know_is_left_untouched(self):
+        """A newer engine's record survives a tick of this one byte for byte: a downgrade must not
+        erase it. The tick runs the planned order and says why."""
+        body = json.dumps({"schema": 3, "collectors": {"leaks": {"whatever": 1}}}) + "\n"
+        self.record.write_text(body, encoding="utf-8")
+        tick = self.tick.Tick(self.record.parent)
+        ran = []
+        tick.step = lambda name, *argv: ran.append(name) or "ran"
+        rotation = self.tick.Rotation(tick, self.record)
+        for name in ("scan-fs", "leaks", "lifecycle"):
+            rotation.step(name, "x.py")
+        rotation.run_in_turn()
+        self.assertEqual(ran, ["scan-fs", "leaks", "lifecycle"])
+        self.assertEqual(self.record.read_text(encoding="utf-8"), body)
+        self.assertTrue(any("unreadable" in l and "schema 3" in l for l in self.said), self.said)
+        self.assertTrue(any("not rewritten" in l for l in self.said), self.said)
+
+    def test_a_schema_1_record_is_read_and_rewritten_as_schema_2(self):
+        self.record.write_text(json.dumps({"started": {"scan-fs": 300.0, "leaks": 100.0, "lifecycle": 200.0}}),
+                               encoding="utf-8")
+        ran, doc = self.run_tick(outcomes={"lifecycle": "not_started"})
+        self.assertEqual(ran, ["leaks", "lifecycle", "scan-fs"], "the old start times still decide the order")
+        self.assertEqual(doc["schema"], 2)
+        self.assertNotIn("started", doc)
+        self.assertEqual(doc["collectors"]["lifecycle"]["started_at"], 200.0,
+                         "a step not started keeps its old start, so it goes first next tick")
+        self.assertEqual(doc["collectors"]["lifecycle"]["not_started_streak"], 1)
+        self.assertEqual(doc["collectors"]["lifecycle"]["last_ran_at"], 200.0,
+                         "the schema-1 time seeds the last run, so an upgrade does not read as starvation")
+
+
+class TailBail(unittest.TestCase):
+    """Verification round 2: merge, emit and validate bailed with a literal exit 1, so a merge the
+    watchdog stopped or never started read as `failed`/1. Their own exit and first line now decide."""
+
+    def bail_row(self, name, rc, out):
+        tick = load_tick()
+        import paths
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            t = tick.Tick(base)
+            t.step = lambda *a, **k: "ran"
+            t.bounded = lambda step, *argv: (rc, out) if step == name else (0 if step != "backup-due" else 1, "")
+            with mock.patch.object(paths, "STATE", base), self.assertRaises(SystemExit):
+                tick.steps(t, base, base / "page.html")
+            return json.loads((base / "tick.json").read_text(encoding="utf-8"))["failed_steps"]
+
+    def test_a_merge_past_its_limit_is_stopped(self):
+        self.assertEqual(self.bail_row("merge", 124, "half a merge\n"),
+                         [{"step": "merge", "exit": 124, "outcome": "stopped"}])
+
+    def test_a_merge_not_started_says_so(self):
+        self.assertEqual(self.bail_row("merge", 124, "not started — the tick's ceiling has been reached\n"),
+                         [{"step": "merge", "exit": 124, "outcome": "not_started"}])
+
+    def test_emit_and_validate_keep_their_exit(self):
+        self.assertEqual(self.bail_row("emit", 3, "REFUSED\n"), [{"step": "emit", "exit": 3, "outcome": "failed"}])
+        self.assertEqual(self.bail_row("validate", 137, ""),
+                         [{"step": "validate", "exit": 137, "outcome": "stopped"}])
 
 
 class TailOrder(unittest.TestCase):
