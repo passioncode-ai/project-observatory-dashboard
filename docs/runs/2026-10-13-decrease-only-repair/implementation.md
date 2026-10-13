@@ -2,7 +2,8 @@
 
 # Explicit decrease-only repair: source candidate
 
-Status: implementation candidate; independent source review pending. This follows
+Status: source candidate accepted for its bounded synthetic contract; full system
+acceptance remains NOT_MET. See the independent review below. This follows
 [the reviewed contract](README.md) and preserves the original full-model failures.
 No provider, credential, installed-runtime or live consumer operation was run.
 Source inventory and diff checks pass; brand lint exits zero with 2,404 warnings,
@@ -138,3 +139,21 @@ well, returning unknown exposure rather than a served slot. The counterexample
 was observed red and is retained. [Current focused receipt](held-alias-focused.json):
 28 repair tests and 115 prior safety assertions pass. Original receipt snapshots
 remain unchanged; independent rereview of this final correction is pending.
+
+
+## Accepted source handoff
+
+Independent review accepted exact runtime/test head
+`b4fbc94cbefbfb16632ee8b30073a05f6328d6a9` for this bounded source contract.
+[Public review summary](independent-review.json) binds the source and closes four
+findings. It distinguishes 18 controls at the preceding correction from seven
+additional controls on the final four-line delta and publication seams. The
+latest developer receipt remains 28 repair tests plus 115 prior assertions.
+
+The runtime is ready for a separate source-to-parser-to-model guidance unit, not
+for a full-system acceptance claim. Guidance remains NOT_WIRED, current-main
+composition and portable runner composition remain untested, and original failed
+matrices are retained. No provider, release, installed or live consumer acceptance
+is implied. The exact next task is the reviewed guidance seam: emit the existing
+flagged command, preserve its target exactly, dispatch through the actual parser,
+and keep all original model invariants and failure outcomes.

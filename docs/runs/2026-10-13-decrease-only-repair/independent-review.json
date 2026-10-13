@@ -1,0 +1,36 @@
+{
+  "as_of": "2026-10-13T08:54:01.579269+00:00",
+  "head": "b4fbc94cbefbfb16632ee8b30073a05f6328d6a9",
+  "verdict": "PASS_SCOPED_SOURCE_AND_SYNTHETIC",
+  "whole_goal": "PARTIAL_NOT_COMPLETE",
+  "full_original_model": "NOT_MET; original153 full2147PASS3053FAIL0ERROR retained; new runtime not remeasured",
+  "source_sha256": {
+    "observatory/engine/tools/openrouter.py": "892740d16cc4e9ad4e51382f03cafd5dc81f7247a5127e7e8aee876f5981b7ae",
+    "observatory/engine/tests/test_decrease_repair.py": "1af91391b1c00020de8295384dcc8ddeaa6ea878b21ebae3c05d94a647e98e50",
+    "observatory/engine/tests/adv_j1_property.py": "374eee9807585e7599771c23866026746c924f9f8c586abb4025bc5a068c1a6b"
+  },
+  "scope": "Explicit caller-requested decrease-only operation, durable unresolved state, separate refresh observation, publication and actual discovered identity guards",
+  "closed_findings": [
+    "DECREASE-01 hashless legacy alias mutation",
+    "DECREASE-02 equal target context drift",
+    "DECREASE-03 contradictory same-operation proof",
+    "DECREASE-04 protected discovered identity in read_held"
+  ],
+  "independent_checks": {
+    "eec7_unchanged_paths": 18,
+    "b4_exact_additional": 7,
+    "total": 25,
+    "failed": 0,
+    "note": "18 controls were run at eec; final production delta is four-line read_held post-discovery guard. Seven final-head controls cover that delta and publication/supersession boundaries."
+  },
+  "limitations": [
+    "No production provider or credential activity",
+    "No external writer transaction/CAS guarantee",
+    "No freshness from ledger-only status; observation time remains explicit",
+    "Subsequent current read cannot confirm historical unknown effect",
+    "General manual set remains its old explicit semantics subject to repair guard",
+    "Automatic policy guidance remains NOT_WIRED",
+    "No broad/current-main/integration/full5200/installed acceptance"
+  ],
+  "detailed_receipts": "Retained in the private owning recovery report; this public summary is source-bound."
+}

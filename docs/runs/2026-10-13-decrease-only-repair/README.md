@@ -1,7 +1,8 @@
 # J3 bounded decrease-only repair contract
 
 Status: scoped design review passed. The [implementation candidate](implementation.md)
-now has synthetic checks; independent implementation review remains pending.
+has passed independent scoped source/synthetic review. Full-system acceptance
+remains open; see its current handoff.
 No provider operation or new automatic remedy. Source baseline `153a1605fbbaf2caf1674a3f70cf2da3557934f3`;
 production SHA256 `602d50bd7f594c74585c10eff3388bd68a16d90a0d5e26cb85c4c50e826e31ba`.
 Prerequisite evidence: [actual CLI semantics](manual-semantics.json)

@@ -142,7 +142,7 @@ an authorized context change only with its historical reference and new context
 in the same publication. The general manual limit command keeps its separate
 semantics; external writers are outside the local lock.
 
-Status: source candidate, independent implementation review pending. Synthetic
-coverage: `observatory/engine/tests/test_decrease_repair.py`; implementation
+Status: scoped source and synthetic review passed; product outcome unobserved.
+Synthetic coverage: `observatory/engine/tests/test_decrease_repair.py`; implementation
 receipt: `docs/runs/2026-10-13-decrease-only-repair/implementation-focused.json`.
 No installed/provider acceptance; original adversarial convergence remains failed.
