@@ -828,8 +828,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "c47fa64b451ec88bc1a1a7aee95d3620bfcd5e2f05cb7a53d0a6bfb1bfaf6874",
-      "bytes": 14213,
+      "export_sha256": "6a8e2db0ebb33583e7bc1cf3578daeeb083d4fc00bf286de3bbec3785f88803c",
+      "bytes": 14827,
       "upstream_modified": true
     },
     {
@@ -849,15 +849,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "9c28e9baf1634737169ff899748c96b795cc79e15b9bbe9da524c7cab9586dad",
-      "bytes": 103585,
+      "export_sha256": "21e1263bf172feb11fca7f92734eba117edacc4ac8c1130de53e41ccfece92c8",
+      "bytes": 104199,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "3d56c69547ffe5d52510d3fceb8323f19f4a07d4346c39c820c1bf1c3949970c",
-      "bytes": 80432,
+      "export_sha256": "51f1a05c8da1be3cfcf491dd822c527aa63d1ec2638c6deeb120184357886153",
+      "bytes": 80936,
       "upstream_modified": true
     },
     {
@@ -2775,8 +2775,8 @@
       "path": "tests/test_git_hardening.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c667cce974aeada27d2c6564e036573c4a8de1f149f87e00dd2b3c37e4d8edd1",
-      "bytes": 50072
+      "export_sha256": "4a8ffa81fbba94da7bb20fdcec7464ec06e9e2c2fb9d232c2c27075ff9891f50",
+      "bytes": 52376
     },
     {
       "path": "tests/test_git_locale.py",
@@ -4245,8 +4245,8 @@
       "path": "tools/cleanup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "13770d956ad2eed7eb3adc3d5ef11861eb3565e35727a3b7c9975d48ebe9c597",
-      "bytes": 45860
+      "export_sha256": "2c2aaa2ecbf466686192cf1a57f2a66ae882067a3807078921a23f7dd5aa5baf",
+      "bytes": 46809
     },
     {
       "path": "tools/cloudflare.py",

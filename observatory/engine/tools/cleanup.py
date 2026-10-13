@@ -640,8 +640,20 @@ def act(a: dict, archive: pathlib.Path) -> dict:
     if cls == "worktree-missing":
         if os.path.exists(target):
             return {**rec, "result": "skipped", "reason": "the directory exists again"}
-        git(repo, "worktree", "prune")
-        return {**rec, "result": "pruned"}
+        # Git prunes eligible administrative records across this repository. Its
+        # exit status proves command completion, never a target-only change count.
+        detail = {"scope": "repository-missing-registrations", "registration_changes": None}
+        try:
+            done = git(repo, "worktree", "prune")
+        except (OSError, subprocess.SubprocessError):
+            return {**rec, **detail, "result": "failed", "effect": "unknown",
+                    "reason_code": "registration-prune-incomplete",
+                    "reason": "registration pruning did not complete; inspect current registrations before retrying"}
+        if done.returncode:
+            return {**rec, **detail, "result": "failed", "exit_code": done.returncode,
+                    "effect": "unknown", "reason_code": "registration-prune-failed",
+                    "reason": "Git reported a registration pruning failure; inspect current registrations before retrying"}
+        return {**rec, **detail, "result": "pruned", "exit_code": 0}
     if cls in ("worktree-clean", "worktree-dirty"):
         if busy_now(target):
             return {**rec, "result": "skipped", "reason": "a process works inside it now"}

@@ -999,5 +999,49 @@ class NoBareGit(unittest.TestCase):
         self.assertTrue(self._is_git(call.args[0]))
 
 
+class MissingRegistrationReceipt(unittest.TestCase):
+    def invoke(self, response=None, error=None, exists=False):
+        import cleanup
+        with patch.object(cleanup.os.path, "exists", return_value=exists), patch.object(
+                cleanup, "git", return_value=response, side_effect=error) as command:
+            row = cleanup.act({"class": "worktree-missing", "tier": "auto",
+                               "repo": "alpha-web", "target": "alpha-worktree"}, pathlib.Path("unused"))
+        return row, command
+
+    def test_failed_git_never_reports_pruned_or_leaks_stderr(self):
+        row, command = self.invoke(subprocess.CompletedProcess([], 128, "private output", "private error"))
+        self.assertEqual(row["result"], "failed")
+        self.assertEqual(row["exit_code"], 128)
+        self.assertEqual(row["scope"], "repository-missing-registrations")
+        self.assertIsNone(row["registration_changes"])
+        self.assertNotIn("private", str(row))
+        command.assert_called_once_with("alpha-web", "worktree", "prune")
+
+    def test_success_reports_command_scope_without_inventing_change_count(self):
+        row, _ = self.invoke(subprocess.CompletedProcess([], 0, "", ""))
+        self.assertEqual(row["result"], "pruned")
+        self.assertEqual(row["scope"], "repository-missing-registrations")
+        self.assertEqual(row["exit_code"], 0)
+        self.assertIsNone(row["registration_changes"])
+
+    def test_timeout_has_uncertain_effect_and_no_raw_exception(self):
+        row, _ = self.invoke(error=subprocess.TimeoutExpired("private command", 1, output="private output"))
+        self.assertEqual(row["result"], "failed")
+        self.assertEqual(row["effect"], "unknown")
+        self.assertEqual(row["reason_code"], "registration-prune-incomplete")
+        self.assertNotIn("private", str(row))
+
+    def test_launch_error_is_reported_without_exception_body(self):
+        row, _ = self.invoke(error=OSError("private path"))
+        self.assertEqual(row["result"], "failed")
+        self.assertEqual(row["effect"], "unknown")
+        self.assertNotIn("private", str(row))
+
+    def test_reappeared_directory_prevents_prune(self):
+        row, command = self.invoke(exists=True)
+        self.assertEqual(row["result"], "skipped")
+        command.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

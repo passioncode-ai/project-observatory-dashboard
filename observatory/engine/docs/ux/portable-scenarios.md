@@ -275,3 +275,12 @@ Evidence: `tests/test_disk_guard.py::HoldersCompleteness`,
 `WorktreeFinalHolders`, and `FreshTargetProbe` (synthetic listings plus disposable
 Git worktrees). `tests/test_git_hardening.py` injects both preliminary and final
 holder outcomes so its Git tests do not inspect the host process table.
+
+### Missing registration cleanup result
+
+When a worktree path is absent, the person and agent see the repository-wide
+registration-prune scope. Git failure or interruption produces a failed row with
+unknown effects, never `pruned`. Successful command completion does not invent a
+registration count. A path that reappears is skipped. Inspect current registrations
+before retrying; raw command output is absent from reasons.
+Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` (five cases).

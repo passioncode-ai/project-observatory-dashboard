@@ -171,3 +171,13 @@ Unmarked legacy and standalone rotation retain their previous behavior and can l
 overlapping capacity after a failure. Their project-wide capacity remains unverified.
 Explicit legacy re-attestation and a bound headroom/reconciliation protocol remain
 open; no existing operational rows are migrated by installation.
+
+### Missing worktree registration receipts
+
+For a missing worktree, cleanup invokes Git's repository-wide registration prune.
+A `pruned` journal row means that command exited zero; `registration_changes` stays
+null because the row does not measure how many registrations changed. A nonzero
+exit, timeout or launch error is `failed`; its effect remains unknown and it is not
+counted as a successful prune. Reasons omit Git output and exception bodies.
+Inspect `git worktree list --porcelain` in the owning repository before retrying.
+Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` in the engine.
