@@ -96,6 +96,18 @@ review exposure and revoke or rotate through its owner before treating it as saf
 
 ### Scheduled measurement freshness
 
+For a stopped tick, inspect `store/raw/tick-run.json` `stage_progress` and the
+same field in `tick-runs.jsonl`. The run ID must match the producer's current
+`tick.json` `progress`; the supervisor already rejects stale or malformed input.
+Coverage is `observed`, `partial` or `unknown`, not a declaration that every
+planned stage ran. Stages include captured-output tail commands. A start without
+an end stays `unknown` with null exit/duration; never infer a stage timeout from
+a whole-tick timeout. `not_started` needs the watchdog's explicit refusal.
+Durations include watchdog overhead. While a run is active, top-level
+`tick.json` `finished_at` still belongs to the last completed report. New stage
+metadata excludes command/output/exception text, and its write failure does not
+replace the command's exit. See `tests/test_tick_progress.py` for fault controls.
+
 Tick receipts distinguish `disabled`, `not_started`, `stopped`, `failed` and
 `ran`. Disabled steps preserve the last successful measurement time; they do not
 raise starvation. A collector absent from the last tick's `collector_order` is
