@@ -1,0 +1,25 @@
+{
+  "base": "1b91f2897bd2bf034ddf4f9b2c1ee78aa77199ff",
+  "workflow_sha256": "cf16679d3feb820b6a1d3e61e5aff7ff40869ddd86850443218ce78857c66579",
+  "checks": {
+    "all_original_jobs_steps_settings_retained_except_declared_changes": true,
+    "schedule_and_explicit_only": true,
+    "wall_clock": true,
+    "ref_scoped_concurrency": true,
+    "bounded_jobs": true,
+    "release_workflow_unchanged": true
+  },
+  "original_steps": {
+    "test": 21,
+    "windows": 17
+  },
+  "actionlint": "1.7.12 exit0",
+  "hosted": "NOT_RUN",
+  "timezone_alias": "Poland",
+  "alias_equivalence": {
+    "utc_hours": 140256,
+    "start": "2020-01-01",
+    "end_exclusive": "2036-01-01",
+    "all_equal": true
+  }
+}
