@@ -834,6 +834,27 @@ class Pass(Base):
         self.assertTrue(stale["stale"])
         self.assertEqual(stale["checked_at"], observed["checked_at"])
 
+    def test_lost_scope_receipt_does_not_claim_zero_effects(self):
+        import log_policy
+        logs = self.home / "store" / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        log = logs / "gate.log"
+        log.write_bytes(b"x" * 100)
+        real = log_policy.sweep_report
+        def lose_receipt(directory, **kwargs):
+            result = real(directory, max_bytes=10)
+            if Path(directory) == logs:
+                raise RuntimeError("PRIVATE_AFTER_EFFECT")
+            return result
+        with patch.object(log_policy, "sweep_report", side_effect=lose_receipt):
+            receipt = M._rotate_logs(self.home, at=AT)
+        self.assertTrue((logs / "gate.log.1").exists())
+        self.assertIsNone(receipt["scopes"]["engine"]["rotated"])
+        self.assertEqual(receipt["scopes"]["engine"]["status"], "unknown")
+        self.assertNotIn("PRIVATE_AFTER_EFFECT", json.dumps(receipt))
+        projected = M.log_retention_status(receipt, at=AT)
+        self.assertIsNone(projected["scopes"]["engine"]["rotated"])
+
     def test_log_retention_reader_sanitizes_malformed_receipt(self):
         state = M.read_state(self.home)
         state["log_retention"] = {"checked_at": "PRIVATE_LOG_PATH", "scopes": {
