@@ -85,7 +85,17 @@ def _collect(out, *, seconds=3, max_rows=128):
     def read(path, source, *, missing_ok=False):
         attempted = now()
         try:
-            with path.open('rb') as stream: text = stream.read(1_048_577)
+            # Refuse special files before opening; NONBLOCK also closes the FIFO
+            # replacement race. An opened descriptor must still match the lstat.
+            if any(p.is_symlink() for p in (path, *path.parents)): raise ValueError
+            before = path.lstat()
+            if not stat.S_ISREG(before.st_mode): raise ValueError
+            fd = osprivacy.open(path, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
+            try:
+                opened = os.fstat(fd)
+                if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino): raise ValueError
+                with os.fdopen(fd, 'rb', closefd=False) as stream: text = stream.read(1_048_577)
+            finally: os.close(fd)
             if len(text) > 1_048_576: raise ValueError
             doc = json.loads(text)
             if not isinstance(doc, dict): raise ValueError
@@ -112,17 +122,35 @@ def _collect(out, *, seconds=3, max_rows=128):
         if not isinstance(found, list): error(source, 'invalid-collection'); return []
         if len(found) > 128: error(source, 'row-limit')
         return found[:128]
-    old_locations = {r['id']: r for r in rows(previous, 'locations', 'previous-cache-coverage') if isinstance(r, dict) and isinstance(r.get('id'), str)}
-    old_commands = {r['id']: r for r in rows(previous, 'commands', 'previous-cache-coverage') if isinstance(r, dict) and isinstance(r.get('id'), str)}
+    def prior_rows(key):
+        valid = {}
+        for row in rows(previous, key, 'previous-cache-coverage'):
+            good = isinstance(row, dict) and isinstance(row.get('id'), str)
+            if good and key == 'locations':
+                declared = row.get('declaration_sources')
+                good = (isinstance(declared, list) and bool(declared)
+                        and all(v in ('machine.locations', 'cleanup.guard.cache_roots') for v in declared)
+                        and isinstance(row.get('path'), str) and bool(row['path'])
+                        and isinstance(row.get('category'), str) and row['category'] in KINDS)
+            if good and key == 'commands':
+                good = row.get('tool') is None or bool(tool_name(row.get('tool')))
+            if not good:
+                error('previous-cache-coverage', 'invalid-' + key + '-row'); continue
+            valid[row['id']] = row
+        return valid
+    old_locations = prior_rows('locations')
+    old_commands = prior_rows('commands')
     if survey and not isinstance(survey.get('disk'), dict): error('machine.json', 'invalid-disk-shape')
     disk = survey.get('disk') if isinstance(survey.get('disk'), dict) else {}
     sizes = {r['path']: r for r in rows(disk, 'locations', 'machine.json') if isinstance(r, dict) and isinstance(r.get('path'), str)}
     guard = cleanup.get('guard') if isinstance(cleanup.get('guard'), dict) else {}
-    if cleanup and not isinstance(cleanup.get('guard'), dict): error('cleanup-config', 'invalid-guard-shape')
+    if not isinstance(cleanup.get('guard'), dict): error('cleanup-config', 'invalid-guard-shape')
     machine_valid = isinstance(machine.get('locations'), list)
     roots_valid = isinstance(guard.get('cache_roots'), list)
     commands_valid = isinstance(guard.get('commands'), list)
-    if machine and not machine_valid: error('machine-config', 'invalid-locations')
+    if not machine_valid: error('machine-config', 'invalid-locations')
+    if not roots_valid: error('cleanup-config', 'invalid-cache-roots')
+    if not commands_valid: error('cleanup-config', 'invalid-commands')
     definitions = rows(machine, 'locations', 'machine-config')
     for path in rows(guard, 'cache_roots', 'cleanup-config'):
         definitions.append({'path': path, 'kind': 'cache', 'declaration': 'cleanup.guard.cache_roots'})
@@ -131,7 +159,9 @@ def _collect(out, *, seconds=3, max_rows=128):
     for item in definitions[:128]:
         if not isinstance(item, dict) or not isinstance(item.get('path'), str) or not item['path'] or len(item['path']) > 4096 or '\0' in item['path']:
             error('machine-config', 'invalid-location'); continue
-        if item.get('kind') not in KINDS: continue
+        if not isinstance(item.get('kind'), str):
+            error('machine-config', 'invalid-category'); continue
+        if item['kind'] not in KINDS: continue
         raw = item['path']; key = 'location:' + hashlib.sha256(raw.encode()).hexdigest()[:24]
         if key in locations:
             locations[key]['declaration_sources'].append(item.get('declaration', 'machine.locations'))

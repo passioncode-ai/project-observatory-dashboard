@@ -111,6 +111,51 @@ class CacheCoverage(Base):
         self.assertTrue(result['commands'][0]['stale'])
         self.assertTrue(result['degraded'])
 
+    def test_fifo_source_is_refused_without_blocking(self):
+        import os, subprocess, sys
+        import cache_coverage as coverage
+        if not hasattr(os, 'mkfifo'): self.skipTest('POSIX FIFO')
+        self.setup_sources([])
+        source = self.home / 'config/machine.json'
+        source.unlink(); os.mkfifo(source)
+        script = "import cache_coverage,json; print(json.dumps(cache_coverage.collect(seconds=.01)))"
+        result = subprocess.run([sys.executable, '-B', '-c', script], cwd=coverage.ROOT,
+                                capture_output=True, text=True, timeout=2)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        doc = json.loads(result.stdout)
+        self.assertFalse(doc['measurement_complete'])
+        self.assertTrue(any(r['source'] == 'config/machine.json' for r in doc['degraded']))
+
+    def test_missing_schema_differs_from_explicit_empty_declarations(self):
+        import cache_coverage as coverage
+        self.setup_sources([])
+        self.assertTrue(coverage.collect()['measurement_complete'])
+        for name in ('machine.json', 'cleanup.json'):
+            (self.home / 'config' / name).write_text('{}')
+        result = coverage.collect()
+        self.assertFalse(result['measurement_complete'])
+        self.assertTrue(result['degraded'])
+        self.setup_sources([])
+        (self.home / 'config/cleanup.json').write_text('{"guard": {}}')
+        self.assertFalse(coverage.collect()['measurement_complete'])
+
+    def test_symlink_and_malformed_prior_rows_preserve_valid_peers(self):
+        import cache_coverage as coverage
+        root = self.data / 'cache'; root.mkdir()
+        self.setup_sources([{'path': str(root), 'kind': 'cache'}])
+        original = coverage.collect()
+        original['locations'].append({'id': 'location:bad', 'declaration_sources': None})
+        (self.home / 'store/raw/cache-coverage.json').write_text(json.dumps(original))
+        source = self.home / 'config/machine.json'; source.unlink()
+        target = self.data / 'foreign.json'; target.write_text('{"locations": []}')
+        source.symlink_to(target)
+        with patch.object(coverage, 'presence', side_effect=AssertionError('lost policy')):
+            result = coverage.collect()
+        self.assertEqual(len(result['locations']), 1)
+        self.assertFalse(result['locations'][0]['declaration_current'])
+        self.assertFalse(result['measurement_complete'])
+        self.assertTrue(any(r['source'] == 'previous-cache-coverage' for r in result['degraded']))
+
     def test_cli_and_uncovered_system_areas_remain_read_only(self):
         import cache_coverage as coverage, workspace
         self.setup_sources([])

@@ -2,6 +2,14 @@
 
 <sub>ssheleg skills — task-pipeline · evidence-docs · copywriting · skill-search</sub>
 
+## State now
+
+Source `a68c81c` passed independent review after three reproduced corrections:
+nonregular configuration source blocking, empty schema reported complete, and
+malformed prior-row metadata crashing recovery. Eleven focused tests pass. The
+original packet and earlier eight-case result remain below as development history.
+Combined, hosted and installed acceptance are separate; OBS-87 remains partial.
+
 ## Packet and source map
 
 `defaults/machine.json` declares aggregate application/tool caches, package stores,
@@ -77,3 +85,19 @@ name checks and installed acceptance were not run as part of this candidate.
 - [`evidence-docs`](https://github.com/ssheleg/task-pipeline): source map and limits.
 - [`copywriting`](https://github.com/ssheleg/super-ux): CLI coverage wording.
 - [`skill-search`](https://github.com/ssheleg/make-skill): bounded route selection.
+
+## Independent-review corrections
+
+Source files are refused when they are symbolic links, have a symlink ancestor, or
+are not regular files. Nonblocking no-follow opens and descriptor identity checks
+prevent a replaced FIFO from blocking at open. Reads remain capped at 1 MiB; kernel
+filesystem stalls are outside the application deadline guarantee. A missing
+configuration alone permits defaults; unreadable or invalid existing configuration
+is degraded and never silently replaced by defaults.
+
+Missing required declaration collections now differ from explicit empty lists.
+Malformed old location metadata is skipped with a reason while valid peers remain
+carried and stale when their declaration source fails. The three tests first failed
+against the initial candidate: FIFO timeout, false completeness for empty objects,
+and lost prior peers through a symlinked policy. Eleven focused synthetic cases pass
+after correction (`test_cache_coverage.py`), jobs 1. No live inventory was run.

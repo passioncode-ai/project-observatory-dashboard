@@ -80,8 +80,8 @@
       "path": "cache_coverage.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "43dba72895b4960333838492797a3aefdc4b385b5ec8a5ee1ea267af74da770e",
-      "bytes": 13969
+      "export_sha256": "4913fc462356421d4df1694cb61956ada2e811d88693ce561db21aeeb793e1ec",
+      "bytes": 15607
     },
     {
       "path": "checkout_inventory.py",
@@ -2316,8 +2316,8 @@
       "path": "tests/test_cache_coverage.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1db7a6506df8dcd90336f9198af1f624930079f07a1b5a5d7942f471145117d2",
-      "bytes": 7302
+      "export_sha256": "3d9be9248d01e5bc99412c2d96943bcc44db2ad5d12775f3b4ccf93a966b8cc1",
+      "bytes": 9833
     },
     {
       "path": "tests/test_caller_identity.py",

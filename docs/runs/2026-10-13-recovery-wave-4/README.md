@@ -34,11 +34,13 @@ source inventory is generated after the new files are tracked.
 
 ## Cache coverage candidate
 
-[Cache lifecycle coverage](../2026-10-13-cache-coverage/README.md), `116659b`, adds
+[Cache lifecycle coverage](../2026-10-13-cache-coverage/README.md), `a68c81c`, adds
 only metadata inspection and saved size provenance. Configured roots and available
 executables are declarations, not proof of ownership, regeneration or reclaimable
 bytes. OS-managed/protected categories stay explicitly uncovered. No cache command
-is run and this inventory cannot authorize cleanup. Independent review is pending.
+is run and this inventory cannot authorize cleanup. Independent source review passed after correcting FIFO source blocking, empty
+configuration coverage and malformed prior-row recovery. Eleven focused cases
+pass, including the three reproduced failures.
 
 ## Verification
 
@@ -52,11 +54,15 @@ maintainer evidence; they are not silently replaced by later green results.
 
 ## Remaining work and exact next task
 
-Finish the cache coverage adapter's independent review, then run combined checks
-and publish a protected PR. Release preparation carries version changes separately
+Complete exact combined independent acceptance and publish a protected PR. Release preparation carries version changes separately
 until this exact source is accepted. After integration verify signed release assets,
 installed code and scheduled receipts before considering automatic cleanup.
 
 OBS-58 still needs explicit unknown-rotation reconciliation and full adversary
 acceptance. OBS-87 still needs lifecycle/ownership proof and reader integration.
 Provider identity evidence and fresh measurement do not grant deletion authority.
+
+The parent hosted pipeline correction is included: its parser now sees both
+integrity and ordinary collector phases, and declares prior-registry harness
+attribution. The combined cache (11 cases) and pipeline (37 assertions) correction
+run passes. The previous ten-suite result remains valid for unchanged components.
