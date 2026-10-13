@@ -91,6 +91,13 @@ git diff --exit-code                                   # the checks left no trac
 - The runner's receipt marks a suite that exited 0 having run nothing (every check printed
   `SKIP`, or every unittest case skipped, as without `node`) as `SKIP`, names it in `not_run`,
   and never reports a selection in which nothing ran as `PASS`.
+- A successful interpreter exit alone is not a test result. New suites default to
+  the `unittest` protocol and require its complete summary with at least one
+  executed case. Existing line-reporting scripts are explicitly listed in
+  `ASSERTION_LINE_SUITES`; they require executed `PASS`/`FAIL` lines. Silent direct
+  assertions have no exemption. `SUITE_MINIMUMS` may raise a suite's positive
+  minimum. Missing/insufficient evidence is `ERROR`, while the actual exit code
+  stays separate; genuine all-skipped suites remain `SKIP`.
 - After changing any engine file run `python tools/update_inventory.py` and commit the
   inventory with the change.
 - Behaviour changes are test-first: the failing test, then the change, then green.

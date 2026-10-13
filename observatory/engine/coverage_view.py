@@ -15,6 +15,75 @@ SAMPLE_ROWS = 10
 MAX_AGE_SECONDS = 1800
 
 
+def local_state_summary(value, at, current):
+    """Project saved counters only; never promote malformed/stale clean evidence."""
+    keys = ('tracked_records', 'untracked_records', 'ignored_records', 'index_records',
+            'assume_unchanged_records', 'skip_worktree_records')
+    result = {'recorded_state': 'unknown', 'current_state': 'unknown', 'stale': True,
+              'age_seconds': None, 'actionable': False, **dict.fromkeys(keys)}
+    if not isinstance(value, dict): return result
+    state = value.get('state')
+    if state not in ('clean-observed', 'changes-observed', 'unknown', 'not-applicable'):
+        return result
+    counts = {key: value.get(key) for key in keys}
+    valid = all(type(n) is int and 0 <= n <= 10000 for n in counts.values())
+    if valid: result.update(counts)
+    age = stamp_age(value.get('measured_at'), at)
+    fresh = current and age is not None and age <= MAX_AGE_SECONDS
+    result.update(recorded_state=state, age_seconds=age, stale=not fresh)
+    if (fresh and valid and value.get('complete') is True and value.get('degraded') == []
+            and not counts['assume_unchanged_records'] and not counts['skip_worktree_records']
+            and state in ('clean-observed', 'changes-observed')):
+        changed = any(counts[k] for k in keys[:3])
+        if changed == (state == 'changes-observed'):
+            result['current_state'] = state
+    return result
+
+
+def upstream_summary(value, at, candidate=None):
+    """A separately dated graph observation cannot inherit another phase's freshness."""
+    import checkout_graph
+    out = {'state': 'unknown', 'ahead': None, 'behind': None, 'upstream_kind': 'unknown',
+           'age_seconds': None, 'stale': True, 'remote_durability': 'unknown',
+           'scope': checkout_graph.SCOPE, 'actionable': False}
+    if not isinstance(value, dict): return out
+    age = stamp_age(value.get('measured_at'), at)
+    out.update(age_seconds=age, stale=age is None or age > MAX_AGE_SECONDS)
+    binding = value.get('binding')
+    def directory_binding(entry):
+        return (isinstance(entry, list) and len(entry) == 2 and safe_text(entry[0]) is not None
+                and os.path.isabs(entry[0]) and isinstance(entry[1], list) and len(entry[1]) == 4
+                and all(type(n) is int and n >= 0 for n in entry[1]))
+    bound = (isinstance(binding, dict) and isinstance(binding.get('root'), list)
+             and len(binding['root']) == 4 and all(type(n) is int and n >= 0 for n in binding['root'])
+             and all(isinstance(binding.get(k), str) and re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', binding[k])
+                     for k in ('head','upstream_commit'))
+             and binding.get('upstream_kind') == value.get('upstream_kind')
+             and all(directory_binding(binding.get(k)) for k in ('git_directory','common_directory'))
+             and all(isinstance(binding.get(k), str) and re.fullmatch(r'[0-9a-f]{64}', binding[k])
+                     for k in ('config_sha256','branch_sha256','upstream_ref_sha256')))
+    try: expected_source = checkout_graph.source_hash()
+    except OSError: return out
+    attempt_age = stamp_age(value.get('attempted_at'), at)
+    bound = bound and attempt_age is not None and age is not None and attempt_age >= age
+    if candidate is not None:
+        identity = candidate.get('identity')
+        root = binding.get('root') if isinstance(binding, dict) else None
+        bound = (bound and isinstance(identity, list) and len(identity) == 3 and all(type(n) is int and n >= 0 for n in identity) and len(root) == 4
+                 and root[:2] == identity[:2] and root[3] == identity[2]
+                 and binding.get('head') == candidate.get('head')
+                 and binding['git_directory'][0] == candidate.get('git_directory')
+                 and binding['common_directory'][0] == candidate.get('common_directory')
+                 and candidate.get('stale') is False)
+    if (bound and not out['stale'] and value.get('complete') is True and value.get('state') == 'observed'
+            and value.get('degraded') == [] and value.get('source_sha256') == expected_source
+            and value.get('actionable') is False and value.get('scope') == checkout_graph.SCOPE and value.get('remote_durability') == 'unknown'
+            and value.get('upstream_kind') in ('local-branch', 'remote-tracking')
+            and all(type(value.get(k)) is int and 0 <= value[k] <= checkout_graph.MAX_COUNT for k in ('ahead','behind'))):
+        out.update(state='observed', ahead=value['ahead'], behind=value['behind'], upstream_kind=value['upstream_kind'])
+    return out
+
+
 def stamp_age(value, at):
     if not isinstance(value, str): return None
     try:
@@ -99,6 +168,8 @@ def _source(name, kind, collections, at):
                     sample['classification'] = value if value in ('clone', 'linked-worktree', 'bare-repository', 'unknown') else 'unknown'
                     value = row.get('registration_status')
                     sample['recorded_registration'] = value if value in ('listed-current', 'not-listed-in-current-pass', 'unknown', 'not-measured') else 'unknown'
+                    sample['local_state'] = local_state_summary(row.get('local_state'), at, current)
+                    sample['upstream'] = upstream_summary(row.get('upstream'), at, row)
                 out['rows'].append(sample)
     out['snapshot_count'] = count if known_collection else None
     out['rows_omitted'] = count - len(out['rows']) if known_collection else None
@@ -109,12 +180,14 @@ def _source(name, kind, collections, at):
 
 
 def summary():
+    import open_unlinked
     at = datetime.now(timezone.utc)
     return {'read_at': at.isoformat(), 'scope': 'saved-inventory-only', 'actionable': False,
             'limits': {'bytes_per_source': MAX_BYTES, 'rows_per_collection': MAX_ROWS,
                        'sample_rows_per_source': SAMPLE_ROWS, 'max_age_seconds': MAX_AGE_SECONDS},
             'checkouts': _source('checkout-candidates.json', 'checkout-candidates', ('candidates',), at),
-            'caches': _source('cache-coverage.json', 'cache-coverage', ('locations', 'commands'), at)}
+            'caches': _source('cache-coverage.json', 'cache-coverage', ('locations', 'commands'), at),
+            'open_unlinked': open_unlinked.saved_summary(at)}
 
 
 # Shared by the actual MCP tool schema; other machine sections retain their schema.
@@ -137,5 +210,8 @@ OUTPUT_SCHEMA = {
     'type': 'object', 'required': ['read_at', 'scope', 'actionable', 'checkouts', 'caches', 'limits'],
     'properties': {'read_at': {'type': 'string'}, 'scope': {'const': 'saved-inventory-only'},
                    'actionable': {'const': False}, 'checkouts': SOURCE_SCHEMA, 'caches': SOURCE_SCHEMA,
-                   'limits': {'type': 'object'}},
+                   'limits': {'type': 'object'},
+                   'open_unlinked': {'type': 'object', 'required': ['partial', 'actionable', 'reclaimable_bytes'],
+                                     'properties': {'partial': {'const': True}, 'actionable': {'const': False},
+                                                    'reclaimable_bytes': {'type': 'null'}}}},
 }

@@ -119,3 +119,15 @@ out-of-window dates are refused before a provider read. A rotation or identity c
 during the read refuses a potentially misattributed result. Provider bodies, hashes,
 credential values and arbitrary extra fields are withheld. Status: draft; synthetic
 coverage: `test_issued_spend.py`; product outcome unobserved.
+
+Windows cleanup holder uncertainty: an operator or agent requests path cleanup
+with no supported current holder inventory. Planning reports unknown holder
+coverage; execution preserves the target, including when an older plan marked
+it free. Rename success never changes that result. Native shared-delete handles
+are covered by a Windows-only control; other hosts report that control skipped.
+`WindowsHolderUnknown` in engine `tests/test_disk_guard.py` owns this contract.
+
+POSIX cleanup argv coverage: a closed script with spaces, relative arguments or a
+symlink alias can evade rendered process text. The system keeps positive holds but
+refuses to turn absent matches into deletion or cache busy-tool admission. See
+[the full-engine scenario](../../observatory/engine/docs/ux/portable-scenarios.md#posix-cleanup-rendered-argv-does-not-prove-absence).

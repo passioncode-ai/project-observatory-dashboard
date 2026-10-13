@@ -1,0 +1,213 @@
+{
+  "base": "12b7343277004aa408283fb4aef06ccbae935954",
+  "head": "69056ec1611efa6937383ab52e57a06c1a289212",
+  "tree": "ee3e07dce47bc26ece926e2486c81ef20268b6d1",
+  "mapping": [
+    {
+      "original": {
+        "sha": "c9b62c2e5a285d3d1b2e0ed149183a16714fc6b0",
+        "subject": "feat: observe open unlinked files without cleanup authority"
+      },
+      "delivery": "d34f983bf0160541e2b2d4ebb7ad4c29c6a525d3"
+    },
+    {
+      "original": {
+        "sha": "99f8570c7754b606154cbfb5046344a671116ad8",
+        "subject": "fix: keep unknown open file types degraded"
+      },
+      "delivery": "0332c678f1860e78974ded2ed2fa57247580cc4c"
+    },
+    {
+      "original": {
+        "sha": "173933c0942e14454c66c78ffac3161b2efd479f",
+        "subject": "feat: observe bounded local checkout state without cleanup authority"
+      },
+      "delivery": "4ae2e024af11f12af0f58a91dc560d07ed2eb86a"
+    },
+    {
+      "original": {
+        "sha": "3fce5f1e98484d1f78efd8eeaf34324d84eec891",
+        "subject": "fix: bind checkout observations to effective worktree root"
+      },
+      "delivery": "be04c23db64a66a71868687fc3d7bb023f53557d"
+    },
+    {
+      "original": {
+        "sha": "2e2de84fba6177436cc21e6af7e04e6dc0f0cff6",
+        "subject": "docs: refresh checkout correction source inventory"
+      },
+      "delivery": "8ccee5a7888d8b056ad1ab2d1c5965ddbbcf820b"
+    },
+    {
+      "original": {
+        "sha": "e23f5ae1d8aa6bd88656d5a5863d04102ba6e5e7",
+        "subject": "fix: keep checkout Git observations offline"
+      },
+      "delivery": "c5cab5fc987abe65279e7be17929b9fea21e61b2"
+    },
+    {
+      "original": {
+        "sha": "284bc398a482c226ed9776eaee629221939e8928",
+        "subject": "docs: bind offline checkout review and Git versions"
+      },
+      "delivery": "605da3e973f9d535586919a50e8fbfe7601b920e"
+    },
+    {
+      "original": {
+        "sha": "885d1f6445b87120302b4d9500be18bf625e9f12",
+        "subject": "feat: observe bounded local checkout upstream graph"
+      },
+      "delivery": "a026a6b7e8fcd4dd25c64a67fed53f99b071d65b"
+    },
+    {
+      "original": {
+        "sha": "52c40faa2f4e286e2935439b0174d934ae9299d0",
+        "subject": "fix: bound graph phase and reject incomplete source bindings"
+      },
+      "delivery": "6acb1e3c19934f4466b82aadef190fe0038a43ff"
+    },
+    {
+      "original": {
+        "sha": "dd85fa04e94cac505f866d8d4b462d5ae4a37b94",
+        "subject": "docs: record independent checkout graph correction review"
+      },
+      "delivery": "aa48ac1c4ecb3985bb8e15855a5b867fc8a125d7"
+    },
+    {
+      "original": {
+        "sha": "8b86dfa76e255aca9439510867ff9105ebf7821d",
+        "subject": "feat: observe memory pressure independently of swap usage"
+      },
+      "delivery": "226fe425fde66e250c014148d7ce2c3f69e025d0"
+    },
+    {
+      "original": {
+        "sha": "d2626daba8aaa02897651cc4383afef3d712520e",
+        "subject": "feat(maintenance): report bounded log-retention evidence by scope"
+      },
+      "delivery": "d7a623d70d315deea46814d11db66e13b44ea13a"
+    },
+    {
+      "original": {
+        "sha": "f342f30d79e7601e8c77eef52458e6f940f72447",
+        "subject": "fix(maintenance): keep lost retention effects unknown"
+      },
+      "delivery": "827823de01dac64594c909c066d43a5d630ab334"
+    },
+    {
+      "original": {
+        "sha": "d370dab2cad6610f0cc4742d9605e726c82d7bcf",
+        "subject": "Record bounded tick stage progress through supervisor stops"
+      },
+      "delivery": "85a1c95e60242902c8183740636c53ea9babd46c"
+    },
+    {
+      "original": {
+        "sha": "a3b2481d27c2b89e18b16fb0055ead9941c1b3cf",
+        "subject": "Isolate tick receipt failures from supervised command outcomes"
+      },
+      "delivery": "396a2077f070b1a29d4afaca58e5fb955a3fc033"
+    },
+    {
+      "original": {
+        "sha": "266e237d7dcac34bbc069bb2478a378ba02960c3",
+        "subject": "Require declared test evidence before portable suite PASS"
+      },
+      "delivery": "1c0630fd6d62121fb4754676350d7ed3b31c6ebb"
+    },
+    {
+      "original": {
+        "sha": "469d316b5cb92063cbbe4d245ca8650ceed5a007",
+        "subject": "fix: preserve earlier unittest failures and incomplete evidence"
+      },
+      "delivery": "a8ef49e9902bea9267088a64710acb897d696c1b"
+    },
+    {
+      "original": {
+        "sha": "476d3927d30e319a223cb997ed9eb0742560ac5f",
+        "subject": "test: declare synthetic line reporter protocols"
+      },
+      "delivery": "71125c6280de30f709ecfa752e25e665f355b66a"
+    },
+    {
+      "original": {
+        "sha": "a562df094da84f9679c6be3d2e2416499b857039",
+        "subject": "fix: refuse Windows path cleanup without holder evidence"
+      },
+      "delivery": "bbde01525dfbf20a27466079b3f45470070c00e1"
+    },
+    {
+      "original": {
+        "sha": "ff13f861390dd5b575a1b7ec62c0565ff4131fdb",
+        "subject": "fix: preserve temporary configuration setup failure in CI"
+      },
+      "delivery": "61398d4ee2b5f1b31265e5982a7f885facf300d2"
+    },
+    {
+      "original": {
+        "sha": "22ea6f44278b9a94cdb6a8749c1c0d9808530616",
+        "subject": "fix: refuse lossy argv absence for destructive admission"
+      },
+      "delivery": "d0345d868c9ac6e9d7d0012ccee299bf5b40157d"
+    },
+    {
+      "original": {
+        "sha": "c7ce68a8f71ef7702602812fd7a900cd99b6d414",
+        "subject": "docs: record scoped POSIX holder safety review"
+      },
+      "delivery": "69056ec1611efa6937383ab52e57a06c1a289212"
+    }
+  ],
+  "unexpected_changed_files": [],
+  "union_but_no_final_change": [],
+  "combined_files_differing_from_last_component": [
+    "docs/AGENT-ONBOARDING.md",
+    "docs/ONBOARDING.md",
+    "observatory/engine/SOURCE-INVENTORY.json",
+    "observatory/engine/docs/AGENT-ONBOARDING.md",
+    "observatory/engine/docs/ONBOARDING.md",
+    "observatory/engine/docs/ux/portable-scenarios.md",
+    "observatory/engine/tests/run_portable.py"
+  ],
+  "financial_base_identity": true,
+  "financial_paths": [
+    "observatory/engine/tools/openrouter.py",
+    "observatory/engine/tests/test_credential_doors.py"
+  ],
+  "scope": "Source-only composition on release base; no main integration or installed acceptance",
+  "excluded": [
+    "financial corrections",
+    "pending CI cadence successor",
+    "pending bounded holder capture"
+  ],
+  "runtime_sha256": {
+    ".github/workflows/check.yml": "2e67888f985d399b98004b712b5c9ed31069e2221c3aeee28635619273342c5e",
+    "observatory/engine/checkout_graph.py": "ddc107eadbc38a13dc3ac887d94fbdba4ece6d728887112c6dd049a33ee4bb03",
+    "observatory/engine/checkout_inventory.py": "431809f29b45cf199104f0b472e3d88743f359fd92ce6da3c81cedbf4c8371f0",
+    "observatory/engine/checkout_state.py": "d494d9e0dd44b1aec2f5ae0e5c954e0fab73dd5c7a6c62fe57e334a93a150058",
+    "observatory/engine/coverage_view.py": "1ce5a36c8a7db5b7ce17351759eafc73309bf5914156a57d931bdce075c80d13",
+    "observatory/engine/dashboard/build_dashboard.py": "d5b6b7acb5d0d032dffea678845255e03cf79ae41f7097bc287fed7123736ed2",
+    "observatory/engine/holders.py": "78717d5d7837b62cf3e48d1eed88b02e54bec401adbf198f59a3d715a0b06a34",
+    "observatory/engine/log_policy.py": "a627575c559ecff3fbecb56efb949b333754437011cb5c5d360f8f33c9cc9719",
+    "observatory/engine/maintenance.py": "f195740d78a8740ce623fb82dccdebfd31def2726da91de0e0f2635ca85f8e91",
+    "observatory/engine/mcp/server.py": "3118894667a8c2635ae13d7ec049acb358fbeacb9de2ef90c74c7d4891f66266",
+    "observatory/engine/memory_snapshot.py": "952190b9144893e8472577a3f9a9ed1f1eb807794810d6947660d9c17b3afcf6",
+    "observatory/engine/open_unlinked.py": "9f761f6be51fb08afbdee6c187003427c9f27125920638dc63d85deb679a750e",
+    "observatory/engine/safe_git.py": "32411e7330b7afc9b9aa03d2d484b8c055986a0614a44193b6d06bd54e411334",
+    "observatory/engine/tests/run_portable.py": "0c6466730589e71963f019f21a109c5a6b4a4b8e15ccd73e2480d9d8d0faf3b8",
+    "observatory/engine/tests/test_checkout_state.py": "280be5fd61fc68a203fac20e0367a62fa681811cd0278d13ded5956fd3663a43",
+    "observatory/engine/tests/test_cli_compatibility.py": "00f3450c9435061cd3e90a3ac35c89bcecc0cef41588d4f9877c377eb05826b7",
+    "observatory/engine/tests/test_disk_guard.py": "10cfcea41c808974e6c9824780bf9f91a30b67faeef479159e9f4612e5ed7e3e",
+    "observatory/engine/tests/test_lifecycle.py": "e983c5066e4f1242fb2655210f44aec92fc776f908d1b8776172d3b2ac8360ec",
+    "observatory/engine/tests/test_maintenance.py": "5e6739f85a7b58d3d0ed7f0da2ce98a3327ff33c6563acd01cdc5e6344748815",
+    "observatory/engine/tests/test_memory_freshness.py": "2f2f92dbbf7dbdcf04d2715c667b66b341a4bcf52523ccb358e7ffda8b295e0c",
+    "observatory/engine/tests/test_open_unlinked.py": "df1a375e6b95113227b62170bbffde8c07b0aee756a99fa6ead6c58abae744b8",
+    "observatory/engine/tests/test_tick_progress.py": "093b11e471c4a93ca0009962b68fca227401d95305d5eea7d373d28412fa2b87",
+    "observatory/engine/tick_progress.py": "aefe3feb2d14e85c259fa595bdcaddf83fce9c636ec21a1a22294b3e4a28154c",
+    "observatory/engine/tools/tick.py": "a1bfda0e105c1ac9db82d7e2bf8bfdf8a9469f260a93419d304a1dae35091f0f",
+    "observatory/engine/tools/tick_lease.py": "ef5eaf048bb83f4717c5c1eac4d2708344bb389fce1695aff8df380aed92cddd",
+    "observatory/engine/workspace.py": "581126a3bef785f873d2d38a223bcfd6719b2d7a46d22cd427fccfa83d0a124d",
+    "tests/test_release_workflow.py": "d8e5c34eed71f39fb4da2674618acf9b105eb044deb149d654a7df19a3a14048",
+    "tests/test_runner_evidence.py": "15717bbb18af5079451c804608e9a23b8455fdab94914aaec7db9b5142e1ef83"
+  }
+}

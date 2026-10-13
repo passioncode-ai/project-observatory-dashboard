@@ -58,6 +58,34 @@ def _run(args, deadline):
         return None, "command-unavailable"
 
 
+PRESSURE_LEVELS = {1: "normal", 2: "warning", 4: "critical"}
+
+
+def pressure_summary(value, at, *, allow_current=True):
+    """Pressure has its own age; swap/RSS never supplies a missing level."""
+    value = value if isinstance(value, dict) else {}
+    raw = value.get("raw_level")
+    supported = type(raw) is int and raw in PRESSURE_LEVELS
+    measured, attempted = _stamp(value.get("measured_at")), _stamp(value.get("attempted_at"))
+    age = (at - measured).total_seconds() if measured else None
+    valid = (allow_current and supported and value.get("source") == "macos-sysctl"
+             and value.get("level") == PRESSURE_LEVELS[raw] and value.get("reason") is None
+             and attempted is not None and measured is not None and attempted <= measured <= at
+             and 0 <= age <= MAX_AGE_SECONDS)
+    reason = value.get("reason")
+    reasons = {"unsupported-platform", "command-failed", "command-timeout", "command-unavailable",
+               "budget-expired", "invalid-output"}
+    return {"level": PRESSURE_LEVELS[raw] if valid else "unknown",
+            "recorded_level": PRESSURE_LEVELS[raw] if supported and value.get("level") == PRESSURE_LEVELS[raw] else "unknown",
+            "raw_level": raw if supported else None,
+            "source": "macos-sysctl" if value.get("source") == "macos-sysctl" else None,
+            "attempted_at": attempted.isoformat() if attempted else None,
+            "measured_at": measured.isoformat() if measured else None,
+            "age_seconds": age, "stale": age > MAX_AGE_SECONDS if age is not None and age >= 0 else None,
+            "reason": None if valid else reason if isinstance(reason, str) and reason in reasons else "missing-stale-or-invalid-pressure",
+            "actionable": False}
+
+
 def collect(seconds=8):
     """Only sysctl/vm_stat (or proc meminfo) and one ps RSS/comm query; no argv."""
     started = now()
@@ -121,6 +149,17 @@ def collect(seconds=8):
             source("swap", False, "memory-source-unavailable")
     else:
         source("memory", False, "unsupported-platform")
+    pressure = {"level": "unknown", "raw_level": None, "attempted_at": now(),
+                "measured_at": None, "source": None, "reason": "unsupported-platform", "actionable": False}
+    if sys.platform == "darwin":
+        output, reason = _run(["/usr/sbin/sysctl", "-n", "kern.memorystatus_vm_pressure_level"], deadline)
+        pressure["source"] = "macos-sysctl"
+        value = output.strip() if isinstance(output, str) else None
+        if reason is None and value in ("1", "2", "4"):
+            pressure.update(raw_level=int(value), level=PRESSURE_LEVELS[int(value)], measured_at=now(), reason=None)
+        else:
+            pressure["reason"] = reason or "invalid-output"
+    memory["pressure"] = pressure
     stamps = [r["measured_at"] for r in memory["sources"].values() if r["measured_at"]]
     memory["measured_at"] = max(stamps) if stamps else None
     attempted = now()
@@ -267,6 +306,8 @@ def select_sources(machine, light, *, at=None):
         if stale is None or stale:
             errors.append({"source": section, "reason": "stale-measurement" if stale else "unknown-measurement-time"})
         if section == "memory":
+            part["pressure"] = pressure_summary(part.get("pressure"), at,
+                                                allow_current=attempt is not None and attempt <= at)
             for key in MEMORY_FIELDS:
                 value = part.get(key)
                 if value is not None and not _number(value):

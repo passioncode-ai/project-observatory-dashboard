@@ -54,19 +54,25 @@ def _single_file(path: Path):
         return None
 
 
-def _private(path: Path) -> None:
+def _private(path: Path) -> bool:
     try:
-        if _single_file(path) is not None and not osprivacy.private(path):
+        if _single_file(path) is None:
+            return False
+        if not osprivacy.private(path):
             osprivacy.make_private(path)
+        return True
     except OSError:
-        pass
+        return False
+
 
 def rotate(path: Path, *, max_bytes: int | None = None, generations: int | None = None,
-           copy_truncate: bool | None = None) -> bool:
+           copy_truncate: bool | None = None, _observation: dict | None = None) -> bool:
     """Rotate `path` when it is larger than `max_bytes`; True when it did.
 
     `copy_truncate` defaults to whether the file's name is in HELD_OPEN. A symlink
     is never followed or rotated; hardlinked files and linked ancestors also refuse."""
+    observation = _observation if _observation is not None else {}
+    observation.update(status="refused", reason="file_unverified")
     path = Path(path)
     max_bytes = MAX_BYTES if max_bytes is None else max_bytes
     generations = GENERATIONS if generations is None else max(1, generations)
@@ -76,8 +82,11 @@ def rotate(path: Path, *, max_bytes: int | None = None, generations: int | None 
     if info is None:
         return False
     if info.st_size <= max_bytes:
-        _private(path)
+        private = _private(path)
+        observation.update(status="complete" if private else "failed",
+                           reason=None if private else "permissions_unverified")
         return False
+    observation["reason"] = "generation_unverified"
     gen = lambda n: path.with_name(f"{path.name}.{n}")                       # noqa: E731
     # Validate the whole chain before moving any generation. lexists semantics
     # matter: a broken symlink must not look like a vacant copy destination.
@@ -90,6 +99,7 @@ def rotate(path: Path, *, max_bytes: int | None = None, generations: int | None 
             return False
         if _single_file(gen(n)) is None:
             return False
+    observation.update(status="failed", reason="rotation_failed")
     gen(generations).unlink(missing_ok=True)
     for n in range(generations - 1, 0, -1):
         if gen(n).exists():
@@ -99,6 +109,7 @@ def rotate(path: Path, *, max_bytes: int | None = None, generations: int | None 
         with os.fdopen(fd, "r+b") as source:
             current = os.fstat(source.fileno())
             if (current.st_dev, current.st_ino, current.st_nlink) != (info.st_dev, info.st_ino, 1):
+                observation.update(status="refused", reason="identity_changed")
                 return False
             # Exclusive creation cannot follow a destination link introduced after
             # preflight. Truncate only the verified source descriptor after copying.
@@ -111,38 +122,96 @@ def rotate(path: Path, *, max_bytes: int | None = None, generations: int | None 
             source.truncate(0)
     else:
         os.replace(path, gen(1))
+    observation.update(status="complete", reason=None)
     for n in range(1, generations + 1):
-        _private(gen(n))
-    _private(path)
+        # Missing generations are expected; failures on existing files are not.
+        if os.path.lexists(gen(n)) and not _private(gen(n)):
+            observation.update(status="failed", reason="permissions_unverified")
+    if copy_truncate and not _private(path):
+        observation.update(status="failed", reason="permissions_unverified")
     return True
+
+
+# Only these bounded categories may enter maintenance receipts and readers.
+REASONS = frozenset({"directory_unverified", "directory_read_failed", "file_unverified",
+                     "generation_unverified", "identity_changed", "rotation_failed",
+                     "permissions_unverified", "scope_failed", "receipt_unreadable"})
+
+
+def unknown_report(reason: str = "scope_failed") -> dict:
+    return {"status": "unknown", "observed_count": None, "rotated": None,
+            "refused": None, "failed": None, "reasons": {reason: 1}}
+
+
+def _sweep(directory: Path, *, max_bytes=None, generations=None, files=(), detailed=False):
+    rotated: list[str] = []
+    rotated_paths: set[Path] = set()
+    directory = Path(directory)
+    report = {"status": "complete", "observed_count": None, "rotated": 0,
+              "refused": 0, "failed": 0, "reasons": {}}
+
+    def reason(code):
+        report["reasons"][code] = report["reasons"].get(code, 0) + 1
+        if report["status"] == "complete":
+            report["status"] = "partial"
+
+    try:
+        safe = _real_parents(directory) and stat.S_ISDIR(directory.lstat().st_mode)
+    except OSError:
+        safe = False
+    entries = []
+    if not safe:
+        report = unknown_report("directory_unverified")
+    else:
+        try:
+            entries = list(directory.iterdir())
+            report["observed_count"] = len(entries)
+        except OSError:
+            report = unknown_report("directory_read_failed")
+    # Enumeration failure happened before these actions; zero attempts is known.
+    # A lost whole-scope receipt instead uses unknown_report's null action counts.
+    report.update(rotated=0, refused=0, failed=0)
+    candidates = sorted(set(files) | {p for p in entries if p.suffix in SUFFIXES})
+    for path in candidates:
+        observation = {}
+        try:
+            did_rotate = rotate(path, max_bytes=max_bytes, generations=generations,
+                                _observation=observation)
+        except Exception:  # detailed mode isolates failures without serializing exceptions
+            if not detailed:
+                raise
+            did_rotate = False
+            observation = {"status": "failed", "reason": "rotation_failed"}
+        if did_rotate:
+            rotated.append(path.name)
+            rotated_paths.add(path)
+            report["rotated"] += 1
+        if observation.get("status") in ("refused", "failed"):
+            report[observation["status"]] += 1
+            reason(observation["reason"])
+    for path in entries:
+        stem, _, tail = path.name.rpartition(".")
+        if tail.isdigit() and Path(stem).suffix in SUFFIXES and path.with_name(stem) not in rotated_paths:
+            if not _private(path):
+                report["refused"] += 1
+                reason("permissions_unverified")
+    return rotated, report
 
 
 def sweep(directory: Path, *, max_bytes: int | None = None, generations: int | None = None,
           files: tuple[Path, ...] = ()) -> list[str]:
-    """Rotate every log in `directory` (and each of `files`) past the cap; make all 0600.
+    """Legacy list API: rotate once and return names; operation errors still raise."""
+    return _sweep(directory, max_bytes=max_bytes, generations=generations, files=files)[0]
 
-    Returns the names rotated. Generations (`name.N`) are made private but never
-    rotated themselves."""
-    rotated: list[str] = []
-    directory = Path(directory)
-    try:
-        safe_directory = _real_parents(directory) and stat.S_ISDIR(directory.lstat().st_mode)
-    except OSError:
-        safe_directory = False
-    candidates: list[Path] = list(files)
-    try:
-        if safe_directory:
-            candidates += [p for p in directory.iterdir() if p.suffix in SUFFIXES]
-    except OSError:
-        pass
-    for p in sorted(set(candidates)):
-        if rotate(p, max_bytes=max_bytes, generations=generations):
-            rotated.append(p.name)
-    try:
-        for p in directory.iterdir() if safe_directory else ():
-            stem, _, tail = p.name.rpartition(".")
-            if tail.isdigit() and Path(stem).suffix in SUFFIXES:
-                _private(p)
-    except OSError:
-        pass
-    return rotated
+
+def sweep_report(directory: Path, *, max_bytes: int | None = None, generations: int | None = None,
+                 files: tuple[Path, ...] = ()) -> dict:
+    """One execution's bounded receipt, with no path, content or exception text.
+
+    `observed_count` counts directory entries, including unrelated names; null
+    means enumeration was not complete. Action counts are completed observations,
+    not an estimate of remaining files. A failed rotation may have moved older
+    generations; its effects are not claimed to be rolled back.
+    """
+    return _sweep(directory, max_bytes=max_bytes, generations=generations,
+                  files=files, detailed=True)[1]

@@ -1,0 +1,82 @@
+{
+  "base": "ff13f861390dd5b575a1b7ec62c0565ff4131fdb",
+  "status": "PASS_SCOPED_SOURCE_SYNTHETIC",
+  "source_sha256": {
+    "observatory/engine/holders.py": "78717d5d7837b62cf3e48d1eed88b02e54bec401adbf198f59a3d715a0b06a34",
+    "observatory/engine/tests/test_disk_guard.py": "10cfcea41c808974e6c9824780bf9f91a30b67faeef479159e9f4612e5ed7e3e",
+    ".github/workflows/check.yml": "2e67888f985d399b98004b712b5c9ed31069e2221c3aeee28635619273342c5e",
+    "tests/test_release_workflow.py": "d8e5c34eed71f39fb4da2674618acf9b105eb044deb149d654a7df19a3a14048"
+  },
+  "tests_first": {
+    "methods": 7,
+    "failing_outcomes": 10,
+    "errors": 0,
+    "exit": 1,
+    "prior_fixture_errors_retained": 2
+  },
+  "focused_corrected": {
+    "methods": 7,
+    "exit": 0
+  },
+  "prior_portable": {
+    "disk_guard": {
+      "cases": 148,
+      "failures": 1,
+      "skips": 2,
+      "reason": "existing2secondarchivefixtureexpiredbeforefinalprobe"
+    },
+    "git_hardening": {
+      "cases": 61,
+      "exit": 0
+    }
+  },
+  "workflow_tests_first": {
+    "cases": 4,
+    "failures": 1,
+    "exit": 1
+  },
+  "workflow_corrected": {
+    "cases": 4,
+    "exit": 0
+  },
+  "doc_copies": {
+    "cases": 6,
+    "exit": 0
+  },
+  "syntax_python311": {
+    "files": 3,
+    "exit": 0
+  },
+  "brand_lint": {
+    "errors": 0,
+    "warnings": 2043,
+    "exit": 0,
+    "strict": false
+  },
+  "ux_lint": "NOT_RUN:repository has no docs/ux/lint.py; existing scenario index updated",
+  "not_run": [
+    "native-Windows-successor",
+    "hosted-successor",
+    "installed-runtime",
+    "live-cleanup",
+    "owner-lifecycle",
+    "native-argv-collector"
+  ],
+  "final_portable": [
+    {
+      "file": "tests/test_disk_guard.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 148,
+      "unittest_skipped": 2
+    }
+  ],
+  "independent_review": {
+    "source": "22ea6f44278b9a94cdb6a8749c1c0d9808530616",
+    "verdict": "PASS_SCOPED_SOURCE_SYNTHETIC",
+    "actual_owned_process_controls": 5,
+    "additional_controls": 7,
+    "workflow_semantics": "only Windows job-level exemption removed; strict step and job unsuppressed",
+    "native_windows_successor": "NOT_RUN"
+  }
+}

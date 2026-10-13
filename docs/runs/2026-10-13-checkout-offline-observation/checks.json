@@ -1,0 +1,58 @@
+{
+  "status": "PASS_SCOPED_SOURCE",
+  "tests_first": {
+    "cases": 17,
+    "failed": 1,
+    "errors_missing_new_argument": 4
+  },
+  "final_suites": [
+    {
+      "file": "tests/test_checkout_state.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 18,
+      "pass_assertions": 0
+    },
+    {
+      "file": "tests/test_checkout_inventory.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 12,
+      "pass_assertions": 0
+    },
+    {
+      "file": "tests/test_git_hardening.py",
+      "status": "PASS",
+      "exit_code": 0,
+      "unittest_cases": 61,
+      "pass_assertions": 0
+    }
+  ],
+  "source_hashes": {
+    "observatory/engine/safe_git.py": "32411e7330b7afc9b9aa03d2d484b8c055986a0614a44193b6d06bd54e411334",
+    "observatory/engine/checkout_state.py": "d494d9e0dd44b1aec2f5ae0e5c954e0fab73dd5c7a6c62fe57e334a93a150058",
+    "observatory/engine/checkout_inventory.py": "ec4dac21a0d4b86f7eea036d585c21de18d05a57f3dad89c52e302df6fbfc5cc",
+    "observatory/engine/tests/test_checkout_state.py": "fd7db05be5ebb18774277a06fd665d424e1549829a936542a433273e86692cdc"
+  },
+  "docs_check_exit": 0,
+  "inventory_check_exit": 0,
+  "not_run": [
+    "Git-binary-predating-no-lazy-fetch",
+    "native-Windows",
+    "hosted-CI",
+    "installed-runtime",
+    "live-network",
+    "cleanup-data-loss-reproduction",
+    "upstream-graph-phase"
+  ],
+  "git_versions": {
+    "standalone_reproduction": "2.55.0",
+    "isolated_author_fixtures": "2.54.0 (Apple Git-157)",
+    "independent_fixture": "2.55.0"
+  },
+  "independent_review": {
+    "source": "e23f5ae1d8aa6bd88656d5a5863d04102ba6e5e7",
+    "verdict": "PASS_SCOPED_OFFLINE_CHECKOUT_OBSERVATION",
+    "controls": 21
+  }
+}

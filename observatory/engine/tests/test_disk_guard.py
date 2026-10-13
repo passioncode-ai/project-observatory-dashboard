@@ -51,7 +51,7 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name).resolve()
         self.home = self.base / "workspace"
-        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(self.base)}, clear=True)
+        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(self.base), "USERPROFILE": str(self.base)}, clear=True)
         self.env.start()
         workspace.initialize(self.home)
         import paths
@@ -630,28 +630,21 @@ class RunBudget(Base):
 
 
 class AnyDevice(Base):
-    """The guard on macOS, Linux and Windows: one rule, three ways to know what is held."""
+    """Supported holder observations and explicit unknown platforms preserve paths."""
 
-    def test_windows_probes_by_renaming_and_skips_what_is_held(self):
+    def test_legacy_rename_state_preserves_paths_without_trying_a_rename(self):
         (self.t1 / "held").mkdir()
-        (self.t1 / "free").mkdir()
+        (self.t1 / "apparently-free").mkdir()
         h = self.g.Holders([])
-        h.mode = "rename"
-        self.assertFalse(h.busy(self.t1 / "held"), "Windows cannot know beforehand; the rename decides")
-        real_rename = os.rename
-
-        def rename(src, dst):
-            if pathlib_name(src) == "held":
-                raise PermissionError(32, "being used by another process")
-            return real_rename(src, dst)
-        with patch.object(self.g.os, "rename", side_effect=rename):
-            held = self.g.act({"class": "temp", "target": str(self.t1 / "held"), "identity": self.identity(self.t1 / "held"), "bytes": 0}, h)
-            free = self.g.act({"class": "temp", "target": str(self.t1 / "free"), "identity": self.identity(self.t1 / "free"), "bytes": 0}, h)
-        self.assertEqual(held["result"], "skipped")
-        self.assertTrue((self.t1 / "held").exists(), "nothing of a held folder is deleted")
-        self.assertEqual(free["result"], "removed")
-        self.assertFalse((self.t1 / "free").exists())
-        self.assertFalse(list(self.t1.glob("*.observatory-removing")))
+        h.mode = "rename"  # Even an old in-memory state cannot grant permission.
+        self.assertTrue(h.busy(self.t1 / "held"))
+        with patch.object(self.g.os, "rename") as rename:
+            for target in (self.t1 / "held", self.t1 / "apparently-free"):
+                result = self.g.act({"class": "temp", "target": str(target),
+                                     "identity": self.identity(target), "bytes": 0}, h)
+                self.assertEqual(result["result"], "skipped")
+                self.assertTrue(target.exists())
+            rename.assert_not_called()
 
     def test_linux_without_lsof_reads_proc(self):
         import holders
@@ -659,7 +652,9 @@ class AnyDevice(Base):
                 patch.object(holders, "proc_paths", return_value=[str(self.t1 / "held")]), \
                 patch.object(holders, "argument_paths", return_value=[]):
             h = self.g.Holders.take()
-        self.assertEqual(h.mode, "proc")
+        self.assertEqual(h.mode, "unknown")
+        self.assertFalse(h.known)
+        self.assertIn(str(self.t1 / "held"), h.names)
         self.assertTrue(h.busy(self.t1))
 
     def test_no_way_to_know_means_nothing_is_removed(self):
@@ -935,6 +930,69 @@ class SecondIteration(Base):
         self.assertFalse(list(self.t1.glob("*.observatory-removing")))
 
 
+class WindowsHolderUnknown(Base):
+    """Rename success is not a holder inventory: FILE_SHARE_DELETE allows it."""
+
+    def test_owned_home_is_defined_for_windows_path_resolution(self):
+        import ntpath
+        self.assertEqual(ntpath.expanduser("~"), str(self.base))
+        self.assertEqual(Path.home(), self.base)
+
+    def test_windows_inventory_is_unknown_without_process_commands(self):
+        import holders
+        from types import SimpleNamespace
+        with patch.object(holders, "os", SimpleNamespace(name="nt", path=os.path)), \
+                patch.object(holders.subprocess, "run") as command:
+            observed = holders.Holders.take()
+            self.assertFalse(observed.known)
+            self.assertTrue(observed.busy(str(self.t1)))
+            self.assertIsNone(holders.fresh_busy(str(self.t1)))
+            command.assert_not_called()
+
+    def test_legacy_rename_mode_cannot_authorize_a_path(self):
+        import holders
+        observed = holders.Holders([], "rename")
+        self.assertFalse(observed.known)
+        self.assertTrue(observed.busy(str(self.t1)))
+
+    def test_current_windows_unknown_preserves_target_even_with_old_free_snapshot(self):
+        import holders
+        from types import SimpleNamespace
+        target = self.t1 / "candidate"
+        target.mkdir()
+        data = target / "state"
+        data.write_text("preserve")
+        action = {"class": "temp", "target": str(target), "identity": self.identity(target), "bytes": 0}
+        with patch.object(holders, "os", SimpleNamespace(name="nt", path=os.path)), \
+                patch.object(self.g, "fresh_busy", holders.fresh_busy), \
+                patch.object(self.g, "remove") as remove:
+            result = self.g.act(action, self.free())
+        self.assertEqual(result["result"], "skipped")
+        remove.assert_not_called()
+        self.assertEqual(data.read_text(), "preserve")
+
+    @unittest.skipUnless(os.name == "nt", "Native Windows FILE_SHARE_DELETE control")
+    def test_native_open_shared_delete_file_can_be_renamed(self):
+        import ctypes
+        from ctypes import wintypes
+        api = ctypes.WinDLL("kernel32", use_last_error=True)
+        api.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                   wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        api.CreateFileW.restype = wintypes.HANDLE
+        api.CloseHandle.argtypes = [wintypes.HANDLE]
+        api.CloseHandle.restype = wintypes.BOOL
+        source = self.t1 / "open-file"
+        source.write_text("held")
+        handle = api.CreateFileW(str(source), 0x80000000, 1 | 2 | 4, None, 3, 0x80, None)
+        self.assertNotEqual(handle, wintypes.HANDLE(-1).value)
+        try:
+            target = self.t1 / "renamed-file"
+            os.rename(source, target)
+            self.assertTrue(target.exists(), "rename is permitted while the handle remains open")
+        finally:
+            self.assertTrue(api.CloseHandle(handle))
+
+
 class HoldersModule(unittest.TestCase):
     def test_lsof_escapes_are_decoded(self):
         import holders
@@ -999,15 +1057,15 @@ class HoldersCompleteness(unittest.TestCase):
                 [], 0, "/usr/bin/node /srv/active-worktree/script.js\n", "")):
             self.assertIn("/srv/active-worktree/script.js", holders.argument_paths())
             self.assertTrue(holders.running(["node"]))
-            self.assertFalse(holders.running(["npm"]))
+            self.assertIsNone(holders.running(["npm"]))
         with patch.object(holders.shutil, "which", return_value="lsof"), \
                 patch.object(holders.subprocess, "run", return_value=subprocess.CompletedProcess(
                     [], 0, "p123\nn/srv/active-worktree/open\n", "")), \
                 patch.object(holders, "argument_paths", return_value=[]):
             observed = holders.Holders.take()
-            self.assertTrue(observed.known)
+            self.assertFalse(observed.known)
             self.assertTrue(observed.busy("/srv/active-worktree"))
-            self.assertFalse(observed.busy("/srv/other-worktree"))
+            self.assertTrue(observed.busy("/srv/other-worktree"))
 
     def test_proc_partial_reads_are_unknown_and_complete_reads_hold_paths(self):
         import holders
@@ -1038,6 +1096,124 @@ class HoldersCompleteness(unittest.TestCase):
                     self.assertFalse(observed.busy("/srv/other"))
 
 
+@unittest.skipIf(os.name == "nt", "POSIX rendered argv contract")
+class LossyArgvEvidence(unittest.TestCase):
+    def test_rendered_argv_absence_is_unknown_for_four_path_forms(self):
+        import holders
+        with tempfile.TemporaryDirectory() as root:
+            base = Path(root).resolve()
+            for label in ("absolute-space", "relative-space", "relative-plain", "symlink"):
+                target = base / ("plain" if label == "relative-plain" else "project with space")
+                target.mkdir(exist_ok=True)
+                script = target / "app.py"
+                script.write_text("# synthetic closed script\n")
+                if label == "symlink":
+                    alias = base / "alias.py"
+                    alias.symlink_to(script)
+                    arg = str(alias)
+                elif label.startswith("relative"):
+                    arg = str(script.relative_to(base))
+                else:
+                    arg = str(script)
+                results = [subprocess.CompletedProcess([], 1, "", ""),
+                           subprocess.CompletedProcess([], 0, "python " + arg + "\n", "")]
+                with self.subTest(label=label), patch.object(holders.shutil, "which", return_value="lsof"), \
+                        patch.object(holders.subprocess, "run", side_effect=results):
+                    self.assertIsNone(holders.fresh_busy(str(target)))
+
+    def test_production_snapshot_retains_positives_but_is_incomplete(self):
+        import holders
+        with patch.object(holders, "lsof_paths", return_value=["/srv/open/file"]), \
+                patch.object(holders, "argument_paths", return_value=["/srv/script/app.py"]):
+            observed = holders.Holders.take()
+        self.assertFalse(observed.known)
+        self.assertIn("/srv/open/file", observed.names)
+        self.assertIn("/srv/script/app.py", observed.names)
+        self.assertTrue(observed.busy("/srv/open"))
+        self.assertTrue(observed.busy("/srv/unmatched"))
+
+    def test_native_file_positive_and_lexical_positive_remain_held(self):
+        import holders
+        for results in ([subprocess.CompletedProcess([], 0, "n/srv/target/file\n", "")],
+                        [subprocess.CompletedProcess([], 1, "", ""),
+                         subprocess.CompletedProcess([], 0, "python /srv/target/app.py\n", "")]):
+            with self.subTest(results=len(results)), patch.object(holders.shutil, "which", return_value="lsof"), \
+                    patch.object(holders.subprocess, "run", side_effect=results):
+                self.assertTrue(holders.fresh_busy("/srv/target"))
+
+    def test_unmatched_cache_tool_is_unknown_and_empty_request_is_vacuous(self):
+        import holders
+        with patch.object(holders, "_run", return_value="/usr/bin/editor\n"):
+            self.assertIsNone(holders.running(["npm"]))
+            self.assertTrue(holders.running(["editor"]))
+        with patch.object(holders, "_run", side_effect=AssertionError("must not inspect")):
+            self.assertFalse(holders.running([]))
+
+
+@unittest.skipIf(os.name == "nt", "POSIX rendered argv admission")
+class LossyArgvAdmission(Base):
+    def lsof_tool(self):
+        import holders
+        real_which = holders.shutil.which
+        return lambda name, *args, **kwargs: "lsof" if name == "lsof" else real_which(name, *args, **kwargs)
+
+    def ps_only(self, output="python relative/app.py\n"):
+        real_run = subprocess.run
+        def run(argv, **kwargs):
+            if Path(argv[0]).name == "lsof":
+                return subprocess.CompletedProcess(argv, 1, "", "")
+            if argv[0] == "ps":
+                return subprocess.CompletedProcess(argv, 0, output, "")
+            return real_run(argv, **kwargs)
+        return run
+
+    def test_disk_action_refuses_after_stale_free_snapshot(self):
+        import holders
+        target = self.t1 / "candidate"
+        target.mkdir()
+        (target / "kept").write_text("only copy")
+        with patch.object(self.g, "fresh_busy", holders.fresh_busy), \
+                patch.object(holders.shutil, "which", side_effect=self.lsof_tool()), \
+                patch.object(holders.subprocess, "run", side_effect=self.ps_only()):
+            result = self.g.act({"class": "temp", "target": str(target),
+                                 "identity": self.identity(target)}, self.free())
+        self.assertEqual(result["result"], "skipped", result)
+        self.assertEqual((target / "kept").read_text(), "only copy")
+
+    def test_clean_and_archived_dirty_worktrees_refuse_final_unknown(self):
+        import holders, cleanup
+        for dirty in (False, True):
+            with self.subTest(dirty=dirty):
+                repo = self.base / ("repo-" + str(dirty)); repo.mkdir()
+                git(repo, "init", "-q", "-b", "main")
+                (repo / "a").write_text("base\n")
+                git(repo, "add", "."); git(repo, "commit", "-qm", "init")
+                wt = self.base / ("worktree " + str(dirty))
+                git(repo, "worktree", "add", "-qb", "topic", str(wt))
+                if dirty: (wt / "a").write_text("only copy edit\n")
+                with patch.object(cleanup, "busy_now", return_value=False), \
+                        patch.object(cleanup, "fresh_busy", holders.fresh_busy), \
+                        patch.object(holders.shutil, "which", side_effect=self.lsof_tool()), \
+                        patch.object(holders.subprocess, "run", side_effect=self.ps_only()):
+                    result = cleanup.act({"class": "worktree-dirty" if dirty else "worktree-clean",
+                                          "tier": "manual" if dirty else "auto", "repo": str(repo),
+                                          "target": str(wt), "branch": "topic"}, self.base / "archive")
+                self.assertEqual(result["result"], "skipped", result)
+                self.assertTrue(wt.exists())
+                if dirty:
+                    self.assertIn("only copy edit", (Path(result["archive"]) / "tracked.patch").read_text())
+
+    def test_cache_busy_if_unknown_executes_no_cache_command(self):
+        import holders
+        with patch.object(self.g, "running", holders.running), \
+                patch.object(holders, "_run", return_value="/usr/bin/editor\n"), \
+                patch.object(self.g.subprocess, "run") as run:
+            result = self.g.act({"class": "cache-command", "target": "synthetic cache",
+                                 "argv": ["synthetic-cache", "prune"], "busy_if": ["npm"]}, self.free())
+        self.assertEqual(result["result"], "skipped", result)
+        run.assert_not_called()
+
+
 class WorktreeFinalHolders(Base):
     def test_final_fresh_check_preserves_clean_and_archived_dirty_worktrees(self):
         import cleanup
@@ -1060,10 +1236,10 @@ class WorktreeFinalHolders(Base):
                         rec = cleanup.act({"class": "worktree-dirty" if dirty else "worktree-clean",
                                            "tier": "manual" if dirty else "auto", "repo": str(repo),
                                            "target": str(wt), "branch": "topic",
-                                           "_deadline": time.monotonic() + 2}, self.base / "archive")
+                                           "_deadline": time.monotonic() + 10}, self.base / "archive")
                     self.assertEqual(fresh.call_count, 1)
                     self.assertGreater(fresh.call_args.args[1], 0)
-                    self.assertLessEqual(fresh.call_args.args[1], 2)
+                    self.assertLessEqual(fresh.call_args.args[1], 5)
                     self.assertEqual(rec["result"], "removed" if outcome is False else "skipped", rec)
                     self.assertEqual(wt.exists(), outcome is not False)
                     if dirty:
@@ -1563,7 +1739,7 @@ class TargetRevalidation(Builds):
         self.assertTrue(entry.exists())
 
 
-@unittest.skipIf(os.name == "nt", "POSIX target probe; Windows uses rename")
+@unittest.skipIf(os.name == "nt", "POSIX target probe; Windows reports unknown")
 class FreshTargetProbe(Base):
     def test_target_probe_is_bounded_and_unknown_never_means_free(self):
         self.assertIsNotNone(self.real_fresh_busy, "fresh target probe must exist")
@@ -1571,7 +1747,7 @@ class FreshTargetProbe(Base):
                            subprocess.CompletedProcess([], 0, "/usr/bin/editor", "")]
         with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
                 patch.object(self.g.subprocess, "run", side_effect=command_results) as call:
-            self.assertIs(self.real_fresh_busy(str(self.t1), 5), False)
+            self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
         self.assertTrue(any(str(self.t1) in c.args[0] for c in call.call_args_list))
         self.assertTrue(all(0 < c.kwargs["timeout"] <= 5 for c in call.call_args_list))
         with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
