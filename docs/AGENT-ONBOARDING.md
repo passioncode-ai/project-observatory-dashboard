@@ -27,7 +27,10 @@ output is rechecked for checkout activity, ignore rules, tracked content and new
 writes. Each path action probes current holders within a five-second shared
 deadline; unknown evidence skips it. POSIX actions require `lsof` for this final
 target-scoped positive observation; unmatched rendered argv remains unknown, so
-current POSIX production path removal is refused. Windows also reports unknown
+current POSIX production path removal is refused. Preliminary cleanup admission
+uses an explicit unknown snapshot without process I/O. Disk-guard phase receipts
+say `observation=not-attempted`, `measured_at=null`; these are no measurement
+of zero holders. Explicit hint readers are unchanged. Windows also reports unknown
 without attempting rename as a holder test. A skipped target
 is not proof of zero reclaimable space. Do not advise an immediate retry as a fix
 for unsupported holder completeness: preserve the target pending a supported

@@ -311,3 +311,10 @@ retain their separate configured policy. The user keeps the target pending a
 supported observation and owner lifecycle contract; repeated scans alone do not
 resolve unsupported completeness. Tests: `LossyArgvEvidence` and
 `LossyArgvAdmission` in `tests/test_disk_guard.py` (synthetic only).
+
+Cleanup admission without collection: when current process observations cannot
+prove non-use, preliminary path admission stays unknown without reading the
+process table. Per-phase evidence marks `not-attempted` and no measurement time;
+there is no claim of zero holders or freed RAM. Explicit positive-hint readers
+and final refusal boundaries retain their behavior. `CheapHolderAdmission` in
+engine `tests/test_disk_guard.py` verifies these outcomes.

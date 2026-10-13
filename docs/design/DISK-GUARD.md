@@ -230,3 +230,16 @@ cover four missing path forms, positive holds, incomplete snapshots, stale-free
 path/clean-worktree/archived-dirty-worktree admission and cache child suppression.
 The source-bound research and original failing assertions are described in
 [the run packet](../runs/2026-10-13-posix-holder-argv/README.md).
+
+## Avoid process inventories that cannot admit cleanup
+
+The three preliminary callers (guard class admission, cleanup planning and cached
+cleanup refusal) request `Holders.take(collect_hints=False)`. This performs no
+lsof/ps/proc collection and returns unknown with `observation=not-attempted`.
+Guard phase metadata carries a null measurement time rather than inventing a
+process observation. Unknown still preserves paths; it does not enable cleanup.
+Default take() retains positive hints and incomplete coverage. Final target probes
+and cache-command preconditions are unchanged. Their capture memory limits remain
+separate unfinished work; this change proves avoided calls, not measured host RAM.
+Five `CheapHolderAdmission` cases in `tests/test_disk_guard.py` exercise the API,
+all three callers and unchanged positive-hint behavior.

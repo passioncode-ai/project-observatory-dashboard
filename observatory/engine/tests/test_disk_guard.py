@@ -139,6 +139,67 @@ class Holding(Base):
         self.assertTrue(h.busy(self.t1))
 
 
+class CheapHolderAdmission(Base):
+    def no_inventory(self):
+        import holders
+        stack = contextlib.ExitStack()
+        for name in ("lsof_paths", "proc_paths", "argument_paths"):
+            stack.enter_context(patch.object(holders, name, side_effect=AssertionError("unexpected inventory")))
+        return stack
+
+    def test_explicit_unknown_admission_has_no_inventory_io(self):
+        import holders
+        with self.no_inventory():
+            observed = holders.Holders.take(0, collect_hints=False)
+        self.assertFalse(observed.known)
+        self.assertEqual(observed.observation, "not-attempted")
+        self.assertEqual(observed.names, [])
+        self.assertTrue(observed.busy(self.t1))
+
+    def test_cached_preliminary_cleanup_refusal_has_no_inventory_io(self):
+        import cleanup
+        with patch.object(cleanup, "_LISTING", (0.0, None)), self.no_inventory():
+            self.assertTrue(cleanup.busy_now(str(self.t1)))
+            self.assertEqual(cleanup._LISTING[1].observation, "not-attempted")
+
+    def test_cleanup_plan_uses_unknown_without_collecting(self):
+        import cleanup
+        seen = []
+        def plan(cfg, busy, **kwargs):
+            seen.append(busy)
+            return {"counts": {}, "actions": [], "auto_enabled": False}
+        with self.no_inventory(), patch.object(cleanup, "load_config", return_value={}), \
+                patch.object(cleanup, "build_plan", side_effect=plan), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cleanup.main(["--json"]), 0)
+        self.assertEqual(len(seen), 1)
+        self.assertFalse(seen[0].known)
+        self.assertEqual(seen[0].observation, "not-attempted")
+
+    def test_guard_phases_have_no_inventory_or_measurement_claim(self):
+        with self.no_inventory(), patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g, "planners", return_value=[(n, lambda b: []) for n in self.g.CLASSES]):
+            doc = self.g.run([])
+        phases = [v for k, v in doc["holders_by_phase"].items() if k != "cache-command"]
+        self.assertTrue(phases)
+        for row in phases:
+            self.assertFalse(row["known"])
+            self.assertEqual(row["observation"], "not-attempted")
+            self.assertIsNone(row["measured_at"])
+        self.assertTrue(self.t1.exists())
+
+    def test_default_positive_hint_contract_remains_incomplete(self):
+        import holders
+        with patch.object(holders, "lsof_paths", return_value=["/srv/held/file"]), \
+                patch.object(holders, "argument_paths", return_value=["/srv/script.py"]):
+            observed = holders.Holders.take()
+        self.assertFalse(observed.known)
+        self.assertIn("/srv/held/file", observed.names)
+        self.assertIn("/srv/script.py", observed.names)
+
+
 class Temp(Base):
     def test_old_unheld_entries_go_fresh_held_and_kept_ones_stay(self):
         old, fresh, held, sock = self.t1 / "old", self.t1 / "fresh", self.t1 / "held", self.t1 / "with-socket"

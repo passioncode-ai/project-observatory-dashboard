@@ -141,10 +141,18 @@ class Holders:
         # consumers); production take() must supply its actual coverage condition.
         self.known = names is not None and mode != "rename" and complete is True
         self.mode = mode if self.known else "unknown"
+        self.observation = "unavailable" if names is None else "provided"
         self.names = sorted({os.path.normpath(n) for n in names or [] if n.startswith("/")})
 
     @classmethod
-    def take(cls, timeout: float = 120) -> "Holders":
+    def take(cls, timeout: float = 120, *, collect_hints: bool = True) -> "Holders":
+        # Admission cannot establish absence with today's collectors. Callers that
+        # only need refusal avoid a full process inventory and its output buffers.
+        # Explicit hint readers retain the existing incomplete observation path.
+        if collect_hints is False:
+            result = cls(None)
+            result.observation = "not-attempted"
+            return result
         if os.name == "nt":
             return cls(None)
         files = lsof_paths(timeout)
@@ -160,7 +168,9 @@ class Holders:
             return cls(None)
         # ps is a display, not a lossless argv protocol. Preserve positive hints,
         # but neither lsof nor /proc file lists cover a script closed after loading.
-        return cls(files + args, mode, complete=False)
+        result = cls(files + args, mode, complete=False)
+        result.observation = "partial"
+        return result
 
     def busy(self, path: str | os.PathLike) -> bool:
         if not self.known:
