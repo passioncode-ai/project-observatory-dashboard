@@ -1,0 +1,98 @@
+{
+  "model_source_commit": "f1dc6a787479ffde976b9fa3e1935f1f62f9a419",
+  "production_base": "12b7343277004aa408283fb4aef06ccbae935954",
+  "candidate_source_sha256": "1163d4f7c1b47cbf07b5301bcbfba2ae805d6ea2f59890020f77b32aa680cc0a",
+  "no_assertion_rng_changes": true,
+  "cases": [
+    {
+      "seed": 7000828,
+      "before_issues": [
+        "(a) POST /keys took the project total to 2792.3201 past 2792.32"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'blocked', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7000906,
+      "before_issues": [
+        "(a) POST /keys took the project total to 83.8001 past 83.8"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['blocked', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7001367,
+      "before_issues": [
+        "(a) POST /keys took the project total to 3.8801 past 3.88"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'blocked', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7001538,
+      "before_issues": [
+        "(a) POST /keys took the project total to 0.6401 past 0.64"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'blocked', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7002311,
+      "before_issues": [
+        "(a) POST /keys took the project total to 3893.7202 past 3893.72"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'blocked', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7002478,
+      "before_issues": [
+        "(a) POST /keys took the project total to 6810.6001 past 6810.6"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'blocked']"
+      ]
+    },
+    {
+      "seed": 7002785,
+      "before_issues": [
+        "(a) POST /keys took the project total to 957.4801 past 957.48"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'blocked', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7002924,
+      "before_issues": [
+        "(a) POST /keys took the project total to 7082.3701 past 7082.37"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['blocked', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7003447,
+      "before_issues": [
+        "(a) POST /keys took the project total to 18.6001 past 18.6"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'blocked']"
+      ]
+    },
+    {
+      "seed": 7003549,
+      "before_issues": [
+        "(a) POST /keys took the project total to 59.1001 past 59.1"
+      ],
+      "after_issues": [
+        "(c') no convergence after the door's own remedies: converge#4 -> None ['in-place', 'in-place', 'blocked']"
+      ]
+    }
+  ]
+}

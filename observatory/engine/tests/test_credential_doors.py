@@ -2468,6 +2468,43 @@ def test_or_policy_runs_one_at_a_time() -> None:
         __import__("os").close(fd)
 
 
+def test_or_policy_counts_every_positive_provider_fraction() -> None:
+    """A provider fraction is exposure, not proof of float noise (seed 7000828)."""
+    from decimal import Decimal
+    m = orr()
+    for value, expected in ((0, 0), (3.33, 333), (3.330000001, 334),
+                            (3.3301, 334), (3.334, 334), (3.34, 334)):
+        check(f"provider ceiling {value!r} rounds up without an allowance",
+              m._cents_up(value) == expected, repr(m._cents_up(value)))
+    for value in (None, True, "3.33", float("nan"), float("inf"), -0.001, -3.33):
+        check(f"unknown provider ceiling {value!r} stays unbounded",
+              m._cents_up(value) is None)
+    for value in (2**53 + 1, 10**400, m.MAX_USD + 1):
+        try:
+            unknown = m._cents_up(value) is None and m._ceiling_of({"limit": value}) is None
+        except (OverflowError, ValueError):
+            unknown = False
+        check("out-of-range provider metadata is unknown without precision loss or overflow", unknown)
+    check("supported integer provider metadata retains its numeric identity",
+          type(m._ceiling_of({"limit": 3})) is int and m._cents_up(3) == 300)
+    for observed in (3.33, 3.330000001, 3.3301, 3.334):
+        m, p = _r3_door()
+        m.issue_for_policy(_pol(1, limit=3.33), "example")
+        p.keys[p.by_name("k0")]["limit"] = observed
+        before = (p.n, p.patches)
+        p.start()
+        plan = m.issue_for_policy(_pol(2, limit=6.66), "example")
+        total = sum(Decimal(repr(row["limit"])) for row in p.keys.values())
+        if observed == 3.33:
+            check("an exact whole-cent held ceiling leaves room for the second key",
+                  p.n == before[0] + 1 and total == Decimal("6.66")
+                  and [row["action"] for row in plan] == ["in-place", "issued"])
+        else:
+            check(f"observed {observed!r} blocks minting into insufficient exact headroom",
+                  (p.n, p.patches) == before and total <= Decimal("6.66")
+                  and [row["action"] for row in plan] == ["in-place", "blocked"], str(plan))
+
+
 def test_or_policy_amounts_are_whole_cents_against_the_exact_limit() -> None:
     """Round 3, probes D, D2, H, J2, J3, I."""
     m, p = _r3_door(echo=lambda x: x + 1e-9)
@@ -2475,9 +2512,10 @@ def test_or_policy_amounts_are_whole_cents_against_the_exact_limit() -> None:
     p.start()
     before = p.patches
     m.issue_for_policy(_pol(3), "example")
-    m.issue_for_policy(_pol(3), "example")
-    check("D: a provider echoing 3.330000001 is not re-PATCHed", p.patches == before and p.max_sum <= 10.0,
-          f"{p.patches - before} patches")
+    plan = m.issue_for_policy(_pol(3), "example")
+    check("D: close ceilings avoid automatic re-PATCH but positive fractions remain counted",
+          p.patches == before and p.max_sum <= 10.0 and plan[-1]["action"] == "over-limit"
+          and "$10.02" in plan[-1]["why"], f"{p.patches - before} patches; {plan}")
     m, p = _r3_door(echo=lambda x: round(x, 2))
     m.issue_for_policy(_pol(1), "example", split={"vault:project-a/prod/K0": 3.333})
     before = p.patches
@@ -3043,6 +3081,7 @@ if __name__ == "__main__":
                test_or_policy_counts_every_key_of_the_project,
                test_or_policy_raises_only_what_fits_beside_unread_or_renamed_keys,
                test_or_policy_runs_one_at_a_time,
+               test_or_policy_counts_every_positive_provider_fraction,
                test_or_policy_amounts_are_whole_cents_against_the_exact_limit,
                test_or_policy_never_leaves_a_live_untracked_key,
                test_or_policy_dry_run_resolves_the_issuing_account,

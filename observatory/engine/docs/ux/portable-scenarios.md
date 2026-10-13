@@ -245,6 +245,18 @@ foreign-kind preservation and invalid-copy reporting. Live backup migration is u
 
 ### Policy provenance and rotation refusal (OSS-54)
 
+Observed provider ceilings round up to whole cents without a fractional allowance
+when admitting new policy keys. A reported $3.330000001 counts as $3.34; the
+collector has no proof that the positive fraction is noise. Beside it, a new
+$3.33 key under a $6.66 policy is blocked. An exact $3.33 observation admits the
+same key. Close-value mutation tolerance still avoids repeated automatic PATCHes;
+it does not reduce counted exposure. An over-limit plan can therefore remain
+until the documented limit remedy is confirmed. Evidence:
+`tests/test_credential_doors.py::test_or_policy_counts_every_positive_provider_fraction`
+and `test_or_policy_amounts_are_whole_cents_against_the_exact_limit`.
+This does not establish an atomic provider snapshot or account for unobserved
+external changes; unresolved consumer and rotation reconciliation remains open.
+
 An applied spend policy records its explicit origin and exact digest on new and
 selected existing key rows; dry-run preserves ledger state. Rotation of a marked
 row refuses before a provider request because current aggregate headroom is unknown.

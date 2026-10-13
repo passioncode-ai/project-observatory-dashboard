@@ -1,0 +1,197 @@
+{
+  "source_commit": "f1dc6a787479ffde976b9fa3e1935f1f62f9a419",
+  "source_bindings": [
+    {
+      "path": "observatory/engine/tests/adv_j1_property.py",
+      "sha256": "658675021c9d7cef4d14b6e6b7161f1a7a903b8297beebeafac213e21ed6685a"
+    },
+    {
+      "path": "observatory/engine/tests/test_credential_doors.py",
+      "sha256": "cad91eb2029563733eab1cfdeac4d4aa487440aa240747deb44646c129cab079"
+    },
+    {
+      "path": "observatory/engine/tools/openrouter.py",
+      "sha256": "eda88faa0e7948b9189ad670b19e8b7fb6f9a7c5e5063d9ab4259179dcfbc93f"
+    },
+    {
+      "path": "observatory/engine/collectors/scan_openrouter.py",
+      "sha256": "b146f9f331ca5ef4d24b3c328db46b860fa319797018ecdbe811fe4e1a307aae"
+    },
+    {
+      "path": "observatory/engine/tests/adversarial_runner.py",
+      "sha256": "a70295a9bbea620f18d4fd1d39148667b69073a99dd6e356b0b7427e9aa425e6"
+    }
+  ],
+  "cases": [
+    {
+      "seed": 7000828,
+      "issues": [
+        "(a) POST /keys took the project total to 2792.3201 past 2792.32"
+      ],
+      "effects": [
+        {
+          "kind": "POST /keys",
+          "before": "2094.2401",
+          "after": "2792.3201",
+          "cap_cents": 279232,
+          "violations": [
+            "(a) POST /keys took the project total to 2792.3201 past 2792.32"
+          ]
+        }
+      ]
+    },
+    {
+      "seed": 7000906,
+      "issues": [
+        "(a) POST /keys took the project total to 83.8001 past 83.8"
+      ],
+      "effects": [
+        {
+          "kind": "POST /keys",
+          "before": "41.9001",
+          "after": "83.8001",
+          "cap_cents": 8380,
+          "violations": [
+            "(a) POST /keys took the project total to 83.8001 past 83.8"
+          ]
+        }
+      ]
+    },
+    {
+      "seed": 7001367,
+      "issues": [
+        "(a) POST /keys took the project total to 3.8801 past 3.88"
+      ],
+      "effects": [
+        {
+          "kind": "POST /keys",
+          "before": "2.9101",
+          "after": "3.8801",
+          "cap_cents": 388,
+          "violations": [
+            "(a) POST /keys took the project total to 3.8801 past 3.88"
+          ]
+        }
+      ]
+    },
+    {
+      "seed": 7001538,
+      "issues": [
+        "(a) POST /keys took the project total to 0.6401 past 0.64"
+      ],
+      "effects": [
+        {
+          "kind": "POST /keys",
+          "before": "0.4801",
+          "after": "0.6401",
+          "cap_cents": 64,
+          "violations": [
+            "(a) POST /keys took the project total to 0.6401 past 0.64"
+          ]
+        }
+      ]
+    },
+    {
+      "seed": 7002311,
+      "issues": [
+        "(a) POST /keys took the project total to 3893.7202 past 3893.72"
+      ],
+      "effects": [
+        {
+          "kind": "POST /keys",
+          "before": "2920.2902",
+          "after": "3893.7202",
+          "cap_cents": 389372,
+          "violations": [
+            "(a) POST /keys took the project total to 3893.7202 past 3893.72"
+          ]
+        }
+      ]
+    },
+    {
+      "seed": 7002478,
+      "issues": [
+        "(a) POST /keys took the project total to 6810.6001 past 6810.6"
+      ],
+      "effects": [
+        {
+          "kind": "POST /keys",
+          "before": "5448.4801",
+          "after": "6810.6001",
+          "cap_cents": 681060,
+          "violations": [
+            "(a) POST /keys took the project total to 6810.6001 past 6810.6"
+          ]
+        }
+      ]
+    },
+    {
+      "seed": 7002785,
+      "issues": [
+        "(a) POST /keys took the project total to 957.4801 past 957.48"
+      ],
+      "effects": [
+        {
+          "kind": "POST /keys",
+          "before": "718.1101",
+          "after": "957.4801",
+          "cap_cents": 95748,
+          "violations": [
+            "(a) POST /keys took the project total to 957.4801 past 957.48"
+          ]
+        }
+      ]
+    },
+    {
+      "seed": 7002924,
+      "issues": [
+        "(a) POST /keys took the project total to 7082.3701 past 7082.37"
+      ],
+      "effects": [
+        {
+          "kind": "POST /keys",
+          "before": "4721.5801",
+          "after": "7082.3701",
+          "cap_cents": 708237,
+          "violations": [
+            "(a) POST /keys took the project total to 7082.3701 past 7082.37"
+          ]
+        }
+      ]
+    },
+    {
+      "seed": 7003447,
+      "issues": [
+        "(a) POST /keys took the project total to 18.6001 past 18.6"
+      ],
+      "effects": [
+        {
+          "kind": "POST /keys",
+          "before": "14.8801",
+          "after": "18.6001",
+          "cap_cents": 1860,
+          "violations": [
+            "(a) POST /keys took the project total to 18.6001 past 18.6"
+          ]
+        }
+      ]
+    },
+    {
+      "seed": 7003549,
+      "issues": [
+        "(a) POST /keys took the project total to 59.1001 past 59.1"
+      ],
+      "effects": [
+        {
+          "kind": "POST /keys",
+          "before": "39.4001",
+          "after": "59.1001",
+          "cap_cents": 5910,
+          "violations": [
+            "(a) POST /keys took the project total to 59.1001 past 59.1"
+          ]
+        }
+      ]
+    }
+  ]
+}

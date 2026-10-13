@@ -1,0 +1,30 @@
+{
+  "base_commit": "12b7343277004aa408283fb4aef06ccbae935954",
+  "source_sha256": "1163d4f7c1b47cbf07b5301bcbfba2ae805d6ea2f59890020f77b32aa680cc0a",
+  "red": {
+    "exit_code": 1,
+    "assertions_pass": 11,
+    "assertions_fail": 4
+  },
+  "green": {
+    "exit_code": 0,
+    "assertions_pass": 37,
+    "assertions_fail": 0
+  },
+  "tests": [
+    "test_or_policy_counts_every_positive_provider_fraction",
+    "test_or_policy_amounts_are_whole_cents_against_the_exact_limit",
+    "test_or_policy_lowers_ceilings_before_it_raises_one",
+    "test_or_policy_counts_every_key_of_the_project",
+    "test_or_policy_raises_only_what_fits_beside_unread_or_renamed_keys"
+  ],
+  "live_provider": "NOT_RUN",
+  "negative_red": {
+    "exit_code": 1,
+    "assertions_fail": 2
+  },
+  "range_red": {
+    "exit_code": 1,
+    "assertions_fail": 4
+  }
+}

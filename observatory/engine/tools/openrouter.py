@@ -622,8 +622,8 @@ class PolicyPartial(RuntimeError):
 #: The largest amount, in USD, a policy limit or a key ceiling may name. Far past any real ceiling;
 #: what it refuses is a number whose cents do not fit a float (1e307 overflowed, round 3).
 MAX_USD = 1_000_000_000.0
-#: Two ceilings closer than this are the same ceiling: a provider that echoes 3.330000001 or stores
-#: cents must not be re-PATCHed on every run.
+#: Close ceilings avoid automatic re-PATCH on every run. This is only mutation
+#: tolerance: aggregate admission still counts every observed positive fraction.
 SAME_CEILING_USD = 0.005
 #: How long a run waits for another `issue-for-policy` run to finish before it refuses.
 POLICY_LOCK_WAIT_S = 30.0
@@ -844,19 +844,29 @@ def _read_held(name: str, rec: dict, account: str | None) -> tuple[str | None, d
     return None, row, ""
 
 
-def _ceiling_of(row: dict | None) -> float | None:
+def _ceiling_of(row: dict | None) -> int | float | None:
     limit = (row or {}).get("limit")
-    return float(limit) if isinstance(limit, (int, float)) and not isinstance(limit, bool) else None
+    if not isinstance(limit, (int, float)) or isinstance(limit, bool):
+        return None
+    # Keep integers exact and refuse unsupported observations before any float
+    # conversion: an enormous JSON integer must not overflow or lose capacity.
+    return limit if 0 <= limit <= MAX_USD and math.isfinite(limit) else None
 
 
 def _cents_up(usd) -> int | None:
-    """A ceiling the provider holds, in cents rounded UP (3.334 is 334), so a total never reads
-    lower than what can be spent. Float noise below a hundredth of a cent (an echo of 3.330000001)
-    is not a cent. None (no ceiling) is unbounded."""
-    if not isinstance(usd, (int, float)) or isinstance(usd, bool) or not math.isfinite(usd):
+    """Round an observed ceiling UP without discarding positive fractions.
+
+    A value such as 3.330000001 may be actual exposure; no provider precision
+    contract proves it is noise. Counting it as 333 cents could authorize a mint
+    beyond the strict policy limit. Missing, nonfinite or negative observations
+    or unsupported observations are unknown (unbounded), rather than evidence
+    of free capacity. The bound is the same MAX_USD supported by policy inputs.
+    """
+    if (not isinstance(usd, (int, float)) or isinstance(usd, bool)
+            or not 0 <= usd <= MAX_USD or not math.isfinite(usd)):
         return None
-    exact = decimal.Decimal(repr(float(usd))) * 100 - decimal.Decimal("0.01")
-    return max(int(exact.to_integral_value(rounding=decimal.ROUND_CEILING)), 0)
+    exact = decimal.Decimal(str(usd)) * 100
+    return int(exact.to_integral_value(rounding=decimal.ROUND_CEILING))
 
 
 def _counted(state: str | None, row: dict | None, rec: dict) -> int | None:
