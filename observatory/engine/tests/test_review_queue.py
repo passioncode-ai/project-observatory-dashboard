@@ -226,6 +226,24 @@ def test_the_health_page_does_not_count_a_lesson_in_its_seven_days() -> None:
           digest.get("erases_within_7d") == 1, json.dumps(digest))
 
 
+
+def test_an_erasure_horizon_for_a_lesson_row_is_its_own() -> None:
+    """`_erasure_horizon` words a receipt row's deadline. No receipt lists a lesson today
+    (corroboration.json keeps lessons in their own bucket), so the row is handed to it
+    directly: an 80-day proposed lesson has some 285 days left, not ten."""
+    made = (datetime.now(timezone.utc) - timedelta(days=80)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    code, out = run([PY, "-c", "import sys; sys.path.insert(0, 'tools'); import build_findings as B;"
+                     f" print(B._erasure_horizon({{'created_at': '{made}',"
+                     " 'owner': 'agent:task-pipeline', 'state': 'proposed', 'kind': 'lesson'}));"
+                     f" print(B._erasure_horizon({{'created_at': '{made}',"
+                     " 'owner': 'agent:observer', 'state': 'proposed'}))"],
+                    store_with([]))
+    lines = out.strip().splitlines()[-2:]
+    check("the lesson row is told its own horizon",
+          len(lines) == 2 and "in 285 day(s)" in lines[0], out[-300:])
+    check("and a row of no kind the general one", len(lines) == 2 and "in 10 day(s)" in lines[1],
+          out[-300:])
+
 if __name__ == "__main__":
     print("the review queue — readable, dated, and still the operator's to decide\n")
     for fn in (test_the_agent_corrects_todays_record_instead_of_appending,
@@ -236,7 +254,8 @@ if __name__ == "__main__":
                test_the_horizon_comes_from_the_file_that_owns_it,
                test_a_lesson_is_not_announced_for_erasure_at_the_general_horizon,
                test_the_digest_does_not_name_a_lesson_for_erasure,
-               test_the_health_page_does_not_count_a_lesson_in_its_seven_days):
+               test_the_health_page_does_not_count_a_lesson_in_its_seven_days,
+               test_an_erasure_horizon_for_a_lesson_row_is_its_own):
         fn()
     print()
     if FAILURES:

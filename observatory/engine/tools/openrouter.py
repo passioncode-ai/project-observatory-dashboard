@@ -814,11 +814,11 @@ def _ceiling_of(row: dict | None) -> float | None:
 
 def _cents_up(usd) -> int | None:
     """A ceiling the provider holds, in cents rounded UP (3.334 is 334), so a total never reads
-    lower than what can be spent. Float noise below a hundredth of a cent (an echo of 3.330000001)
-    is not a cent. None (no ceiling) is unbounded."""
+    lower than what can be spent. Float noise below a millionth of a dollar (an echo of 3.330000001)
+    is not a cent; a provider holding $0.0001 more than asked is (fix 5). None is unbounded."""
     if not isinstance(usd, (int, float)) or isinstance(usd, bool) or not math.isfinite(usd):
         return None
-    exact = decimal.Decimal(repr(float(usd))) * 100 - decimal.Decimal("0.01")
+    exact = decimal.Decimal(repr(float(usd))) * 100 - decimal.Decimal("0.0001")
     return max(int(exact.to_integral_value(rounding=decimal.ROUND_CEILING)), 0)
 
 
@@ -1482,6 +1482,12 @@ def cmd_revoke(name: str, forget_pending: bool = False, reason: str | None = Non
     except (ValueError, LookupError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
+    except OSError as exc:
+        # The ledger could not be written (a full disk): the provider may already have deleted the
+        # key; the row stays, and the next revoke finds it gone (404) and clears it.
+        print(f"refused: the ledger could not be written ({type(exc).__name__}: {exc})\n  the ledger row was "
+              f"kept; run the revoke again once the disk takes writes", file=sys.stderr)
+        return 1
     except RuntimeError as exc:
         rec = (ledger().get("issued", {}).get(name) or {}) if LEDGER.exists() else {}
         hint = (f"\n  past the listing the name cannot be looked up: once the key called {name!r} is deleted at "
@@ -1572,6 +1578,53 @@ def cmd_ping() -> int:
     return 1 if bad else 0
 
 
+def read_activity(admin: str, key_hash: str, date: str | None = None) -> list[dict]:
+    """One issued key's activity at the provider: rows by UTC day and model.
+
+    GET /activity is the management key's read (the last 30 completed UTC
+    days, or one `date`), filtered by the issued key's hash. The hash travels
+    to the provider only; callers must not print it. A refusal raises — an
+    unreadable report is not a measured zero.
+    """
+    path = "/activity?api_key_hash=" + key_hash + (f"&date={date}" if date else "")
+    rows = _request(path, admin).get("data")
+    if not isinstance(rows, list):
+        raise RuntimeError("openrouter answered /activity without a data list")
+    return rows
+
+
+def cmd_spend(name: str, date: str | None, as_json: bool) -> int:
+    """What an issued key cost, by day and model, from the provider's own record."""
+    if date is not None and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        raise ValueError("--date is YYYY-MM-DD (a UTC day in the last 30)")
+    rec = ledger()["issued"].get(name)
+    if not rec:
+        raise LookupError(f"no issued key called {name!r} — `list` shows what exists")
+    if not rec.get("hash"):
+        raise LookupError(f"{name}: the ledger row has no provider hash to filter by")
+    _label, admin = read_admin(rec["account"])
+    rows = read_activity(admin, rec["hash"], date)
+    keep = ("date", "model", "requests", "prompt_tokens", "completion_tokens",
+            "reasoning_tokens", "usage")
+    # The provider sends the day as "YYYY-MM-DD 00:00:00"; the day is the unit.
+    out = sorted(({**{k: r.get(k) for k in keep}, "date": str(r.get("date") or "")[:10]}
+                  for r in rows),
+                 key=lambda r: (str(r["date"]), str(r["model"])))
+    total = round(sum(float(r.get("usage") or 0) for r in out), 9)
+    if as_json:
+        print(json.dumps({"key": name, "date": date, "rows": out, "totalUsd": total},
+                         ensure_ascii=False))
+        return 0
+    scope = f"on {date}" if date else "in the last 30 UTC days"
+    print(f"{name}: {len(out)} row(s) {scope}, from the provider's activity report")
+    for r in out:
+        print(f"  {r['date']}  {r['model']:34s} {r['requests'] or 0:>5} req  "
+              f"in {r['prompt_tokens'] or 0} out {r['completion_tokens'] or 0}  "
+              f"${float(r['usage'] or 0):.6f}")
+    print(f"  total ${total:.6f}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1608,6 +1661,10 @@ def main() -> int:
                       "several are stashed and no --account), the slot reads held-unread and the run exits 1")
     sub.add_parser("list", help="what exists — names, ceilings, places; never values")
     sub.add_parser("ping", help="alive? spent how much of its ceiling?")
+    p_sp = sub.add_parser("spend", help="one issued key's cost by day and model (provider activity)")
+    p_sp.add_argument("name")
+    p_sp.add_argument("--date", help="one UTC day, YYYY-MM-DD, in the last 30")
+    p_sp.add_argument("--json", action="store_true")
     p_li = sub.add_parser("limit", help="show or move a key's USD ceiling; for a key issued by a spend policy, "
                           "raising it can take it past its share of the project limit until the next "
                           "issue-for-policy run")
@@ -1655,6 +1712,17 @@ def main() -> int:
         return cmd_list()
     if a.cmd == "ping":
         return cmd_ping()
+    if a.cmd == "spend":
+        try:
+            return cmd_spend(a.name, a.date, a.json)
+        except (LookupError, ValueError) as exc:
+            print(str(exc).strip("'\""), file=sys.stderr)
+            return 2
+        except RuntimeError as exc:
+            # A refused or unreadable report is said as such — never a $0.
+            print(f"{a.name}: the activity report is unavailable, no figure: {exc}",
+                  file=sys.stderr)
+            return 1
     if a.cmd == "limit":
         return cmd_limit(a.name, a.set_to, a.reset)
     if a.cmd == "disable":

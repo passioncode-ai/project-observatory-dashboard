@@ -2040,6 +2040,74 @@ def test_or_issue_for_policy_command_line() -> None:
     check("a refused policy exits 2", m.cmd_issue_for_policy(str(good), "example", 99.0, False) == 2, "")
 
 
+def test_or_spend_reads_one_keys_activity_and_prints_no_handle() -> None:
+    """`spend` answers "what did this key cost, by day and model" from the
+    provider's activity report — the management key's read, filtered by the
+    issued key's hash. The hash is a handle that acts on the key: it is sent to
+    the provider, never printed
+    (an attempt with no request id can only be reconciled from this record)."""
+    m = orr()
+    d = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    m.ADMIN_STORE = d / "openrouter-admin"
+    m.ADMIN_STORE.mkdir(parents=True)
+    private_io.write(m.ADMIN_STORE / "example-account", "prov\n")
+    m.LEDGER = d / "ledger.json"
+    m.save_ledger({"issued": {"example-agent": {
+        "account": "example-account", "hash": "h" * 64, "delivered_to": "vault example/prod/OPENROUTER_API_KEY",
+        "limit_usd": 30}}})
+    asked: list[str] = []
+
+    def fake(path, key, payload=None, method=None):
+        asked.append(path)
+        return {"data": [
+            {"date": "2026-10-11", "model": "vendor/model-a", "requests": 49,
+             "prompt_tokens": 9000, "completion_tokens": 7000, "reasoning_tokens": 0,
+             "usage": 0.432, "byok_usage_inference": 0},
+            {"date": "2026-10-11", "model": "vendor/model-b", "requests": 17,
+             "prompt_tokens": 8000, "completion_tokens": 5000, "reasoning_tokens": 0,
+             "usage": 0.184464, "byok_usage_inference": 0},
+        ]}
+    m._request = fake
+    import io
+    import contextlib
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_spend("example-agent", "2026-10-11", False)
+    text = out.getvalue()
+    check("spend asks the activity report for that key and day",
+          asked == ["/activity?api_key_hash=" + "h" * 64 + "&date=2026-10-11"], str(asked))
+    check("it prints per day and model with a total", rc == 0
+          and "vendor/model-a" in text and "0.432" in text
+          and "total" in text and "0.616464" in text, text[:300])
+    check("the hash never reaches the output", "h" * 16 not in text, text[:300])
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        m.cmd_spend("example-agent", None, True)
+    doc = json.loads(out.getvalue())
+    check("--json is the rows and the total, no hash",
+          doc["key"] == "example-agent" and abs(doc["totalUsd"] - 0.616464) < 1e-9
+          and "hash" not in json.dumps(doc), out.getvalue()[:200])
+    check("without --date the last 30 days are asked",
+          asked[-1] == "/activity?api_key_hash=" + "h" * 64, asked[-1])
+    try:
+        m.cmd_spend("nobody", None, False)
+        check("an unknown key is refused", False, "no error")
+    except LookupError:
+        check("an unknown key is refused", True)
+
+    def refused(path, key, payload=None, method=None):
+        raise RuntimeError("openrouter answered 403 for /activity: management key required")
+    m._request = refused
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            m.cmd_spend("example-agent", None, False)
+        check("a refused report is an error, never a $0", False, out.getvalue()[:120])
+    except RuntimeError:
+        check("a refused report is an error, never a $0",
+              "total" not in out.getvalue(), out.getvalue()[:120])
+
+
 def _two_slots(**over):
     """A limited policy with two project-key sources of the same project."""
     return _policy(credentialSources=[{"kind": "project-key", "ref": "vault:project-a/prod/MODEL_KEY"},
@@ -2704,6 +2772,32 @@ def test_or_policy_fix_five() -> None:
     check("--forget-pending refuses a row that is not a hashless pending one", rc == 1 and p.keys
           and "project-a-prod-k0" in m.ledger()["issued"], e3.getvalue())
 
+    # Harness: a provider holding $0.0001 more than the plan is past the limit; only float noise below
+    # a millionth of a dollar is not a cent.
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(2), "example")
+    p.keys[p.by_name("k1")]["limit"] = 5.0001
+    rc, out = _cmd(m, _pol(2), "example", None, True)
+    check("a provider ceiling $0.0001 past the plan counts as the next cent: OVER LIMIT, exit 1",
+          rc == 1 and "OVER LIMIT by $0.01 now" in out, out)
+    check("float noise (5.000000001) is not a cent", m._cents_up(5.000000001) == 500 and m._cents_up(5.0001) == 501,
+          f"{m._cents_up(5.000000001)} {m._cents_up(5.0001)}")
+    # Harness: a ledger write that fails inside revoke is a refusal with exit 1, never a traceback.
+    m, p = _r3_door()
+    m.issue_for_policy(_pol(1), "example")
+
+    def disk_refuses(doc):
+        raise OSError("the disk refused the ledger write")
+    m.paths.SCRATCH = pathlib.Path(tmpdir.mkdtemp())      # no consumer scan: an earlier case set one
+    m.save_ledger = disk_refuses
+    try:
+        with contextlib.redirect_stderr(io.StringIO()) as e4:
+            rc = m.cmd_revoke("project-a-prod-k0")
+        check("revoke whose ledger write fails exits 1 and says the row was kept", rc == 1 and "kept" in e4.getvalue(),
+              e4.getvalue())
+    except OSError as exc:
+        check("revoke whose ledger write fails exits 1 and says the row was kept", False, f"crashed: {exc}")
+
     # Item 5: a disk that is full under the test is the machine's failure, never a (b) violation.
     import errno
     rng = random.Random(1)
@@ -3081,7 +3175,8 @@ if __name__ == "__main__":
                test_or_issue_works_on_an_account_past_the_listing,
                test_or_issue_is_one_function_with_a_monthly_reset,
                test_or_a_daily_ceiling_is_issued_and_keeps_its_period,
-               test_or_ping_names_the_strays_it_does_not_manage):
+               test_or_ping_names_the_strays_it_does_not_manage,
+               test_or_spend_reads_one_keys_activity_and_prints_no_handle):
         fn()
     print()
     if FAILURES:

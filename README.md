@@ -99,7 +99,7 @@ What agents write and read back is agent memory, and every write is a proposal (
 |---|---|
 | `observatory_record` | a note about one project: the claim and why it mattered |
 | `observatory_learn` | a lesson inside one project, from a failure record and its fix record |
-| `observatory_lesson` | a lesson for every project: a retro entry's class (`classKey`, `title`, `trigger`, `check`, `nouns`) and its origin, the project's pseudonymous key `p-<12 hex>` and the evidence commit. One record per class and project; a second, distinct project recording the same class promotes both to `observed` when both commits resolve in clones the registry knows on this machine (an unknown key is no witness). Kept 365 days while proposed. Local stdio only |
+| `observatory_lesson` | a lesson for every project: a retro entry's class (`classKey`, `title`, `trigger`, `check`, `nouns`) and its origin, the project's pseudonymous key `p-<12 hex>` and the evidence commit. One record per class and project; a second, distinct project recording the same class promotes both to `observed` when both commits resolve in clones the registry knows on this machine (an unknown key is no witness). If a promoted lesson later cites a different commit, or its evidence stops resolving in two known projects, the observed record is archived and a new proposed one replaces it (`outcome: replaced`). Kept 365 days while proposed. Local stdio only |
 | `observatory_search` | records by word forms; `kinds: ["lesson"]` without a project finds lessons across projects, filtered before the 300-match window, and every hit names its `kind` |
 | `observatory_recall` | current records, paged; `kinds` narrows the page and its `total` alike |
 
