@@ -166,7 +166,14 @@ def existing(conn: sqlite3.Connection, class_key: str, project_key: str) -> sqli
         " AND l.state NOT IN ('rejected', 'archived', 'superseded')"
         " AND json_extract(l.body_json, '$.classKey') = ?"
         " AND json_extract(l.body_json, '$.origin.projectId') = ?"
-        " ORDER BY l.created_at, l.memory_id LIMIT 1",
+        # THE OLDEST RECORD FIRST, decided by when each record was MINTED and then by its
+        # first row's insertion order — never by the random id. Two records of one class and
+        # project can be minted in one second (an archive and its replacement), and a tie
+        # broken by `memory_id` picked either. One open record per (classKey, project) is
+        # the invariant; this order only makes a breach of it answer the same way each time.
+        " ORDER BY (SELECT MIN(x.created_at) FROM ledger x WHERE x.memory_id = l.memory_id),"
+        " (SELECT MIN(x.rowid) FROM ledger x WHERE x.memory_id = l.memory_id), l.memory_id"
+        " LIMIT 1",
         (KIND, class_key, project_key)).fetchone()
 
 
