@@ -298,3 +298,16 @@ remain visible. An agent reads the same saved result through
 Missing, unsupported, malformed and stale receipts are distinguishable from a
 current successful empty observation. `full doctor` carries the same saved state.
 Tests: `test_open_unlinked.py::Observation`, `test_open_unlinked.py::SavedObservation`.
+
+### Observed local checkout state
+
+A person runs the existing explicit-root checkout scan and reads saved coverage;
+an agent reads the same coverage section. Each sample separates recorded Git state
+from current state and exposes bounded status/index record counts. Ignored records
+do not stand for all nested files. Assume-unchanged/skip-worktree flags, malformed
+or partial output, changed bindings, stale evidence, and unsupported Windows pipes
+show unknown; bare repositories show not-applicable. A clean observation grants
+no cleanup authority and does not prove absence of a concurrent writer.
+Tests: `test_checkout_state.py::CheckoutState` (real Git changes and index flags,
+unchanged index, byte filenames, parser limits, binding change, incomplete reads,
+bare/unborn/Windows, saved-reader validation).
