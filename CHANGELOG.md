@@ -14,11 +14,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   observatory_lesson` prints (where the engine lacks the tool, the emitter writes `lesson:` notes through
   `observatory_record`); `tests/lesson_emitter_fixture.json` holds that shape and the published schema is
   checked against it. One record per (classKey, project): a repeat revises it or writes nothing. A
-  path, a URL, an e-mail address, a line break or a `classKey` the redactor would change is refused before any write;
-  a promoted lesson that cites a new commit is archived and replaced by a new proposal (`outcome: replaced`), which is
-  promoted again only once that commit resolves (`invalid-lesson`, every reason
-  listed); credential shapes and known values are redacted. Written `proposed`, confidence 0.5, local stdio only.
-  The tool publishes its outputSchema.
+  path, a URL, an e-mail address, a line break or a `classKey` the redactor would change is refused before any
+  write (`invalid-lesson`, every reason listed); credential shapes and known values are redacted. A promoted
+  lesson that cites a new commit is archived and replaced by a new proposal (`outcome: replaced`), which is
+  promoted again only once that commit resolves. Written `proposed`, confidence 0.5, local stdio only. The tool
+  publishes its outputSchema.
 - **`observatory_search` and `observatory_recall` take `kinds`**, applied inside the candidate query before the
   300-match window, and every hit names its `kind`; a lesson hit carries its fields as `lesson`. Across projects
   the search abstained with the window full of per-session turn records (measured: `count 0, abstain: true`);
