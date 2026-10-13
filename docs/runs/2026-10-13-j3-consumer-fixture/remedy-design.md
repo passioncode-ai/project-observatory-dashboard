@@ -120,3 +120,14 @@ adapter acquires no nested lock. External changes after its precheck remain outs
 this simulated phase. No production race-safety claim follows from these negatives.
 The producer fixture at `532b709` passed six independent probes and representative
 residual replays. The remedial adapter is a separate change requiring its own review.
+
+## Renamed identity correction
+
+The first implementation `f3ffea10` wrongly allowed an absence attestation when a
+live model-owned identity had been renamed away from the pending name. A regression
+failed before correction, and independent review reproduced it. The adapter now
+requires every synthetic model-owned key to have an explicit primary, predecessor
+or successor ledger reference; unknown/malformed ownership refuses. The ownership
+fact is model data, never inferred from a display-name prefix, and is included in
+the inventory digest. The finite operator-proof scope remains separate from real
+provider discoverability. The original failing source receipt is retained.

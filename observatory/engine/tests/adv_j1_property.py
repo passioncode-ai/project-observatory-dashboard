@@ -385,7 +385,15 @@ def pending_absence_attestation(m, p, name, consumers, *, complete):
                not isinstance(row.get('hash'),str) or row['hash'] != handle
                for handle,row in p.keys.items()): return None
         if any(row['name'] == name for row in p.keys.values()): return None
-        inventory = {handle:p.public(row) for handle,row in p.keys.items()}
+        # Names can change after an unknown mint. The synthetic operator must
+        # account for every model-owned identity before certifying no extra key;
+        # explicit ownership is fixture data, never a display-name inference.
+        if any(type(row.get('_proj')) is not bool for row in p.keys.values()): return None
+        if any(not isinstance(row,dict) for row in doc['issued'].values()): return None
+        represented = set().union(*(m._identity_refs(row) for row in doc['issued'].values()))
+        if any(row['_proj'] and handle not in represented for handle,row in p.keys.items()): return None
+        inventory = {handle:{'owned':row['_proj'],'provider':p.public(row)}
+                     for handle,row in p.keys.items()}
         return {'kind':'synthetic-operator-absence','name':name,'account':rec['account'],
                 'ledger_digest':_fixture_digest(doc),'inventory_digest':_fixture_digest(inventory),
                 'reason':'Synthetic operator observed complete finite inventory after manual cleanup; matching identity absent'}

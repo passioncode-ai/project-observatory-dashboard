@@ -158,6 +158,15 @@ class ModelBinding(unittest.TestCase):
         self.assertIsNone(A.pending_absence_attestation(self.m,self.p,name,{},complete=True))
         self.assertIn(name,self.m.ledger()['issued'])
 
+    def test_pending_attestation_never_infers_absence_from_renamed_unknown_identity(self):
+        name=self.pending_fixture()
+        self.p.keys['unknown']={'hash':'unknown','name':'renamed-away','_proj':True,'limit':1}
+        self.assertIsNone(A.pending_absence_attestation(self.m,self.p,name,{},complete=True))
+        for ownership in (None, 'false', 0):
+            self.p.keys['unknown']['_proj']=ownership
+            self.assertIsNone(A.pending_absence_attestation(self.m,self.p,name,{},complete=True))
+        self.assertIn(name,self.m.ledger()['issued'])
+
     def test_operator_admission_has_no_rng_or_provider_hook_and_binds_inventory(self):
         name=self.pending_fixture(); calls=self.p.calls; state=random.getstate()
         self.p.hook=(calls+1,lambda: self.fail('operator observation called the provider'))
