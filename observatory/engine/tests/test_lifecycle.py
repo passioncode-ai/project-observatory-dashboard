@@ -21,6 +21,7 @@ from __future__ import annotations
 import ast
 import importlib
 import json
+import contextlib
 import os
 import pathlib
 import plistlib
@@ -593,6 +594,88 @@ class OneRotationPolicy(Workspace):
         with patch.object(rl.log_policy, "MAX_BYTES", 100):
             self.assertEqual(rl.main([]), 0)
         self.assertTrue((self.paths.SCRATCH / "store-faults.jsonl.1").exists())
+
+
+class LogRetentionEvidence(Workspace):
+    def setUp(self):
+        super().setUp()
+        self.lp = self.reload("log_policy")
+        self.logs = self.paths.STATE / "logs"
+        self.logs.mkdir(parents=True, exist_ok=True)
+
+    def test_missing_is_unknown_but_empty_directory_is_measured(self):
+        absent = self.lp.sweep_report(self.base / "absent")
+        empty = self.lp.sweep_report(self.logs)
+        self.assertEqual(absent["status"], "unknown")
+        self.assertIsNone(absent["observed_count"])
+        self.assertEqual(empty["status"], "complete")
+        self.assertEqual(empty["observed_count"], 0)
+
+    def test_unreadable_and_linked_scopes_are_unknown(self):
+        linked = self.base / "linked"
+        linked.symlink_to(self.logs, target_is_directory=True)
+        self.assertEqual(self.lp.sweep_report(linked)["status"], "unknown")
+        with patch.object(Path, "iterdir", side_effect=PermissionError("PRIVATE_LOG_MARKER")):
+            receipt = self.lp.sweep_report(self.logs)
+        self.assertEqual(receipt["status"], "unknown")
+        self.assertIsNone(receipt["observed_count"])
+        self.assertNotIn("PRIVATE_LOG_MARKER", json.dumps(receipt))
+
+    def test_refusals_and_failures_preserve_content_and_report_no_paths(self):
+        for mode in ("hardlink", "generation", "copy", "fsync"):
+            folder = self.logs / mode
+            folder.mkdir()
+            log = folder / "serverd.err"
+            log.write_bytes(b"PRIVATE_LOG_CONTENT" * 10)
+            log.chmod(0o644)
+            before = log.read_bytes()
+            with contextlib.ExitStack() as stack:
+                if mode == "hardlink":
+                    os.link(log, self.base / "alias")
+                elif mode == "generation":
+                    (folder / "serverd.err.1").symlink_to(self.base / "missing")
+                else:
+                    stack.enter_context(patch.object(self.lp.shutil if mode == "copy" else self.lp.os,
+                                                    "copyfileobj" if mode == "copy" else "fsync",
+                                                    side_effect=OSError("PRIVATE_LOG_ERROR")))
+                receipt = self.lp.sweep_report(folder, max_bytes=10)
+            self.assertEqual(log.read_bytes(), before)
+            self.assertEqual(log.stat().st_mode & 0o777, 0o644)
+            self.assertEqual(receipt["status"], "partial")
+            self.assertGreater(receipt["refused"] + receipt["failed"], 0)
+            for private in (str(folder), "serverd.err", "PRIVATE_LOG"):
+                self.assertNotIn(private, json.dumps(receipt))
+
+    def test_permission_failure_is_partial_even_below_rotation_cap(self):
+        log = self.logs / "small.log"
+        log.write_bytes(b"keep")
+        log.chmod(0o644)
+        with patch.object(self.lp.osprivacy, "make_private", side_effect=OSError("PRIVATE_PERMISSION")):
+            receipt = self.lp.sweep_report(self.logs)
+        self.assertEqual(receipt["status"], "partial")
+        self.assertEqual(receipt["failed"], 1)
+        self.assertEqual(log.read_bytes(), b"keep")
+        self.assertEqual(log.stat().st_mode & 0o777, 0o644)
+        self.assertNotIn("PRIVATE_PERMISSION", json.dumps(receipt))
+
+    def test_external_same_named_log_does_not_skip_local_generation_permissions(self):
+        local = self.logs / "same.log.1"
+        local.write_bytes(b"old")
+        local.chmod(0o644)
+        external = self.base / "same.log"
+        external.write_bytes(b"x" * 100)
+        self.lp.sweep_report(self.logs, files=(external,), max_bytes=10)
+        self.assertEqual(local.stat().st_mode & 0o777, 0o600)
+
+    def test_normal_rotation_observed_once_and_legacy_list_preserved(self):
+        log = self.logs / "gate.log"
+        log.write_bytes(b"x" * 100)
+        receipt = self.lp.sweep_report(self.logs, max_bytes=10)
+        self.assertEqual(receipt["status"], "complete")
+        self.assertEqual(receipt["rotated"], 1)
+        self.assertEqual((self.logs / "gate.log.1").read_bytes(), b"x" * 100)
+        log.write_bytes(b"y" * 100)
+        self.assertEqual(self.lp.sweep(self.logs, max_bytes=10), ["gate.log"])
 
 
 class MigrationBackupsAreRetained(Workspace):

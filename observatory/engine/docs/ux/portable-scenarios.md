@@ -286,3 +286,21 @@ unknown effects, never `pruned`. Successful command completion does not invent a
 registration count. A path that reappears is skipped. Inspect current registrations
 before retrying; raw command output is absent from reasons.
 Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` (five cases).
+
+
+### Maintenance log-retention evidence
+
+After maintenance, the person or agent reads per-scope log-retention evidence
+through `full maintain status` and doctor; Health shows their incomplete/stale
+warning and retains the typed result in its payload. Engine, updater and hook log
+scopes have separate measured times, observed counts, completed rotations,
+refusals and failures. Missing/unreadable scopes are unknown, not measured empty;
+a failed scope does not suppress peers. A report older than one hour is stale
+and never presented as a new attempt. Reasons are bounded codes, without file
+paths, log contents or exception text. Existing rotation/list APIs retain their
+contracts. No new retention policy or filesystem-lock guarantee is introduced.
+
+Acceptance: synthetic small-file tests for empty/missing/unreadable directories,
+linked files/parents/generations, copy and fsync failure, independent peer scopes,
+persistence, stale/malformed receipt projection and private marker omission.
+Implementation acceptance and installed observation remain pending.
