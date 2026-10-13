@@ -53,7 +53,7 @@ def _probe(path):
     """Only metadata reads. The parent bounds this process including Git setup."""
     import safe_git
     def query(*args):
-        result = safe_git.run(args, repo=path, timeout=1)
+        result = safe_git.run(args, repo=path, timeout=1, offline=True)
         return result.stdout.strip() if result.returncode == 0 else None
     bare = query('rev-parse', '--is-bare-repository')
     gitdir = query('rev-parse', '--absolute-git-dir')
