@@ -1,0 +1,57 @@
+{
+  "reviewed_source": "9d709acac0309cf06f8c123d798d17af052a17e5",
+  "counterexample": {
+    "policy": 100,
+    "predecessor": 20,
+    "successor": 50
+  },
+  "correction": "retain max(current upper, requested cap) until confirmed effect",
+  "test_receipt": {
+    "schema_version": 1,
+    "coverage": "synthetic-offline",
+    "status": "PASS",
+    "suites": [
+      {
+        "file": "tests/test_rotation_capacity.py",
+        "status": "PASS",
+        "exit_code": 0,
+        "seconds": 1.91,
+        "pass_assertions": 0,
+        "fail_assertions": 0,
+        "skip_assertions": 0,
+        "unittest_cases": 16,
+        "unittest_skipped": 0,
+        "log": "rotation_capacity/run.log"
+      }
+    ],
+    "not_run": [
+      {
+        "scope": "live-provider-acceptance",
+        "status": "NOT_RUN",
+        "reason": "Requires independently configured provider accounts and explicit opt-in; no credentials are inherited."
+      },
+      {
+        "scope": "external-mcp-host-admission",
+        "status": "NOT_RUN",
+        "reason": "The local stdio protocol is tested; acceptance by another host requires a separate configured fixture run."
+      },
+      {
+        "scope": "live-secret-rotation-and-delivery",
+        "status": "NOT_RUN",
+        "reason": "Synthetic credential boundaries are tested; real rotation/delivery must be independently authorized."
+      }
+    ],
+    "suite_count": 1,
+    "python": "3.14.7"
+  },
+  "sources": [
+    {
+      "path": "observatory/engine/tests/rotation_capacity_model.py",
+      "sha256": "3f1f95711f410f28abe61fe6018a6242bf987e1fd1ae5e0c39d1a269a2d8903b"
+    },
+    {
+      "path": "observatory/engine/tests/test_rotation_capacity.py",
+      "sha256": "4116cd2cb3dad60a2e4ad4f0157685c4cec991d8a34539b52d124cb6ef3501ad"
+    }
+  ]
+}

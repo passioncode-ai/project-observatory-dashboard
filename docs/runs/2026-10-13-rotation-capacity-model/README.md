@@ -91,6 +91,16 @@ legacy limits. Then independent exact-commit review. A later explicit offline le
 re-attestation plan must bind the operator-supplied policy to exact account/key identities
 and show proposed changes before any apply operation is designed.
 
+## Independent model correction
+
+Review of `9d709ac` found that a successor larger than the final restored cap (50
+then20 under a100 policy) reduced its recorded upper bound before the lowering
+effect. The model now retains max(current upper, requested cap) until confirmation.
+The new regression first failed, then passed at restore intent, before effect and
+after effect. The suite now passes16 cases. The [initial receipt](raw/model.json)
+remains historical; [review correction evidence](raw/review-correction.json) binds
+the updated source hashes. This fixes the conditional model only.
+
 ---
 
 **Made with [ssheleg skills](https://github.com/ssheleg/sshlg-skills)**

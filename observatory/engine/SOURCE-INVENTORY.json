@@ -2126,8 +2126,8 @@
       "path": "tests/rotation_capacity_model.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "62b7cc7c2c7ed418e1e8027996b46ae7e003e6ca0e02b6de30602f289367de97",
-      "bytes": 7565
+      "export_sha256": "3f1f95711f410f28abe61fe6018a6242bf987e1fd1ae5e0c39d1a269a2d8903b",
+      "bytes": 7581
     },
     {
       "path": "tests/run_portable.py",
@@ -3590,8 +3590,8 @@
       "path": "tests/test_rotation_capacity.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5f2242e144d879cdbdbe3aa68f9558b41adfbf602a24175cee35e1b598381cae",
-      "bytes": 7691
+      "export_sha256": "4116cd2cb3dad60a2e4ad4f0157685c4cec991d8a34539b52d124cb6ef3501ad",
+      "bytes": 8286
     },
     {
       "path": "tests/test_runtime_identity.py",

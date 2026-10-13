@@ -25,6 +25,15 @@ class CapacityModel(unittest.TestCase):
             second.issue_key(name,row['limit_usd'],row['account'],row['destination'],row['project'],row['limit_reset'])
             self.assertEqual(row,second.ledger()['issued'][name])
 
+    def test_larger_successor_keeps_prior_upper_until_restore_is_confirmed(self):
+        plan=self.plan(policy='100',predecessor='20',successor='50')
+        self.assertEqual(M.simulate(plan)['status'],'conditional-completion')
+        for boundary in ('after-intent','before-effect','after-effect'):
+            result=M.simulate(plan,fault=('restore',boundary))
+            self.assertEqual(result['status'],'interrupted')
+            self.assertEqual(result['final']['successor_upper'],'50')
+            self.assertTrue(all(r['within_bound'] and r['represented'] for r in result['trace']))
+
     def test_success_preserves_strict_bound_at_every_boundary(self):
         result=M.simulate(self.plan())
         self.assertEqual(result['status'],'conditional-completion')

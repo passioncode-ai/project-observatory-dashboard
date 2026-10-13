@@ -118,7 +118,7 @@ def simulate(plan, *, fault=None, holders_complete=True, old_unused=True,
             out['missing'].append('fresh-complete-holder-proof-required'); return out
         pending = stage
         if stage == 'mint': new_upper = target  # record reservation BEFORE effect
-        if stage == 'restore': new_upper = amount(plan['predecessor'])  # old already confirmed absent
+        if stage == 'restore': new_upper = max(new_upper, amount(plan['predecessor']))  # old already confirmed absent
         if snapshot(stage, 'after-intent'): return out
         if snapshot(stage, 'before-effect'): return out
         if stage == 'lower': old = lower
