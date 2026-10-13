@@ -618,6 +618,9 @@ not included in that archive: if any are present, manual removal is skipped.
 Preserve or move them first, then rerun `full cleanup --apply --include manual`.
 The `.wrangler` directory can hold local databases and object storage; it is never
 classified as build output, even when an older cleanup configuration lists it.
+Cleanup also retains an ignored artifact parent containing a nested repository or
+local state, and any tree whose contents cannot be fully inspected within its
+bounded check. Symlinks and special files are retained conservatively.
 Regression coverage: `observatory/engine/tests/test_disk_guard.py`, `GitTierSafety`.
 
 ### The disk guard

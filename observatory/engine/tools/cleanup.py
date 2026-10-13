@@ -50,6 +50,7 @@ sys.path.insert(0, str(ROOT / "collectors"))
 import configuration  # noqa: E402
 import paths  # noqa: E402
 import safe_git  # noqa: E402
+from cleanup_safety import protected_tree_reason  # noqa: E402
 
 AUTO_CLASSES = ("branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts")
 MANUAL_CLASSES = ("branch-unique", "worktree-dirty")
@@ -234,7 +235,7 @@ def plan_artifacts(cfg: dict, busy: set[str]) -> list[dict]:
                         in_repo = git(dirpath, "rev-parse", "--git-dir").returncode == 0
                         held = busy.busy(full) if hasattr(busy, "busy") else \
                             any(b == full or b.startswith(full + "/") for b in busy)
-                        if (ignored or not in_repo) and not held:
+                        if (ignored or not in_repo) and not held and not protected_tree_reason(full):
                             out.append({"class": "build-artifacts", "tier": "auto", "target": full,
                                         "project": p["id"], "why": f"{'git-ignored' if in_repo else 'outside git'} "
                                                                    f"build output; project idle {p['idle_days']} days"})
@@ -317,7 +318,8 @@ def ignored_keepers(target: str, artifacts: set[str]) -> list[str]:
     for entry in out.stdout.split("\0"):
         if entry.startswith("!! "):
             rel = entry[3:].rstrip("/")
-            if ".wrangler" in rel.split("/") or not any(part in artifacts for part in rel.split("/")):
+            if (".wrangler" in rel.split("/") or not any(part in artifacts for part in rel.split("/"))
+                    or protected_tree_reason(os.path.join(target, rel))):
                 keep.append(rel)
     return keep
 
@@ -404,6 +406,9 @@ def act(a: dict, archive: pathlib.Path) -> dict:
     if cls == "build-artifacts":
         if busy_now(target):
             return {**rec, "result": "skipped", "reason": "a process works inside it now"}
+        why = protected_tree_reason(target)
+        if why:
+            return {**rec, "result": "skipped", "reason": why}
         size = subprocess.run(["du", "-sk", target], capture_output=True, text=True).stdout.split()
         shutil.rmtree(target, ignore_errors=True)
         return {**rec, "project": a.get("project"), "kb": int(size[0]) if size else None,

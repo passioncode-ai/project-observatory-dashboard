@@ -1001,6 +1001,46 @@ class GitTierSafety(Base):
         with patch.object(cleanup, "idle_projects", return_value=[{"id": "alpha-web", "folders": [str(repo)], "idle_days": 30}]):
             self.assertEqual(cleanup.plan_artifacts({"artifact_dirs": ["dist"]}, self.free()), [])
 
+    def test_ignored_artifact_parent_keeps_nested_state_and_git(self):
+        import cleanup
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        (repo / ".gitignore").write_text("dist/\n")
+        git(repo, "add", ".")
+        git(repo, "commit", "-qm", "init")
+        for marker in (".wrangler", ".git"):
+            with self.subTest(marker=marker):
+                nested = repo / "dist" / "nested" / marker
+                nested.mkdir(parents=True)
+                (nested / "only-copy").write_text("unique data")
+                self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), ["dist"])
+                with patch.object(cleanup, "idle_projects", return_value=[{"id": "alpha-web", "folders": [str(repo)], "idle_days": 30}]):
+                    self.assertEqual(cleanup.plan_artifacts({"artifact_dirs": ["dist"]}, self.free()), [])
+                with patch.object(cleanup, "busy_now", return_value=False):
+                    rec = cleanup.act({"class": "build-artifacts", "tier": "auto", "target": str(repo / "dist")}, self.base / "archive")
+                self.assertEqual(rec["result"], "skipped")
+                self.assertTrue((nested / "only-copy").exists())
+                import shutil
+                shutil.rmtree(repo / "dist")
+
+    def test_uncertain_artifact_walk_is_a_keeper(self):
+        import cleanup
+        import cleanup_safety
+        repo = self.base / "repo"
+        repo.mkdir()
+        git(repo, "init", "-q")
+        (repo / ".gitignore").write_text("dist/\n")
+        (repo / "dist").mkdir()
+        (repo / "dist" / "output").write_text("regenerable")
+        self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), [])
+        with patch.object(cleanup_safety.os, "scandir", side_effect=PermissionError):
+            self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), ["dist"])
+        self.assertTrue(cleanup_safety.protected_tree_reason(str(repo / "dist"), timeout=0))
+        self.assertTrue(cleanup_safety.protected_tree_reason(str(repo / "dist"), max_entries=0))
+        (repo / "dist" / "link").symlink_to(repo / "elsewhere")
+        self.assertEqual(cleanup.ignored_keepers(str(repo), {"dist"}), ["dist"])
+
     def test_a_clean_worktree_with_a_keeper_ignored_file_is_skipped(self):
         import cleanup
         repo = self.base / "repo"

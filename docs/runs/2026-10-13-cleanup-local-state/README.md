@@ -52,3 +52,16 @@ identified that gap; `test_artifact_names_below_local_state_never_make_it_dispos
 failed with an empty keeper list before the correction. Both artifact walkers now
 prune `.wrangler` subtrees and ignored-file classification preserves any path under
 one. Focused `GitTierSafety`: 6 tests passed after this correction.
+
+## Collapsed ignored-parent correction
+
+A follow-up synthetic case put state under `dist/.wrangler` and a repository under
+`dist/nested/.git`. Git collapses both to `!! dist/`, so path-segment filtering alone
+cannot preserve them. Two marker subcases failed before the bounded content scan;
+a third negative case initially lacked the new helper. Cleanup now inspects ignored
+artifact parents before classifying them disposable, during legacy artifact planning,
+and at legacy artifact removal. An unreadable, over-budget, symlink or special-file
+tree stays. `GitTierSafety`: 8 tests passed, including unreadable/zero-budget cases.
+The shared entry predicate is for the stacked disk-guard slice's own walker.
+These checks reduce ordinary plan/action drift; they do not provide filesystem
+transaction isolation against an adversarial concurrent writer.

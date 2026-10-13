@@ -62,7 +62,12 @@ filter in `tools/cleanup.py::artifact_names` excludes it from both cleanup paths
 including copied configurations that still list it. A manually removed dirty
 worktree has only its tracked patch and untracked files archived; any ignored
 files therefore cause a skip before archiving and again before force removal.
-`tests/test_disk_guard.py::GitTierSafety` reproduces and pins both refusals.
+`tests/test_disk_guard.py::GitTierSafety` reproduces and pins these refusals.
+Git can collapse an ignored artifact parent into one row. Cleanup therefore walks
+that candidate with `cleanup_safety.protected_tree_reason`: repository and local
+state markers, symlinks, special files, read errors and exhausted time/entry budgets
+all retain it. The disk guard shares the entry predicate in its own bounded walk.
+This observation does not lock out an adversarial writer between a check and removal.
 
 ## Not done here, and why
 

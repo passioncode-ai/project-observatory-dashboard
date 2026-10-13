@@ -807,8 +807,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c4a8a3b6408ee31e9cdf6eb2e8b546ed2701f3bf23d03eeee36c0edf9c4c227c",
-      "bytes": 78647,
+      "export_sha256": "717f8170ca6536b50b5dbe122d9e8689f4f4b389dd58f0b78d81ff80ee777444",
+      "bytes": 78878,
       "upstream_modified": true
     },
     {
@@ -2426,8 +2426,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "36a95b6ff36df729288819b2520a0f2beaaa3c2429ff905fd994d13f8ccd92e1",
-      "bytes": 63018
+      "export_sha256": "cbea323254475a41cc30c480fb78454a6c8482d610bcc94f302e39a79d1561dd",
+      "bytes": 65252
     },
     {
       "path": "tests/test_docs_current.py",
@@ -3986,8 +3986,8 @@
       "path": "tools/cleanup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "83c10cd509a8e38a47def1b73e73568828a6e90005c9bae62b897b0f23cf5d30",
-      "bytes": 29261
+      "export_sha256": "84d10968e2118daf1983c79a0605a92ddf12f892658c503aee32357c84317869",
+      "bytes": 29557
     },
     {
       "path": "tools/cloudflare.py",
