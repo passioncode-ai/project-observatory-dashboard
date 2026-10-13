@@ -35,3 +35,15 @@ preempt a blocked operating-system call. Membership never proves abandonment
 or authorizes removal without the existing independent safeguards.
 
 Skills: task-pipeline (test-first bounded change), evidence-docs (measured scope).
+
+
+Independent IV11 correction: schema-valid registration documents could contain
+null repository/worktree rows and crash the consumer without degradation.
+`RegistrationMalformed` reproduced ten failed assertions and eight errors across
+four tests before the fix; a missing-protection-flag case also failed before its
+strict check. The consumer now excludes malformed rows/metadata, retains valid
+peers and reports invalid counts. The dated fallback is covered as well. Selected
+`RegistrationMalformed RegistrationIntegration RegistrationFairness Builds`
+passed 17 tests, including an integrated guard run that reaches later phases.
+No live survey or cleanup was run for this correction. Next: independently
+verify the correction on the combined candidate commit.

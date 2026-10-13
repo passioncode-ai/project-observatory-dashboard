@@ -651,37 +651,73 @@ def checkouts(degraded: list | None = None) -> list[str]:
     proves ignore rules, idle time, holders and target identity.
     """
     found: list[str] = []
+    invalid = {"repositories": 0, "worktrees": 0}
+
+    def collection(value, key):
+        if isinstance(value, list):
+            return value
+        invalid[key] += 1
+        return []
+
+    def valid_path(value):
+        return isinstance(value, str) and bool(value) and "\0" not in value and os.path.isabs(value)
+
+    def dated(value):
+        return parse_stamp(value) if isinstance(value, str) else None
+
     registration_file = paths.SCRATCH / "worktree-registration.json"
     registration = _read(registration_file)
     if registration_file.exists():
-        if registration.get("schema_version") != 1 or registration.get("kind") != "worktree-registration":
+        if (type(registration.get("schema_version")) is not int or registration.get("schema_version") != 1
+                or registration.get("kind") != "worktree-registration"
+                or type(registration.get("partial", False)) is not bool):
             if degraded is not None:
                 degraded.append({"source": "build-roots", "reason": "invalid registration receipt; no roots eligible"})
             return []
         excluded = 0
-        for row in registration.get("repositories") or []:
-            stamp = parse_stamp(row.get("registered_at"))
+        for row in collection(registration.get("repositories"), "repositories"):
+            if (not isinstance(row, dict) or not valid_path(row.get("path"))
+                    or type(row.get("stale")) is not bool):
+                invalid["repositories"] += 1
+                continue
+            stamp = dated(row.get("registered_at"))
             if row.get("stale") is not False or stamp is None or not 0 <= time.time() - stamp <= 6 * 3600:
                 excluded += 1
                 continue
-            found += [w.get("path") for w in row.get("worktrees") or []
-                      if not w.get("bare") and not w.get("prunable") and not w.get("locked")]
-        if (registration.get("partial") or excluded) and degraded is not None:
+            for worktree in collection(row.get("worktrees"), "worktrees"):
+                if (not isinstance(worktree, dict) or not valid_path(worktree.get("path"))
+                        or any(type(worktree.get(key)) is not bool for key in ("bare", "prunable", "locked"))):
+                    invalid["worktrees"] += 1
+                    continue
+                if not any(worktree.get(key, False) for key in ("bare", "prunable", "locked")):
+                    found.append(worktree["path"])
+        if (registration.get("partial") or excluded or any(invalid.values())) and degraded is not None:
             degraded.append({"source": "build-roots", "reason": "registration is partial; only current successful rows eligible",
-                             "measured_at": registration.get("measured_at"), "excluded_repositories": excluded})
+                             "measured_at": registration.get("measured_at") if dated(registration.get("measured_at")) is not None else None,
+                             "excluded_repositories": excluded, "invalid": invalid})
     else:
         hygiene = _read(paths.SCRATCH / "git-hygiene.json")
-        stamp = parse_stamp(hygiene.get("measured_at") or hygiene.get("at"))
+        stamp = dated(hygiene.get("measured_at") or hygiene.get("at"))
         if stamp is not None and 0 <= time.time() - stamp <= 24 * 3600:
-            for row in hygiene.get("checkouts") or []:
-                row_stamp = parse_stamp(row.get("measured_at")) if row.get("measured_at") else stamp
+            for row in collection(hygiene.get("checkouts"), "repositories"):
+                if (not isinstance(row, dict) or not valid_path(row.get("path"))
+                        or type(row.get("stale", False)) is not bool):
+                    invalid["repositories"] += 1
+                    continue
+                row_stamp = dated(row.get("measured_at")) if "measured_at" in row else stamp
                 if row.get("stale") or row_stamp is None or not 0 <= time.time() - row_stamp <= 24 * 3600:
                     continue
                 found.append(row.get("path"))
-                found += [w.get("path") for w in row.get("worktrees") or [] if w.get("state") != "missing"]
+                for worktree in collection(row.get("worktrees", []), "worktrees"):
+                    if not isinstance(worktree, dict) or not valid_path(worktree.get("path")):
+                        invalid["worktrees"] += 1
+                        continue
+                    if worktree.get("state") != "missing":
+                        found.append(worktree["path"])
         if degraded is not None:
             degraded.append({"source": "build-roots", "reason": "registration unavailable; using dated hygiene fallback only",
-                             "measured_at": hygiene.get("measured_at") or hygiene.get("at"), "max_age_hours": 24})
+                             "measured_at": (hygiene.get("measured_at") or hygiene.get("at")) if stamp is not None else None,
+                             "max_age_hours": 24, "invalid": invalid})
     return sorted({os.path.realpath(p) for p in found if isinstance(p, str) and p and os.path.isdir(p)})
 
 

@@ -1548,6 +1548,81 @@ class RegistrationIntegration(Base):
         self.assertEqual(hygiene.stat().st_mtime_ns, stamp)
 
 
+class RegistrationMalformed(Base):
+    def write_receipt(self, **over):
+        import paths
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        doc = {"schema_version": 1, "kind": "worktree-registration", "partial": False,
+               "repositories": [self.valid_row()]}
+        doc.update(over)
+        (paths.SCRATCH / "worktree-registration.json").write_text(json.dumps(doc))
+
+    def valid_row(self):
+        return {"path": str(self.t1), "registered_at": self.g.now(), "stale": False,
+                "worktrees": [{"path": str(self.t1), "bare": False, "locked": False, "prunable": False}]}
+
+    def test_malformed_collections_and_rows_preserve_valid_peers_with_degradation(self):
+        for bad in (None, "bad", 1, {}, [None]):
+            with self.subTest(bad=bad):
+                self.write_receipt(repositories=bad)
+                degraded = []
+                self.assertEqual(self.g.checkouts(degraded), [])
+                self.assertTrue(degraded)
+        self.write_receipt(repositories=[None, self.valid_row()])
+        degraded = []
+        self.assertEqual(self.g.checkouts(degraded), [str(self.t1)])
+        self.assertTrue(degraded)
+
+    def test_invalid_worktree_metadata_is_never_eligible(self):
+        for bad in (None, "bad", 1, {}, {"path": "relative"}, {"path": 4},
+                    {"path": "/bad\0path"}, {"path": str(self.t1)}, {"path": str(self.t1), "bare": 0},
+                    {"path": str(self.t1), "locked": "false"}):
+            with self.subTest(bad=bad):
+                row = self.valid_row()
+                row["worktrees"] = [bad, row["worktrees"][0]]
+                self.write_receipt(repositories=[row])
+                degraded = []
+                self.assertEqual(self.g.checkouts(degraded), [str(self.t1)])
+                self.assertTrue(degraded)
+        for bad in (None, "bad", {}, 1):
+            row = {**self.valid_row(), "worktrees": bad}
+            self.write_receipt(repositories=[row])
+            degraded = []
+            self.assertEqual(self.g.checkouts(degraded), [])
+            self.assertTrue(degraded)
+
+    def test_invalid_root_timestamp_stale_and_schema_are_refused(self):
+        for field, value in (("path", "relative"), ("path", None), ("registered_at", []),
+                             ("registered_at", "bad"), ("stale", 0), ("stale", "false")):
+            self.write_receipt(repositories=[{**self.valid_row(), field: value}])
+            degraded = []
+            self.assertEqual(self.g.checkouts(degraded), [])
+            self.assertTrue(degraded)
+        self.write_receipt(schema_version=True)
+        self.assertEqual(self.g.checkouts([]), [])
+
+    def test_malformed_dated_fallback_preserves_valid_peers(self):
+        import paths
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "git-hygiene.json").write_text(json.dumps({
+            "measured_at": self.g.now(), "checkouts": [None, {"path": str(self.t1), "worktrees": [None]}]}))
+        degraded = []
+        self.assertEqual(self.g.checkouts(degraded), [str(self.t1)])
+        self.assertEqual(degraded[0]["invalid"], {"repositories": 1, "worktrees": 1})
+
+    def test_run_reports_malformed_receipt_without_losing_other_phases(self):
+        self.write_receipt(repositories=[None, self.valid_row()])
+        with patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "refresh", return_value="refreshed"), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "checkout_idle_days", return_value=None), \
+                patch.object(self.g, "large_files", return_value=None):
+            doc = self.g.run([])
+        self.assertIn("cache-command", doc["phases"])
+        self.assertTrue(any(d.get("source") == "build-roots" for d in doc["degraded"]))
+        self.assertEqual(doc["planned"]["build-output"], 0)
+
+
 class RegistrationFairness(Base):
     def test_current_registration_roots_replace_undated_hygiene(self):
         import paths
@@ -1560,7 +1635,7 @@ class RegistrationFairness(Base):
         (paths.SCRATCH / "worktree-registration.json").write_text(json.dumps({
             "schema_version": 1, "kind": "worktree-registration", "partial": True,
             "repositories": [{"path": str(root), "registered_at": self.g.now(),
-                "stale": i == 1, "worktrees": [{"path": str(root)}]} for i, root in enumerate(roots[:2])]}))
+                "stale": i == 1, "worktrees": [{"path": str(root), "bare": False, "locked": False, "prunable": False}]} for i, root in enumerate(roots[:2])]}))
         self.assertEqual(self.g.checkouts(), [str(roots[0])])
 
     def test_undated_hygiene_is_not_current_registration(self):

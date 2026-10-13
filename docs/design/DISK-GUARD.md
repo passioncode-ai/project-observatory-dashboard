@@ -162,3 +162,12 @@ be preempted by these cooperative deadlines.
 the cache-command phase's `none` does not erase a failed path-holder probe.
 `RegistrationFairness` pins the refresh order, stale fallback, child deadline,
 pre-attempt cursor, per-root quantum and bounded enumeration.
+
+The registration consumer validates nested collections and row types before
+reading fields. Invalid repository/worktree rows are excluded with explicit
+counts in `degraded`, while valid peers remain available. Paths must be absolute
+strings without NUL, timestamps must parse, and freshness and worktree protection
+flags must be booleans. Unknown flags never authorize a root. The dated hygiene
+fallback also rejects malformed nested rows. `RegistrationMalformed` exercises
+null/scalar collections, mixed valid/invalid peers, malformed metadata and the
+whole guard run continuing through later phases after a damaged receipt.
