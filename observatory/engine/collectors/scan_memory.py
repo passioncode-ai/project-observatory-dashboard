@@ -11,8 +11,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("out", type=Path)
     ap.add_argument("--budget-seconds", type=float, default=8)
+    ap.add_argument("--attempt-id", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
-    doc = memory_snapshot.write(args.out, args.budget_seconds)
+    doc = memory_snapshot.write(args.out, args.budget_seconds, args.attempt_id)
     print("memory-only: partial" if doc["partial"] else "memory-only: measured")
     return 0
 

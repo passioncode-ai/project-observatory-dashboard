@@ -71,6 +71,7 @@ SETTLE_HINT = ("the leaked values are dead; close each row the register names wi
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import oslocks
+import osprivacy
 import private_io
 import paths                                                                    
 
@@ -759,7 +760,7 @@ def _policy_lock():
     other's keys before either moved them, and opposite splits ended both keys high (round 3: $16
     against a $10 limit). A second run waits up to POLICY_LOCK_WAIT_S, then refuses."""
     LEDGER.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(LEDGER.parent / ".openrouter-policy.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    fd = osprivacy.open(LEDGER.parent / ".openrouter-policy.lock", os.O_RDWR | os.O_CREAT, 0o600)
     try:
         give_up = time.monotonic() + POLICY_LOCK_WAIT_S
         while True:

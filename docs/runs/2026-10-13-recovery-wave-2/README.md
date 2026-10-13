@@ -50,3 +50,13 @@ then perform release and installed acceptance. In parallel, finish findings
 coverage and independently timestamped memory measurements. No live rotation,
 cleanup, migration or provider spend was used as a test. A synthetic receipt is
 not proof of provider execution, application health or complete erasure.
+
+## Hosted matrix correction
+
+The full Linux compatibility run at `5e523cd` found a direct `os.open` in the
+policy lock, outside the portable privacy API. The lock now opens through
+`osprivacy.open` with the same access/create flags and mode. POSIX behavior is
+unchanged; Windows uses the shared binary-opening boundary. The lock contention
+and synthetic policy tests are rerun alongside the OS privacy suite. The workflow
+header now describes the already configured checks-based release gate; executable
+workflow behavior did not change.

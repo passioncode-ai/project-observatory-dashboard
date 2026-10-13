@@ -937,8 +937,17 @@ def refresh_memory(timeout: float) -> str:
     """Small independent refresh before cleanup planning, including disabled auto mode."""
     if timeout <= 0.2:
         return "skipped: the run budget is spent"
-    return refresh("collectors/scan_memory.py", paths.SCRATCH / "machine-memory.json", 0,
-                   timeout, ("--budget-seconds", str(max(0, timeout - 0.1))))
+    import memory_snapshot
+    out = paths.SCRATCH / "machine-memory.json"
+    try:
+        attempt_id = memory_snapshot.begin_attempt(out)
+        status = refresh("collectors/scan_memory.py", out, 0, timeout,
+                         ("--budget-seconds", str(max(0, timeout - 0.1)), "--attempt-id", attempt_id))
+        if status not in ("refreshed", "fresh"):
+            memory_snapshot.finish_attempt(out, attempt_id, memory_snapshot.failed_attempt("collector-failed"))
+        return status
+    except (OSError, ValueError):
+        return "failed: memory-receipt-unavailable"
 
 
 def refresh(script: str, out: pathlib.Path, hours: float, timeout: int, args: tuple = ()) -> str:

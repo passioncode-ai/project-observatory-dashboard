@@ -4,6 +4,7 @@ Receipts are observations, never lifecycle or cleanup authority. RSS adds each
 process's resident pages and can count shared pages repeatedly.
 """
 from __future__ import annotations
+import contextlib
 import json
 import math
 import os
@@ -11,18 +12,22 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import stat
+import uuid
 import time
 from datetime import datetime, timezone
 
 import atomic
 import paths
+import oslocks
+import osprivacy
 
 MAX_AGE_SECONDS = 1800
 MEMORY_FIELDS = ("total_mb", "free_mb", "active_mb", "inactive_mb", "wired_mb", "compressed_mb", "swap_used_mb")
 
 
 def now():
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def _number(value):
@@ -155,9 +160,73 @@ def collect(seconds=8):
             "partial": bool(memory["degraded"] or processes["degraded"])}
 
 
-def write(out, seconds=8):
+@contextlib.contextmanager
+def _receipt_lock(out):
+    """Only serialize receipt replacement; collection never holds this lock."""
+    out = Path(out)
+    if any(p.is_symlink() for p in (out, *out.parents)):
+        raise ValueError("Output path must not contain symbolic links")
+    out.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lock = out.with_name(out.name + ".lock")
+    fd = osprivacy.open(lock, os.O_RDWR | os.O_CREAT | osprivacy.NOFOLLOW | osprivacy.NONBLOCK, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError("Receipt lock must be a regular file")
+        end = time.monotonic() + 0.25
+        while True:
+            try:
+                oslocks.flock(fd, oslocks.LOCK_EX | oslocks.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= end:
+                    raise TimeoutError("memory-receipt-lock-busy")
+                time.sleep(0.005)
+        try:
+            yield
+        finally:
+            oslocks.flock(fd, oslocks.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def failed_attempt(reason="measurement-incomplete"):
+    stamp = now()
+    error = [{"source": "memory-refresh", "reason": reason}]
+    return {"schema_version": 1, "kind": "machine-memory", "attempted_at": stamp, "partial": True,
+            "memory": {**{key: None for key in MEMORY_FIELDS}, "attempted_at": stamp,
+                       "measured_at": None, "degraded": error},
+            "processes": {"count": None, "attempted_at": stamp, "measured_at": None,
+                          "groups": [], "top": [], "projects": [], "degraded": error}}
+
+
+def begin_attempt(out):
+    with _receipt_lock(out):
+        doc = failed_attempt()
+        doc["attempt_id"] = uuid.uuid4().hex
+        atomic.write_json(out, doc)
+        return doc["attempt_id"]
+
+
+def finish_attempt(out, attempt_id, doc):
+    """Compare and replace under one lock; an older finish cannot hide a newer failure."""
+    with _receipt_lock(out):
+        try:
+            prior = json.loads(Path(out).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        if not isinstance(prior, dict) or prior.get("attempt_id") != attempt_id:
+            return False
+        doc = {**doc, "attempt_id": attempt_id, "attempted_at": prior["attempted_at"]}
+        for section in ("memory", "processes"):
+            doc[section] = {**doc[section], "attempted_at": prior["attempted_at"]}
+        atomic.write_json(out, doc)
+        return True
+
+
+def write(out, seconds=8, attempt_id=None):
+    attempt_id = attempt_id or begin_attempt(out)
     doc = collect(seconds)
-    atomic.write_json(Path(out), doc)
+    doc["publication"] = "published" if finish_attempt(out, attempt_id, doc) else "superseded"
     return doc
 
 
@@ -183,7 +252,7 @@ def select_sources(machine, light, *, at=None):
                                {**part, "attempted_at": stamp,
                                 "measured_at": part.get("measured_at", doc.get("measured_at"))}))
         if candidates:
-            _, name, part = max(candidates, key=lambda row: row[0])
+            _, name, part = max(candidates, key=lambda row: (row[0], row[1] == "machine-memory.json"))
         else:
             name, part = None, {"attempted_at": None, "measured_at": None}
         errors = part.get("degraded")
@@ -191,6 +260,10 @@ def select_sources(machine, light, *, at=None):
         stamp = _stamp(part.get("measured_at"))
         age = (at - stamp).total_seconds() if stamp else None
         stale = age > MAX_AGE_SECONDS if age is not None and age >= -60 else None
+        attempt = _stamp(part.get("attempted_at"))
+        if attempt is None or (attempt - at).total_seconds() > 60:
+            stale = None
+            errors.append({"source": section, "reason": "invalid-attempted-at"})
         if stale is None or stale:
             errors.append({"source": section, "reason": "stale-measurement" if stale else "unknown-measurement-time"})
         if section == "memory":

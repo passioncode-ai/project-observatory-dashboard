@@ -85,3 +85,25 @@ in this bounded candidate check. Independent review is pending.
 - `copywriting`: memory freshness wording.
 - `working-with-fabric`: preserved service lifecycle boundary; outside the family.
 - `skill-search`: route selection.
+
+## Independent review correction
+
+Review reproduced equal-second ordering, future attempt timestamps, a killed collector
+leaving an older success visible, and a delayed older collector overwriting a newer
+failure. `begin_attempt` now writes an unknown provisional receipt before launch;
+`finish_attempt` compares the attempt ID under a bounded cross-process lock before
+replacement. Collection holds no lock. A killed process leaves an explicit incomplete
+attempt. Guard failure updates only its own attempt. Microsecond timestamps reduce
+collisions; legacy equal-time light receipts win conservatively, and an invalid/future
+attempt is never fresh even if its measurement timestamp appears current.
+
+Regression evidence: `test_same_second_failed_light_attempt_wins_over_full_success`,
+`test_future_attempt_cannot_be_fresh_even_with_current_measurement`,
+`test_guard_timeout_publishes_failed_new_attempt_for_every_reader`, and
+`test_older_finish_cannot_overwrite_newer_started_attempt` failed before correction.
+`test_two_collectors_finishing_out_of_order_keep_newer_failure` exercises real file
+replacement with concurrent collectors. Disk-full or lock-write failure still cannot
+persist a new receipt and is reported by the caller; no persistence claim is made then.
+
+Correction validation: PASS, memory freshness 21 and disk guard 123 cases (two
+platform skips), jobs 1. Source inventory and pattern privacy passed again.

@@ -1,6 +1,7 @@
 """Merge freshness is derived from its inputs, never its own write time."""
 import datetime
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -45,6 +46,7 @@ class InputAge(unittest.TestCase):
             self.assertEqual(inputs['sessions.json'], '2020-01-01T00:00:00Z')
             self.assertTrue(any(n['source'] == 'sessions.json' and 'old' in n['reason'] for n in notes))
 
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO fixtures require mkfifo")
     def test_nonregular_input_is_not_opened(self):
         import merge_input_age as A
         import os
@@ -66,7 +68,9 @@ class InputAge(unittest.TestCase):
         import subprocess
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw).resolve()
-            env = {**os.environ, 'HOME': str(home), 'OBSERVATORY_HOME': str(home / 'workspace'), 'OBSERVATORY_SYSTEM_SETUP': '0'}
+            env = {k: v for k, v in os.environ.items() if k not in {
+                'OBSERVATORY_REGISTRY', 'OBSERVATORY_DB', 'OBSERVATORY_STATE', 'OBSERVATORY_SCRATCH'}}
+            env.update(HOME=str(home), OBSERVATORY_HOME=str(home / 'workspace'), OBSERVATORY_SYSTEM_SETUP='0')
             initialized = subprocess.run([sys.executable, str(ROOT / 'observatory.py'), 'init'], env=env, capture_output=True, text=True)
             self.assertEqual(initialized.returncode, 0, initialized.stderr[-500:])
             scratch = home / 'workspace/store/raw'; scratch.mkdir(parents=True, exist_ok=True)

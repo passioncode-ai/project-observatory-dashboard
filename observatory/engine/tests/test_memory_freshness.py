@@ -67,6 +67,72 @@ class MemoryFreshness(Base):
         self.assertEqual(result["processes"]["groups"], [])
         self.assertTrue(result["processes"]["degraded"])
 
+    def test_same_second_failed_light_attempt_wins_over_full_success(self):
+        import memory_snapshot as ms
+        light = self.light(swap=None)
+        light["memory"].update(measured_at=None, degraded=[{"source": "swap", "reason": "command-timeout"}])
+        full = {"measured_at": light["attempted_at"], "memory": {"swap_used_mb": 0}}
+        result = ms.select_sources(full, light, at=datetime(2026,10,13,10,0,tzinfo=timezone.utc))["memory"]
+        self.assertIsNone(result["swap_used_mb"])
+        self.assertIsNone(result["stale"])
+        self.assertTrue(result["degraded"])
+
+    def test_future_attempt_cannot_be_fresh_even_with_current_measurement(self):
+        import memory_snapshot as ms
+        light = self.light()
+        light["memory"]["attempted_at"] = "2099-01-01T00:00:00Z"
+        result = ms.select_sources({}, light, at=datetime(2026,10,13,10,0,tzinfo=timezone.utc))["memory"]
+        self.assertIsNone(result["stale"])
+        self.assertTrue(result["degraded"])
+
+    def test_guard_timeout_publishes_failed_new_attempt_for_every_reader(self):
+        import memory_snapshot as ms, disk_guard
+        out = self.home / "store/raw/machine-memory.json"
+        out.write_text(json.dumps(self.light()))
+        with patch.object(disk_guard.subprocess, "run", side_effect=subprocess.TimeoutExpired("synthetic", 1)):
+            status = disk_guard.refresh_memory(1)
+        self.assertIn("timeout", status)
+        memory = ms.read_sources()["memory"]
+        self.assertIsNone(memory["swap_used_mb"])
+        self.assertIsNone(memory["measured_at"])
+        self.assertTrue(memory["degraded"])
+
+    def test_older_finish_cannot_overwrite_newer_started_attempt(self):
+        import memory_snapshot as ms
+        out = self.home / "store/raw/machine-memory.json"
+        older = ms.begin_attempt(out)
+        newer = ms.begin_attempt(out)
+        self.assertFalse(ms.finish_attempt(out, older, self.light(swap=8192)))
+        provisional = json.loads(out.read_text())
+        self.assertEqual(provisional["attempt_id"], newer)
+        self.assertIsNone(provisional["memory"]["swap_used_mb"])
+        self.assertTrue(ms.finish_attempt(out, newer, self.light(swap=0)))
+        self.assertEqual(json.loads(out.read_text())["memory"]["swap_used_mb"], 0)
+
+    def test_two_collectors_finishing_out_of_order_keep_newer_failure(self):
+        import memory_snapshot as ms
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        out = self.home / "store/raw/machine-memory.json"
+        started, release = threading.Event(), threading.Event()
+        def collect(seconds):
+            if seconds == 1:
+                started.set()
+                self.assertTrue(release.wait(3))
+                return self.light(swap=8192)
+            return ms.failed_attempt("synthetic-failure")
+        with patch.object(ms, "collect", side_effect=collect), ThreadPoolExecutor(max_workers=2) as pool:
+            older = pool.submit(ms.write, out, 1)
+            self.assertTrue(started.wait(3))
+            newer = pool.submit(ms.write, out, 2)
+            self.assertEqual(newer.result(timeout=3)["publication"], "published")
+            release.set()
+            self.assertEqual(older.result(timeout=3)["publication"], "superseded")
+        memory = ms.read_sources()["memory"]
+        self.assertIsNone(memory["swap_used_mb"])
+        self.assertIsNone(memory["measured_at"])
+        self.assertIn("synthetic-failure", [r["reason"] for r in memory["degraded"]])
+
     def test_cli_declares_memory_only(self):
         import workspace
         parsed = workspace.machine_parser("machine").parse_args(["--memory-only"])

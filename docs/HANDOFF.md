@@ -17,6 +17,16 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-13 — Findings and measurement recovery](runs/2026-10-13-recovery-wave-3/README.md):
+OBS-88–90 preserve configuration coverage, measurement age and repeated guard errors;
+OBS-87 adds independent memory observations. Next: combined source acceptance,
+protected integration, then release and installed verification. Unknown allocation,
+ownership and live-provider outcomes remain explicit.
+
+[2026-10-13 — Evidence, credentials and memory recovery](runs/2026-10-13-recovery-wave-2/README.md):
+key-policy evidence, one-attempt database resets, leak-source omissions and atomic
+lesson revisions. Source acceptance does not establish live-provider success.
+
 [2026-10-13 — Cleanup recovery](runs/2026-10-13-cleanup-recovery/README.md):
 independent source acceptance for preservation, archive/ref/index revalidation,
 partial receipts and registered-root coverage. Next: required integration checks

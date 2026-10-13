@@ -88,19 +88,23 @@ class Harness(unittest.TestCase):
         (proj / "b.jsonl").write_text(json.dumps({"message": {"content": [
             {"type": "tool_use", "name": "Skill", "input": {"skill": "tool:installer"}}]}}) + "\n")
         (claude / "CLAUDE.md").write_text("rule\n" * 600, encoding="utf-8")
+        # Own the nested fixture workspace even under the isolated portable runner.
+        self.env = {k: v for k, v in os.environ.items() if k not in {
+            "OBSERVATORY_REGISTRY", "OBSERVATORY_DB", "OBSERVATORY_STATE", "OBSERVATORY_SCRATCH"}}
+        self.env.update(OBSERVATORY_HOME=str(self.ws), OBSERVATORY_SYSTEM_SETUP="0")
         init = subprocess.run([PY, str(ROOT / "observatory.py"), "init"], cwd=ROOT, capture_output=True, text=True,
-                              env={**os.environ, "OBSERVATORY_HOME": str(self.ws), "OBSERVATORY_SYSTEM_SETUP": "0"})
+                              env=self.env)
         self.assertEqual(init.returncode, 0, init.stderr[-600:])
         self.configure(["integrations", "harness", "true"], ["sources", "harness_root", str(self.home)])
 
     def configure(self, *settings):
         for setting in settings:
             p = subprocess.run([PY, str(ROOT / "observatory.py"), "configure", *setting], cwd=ROOT, capture_output=True,
-                               text=True, env={**os.environ, "OBSERVATORY_HOME": str(self.ws), "OBSERVATORY_SYSTEM_SETUP": "0"})
+                               text=True, env=self.env)
             self.assertEqual(p.returncode, 0, (setting, p.stdout[-400:], p.stderr[-400:]))
 
     def scan(self, budget: int = 100_000) -> dict:
-        env = {**os.environ, "OBSERVATORY_STATE": str(self.ws / "store"),
+        env = {**self.env, "OBSERVATORY_STATE": str(self.ws / "store"),
                "OBSERVATORY_HOME": str(self.ws),
                "OBSERVATORY_HARNESS_BUDGET_CHARS": str(budget)}
         env.pop("ANTHROPIC_BASE_URL", None)
