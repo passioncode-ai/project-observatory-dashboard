@@ -622,7 +622,7 @@ def act(a: dict, archive: pathlib.Path) -> dict:
             return {**rec, "result": "skipped", "reason": why}
         if cls == "branch-unique":
             archive.mkdir(parents=True, exist_ok=True, mode=0o700)
-            folder = pathlib.Path(tempfile.mkdtemp(prefix="branch-" + sha[:8] + "-", dir=archive))
+            folder = pathlib.Path(tempfile.mkdtemp(prefix="branch-" + sha[:8] + "-", dir=archive))  # paths-check: allow - durable recovery archive under the caller's redirected archive root, never temporary test state
             bundle = folder / "branch.bundle"
             rec["archive"] = str(bundle)
             made = git(repo, "bundle", "create", str(bundle), "refs/heads/" + target, "^" + a["default_branch"])
@@ -677,7 +677,7 @@ def act(a: dict, archive: pathlib.Path) -> dict:
                 archive_time_left(deadline)
                 archive.mkdir(parents=True, exist_ok=True, mode=0o700)
                 # A failed attempt keeps a named partial archive; retries never overwrite it.
-                dest = pathlib.Path(tempfile.mkdtemp(prefix=pathlib.Path(target).name + "-" + rec["head"][:8] + "-", dir=archive))
+                dest = pathlib.Path(tempfile.mkdtemp(prefix=pathlib.Path(target).name + "-" + rec["head"][:8] + "-", dir=archive))  # paths-check: allow - durable recovery archive under the caller's redirected archive root, retained after exit
                 rec["archive"] = str(dest)
                 patch, staged, manifest = archive_manual(target, dest, status.stdout, deadline)
             except (ArchiveRefused, OSError, subprocess.SubprocessError, tarfile.TarError, ValueError) as exc:

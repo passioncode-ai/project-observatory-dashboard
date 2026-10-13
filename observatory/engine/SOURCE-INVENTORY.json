@@ -3993,8 +3993,8 @@
       "path": "tools/cleanup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9b9d126623be78a6499d7e36525bb3d8772f002bc90a39bfb984948faae3fa66",
-      "bytes": 45694
+      "export_sha256": "852d37da85c9c53249c58a9642b26f7433eaefb5c41b29d681fc3a3c996b108b",
+      "bytes": 45927
     },
     {
       "path": "tools/cloudflare.py",
