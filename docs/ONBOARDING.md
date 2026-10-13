@@ -632,6 +632,23 @@ a file between its final observation and Git removal. Stop writers before an
 explicit manual cleanup. Coverage: `CleanupNeverLosesWork` in
 `observatory/engine/tests/test_git_hardening.py`.
 
+Before both automatic and manual worktree removal, cleanup reads index flags
+before status and again at the removal boundary. `assume-unchanged`,
+`skip-worktree` (including sparse checkouts), unsupported entries or an unreadable
+index cause a skip: Git status and diff can omit changes behind these flags.
+Cleanup does not clear or rewrite the flags. It also verifies the live HEAD's
+retaining branch; a detached HEAD needs an archive ref whose readback equals the
+exact commit. A conflicting ref or a failed creation retains the worktree.
+
+Branch cleanup captures its tip before eligibility checks. A unique branch's
+verified bundle must advertise that exact tip, and the current tip and worktree
+attachments are checked again. Deletion uses Git's expected-old-tip comparison:
+a newer commit cannot be deleted by a stale cleanup. A newly attached worktree
+still has a small final attachment-check/deletion race; concurrent checkout
+writers must be stopped. Each branch bundle gets a new directory. Git branch
+configuration is retained when the ref is deleted. Coverage:
+`CleanupNeverLosesWork` in `observatory/engine/tests/test_git_hardening.py`.
+
 The legacy `full cleanup` build-artifact action now reports a skip and asks for
 `full disk-guard` to replan; only the disk guard owns build-output eligibility.
 `CleanupNeverLosesWork.test_legacy_artifact_plan_cannot_delete_newly_tracked_output`
