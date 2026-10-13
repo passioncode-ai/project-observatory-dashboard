@@ -18,3 +18,5 @@ Contract: brand-contract v1
 
 | machine.guard_stopping | Git cleanup stopped in three consecutive disk guard runs | observatory/engine/tools/machine_findings.py | Guard stop and coverage findings (K-7) | proposed | copy |
 | machine.guard_degraded | the disk guard could not measure {source} | observatory/engine/tools/machine_findings.py | Guard stop and coverage findings (K-7) | proposed | copy |
+
+| openrouter.held_ceiling | the observed ceiling remains above the requested share; reconcile provider precision before retrying | observatory/engine/tools/openrouter.py | OSS-54 | proposed | copy |
