@@ -840,8 +840,10 @@ without that identity is skipped and must be planned again. Build cleanup rechec
 activity, ignore rules, tracked files and new writes immediately before acting.
 Each path action also makes a fresh, target-scoped holder probe within five
 seconds; unknown, partial or timed-out results skip the path. On POSIX this
-last probe requires `lsof`; without it the plan is available but path removal
-waits. Windows reports unknown holder coverage and preserves path targets.
+last probe uses `lsof` for positive holds. An empty listing plus unmatched
+rendered `ps` arguments cannot prove a closed script is inactive: spaces, relative
+paths and symlink aliases can hide its checkout. Current POSIX production holder
+snapshots therefore remain incomplete, and path removal is refused. Windows reports unknown holder coverage and preserves path targets.
 See [the preservation contract](design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
 and `tests/test_disk_guard.py::TargetRevalidation` / `FreshTargetProbe`.
 On POSIX, clean and archived dirty worktrees repeat this target check immediately
@@ -850,7 +852,9 @@ listing never grants final removal. Nonzero, diagnostic or undecodable `lsof`/`p
 output, unparseable global `lsof` names and Linux `/proc` read failures mean
 unknown, so cleanup can conservatively skip
 work even if a partial survey showed no holder. Cache-tool commands likewise
-skip when their process survey is unknown. Worktree idle age is still a planning
+skip when their process survey is unknown. In particular, a nonempty `busy_if`
+request cannot be cleared by an unmatched `ps` display. Commands without holder
+preconditions retain their separate configured policy. Worktree idle age is still a planning
 condition, not a fresh action-time measurement. A process starting after the
 final check remains a race; these checks are not an exclusive filesystem lock.
 Windows worktree removal also refuses unknown holder coverage. A successful
@@ -870,11 +874,12 @@ a systemd user timer, or a Task Scheduler task, every 15 minutes. "Nobody worked
 checkout or commit and no uncommitted file changed since — never the index,
 which every `git status` rewrites.
 
-What it never does: remove anything a process holds open or works inside (one
-`lsof` listing per run, re-checked at each removal; without it no path goes),
-follow a symlink, open a privacy-guarded folder, touch another user's file, stop a
-process, start an app (Docker commands run only while the daemon already runs),
-or run a cache command while that tool is running. Memory is reported, not
+Observed holds and incomplete holder coverage refuse path removal. These
+observations do not establish lifecycle ownership or exclude future writers.
+Cleanup also refuses symlinks, privacy-guarded folders and another user's files.
+It does not stop a process or start an app; daemon-dependent commands require a
+positive observation. A configured busy-tool precondition requires proven absence,
+which the current rendered process display does not provide. Memory is reported, not
 freed: the Machine page names who holds the memory that swap writes to this disk,
 and each running simulator with the command that stops it.
 

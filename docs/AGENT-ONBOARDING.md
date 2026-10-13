@@ -37,9 +37,14 @@ temporary roots and refuses temporary targets beneath Git ancestry. Build
 output is rechecked for checkout activity, ignore rules, tracked content and new
 writes. Each path action probes current holders within a five-second shared
 deadline; unknown evidence skips it. POSIX actions require `lsof` for this final
-target-scoped probe; Windows retains rename-based protection. A skipped target
-is not proof of zero reclaimable space. Replan after resolving the reported
-reason. [Design and regression cases](design/DISK-GUARD.md#apply-time-preservation-2026-10-13).
+target-scoped positive observation; unmatched rendered argv remains unknown, so
+current POSIX production path removal is refused. Windows also reports unknown
+without attempting rename as a holder test. A skipped target
+is not proof of zero reclaimable space. Do not advise an immediate retry as a fix
+for unsupported holder completeness: preserve the target pending a supported
+observation and owner lifecycle contract. Cache commands with nonempty `busy_if`
+likewise refuse unmatched rendered argv; commands with no holder preconditions
+keep their separately configured policy. [Design and regression cases](design/DISK-GUARD.md#apply-time-preservation-2026-10-13).
 
 Disk-guard measurement limits: unknown swap remains `null` with a reason and
 source time; it is not zero. The largest-file report carries completeness,

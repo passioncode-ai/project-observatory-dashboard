@@ -204,3 +204,29 @@ is disabled. Native inventory support remains unimplemented.
 Evidence: `WindowsHolderUnknown` and the legacy-mode case in engine
 `tests/test_disk_guard.py`; the native shared-delete control runs only on Windows.
 [Microsoft CreateFile sharing contract](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew).
+
+## POSIX argv completeness correction
+
+Rendered `ps` text is not a lossless argument protocol. A closed script can remain
+active while a target-specific lsof query is empty; spaces, relative paths and
+symlink aliases defeat the existing lexical path heuristic. Positive file or
+command hints still refuse removal, but unmatched text is unknown. Production
+`Holders.take()` retains its observed paths with `known=false`; `fresh_busy()`
+returns true for a positive hold and otherwise unknown. Consequently current
+production path-removal tiers refuse instead of inferring lifecycle inactivity.
+The legacy manually constructed `Holders([...])` complete snapshot remains an
+explicit test/consumer input, not the completeness state returned by production.
+
+`running(nonempty_names)` returns true for a recognized tool and otherwise unknown.
+An empty requested set is vacuously false. Cache commands with a nonempty `busy_if`
+refuse unknown; positive daemon requirements and commands without holder preconditions
+retain their existing separate policy. No native argv collector, owner lease or
+extra process/environment persistence is introduced here. Native argv could improve
+positive evidence but would not recover a process's launch cwd or prove universal
+non-use after arguments are modified.
+
+Acceptance: `tests/test_disk_guard.py::LossyArgvEvidence` and `LossyArgvAdmission`
+cover four missing path forms, positive holds, incomplete snapshots, stale-free
+path/clean-worktree/archived-dirty-worktree admission and cache child suppression.
+The source-bound research and original failing assertions are described in
+[the run packet](../runs/2026-10-13-posix-holder-argv/README.md).
