@@ -1,0 +1,315 @@
+{
+  "source_parent": "89e8cd751c834a045d071ec0fd63e45d52c74fe9",
+  "source_sha256": {
+    "observatory/engine/tools/openrouter.py": "036070aa003e679f680712362f85fd8aed40af6110d55c75300baa242d21849a",
+    "observatory/engine/tests/adv_j1_property.py": "fdd71cd470d781913d6323cfcb3052c6d5022bb923561415fbc56cd4dd6f16b2",
+    "observatory/engine/tests/test_j3_adversary.py": "fa288fa60e175731332eff96d0dba2a1daa13061bef2475699ca15b4af3d1e22"
+  },
+  "changed_model_functions": [
+    "apply_limit_remedy",
+    "limit_remedies"
+  ],
+  "all_other_model_function_AST": "IDENTICAL",
+  "tests": 30,
+  "failures": 0,
+  "errors": 0,
+  "test_output": [
+    "test_actual_cli_prints_exact_command_and_proposal_has_no_effect (test_j3_adversary.ModelBinding.test_actual_cli_prints_exact_command_and_proposal_has_no_effect) ... ok",
+    "test_actual_emitted_held_ceiling_remedy_uses_same_declared_target (test_j3_adversary.ModelBinding.test_actual_emitted_held_ceiling_remedy_uses_same_declared_target) ... ok",
+    "test_bad_identity_remains_a_negative_case (test_j3_adversary.ModelBinding.test_bad_identity_remains_a_negative_case) ... ok",
+    "test_convergence_refresh_does_not_erase_observed_consumers (test_j3_adversary.ModelBinding.test_convergence_refresh_does_not_erase_observed_consumers) ... ok",
+    "test_emitted_limit_remedy_uses_real_command_and_preserves_source (test_j3_adversary.ModelBinding.test_emitted_limit_remedy_uses_real_command_and_preserves_source) ... ok",
+    "test_fresh_persistent_echo_is_unmet_not_success (test_j3_adversary.ModelBinding.test_fresh_persistent_echo_is_unmet_not_success) ... ok",
+    "test_guarded_guidance_is_emitted_without_aggregate_overflow (test_j3_adversary.ModelBinding.test_guarded_guidance_is_emitted_without_aggregate_overflow) ... ok",
+    "test_guarded_guidance_round_trips_large_planned_target (test_j3_adversary.ModelBinding.test_guarded_guidance_round_trips_large_planned_target) ... ok",
+    "test_guarded_remedy_uses_actual_parser_and_exact_entry_exception_tuple (test_j3_adversary.ModelBinding.test_guarded_remedy_uses_actual_parser_and_exact_entry_exception_tuple) ... ok",
+    "test_held_ceiling_remedy_still_requires_emission_identity_and_unchanged_revision (test_j3_adversary.ModelBinding.test_held_ceiling_remedy_still_requires_emission_identity_and_unchanged_revision) ... ok",
+    "test_held_rotation_is_not_mistaken_for_convergence (test_j3_adversary.ModelBinding.test_held_rotation_is_not_mistaken_for_convergence) ... ok",
+    "test_invalid_budget_seed_7000104_and_planted_mutation_remain_checked (test_j3_adversary.ModelBinding.test_invalid_budget_seed_7000104_and_planted_mutation_remain_checked) ... ok",
+    "test_ledger_failure_cannot_hide_untracked_keys (test_j3_adversary.ModelBinding.test_ledger_failure_cannot_hide_untracked_keys) ... ok",
+    "test_limit_remedy_rejects_foreign_unknown_raised_changed_and_prose_targets (test_j3_adversary.ModelBinding.test_limit_remedy_rejects_foreign_unknown_raised_changed_and_prose_targets) ... ok",
+    "test_measured_unmet_response_emits_guarded_request_not_auto_retry (test_j3_adversary.ModelBinding.test_measured_unmet_response_emits_guarded_request_not_auto_retry) ... ok",
+    "test_operator_admission_has_no_rng_or_provider_hook_and_binds_inventory (test_j3_adversary.ModelBinding.test_operator_admission_has_no_rng_or_provider_hook_and_binds_inventory) ... ok",
+    "test_pending_attestation_journal_failure_and_missing_reason_preserve_row (test_j3_adversary.ModelBinding.test_pending_attestation_journal_failure_and_missing_reason_preserve_row) ... ok",
+    "test_pending_attestation_never_infers_absence_from_renamed_unknown_identity (test_j3_adversary.ModelBinding.test_pending_attestation_never_infers_absence_from_renamed_unknown_identity) ... ok",
+    "test_pending_attestation_refuses_live_unknown_holder_hash_and_changed_revision (test_j3_adversary.ModelBinding.test_pending_attestation_refuses_live_unknown_holder_hash_and_changed_revision) ... ok",
+    "test_pending_attestation_separate_absence_proof_and_required_journal (test_j3_adversary.ModelBinding.test_pending_attestation_separate_absence_proof_and_required_journal) ... ok",
+    "test_producer_empty_positive_unlisted_and_stale_negative (test_j3_adversary.ModelBinding.test_producer_empty_positive_unlisted_and_stale_negative) ... ok",
+    "test_producer_refresh_preserves_holders_and_has_no_door_effects (test_j3_adversary.ModelBinding.test_producer_refresh_preserves_holders_and_has_no_door_effects) ... ok",
+    "test_reservation_does_not_cover_wrong_name_or_excess_capacity (test_j3_adversary.ModelBinding.test_reservation_does_not_cover_wrong_name_or_excess_capacity) ... ok",
+    "test_revoke_cli_boundary_catches_only_the_real_entrypoint_tuple (test_j3_adversary.ModelBinding.test_revoke_cli_boundary_catches_only_the_real_entrypoint_tuple) ... ok",
+    "test_revoke_cli_boundary_preserves_effect_and_failed_ledger_write (test_j3_adversary.ModelBinding.test_revoke_cli_boundary_preserves_effect_and_failed_ledger_write) ... ok",
+    "test_successor_is_explicitly_represented_after_delivery_failure (test_j3_adversary.ModelBinding.test_successor_is_explicitly_represented_after_delivery_failure) ... ok",
+    "test_unflagged_manual_guidance_is_not_guarded_authority (test_j3_adversary.ModelBinding.test_unflagged_manual_guidance_is_not_guarded_authority) ... ok",
+    "test_unique_values_bind_real_hash_and_positive_rotation_reaches_delivery (test_j3_adversary.ModelBinding.test_unique_values_bind_real_hash_and_positive_rotation_reaches_delivery) ... ok",
+    "test_unknown_limit_effect_and_persistent_echo_are_not_rewritten_to_success (test_j3_adversary.ModelBinding.test_unknown_limit_effect_and_persistent_echo_are_not_rewritten_to_success) ... ok",
+    "test_unknown_mint_reservation_covers_at_most_one_matching_successor (test_j3_adversary.ModelBinding.test_unknown_mint_reservation_covers_at_most_one_matching_successor) ... ok",
+    "",
+    "----------------------------------------------------------------------",
+    "Ran 30 tests in 1.227s",
+    "",
+    "OK"
+  ],
+  "representative_replays": [
+    {
+      "seed": 7000017,
+      "status": "PASS",
+      "failures": [],
+      "trace": [
+        "shape {'echo': 'round2', 'big': False, 'drift': 1, 'page': (5, 3), 'fillers': 5, 'newest_first': False}",
+        "run1 limit=300611 refs=5 kw={} -> None ['issued', 'issued', 'issued', 'issued', 'issued']",
+        "rotate project-a-prod-k1 fault=- -> rc=1",
+        "failrun mint:unreach-after -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "subcent db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4 -> 601.2201",
+        "converge#0 -> None ['in-place', 'in-place', 'in-place', 'held-ceiling', 'in-place']",
+        "  explicit operator limit project-a-prod-k0 -> operator-applied",
+        "converge#1 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7000032,
+      "status": "PASS",
+      "failures": [],
+      "trace": [
+        "shape {'echo': '-0.004', 'big': False, 'drift': 0, 'page': (5, 3), 'fillers': 1, 'newest_first': False}",
+        "run1 limit=4197 refs=6 kw={} -> None ['issued', 'issued', 'issued', 'issued', 'issued', 'issued']",
+        "failrun delete -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "unread 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "unread 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "concurrent[issue] during rotate -> rc=1",
+        "failrun mint:unreach-after -> None ['held-unread', 'in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'over-limit']",
+        "consumer reads f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 by label (unlisted); revoke -> rc=1 still=True",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 6.992",
+        "converge#0 -> None ['in-place', 'held-ceiling', 'in-place', 'in-place', 'in-place', 'in-place']",
+        "  explicit operator limit project-a-prod-k0 -> operator-applied",
+        "converge#1 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7000039,
+      "status": "PASS",
+      "failures": [],
+      "trace": [
+        "shape {'echo': '-0.004', 'big': True, 'drift': -1, 'page': (3, 2), 'fillers': 10, 'newest_first': False}",
+        "run1 limit=9088 refs=3 kw={'split': {'vault:project-a/prod/K1': 27.07, 'vault:project-a/prod/K5': 34.5, 'vault:project-a/prod/K2': 10.59}} -> None ['issued', 'issued', 'issued']",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 27.072",
+        "rotate-kill project-a-prod-k1 fault=kill -> rc=1",
+        "failrun lower -> None ['held-ceiling', 'in-place', 'in-place']",
+        "converge#0 -> None ['held-ceiling', 'in-place', 'in-place']",
+        "  explicit operator limit project-a-prod-k1 -> operator-applied",
+        "converge#1 -> None ['in-place', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7000008,
+      "status": "PASS",
+      "failures": [],
+      "trace": [
+        "shape {'echo': 'id', 'big': False, 'drift': -1, 'page': (4, 4), 'fillers': 1, 'newest_first': True}",
+        "run1 limit=40 refs=5 kw={} -> None ['issued', 'issued', 'issued', 'issued', 'issued']",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 0.076",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 0.082",
+        "subcent db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4 -> 0.084",
+        "failrun mint:unreach-before -> None ['in-place', 'in-place', 'held-ceiling', 'held-ceiling', 'in-place', 'over-limit']",
+        "converge#0 -> None ['in-place', 'in-place', 'held-ceiling', 'held-ceiling', 'in-place', 'over-limit']",
+        "  explicit operator limit project-a-prod-k5 -> operator-applied",
+        "  explicit operator limit project-a-prod-k4 -> refused",
+        "converge#1 -> None ['in-place', 'in-place', 'in-place', 'held-ceiling', 'in-place', 'over-limit']",
+        "  explicit operator limit project-a-prod-k4 -> operator-applied",
+        "converge#2 -> None ['in-place', 'in-place', 'in-place', 'in-place', 'in-place']"
+      ]
+    },
+    {
+      "seed": 7000018,
+      "status": "PASS",
+      "failures": [],
+      "trace": [
+        "shape {'echo': '-0.004', 'big': True, 'drift': 0, 'page': (4, 4), 'fillers': 16, 'newest_first': False}",
+        "run1 limit=52 refs=1 kw={} -> None ['issued']",
+        "failrun raise -> None ['in-place']",
+        "rotate-kill project-a-prod-k6 fault=deliver -> rc=1",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 0.522",
+        "failrun mint:unreach-before -> None ['held-ceiling', 'over-limit']",
+        "rotate project-a-prod-k6 fault=- -> rc=1",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 0.5221",
+        "converge#0 -> None ['held-ceiling', 'over-limit']",
+        "  explicit operator limit project-a-prod-k6 -> operator-applied",
+        "converge#1 -> None ['in-place']"
+      ]
+    },
+    {
+      "seed": 7000029,
+      "status": "PASS",
+      "failures": [],
+      "trace": [
+        "shape {'echo': 'id', 'big': False, 'drift': -1, 'page': (3, 2), 'fillers': 2, 'newest_first': False}",
+        "run1 limit=82 refs=1 kw={} -> None ['issued']",
+        "unread 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 0.8201",
+        "rotate-kill project-a-prod-k5 fault=mint:502-after -> rc=1",
+        "subcent 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07 -> 0.8241",
+        "rename 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "unread 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "converge#0 -> None ['held-ceiling', 'over-limit']",
+        "  explicit operator limit project-a-prod-k5 -> operator-applied",
+        "converge#1 -> None ['in-place']"
+      ]
+    },
+    {
+      "seed": 7000828,
+      "status": "FAIL",
+      "failures": [
+        "(c') no convergence after the door's own remedies:   explicit operator limit project-a-prod-k5 -> refused"
+      ],
+      "trace": [
+        "shape {'echo': '+1e-9', 'big': True, 'drift': -1, 'page': (3, 2), 'fillers': 8, 'newest_first': False}",
+        "run1 limit=279232 refs=4 kw={} -> None ['issued', 'issued', 'issued', 'issued']",
+        "provider deleted 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "rename 9185a6d77682ff7d45c585d71ed774731cf22e6b4e32c972e7ce278c3b932c07",
+        "subcent f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 -> 698.0801",
+        "converge#0 -> None ['held-ceiling', 'held-missing', 'held-ceiling', 'held-ceiling']",
+        "  remedy revoke project-a-prod-k0 (held-missing) -> 0",
+        "  explicit operator limit project-a-prod-k3 -> unresolved",
+        "  explicit operator limit project-a-prod-k1 -> refused",
+        "  explicit operator limit project-a-prod-k5 -> refused",
+        "converge#1 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'held-ceiling']",
+        "  explicit operator limit project-a-prod-k3 -> unresolved",
+        "  explicit operator limit project-a-prod-k1 -> refused",
+        "  explicit operator limit project-a-prod-k5 -> refused",
+        "converge#2 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'held-ceiling']",
+        "  explicit operator limit project-a-prod-k3 -> unresolved",
+        "  explicit operator limit project-a-prod-k1 -> refused",
+        "  explicit operator limit project-a-prod-k5 -> refused",
+        "converge#3 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'held-ceiling']",
+        "  explicit operator limit project-a-prod-k3 -> unresolved",
+        "  explicit operator limit project-a-prod-k1 -> refused",
+        "  explicit operator limit project-a-prod-k5 -> refused",
+        "converge#4 -> None ['held-ceiling', 'blocked', 'held-ceiling', 'held-ceiling']",
+        "  explicit operator limit project-a-prod-k3 -> unresolved",
+        "  explicit operator limit project-a-prod-k1 -> refused",
+        "  explicit operator limit project-a-prod-k5 -> refused"
+      ]
+    },
+    {
+      "seed": 7000072,
+      "status": "FAIL",
+      "failures": [
+        "(c') no convergence after the door's own remedies:   remedy revoke project-a-prod-k6 (not-in-policy) -> 1"
+      ],
+      "trace": [
+        "shape {'echo': 'id', 'big': True, 'drift': 1, 'page': (4, 4), 'fillers': 20, 'newest_first': True}",
+        "run1 limit=58 refs=2 kw={'limit_override': 0.05} -> None ['issued', 'issued']",
+        "edit limit=58 refs=3 kw={}",
+        "edit limit=100 refs=3 kw={'split': {'vault:project-a/prod/K2': 0.19, 'vault:project-a/prod/K4': 0.35, 'vault:project-a/prod/K5': 0.43}}",
+        "consumer reads 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 by label (unlisted); revoke -> rc=1 still=True",
+        "concurrent[policy] during policy -> None",
+        "converge#0 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1",
+        "converge#1 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1",
+        "converge#2 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1",
+        "converge#3 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1",
+        "converge#4 -> None ['blocked', 'blocked', 'blocked', 'not-in-policy']",
+        "  remedy revoke project-a-prod-k6 (not-in-policy) -> 1"
+      ]
+    },
+    {
+      "seed": 7002628,
+      "status": "FAIL",
+      "failures": [
+        "(c') no convergence after the door's own remedies:   explicit operator attestation project-a-prod-k2 -> refused"
+      ],
+      "trace": [
+        "shape {'echo': '-0.004', 'big': True, 'drift': 1, 'page': (3, 2), 'fillers': 10, 'newest_first': False}",
+        "run1 limit=88 refs=3 kw={'split': {'vault:project-a/prod/K7': 0.25, 'vault:project-a/prod/K0': 0.27, 'vault:project-a/prod/K5': 0.3}} -> None ['issued', 'issued', 'issued']",
+        "concurrent[policy] during policy -> None",
+        "edit limit=100 refs=4 kw={'split': {'vault:project-a/prod/K7': 0.16, 'vault:project-a/prod/K0': 0.34, 'vault:project-a/prod/K5': 0.12, 'vault:project-a/prod/K2': 0.33}}",
+        "consumer reads 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 by label (unlisted); revoke -> rc=1 still=True",
+        "failrun mint:502-after -> PolicyPartial: partial: 3 of 4 slots served before vault:project-a/prod/K2 failed; a re-run does only what is missing ['ceiling-moved', 'ceiling-moved', 'ceiling-moved', 'failed']",
+        "remedy revoke project-a-prod-k2 -> 1",
+        "converge#0 -> None ['in-place', 'in-place', 'in-place', 'held-pending', 'over-limit']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused",
+        "converge#1 -> None ['in-place', 'in-place', 'in-place', 'held-pending', 'over-limit']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused",
+        "converge#2 -> None ['in-place', 'in-place', 'in-place', 'held-pending', 'over-limit']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused",
+        "converge#3 -> None ['in-place', 'in-place', 'in-place', 'held-pending', 'over-limit']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused",
+        "converge#4 -> None ['in-place', 'in-place', 'in-place', 'held-pending', 'over-limit']",
+        "  remedy revoke project-a-prod-k2 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k2 -> refused"
+      ]
+    },
+    {
+      "seed": 7003708,
+      "status": "FAIL",
+      "failures": [
+        "(L) live project key unknown to the ledger after subcent: db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4(project-a-prod-k1, $10.5601)",
+        "(L) live project key unknown to the ledger after rotate-kill: db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4(project-a-prod-k1, $10.5601)",
+        "(c') no convergence after the door's own remedies:   explicit operator limit project-a-prod-k0 -> refused",
+        "(L) at rest: db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4(project-a-prod-k1, $10.5601)"
+      ],
+      "trace": [
+        "shape {'echo': '+1e-9', 'big': False, 'drift': -1, 'page': (4, 4), 'fillers': 3, 'newest_first': True}",
+        "run1 limit=3255 refs=3 kw={'split': {'vault:project-a/prod/K3': 17.48, 'vault:project-a/prod/K7': 5.66, 'vault:project-a/prod/K0': 7.28}} -> None ['issued', 'issued', 'issued']",
+        "  concurrent limit project-a-prod-k7 0.01 rc=1",
+        "concurrent[limit] during policy -> None",
+        "edit limit=6510 refs=4 kw={'split': {'vault:project-a/prod/K3': 29.13, 'vault:project-a/prod/K0': 3.89, 'vault:project-a/prod/K1': 10.56, 'vault:project-a/prod/K6': 10.4}}",
+        "remedy revoke project-a-prod-k7 -> 0",
+        "failrun save -> PolicyPartial: partial: 0 of 4 slots served before vault:project-a/prod/K1 failed; a re-run does only what is missing ['held-ceiling', 'held-ceiling', 'failed', 'not-reached']",
+        "consumer reads f0e9460093cb0732d0d9725372897eb94251afcebc5f671e897ef1a80353b015 by label (listed); revoke -> rc=1 still=True",
+        "subcent db162b3723b698f168c7b3aa63fa340d69ed5167fe4ca8674a2ab23852b863f4 -> 10.5601",
+        "rotate-kill project-a-prod-k3 fault=deliver -> rc=1",
+        "converge#0 -> None ['held-ceiling', 'held-ceiling', 'held-pending', 'blocked', 'over-limit']",
+        "  remedy revoke project-a-prod-k1 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k1 -> refused",
+        "  explicit operator limit project-a-prod-k3 -> unresolved",
+        "  explicit operator limit project-a-prod-k0 -> refused",
+        "converge#1 -> None ['held-ceiling', 'held-ceiling', 'held-pending', 'blocked', 'over-limit']",
+        "  remedy revoke project-a-prod-k1 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k1 -> refused",
+        "  explicit operator limit project-a-prod-k3 -> unresolved",
+        "  explicit operator limit project-a-prod-k0 -> refused",
+        "converge#2 -> None ['held-ceiling', 'held-ceiling', 'held-pending', 'blocked', 'over-limit']",
+        "  remedy revoke project-a-prod-k1 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k1 -> refused",
+        "  explicit operator limit project-a-prod-k3 -> unresolved",
+        "  explicit operator limit project-a-prod-k0 -> refused",
+        "converge#3 -> None ['held-ceiling', 'held-ceiling', 'held-pending', 'blocked', 'over-limit']",
+        "  remedy revoke project-a-prod-k1 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k1 -> refused",
+        "  explicit operator limit project-a-prod-k3 -> unresolved",
+        "  explicit operator limit project-a-prod-k0 -> refused",
+        "converge#4 -> None ['held-ceiling', 'held-ceiling', 'held-pending', 'blocked', 'over-limit']",
+        "  remedy revoke project-a-prod-k1 (held-pending) -> 1",
+        "  explicit operator attestation project-a-prod-k1 -> refused",
+        "  explicit operator limit project-a-prod-k3 -> unresolved",
+        "  explicit operator limit project-a-prod-k0 -> refused"
+      ]
+    },
+    {
+      "seed": 7000104,
+      "status": "PASS",
+      "failures": [],
+      "trace": [
+        "shape {'echo': '+0.004', 'big': False, 'drift': 0, 'page': (3, 2), 'fillers': 0, 'newest_first': True}",
+        "run1 limit=3 refs=3 kw={} -> None ['issued', 'issued', 'issued']",
+        "subcent 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 -> 0.01",
+        "edit limit=3 refs=4 kw={}",
+        "consumer reads 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8 by label (unlisted); revoke -> rc=1 still=True",
+        "rotate project-a-prod-k6 fault=- -> rc=1",
+        "rename 7af1678f3a6ca3b258273fbeff45f7e4badb71c800402895860aedfdf8c04ad8",
+        "converge#0 -> ValueError: a $0.03 limit over 4 keys leaves less than a cent for each; raise the limit or name fewer project-key sources []",
+        "invalid-input partition: expected rejection, state checked"
+      ]
+    }
+  ],
+  "full5200": "NOT_RUN; previous 2147 PASS / 3053 FAIL / 0 ERROR unchanged",
+  "live_provider_calls": 0
+}

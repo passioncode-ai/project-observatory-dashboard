@@ -1,0 +1,61 @@
+{
+  "as_of": "2026-10-13T09:17:41.986787+00:00",
+  "head": "c862c596c3ce99216f01f89d1047773bfceb9f03",
+  "base": "89e8cd751c834a045d071ec0fd63e45d52c74fe9",
+  "verdict": "PASS_SCOPED_SOURCE_AND_SYNTHETIC",
+  "source_sha256": {
+    "observatory/engine/tools/openrouter.py": "036070aa003e679f680712362f85fd8aed40af6110d55c75300baa242d21849a",
+    "observatory/engine/tests/adv_j1_property.py": "fdd71cd470d781913d6323cfcb3052c6d5022bb923561415fbc56cd4dd6f16b2",
+    "observatory/engine/tests/test_j3_adversary.py": "fa288fa60e175731332eff96d0dba2a1daa13061bef2475699ca15b4af3d1e22"
+  },
+  "independent_controls": [
+    {
+      "name": "large exact amount through actual main parser and one mutation",
+      "result": "PASS"
+    },
+    {
+      "name": "aggregate-fit actual emission no discovery effects and six negative controls",
+      "result": "PASS"
+    },
+    {
+      "name": "changed plan and ledger refuse stale proposal",
+      "result": "PASS"
+    },
+    {
+      "name": "fresh smaller actual refuses increase before parser admission",
+      "result": "PASS"
+    },
+    {
+      "name": "unknown after effect preserves intent and no blind retry",
+      "result": "PASS"
+    },
+    {
+      "name": "entrypoint exception tuple exactly retained",
+      "result": "PASS"
+    },
+    {
+      "name": "one automatic lowering actual unmet response emits guarded command",
+      "result": "PASS"
+    },
+    {
+      "name": "dry-run emission has no mutation or local publication",
+      "result": "PASS"
+    },
+    {
+      "name": "automatic safe progression removes preliminary repair guidance",
+      "result": "PASS"
+    },
+    {
+      "name": "entire model AST outside two remedy functions unchanged including globals events RNG assertions attempts",
+      "result": "PASS"
+    }
+  ],
+  "limits": [
+    "No full5200 or broad/current-main integration acceptance. Latest original153 full result remains2147PASS3053FAIL0ERROR until new measurement.",
+    "Proposal digest is a precheck, not external CAS. First mutation can invalidate sibling proposals until next existing attempt; five-attempt/event/RNG/global/assertion AST unchanged.",
+    "No live provider or credentials; synthetic socket connect blocked; no raw output persisted.",
+    "Repair unknown remains unresolved; no adapter refresh or extra automatic retry.",
+    "Confirmed source only wires existing explicit decrease authority; does not imply convergence or account-wide external writer serialization."
+  ],
+  "whole_goal": "PARTIAL_NOT_COMPLETE"
+}

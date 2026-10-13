@@ -56,6 +56,7 @@ import math
 import os
 import pathlib
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -1000,6 +1001,15 @@ def _policy_provenance(policy: dict, folder: str, limit_cents: int | None) -> di
             "headroom": "not-verified"}
 
 
+def _decrease_guidance(step: dict) -> None:
+    """Serialize the caller's existing whole-cent target, without rounding it."""
+    cents = _cents(step["limit"], "a planned ceiling")
+    amount = f"{cents // 100}.{cents % 100:02d}"
+    command = shlex.join(["limit", step["name"], "--set", amount, "--decrease-only"])
+    step["repair_command"] = command
+    step["why"] += f"; request one observed decrease: `{command}`"
+
+
 def issue_for_policy(policy: dict, account: str | None = None, limit_override: float | None = None,
                      dry_run: bool = False, split: dict | None = None) -> list[dict]:
     """Carries out `policy_key_plan` so that the project's key ceilings never sum past its limit — not
@@ -1109,7 +1119,7 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                     step["action"] = "held-ceiling"
                     step["observed_limit"] = current
                     step["why"] = "The provider ceiling remains above the requested share; no automatic retry"
-                    settle.append(f"limit {name} --set {step['limit']:g}")
+                    _decrease_guidance(step)
                     near_targets.append((step, name, held, current, state))
                 continue
             step["previous"] = current
@@ -1144,6 +1154,7 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                 step["previous"], step["held"] = current, state
                 step.pop("why", None)
                 step.pop("observed_limit", None)
+                step.pop("repair_command", None)
                 work.append((0, step, name, held))
         room = not after.over(limit_cents)
         for _order, step, name, _held in sorted(work, key=lambda w: w[0]):
@@ -1195,12 +1206,15 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                 step["action"] = "held-ceiling"
                 step["why"] = (f"The provider reported ${observed['limit']:g}; the requested share is unmet; "
                                "actual exposure counts before any increase")
+                _decrease_guidance(step)
+        settle.extend(step["repair_command"] for step in plan
+                      if step.get("action") == "held-ceiling" and step.get("repair_command"))
         if end.over(limit_cents):
             head = ("OVER LIMIT: unbounded now" if end.unbounded
                     else f"OVER LIMIT by ${_usd(end.cents - limit_cents):.2f} now")
             plan.append({"ref": f"vault:{folder}/", "name": folder, "action": "over-limit",
                          "why": (f"{head} ({end.text()} against the ${_usd(limit_cents):.2f} limit); "
-                                 + ("it ends after: " + ", ".join(settle) if settle
+                                 + ("explicit actions to request: " + ", ".join(settle) if settle
                                     else "it ends once the keys above are read and settled"))})
     return plan
 

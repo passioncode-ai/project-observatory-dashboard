@@ -97,8 +97,9 @@ class ModelBinding(unittest.TestCase):
 
     def limit_fixture(self):
         name = self.issue(); row = self.m.ledger()['issued'][name]
-        plan = [{'name': name, 'limit': 9.0, 'action': 'in-place'},
-                {'action': 'over-limit', 'why': f'OVER LIMIT; it ends after: limit {name} --set 9'}]
+        # Source-backed measured near-target observation, not invented prose.
+        self.p.keys[row['hash']]['limit'] = 9.004
+        plan = self.m.issue_for_policy(self.pol, 'example', limit_override=9)
         return name, row['hash'], plan
 
     def held_limit_fixture(self):
@@ -128,8 +129,9 @@ class ModelBinding(unittest.TestCase):
         self.assertEqual(len(proposals), 1)
         proposal, = proposals
         writes = self.p.writes
-        self.assertEqual(A.limit_remedies(self.m, self.p, plan[:-1]), [])
-        bad = copy.deepcopy(plan); bad[-1]['why'] = f'limit {name} --set 10'
+        missing = copy.deepcopy(plan); missing[0].pop('repair_command')
+        self.assertEqual(A.limit_remedies(self.m, self.p, missing), [])
+        bad = copy.deepcopy(plan); bad[0]['why'] = f'limit {name} --set 10'
         self.assertEqual(A.limit_remedies(self.m, self.p, bad), [])
         for update in ({'hash': 'foreign'}, {'limit': None}, {'limit': 9}):
             saved = copy.deepcopy(self.p.keys[handle]); self.p.keys[handle].update(update)
@@ -163,11 +165,11 @@ class ModelBinding(unittest.TestCase):
             prior = self.p.keys[h].copy(); self.p.keys[h].update(update)
             self.assertEqual(A.limit_remedies(self.m, self.p, plan), [])
             self.p.keys[h] = prior
-        bad = copy.deepcopy(plan); bad[-1]['why'] += '; run arbitrary-command'
+        bad = copy.deepcopy(plan); bad[0]['why'] += '; run arbitrary-command'
         self.assertEqual(A.apply_limit_remedy(self.m, self.p, bad, proposal)['status'], 'refused')
         bad[0]['limit'] = 8
         self.assertEqual(A.limit_remedies(self.m, self.p, bad), [])
-        self.assertEqual(self.p.keys[h]['limit'],10)
+        self.assertEqual(self.p.keys[h]['limit'],9.004)
 
     def test_unknown_limit_effect_and_persistent_echo_are_not_rewritten_to_success(self):
         name,h,plan = self.limit_fixture(); proposal, = A.limit_remedies(self.m,self.p,plan)
@@ -180,11 +182,103 @@ class ModelBinding(unittest.TestCase):
         self.assertEqual(A.apply_limit_remedy(self.m,self.p,plan,proposal)['status'],'unresolved')
         self.assertEqual(self.m.ledger()['issued'][name]['limit_usd'],10)
         self.assertEqual(self.p.keys[h]['limit'],9)
-        self.m._request = original; self.p.keys[h]['limit'] = 10
+        self.m._request = original; self.p.keys[h]['limit'] = 9.004
+        proposal, = A.limit_remedies(self.m,self.p,plan)
+        writes = self.p.writes
+        self.assertEqual(A.apply_limit_remedy(self.m,self.p,plan,proposal)['status'], 'unresolved')
+        self.assertEqual(self.p.writes, writes)
+        self.assertEqual(self.m.ledger()['issued'][name]['ceiling_repair']['status'], 'effect-unknown')
+
+    def test_fresh_persistent_echo_is_unmet_not_success(self):
+        name,h,plan = self.limit_fixture()
         self.p.echo = lambda x: x + .0004
         proposal, = A.limit_remedies(self.m,self.p,plan)
-        A.apply_limit_remedy(self.m,self.p,plan,proposal)
+        self.assertEqual(A.apply_limit_remedy(self.m,self.p,plan,proposal)['status'], 'unresolved')
         self.assertEqual(self.p.keys[h]['limit'],9.0004)
+
+    def test_guarded_guidance_round_trips_large_planned_target(self):
+        name = self.issue(); handle = self.m.ledger()['issued'][name]['hash']
+        target = 123456.78
+        self.p.keys[handle]['limit'] = target + .004
+        plan = self.m.issue_for_policy(A.T._pol(1, limit=target), 'example')
+        command = plan[0]['repair_command']
+        self.assertEqual(command, f'limit {name} --set 123456.78 --decrease-only')
+        self.assertIn(command, plan[0]['why'])
+        self.assertIn(command, plan[-1]['why'])
+        proposal, = A.limit_remedies(self.m, self.p, plan)
+        self.assertEqual(proposal['amount'], target)
+
+    def test_guarded_guidance_is_emitted_without_aggregate_overflow(self):
+        name = self.issue(); handle = self.m.ledger()['issued'][name]['hash']
+        self.p.keys[handle]['limit'] = 9.004
+        plan = self.m.issue_for_policy(self.pol, 'example', limit_override=9)
+        self.assertEqual([r['action'] for r in plan], ['held-ceiling'])
+        self.assertEqual(plan[0]['repair_command'], f'limit {name} --set 9.00 --decrease-only')
+        proposal, = A.limit_remedies(self.m, self.p, plan)
+        before = self.p.writes
+        self.assertEqual(A.apply_limit_remedy(self.m, self.p, plan, proposal)['status'], 'operator-applied')
+        self.assertEqual(self.p.writes, before + 1)
+        self.assertEqual(self.m.ledger()['issued'][name]['ceiling_repair']['status'], 'observed-satisfied')
+
+    def test_measured_unmet_response_emits_guarded_request_not_auto_retry(self):
+        name = self.issue(); self.p.echo = lambda x: x + .004
+        before = self.p.writes
+        plan = self.m.issue_for_policy(self.pol, 'example', limit_override=9)
+        self.assertEqual(plan[0]['action'], 'held-ceiling')
+        self.assertEqual(self.p.writes, before + 1)
+        self.assertEqual(plan[0]['repair_command'], f'limit {name} --set 9.00 --decrease-only')
+        proposal, = A.limit_remedies(self.m, self.p, plan)
+        self.assertEqual(A.apply_limit_remedy(self.m, self.p, plan, proposal)['status'], 'unresolved')
+        self.assertEqual(self.p.writes, before + 2)
+        self.assertEqual(self.m.ledger()['issued'][name]['ceiling_repair']['status'], 'observed-unmet')
+
+    def test_guarded_remedy_uses_actual_parser_and_exact_entry_exception_tuple(self):
+        name, handle, plan = self.held_limit_fixture()
+        proposal, = A.limit_remedies(self.m, self.p, plan)
+        for error in (OSError, ValueError, RuntimeError):
+            with patch.object(self.m, 'cmd_limit', side_effect=error('synthetic')):
+                self.assertEqual(A.apply_limit_remedy(self.m, self.p, plan, proposal)['status'], 'unresolved')
+        with patch.object(self.m, 'cmd_limit', side_effect=LookupError('unexpected')):
+            with self.assertRaises(LookupError): A.apply_limit_remedy(self.m, self.p, plan, proposal)
+        argv = []; main = self.m.main
+        def parsed():
+            argv.append(list(self.m.sys.argv[1:])); return main()
+        with patch.object(self.m, 'main', side_effect=parsed):
+            self.assertEqual(A.apply_limit_remedy(self.m, self.p, plan, proposal)['status'], 'operator-applied')
+        self.assertEqual(argv, [['limit', name, '--set', '10.00', '--decrease-only']])
+
+    def test_unflagged_manual_guidance_is_not_guarded_authority(self):
+        name = self.issue()
+        plan = [{'name':name, 'limit':9, 'action':'in-place'},
+                {'action':'over-limit', 'why':f'OVER LIMIT; it ends after: limit {name} --set 9'}]
+        before = (self.p.calls, self.p.writes, copy.deepcopy(self.m.ledger()))
+        self.assertEqual(A.limit_remedies(self.m, self.p, plan), [])
+        self.assertEqual((self.p.calls, self.p.writes, self.m.ledger()), before)
+
+    def test_actual_cli_prints_exact_command_and_proposal_has_no_effect(self):
+        import json
+        name = self.issue(); handle = self.m.ledger()['issued'][name]['hash']
+        self.p.keys[handle]['limit'] = 123456.784
+        policy = A.T._pol(1, limit=123456.78)
+        path = self.m.paths.SCRATCH / 'guidance-policy.json'
+        path.write_text(json.dumps(policy))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.m.cmd_issue_for_policy(str(path), 'example', None, False)
+        self.assertIn(f'limit {name} --set 123456.78 --decrease-only', output.getvalue())
+        plan = self.m.issue_for_policy(policy, 'example')
+        before = (self.p.calls, self.p.writes, copy.deepcopy(self.p.keys), copy.deepcopy(self.m.ledger()))
+        with patch.object(self.m, 'main', side_effect=AssertionError('proposal must not execute')):
+            proposal, = A.limit_remedies(self.m, self.p, plan)
+        self.assertEqual((self.p.calls, self.p.writes, self.p.keys, self.m.ledger()), before)
+        duplicate = copy.deepcopy(plan); duplicate.append(copy.deepcopy(plan[0]))
+        self.assertEqual(A.limit_remedies(self.m, self.p, duplicate), [])
+        hidden = copy.deepcopy(plan); hidden[0]['why'] = 'no emitted command'
+        self.assertEqual(A.limit_remedies(self.m, self.p, hidden), [])
+        unflagged = copy.deepcopy(plan)
+        unflagged[0]['repair_command'] = f'limit {name} --set 123456.78'
+        unflagged[0]['why'] = f'; request one observed decrease: `{unflagged[0]["repair_command"]}`'
+        self.assertEqual(A.limit_remedies(self.m, self.p, unflagged), [])
 
     def pending_fixture(self):
         name = 'project-a-prod-pending'
