@@ -83,6 +83,10 @@ class Base(unittest.TestCase):
         cfg.update({"temp_roots": [{"path": str(self.t1), "depth": 1}], "commands": []}, **over)
         return cfg
 
+    def identity(self, path):
+        st = os.lstat(path)
+        return {"dev": st.st_dev, "ino": st.st_ino}
+
     def free(self, *names):
         """Holders that know of exactly these open paths."""
         return self.g.Holders([str(n) for n in names])
@@ -237,7 +241,7 @@ class Order(Base):
 class Acting(Base):
     def test_a_path_that_became_held_after_the_plan_is_skipped(self):
         (self.t1 / "x").mkdir()
-        rec = self.g.act({"class": "temp", "target": str(self.t1 / "x"), "bytes": 0},
+        rec = self.g.act({"class": "temp", "target": str(self.t1 / "x"), "identity": self.identity(self.t1 / "x"), "bytes": 0},
                          self.free(self.t1 / "x" / "opened-since"))
         self.assertEqual(rec["result"], "skipped")
         self.assertTrue((self.t1 / "x").exists())
@@ -246,7 +250,7 @@ class Acting(Base):
         (self.t1 / "x").mkdir()
         frees = iter([1000 * 1048576, 1250 * 1048576])
         with patch.object(self.g, "free_bytes", side_effect=lambda *_: next(frees)):
-            rec = self.g.act({"class": "temp", "target": str(self.t1 / "x"), "bytes": 4096}, self.free())
+            rec = self.g.act({"class": "temp", "target": str(self.t1 / "x"), "identity": self.identity(self.t1 / "x"), "bytes": 4096}, self.free())
         self.assertEqual(rec["result"], "removed")
         self.assertEqual(rec["freed_mb"], 250)
         self.assertEqual(rec["kb"], 4)
@@ -610,8 +614,8 @@ class AnyDevice(Base):
                 raise PermissionError(32, "being used by another process")
             return real_rename(src, dst)
         with patch.object(self.g.os, "rename", side_effect=rename):
-            held = self.g.act({"class": "temp", "target": str(self.t1 / "held"), "bytes": 0}, h)
-            free = self.g.act({"class": "temp", "target": str(self.t1 / "free"), "bytes": 0}, h)
+            held = self.g.act({"class": "temp", "target": str(self.t1 / "held"), "identity": self.identity(self.t1 / "held"), "bytes": 0}, h)
+            free = self.g.act({"class": "temp", "target": str(self.t1 / "free"), "identity": self.identity(self.t1 / "free"), "bytes": 0}, h)
         self.assertEqual(held["result"], "skipped")
         self.assertTrue((self.t1 / "held").exists(), "nothing of a held folder is deleted")
         self.assertEqual(free["result"], "removed")
@@ -1283,7 +1287,8 @@ class TargetRevalidation(Builds):
 
     def test_apply_build_refuses_missing_revalidation_context(self):
         root = self.repo("alpha-web", 20)
-        action = {"class": "build-output", "target": str(root / "node_modules")}
+        action = {"class": "build-output", "target": str(root / "node_modules"),
+                  "identity": self.identity(root / "node_modules")}
         self.assertEqual(self.g.act(action, self.free())["result"], "skipped")
         self.assertTrue((root / "node_modules").exists())
 
@@ -1299,7 +1304,7 @@ class TargetRevalidation(Builds):
                 root = self.t1 / str(outcome)
                 root.mkdir()
                 with patch.object(self.g, "fresh_busy", return_value=outcome) as fresh:
-                    rec = self.g.act({"class": "temp", "target": str(root)}, self.free())
+                    rec = self.g.act({"class": "temp", "target": str(root), "identity": self.identity(root)}, self.free())
                 self.assertEqual(rec["result"], "skipped")
                 self.assertTrue(root.exists())
                 fresh.assert_called_once()
@@ -1434,6 +1439,86 @@ class CoverageTruth(Base):
         self.assertFalse(result["guard"]["largeFilesCoverage"]["complete"])
         self.assertEqual(result["guard"]["largeFilesCoverage"]["errors"]["directory_read"], 1)
         self.assertIsNone(result["guard"]["memory"]["swap_gb"])
+
+
+class SnapshotSafety(Base):
+    def test_bare_repository_is_preserved_by_temp_and_shared_artifact_scan(self):
+        import cleanup_safety
+        bare = self.t1 / "only-copy.git"
+        bare.mkdir()
+        git(bare, "init", "--bare", "-q")
+        age(bare, 9)
+        self.assertEqual(self.g.plan_temp(self.cfg(), "critical", self.free(), time.time()), [])
+        self.assertTrue(cleanup_safety.protected_tree_reason(str(bare)))
+        self.assertFalse(self.g.inspect(str(bare))["complete"])
+        self.assertTrue((bare / "HEAD").exists())
+
+    def test_bare_repository_ancestry_preserves_selected_nested_temp_root(self):
+        bare = self.t1 / "only-copy.git"
+        bare.mkdir()
+        git(bare, "init", "--bare", "-q")
+        (bare / "objects" / "old-pack").write_text("only copy")
+        age(bare, 9)
+        cfg = self.cfg(temp_roots=[{"path": str(bare / "objects"), "depth": 1}])
+        self.assertEqual(self.g.plan_temp(cfg, "critical", self.free(), time.time()), [])
+
+    def test_bare_ancestry_and_nested_tree_protect_other_cleanup_classes(self):
+        import cleanup_safety
+        bare = self.t1 / "only-copy.git"
+        bare.mkdir()
+        git(bare, "init", "--bare", "-q")
+        data = bare / "objects" / "old-data"
+        data.mkdir()
+        (data / "only-copy").write_text("keep")
+        age(bare, 9)
+        self.assertTrue(cleanup_safety.protected_tree_reason(str(data)))
+        self.assertFalse(self.g.inspect(str(data))["complete"])
+        self.assertFalse(self.g.inspect(str(self.t1))["complete"])
+        self.assertEqual(self.g.plan_cache_dirs(
+            self.cfg(cache_roots=[str(bare / "objects")], cache_keep=[]),
+            "critical", self.free(), time.time()), [])
+
+    def test_replaced_directory_is_preserved_even_with_eligible_timestamps(self):
+        root = self.t1 / "old"
+        root.mkdir()
+        (root / "old-file").write_text("old")
+        age(root, 9)
+        action = self.g.plan_temp(self.cfg(), "critical", self.free(), time.time())[0]
+        root.rename(self.t1 / "original")
+        root.mkdir()
+        (root / "new-only-copy").write_text("keep")
+        age(root, 9)
+        rec = self.g.act(action, self.free())
+        self.assertEqual(rec["result"], "skipped")
+        self.assertTrue((root / "new-only-copy").exists())
+
+    def test_missing_identity_requires_replanning_for_every_path_class(self):
+        for kind in ("temp", "cache-dir", "trash", "browser-clone", "build-output"):
+            with self.subTest(kind=kind):
+                root = self.t1 / kind
+                root.mkdir()
+                result = self.g.act({"class": kind, "target": str(root)}, self.free())
+                self.assertEqual(result["result"], "skipped")
+                self.assertIn("identity", result["reason"])
+                self.assertTrue(root.exists())
+
+    def test_every_path_planner_binds_device_and_inode(self):
+        root = self.t1 / "old"
+        root.mkdir()
+        age(root, 9)
+        plans = self.g.plan_temp(self.cfg(), "critical", self.free(), time.time())
+        plans += self.g.plan_cache_dirs(self.cfg(cache_roots=[str(self.t1)], cache_keep=[]),
+                                        "critical", self.free(), time.time())
+        with patch.object(self.g, "trash_dirs", return_value=[str(self.t1)]):
+            plans += self.g.plan_trash(self.cfg(), "critical", time.time() + 31 * DAY, [])
+        clone = self.clones / "com.example.Browser.code_sign_clone" / "code_sign_clone.old"
+        clone.mkdir(parents=True)
+        age(clone, 9)
+        plans += self.g.plan_clones(self.cfg(), self.free(), time.time())
+        self.assertEqual({a["class"] for a in plans}, {"temp", "cache-dir", "trash", "browser-clone"})
+        for action in plans:
+            st = os.lstat(action["target"])
+            self.assertEqual(action.get("identity"), {"dev": st.st_dev, "ino": st.st_ino})
 
 
 if __name__ == "__main__":

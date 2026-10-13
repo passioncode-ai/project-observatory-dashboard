@@ -136,3 +136,8 @@ measured zero remains zero. A missing/unreadable root or entry, or exhausted
 large-file scan budget, is incomplete. Partial successes remain visible, with
 coverage metadata in the MCP overview and an incomplete label on the page.
 Regression: `test_disk_guard.py::CoverageTruth`.
+
+OSS-22 target preservation: structural bare repositories and paths beneath them
+are preserved in temporary, cache and artifact inspections. Every path action
+requires its planned device/inode; a replacement requires a new plan. Regression:
+`test_disk_guard.py::SnapshotSafety` (including positive planner identity coverage).

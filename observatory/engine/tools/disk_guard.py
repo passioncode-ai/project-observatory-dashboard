@@ -57,7 +57,7 @@ import configuration  # noqa: E402
 import osprivacy  # noqa: E402
 import paths  # noqa: E402
 import safe_git  # noqa: E402
-from cleanup_safety import protected_entry_reason  # noqa: E402
+from cleanup_safety import protected_entry_reason, bare_repository_reason, bare_ancestry_reason  # noqa: E402
 from holders import Holders, running, _utf8_env  # noqa: E402,F401  (re-exported: tests patch `disk_guard.running`)
 
 LEVELS = ("normal", "low", "critical")
@@ -196,6 +196,12 @@ def inspect(root: str, cutoff: float | None = None, deadline: float | None = Non
         out["reason"] = "gone"
         return out
 
+    out["identity"] = {"dev": st.st_dev, "ino": st.st_ino}
+    reason = bare_ancestry_reason(root)
+    if reason:
+        out["reason"] = reason
+        return out
+
     def refuse(s: os.stat_result, name: str) -> str:
         protected = protected_entry_reason(name, s.st_mode)
         if protected:
@@ -220,6 +226,10 @@ def inspect(root: str, cutoff: float | None = None, deadline: float | None = Non
             out["reason"] = "the time ran out"
             return out
         d = stack.pop()
+        reason = bare_repository_reason(d)
+        if reason:
+            out["reason"] = reason
+            return out
         try:
             # Iterate lazily: even a single huge directory obeys the entry/time budget.
             with os.scandir(d) as entries:
@@ -244,6 +254,14 @@ def inspect(root: str, cutoff: float | None = None, deadline: float | None = Non
         except OSError:
             out["reason"] = "an entry could not be read"
             return out
+    try:
+        final = os.lstat(root)
+        if out["identity"] != {"dev": final.st_dev, "ino": final.st_ino}:
+            out["reason"] = "target identity changed during inspection"
+            return out
+    except OSError:
+        out["reason"] = "target identity could not be read"
+        return out
     out["complete"] = True
     return out
 
@@ -335,6 +353,8 @@ def git_ancestry(path: str) -> bool:
     for candidate in {os.path.abspath(path), os.path.realpath(path)}:
         p = pathlib.Path(candidate)
         for parent in (p, *p.parents):
+            if bare_repository_reason(str(parent)):
+                return True
             try:
                 os.lstat(parent / ".git")
                 return True
@@ -428,7 +448,7 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
                     continue
                 r = inspect(full, cutoff, time.monotonic() + max(1.0, budget.left()) if budget else None)
                 if r["complete"] and not holders.busy(full):
-                    out.append({"class": "temp", "target": full, "bytes": r["size"], "cutoff": cutoff,
+                    out.append({"class": "temp", "target": full, "bytes": r["size"], "cutoff": cutoff, "identity": r["identity"],
                                 "why": f"untouched {(at - r['newest']) / 86400:.1f} days, nobody holds it"})
     return out
 
@@ -468,7 +488,7 @@ def plan_cache_dirs(cfg: dict, level: str, holders: Holders, at: float, budget: 
             r = inspect(e.path, cutoff, time.monotonic() + max(1.0, budget.left()) if budget else None,
                         limit=200_000)
             if r["complete"] and not holders.busy(e.path):
-                out.append({"class": "cache-dir", "target": e.path, "bytes": r["size"], "cutoff": cutoff,
+                out.append({"class": "cache-dir", "target": e.path, "bytes": r["size"], "cutoff": cutoff, "identity": r["identity"],
                             "why": f"a cache untouched {(at - r['newest']) / 86400:.1f} days, nobody holds it"})
     return out
 
@@ -491,8 +511,11 @@ def plan_clones(cfg: dict, holders: Holders, at: float) -> list[dict]:
             except OSError:
                 continue
             if e.name.startswith("code_sign_clone.") and mtime < cutoff and not holders.busy(e.path):
-                out.append({"class": "browser-clone", "target": e.path, "bytes": 0,
-                            "why": f"left by a browser {(at - mtime) / 3600:.0f} h ago, no process uses it"})
+                r = inspect(e.path, cutoff, time.monotonic() + 2)
+                if r["complete"]:
+                    out.append({"class": "browser-clone", "target": e.path, "bytes": r["size"],
+                                "identity": r["identity"], "cutoff": cutoff,
+                                "why": f"left by a browser {(at - mtime) / 3600:.0f} h ago, no process uses it"})
     return out
 
 
@@ -533,7 +556,7 @@ def plan_trash(cfg: dict, level: str, at: float, degraded: list) -> list[dict]:
             if age >= days:
                 r = inspect(e.path)
                 if r["complete"]:
-                    out.append({"class": "trash", "target": e.path, "bytes": r["size"],
+                    out.append({"class": "trash", "target": e.path, "bytes": r["size"], "identity": r["identity"],
                                 "why": f"in the Trash {age:.0f} days"})
     return out
 
@@ -670,7 +693,7 @@ def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[
             keep = []
             for d in dirnames:
                 full = os.path.join(dirpath, d)
-                if d in (".git", ".wrangler") or os.path.islink(full):
+                if d in (".git", ".wrangler") or os.path.islink(full) or bare_repository_reason(full):
                     continue
                 if d in wanted:
                     t = min(30.0, max(1.0, left()))
@@ -678,7 +701,7 @@ def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[
                     if ignored and not holders.busy(full) and not _force_tracked(dirpath, full, t):
                         r = inspect(full, at, time.monotonic() + max(1.0, left()), limit=500_000)
                         if r["complete"]:
-                            out.append({"class": "build-output", "target": full, "bytes": r["size"],
+                            out.append({"class": "build-output", "target": full, "bytes": r["size"], "identity": r["identity"],
                                         "checkout": root, "idle_days": days, "cutoff": at,
                                         "why": f"git-ignored {d}; checkout idle {idle:.0f} days"})
                     continue
@@ -827,6 +850,16 @@ def act(a: dict, holders: Holders) -> dict:
         target = a["target"]
         if not os.path.lexists(target):
             return {**rec, "result": "skipped", "reason": "already gone"}
+        identity = a.get("identity")
+        if (not isinstance(identity, dict) or set(identity) != {"dev", "ino"}
+                or any(type(v) is not int for v in identity.values())):
+            return {**rec, "result": "skipped", "reason": "planned target identity is missing; replan"}
+        try:
+            current = os.lstat(target)
+        except OSError:
+            return {**rec, "result": "skipped", "reason": "target identity could not be read; replan"}
+        if identity != {"dev": current.st_dev, "ino": current.st_ino}:
+            return {**rec, "result": "skipped", "reason": "target identity changed; replan"}
         if holders.busy(target):
             return {**rec, "result": "skipped", "reason": "a process holds it now"}
         deadline = min(a.get("deadline", float("inf")), time.monotonic() + 30)
@@ -861,6 +894,8 @@ def act(a: dict, holders: Holders) -> dict:
         r = inspect(target, a.get("cutoff"), deadline)
         if not r["complete"]:
             return {**rec, "result": "skipped", "reason": f"changed since the plan: {r['reason']}"}
+        if r.get("identity") != identity:
+            return {**rec, "result": "skipped", "reason": "target identity changed during revalidation; replan"}
         held = fresh_busy(a.get("checkout", target), min(5.0, deadline - time.monotonic()))
         if held is not False:
             return {**rec, "result": "skipped", "reason": "a process holds it now" if held
@@ -868,6 +903,9 @@ def act(a: dict, holders: Holders) -> dict:
         if time.monotonic() >= deadline:
             return {**rec, "result": "skipped", "reason": "target revalidation time ran out"}
         try:
+            current = os.lstat(target)
+            if identity != {"dev": current.st_dev, "ino": current.st_ino}:
+                return {**rec, "result": "skipped", "reason": "target identity changed before removal; replan"}
             remove(target, probe=holders.mode == "rename")
             rec["result"] = "removed"
         except PermissionError as exc:

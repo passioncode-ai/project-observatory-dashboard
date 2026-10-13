@@ -87,8 +87,8 @@
       "path": "cleanup_safety.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8f12993a5282d787f4ea22dacdbf51c9b86c8ce768064a099ebbad4f38e4628f",
-      "bytes": 2060
+      "export_sha256": "5d36eee607fd8286d2ec7fd3afb668206cb2df85f1714780a67f7ac238f1b8f4",
+      "bytes": 3891
     },
     {
       "path": "code_freshness.py",
@@ -814,15 +814,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "20d5f0c90bd8ce08a3ba5f65c331931174a2cc1c1a5bee2df8ef44e87afe3890",
-      "bytes": 80124,
+      "export_sha256": "c431f748e4540c2f21064966c56d76622976f4a181b22101accd4fc6bb61125b",
+      "bytes": 80300,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "00c190a804b41dc55d59ccc4c9d3daf4833f44551e8eb8964673dc5189cea8b1",
-      "bytes": 67718,
+      "export_sha256": "07f54e0443f2d61e05ade293e22a37606e4d87f3101eb188056db8708b81f2c3",
+      "bytes": 68044,
       "upstream_modified": true
     },
     {
@@ -2433,8 +2433,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d685fd3a2e9acfb0917c7c6db590f4925520fc9976c40e220ea4bbdef132006d",
-      "bytes": 77586
+      "export_sha256": "f8e3b62747870f3cc3bf612f340733bc840739fdaa6ad8a05befae95f8a52b81",
+      "bytes": 81855
     },
     {
       "path": "tests/test_docs_current.py",
@@ -4057,8 +4057,8 @@
       "path": "tools/disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "584bef7557b19753aeb27dd4703bc5be2383cb1db6bac5a0f710bb2e6c6f9f91",
-      "bytes": 56343
+      "export_sha256": "e19514b3cbbaf0504e93f03bd390391d3fe613a50205039e7623911791d0a10e",
+      "bytes": 58410
     },
     {
       "path": "tools/embedding_policy_cli.py",

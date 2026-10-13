@@ -82,7 +82,16 @@ This observation does not lock out an adversarial writer between a check and rem
 `tools/disk_guard.py::git_ancestry` keeps generic temporary cleanup out of Git
 repositories and linked worktrees, including a target whose parent is a checkout.
 The recursive inspection also refuses nested repository markers and local state;
-old timestamps do not turn those paths into disposable temporary data.
+old timestamps do not turn those paths into disposable temporary data. Structural
+bare repositories (`HEAD`, `objects`, and `refs` or `config`) are preserved even
+without a `.git` marker, including nested trees and configured paths beneath one.
+The shared `cleanup_safety` inspection applies the same rule to artifact pruning.
+
+Every path plan records the target device and inode. Apply requires that identity
+and checks it before revalidation, after inspection and immediately before removal;
+a replacement or missing identity is a skip requiring a new plan. Browser clones
+also undergo subtree inspection when planned. `SnapshotSafety` covers bare
+repositories, their ancestry, target replacement and identity on each path class.
 
 Build plans carry their checkout, idle threshold and planning timestamp.
 `act` repeats the checkout-idle, Git-ignore, tracked-content and subtree-freshness

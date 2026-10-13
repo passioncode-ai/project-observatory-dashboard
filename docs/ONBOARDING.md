@@ -662,7 +662,9 @@ Every cleanup takes one lock, so the tick, the guard and you never act on the sa
 cache and macOS diagnostic reports are swept too.
 
 Temporary cleanup preserves repositories and linked worktrees, including nested
-Git markers and paths beneath a checkout. Build cleanup rechecks checkout
+Git markers, bare repositories and paths beneath a checkout or bare repository.
+Each path plan carries its device/inode identity; a replaced target or a plan
+without that identity is skipped and must be planned again. Build cleanup rechecks checkout
 activity, ignore rules, tracked files and new writes immediately before acting.
 Each path action also makes a fresh, target-scoped holder probe within five
 seconds; unknown, partial or timed-out results skip the path. On POSIX this
