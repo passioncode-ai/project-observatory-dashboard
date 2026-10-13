@@ -54,14 +54,16 @@ these receipts are synthetic; no live provider or vault was used.
 
 ## Remaining work and handoff
 
-Independent review is required before integration. Review the finite trigger,
+Independent scoped review passed ten controls on `5f6f2a9`. The subsequent
+[full measurement](measurement.md) is FAIL and does not permit full acceptance. Review the finite trigger,
 unchanged fresh/actual guard paths and all accounting deltas, including dry-run
 behavior. The owning integration agent should cherry-pick only the accepted
 fix-only commit and preserve the earlier lowering-progress dependencies.
 
 The original full matrices remain failed: 4307 PASS / 891 FAIL / 2 ERROR, then
 3501 PASS / 1699 FAIL / 0 ERROR on the strict composition. Neither is replaced by
-this 13-case correction. Full 5200 is NOT_RERUN here. The remaining consumer and
+this 13-case correction. The focused correction did not rerun full 5200; the subsequent
+[composition measurement](measurement.md) did and remains FAIL. The remaining consumer and
 unknown-identity cases need separate identity-bound remediation evidence; exact
 provider behavior alone does not make them convergence successes. A future full
 measurement needs a new evaluation decision, not a search for a green range.
