@@ -621,7 +621,7 @@ def machine_parser(name: str) -> argparse.ArgumentParser:
         ap = argparse.ArgumentParser(prog=f"{PROG} disk-guard",
                                      description="keep free space: temporary files, abandoned browser clones, the Trash, "
                                                  "cache tools' own cleanup and build output of idle checkouts, by "
-                                                 "pressure; never what a process holds. Without --apply only the plan "
+                                                 "pressure; refuse observed holders and unknown coverage (point-in-time checks, not a writer lock). Without --apply only the plan "
                                                  "is written (store/raw/disk-guard.json)")
         ap.add_argument("--apply", action="store_true", help="act now, at the current pressure")
         ap.add_argument("--level", choices=["normal", "low", "critical"],
