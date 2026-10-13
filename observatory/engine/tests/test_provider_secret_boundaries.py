@@ -2,6 +2,7 @@
 """Provider credential boundaries, exercised with synthetic values and mocked HTTP only."""
 from __future__ import annotations
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -119,29 +120,36 @@ class ProviderBoundaryTests(unittest.TestCase):
                                    'hash':'old-id','limit_usd':10,'limit_reset':'monthly','rotations':0}}}
 
     def mocked_rotation(self,cleanup_fails=False):
+        openrouter.save_ledger(self.record())
         calls=[]
         def request(path,key,payload=None,method=None):
             calls.append((path,method))
-            if path=='/keys':return {'key':'synthetic-successor','data':{'hash':'new-id'}}
+            if path=='/keys':return {'key':'synthetic-successor','data':{'hash':hashlib.sha256(b'synthetic-successor').hexdigest()}}
             if cleanup_fails and method=='DELETE':raise RuntimeError('synthetic-successor')
             return {}
         return calls,request
 
-    def test_failed_delivery_deletes_successor_and_keeps_predecessor(self):
+    def test_failed_delivery_retains_both_identities_and_never_echoes_value(self):
         calls,request=self.mocked_rotation()
-        with patch.object(openrouter,'read_admin',return_value=('example','synthetic-admin')), patch.object(openrouter,'find_key',return_value={'hash':'old-id'}), patch.object(openrouter,'_request',side_effect=request), patch.object(openrouter,'deliver',side_effect=RuntimeError('synthetic-successor')):
+        with patch.object(openrouter,'read_admin',return_value=('example','synthetic-admin')), patch.object(openrouter,'find_key',return_value={'hash':'old-id','limit':10,'limit_reset':'monthly'}), patch.object(openrouter,'_request',side_effect=request), patch.object(openrouter,'deliver',side_effect=RuntimeError('synthetic-successor')):
             with self.assertRaises(RuntimeError) as got:openrouter.rotate_one('example',self.record())
-        self.assertIn(('/keys/new-id','DELETE'),calls)
-        self.assertNotIn(('/keys/old-id','DELETE'),calls)
-        self.assertIn('successor deleted',str(got.exception))
-        self.assertNotIn('synthetic-successor',str(got.exception))
+        self.assertFalse(any(method=='DELETE' for _,method in calls))
+        row=openrouter.ledger()['issued']['example']
+        self.assertEqual(row['hash'],'old-id')
+        self.assertEqual(row['successor_hash'],hashlib.sha256(b'synthetic-successor').hexdigest())
+        self.assertEqual(row['rotation_status'],'delivery-unknown')
+        self.assertIn('both keys retained',str(got.exception))
+        self.assertNotIn('synthetic-successor',str(got.exception)+json.dumps(row))
 
-    def test_cleanup_failure_reports_partial_without_claiming_success(self):
+    def test_delivery_io_failure_is_unknown_and_retry_makes_no_provider_call(self):
         calls,request=self.mocked_rotation(cleanup_fails=True)
-        with patch.object(openrouter,'read_admin',return_value=('example','synthetic-admin')), patch.object(openrouter,'find_key',return_value={'hash':'old-id'}), patch.object(openrouter,'_request',side_effect=request), patch.object(openrouter,'deliver',side_effect=OSError('synthetic-successor')):
+        with patch.object(openrouter,'read_admin',return_value=('example','synthetic-admin')), patch.object(openrouter,'find_key',return_value={'hash':'old-id','limit':10,'limit_reset':'monthly'}), patch.object(openrouter,'_request',side_effect=request), patch.object(openrouter,'deliver',side_effect=OSError('synthetic-successor')):
             with self.assertRaises(RuntimeError) as got:openrouter.rotate_one('example',self.record())
-        self.assertIn('Partial failure',str(got.exception));self.assertIn('cleanup failed',str(got.exception))
-        self.assertNotIn(('/keys/old-id','DELETE'),calls)
+            before=list(calls)
+            with self.assertRaises(RuntimeError):openrouter.rotate_one('example',self.record())
+        self.assertEqual(calls,before)
+        self.assertIn('outcome unknown',str(got.exception))
+        self.assertFalse(any(method=='DELETE' for _,method in calls))
         self.assertNotIn('synthetic-successor',str(got.exception))
 
     def test_successful_rotation_delivers_before_revocation_and_records_completion(self):
@@ -149,7 +157,7 @@ class ProviderBoundaryTests(unittest.TestCase):
         def deliver(value,to,*,rotate=False):
             self.assertTrue(rotate);calls.append(('delivered',None));return 'vault example/local/EXAMPLE_KEY'
         doc=self.record()
-        with patch.object(openrouter,'read_admin',return_value=('example','synthetic-admin')), patch.object(openrouter,'find_key',return_value={'hash':'old-id'}), patch.object(openrouter,'_request',side_effect=request), patch.object(openrouter,'deliver',side_effect=deliver):
+        with patch.object(openrouter,'read_admin',return_value=('example','synthetic-admin')), patch.object(openrouter,'find_key',return_value={'hash':'old-id','limit':10,'limit_reset':'monthly'}), patch.object(openrouter,'_request',side_effect=request), patch.object(openrouter,'deliver',side_effect=deliver):
             result=openrouter.rotate_one('example',doc)
         self.assertLess(calls.index(('delivered',None)),calls.index(('/keys/old-id','DELETE')))
         self.assertEqual(openrouter.ledger()['issued']['example']['rotation_status'],'complete')
@@ -161,13 +169,13 @@ class ProviderBoundaryTests(unittest.TestCase):
             if path=='/keys/old-id' and method=='DELETE':
                 raise RuntimeError('synthetic-successor')
             return request(path,key,payload,method)
-        with patch.object(openrouter,'read_admin',return_value=('example','synthetic-admin')), patch.object(openrouter,'find_key',return_value={'hash':'old-id'}), patch.object(openrouter,'_request',side_effect=fail_old_delete), patch.object(openrouter,'deliver',return_value='vault example/local/EXAMPLE_KEY'):
+        with patch.object(openrouter,'read_admin',return_value=('example','synthetic-admin')), patch.object(openrouter,'find_key',return_value={'hash':'old-id','limit':10,'limit_reset':'monthly'}), patch.object(openrouter,'_request',side_effect=fail_old_delete), patch.object(openrouter,'deliver',return_value='vault example/local/EXAMPLE_KEY'):
             with self.assertRaises(RuntimeError) as got:openrouter.rotate_one('example',self.record())
         row=openrouter.ledger()['issued']['example']
-        self.assertEqual(row['hash'],'new-id')
+        self.assertEqual(row['hash'],hashlib.sha256(b'synthetic-successor').hexdigest())
         self.assertEqual(row['predecessor_hash'],'old-id')
         self.assertEqual(row['rotation_status'],'successor-delivered-predecessor-pending')
-        self.assertIn('Partial failure',str(got.exception))
+        self.assertIn('finalization outcome unknown',str(got.exception))
         self.assertNotIn('synthetic-successor',str(got.exception)+json.dumps(row))
 
     def test_vault_destination_uses_rotation_for_existing_slot(self):

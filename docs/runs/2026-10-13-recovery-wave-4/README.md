@@ -66,3 +66,15 @@ The parent hosted pipeline correction is included: its parser now sees both
 integrity and ordinary collector phases, and declares prior-registry harness
 attribution. The combined cache (11 cases) and pipeline (37 assertions) correction
 run passes. The previous ten-suite result remains valid for unchanged components.
+
+## Hosted provider-boundary fixture correction
+
+The complete hosted suite exposed four old rotation tests that supplied an in-memory
+ledger, unbound successor hashes and the former delete-on-delivery-error expectation.
+The corrected fixtures persist the authoritative ledger and use a hash-bound synthetic
+successor with a finite provider ceiling. Failure assertions retain both identities
+and verify that replay makes no provider call. Finalization still requires recovery
+state and never exposes the synthetic value. Production code is unchanged.
+
+Evidence: `tests/test_provider_secret_boundaries.py` (12 isolated cases); full hosted
+checks must rerun on the corrected commit before integration.
