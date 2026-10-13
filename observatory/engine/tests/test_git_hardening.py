@@ -395,7 +395,12 @@ class HookAndTools(HostileBase):
 
     def test_cleanup_archives_and_removes_without_running_anything(self) -> None:
         import cleanup
-        cleanup.busy_now = lambda path: False
+        # Holder behavior has separate synthetic negative/positive coverage in
+        # test_disk_guard; this suite only exercises the hostile Git boundary.
+        for name in ("busy_now", "fresh_busy"):
+            probe = patch.object(cleanup, name, return_value=False)
+            probe.start()
+            self.addCleanup(probe.stop)
         archive = self.f.d / "archive"
         # Its own branch and worktree: the other cases read the shared ones.
         wt = self.f.projects / "beta-cleanup-wt"
@@ -414,8 +419,8 @@ class HookAndTools(HostileBase):
                            "target": str(wt), "branch": "cleanup-topic",
                            "repository": "repository:example-org/beta-api"}, archive)
         self.assertEqual(rec["result"], "removed", rec)
-        patch = (pathlib.Path(rec["archive"]) / "tracked.patch").read_text(encoding="utf-8")
-        self.assertIn("+uncommitted edit", patch)
+        archived_patch = (pathlib.Path(rec["archive"]) / "tracked.patch").read_text(encoding="utf-8")
+        self.assertIn("+uncommitted edit", archived_patch)
         self.assertNothingRan("cleanup")
 
 
@@ -428,7 +433,12 @@ class CleanupNeverLosesWork(unittest.TestCase):
     def setUp(self) -> None:
         import cleanup
         self.cleanup = cleanup
-        cleanup.busy_now = lambda path: False
+        # Holder behavior has separate synthetic negative/positive coverage in
+        # test_disk_guard; this suite only exercises the hostile Git boundary.
+        for name in ("busy_now", "fresh_busy"):
+            probe = patch.object(cleanup, name, return_value=False)
+            probe.start()
+            self.addCleanup(probe.stop)
         self.d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-cleanup-loss-")).resolve()
         self.repo, self.wt = self.d / "alpha-web", self.d / "alpha-wt"
         bare(self.d, "init", "-q", "-b", "main", str(self.repo))
@@ -987,6 +997,50 @@ class NoBareGit(unittest.TestCase):
         tree = ast.parse('subprocess.run(["git", "-C", repo, "status"])')
         call = tree.body[0].value
         self.assertTrue(self._is_git(call.args[0]))
+
+
+class MissingRegistrationReceipt(unittest.TestCase):
+    def invoke(self, response=None, error=None, exists=False):
+        import cleanup
+        with patch.object(cleanup.os.path, "exists", return_value=exists), patch.object(
+                cleanup, "git", return_value=response, side_effect=error) as command:
+            row = cleanup.act({"class": "worktree-missing", "tier": "auto",
+                               "repo": "alpha-web", "target": "alpha-worktree"}, pathlib.Path("unused"))
+        return row, command
+
+    def test_failed_git_never_reports_pruned_or_leaks_stderr(self):
+        row, command = self.invoke(subprocess.CompletedProcess([], 128, "private output", "private error"))
+        self.assertEqual(row["result"], "failed")
+        self.assertEqual(row["exit_code"], 128)
+        self.assertEqual(row["scope"], "repository-missing-registrations")
+        self.assertIsNone(row["registration_changes"])
+        self.assertNotIn("private", str(row))
+        command.assert_called_once_with("alpha-web", "worktree", "prune")
+
+    def test_success_reports_command_scope_without_inventing_change_count(self):
+        row, _ = self.invoke(subprocess.CompletedProcess([], 0, "", ""))
+        self.assertEqual(row["result"], "pruned")
+        self.assertEqual(row["scope"], "repository-missing-registrations")
+        self.assertEqual(row["exit_code"], 0)
+        self.assertIsNone(row["registration_changes"])
+
+    def test_timeout_has_uncertain_effect_and_no_raw_exception(self):
+        row, _ = self.invoke(error=subprocess.TimeoutExpired("private command", 1, output="private output"))
+        self.assertEqual(row["result"], "failed")
+        self.assertEqual(row["effect"], "unknown")
+        self.assertEqual(row["reason_code"], "registration-prune-incomplete")
+        self.assertNotIn("private", str(row))
+
+    def test_launch_error_is_reported_without_exception_body(self):
+        row, _ = self.invoke(error=OSError("private path"))
+        self.assertEqual(row["result"], "failed")
+        self.assertEqual(row["effect"], "unknown")
+        self.assertNotIn("private", str(row))
+
+    def test_reappeared_directory_prevents_prune(self):
+        row, command = self.invoke(exists=True)
+        self.assertEqual(row["result"], "skipped")
+        command.assert_not_called()
 
 
 if __name__ == "__main__":

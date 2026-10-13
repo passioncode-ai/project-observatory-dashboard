@@ -7,6 +7,7 @@
     python "$T/openrouter.py" issue --name my-agent --limit 10 [--reset daily] --to vault:PROJECT/prod/OPENROUTER_API_KEY
     python "$T/openrouter.py" issue-for-policy --policy FILE [--limit USD | --split REF=USD,…] [--dry-run]
     python "$T/openrouter.py" list | ping
+    python "$T/openrouter.py" spend my-agent [--date YYYY-MM-DD] [--json]
     python "$T/openrouter.py" limit my-agent --set 25 [--reset daily]
     python "$T/openrouter.py" disable my-agent              # or enable
     python "$T/openrouter.py" rotate my-agent               # or --leaked
@@ -48,16 +49,19 @@ import contextlib
 import datetime
 import decimal
 import hashlib
+import functools
 import json
 import math
 import os
 import pathlib
 import re
+import stat
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 
 
 #: What closes the leak register once the leaked values are dead. It named `vault.py
@@ -121,7 +125,7 @@ class Unreachable(RuntimeError):
 
 
 def _request(path: str, key: str, payload: dict | None = None,
-             method: str | None = None) -> dict:
+             method: str | None = None, *, max_bytes: int | None = None) -> dict:
     """Endpoint and status in errors — never headers, never the body we sent."""
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     req = urllib.request.Request(
@@ -130,7 +134,10 @@ def _request(path: str, key: str, payload: dict | None = None,
                  "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
-            return json.loads(r.read())
+            raw = r.read() if max_bytes is None else r.read(max_bytes + 1)
+            if max_bytes is not None and len(raw) > max_bytes:
+                raise RuntimeError("Provider response exceeded the read limit; body withheld")
+            return json.loads(raw)
     except urllib.error.HTTPError as e:
         e.close()
         raise RuntimeError(f"openrouter answered HTTP {e.code}; provider response withheld") from None
@@ -374,7 +381,10 @@ def find_key(admin: str, name: str) -> dict | None:
     rec = ledger().get("issued", {}).get(name) or {}
     if rec.get("hash"):
         try:
-            row = _request(f"/keys/{rec['hash']}", admin).get("data") or None
+            response = _request(f"/keys/{rec['hash']}", admin)
+            row = response.get("data") if isinstance(response, dict) else None
+            if not isinstance(row, dict) or row.get("hash") != rec["hash"]:
+                raise RuntimeError("Provider identity is unreadable or does not match the recorded key")
         except RuntimeError as exc:
             if "HTTP 404" in str(exc):
                 return None
@@ -431,8 +441,22 @@ def _reset(value: str | None) -> str:
     return value
 
 
+def _ledger_writer(function):
+    @functools.wraps(function)
+    def locked(*args, **kwargs):
+        with _policy_lock():
+            return function(*args, **kwargs)
+    return locked
+
+
 def issue_key(name: str, limit: float, account: str | None, to: str,
               project: str | None, reset: str = "monthly") -> dict:
+    with _policy_lock():
+        return _issue_key_locked(name, limit, account, to, project, reset)
+
+
+def _issue_key_locked(name: str, limit: float, account: str | None, to: str,
+              project: str | None, reset: str = "monthly", *, policy_binding: dict | None = None) -> dict:
     """Mint, deliver, record. The ONE issuer: `tools/keyserver.py`'s HTTP
     `mint` calls this, so a key born from a button and a key born from the
     command line are the same key, in the same ledger, with the same ceiling.
@@ -446,6 +470,10 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     reset = _reset(reset)
     to = vault_destination(to)
     doc = ledger()
+    previous = doc["issued"].get(name) or {}
+    has_binding = policy_binding is not None or "policy_binding" in previous
+    binding = policy_binding if policy_binding is not None else previous.get("policy_binding")
+    _require_resolved_rotation(previous)
     if (doc["issued"].get(name) or {}).get("pending"):
         raise ValueError(f"an issue of {name!r} is recorded as pending: {PENDING_REMEDY.format(name=name)}")
     label, admin = read_admin(account)
@@ -459,6 +487,8 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     # key, its slot and its ceiling, and gets the hash the moment the provider answers.
     doc["issued"][name] = {"account": label, "hash": None, "destination": to, "project": project,
                            "limit_usd": limit, "limit_reset": reset, "issued_on": today(), "pending": True}
+    if has_binding:
+        doc["issued"][name]["policy_binding"] = binding
     save_ledger(doc)
     # A RESET, never a lifetime cap (trap T17): a lifetime cap works until the
     # total is reached and then stops — months later, with no warning. Found in
@@ -493,6 +523,8 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
         "delivered_to": place, "project": project,
         "limit_usd": limit, "limit_reset": reset, "issued_on": today(),
         "rotated_on": None, "rotations": 0, "name_check": name_check}
+    if has_binding:
+        doc["issued"][name]["policy_binding"] = binding
     save_ledger(doc)
     _journal("issue", f"openrouter/{label}/{name}", to=to, limit_usd=limit, name_check=name_check)
     return {"name": name, "account": label, "label": row.get("label"),
@@ -750,12 +782,13 @@ HELD_NOT_SERVING = {"held-disabled": "`enable {name}` lets it spend again, or `r
                     "held-unread": "the provider could not be read; re-run when it answers",
                     "blocked": "the project's other keys leave no room under the limit; the lines above say which",
                     "not-in-policy": "`revoke {name}` if nothing spends it, or name its slot in the policy",
+                    "held-rotation": "reconcile the rotation identities and destination before another mutation; do not blindly retry",
                     "held-pending": PENDING_REMEDY}
 
 
 @contextlib.contextmanager
 def _policy_lock():
-    """One `issue-for-policy` run at a time, across processes: an exclusive lock on a file beside the
+    """One ledger writer at a time, across processes: an exclusive lock on a file beside the
     ledger, held from the plan through the last provider write. Two runs at once each read the
     other's keys before either moved them, and opposite splits ended both keys high (round 3: $16
     against a $10 limit). A second run waits up to POLICY_LOCK_WAIT_S, then refuses."""
@@ -769,7 +802,7 @@ def _policy_lock():
                 break
             except BlockingIOError:
                 if time.monotonic() >= give_up:
-                    raise RuntimeError(f"another issue-for-policy run has held the policy lock for "
+                    raise RuntimeError(f"another key writer has held the policy lock for "
                                        f"{POLICY_LOCK_WAIT_S:.0f} s; nothing was read or moved — run again "
                                        f"when it is done") from None
                 time.sleep(0.05)
@@ -799,6 +832,10 @@ def _read_held(name: str, rec: dict, account: str | None) -> tuple[str | None, d
         return "held-unread", None, f"read failed ({type(exc).__name__})"
     if not row:
         return "held-missing", None, ""
+    if not isinstance(row, dict) or (rec.get("hash") and row.get("hash") != rec["hash"]):
+        return "held-unread", None, "provider identity does not match the ledger"
+    if rec.get("rotation_status") not in (None, "complete") or rec.get("predecessor_hash") or rec.get("successor_hash"):
+        return "held-rotation", row, "rotation is unresolved; reconcile both identities and destination before another mutation"
     if rec.get("pending"):
         return "held-pending", row, "minted, but its delivery was never recorded" + (
             " (its cleanup delete failed)" if rec.get("orphan") else "")
@@ -834,6 +871,55 @@ def _counted(state: str | None, row: dict | None, rec: dict) -> int | None:
     return _cents_up(_ceiling_of(row))
 
 
+def _identity_refs(rec: dict) -> set[str]:
+    return {value for field in ("hash", "predecessor_hash", "successor_hash")
+            if isinstance(value := rec.get(field), str) and value}
+
+
+def _require_resolved_rotation(rec: dict) -> None:
+    if rec.get("rotation_status") not in (None, "complete") or rec.get("predecessor_hash") or rec.get("successor_hash"):
+        raise RuntimeError("Unresolved rotation: reconcile provider identities and destination before another mutation")
+    refs = _identity_refs(rec)
+    if refs:
+        for other in ledger().get("issued", {}).values():
+            unresolved = (other.get("rotation_status") not in (None, "complete")
+                          or other.get("predecessor_hash") or other.get("successor_hash"))
+            if unresolved and refs & _identity_refs(other):
+                raise RuntimeError("Identity belongs to an unresolved rotation; no alias mutation is allowed")
+
+
+def _rotation_exposure(rec: dict) -> int | None:
+    """Additional possible live ceiling, beyond rec.hash; unread is never zero."""
+    extra = []
+    if rec.get("predecessor_hash"):
+        extra.append((rec["predecessor_hash"], rec.get("predecessor_limit_usd")))
+    if rec.get("successor_hash"):
+        extra.append((rec["successor_hash"], rec.get("successor_limit_usd")))
+    elif rec.get("rotation_status") == "mint-pending":
+        extra.append((None, rec.get("successor_limit_usd")))
+    total = 0
+    for digest, reserve in extra:
+        if digest and digest == rec.get("hash"):
+            continue
+        counted = _cents_up(reserve)
+        if digest:
+            try:
+                _, admin = read_admin(rec.get("account"))
+                response = _request(f"/keys/{digest}", admin)
+                row = response.get("data") if isinstance(response, dict) else None
+                if isinstance(row, dict) and row.get("hash") == digest:
+                    counted = _cents_up(_ceiling_of(row))
+                # A malformed or foreign response cannot replace the reservation.
+                # Missing reserve stays unbounded until this identity is measured.
+            except (OSError, ValueError, RuntimeError) as exc:
+                if isinstance(exc, RuntimeError) and "HTTP 404" in str(exc):
+                    counted = 0
+        if counted is None:
+            return None
+        total += counted
+    return total
+
+
 class _Total:
     """A total in whole cents with unbounded held apart (no float sums: $0.10 x 3 is $0.30)."""
 
@@ -851,6 +937,24 @@ class _Total:
 
     def text(self) -> str:
         return "unbounded" if self.unbounded else f"${_usd(self.cents):.2f}"
+
+
+def _policy_provenance(policy: dict, folder: str, limit_cents: int | None) -> dict:
+    """Historical caller-supplied policy evidence, never current headroom authority.
+
+    Only an origin kind and exact digest are stored, never the source filename or
+    arbitrary policy fields. A later policy application explicitly re-attests its
+    named key rows; existing unrelated/legacy rows are not classified by a name.
+    """
+    try:
+        raw = json.dumps(policy, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("Policy cannot be bound to an exact canonical digest") from None
+    return {"schema_version": 1, "origin": "issue-for-policy",
+            "policy_sha256": hashlib.sha256(raw).hexdigest(), "project": folder,
+            "mode": policy["mode"], "period": policy["period"],
+            "limit_usd": None if limit_cents is None else _usd(limit_cents),
+            "headroom": "not-verified"}
 
 
 def issue_for_policy(policy: dict, account: str | None = None, limit_override: float | None = None,
@@ -877,8 +981,8 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
     * **One run at a time** (`_policy_lock`), the ledger and the provider re-read under the lock.
     * The issuing account for a new key is resolved before anything moves, in a dry run too.
 
-    The one window this door opens in which the total can pass the limit is `rotate`'s: the
-    successor is live before the predecessor is deleted (docs/design/AGENT-SECRETS.md).
+    Explicit policy provenance now prevents rotation without a current aggregate
+    headroom proof. Unmarked legacy/standalone rotation still permits overlap.
 
     A failure in the middle stops the run and raises `PolicyPartial` carrying the plan: what was
     done, what failed, what was not reached. Idempotent: run it again and nothing moves.
@@ -887,6 +991,8 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
     limit_cents = _policy_limit_cents(policy)
     slots = [step for step in plan if "to" in step]
     folder = slots[0]["project"]
+    binding = _policy_provenance(policy, folder, limit_cents)
+    binding["recorded_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     with _policy_lock():
         issued = ledger().get("issued", {})
         scope = {n: r for n, r in sorted(issued.items())
@@ -896,10 +1002,34 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
             holders = [n for n, r in scope.items() if r.get("destination") == step["to"]]
             if holders:
                 primary[step["to"]] = step["name"] if step["name"] in holders else holders[0]
+        if not dry_run:
+            # Exact named sources, not every row sharing a project/folder. Save
+            # provenance before any provider write, including an in-place row.
+            doc = ledger()
+            changed = False
+            for selected in primary.values():
+                rec = doc["issued"][selected]
+                prior = rec.get("policy_binding")
+                same = isinstance(prior, dict) and all(prior.get(k) == v for k, v in binding.items()
+                                                      if k != "recorded_at")
+                if not same:
+                    rec["policy_binding"] = dict(binding)
+                    changed = True
+            if changed:
+                save_ledger(doc)
         if len(primary) < len(slots):
             read_admin(account)         # the account a new key is minted from, resolved before anything moves
         after, end = _Total(), _Total()  # the total if every planned write happens / what the run leaves
         work, settle = [], []
+        for rotation_name, rotation_rec in scope.items():
+            extra = _rotation_exposure(rotation_rec)
+            if extra != 0:
+                after.add(extra)
+                end.add(extra)
+                settle.append(f"reconcile rotation {rotation_name} at the provider and destination; do not blindly retry")
+                plan.append({"ref": rotation_rec.get("destination"), "name": rotation_name,
+                             "action": "held-rotation-exposure", "counted": None if extra is None else _usd(extra),
+                             "why": "Additional rotation exposure retained until provider identity and destination are reconciled"})
         named = set(primary.values())
         for step in slots:
             planned = _cents(step["limit"], "a planned ceiling")
@@ -913,7 +1043,7 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
             state, row, why = _read_held(name, rec, account)
             if why:
                 step["why"] = why
-            if state in ("held-missing", "held-unread", "held-pending"):
+            if state in ("held-missing", "held-unread", "held-pending", "held-rotation"):
                 step["action"] = state
                 counted = _counted(state, row, rec)
                 after.add(counted)
@@ -967,9 +1097,10 @@ def issue_for_policy(policy: dict, account: str | None = None, limit_override: f
                 continue
             try:
                 if moving:
-                    set_limit(name, step["limit"], step["reset"])
+                    _set_limit_locked(name, step["limit"], step["reset"])
                 else:
-                    issue_key(step["name"], step["limit"], account, step["to"], step["project"], step["reset"])
+                    _issue_key_locked(step["name"], step["limit"], account, step["to"], step["project"], step["reset"],
+                                      policy_binding=dict(binding))
             except (ValueError, RuntimeError, LookupError, OSError, subprocess.SubprocessError) as exc:
                 step.pop("held", None)
                 step["action"] = "failed"
@@ -1039,6 +1170,11 @@ def cmd_issue_for_policy(path: str, account: str | None, limit_override: float |
             not_serving = True
             print(step["why"])
             continue
+        if step.get("action") == "held-rotation-exposure":
+            not_serving = True
+            total += step["counted"] if step["counted"] is not None else math.inf
+            print(f"{step['ref']}: held-rotation-exposure — {step['why']}")
+            continue
         if step.get("action") == "not-in-policy":
             not_serving = True
             total += step["counted"] if step["counted"] is not None else math.inf
@@ -1091,11 +1227,17 @@ def resolve_issued(name_or_label: str) -> tuple[str, dict]:
 
 
 def set_limit(name_or_label: str, limit: float, reset: str | None = None) -> dict:
+    with _policy_lock():
+        return _set_limit_locked(name_or_label, limit, reset)
+
+
+def _set_limit_locked(name_or_label: str, limit: float, reset: str | None = None) -> dict:
     """Moves a key's ceiling. Without a `reset` the key keeps the period it has: moving a daily
     ceiling never turns it into a monthly one behind the caller's back."""
     if not math.isfinite(limit) or limit <= 0:
         raise ValueError("a positive ceiling is required")
     name, rec = resolve_issued(name_or_label)
+    _require_resolved_rotation(rec)
     reset = _reset(reset if reset is not None else (rec.get("limit_reset") or "monthly"))
     label, admin = read_admin(rec["account"])
     row = find_key(admin, name)
@@ -1142,6 +1284,7 @@ def cmd_limit(name: str, set_to: float | None, reset: str | None = None) -> int:
     return 0
 
 
+@_ledger_writer
 def toggle_key(name: str, disabled: bool) -> dict:
     """Stop or resume one issued key's spending, reversibly, at the provider.
 
@@ -1154,6 +1297,7 @@ def toggle_key(name: str, disabled: bool) -> dict:
     rec = doc["issued"].get(name)
     if not rec:
         raise LookupError(f"no issued key called {name!r}")
+    _require_resolved_rotation(rec)
     _label, admin = read_admin(rec["account"])
     row = find_key(admin, name)
     if not row:
@@ -1188,53 +1332,94 @@ def _delivery_failed(admin: str, row: dict) -> None:
 
 
 def rotate_one(name: str, doc: dict | None = None) -> dict:
-    """Deliver and verify a successor before revoking the predecessor; keep recovery metadata."""
-    if ((doc or ledger()).get("issued", {}).get(name) or {}).get("claimed"):
-        raise ValueError(f"{name!r} was claimed, not issued: there is nowhere to deliver a successor; "
-                         f"`issue` its replacement to a destination, then `revoke {name}`")
-    doc = doc if doc is not None else ledger()
+    """Persist each uncertain transition before doing it. Never repeat an unknown mint.
+
+    `doc` remains accepted for callers, but is never trusted across the writer lock.
+    A delivery timeout can already have changed the vault: neither key is deleted
+    until delivery was confirmed. No credential value is written to this receipt.
+    """
+    with _policy_lock():
+        try:
+            return _rotate_one_locked(name)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError(f"Rotation incomplete ({type(exc).__name__}); inspect its ledger phase before retrying") from None
+
+
+def _rotate_one_locked(name: str) -> dict:
+    doc = ledger()
     rec = doc["issued"].get(name)
     if not rec:
         raise LookupError("not in the ledger")
+    identities = _identity_refs(rec)
+    bound_alias = any(isinstance(peer, dict) and "policy_binding" in peer
+                      and identities.intersection(_identity_refs(peer))
+                      for peer in doc["issued"].values())
+    if "policy_binding" in rec or bound_alias:
+        # Exact hash aliases share the restriction, including reserved identities.
+        # Account names are local aliases, not provider ownership proofs; changing
+        # a local account/display name cannot bypass a key's policy provenance.
+        # Presence refuses even if corrupted/stale; it is not headroom proof.
+        raise RuntimeError("Rotation refused: policy-managed key has no verified current aggregate headroom; its policy snapshot is not authorization to mint overlap. No provider call or ledger change was made")
+    if rec.get("claimed"):
+        raise ValueError("claimed key has no successor destination; issue its replacement before revocation")
+    if rec.get("rotation_status") not in (None, "complete") or rec.get("predecessor_hash") or rec.get("successor_hash"):
+        raise RuntimeError("Previous rotation outcome is unresolved; reconcile the provider identities and destination before another rotation; no new key was minted")
+    _require_resolved_rotation(rec)
     rotations = rec.get("rotations", 0)
     if type(rotations) is not int or rotations < 0:
-        raise RuntimeError("Invalid rotation count; repair ledger before rotating")
-    limit = rec.get("limit_usd") or 10
-    if not isinstance(limit, (int, float)) or not math.isfinite(limit) or limit <= 0:
-        raise ValueError("A finite positive ceiling is required")
+        raise ValueError("Invalid rotation count; repair ledger before rotating")
     private_io.check(LEDGER)
     label, admin = read_admin(rec["account"])
     old = find_key(admin, name)
-    d = _request("/keys", admin,
-                 {"name": f"{name}-next", "limit": limit,
-                  "limit_reset": rec.get("limit_reset") or "monthly"})
-    value = d.get("key") or (d.get("data") or {}).get("key")
-    new_row = d.get("data") or d
-    if not value:
-        _delivery_failed(admin, new_row)
+    if not isinstance(old, dict) or not isinstance(old.get("hash"), str) or not old["hash"]:
+        raise ValueError("Predecessor identity could not be established; nothing was minted")
+    if not isinstance(rec.get("hash"), str) or old["hash"] != rec["hash"]:
+        raise RuntimeError("Predecessor identity does not match the ledger; nothing was minted or changed")
+    limit = old.get("limit")
+    if isinstance(limit, bool) or not isinstance(limit, (int, float)) or not math.isfinite(limit) or limit <= 0:
+        raise ValueError("A finite positive provider ceiling is required; nothing was minted")
+    reset = old.get("limit_reset")
+    if reset not in (None, "daily", "weekly", "monthly"):
+        raise ValueError("Unknown provider reset period; nothing was minted")
+    # A lost POST response still reserves this exposure. This write precedes POST.
+    rec.update(hash=old["hash"], limit_usd=limit, limit_reset=reset,
+               rotation_status="mint-pending", successor_limit_usd=limit)
+    save_ledger(doc)
+    try:
+        d = _request("/keys", admin, {"name": f"{name}-next", "limit": limit, "limit_reset": reset})
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        raise RuntimeError("Successor creation outcome unknown; its reservation remains; reconcile at the provider before any retry") from None
+    new_row = d.get("data") if isinstance(d, dict) else None
+    value = d.get("key") if isinstance(d, dict) else None
+    if not isinstance(new_row, dict) or not isinstance(new_row.get("hash"), str) or not new_row["hash"] or new_row["hash"] == old["hash"]:
+        raise RuntimeError("Successor identity unknown; its reservation remains; reconcile at the provider before any retry")
+    rec.update(successor_hash=new_row["hash"], rotation_status="delivery-unknown")
+    save_ledger(doc)  # if interrupted next, both identities remain represented
+    if not isinstance(value, str) or not value:
+        raise RuntimeError("Successor value unavailable; delivery unconfirmed; reconcile the recorded identities before retrying")
+    if hashlib.sha256(value.encode("utf-8")).hexdigest() != new_row["hash"]:
+        raise RuntimeError("Successor value identity does not match its provider receipt; no delivery or revocation attempted; reconcile before retrying")
     try:
         place = deliver(value, rec["destination"], rotate=True)
-    except (OSError, ValueError, RuntimeError):
-        _delivery_failed(admin, new_row)
-    rec.update({"hash": new_row.get("hash"), "label": new_row.get("label"), "delivered_to": place,
-                "rotated_on": today(), "rotations": rotations + 1,
-                "rotation_status": "successor-delivered-predecessor-pending",
-                "predecessor_hash": old.get("hash") if old else None})
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        raise RuntimeError("Successor delivery outcome unknown; both keys retained; verify the destination before reconciliation") from None
+    rec.update(hash=new_row["hash"], delivered_to=place, limit_usd=limit, limit_reset=reset,
+               rotated_on=today(), rotations=rotations + 1,
+               rotation_status="successor-delivered-predecessor-pending",
+               predecessor_hash=old["hash"], predecessor_limit_usd=limit)
+    rec.pop("successor_hash", None)
+    save_ledger(doc)
     try:
-        save_ledger(doc)
-        if old:
-            _request(f"/keys/{old['hash']}", admin, method="DELETE")
+        _request(f"/keys/{old['hash']}", admin, method="DELETE")
         _request(f"/keys/{new_row['hash']}", admin, {"name": name}, method="PATCH")
-        rec["rotation_status"] = "complete"
-        rec.pop("predecessor_hash", None)
-        save_ledger(doc)
-    except (OSError, ValueError, RuntimeError):
-        _journal("rotation-partial", f"openrouter/{label}/{name}",
-                 status="successor-delivered-provider-or-ledger-finalization-failed")
-        raise RuntimeError("Partial failure: successor delivered, but provider or ledger finalization failed; inspect provider keys and ledger before retrying") from None
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        raise RuntimeError("Rotation finalization outcome unknown; successor delivered and predecessor exposure retained; reconcile before retrying") from None
+    rec["rotation_status"] = "complete"
+    for field in ("predecessor_hash", "predecessor_limit_usd", "successor_limit_usd", "pending", "orphan"):
+        rec.pop(field, None)
+    save_ledger(doc)
     _journal("rotate", f"openrouter/{label}/{name}", to=rec["destination"])
-    return {"name": name, "delivered_to": place, "rotations": rec["rotations"],
-            "rotated_on": rec["rotated_on"]}
+    return {"name": name, "delivered_to": place, "rotations": rec["rotations"], "rotated_on": rec["rotated_on"]}
 
 
 def cmd_rotate(name: str | None, leaked: bool) -> int:
@@ -1290,6 +1475,7 @@ def _label_of(value: str) -> str:
     return label_of(value)
 
 
+@_ledger_writer
 def claim_key(name: str, value: str, account: str | None = None, where: str = "") -> dict:
     """Bring a key this door did NOT mint under its control, so `disable`, `limit` and
     `revoke` reach it — the door hashes the value and never stores or prints it.
@@ -1316,13 +1502,13 @@ def claim_key(name: str, value: str, account: str | None = None, where: str = ""
     doc = ledger()
     if name in doc["issued"]:
         raise ValueError(f"the ledger already has a key called {name!r}")
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    if any(digest in _identity_refs(r) for r in doc["issued"].values()):
+        raise ValueError("this key is already in the ledger")
     accounts = [(account, read_admin(account)[1])] if account else \
         [(lbl, read_admin(lbl)[1]) for lbl, _p in admins()]
     if not accounts:
         raise RuntimeError("no provisioning key is stashed; `stash --as <label>` first")
-    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
-    if any(r.get("hash") == digest for r in doc["issued"].values()):
-        raise ValueError("this key is already in the ledger")
     found: list[tuple[str, dict]] = []
     for acct, admin in accounts:
         try:
@@ -1364,7 +1550,7 @@ def claim_key(name: str, value: str, account: str | None = None, where: str = ""
     # second claim in the meantime would otherwise be overwritten (review 2026-10-12).
     if name in doc["issued"]:
         raise ValueError(f"the ledger already has a key called {name!r}")
-    if any(r.get("hash") == row.get("hash") for r in doc["issued"].values()):
+    if any(row.get("hash") in _identity_refs(r) for r in doc["issued"].values()):
         raise ValueError("this key is already in the ledger")
     doc["issued"][name] = {
         "account": acct, "hash": row.get("hash"), "destination": place, "delivered_to": place,
@@ -1393,6 +1579,7 @@ def cmd_claim(name: str, account: str | None, where: str) -> int:
     return 0
 
 
+@_ledger_writer
 def forget_pending_key(name: str, reason: str) -> dict:
     """Clear a pending row with no hash WITHOUT reading the provider: the one remedy that works on an
     account listing past PAGES_MAX, where the name cannot be looked up (fix 5). Only after the key
@@ -1418,42 +1605,99 @@ def forget_pending_key(name: str, reason: str) -> dict:
     return {"name": name, "forgotten": True}
 
 
+def _revoke_scan() -> tuple[dict, str]:
+    """Read the collector's complete schema, bounded and fail closed.
+
+    This proves only the saved OpenRouter destination survey, not all live vault
+    or remote consumers. Its producer writes schema_version/scanned_at and the
+    three collections even for a known-empty survey; absent fields are unknown.
+    """
+    path = paths.SCRATCH / "openrouter.json"
+    maximum = 4 * 1024 * 1024
+    try:
+        with os.fdopen(osprivacy.open(path, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK), "rb") as stream:
+            before = os.fstat(stream.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_size > maximum:
+                raise ValueError
+            raw = stream.read(maximum + 1)
+            after = os.fstat(stream.fileno())
+        binding = lambda st: (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+        if len(raw) > maximum or binding(before) != binding(after) or binding(after) != binding(path.lstat()):
+            raise ValueError
+        doc = json.loads(raw)
+        if not isinstance(doc, dict) or type(doc.get("schema_version")) is not int or doc["schema_version"] != 1:
+            raise ValueError
+        stamp = doc.get("scanned_at")
+        if not isinstance(stamp, str):
+            raise ValueError
+        measured = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        if measured.tzinfo is None:
+            raise ValueError
+        age = (datetime.datetime.now(datetime.timezone.utc) - measured).total_seconds()
+        if not 0 <= age <= 36 * 3600:
+            raise ValueError
+        if doc.get("degraded") != []:
+            raise ValueError
+        keys, dests, hashes = (doc.get(k) for k in ("keys", "destinations", "destination_hashes"))
+        if not isinstance(keys, list) or not isinstance(dests, dict) or not isinstance(hashes, dict):
+            raise ValueError
+        if len(keys) + len(dests) + len(hashes) > 10000:
+            raise ValueError
+        for row in keys:
+            if not isinstance(row, dict) or not all(k in row for k in ("name", "label", "serves")):
+                raise ValueError
+            if any(row[k] is not None and not isinstance(row[k], str) for k in ("name", "label", "serves")):
+                raise ValueError
+        if any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in dests.items()):
+            raise ValueError
+        for dest, held in hashes.items():
+            if not isinstance(dest, str) or not dest or not isinstance(held, dict):
+                raise ValueError
+            if not isinstance(held.get("hash"), str) or not held["hash"]:
+                raise ValueError
+    except (OSError, ValueError, TypeError, OverflowError, RecursionError):
+        raise RuntimeError("Consumer evidence unavailable: OpenRouter scan is missing, unreadable, changed, malformed, degraded or outside its 36-hour window; refresh the scan before retrying; no key was revoked") from None
+    return doc, hashlib.sha256(raw).hexdigest()
+
+
+def _require_no_scan_holders(scan: dict, name: str, rec: dict, row: dict | None, alias: str) -> None:
+    # The provider row is bound to rec.hash by find_key. Rotation can leave a
+    # predecessor label in the legacy ledger: it is an extra refusal witness,
+    # never a substitute for the current provider label. Labels stay in memory.
+    row = row or {}
+    hashes = {h for h in (rec.get("hash"), row.get("hash")) if isinstance(h, str) and h}
+    labels = {v for v in (alias, rec.get("label"), row.get("label")) if isinstance(v, str) and v}
+    names = {v for v in (name, rec.get("provider_name"), row.get("name")) if isinstance(v, str) and v}
+    held = any(item["hash"] in hashes for item in scan["destination_hashes"].values())
+    held = held or any(label in labels for label in scan["destinations"].values())
+    held = held or any(k.get("serves") and (k.get("name") in names or k.get("label") in labels)
+                       for k in scan["keys"])
+    if held:
+        raise ValueError("A known consumer is reading right now from this key; deliver its replacement and refresh the OpenRouter scan before revocation")
+
+
+@_ledger_writer
 def revoke_key(name_or_label: str) -> dict:
-    """Delete at the provider, then clear the ledger row — in that order: a
-    forgotten live key is worse than a stale row. REFUSED for a key something
-    is reading right now (`serves` in the OpenRouter scan): revoking the key a
-    consumer holds takes the consumer down with no way back."""
+    """Refuse unknown consumer evidence and use current provider identity under lock.
+
+    Saved source identity is rechecked after provider lookup. This bounds source
+    drift across that read; it is not a transaction with external consumer writers.
+    Full vault and remote-holder evidence remains separate, unimplemented coverage.
+    """
     name, rec = resolve_issued(name_or_label)
-    scan = paths.SCRATCH / "openrouter.json"
-    if scan.is_file():
-        try:
-            doc_scan = json.loads(scan.read_text(encoding="utf-8"))
-            # By HASH first (round 4): a key renamed in the provider's dashboard is still the key a
-            # consumer holds, and the scan records each consumer's key hash.
-            for dest, held in (doc_scan.get("destination_hashes") or {}).items():
-                if rec.get("hash") and isinstance(held, dict) and held.get("hash") == rec["hash"]:
-                    raise ValueError(f"{name} is what {dest} is reading right now; "
-                                     f"issue its replacement first, then revoke this one")
-            # A key past the listing appears in the scan only as the label a destination holds
-            # (`destinations`, fix 5). A label two keys share refuses too: the safe side.
-            for dest, lab in (doc_scan.get("destinations") or {}).items():
-                if rec.get("label") and lab == rec["label"]:
-                    raise ValueError(f"{name} is what {dest} is reading right now (by its label); "
-                                     f"issue its replacement first, then revoke this one")
-            for k in doc_scan.get("keys", []):
-                names = {name, rec.get("provider_name")} - {None}
-                labels = {name_or_label, rec.get("label")} - {None}
-                # A claimed key carries the provider's name, not the ledger's, and the scan has no
-                # hash; its label (recorded at claim) is what a consumer is found by. A label two
-                # keys share refuses here too: a consumer that may be reading it is not taken down.
-                if k.get("serves") and (k.get("name") in names or k.get("label") in labels):
-                    raise ValueError(f"{name} is what {k['serves']} is reading right now; "
-                                     f"issue its replacement first, then revoke this one")
-        except (OSError, ValueError) as exc:
-            if isinstance(exc, ValueError) and "reading right now" in str(exc):
-                raise
+    _require_resolved_rotation(rec)
+    _scan, receipt = _revoke_scan()
     _label, admin = read_admin(rec["account"])
     row = find_key(admin, name)
+    # Never let an unrelated name lookup supply the deletion identity.
+    if row and (not rec.get("hash") or row.get("hash") != rec["hash"]):
+        raise RuntimeError("Recorded key identity is unresolved; no key was revoked")
+    if row and (not isinstance(row.get("label"), str) or not row["label"]):
+        raise RuntimeError("Current provider consumer identity is unreadable; no key was revoked")
+    current, current_receipt = _revoke_scan()
+    if receipt != current_receipt:
+        raise RuntimeError("Consumer evidence changed during provider lookup; refresh the scan before retrying; no key was revoked")
+    _require_no_scan_holders(current, name, rec, row, name_or_label)
     if row:
         _request(f"/keys/{row['hash']}", admin, method="DELETE")
     doc = ledger()
@@ -1572,6 +1816,127 @@ def cmd_ping() -> int:
     return 1 if bad else 0
 
 
+ACTIVITY_MAX_BYTES = 4 * 1024 * 1024
+ACTIVITY_MAX_ROWS = 10000
+ACTIVITY_COUNTERS = ("requests", "prompt_tokens", "completion_tokens", "reasoning_tokens")
+
+
+def _activity_date(value: str | None, *, provider: bool = False) -> str | None:
+    if value is None and not provider: return None
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise ValueError("Activity date must be a completed UTC day in YYYY-MM-DD form")
+    day = datetime.date.fromisoformat(value)
+    current = datetime.datetime.now(datetime.timezone.utc).date()
+    if not 1 <= (current - day).days <= 30:
+        raise ValueError("Activity date must be one of the last 30 completed UTC days")
+    return value
+
+
+def read_activity(admin: str, key_hash: str, date: str | None = None) -> list[dict]:
+    """One GET for one issued identity; reject malformed evidence without echoing it.
+
+    The endpoint groups by endpoint, so the CLI folds its rows by day/model. Only
+    finite provider usage is money evidence; missing counters remain unknown.
+    Handles and the management credential travel to the provider, never output.
+    """
+    _activity_date(date)
+    if not isinstance(key_hash, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", key_hash):
+        raise ValueError("Issued key has no valid provider hash; repair its ledger metadata")
+    query = {"api_key_hash": key_hash}
+    if date is not None: query["date"] = date
+    try:
+        doc = _request("/activity?" + urllib.parse.urlencode(query), admin, max_bytes=ACTIVITY_MAX_BYTES)
+        rows = doc.get("data") if isinstance(doc, dict) else None
+        if not isinstance(rows, list) or len(rows) > ACTIVITY_MAX_ROWS:
+            raise ValueError
+        clean = []
+        for row in rows:
+            if not isinstance(row, dict): raise ValueError
+            day = row.get("date")
+            # Historical endpoint responses also use the exact UTC midnight form.
+            if isinstance(day, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2} 00:00:00", day): day = day[:10]
+            _activity_date(day, provider=True)
+            if date is not None and day != date: raise ValueError
+            model = row.get("model")
+            if (not isinstance(model, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+~-]{0,255}", model)
+                    or (admin and admin in model) or key_hash.lower() in model.lower()
+                    or re.search(r"sk-|gh[pousr]_", model, re.I)):
+                raise ValueError
+            usage = row.get("usage")
+            if type(usage) not in (int, float) or not math.isfinite(usage) or usage < 0: raise ValueError
+            item = {"date": day, "model": model, "usage": usage}
+            for field in ACTIVITY_COUNTERS:
+                value = row.get(field)
+                if value is not None and (type(value) is not int or value < 0): raise ValueError
+                item[field] = value
+            clean.append(item)
+        return clean
+    except (OSError, RuntimeError, ValueError, OverflowError, RecursionError):
+        raise RuntimeError("Activity report unavailable or invalid; no figure. Check management-key access and retry the read") from None
+
+
+def _spend_identity(name: str) -> tuple[str, str]:
+    rec = ledger()["issued"].get(name)
+    if not isinstance(rec, dict):
+        raise LookupError("Unknown issued key; run openrouter.py list")
+    account, handle = rec.get("account"), rec.get("hash")
+    if not isinstance(account, str) or not account or not isinstance(handle, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", handle):
+        raise ValueError("Issued-key identity is incomplete; repair its ledger metadata")
+    if (rec.get("pending") or rec.get("orphan") or rec.get("rotation_status") not in (None, "complete")
+            or rec.get("predecessor_hash") or rec.get("successor_hash")):
+        raise RuntimeError("Issued-key rotation or issuance is unresolved; reconcile it before reading spend")
+    return account, handle
+
+
+def cmd_spend(name: str, date: str | None, as_json: bool) -> int:
+    """Read-only current-key snapshot; it does not total retired keys or projects."""
+    _activity_date(date)
+    identity = _spend_identity(name)
+    _label, admin = read_admin(identity[0])
+    if (not isinstance(name, str) or not 0 < len(name) <= 200 or any(ord(c) < 32 or ord(c) == 127 for c in name)
+            or (admin and admin in name) or identity[1].lower() in name.lower() or re.search(r"sk-|gh[pousr]_", name, re.I)):
+        raise ValueError("Issued-key display name is unsafe; repair its ledger metadata")
+    rows = read_activity(admin, identity[1], date)
+    try: current = _spend_identity(name)
+    except (LookupError, ValueError, RuntimeError):
+        raise RuntimeError("Issued-key identity changed during the read; retry after reconciliation") from None
+    if current != identity:
+        raise RuntimeError("Issued-key identity changed during the read; retry after reconciliation")
+    grouped = {}
+    try:
+        with decimal.localcontext() as ctx:
+            ctx.prec = 340  # finite IEEE doubles plus a bounded 10k-row sum
+            for row in rows:
+                key = (row["date"], row["model"])
+                if key not in grouped:
+                    grouped[key] = {**row, "usage": decimal.Decimal(str(row["usage"]))}
+                    continue
+                target = grouped[key]; target["usage"] += decimal.Decimal(str(row["usage"]))
+                for field in ACTIVITY_COUNTERS:
+                    target[field] = target[field] + row[field] if target[field] is not None and row[field] is not None else None
+            total = sum((r["usage"] for r in grouped.values()), decimal.Decimal(0))
+            total_usd = float(total)
+            if not math.isfinite(total_usd): raise ValueError
+            out = [grouped[k] for k in sorted(grouped)]
+            for row in out: row["usage"] = float(row["usage"])
+    except (ValueError, OverflowError, decimal.DecimalException):
+        raise RuntimeError("Activity totals are outside the supported numeric range; no figure") from None
+    doc = {"key": name, "date": date, "rows": out, "totalUsd": total_usd,
+           "measuredAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+           "scope": "current-issued-key-only", "totalBasis": "sum-of-provider-usage",
+           "retiredKeysIncluded": False}
+    if as_json:
+        print(json.dumps(doc, ensure_ascii=False, allow_nan=False))
+    else:
+        scope = f"on {date}" if date else "in the last 30 completed UTC days"
+        print(f"{name}: {len(out)} day/model row(s) {scope}; current issued key only")
+        for row in out:
+            requests = row['requests'] if row['requests'] is not None else 'unknown'
+            print(f"  {row['date']}  {row['model']}  {requests} req  ${row['usage']:.6f}")
+        print(f"  total ${total_usd:.6f} (provider usage; retired keys excluded)")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1608,6 +1973,10 @@ def main() -> int:
                       "several are stashed and no --account), the slot reads held-unread and the run exits 1")
     sub.add_parser("list", help="what exists — names, ceilings, places; never values")
     sub.add_parser("ping", help="alive? spent how much of its ceiling?")
+    p_sp = sub.add_parser("spend", help="one issued key's cost by day and model (provider activity)")
+    p_sp.add_argument("name")
+    p_sp.add_argument("--date", help="one of the last 30 completed UTC days, YYYY-MM-DD")
+    p_sp.add_argument("--json", action="store_true")
     p_li = sub.add_parser("limit", help="show or move a key's USD ceiling; for a key issued by a spend policy, "
                           "raising it can take it past its share of the project limit until the next "
                           "issue-for-policy run")
@@ -1619,17 +1988,19 @@ def main() -> int:
     p_di.add_argument("name")
     p_en = sub.add_parser("enable", help="let a disabled key spend again")
     p_en.add_argument("name")
-    p_ro = sub.add_parser("rotate", help="create successor, deliver, delete predecessor. While it runs the slot "
-                          "holds two live keys (the one window past a spend policy's limit). Until the J-3 change "
-                          "counts them, a rotate that FAILS can leave the successor NAME-next live and untracked, "
-                          "or the predecessor live and uncounted (the row then says rotation_status "
-                          "successor-delivered-predecessor-pending with its predecessor_hash): delete at the "
-                          "provider whichever of the two the slot does not hold, then run issue-for-policy, which "
-                          "names any total still past the limit")
+    p_ro = sub.add_parser("rotate", help="Policy-marked keys refuse rotation without verified aggregate headroom. "
+                          "Unmarked legacy/standalone keys reserve successor, verify identity, deliver, then delete predecessor. "
+                          "Unknown outcomes retain possible exposure and refuse another rotation or mutation of "
+                          "the unresolved identity. Overlapping ceilings can remain above the policy limit. "
+                          "Reconcile provider identities and consumer state before recovery; no automatic "
+                          "reconciliation is implemented. Local writer locking does not serialize external "
+                          "account changes or enforce every standalone command's project policy",
+                          description="Policy-marked keys refuse before provider calls: a stored policy snapshot is not current headroom proof. No bypass or automatic migration exists. Unmarked legacy/standalone keys retain the overlap workflow; their project-wide capacity is unverified.")
     p_ro.add_argument("name", nargs="?")
     p_ro.add_argument("--leaked", action="store_true",
                       help="rotate every issued key named in an open leak")
-    p_re = sub.add_parser("revoke", help="delete at the provider, clear the ledger row")
+    p_re = sub.add_parser("revoke", help="delete only with current complete OpenRouter consumer evidence",
+                          description="Requires a complete OpenRouter scan no older than 36 hours and no known holder. Missing, stale, changed or degraded evidence refuses. This guard does not yet survey every vault or remote holder.")
     p_re.add_argument("name")
     p_re.add_argument("--forget-pending", action="store_true",
                       help="clear a pending row with no hash without reading the provider — only once the key "
@@ -1655,6 +2026,15 @@ def main() -> int:
         return cmd_list()
     if a.cmd == "ping":
         return cmd_ping()
+    if a.cmd == "spend":
+        try:
+            return cmd_spend(a.name, a.date, a.json)
+        except (LookupError, ValueError):
+            print("Spend request refused; check the issued name and a date in the last 30 completed UTC days. Run openrouter.py list", file=sys.stderr)
+            return 2
+        except (OSError, RuntimeError):
+            print("Activity report unavailable or identity unresolved; no figure. Check management-key access and reconcile pending rotation before retrying", file=sys.stderr)
+            return 1
     if a.cmd == "limit":
         return cmd_limit(a.name, a.set_to, a.reset)
     if a.cmd == "disable":

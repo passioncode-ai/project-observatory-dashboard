@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 from pathlib import Path
 
 import osprivacy
@@ -37,40 +38,77 @@ SUFFIXES = (".log", ".err", ".out", ".jsonl")
 HELD_OPEN = frozenset({"serverd.err", "serverd.out", "tick.log", "tick.err"})
 
 
+def _real_parents(path: Path) -> bool:
+    """Refuse linked or unreadable ancestors, including explicit out-of-directory logs."""
+    try:
+        return all(stat.S_ISDIR(parent.lstat().st_mode) for parent in path.absolute().parents)
+    except OSError:
+        return False
+
+
+def _single_file(path: Path):
+    try:
+        info = path.lstat()
+        return info if _real_parents(path) and stat.S_ISREG(info.st_mode) and info.st_nlink == 1 else None
+    except OSError:
+        return None
+
+
 def _private(path: Path) -> None:
     try:
-        if path.is_file() and not path.is_symlink() and not osprivacy.private(path):
+        if _single_file(path) is not None and not osprivacy.private(path):
             osprivacy.make_private(path)
     except OSError:
         pass
-
 
 def rotate(path: Path, *, max_bytes: int | None = None, generations: int | None = None,
            copy_truncate: bool | None = None) -> bool:
     """Rotate `path` when it is larger than `max_bytes`; True when it did.
 
     `copy_truncate` defaults to whether the file's name is in HELD_OPEN. A symlink
-    is never followed or rotated: a log that became a link is someone else's file."""
+    is never followed or rotated; hardlinked files and linked ancestors also refuse."""
     path = Path(path)
     max_bytes = MAX_BYTES if max_bytes is None else max_bytes
     generations = GENERATIONS if generations is None else max(1, generations)
     if copy_truncate is None:
         copy_truncate = path.name in HELD_OPEN
-    try:
-        if path.is_symlink() or not path.is_file() or path.stat().st_size <= max_bytes:
-            _private(path)
-            return False
-    except OSError:
+    info = _single_file(path)
+    if info is None:
+        return False
+    if info.st_size <= max_bytes:
+        _private(path)
         return False
     gen = lambda n: path.with_name(f"{path.name}.{n}")                       # noqa: E731
+    # Validate the whole chain before moving any generation. lexists semantics
+    # matter: a broken symlink must not look like a vacant copy destination.
+    for n in range(1, generations + 1):
+        try:
+            gen(n).lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return False
+        if _single_file(gen(n)) is None:
+            return False
     gen(generations).unlink(missing_ok=True)
     for n in range(generations - 1, 0, -1):
         if gen(n).exists():
             os.replace(gen(n), gen(n + 1))
     if copy_truncate:
-        shutil.copyfile(path, gen(1))
-        with open(path, "r+b") as fh:
-            fh.truncate(0)
+        fd = osprivacy.open(path, os.O_RDWR | osprivacy.NOFOLLOW)
+        with os.fdopen(fd, "r+b") as source:
+            current = os.fstat(source.fileno())
+            if (current.st_dev, current.st_ino, current.st_nlink) != (info.st_dev, info.st_ino, 1):
+                return False
+            # Exclusive creation cannot follow a destination link introduced after
+            # preflight. Truncate only the verified source descriptor after copying.
+            target = osprivacy.open(gen(1), os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                                    osprivacy.NOFOLLOW, 0o600)
+            with os.fdopen(target, "wb") as backup:
+                shutil.copyfileobj(source, backup)
+                backup.flush()
+                os.fsync(backup.fileno())
+            source.truncate(0)
     else:
         os.replace(path, gen(1))
     for n in range(1, generations + 1):
@@ -86,16 +124,22 @@ def sweep(directory: Path, *, max_bytes: int | None = None, generations: int | N
     Returns the names rotated. Generations (`name.N`) are made private but never
     rotated themselves."""
     rotated: list[str] = []
+    directory = Path(directory)
+    try:
+        safe_directory = _real_parents(directory) and stat.S_ISDIR(directory.lstat().st_mode)
+    except OSError:
+        safe_directory = False
     candidates: list[Path] = list(files)
     try:
-        candidates += [p for p in Path(directory).iterdir() if p.suffix in SUFFIXES]
+        if safe_directory:
+            candidates += [p for p in directory.iterdir() if p.suffix in SUFFIXES]
     except OSError:
         pass
     for p in sorted(set(candidates)):
         if rotate(p, max_bytes=max_bytes, generations=generations):
             rotated.append(p.name)
     try:
-        for p in Path(directory).iterdir():
+        for p in directory.iterdir() if safe_directory else ():
             stem, _, tail = p.name.rpartition(".")
             if tail.isdigit() and Path(stem).suffix in SUFFIXES:
                 _private(p)

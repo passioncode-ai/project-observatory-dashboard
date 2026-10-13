@@ -17,6 +17,48 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-10-13 — Final holder coverage and prune receipts](runs/2026-10-13-cleanup-holder-integration/README.md):
+partial or unreadable process evidence no longer declares an omitted target free;
+clean and archived dirty worktrees require a fresh bounded final target observation.
+Failed repository-wide registration pruning reports unknown effects, never success.
+These independently reviewed corrections supersede the `93223f5` preparation
+checkpoint. Local combined checks passed; protected exact-source CI, merge,
+tagged assets and installed acceptance remain pending. Versions stay 0.25.0/0.22.1.
+Next: independent composition binding, privacy, then the existing protected release
+PR; retain the open rotation-convergence and filesystem-race limitations.
+
+[2026-10-13 — Recovery wave 8](runs/2026-10-13-recovery-wave-8/README.md):
+explicit policy provenance makes unproved rotation refuse before provider requests,
+including exact hash aliases; known engine-update backups are visible to status and
+verified migration. A conditional capacity-transfer model remains synthetic only.
+The exact policy source's 128-case baseline is 58 PASS / 70 FAIL, all remaining failures
+in convergence; full 5,200-case acceptance is open. This combined candidate supersedes
+checkpoint `8aff34f` after its CI failures; source preparation is not installed acceptance.
+Next: combined independent review and protected integration, preserving explicit
+legacy/unmarked-key, backup-kind and live-provider limits.
+
+[2026-10-13 — Release 0.25.0 preparation](runs/2026-10-13-release-0.25.0-preparation/README.md):
+application 0.25.0 and companion plugin 0.22.1 combine independently reviewed waves
+four through seven: rotation identity/accounting, checkout/cache coverage and saved readers,
+scoped Heroku preservation, cleanup diagnostic privacy and read-only issued-key activity,
+plus current-consumer revocation refusal, validated cleanup child summaries and
+[log-rotation link preservation](runs/2026-10-13-log-rotation-safety/README.md).
+The latter runs independently of auto-cleanup; copy/truncate concurrent-append and
+maintenance refusal-observability limits remain explicit.
+The corrected full-rotation model preserves a failed 128-case baseline (28 PASS /
+100 FAIL); this is evidence of remaining work, not full J3 acceptance.
+Source is prepared; no tag, published assets or installed acceptance is claimed. Next:
+protected exact-source CI and merge, tag the accepted main SHA, verify signed release
+assets, then verify installed code and scheduled receipts with automatic cleanup off.
+Full rotation reconciliation/5200-case acceptance, retired-key/project spend accounting
+and typed ownership/reclamation proof remain open on the canonical board.
+
+[2026-10-13 — Rotation and inventory follow-up](runs/2026-10-13-recovery-wave-4/README.md):
+reviewed identity/reservation corrections, explicit-root checkout inventory and
+lossless scoped provider measurements. Next: combined independent acceptance,
+protected integration and fixed release installation. All candidates remain
+non-actionable; cleanup authority and live provider acceptance are separate.
+
 [2026-10-13 — Findings and measurement recovery](runs/2026-10-13-recovery-wave-3/README.md):
 OBS-88–90 preserve configuration coverage, measurement age and repeated guard errors;
 OBS-87 adds independent memory observations. Next: combined source acceptance,

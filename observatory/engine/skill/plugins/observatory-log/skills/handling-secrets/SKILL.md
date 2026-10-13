@@ -10,7 +10,7 @@ description: >-
   provider permissions or choosing a project's authentication architecture.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
-  version: "0.22.0"
+  version: "0.22.1"
 compatibility: >-
   Requires an initialized full Project Observatory installation, Python 3.11+
   and local shell access on macOS or Linux. Provider operations additionally
@@ -30,7 +30,7 @@ names. Never ask the user to paste a credential into the conversation.
 2. Select the user's initialized `OBSERVATORY_HOME`. Run
    `project-observatory full doctor`. A missing workspace
    needs the documented onboarding before secret operations.
-3. Run `"$OBSERVATORY_PYTHON" "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.22.0`
+3. Run `"$OBSERVATORY_PYTHON" "$OBSERVATORY_ROOT/tools/skill_check.py" handling-secrets 0.22.1`
    (`full agent install` records that interpreter; the stock macOS `python3` is too old).
    If stale, read the installed skill once and follow its compatible commands.
    Do not turn an unavailable version check into a retry loop.
@@ -181,11 +181,22 @@ accounts, budgets or tokens. Limit issuance and revocation to the task's scope.
 A project's own OpenRouter keys come from its spend policy: `openrouter.py
 issue-for-policy --policy FILE [--dry-run]` keeps their ceilings together within
 the project limit and exits 1 with `OVER LIMIT by $X now ($A against the $L
-limit); it ends after: …` when they are not. `rotate` is the one window past the
-limit: both keys are live while it runs, and until the J-3 change a rotate that
-fails can leave the successor `NAME-next` untracked or the predecessor uncounted —
-delete at the provider the one the slot does not hold, then run
-`issue-for-policy`. A pending row with no hash on an account past the listing is
+limit); it ends after: …` when they are not. An applied policy marks its new and
+explicitly selected existing rows with policy provenance; dry-run does not write it.
+`rotate` refuses a marked row, or an exact primary/predecessor/successor hash alias,
+before provider calls because current aggregate headroom is unproved. A saved policy
+snapshot does not grant that proof; malformed provenance also refuses. Unmarked legacy
+and standalone rows are not classified by their names or folders. Their rotation
+records a successor reservation before minting, verifies returned identities before
+delivery, and retains predecessor exposure until deletion is confirmed. Failed or ambiguous effects remain accounted for;
+repeating rotation or mutating an identity held by unresolved rotation is refused.
+Overlapping ceilings can remain above the limit until reconciled. There is no automatic
+reconciliation command, and the full 5200-case rotation/convergence acceptance remains
+open. Read-only evidence must establish provider state and the value each consumer uses
+before any recovery mutation; a local receipt alone does not prove an effect completed.
+The shared local writer lock does not serialize external account changes or enforce a
+project's policy on every standalone mutation command. A pending issuance row with no
+hash on an account past the listing is
 cleared with `revoke NAME --forget-pending --reason "…"` once its key is gone. The door must
 record the reason as a pre-action attestation before clearing the row; an
 unwritable journal refuses the change. This is an operator assertion, not

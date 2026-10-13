@@ -5,7 +5,7 @@ Read ONBOARDING.md and COMPATIBILITY.md first: under `docs/` in a checkout of th
 
 1. Verify Python and SQLite requirements. Explain the code directory and the separate private workspace. Run `project-observatory full version`, then `full init` and `full doctor` with an explicit OBSERVATORY_HOME.
 2. Ask which project directory I want to observe. Configure only that directory. Explain which local metadata will be read. Start with filesystem scanning and the local dashboard.
-3. Offer optional GitHub, Bitbucket, hosting, DNS, analytics, memory and model integrations separately. Missing integrations remain unconfigured. Do not enable paid reasoning, remote secret reads, memory remediation, notifications or the observation scheduler as part of a default setup. Offer `features.auto_cleanup` separately and say what it does: the maintenance job (every 15 minutes) then runs the disk guard (`full disk-guard`): it removes application and tool cache folders, npx's package cache, temporary files, macOS diagnostic reports, abandoned browser clones, Trash items older than 30 days, the cache tools' own caches and git-ignored build output of idle checkouts, then merged or pushed branches and clean worktrees whose branch stays — more of them as free space falls (below 25 GB: 3 days; below 10 GB: 1 day) — and never anything a process holds, a privacy-guarded folder or another account's file; preserve `.wrangler` local state even when an old artifact configuration lists it; manual dirty-worktree removal skips all ignored files because its archive excludes them (preserve or move those files before retrying `full cleanup --apply --include manual`); show me `full disk-guard` and `full cleanup --level low` (the plans, which remove nothing) before I turn it on. The maintenance job (every 15 minutes: updates and a daily encrypted backup) is separate: `full init` schedules it only when I run init at my own terminal; run by you, init schedules nothing and answers `not-scheduled-here` with the command, `full maintain ensure`, which also needs my terminal. Remote memory embeddings need my own consent per project (`full embedding-policy grant`, at my terminal); you cannot give it, and your searches stay local either way. Say this before I enable embeddings. Any caller other than you (the local stdio agent) reaches memory only through a binding I issue at my terminal (`full access-binding issue`); you cannot issue one, and I hand its bearer over as a file, never in chat.
+3. Offer optional GitHub, Bitbucket, hosting, DNS, analytics, memory and model integrations separately. Missing integrations remain unconfigured. Do not enable paid reasoning, remote secret reads, memory remediation, notifications or the observation scheduler as part of a default setup. Offer `features.auto_cleanup` separately and say what it does: the maintenance job (every 15 minutes) then runs the disk guard (`full disk-guard`): it removes application and tool cache folders, npx's package cache, temporary files, macOS diagnostic reports, abandoned browser clones, Trash items older than 30 days, the cache tools' own caches and git-ignored build output of idle checkouts, then merged or pushed branches and clean worktrees whose branch stays — more of them as free space falls (below 25 GB: 3 days; below 10 GB: 1 day) — and refuses observed holders or unknown holder coverage, privacy-guarded folders and another account's files. Holder checks are point-in-time observations; exclusion of external writers starting afterward is unproved; preserve `.wrangler` local state even when an old artifact configuration lists it; manual dirty-worktree removal skips all ignored files because its archive excludes them (preserve or move those files before retrying `full cleanup --apply --include manual`); show me `full disk-guard` and `full cleanup --level low` (the plans, which remove nothing) before I turn it on. The maintenance job (every 15 minutes: updates and a daily encrypted backup) is separate: `full init` schedules it only when I run init at my own terminal; run by you, init schedules nothing and answers `not-scheduled-here` with the command, `full maintain ensure`, which also needs my terminal. Remote memory embeddings need my own consent per project (`full embedding-policy grant`, at my terminal); you cannot give it, and your searches stay local either way. Say this before I enable embeddings. Any caller other than you (the local stdio agent) reaches memory only through a binding I issue at my terminal (`full access-binding issue`); you cannot issue one, and I hand its bearer over as a file, never in chat.
 4. Explain the minimum credential permissions for each selected integration. Have me enter secrets in a local hidden prompt, secure file or credential manager. Never ask me to paste a value into this conversation. Report only names and connection results.
 5. Run a first observation and show its coverage, findings and unavailable inputs. A disconnected source is not a clean security finding.
 6. Explain how to update, preview a migration and restore a backup. If this is an existing installation, stop writers before migration and keep the original until the new copy is verified. Do not start a second scheduler over the same data.
@@ -123,3 +123,61 @@ Privacy & Security → Full Disk Access, or leaves that source unmeasured. Other
 access, journal and time-budget failures keep their own reason and recovery step.
 The compact agent overview already carries Git `partial` and `carried` evidence;
 carried measurements are not a new cleanup authorization.
+
+
+For a single issued OpenRouter key, use `tools/openrouter.py spend NAME [--date
+YYYY-MM-DD] [--json]` beneath `project-observatory full-path`. This is a management-key
+activity read, not an inference call or a mutation. It reports the current ledger
+identity only, excluding retired keys; do not call it a project spend total. Null
+optional counters remain unknown. An unavailable/malformed report or changed identity
+returns no figure and nonzero exit, never a measured zero. See the
+[operator guide](ONBOARDING.md#spend-for-one-issued-openrouter-key) for bounds and recovery.
+
+## OpenRouter revocation evidence
+
+`openrouter.py revoke NAME` checks the provider identity by its recorded hash and
+refuses known consumers, including a successor seen only in the scan's destination
+labels. It requires a complete OpenRouter scan no older than 36 hours. Missing,
+unreadable, malformed, degraded, future-dated or changed evidence refuses before
+provider deletion and keeps the ledger row. Refresh the scan with the engine's
+`collectors/scan_openrouter.py OUTPUT` command, using the workspace's
+`store/raw/openrouter.json` as OUTPUT, then inspect the result before retrying.
+Refreshing is a provider read and uses the configured provisioning credential.
+
+The current provider label is used only in memory for matching. The guard does not
+yet prove that every live vault slot or remote environment is unused, and a saved
+scan is not a transaction with external consumer changes. There is no unread-evidence
+bypass. `--forget-pending --reason` remains a separate journaled operator attestation
+for a hashless pending row; it never deletes a provider key.
+
+## Policy-managed rotation admission
+
+`openrouter.py issue-for-policy --policy FILE` records explicit policy provenance
+for new keys and existing rows selected by that policy's named sources. The record
+contains a version, normalized project, policy digest, origin kind and observation
+time. It stores no policy filename. `--dry-run` does not write this provenance.
+A later policy application updates the snapshot when the policy changes.
+
+`rotate NAME` and `rotate --leaked` refuse policy-marked rows before provider calls
+because no current aggregate headroom proof is implemented. The refusal also applies
+to an unmarked alias sharing an exact hash with a marked primary or reserved
+predecessor/successor identity. A different ledger name cannot bypass it. The stored policy
+snapshot does not authorize overlapping capacity; stale or malformed provenance
+also refuses. There is no force option or automatic recovery command. Re-applying
+a policy does not make its snapshot a live headroom proof.
+
+Existing unmarked rows are not classified by project names or destination folders.
+Unmarked legacy and standalone rotation retain their previous behavior and can leave
+overlapping capacity after a failure. Their project-wide capacity remains unverified.
+Explicit legacy re-attestation and a bound headroom/reconciliation protocol remain
+open; no existing operational rows are migrated by installation.
+
+### Missing worktree registration receipts
+
+For a missing worktree, cleanup invokes Git's repository-wide registration prune.
+A `pruned` journal row means that command exited zero; `registration_changes` stays
+null because the row does not measure how many registrations changed. A nonzero
+exit, timeout or launch error is `failed`; its effect remains unknown and it is not
+counted as a successful prune. Reasons omit Git output and exception bodies.
+Inspect `git worktree list --porcelain` in the owning repository before retrying.
+Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` in the engine.

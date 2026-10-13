@@ -815,8 +815,20 @@ activity, ignore rules, tracked files and new writes immediately before acting.
 Each path action also makes a fresh, target-scoped holder probe within five
 seconds; unknown, partial or timed-out results skip the path. On POSIX this
 last probe requires `lsof`; without it the plan is available but path removal
-waits. Windows retains the rename probe. See [the preservation contract](design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
+waits. Windows disk-guard path removal retains its explicit rename probe.
+See [the preservation contract](design/DISK-GUARD.md#apply-time-preservation-2026-10-13)
 and `tests/test_disk_guard.py::TargetRevalidation` / `FreshTargetProbe`.
+On POSIX, clean and archived dirty worktrees repeat this target check immediately
+before removal, after Git/archive verification. The earlier shared process
+listing never grants final removal. Nonzero, diagnostic or undecodable `lsof`/`ps`
+output, unparseable global `lsof` names and Linux `/proc` read failures mean
+unknown, so cleanup can conservatively skip
+work even if a partial survey showed no holder. Cache-tool commands likewise
+skip when their process survey is unknown. Worktree idle age is still a planning
+condition, not a fresh action-time measurement. A process starting after the
+final check remains a race; these checks are not an exclusive filesystem lock.
+Git worktree removal on Windows relies on Git/native deletion behavior, not the
+disk guard's explicit rename probe; native handle behavior is not verified here.
 
 Build planning first refreshes explicit Git worktree registrations within a
 reserved budget. Root attempts rotate across passes with a persisted cursor and
@@ -825,9 +837,10 @@ safe-to-delete status. Failed path-holder readings remain visible per phase.
 See [registration and fairness](design/DISK-GUARD.md#registration-refresh-and-build-root-fairness-obs-87-subset).
 
 **On every system.** What a process holds is read with `lsof` on macOS and Linux, from
-`/proc` on a Linux without `lsof`, and on Windows by renaming the folder aside before
-removing it — Windows refuses to rename a folder something holds, so a refusal is a skip
-and nothing of it is deleted. The schedule is the same maintenance job everywhere: launchd,
+`/proc` for planning on a Linux without `lsof`, and for Windows disk-guard path
+actions by renaming the folder aside before removal. A refused rename skips the
+path. This does not establish Git worktree handle behavior on Windows. The
+schedule is the same maintenance job everywhere: launchd,
 a systemd user timer, or a Task Scheduler task, every 15 minutes. "Nobody worked in" means no
 checkout or commit and no uncommitted file changed since — never the index,
 which every `git status` rewrites.
@@ -963,8 +976,12 @@ elsewhere.
 Each workspace writes into its own subfolder (`<home-name>-<instance>`), so two
 workspaces sharing one root never rotate each other's files. Three artifacts
 per kind are kept (`observatory-db-*.obsdb`, `snapshot-*.obsnap`,
-`before-upgrade-*.obsnap`); a new one is decrypted in full before anything
-older is pruned.
+`before-upgrade-*.obsnap`, `before-update-*.obsnap` and `daily-*.obsnap`); a new
+one is decrypted in full before anything older is pruned. Local status and migration
+use the same snapshot kinds, including snapshots left by engine updates. Migration
+exports verified copies under the existing three-per-kind policy; an unverifiable
+copy is reported and retained. Unrecognized kinds are outside this inventory and
+remain untouched by migration; the count is not a survey of every backup-like directory.
 
 The format is `OBSENC1`: AES-256-GCM in authenticated chunks, key derived from
 the passphrase by scrypt (N=2^17, r=8, p=1), header bound as associated data,
@@ -1392,3 +1409,151 @@ Privacy & Security → Full Disk Access, or leaves that source unmeasured. Other
 access, journal and time-budget failures keep their own reason and recovery step.
 The compact agent overview already carries Git `partial` and `carried` evidence;
 carried measurements are not a new cleanup authorization.
+
+### Inspect checkout candidates beneath explicit roots
+
+```sh
+project-observatory full machine --checkouts --root /path/to/checkouts --root /path/to/other-checkouts
+```
+
+This read-only command writes `store/raw/checkout-candidates.json` with a persisted
+cursor. The default pass allows 20 seconds overall, 2 seconds and 250 entries per
+root, depth 8, and at most 10,000 retained candidates. Repeating the command resumes
+unfinished roots and rotates the root last attempted before expensive work. Symlinks
+are not traversed; Git metadata for a linked checkout may reference its common Git
+directory outside these roots. Repository contents are not recursively surveyed.
+
+The receipt distinguishes clones, linked worktrees, bare repositories and unknown
+Git results. A fresh registration receipt may establish listed path membership;
+missing, partial or old registration evidence leaves absence unknown. Allocated and
+reclaimable bytes, local changes, ownership, upstream containment and active use are
+not measured here. No candidate is actionable and none enters cleanup planning.
+Depth/time/entry limits and source failures keep a pass incomplete. Directory offsets
+are resumable hints; a changed directory identity resets its position, and huge
+or continually changing directories can need additional passes. Filesystem calls
+are checked between operations; a kernel-blocked filesystem read is not a hard
+real-time deadline. Git probes run in owned bounded child groups.
+
+A competing inventory writer refuses while the receipt lock is held; it never resets
+another scan's cursor. The command is not scheduled automatically.
+
+### Read cache and runtime coverage without cleaning
+
+```sh
+project-observatory full machine --cache-coverage
+```
+
+The receipt is `store/raw/cache-coverage.json`. It reads machine/cleanup declarations,
+checks non-protected root metadata, and locates executable tools without running them.
+It does not enumerate directory contents or start application-managed cleanup commands.
+Protected app containers and uncovered OS cache areas have unknown presence and size.
+A configured `regenerable` label remains an unverified declaration; tool availability
+means only that an executable was found, not that its daemon runs or the cache is idle.
+
+Old `du` figures retain their own dates as rounded reported sizes with unknown
+completeness. Exact allocated bytes, reclaimable bytes, owner, current use, restoration
+cost and regeneration proof remain unknown. Neither command estimates of zero nor
+APFS clone/private-size hints are promoted into reclamation promises by this adapter.
+The receipt always says coverage is partial. `measurement_complete` describes only
+completion of this narrow metadata pass, and never lifecycle safety.
+
+The default pass allows three seconds, capped at ten, and 128 attempted rows. Its
+persisted cursor advances before each probe so repeated bounded passes rotate through
+locations and tools. Input documents are capped at 1 MiB and source collections at 128
+rows; omissions are explicit. A kernel-blocked metadata read is not preempted. A failed
+source preserves old observations and dates; a missing current policy leaves those rows
+stale and does not authorize probing them again. A single-writer lock protects cursor
+progress. Nothing schedules this command or adds its rows to a cleanup planner.
+
+
+### Read saved checkout and cache coverage
+
+`project-observatory full machine --coverage` summarizes the two saved inventory
+receipts without running their collectors. The agent tool is
+`observatory_machine(section="coverage")`; its default overview includes the same
+summary. Each source retains its own attempt age and partial state. Snapshot counts
+count validated saved rows within the declared scope, never every checkout or cache
+on the machine. Current snapshot counts remain null for stale, partial or invalid
+sources. Cache lifecycle coverage remains partial even after all metadata probes finish.
+
+The reader caps each source at 4 MiB, each collection at 10,000 inspected rows, and
+returns ten rows per source. Its stale threshold is 30 minutes. Oversized or malformed
+receipts show an explicit unknown state; malformed rows do not erase valid peers.
+Read time is separate from measurement time. Reclaimable/allocated totals remain null,
+command arguments are omitted and all rows remain non-actionable. Refresh evidence
+with the separate `--checkouts --root ...` or `--cache-coverage` command when needed.
+
+### Spend for one issued OpenRouter key
+
+Use the provider door's `spend` command with an issued name from its `list`:
+
+```sh
+python "$(project-observatory full-path)/tools/openrouter.py" spend example-agent --json
+```
+
+`--date YYYY-MM-DD` selects one of the last 30 completed UTC days; without it,
+the provider supplies that whole window. The management credential stays in its
+private stash. This command only reads activity. It does not issue keys, run a model,
+change limits, or write the ledger. It groups endpoint records by day/model and sums
+the provider's `usage` field, with `totalBasis` identifying that field. It is not a
+project total or a bill including other providers, BYOK inference or retired keys.
+
+A valid empty response is zero. Missing or invalid usage, an unavailable report,
+an unresolved issuance/rotation, or a key identity changing during the read yields
+no figure. Missing optional request/token counts remain null (`unknown` in text).
+JSON includes `measuredAt`, `scope: current-issued-key-only`, and
+`retiredKeysIncluded: false`. Responses are capped at 4 MiB and 10,000 endpoint rows;
+an exceeded cap refuses the report. Provider bodies, handles and credentials are
+withheld. Exit 2 means an invalid name/date/identity; exit 1 means an unavailable
+report or unresolved/changing identity. Check `list`, management-key access and
+rotation state before retrying this read. Existing unresolved rotations require
+reconciliation; the report does not perform it.
+
+## OpenRouter revocation evidence
+
+`openrouter.py revoke NAME` checks the provider identity by its recorded hash and
+refuses known consumers, including a successor seen only in the scan's destination
+labels. It requires a complete OpenRouter scan no older than 36 hours. Missing,
+unreadable, malformed, degraded, future-dated or changed evidence refuses before
+provider deletion and keeps the ledger row. Refresh the scan with the engine's
+`collectors/scan_openrouter.py OUTPUT` command, using the workspace's
+`store/raw/openrouter.json` as OUTPUT, then inspect the result before retrying.
+Refreshing is a provider read and uses the configured provisioning credential.
+
+The current provider label is used only in memory for matching. The guard does not
+yet prove that every live vault slot or remote environment is unused, and a saved
+scan is not a transaction with external consumer changes. There is no unread-evidence
+bypass. `--forget-pending --reason` remains a separate journaled operator attestation
+for a hashless pending row; it never deletes a provider key.
+
+## Policy-managed rotation admission
+
+`openrouter.py issue-for-policy --policy FILE` records explicit policy provenance
+for new keys and existing rows selected by that policy's named sources. The record
+contains a version, normalized project, policy digest, origin kind and observation
+time. It stores no policy filename. `--dry-run` does not write this provenance.
+A later policy application updates the snapshot when the policy changes.
+
+`rotate NAME` and `rotate --leaked` refuse policy-marked rows before provider calls
+because no current aggregate headroom proof is implemented. The refusal also applies
+to an unmarked alias sharing an exact hash with a marked primary or reserved
+predecessor/successor identity. A different ledger name cannot bypass it. The stored policy
+snapshot does not authorize overlapping capacity; stale or malformed provenance
+also refuses. There is no force option or automatic recovery command. Re-applying
+a policy does not make its snapshot a live headroom proof.
+
+Existing unmarked rows are not classified by project names or destination folders.
+Unmarked legacy and standalone rotation retain their previous behavior and can leave
+overlapping capacity after a failure. Their project-wide capacity remains unverified.
+Explicit legacy re-attestation and a bound headroom/reconciliation protocol remain
+open; no existing operational rows are migrated by installation.
+
+### Missing worktree registration receipts
+
+For a missing worktree, cleanup invokes Git's repository-wide registration prune.
+A `pruned` journal row means that command exited zero; `registration_changes` stays
+null because the row does not measure how many registrations changed. A nonzero
+exit, timeout or launch error is `failed`; its effect remains unknown and it is not
+counted as a successful prune. Reasons omit Git output and exception bodies.
+Inspect `git worktree list --porcelain` in the owning repository before retrying.
+Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` in the engine.
