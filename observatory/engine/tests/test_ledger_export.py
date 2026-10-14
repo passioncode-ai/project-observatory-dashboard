@@ -11,7 +11,7 @@ fails for the wrong reason, because it reads as evidence.
 So each case below is driven, including the two that must still FAIL.
 """
 from __future__ import annotations
-import json, pathlib, sys, tempfile
+import json, pathlib, re, sys, tempfile
 from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -114,7 +114,9 @@ def test_an_unparseable_timestamp_is_treated_as_old() -> None:
 def test_the_check_never_writes_to_the_store() -> None:
     src = (ROOT / "tools/export_ledger.py").read_text(encoding="utf-8")
     head = src.split("if \"--check\" in argv:", 1)[1].split("conn = store_db.connect()")[0]
-    check("--check opens the store read-only", "mode=ro" in head,
+    # `paths.sqlite_uri(path)` defaults to `mode=ro`; any other mode is passed in the call.
+    check("--check opens the store read-only",
+          "mode=ro" in head or re.search(r"paths\.sqlite_uri\(paths\.DB\)", head) is not None,
           "store_db.connect() opens read-write and now applies migrations, so a gate "
           "step would write into the store it audits")
 

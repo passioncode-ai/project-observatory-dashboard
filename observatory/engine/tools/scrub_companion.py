@@ -96,7 +96,7 @@ def backup(db: pathlib.Path) -> pathlib.Path | None:
     dest = BACKUP_DIR / f"{db.stem}-pre-scrub-{now().replace(':', '-')}-{uuid.uuid4().hex[:12]}.db"
     fd = osprivacy.open(dest, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     os.close(fd)
-    src = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    src = sqlite3.connect(paths.sqlite_uri(db), uri=True)
     try:
         out = sqlite3.connect(dest)
         try:
@@ -128,7 +128,7 @@ def scan_store(db: pathlib.Path, values: dict[str, str], since: dict[str, int] |
     if not db.is_file():
         return [], [], {}, 0, None
     try:
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=60)
+        conn = sqlite3.connect(paths.sqlite_uri(db), uri=True, timeout=60)
         conn.execute("PRAGMA busy_timeout = 60000")
     except sqlite3.Error as exc:
         return [], [], {}, 0, f"{type(exc).__name__}: {exc}"
@@ -188,7 +188,7 @@ def apply_todo(db: pathlib.Path, todo: list[tuple]) -> str | None:
     left as it is; a problem rolls the whole store back.
     """
     try:
-        conn = sqlite3.connect(f"file:{db}?mode=rw", uri=True, timeout=60)
+        conn = sqlite3.connect(paths.sqlite_uri(db, "rw"), uri=True, timeout=60)
     except sqlite3.Error as exc:
         return f"{type(exc).__name__}: {exc}"
     try:

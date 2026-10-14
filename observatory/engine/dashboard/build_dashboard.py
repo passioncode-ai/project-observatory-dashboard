@@ -98,7 +98,7 @@ def work_stats() -> dict:
         return {}
     out: dict[str, object] = {}
     try:
-        conn = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
         conn.row_factory = sqlite3.Row
     except sqlite3.Error:
         return {}
@@ -280,7 +280,7 @@ def from_store() -> dict:
         out["degraded"] = {"text": "no local store — history and metrics are unavailable"}
         return out
     try:
-        conn = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
         conn.row_factory = sqlite3.Row
     except sqlite3.Error as exc:
         out["degraded"] = {"text": "the store did not open: {error}", "args": {"error": type(exc).__name__}}

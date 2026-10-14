@@ -178,7 +178,7 @@ def cmd_digest(conn, args) -> int:
     # READ-ONLY. `store_db.connect()` opens read-write and applies pending
     # migrations, so a command that only reads was a writer into the store it
     # reports on, and its own test caught it by watching the mtime.
-    conn = _sq.connect(f"file:{paths.DB}?mode=ro", uri=True)
+    conn = _sq.connect(paths.sqlite_uri(paths.DB), uri=True)
     conn.row_factory = _sq.Row
     horizon = 90
     try:

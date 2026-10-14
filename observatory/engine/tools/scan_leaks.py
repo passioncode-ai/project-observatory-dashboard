@@ -33,7 +33,26 @@ this exception is not a safer scanner, it is no scanner.
 WHAT IT READS. Agent session transcripts — gigabytes over a few weeks on a busy
 machine, which is why this is incremental: a JSONL transcript is append-only, so
 a remembered offset makes the steady-state cost the size of what was said since
-the last tick. Plus this project's own logs, its built page, its tracked tree,
+the last tick. A file that is rewritten in place (JSON, HTML, a tracked file) is
+read whole again when its size or modification time moves. The transcript homes
+are `paths.transcript_homes()` (I-5):
+
+  claude    the configured `sessions` source, `*.jsonl`; `$CLAUDE_CONFIG_DIR`
+            (~/.claude) `history.jsonl`
+  codex     `$CODEX_HOME` (~/.codex) `sessions/` and `archived_sessions/`,
+            `rollout-*.jsonl` and the compressed `rollout-*.jsonl.zst`;
+            `history.jsonl`; and in `$CODEX_SQLITE_HOME` (default the same)
+            `state_*`, `logs_*`, `thread_history_*`, `memories*`, `queue_*`,
+            `goals_*`, `agent_message_board_*` `.sqlite`
+  hermes    `$HERMES_HOME` (~/.hermes + `$HERMES_DATA_DIR_SUFFIX`) and each
+            `profiles/<name>/`: the `state.db` SQLite store and
+            `sessions/*.json|*.jsonl`
+  opencode  `$XDG_DATA_HOME/opencode` (~/.local/share/opencode): `opencode*.db`
+            (or `$OPENCODE_DB`) and the legacy `storage/**/*.json`
+
+An absent home is not a degradation; one that exists and will not read is named
+in `not_scanned`, and one the deadline cut is `partial` in coverage. Plus this
+project's own logs, its built page, its tracked tree,
 the session companion's SQLite store, and this engine's own store, where agent
 memory lives.
 
@@ -45,6 +64,7 @@ is allowed to be noisy; the ledger is not.
 """
 from __future__ import annotations
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -445,58 +465,213 @@ def checkout_source(root: pathlib.Path, notes: list[dict]) -> bool:
     return False
 
 
+def _walk_transcripts(root: pathlib.Path, suffixes: tuple[str, ...], cutoff: float,
+                      notes: list[dict], out: list[pathlib.Path]) -> int:
+    """Add the transcripts under `root` modified since `cutoff`; return how many were older.
+
+    An absent root is not a hole (the tool is not installed, or has not written yet);
+    a root that exists and will not read is.
+    """
+    info = source_stat(root, notes)
+    if info is None:
+        return 0
+    if not stat.S_ISDIR(info.st_mode):
+        notes.append({"what": _label(root), "unreadable": True,
+                      "why": "the sessions source is not a directory; its transcripts are unmeasured"})
+        return 0
+    old = 0
+    # AN EXPLICIT WALK, not `rglob` (review round 3): `rglob` skips a folder
+    # it cannot open without a word, so a project folder at mode 000 dropped
+    # its transcripts and /health stayed green. Each folder that will not
+    # list is a hole now, named `~`-relative.
+    unlisted: list[str] = []
+
+    def refused(err: OSError) -> None:
+        unlisted.append(_label(getattr(err, "filename", None) or root))
+
+    for folder, dirs, files in os.walk(root, onerror=refused):
+        for name in list(dirs):
+            child = pathlib.Path(folder) / name
+            try:
+                linked = stat.S_ISLNK(child.lstat().st_mode)
+            except OSError:
+                dirs.remove(name)
+                notes.append({"what": _label(child), "unreadable": True,
+                              "why": "session folder metadata could not be read; its transcripts are unmeasured"})
+                continue
+            if linked:
+                dirs.remove(name)
+                notes.append({"what": _label(child), "unreadable": True,
+                              "why": "session directory symbolic link excluded without following; its transcripts are unmeasured"})
+        for fname in files:
+            if not fname.endswith(suffixes):
+                continue
+            p = pathlib.Path(folder) / fname
+            info = source_file_stat(p, notes, required=True)
+            if info is None:
+                continue
+            if info.st_mtime < cutoff:
+                old += 1
+                continue
+            out.append(p)
+    for where in unlisted:
+        notes.append({"what": f"session folder {where}", "unreadable": True,
+                      "why": "could not be listed; the transcripts in it are unmeasured, not clean"})
+    return old
+
+
+def transcript_homes(notes: list[dict] | None = None) -> list[dict]:
+    """The agent transcript homes of `paths.transcript_homes`, each profile expanded into a home.
+
+    The Claude row is this module's `SESSIONS` (`OBSERVATORY_SESSIONS` wins), so the scanner
+    and its tests keep one place to point it. A profiles folder that exists and will not list
+    is a hole when `notes` is given; one that is absent is nothing.
+    """
+    rows = []
+    for row in paths.transcript_homes(sessions=SESSIONS):
+        rows.append(row)
+        parent, layout = row.get("profiles") or (None, None)
+        if parent is None:
+            continue
+        children, odd = [], []
+        try:
+            with os.scandir(parent) as entries:
+                for e in entries:
+                    if e.name.startswith("."):
+                        continue
+                    # THE SAME BOUNDARY AS A SESSION FOLDER: a profile that is a symbolic link
+                    # (a loop among them) is not followed, and neither it nor a stray file is
+                    # dropped in silence.
+                    try:
+                        linked = e.is_symlink()
+                        folder = not linked and e.is_dir(follow_symlinks=False)
+                    except OSError:
+                        linked, folder = False, False
+                    if folder:
+                        children.append(pathlib.Path(e.path))
+                    else:
+                        odd.append((pathlib.Path(e.path), linked))
+        except FileNotFoundError:
+            continue
+        except OSError:
+            if notes is not None:
+                notes.append({"what": _label(parent), "unreadable": True,
+                              "why": f"the {row['agent']} profiles folder could not be listed; "
+                                     "the transcripts of its profiles are unmeasured, not clean"})
+            continue
+        if notes is not None:
+            for path, linked in sorted(odd):
+                notes.append({"what": _label(path), "unreadable": True,
+                              "why": (f"{row['agent']} profile symbolic link excluded without following"
+                                      if linked else f"not a {row['agent']} profile folder; excluded without reading")
+                                     + "; its transcripts are unmeasured"})
+        children.sort()
+        for child in children:
+            rows.append({"agent": row["agent"], "home": child,
+                         "trees": [(child / t, s) for t, s in layout["trees"]],
+                         "stores": [child / s for s in layout["stores"]],
+                         "evidence": row["evidence"]})
+    seen, unique = set(), []
+    for row in rows:
+        if row["home"] not in seen:
+            seen.add(row["home"])
+            unique.append(row)
+    return unique
+
+
+def transcript_stores(notes: list[dict]) -> list[pathlib.Path]:
+    """The SQLite databases agents keep transcripts in (Hermes `state.db`, `opencode.db`).
+
+    Read as databases by `scan_sqlite`, like the companion's store. An absent one is
+    nothing; one that exists but cannot be examined, or a folder that will not list,
+    is a hole named in `notes`.
+    """
+    found: list[pathlib.Path] = []
+    for row in transcript_homes():
+        candidates = list(row.get("stores") or [])
+        for folder, patterns in row.get("store_globs") or []:
+            try:
+                with os.scandir(folder) as entries:
+                    candidates += sorted(pathlib.Path(e.path) for e in entries
+                                         if any(fnmatch.fnmatch(e.name, p) for p in patterns))
+            except FileNotFoundError:
+                continue
+            except OSError:
+                notes.append({"what": _label(folder), "unreadable": True,
+                              "why": f"the {row['agent']} data folder could not be listed; "
+                                     "its transcript databases are unmeasured, not clean"})
+        for path in candidates:
+            if path not in found and source_file_stat(path, notes) is not None:
+                found.append(path)
+    return found
+
+
+def home_coverage(notes: list[dict], unread: list[str] = ()) -> list[dict]:
+    """Per transcript home: `absent`; `unreadable` (a hole is named under it); `partial`
+    (the step's deadline left a file or a store under it unread, `unread`); or `scanned`."""
+    rows = transcript_homes()
+
+    def within(what: str, home: pathlib.Path) -> bool:
+        return _under(what, _label(home)) or _under(what, str(home))
+
+    # A HOLE BELONGS TO ITS NEAREST HOME. A locked folder under `~/.claude/projects` is that
+    # home's hole; `~/.claude`, which holds it and whose own history was read, is `partial`.
+    holes, outer = set(), set()
+    for n in notes:
+        if not n.get("unreadable"):
+            continue
+        what = str(n.get("what", ""))
+        holders = [i for i, r in enumerate(rows) if within(what, r["home"])]
+        if holders:
+            nearest = max(holders, key=lambda i: len(str(rows[i]["home"])))
+            holes.add(nearest)
+            outer.update(i for i in holders if i != nearest)
+    cut = {i for i, r in enumerate(rows) for p in unread if within(p, r["home"])}
+    out = []
+    for i, row in enumerate(rows):
+        home = row["home"]
+        try:
+            home.lstat()
+        except FileNotFoundError:
+            out.append({"agent": row["agent"], "home": _label(home), "state": "absent"})
+            continue
+        except OSError:
+            pass
+        state = "unreadable" if i in holes else "partial" if i in outer or i in cut else "scanned"
+        out.append({"agent": row["agent"], "home": _label(home), "state": state})
+    return out
+
+
+def _under(what: str, home: str) -> bool:
+    """Does a `not_scanned` entry name `home` or something inside it (a file, a table)?"""
+    what = what.removeprefix("session folder ")
+    return what == home or what.startswith((home + "/", home + "#"))
+
+
 def targets(days: int) -> tuple[list[pathlib.Path], list[dict]]:
     """Where a value must never appear, and what was left out of the window."""
     out: list[pathlib.Path] = []
     notes: list[dict] = []
     cutoff = datetime.now(timezone.utc).timestamp() - days * 86400
-    sessions_info = source_stat(SESSIONS, notes)
-    if sessions_info is not None and not stat.S_ISDIR(sessions_info.st_mode):
-        notes.append({"what": _label(SESSIONS), "unreadable": True,
-                      "why": "the sessions source is not a directory; its transcripts are unmeasured"})
-    if sessions_info is not None and stat.S_ISDIR(sessions_info.st_mode):
-        old = 0
-        # AN EXPLICIT WALK, not `rglob` (review round 3): `rglob` skips a folder
-        # it cannot open without a word, so a project folder at mode 000 dropped
-        # its transcripts and /health stayed green. Each folder that will not
-        # list is a hole now, named `~`-relative.
-        unlisted: list[str] = []
-
-        def refused(err: OSError) -> None:
-            unlisted.append(_label(getattr(err, "filename", None) or SESSIONS))
-
-        for folder, dirs, files in os.walk(SESSIONS, onerror=refused):
-            for name in list(dirs):
-                child = pathlib.Path(folder) / name
-                try:
-                    linked = stat.S_ISLNK(child.lstat().st_mode)
-                except OSError:
-                    dirs.remove(name)
-                    notes.append({"what": _label(child), "unreadable": True,
-                                  "why": "session folder metadata could not be read; its transcripts are unmeasured"})
-                    continue
-                if linked:
-                    dirs.remove(name)
-                    notes.append({"what": _label(child), "unreadable": True,
-                                  "why": "session directory symbolic link excluded without following; its transcripts are unmeasured"})
-            for fname in files:
-                if not fname.endswith(".jsonl"):
-                    continue
-                p = pathlib.Path(folder) / fname
-                info = source_file_stat(p, notes, required=True)
-                if info is None:
-                    continue
-                if info.st_mtime < cutoff:
-                    old += 1
-                    continue
-                out.append(p)
-        for where in unlisted:
-            notes.append({"what": f"session folder {where}", "unreadable": True,
-                          "why": "could not be listed; the transcripts in it are unmeasured, not clean"})
-        if old:
-            notes.append({"what": f"{old} session transcript(s)",
-                          "why": f"older than {days} days; `--days N` widens the "
-                                 f"window and `--full` re-reads from the start"})
+    # EVERY AGENT'S TRANSCRIPTS (I-5), not only Claude's: Codex rollouts, Hermes session
+    # logs and opencode's message files take the same echoed value a Claude transcript does.
+    old = 0
+    for row in transcript_homes(notes):
+        for root, suffixes in row.get("trees") or []:
+            old += _walk_transcripts(root, suffixes, cutoff, notes, out)
+        for path in row.get("files") or []:
+            # A single transcript file: Codex and Claude Code `history.jsonl`.
+            info = source_file_stat(path, notes)
+            if info is None:
+                continue
+            if info.st_mtime < cutoff:
+                old += 1
+                continue
+            out.append(path)
+    if old:
+        notes.append({"what": f"{old} session transcript(s)",
+                      "why": f"older than {days} days; `--days N` widens the "
+                             f"window and `--full` re-reads from the start"})
     logs = paths.STATE / "logs"
     logs_info = source_stat(logs, notes)
     if logs_info is not None:
@@ -535,92 +710,441 @@ def targets(days: int) -> tuple[list[pathlib.Path], list[dict]]:
     return out, notes
 
 
+#: Rows per read. Each page is its own statement, finished before the next one starts, so a
+#: read-only pass never holds a reader's lock on the database for longer than one page: on a
+#: rollback-journal database a long cursor holds SHARED and every writer waits behind it.
+PAGE = 500
+
+#: A column a tool bumps when it rewrites a row in place, the finest grain first: Codex
+#: `updated_at_ms` before its `updated_at` (seconds); opencode `time_updated` (`part`,
+#: `message`, `session`, milliseconds); Hermes `last_activity_at` (`sessions`); Codex
+#: `source_updated_at`. A row whose value is above the last pass's maximum is read again;
+#: a row AT that maximum is read again when its digest is not the one recorded for it
+#: (an edit within the same second), so an edit in place is seen without re-reading the
+#: table and without reporting the newest row every tick.
+UPDATED_COLUMNS = ("updated_at_ms", "time_updated", "updated_at", "last_activity_at", "source_updated_at")
+
+#: The rows sharing the update column's maximum whose digests are kept one by one; above it,
+#: one digest of the whole set is kept, and the set is read again only when that digest changes.
+AT_MAX = 64
+
+#: Rowids are summed modulo this prime: the count and the newest row cannot tell
+#: {1, 2, 4, 5} from {2, 3, 4, 5}, the sum can, and it never overflows SQLite's integer.
+ROWID_MOD = 2147483647
+
+#: And their squares modulo a second prime: {2, 5} and {3, 4} share a sum but not a sum of
+#: squares, and a rowid moved by a multiple of ROWID_MOD keeps its residue but not this one.
+ROWID_SQ_MOD = 1000000007
+
+#: The table that cannot be read whole leaves its store read only in part: a hole.
+PARTIAL = "a SQLite store read only in part; these tables could not be read: "
+
+#: A store that opened and then raised something no table handler knows: its sightings so far
+#: stand, the rest of it is a hole.
+STOPPED = "a SQLite store stopped while reading "
+
+
+def _holds_text(declared) -> bool:
+    """SQLite's own affinity rules (datatype3 §3.1): a declared type containing CHAR, CLOB or
+    TEXT has TEXT affinity (`VARCHAR(255)`, `NCHAR(10)`); one containing BLOB, or no type at
+    all, has BLOB affinity. JSON is what some tools declare for text."""
+    d = str(declared or "").upper()
+    return d == "" or any(k in d for k in ("CHAR", "CLOB", "TEXT", "BLOB", "JSON"))
+
+
+def _cells(row) -> list[bytes | None]:
+    return [None if c is None else (c if isinstance(c, bytes) else str(c).encode("utf-8", "surrogateescape"))
+            for c in row]
+
+
+def _digest(row) -> str:
+    """A digest of one whole row, never the row: it tells a reused or rewritten rowid apart."""
+    h = hashlib.sha256()
+    for cell in _cells(row):
+        h.update(b"\1" if cell is None else b"\2" + len(cell).to_bytes(8, "big") + cell)
+    return h.hexdigest()[:32]
+
+
+def _mod(value: int, prime: int) -> int:
+    """SQLite's `%` (the sign of the dividend), so a Python-side sum matches the SQL aggregate.
+    Anything but an integer counts as 0, as SQLite's `%` makes of text (round 5)."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    rest = abs(value) % prime
+    return rest if value >= 0 else -rest
+
+
+def _rowid_alias(declared: list[str]) -> str | None:
+    """The name of the real rowid in a table whose own columns may take one of its names: a
+    column called `rowid` shadows `rowid`, and its values (NULL, text, duplicates) are not the
+    rowid. None when `rowid`, `_rowid_` and `oid` are all declared columns (round 5, F2)."""
+    taken = {c.lower() for c in declared}
+    return next((a for a in ("rowid", "_rowid_", "oid") if a not in taken), None)
+
+
+def _strip_sql(sql: str) -> str:
+    """A CREATE statement with its comments removed and every string literal and quoted
+    identifier emptied, so neither a `)` nor `--`, `/*` or the words WITHOUT ROWID inside one
+    can be taken for the statement's own (round 5, F4)."""
+    out, i, n = [], 0, len(sql)
+    while i < n:
+        c = sql[i]
+        if c in "'\"`":
+            j = i + 1
+            while j < n:
+                if sql[j] == c:
+                    if j + 1 < n and sql[j + 1] == c:
+                        j += 2
+                        continue
+                    break
+                j += 1
+            out.append(c + c)
+            i = j + 1
+        elif c == "[":
+            j = sql.find("]", i + 1)
+            out.append("[]")
+            i = n if j < 0 else j + 1
+        elif sql.startswith("--", i):
+            j = sql.find("\n", i)
+            out.append(" ")
+            i = n if j < 0 else j
+        elif sql.startswith("/*", i):
+            j = sql.find("*/", i + 2)
+            out.append(" ")
+            i = n if j < 0 else j + 2
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _q(name: str) -> str:
+    """An SQL identifier, quoted: a `"` inside a name is doubled. A name that is not UTF-8
+    cannot be put in a statement at all; encoding it raises UnicodeEncodeError, a hole."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _shown(name: str) -> str:
+    """A table or column name as a report can hold it: bytes that were not UTF-8 written as
+    `\\udcXX`, never a lone surrogate the state file could not encode."""
+    return name.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def _without_rowid(conn: sqlite3.Connection, table: str, sql: str) -> bool:
+    """Is the table declared WITHOUT ROWID? SQLite says so itself (`pragma_table_list.wr`,
+    3.37+); older SQLite gets its CREATE statement read through `_strip_sql`, so a `)` or the
+    words inside a comment, a string or a quoted name cannot decide it."""
+    try:
+        row = conn.execute("SELECT wr FROM pragma_table_list WHERE schema = 'main' AND name = ?",
+                           (table,)).fetchone()
+        if row is not None:
+            return bool(row[0])
+    except sqlite3.Error:
+        pass
+    bare = _strip_sql(sql)
+    return bool(re.search(r"\bWITHOUT\s+ROWID\b", bare[bare.rfind(")") + 1:], re.I))
+
+
+def _row_digest(conn: sqlite3.Connection, table: str, rowid: int, sel: str, rid: str = "rowid") -> str | None:
+    """`sel` is the table's plain columns: never `*`, which evaluates generated columns, whose
+    errors quote cells and whose failure blinded the whole table. `rid`: the rowid's name."""
+    row = conn.execute(f'SELECT {sel} FROM {_q(table)} WHERE {rid} = ?', (rowid,)).fetchone()
+    return None if row is None else _digest(row)
+
+
+def _plain(value):
+    """A signature value the state file can hold: a number or text as is, anything else
+    (a BLOB in an update column) as a digest, so the state file always serialises."""
+    if value is None or (isinstance(value, (int, float)) and not isinstance(value, bool)):
+        return value
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")            # text that was not UTF-8 arrives with surrogates
+            return value
+        except UnicodeEncodeError:
+            raw = value.encode("utf-8", "surrogateescape")
+    else:
+        raw = value if isinstance(value, bytes) else repr(value).encode("utf-8", "surrogateescape")
+    return {"sha256": hashlib.sha256(raw).hexdigest()}
+
+
+def _moved(before, now) -> bool | None:
+    """Did an update column's maximum move up? None when that cannot be told (mixed types,
+    a digest that changed)."""
+    if isinstance(before, dict) or isinstance(now, dict):
+        return False if before == now else None
+    if before is None or now is None:
+        return False if before == now else None
+    try:
+        return now > before
+    except TypeError:
+        return None
+
+
+def _set_digest(conn: sqlite3.Connection, table: str, updated: str, value, top: int, sel: str,
+                rid: str = "rowid") -> str:
+    """One digest of every row whose update column is `value` at or below rowid `top`,
+    read a page at a time: the at-max set past AT_MAX rows."""
+    h, after = hashlib.sha256(), 0
+    while True:
+        rows = conn.execute(f'SELECT {rid}, {sel} FROM {_q(table)} WHERE {_q(updated)} = ? AND {rid} > ? '
+                            f'AND {rid} <= ? ORDER BY {rid} LIMIT {PAGE}', (value, after, top)).fetchall()
+        if not rows:
+            return h.hexdigest()[:32]
+        for r in rows:
+            h.update(f"{r[0]}:{_digest(r[1:])};".encode())
+        after = rows[-1][0]
+
+
+def table_signature(conn: sqlite3.Connection, table: str, updated: str | None, sel: str,
+                    rid: str = "rowid") -> dict:
+    """{max rowid, row count, rowid sum and sum of squares, max update value, digest of the
+    newest row, digests of the rows at the update maximum (or one of the whole set past
+    AT_MAX)} — numbers and digests, never row text. `sel`: the plain columns to digest;
+    `rid`: the name the real rowid answers to in this table."""
+    top, count, total, squares = conn.execute(
+        f'SELECT max({rid}), count(*), sum({rid} % {ROWID_MOD}), '
+        f'sum((({rid} % {ROWID_SQ_MOD}) * ({rid} % {ROWID_SQ_MOD})) % {ROWID_SQ_MOD}) FROM {_q(table)}').fetchone()
+    upd = conn.execute(f'SELECT max({_q(updated)}) FROM {_q(table)}').fetchone()[0] if updated else None
+    at_max = at_max_set = None
+    if updated and isinstance(_plain(upd), (int, float, str)):
+        rows = conn.execute(f'SELECT {rid}, {sel} FROM {_q(table)} WHERE {_q(updated)} = ? LIMIT {AT_MAX + 1}',
+                            (upd,)).fetchall()
+        if len(rows) <= AT_MAX:
+            at_max = {str(r[0]): _digest(r[1:]) for r in rows}
+        else:
+            at_max_set = _set_digest(conn, table, updated, upd, top or 0, sel, rid)
+    return {"max": top or 0, "count": count or 0, "sum": total or 0, "sq": squares or 0, "upd": _plain(upd),
+            "at_max": at_max, "at_max_set": at_max_set,
+            "tail": _row_digest(conn, table, top, sel, rid) if top else None}
+
+
 def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, SecretRef],
-                since: dict[str, int] | None = None
-                ) -> tuple[dict[tuple[SecretRef, str], int], str | None, dict[str, int], int]:
+                since: dict[str, int] | None = None, signature: dict | None = None,
+                hits: dict | None = None, tally: dict | None = None
+                ) -> tuple[dict[tuple[SecretRef, str], int], str | None, dict[str, int], int, dict | None]:
     """Occurrences by (secret name, `table.column`) across every text column
     of a SQLite store, read-only; the reason when it could not be read; the
-    highest rowid read per table; and the number of rows read.
+    highest rowid read per table; the number of rows read; and the store's new
+    signature (`table_signature` per table, plus the file's inode).
 
     A session companion's store holds session summaries, which is exactly the
     shape a leak takes, and a text scan of a SQLite file reads page headers and
     misses the rows — so the store is read as a database instead of being named
-    as unread. Rows are read per table in pages of 500 so a store of hundreds of
-    megabytes does not sit in memory.
+    as unread. A page is tested against every value at once and examined cell by
+    cell only when it holds one.
 
-    `since` maps a table to the highest rowid a previous pass read; only rows
-    above it are read, the same way transcripts are read from their last
-    offset, so a sighting is reported by the pass that first reads its row
-    (tools/sqlite_scan.py decides when a pass must be complete). A page is
-    tested against every value at once and examined cell by cell only when it
-    holds one. A table that cannot be addressed by rowid is read whole on
-    every pass and gets no mark.
+    `since` maps a table to the highest rowid a previous pass read, and
+    `signature` is what that pass saw. Rows above the mark, up to the highest
+    rowid now, are new. The rows at or below it are read again WHOLE when the
+    store is another file (inode), when the count or the rowid sum says the set
+    of rowids below the mark changed, or when the previous newest row's digest
+    changed (its rowid was reused, or it was rewritten). Rows whose update column
+    (`UPDATED_COLUMNS`) moved past the last maximum are read again, and so are
+    rows at that maximum whose digest is not the recorded one. Without a
+    signature for a marked table the old rows are read once whole. A table that
+    cannot be addressed by rowid is read whole on every pass and gets no mark.
+    NOT SEEN BEFORE THE WEEKLY COMPLETE PASS (tools/sqlite_scan.py): a row
+    replaced under its own rowid below the newest row in a table with no update
+    column; an edit that does not move the update column at all; an edit below
+    a maximum already in the future; an update column holding mixed types (its
+    maximum is compared within one type only); and a change of rowids whose
+    count, sum and sum of squares all collide (impractical, not impossible).
+
+    A table that cannot be read — a damaged page, a missing module — is a hole:
+    the store comes back read in part (`PARTIAL`), its other tables still read,
+    and its marks do not move. Text that is not UTF-8 is read as its bytes.
+
+    READ-ONLY IS NOT SIDE-EFFECT FREE: SQLite opens a WAL database's `-shm`
+    (and may create `-wal`/`-shm` beside it) even with `mode=ro`. Each page of
+    rows is its own statement, but the signature's aggregates (count, sums,
+    maximum) each scan the whole table in one statement: on a rollback-journal
+    database a writer can wait for one such scan. Codex, opencode and Hermes run
+    their stores in WAL mode by default, where a reader does not block a writer.
     """
     since = since or {}
-    hits: dict[tuple[SecretRef, str], int] = {}
+    old_sig = signature or {}
+    # The caller may hand its own dict: what is counted before a store stops stays counted.
+    hits: dict[tuple[SecretRef, str], int] = {} if hits is None else hits
     high: dict[str, int] = {}
     read = 0
-    if not db.is_file():
-        return hits, None, high, read
     try:
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        info = db.stat()
+    except FileNotFoundError:
+        return hits, None, high, read, None
+    except OSError as exc:
+        return hits, type(exc).__name__, high, read, None
+    if not stat.S_ISREG(info.st_mode):
+        return hits, None, high, read, None
+    same_file = old_sig.get("inode") == info.st_ino
+    new_sig: dict = {"inode": info.st_ino, "tables": {}}
+    try:
+        conn = sqlite3.connect(paths.sqlite_uri(db), uri=True)
     except sqlite3.Error as exc:
-        return hits, f"{type(exc).__name__}: {exc}", high, read
+        # The type only, here as everywhere (round 5, F1): SQLite's message can quote text.
+        return hits, type(exc).__name__, high, read, None
+    # TEXT THAT IS NOT UTF-8 IS STILL READ. The default decoder raised on it, and the error
+    # message carried the cell's text; bytes kept as surrogates match as the bytes they are.
+    conn.text_factory = lambda b: b.decode("utf-8", "surrogateescape")
+    damaged: list[str] = []
+
+    def scan_rows(table: str, cols: list[str], rows) -> None:
+        nonlocal read
+        read += len(rows)
+        if tally is not None:
+            # The caller's count too: a store that stops midway still says what it read (L5).
+            tally["rows"] = tally.get("rows", 0) + len(rows)
+        blobs = [_cells(row[1:]) for row in rows]
+        joined = b"\0".join(b for cells in blobs for b in cells if b)
+        present = [n for n in pattern if n in joined]
+        if not present:
+            return
+        for cells in blobs:
+            for col, blob in zip(cols, cells):
+                if not blob:
+                    continue
+                for needle in present:
+                    n = blob.count(needle)
+                    if n:
+                        key = (by_value[needle], f"{table}.{col}")
+                        hits[key] = hits.get(key, 0) + n
+
+    def pages(table: str, cols: list[str], low: int, top: int, extra: str = "", args: tuple = (),
+              rid: str = "rowid") -> tuple[int, int, int]:
+        """Read rowid in (low, top] page by page, each page a finished statement;
+        (the rows read, their rowid sum modulo ROWID_MOD, their square sum modulo ROWID_SQ_MOD).
+        `rid` is the name the real rowid answers to (`_rowid_alias`)."""
+        sel = ", ".join(_q(c) for c in cols)
+        n, total, squares, after = 0, 0, 0, low
+        while True:
+            rows = conn.execute(f'SELECT {rid}, {sel} FROM {_q(table)} WHERE {rid} > ? AND {rid} <= ?{extra} '
+                                f'ORDER BY {rid} LIMIT {PAGE}', (after, top, *args)).fetchall()
+            if not rows:
+                return n, total, squares
+            n += len(rows)
+            total += sum(_mod(r[0], ROWID_MOD) for r in rows)
+            squares += sum(_mod(_mod(r[0], ROWID_SQ_MOD) ** 2, ROWID_SQ_MOD) for r in rows)
+            after = rows[-1][0]
+            scan_rows(table, cols, rows)
+
+    def at_old_max(table: str, cols: list[str], plain: list[str], updated: str, mark: int, before: dict,
+                   rid: str = "rowid") -> None:
+        """The rows at the old maximum of the update column whose digest is not the recorded
+        one: edited within the same tick of the clock. Read a page at a time, by rowid. Past
+        AT_MAX rows the set is compared as one digest and read again only when it changed."""
+        sel = ", ".join(_q(c) for c in plain)
+        known = before.get("at_max")
+        if known is None and before.get("at_max_set") is not None and \
+                _set_digest(conn, table, updated, before["upd"], mark, sel, rid) == before["at_max_set"]:
+            return
+        index = [i for i, c in enumerate(plain) if c in cols]
+        after = 0
+        while True:
+            rows = conn.execute(f'SELECT {rid}, {sel} FROM {_q(table)} WHERE {_q(updated)} = ? AND {rid} > ? '
+                                f'AND {rid} <= ? ORDER BY {rid} LIMIT {PAGE}',
+                                (before["upd"], after, mark)).fetchall()
+            if not rows:
+                return
+            after = rows[-1][0]
+            changed = [r for r in rows if known is None or known.get(str(r[0])) != _digest(r[1:])]
+            if changed:
+                scan_rows(table, cols, [(r[0], *(r[1 + i] for i in index)) for r in changed])
+
+    def read_table(table: str, sql: str) -> None:
+        # THE STORED COLUMNS ONLY (`table_xinfo` hidden 0, and 3 for a STORED generated column,
+        # whose value is on disk). A VIRTUAL generated column (2) is computed on read, and
+        # evaluating it can fail with an error that quotes a cell (rounds 4 and 5).
+        info_rows = conn.execute(f"PRAGMA table_xinfo({_q(table)})").fetchall()
+        plain, unnamed = [], []
+        for r in info_rows:
+            if r[6] not in (0, 3):
+                continue
+            try:
+                r[1].encode("utf-8")
+                plain.append(r)
+            except UnicodeEncodeError:
+                # A column whose name is not UTF-8 cannot be put in a statement: the rest of
+                # the table is still read, and this column is named as a hole.
+                unnamed.append(r[1])
+        for name in unnamed:
+            damaged.append(f"{_shown(table)}.{_shown(name)} (column name is not UTF-8)")
+        cols = [r[1] for r in plain if _holds_text(r[2])]
+        if not cols:
+            return
+        rid = _rowid_alias([r[1] for r in info_rows])
+        if rid is None or _without_rowid(conn, table, sql):
+            # A REAL WITHOUT ROWID TABLE, so SQLite says, or one whose own columns take all
+            # three of the rowid's names: no rowid to mark, so it is read whole, still a page
+            # at a time. Any other error is a hole.
+            sel = ", ".join(_q(c) for c in cols)
+            offset = 0
+            while True:
+                rows = conn.execute(f'SELECT NULL, {sel} FROM {_q(table)} LIMIT {PAGE} OFFSET ?',
+                                    (offset,)).fetchall()
+                if not rows:
+                    return
+                offset += len(rows)
+                scan_rows(table, cols, rows)
+        names = [r[1] for r in plain]
+        every = ", ".join(_q(c) for c in names)
+        updated = next((c for c in UPDATED_COLUMNS if c in names), None)
+        now = table_signature(conn, table, updated, every, rid)
+        mark = since.get(table, 0) or 0
+        if isinstance(mark, bool) or not isinstance(mark, int):
+            # A mark that is not a rowid (an old or edited state file) is no mark: the table is
+            # read from the start, never left unread until the weekly pass (round 6, L2).
+            mark = 0
+        before = (old_sig.get("tables") or {}).get(table) if same_file else None
+        if before is not None and before.get("max") != mark:
+            before = None
+        if not mark or now["max"] < mark:
+            # First pass, a complete pass, or a table emptied or recreated.
+            pages(table, cols, 0, now["max"], rid=rid)
+        else:
+            fresh, fresh_sum, fresh_sq = pages(table, cols, mark, now["max"], rid=rid)
+            below_changed = (before is None
+                             or now["count"] != before["count"] + fresh
+                             or before.get("sum") is None or before.get("sq") is None
+                             or now["sum"] != before["sum"] + fresh_sum
+                             or now["sq"] != before["sq"] + fresh_sq
+                             or _row_digest(conn, table, mark, every, rid) != before.get("tail"))
+            moved = _moved(before.get("upd"), now["upd"]) if updated and before else False
+            if below_changed or moved is None:
+                pages(table, cols, 0, mark, rid=rid)
+            elif updated and isinstance(before.get("upd"), (int, float, str)):
+                if moved:
+                    pages(table, cols, 0, mark, f" AND {_q(updated)} > ?", (before["upd"],), rid=rid)
+                at_old_max(table, cols, names, updated, mark, before, rid)
+        high[table] = now["max"]
+        new_sig["tables"][table] = now
+
     try:
-        tables = [r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+        tables = conn.execute("SELECT name, coalesce(sql, '') FROM sqlite_master "
+                              "WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()
         # FTS mirrors are the same text again: `observations_fts` and its
         # `_fts_*` shadow tables doubled every count on the first run.
-        tables = [t for t in tables if not re.search(r"_fts(_|$)", t)]
-        for table in tables:
-            try:
-                cols = [r[1] for r in conn.execute(f'PRAGMA table_info("{table}")')
-                        if str(r[2] or "").upper() in ("TEXT", "", "BLOB", "CLOB", "VARCHAR", "JSON")]
-            except sqlite3.Error:
+        for table, sql in tables:
+            if re.search(r"_fts(_|$)", table):
                 continue
-            if not cols:
-                continue
-            sel = ", ".join(f'"{c}"' for c in cols)
-            by_rowid = True
             try:
-                floor = sqlite_scan.floor_for(conn, table, int(since.get(table, 0)))
-                cur = conn.execute(f'SELECT rowid, {sel} FROM "{table}" WHERE rowid > ? ORDER BY rowid', (floor,))
-            except sqlite3.Error:
-                by_rowid, floor = False, 0
-                try:
-                    cur = conn.execute(f'SELECT NULL, {sel} FROM "{table}"')
-                except sqlite3.Error:
-                    continue
-            top = floor
-            while True:
-                rows = cur.fetchmany(500)
-                if not rows:
-                    break
-                read += len(rows)
-                if by_rowid:
-                    top = max(top, rows[-1][0])
-                blobs = [[None if c is None else (c if isinstance(c, bytes) else str(c).encode("utf-8", "surrogateescape"))
-                          for c in row[1:]] for row in rows]
-                joined = b"\0".join(b for cells in blobs for b in cells if b)
-                present = [n for n in pattern if n in joined]
-                if not present:
-                    continue
-                for cells in blobs:
-                    for col, blob in zip(cols, cells):
-                        if not blob:
-                            continue
-                        for needle in present:
-                            n = blob.count(needle)
-                            if n:
-                                key = (by_value[needle], f"{table}.{col}")
-                                hits[key] = hits.get(key, 0) + n
-            if by_rowid:
-                high[table] = top
+                read_table(table, sql)
+            except (sqlite3.Error, UnicodeError) as exc:
+                # A DAMAGED TABLE IS A HOLE, NEVER A CLEAN TABLE (round 3, N1): a damaged page,
+                # a missing module, a name that is not UTF-8 (round 4). Only the error's type
+                # is kept: SQLite's message can quote a cell. The other tables are still read,
+                # and their sightings stand.
+                damaged.append(f"{_shown(table)} ({type(exc).__name__})")
+    except UnicodeError as exc:
+        return hits, type(exc).__name__, {}, read, None
     except sqlite3.Error as exc:
-        return hits, f"{type(exc).__name__}: {exc}", {}, read
+        # The type only (round 5, F1): `malformed database schema (t) - unknown table option:
+        # '<text>'` quotes the stored CREATE statement, and that text can be anything.
+        return hits, type(exc).__name__, {}, read, None
     finally:
         conn.close()
-    return hits, None, high, read
+    if damaged:
+        return hits, PARTIAL + ", ".join(damaged), high, read, None
+    return hits, None, high, read, new_sig
 
 
 #: The operator's decisions that a sighting is known and accepted, each with a
@@ -735,25 +1259,64 @@ def scan_file(path: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
     try:
         with path.open("rb") as fh:
             fh.seek(start)
-            carry = b""
-            pos = start
-            while True:
-                chunk = fh.read(CHUNK)
-                if not chunk:
-                    break
-                buf = carry + chunk
-                for needle in pattern:
-                    at = buf.find(needle)
-                    while at >= 0:
-                        name = by_value[needle]
-                        hits[name] = hits.get(name, 0) + 1
-                        at = buf.find(needle, at + 1)
-                keep = min(longest, len(buf))
-                carry = buf[len(buf) - keep:]
-                pos += len(chunk)
+            _scan_stream(fh, pattern, by_value, longest, hits)
     except OSError as exc:
         return hits, start, type(exc).__name__
     return hits, size, None
+
+
+def _scan_stream(fh, pattern: list[bytes], by_value: dict[bytes, SecretRef], longest: int,
+                 hits: dict[SecretRef, int]) -> None:
+    """Count every value in a binary stream, chunk by chunk, with an overlap so a value
+    split across two reads is still found."""
+    carry = b""
+    while True:
+        chunk = fh.read(CHUNK)
+        if not chunk:
+            break
+        buf = carry + chunk
+        for needle in pattern:
+            at = buf.find(needle)
+            while at >= 0:
+                name = by_value[needle]
+                hits[name] = hits.get(name, 0) + 1
+                at = buf.find(needle, at + 1)
+        keep = min(longest, len(buf))
+        carry = buf[len(buf) - keep:]
+
+
+#: Codex compresses a finished rollout to `rollout-….jsonl.zst` (openai/codex
+#: codex-rs/rollout/src/compression.rs). Python reads zstd from 3.14 on.
+ZSTD_MISSING = "compressed with zstd, and this Python has no zstd decoder (3.14+ reads .zst)"
+
+
+def scan_zst(path: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, SecretRef],
+             longest: int) -> tuple[dict[SecretRef, int], int, str | None]:
+    """`scan_file` for a zstd-compressed transcript, read whole: a frame has no offset to resume.
+
+    A file this Python cannot decode is a hole with that reason, never a clean file.
+    """
+    hits: dict[SecretRef, int] = {}
+    try:
+        from compression import zstd
+    except ImportError:
+        return hits, 0, ZSTD_MISSING
+    failures = (OSError, EOFError, ValueError, getattr(zstd, "ZstdError", OSError))
+    try:
+        size = path.stat().st_size
+        with zstd.open(path, "rb") as fh:
+            _scan_stream(fh, pattern, by_value, longest, hits)
+    except failures as exc:
+        return {}, 0, type(exc).__name__
+    return hits, size, None
+
+
+def _signature(path: pathlib.Path) -> list[int] | None:
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    return [info.st_size, info.st_mtime_ns]
 
 
 def main(argv: list[str]) -> int:
@@ -815,13 +1378,14 @@ def main(argv: list[str]) -> int:
     # buffer still win by an order of magnitude. Measured, not assumed.
     pattern = sorted(by_value, key=len, reverse=True)
 
-    state, sqlite_mark, saved = {}, {}, {}
+    state, signatures, sqlite_mark, saved = {}, {}, {}, {}
     if STATE.is_file():
         try:
             saved = json.loads(STATE.read_text(encoding="utf-8"))
             sqlite_mark = saved.get("sqlite") or {}
             if not a.full:
                 state = saved.get("offsets", {})
+                signatures = saved.get("signatures", {})
         except ValueError:
             state = {}
 
@@ -830,9 +1394,10 @@ def main(argv: list[str]) -> int:
     decisions_changed = saved.get("suppressions_digest") != suppression_mark
     files_full = a.full or digest is None or saved.get("values_digest") != digest or decisions_changed
     if files_full:
-        state = {}
+        state, signatures = {}, {}
 
     files, notes = targets(a.days)
+    stores = transcript_stores(notes)
     unreadable: list[dict] = []
     hits: dict[tuple[SecretRef, str], int] = {}
     read_bytes = 0
@@ -844,14 +1409,28 @@ def main(argv: list[str]) -> int:
         key = str(p)
         if key in home_paths:
             continue
-        start = int(state.get(key, 0))
-        found, reached, problem = scan_file(p, pattern, by_value, start, longest)
+        # ONLY A `.jsonl` IS APPEND-ONLY (I-5). A Hermes session log, an opencode
+        # message file, the built page or a tracked file is rewritten in place, so an
+        # offset would skip a value written before the old end. Such a file is read
+        # whole again whenever its size or modification time moves.
+        if key.endswith(".jsonl"):
+            start = int(state.get(key, 0))
+            found, reached, problem = scan_file(p, pattern, by_value, start, longest)
+        else:
+            start, sig = 0, _signature(p)
+            if sig is not None and signatures.get(key) == sig:
+                continue
+            found, reached, problem = (scan_zst(p, pattern, by_value, longest) if key.endswith(".zst")
+                                       else scan_file(p, pattern, by_value, 0, longest))
         if problem:
             unreadable.append({"what": key, "why": f"could not be read ({problem}); not counted as clean",
                                "unreadable": True})
             continue
         read_bytes += max(0, reached - start)
-        state[key] = reached
+        if key.endswith(".jsonl"):
+            state[key] = reached
+        elif sig is not None:
+            signatures[key] = sig
         for name, n in found.items():
             hits[(name, key)] = hits.get((name, key), 0) + n
 
@@ -869,35 +1448,61 @@ def main(argv: list[str]) -> int:
     # redact wrote it — the alarm for the safety net itself.
     own = paths.DB
     marks = sqlite_mark.get("stores") or {}
+    # WHAT EACH STORE LOOKED LIKE when its mark was taken (I-5): a store replaced by
+    # another file, a row deleted under the mark, a reused rowid or a row rewritten
+    # in place is read again rather than hidden behind the mark.
+    store_sigs = {} if full else dict(saved.get("sqlite_signatures") or {})
     results = {}
     stores_cut = []
-    for store in (mem, own):
+    # AND EVERY AGENT'S TRANSCRIPT DATABASE (I-5): Hermes `state.db`, opencode's `opencode.db`,
+    # Codex's `state_*`, `logs_*`, `thread_history_*`, `memories*`, `queue_*`, `goals_*`,
+    # `agent_message_board_*`.
+    for store in dict.fromkeys((mem, own, *stores)):
         if step_budget.remaining() < STORE_RESERVE_S:
             # Unread, not clean: the mark stays where it was, so the next pass reads what this one did not.
-            results[store] = ({}, None, None, 0)
+            results[store] = ({}, None, None, 0, None)
             stores_cut.append(str(store))
             continue
         since = {} if full else marks.get(str(store))
-        results[store] = scan_sqlite(store, pattern, by_value, since)
+        found: dict = {}
+        tally: dict = {}
+        try:
+            results[store] = scan_sqlite(store, pattern, by_value, since, store_sigs.get(str(store)), found, tally)
+        except Exception as exc:  # noqa: BLE001 — one store is a hole, never the end of the scan
+            # WHATEVER ONE STORE RAISES (round 4): the other homes are still measured and the
+            # report is still written; the sightings counted before it stopped stand (round 5).
+            # The type only; a message can quote what was read.
+            results[store] = (found, f"{STOPPED}({type(exc).__name__})", None, tally.get("rows", 0), None)
+    succeeded = {str(store): r for store, r in results.items() if not r[1] and str(store) not in stores_cut}
     new_mark = sqlite_scan.next_mark(
-        sqlite_mark, digest, full, today,
-        {str(store): r[2] for store, r in results.items() if not r[1] and str(store) not in stores_cut},
+        sqlite_mark, digest, full, today, {s: r[2] for s, r in succeeded.items()},
         not any(r[1] for r in results.values()) and not stores_cut)
-    for store, (store_hits, problem, _high, _rows) in results.items():
+    for s, r in succeeded.items():
+        if r[4] is not None:
+            store_sigs[s] = r[4]
+        else:
+            store_sigs.pop(s, None)
+    for store, (store_hits, problem, _high, _rows, _sig) in results.items():
         for (name, where_in), n in store_hits.items():
             hits[(name, f"{store}#{where_in}")] = hits.get((name, f"{store}#{where_in}"), 0) + n
         if problem:
-            notes.append({"what": str(store), "why": f"a SQLite store that would not open: {problem}"})
-    _hits, mem_problem, _high, mem_rows = results[mem]
+            notes.append({"what": str(store),
+                          "why": (problem if problem.startswith((PARTIAL, STOPPED))
+                                  else f"a SQLite store that would not open: {problem}"),
+                          "unreadable": True})
+    _hits, mem_problem, _high, mem_rows, _sig = results[mem]
     companion = {"path": str(mem), "read": mem.is_file() and not mem_problem and str(mem) not in stores_cut,
                  "mode": "full" if full else "incremental", "why": why, "rows_read": mem_rows}
     own_problem, own_rows = results[own][1], results[own][3]
     own_store = {"path": str(own), "read": own.is_file() and not own_problem and str(own) not in stores_cut,
                  "mode": "full" if full else "incremental", "rows_read": own_rows}
 
-    _write_json(STATE, {"updated_at": now, "offsets": state,
-                              "values_digest": digest, "suppressions_digest": suppression_mark,
-                              **({"sqlite": new_mark} if new_mark else {})})
+    _write_json(STATE, {"updated_at": now, "offsets": state, "signatures": signatures,
+                        "values_digest": digest, "suppressions_digest": suppression_mark,
+                        **({"sqlite": new_mark, "sqlite_signatures": store_sigs} if new_mark else {})})
+    transcript_store_rows = [
+        {"store": _label(s), "read": str(s) not in stores_cut and not results[s][1],
+         "rows_read": results[s][3]} for s in stores]
     rows = [{"secret": name, "where": where, "occurrences": n,
              **({"version_id": version} if version else {})}
             for ((name, version), where), n in sorted(hits.items(), key=lambda kv: -kv[1])]
@@ -924,9 +1529,8 @@ def main(argv: list[str]) -> int:
     # EVERY UNREAD SOURCE IS A HOLE, and a hole holds /health as degraded
     # (decision, review round 2): the scan finished, but what it could not open
     # is unmeasured, not clean. `notes` already holds `unreadable` and any
-    # unreadable source `targets()` named.
-    holes = (sum(1 for n in notes if n.get("unreadable")) + sum(1 for k in skipped if k.get("unreadable"))
-             + sum(1 for r in results.values() if r[1]))
+    # unreadable source `targets()` named, and each store that would not open.
+    holes = sum(1 for n in notes if n.get("unreadable")) + sum(1 for k in skipped if k.get("unreadable"))
     if holes:
         degraded.append({"code": "source-unreadable",
                          "why": f"{holes} source(s) could not be opened; each is named in not_scanned or skipped",
@@ -951,7 +1555,10 @@ def main(argv: list[str]) -> int:
                      "targets_read": targets_read, "stores_unread": stores_unread,
                      "targets_unreadable": len(unreadable), "read_bytes": read_bytes,
                      "window_days": a.days, "companion_store": companion["mode"] if companion["read"] else "unread",
-                     "observatory_store": own_store["mode"] if own_store["read"] else "unread"},
+                     "observatory_store": own_store["mode"] if own_store["read"] else "unread",
+                     "transcript_stores": transcript_store_rows,
+                     "transcript_homes": home_coverage(
+                         notes, [str(p) for p in (files[cut_at:] if cut_at is not None else [])] + stores_cut)},
         "skipped": skipped,
         "not_scanned": notes,
         "companion_store": companion,

@@ -400,7 +400,7 @@ def reclaimable_holders() -> list[str]:
     if not metric or not paths.DB.is_file():
         return []
     try:
-        c = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+        c = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
     except sqlite3.Error:
         return []
     try:
@@ -431,7 +431,7 @@ def disk_culprits() -> tuple[list[str], list[str]]:
     if not metric or not paths.DB.is_file():
         return [], []
     try:
-        c = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+        c = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
     except sqlite3.Error:
         return [], []
     try:
@@ -1252,7 +1252,7 @@ def interpretation_cost(sample: int = 60) -> tuple[float, float, int] | None:
     """
     import statistics
     try:
-        conn = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
     except sqlite3.Error:
         return None
     try:
@@ -1997,7 +1997,7 @@ def collect() -> list[dict]:
     _rec_metric = metric_for_role(RECLAIMABLE_ROLE)
     if _rec_metric and paths.DB.is_file():
         try:
-            _c = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+            _c = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
             try:
                 # PER-PROJECT latest, not a global MAX(at). Both shapes agree
                 # today because the disk plugin stamps the calendar day, so all
@@ -3097,7 +3097,7 @@ def collect() -> list[dict]:
     newest_scan = None
     if paths.DB.is_file():
         try:
-            c = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+            c = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
             try:
                 row = c.execute("SELECT max(started_at) FROM scans").fetchone()
                 newest_scan = row[0] if row else None
@@ -3181,7 +3181,7 @@ def collect() -> list[dict]:
     cur = newest = None
     if paths.DB.is_file():
         try:
-            c = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+            c = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
             c.row_factory = sqlite3.Row
             try:
                 cur = c.execute("SELECT value, updated_at FROM cursors WHERE name = ?",
@@ -3351,7 +3351,7 @@ def collect() -> list[dict]:
         known = set()
     if known and paths.DB.is_file():
         try:
-            c = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+            c = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
             try:
                 ids = {r[0] for r in c.execute(
                     "SELECT DISTINCT project_id FROM ledger WHERE project_id IS NOT NULL")}
@@ -3889,7 +3889,7 @@ def collect() -> list[dict]:
     # rather than a finding.
     if release_metric and paths.DB.is_file():
         try:
-            c = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+            c = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
             try:
                 latest = c.execute(
                     "SELECT project_id, value FROM metrics"
@@ -4364,7 +4364,7 @@ def collect() -> list[dict]:
     db = paths.DB
     if db.is_file():
         try:
-            c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            c = sqlite3.connect(paths.sqlite_uri(db), uri=True)
             # RECORDS, not revisions. The first version counted rows and said
             # "43 are still proposed" while 28 records were: one memory had
             # nineteen revisions and was counted nineteen times. A queue length
@@ -4528,7 +4528,7 @@ def collect() -> list[dict]:
         stale_at = (datetime.now(timezone.utc)
                     - timedelta(hours=PROJECTION_LAG_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
         try:
-            c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            c = sqlite3.connect(paths.sqlite_uri(db), uri=True)
             c.row_factory = sqlite3.Row
             lag = c.execute(
                 "SELECT count(*) AS n, min(l.created_at) AS oldest FROM outbox o"

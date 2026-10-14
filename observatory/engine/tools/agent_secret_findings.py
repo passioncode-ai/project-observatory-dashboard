@@ -47,7 +47,10 @@ def agent_projects(db: pathlib.Path | None, projects: list[dict]) -> dict[str, s
     out: dict[str, str] = {}
     if db is not None and pathlib.Path(db).is_file():
         try:
-            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            # The path percent-encoded: `?` or `#` in a folder name cut `file:{db}?mode=ro`
+            # short, dropped `mode=ro` and created a file (I-5, review round 6).
+            import paths
+            conn = sqlite3.connect(paths.sqlite_uri(db), uri=True)
             rows = conn.execute(
                 "SELECT l.body_json FROM ledger l JOIN (SELECT memory_id, MAX(revision) r"
                 " FROM ledger WHERE kind = 'checkpoint' GROUP BY memory_id) m"

@@ -7,12 +7,14 @@ The mark never holds a value.
 """
 import io
 import json
+import os
 import sqlite3
 import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 for p in (ROOT, ROOT / "tools", ROOT / "collectors"):
@@ -30,6 +32,13 @@ class LeakScan(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name).resolve()
+        # The scan reads every agent's transcript home under HOME (I-5): a synthetic one here.
+        env = patch.dict(os.environ, {"HOME": str(base / "user")})
+        env.start()
+        self.addCleanup(env.stop)
+        for name in ("CODEX_HOME", "CODEX_SQLITE_HOME", "HERMES_HOME", "HERMES_DATA_DIR_SUFFIX",
+                     "XDG_DATA_HOME", "OPENCODE_DB", "CLAUDE_CONFIG_DIR"):
+            os.environ.pop(name, None)
         self.db = base / "companion.db"
         c = sqlite3.connect(self.db)
         c.execute("CREATE TABLE observations(title TEXT, facts TEXT)")

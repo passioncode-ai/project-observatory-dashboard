@@ -132,7 +132,7 @@ def inspect(db: pathlib.Path, pragma: str = PRAGMA, budget: float = float("inf")
         # READ-ONLY, and that matters twice: a check must not be the thing that
         # writes to a store it suspects, and opening read-write would run any
         # pending migration first.
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        conn = sqlite3.connect(paths.sqlite_uri(db), uri=True)
     except sqlite3.Error as exc:
         return {"verdict": "unopenable", "detail": f"{type(exc).__name__}: {exc}",
                 "took_ms": round((time.perf_counter() - started) * 1000, 1),

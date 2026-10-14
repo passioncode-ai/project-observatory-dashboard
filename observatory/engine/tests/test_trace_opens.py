@@ -116,8 +116,13 @@ def test_a_sqlite_uri_is_split_into_a_path_and_a_mode() -> None:
         f = planted("import pathlib, sqlite3\n"
                     "db = pathlib.Path(__file__).with_name('t.db')\n"
                     "sqlite3.connect(db).close()\n"
-                    "sqlite3.connect(f'file:{db}?mode=ro', uri=True).close()\n")
+                    "sqlite3.connect(f'file:{db}?mode=ro', uri=True).close()\n"
+                    "spaced = db.with_name('t two.db')\n"
+                    "sqlite3.connect(spaced).close()\n"
+                    "sqlite3.connect(spaced.resolve().as_uri() + '?mode=ro', uri=True).close()\n")
         seen = [list(x) for x in trace_child(f)]
+        check("a percent-encoded URI (paths.sqlite_uri) is recorded as its plain path, read-only",
+              any(m == "r" and p.endswith("/t two.db") for m, p in seen), str(seen))
         dbs = [(m, p) for m, p in seen if p.endswith("t.db")]
         check("the read-only connection is recorded as a read",
               ("r", next((p for m, p in dbs if m == "r"), "")) in dbs, str(dbs))

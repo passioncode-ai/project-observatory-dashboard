@@ -7,6 +7,83 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **The leak scan reads every agent's transcripts, not only Claude's** (I-5, PB-032 remainder).
+  Before this, a value echoed into a Codex rollout was neither a sighting nor named as unread.
+  `paths.transcript_homes()` names each home, with the tool's own source as evidence:
+  - **Claude Code:** the `sessions` source, and `history.jsonl` in `$CLAUDE_CONFIG_DIR`/`~/.claude`.
+  - **Codex:** in `$CODEX_HOME`/`~/.codex`, `sessions/` and `archived_sessions/` (`rollout-*.jsonl`,
+    and the compressed `.jsonl.zst`, read with Python 3.14's zstd) and `history.jsonl`; in
+    `$CODEX_SQLITE_HOME`, the `state_*`, `logs_*`, `thread_history_*`, `memories*`, `queue_*`,
+    `goals_*` and `agent_message_board_*` `.sqlite` databases.
+  - **Hermes:** `$HERMES_HOME`, or `~/.hermes` with `$HERMES_DATA_DIR_SUFFIX`, and its profiles:
+    `state.db` and `sessions/*.json|*.jsonl`.
+  - **opencode:** in `$XDG_DATA_HOME/opencode`, the `opencode*.db` databases or `$OPENCODE_DB`, and the
+    legacy `storage/**/*.json`.
+
+  An absent home is not a degradation. These are named in `not_scanned` with the reason: a home that
+  exists but will not read, a profile that is a symbolic link, a database that will not open, and a
+  `.zst` this Python cannot decode. `coverage.transcript_homes` says which homes were `absent`,
+  `scanned`, `partial` (cut by the step's deadline) or `unreadable`. Sightings name the file or the
+  `table.column`, never the value.
+- **A database's mark hides fewer rows from the leak scan** (I-5). Each table's signature is kept
+  beside its mark: the inode, highest rowid, count, rowid sum and sum of squares (two primes),
+  highest update value, and digests of the newest row and of the rows at the update maximum (one
+  digest for the whole set past 64 rows). These are now read again:
+  - rows in a store replaced by another file;
+  - rows whose set of rowids under the mark changed (some deleted, or one inserted under the mark
+    with a new rowid);
+  - the deleted newest row's rowid when it is reused;
+  - a row rewritten in place whose update column moved, or stayed at its maximum with a new digest
+    (the column preferred finest-first: `updated_at_ms` before `updated_at`). A bulk update is
+    reported once, not every tick.
+
+  The weekly complete pass is still the only one to see:
+  - a row replaced under its own rowid below the newest row, in a table with no update column;
+  - an edit that moves no column (Codex `UPDATE threads SET title`);
+  - an edit below a future-dated maximum;
+  - an update column holding mixed types;
+  - a change of rowids whose count and both sums collide (impractical, not impossible);
+  - Codex `thread_items`, which is upserted in place; its rollouts are read incrementally.
+
+  Rows are read 500 at a time, each page its own statement. The signature's aggregates each scan
+  the whole table in one statement, so on a rollback-journal database a writer can wait for one
+  such scan. Codex, opencode and Hermes run their stores in WAL mode by default, where a reader
+  does not block a writer.
+- **A damaged table is a hole, never a clean table** (I-5). Any error from a table used to be
+  taken for a WITHOUT ROWID table, and that table's read then stopped without a word: a damaged
+  page left the store `scanned` with nothing degraded. Only a table declared `WITHOUT ROWID` is
+  read whole now; SQLite itself says which tables those are (`pragma_table_list`), so a comment in
+  the CREATE statement cannot. Any other error names the store in `not_scanned` as read only in
+  part, with each table and the error's type, never SQLite's message, which can quote a cell.
+  Its other tables are still read, and its marks do not move.
+
+  Other inputs that used to fail are now handled:
+  - Text that is not UTF-8 is read as its bytes.
+  - A table name that is not UTF-8 is a hole. A column name that is not UTF-8 is a hole of its
+    own, and the rest of its table is still read.
+  - VIRTUAL generated columns are left out of every read, so one that fails no longer blinds its
+    table. STORED generated columns are read, because their values are on disk.
+  - A column named `rowid` no longer stands in for the real rowid. Rows are paged on whichever of
+    `rowid`, `_rowid_` and `oid` the table leaves free; one that takes all three is read whole.
+  - A store that fails in any other way is "stopped while reading (<Type>)". Its sightings
+    counted so far stand, its `rows_read` counts the rows it read, and the rest of the scan
+    and its report go on.
+  - A mark in the state file that is not a rowid is treated as absent, and its table is read
+    from the start.
+  - `VARCHAR(n)` and `NCHAR(n)` columns are read, by SQLite's TEXT affinity rule.
+
+  Every SQLite store error is now reported by its type only, including "would not open" and a
+  malformed schema, whose message quotes the stored CREATE statement. Before, those two copied
+  SQLite's whole message into the report, the `secret.leak_scan_blind` finding and stdout.
+
+  Not read: rowids of 0 or below, and text kept in a column without text affinity. A
+  `WITHOUT ROWID` table is read whole every pass.
+- **Upgrade cost, and two changed findings.** The first passes after the upgrade read every Codex
+  rollout in the 14-day window, both prompt histories and every transcript database whole, and
+  re-read the tracked tree, the built page and the two engine stores once. The first tick or two
+  may therefore raise `secret.leak_scan_partial`. A store that will not open is now an unreadable
+  source, which raises `secret.leak_scan_blind` from `info` to `warning`.
+
 - **What one issued OpenRouter key cost, by day and model** (INB-019): `openrouter.py spend NAME [--date
   YYYY-MM-DD] [--json]` reads the provider's activity report through the management key that issued the key,
   filtered by that key's hash — the last 30 completed UTC days, or one day. The hash goes to the provider only and
@@ -200,6 +277,29 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
 
 ### Fixed
 
+- **A store path holding `?`, `#` or `%` is read, read-only, as the path it is** (I-5). Every
+  `sqlite3.connect(f"file:{path}?mode=…", uri=True)` in the engine let SQLite cut the path at a
+  `?` or `#`. That affected the leak scan and also Observatory's own store in the dashboard,
+  findings, sessions, MCP, backup, ledger export, review and companion scrub. The `mode=ro`
+  after the cut was lost: the store opened read-write and created an empty file where the cut
+  fell, while the real store was never read, so the leak scan reported it clean. A `%XX` was
+  decoded into another path.
+
+  All of them now go through `paths.sqlite_uri`. It percent-encodes the absolute path without
+  looking it up, and so never raises: `Path.resolve()` raised RuntimeError on a symlink loop on
+  Python 3.11 and 3.12. `..` is kept, so `C/link/../store.db` names the file the operating
+  system and the plain-path writer reach through `link`. Only a trailing slash and `.` parts are
+  dropped. The modules that already built
+  their own URI with `as_uri()` (`store/compatibility.py`, `workspace.py`,
+  `workspace_upgrade.py`, `service_events.py`) are unchanged, and the store's writer
+  (`store/db.py`) opens by plain path. An AST test refuses any `connect(…, uri=True)` in the
+  engine whose URI is not built by `sqlite_uri`, `readonly_uri` or `<path>.as_uri() + …`,
+  directly or through a name bound only to those in the same function. `trace_opens` decodes
+  such URIs back into their paths.
+- **A file rewritten in place is read again whole by the leak scan** (I-5): only a `.jsonl` is
+  append-only. A rewritten file (a session JSON, the built page, a tracked file) used to be resumed from
+  its old offset, so a value written before the old end was never read; it is now re-read whenever its
+  size or modification time changes.
 - **A leak scan cut short by its deadline still reports what it saw** (ENG-001): any `degraded` entry in
   `leak-scan.json` used to turn the whole board into "the leak scan had nothing to look for", so a pass that
   had already found a credential before its time ran out reported nothing. Each entry now carries a `code`

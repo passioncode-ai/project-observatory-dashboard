@@ -158,3 +158,57 @@ link before or after the open is a hole, and a case variant of the data folder's
 apart by any path check and is read like any other regular file. A document from an older scanner (no `code`, no `targets_read`) still reads:
 without `known` it is unmeasured as before; with `known` its sightings stand and the partial row says the
 scanner recorded no coverage rather than inventing a count.
+
+## Leak scan: every agent's transcripts (I-5, PB-032 remainder)
+
+The leak scan now also reads Codex, Hermes and opencode transcripts and the Claude Code and Codex
+prompt histories (`paths.transcript_homes`). A sighting's `where` can name a file under `~/.claude`,
+`~/.codex`, `~/.hermes` or `~/.local/share/opencode`, or a `<database>#<table>.<column>` in a Codex
+`*.sqlite`, Hermes's `state.db` or opencode's `opencode*.db`.
+
+`coverage` gains:
+
+- `transcript_homes`: `[{agent, home, state}]`, with `state` one of `absent`, `scanned`, `partial`
+  (the step's deadline left something under the home unread) or `unreadable`, and `home` `~`-relative;
+- `transcript_stores`: `[{store, read, rows_read}]`, one entry per transcript database.
+
+**Findings.** A SQLite store that would not open is now marked `"unreadable": true` in
+`not_scanned`. The `source-unreadable` count is unchanged, but `secret.leak_scan_blind` for such a
+store rises from `info` to `warning`, because the finding grades on unreadable entries.
+
+A store with a table that could not be read was reported clean before. It is now such an entry
+too, its `why` starting with "a SQLite store read only in part" and listing each table, or each
+`table.column` whose name is not UTF-8, with the error's type only. Its other tables' sightings
+still appear, and it raises `source-unreadable` and `secret.leak_scan_blind` (warning). A name
+that was not UTF-8 appears with `\udcXX` escapes.
+
+A store that raised anything else is an entry whose `why` is "a SQLite store stopped while
+reading (<Type>)"; its sightings counted before the stop still appear, and the scan still writes
+its report. A store that would not open reads "a SQLite store that would not open: <Type>". It
+used to be followed by SQLite's message, which is no longer copied anywhere.
+
+**Private state.** `store/raw/leak-scan-state.json` gains:
+
+- `signatures`: `[size, mtime_ns]` per non-`.jsonl` file. Such files are no longer resumed from an
+  offset but read whole when they change.
+- `sqlite_signatures`: per store, the file's inode. Per table it keeps:
+  - the highest rowid and the row count;
+  - the sum of the rowids modulo 2147483647 (`sum`), and of their squares modulo 1000000007 (`sq`);
+  - the highest update-column value;
+  - a digest of the newest row, and digests of up to 64 rows at the update maximum (`at_max`), or
+    past 64 rows one digest of the whole set (`at_max_set`).
+
+  Never any row text. A BLOB maximum, or text that is not UTF-8, is kept as `{"sha256": …}`.
+  These tables have their rows below the mark read once again: a table marked before the upgrade,
+  which has no signature yet, and one whose signature lacks `sum` or `sq`.
+
+**Upgrade cost.** The first passes after the upgrade read much more than an ordinary tick:
+
+- the tracked tree and the built page, once;
+- the companion and Observatory stores, once more;
+- every Codex rollout in the 14-day window, and both prompt histories;
+- every Codex, Hermes and opencode database, whole.
+
+On a busy machine the first tick or two may stop at the step's deadline and raise
+`secret.leak_scan_partial` until the marks catch up. Nothing is removed; older readers ignore
+the new keys.

@@ -105,7 +105,7 @@ def last_measured() -> dict[str, str]:
     """When each project's footprint was last measured, read-only from the store; empty
     when the store cannot say, which only makes the order the registry's own."""
     try:
-        conn = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
         try:
             return dict(conn.execute("SELECT project_id, MAX(at) FROM metrics "
                                      "WHERE metric = 'disk.bytes' GROUP BY project_id").fetchall())

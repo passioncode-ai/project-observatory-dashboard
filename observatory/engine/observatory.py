@@ -979,7 +979,7 @@ def ignored_state() -> tuple[dict[str, str], dict[str, int]]:
     rows: dict[str, int] = {}
     if paths.DB.is_file():
         try:
-            conn = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+            conn = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
             try:
                 for t in WATCHED_TABLES:
                     try:

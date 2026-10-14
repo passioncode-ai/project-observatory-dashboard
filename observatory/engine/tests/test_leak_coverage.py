@@ -1,8 +1,12 @@
 """PB-032: the leak scan says what it could not read, and suppression needs a reason and an expiry."""
+import ast
+import contextlib
 import datetime
+import importlib.util
 import io
 import json
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -27,10 +31,27 @@ SECRET = "synthetic-value-" + "d" * 24
 TODAY = datetime.datetime.now(datetime.timezone.utc).date()
 
 
+#: The variables that move an agent's transcript home away from HOME (paths.transcript_homes).
+HOME_OVERRIDES = ("CODEX_HOME", "CODEX_SQLITE_HOME", "HERMES_HOME", "HERMES_DATA_DIR_SUFFIX",
+                  "XDG_DATA_HOME", "OPENCODE_DB", "CLAUDE_CONFIG_DIR")
+
+
+def isolate_home(case: unittest.TestCase, user: Path) -> None:
+    """HOME is a synthetic folder for the whole test: the real `~/.codex`, `~/.hermes` and
+    opencode data are never read (I-5), and no override in the caller's environment leaks in."""
+    user.mkdir(parents=True, exist_ok=True)
+    env = patch.dict(os.environ, {"HOME": str(user)})
+    env.start()
+    case.addCleanup(env.stop)
+    for name in HOME_OVERRIDES:
+        os.environ.pop(name, None)
+
+
 class Coverage(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name).resolve()
+        isolate_home(self, base / "user")
         self.readable = base / "log-a.txt"
         self.readable.write_text(f"prefix {SECRET} suffix")
         self.locked = base / "log-b.txt"
@@ -775,6 +796,1185 @@ class Coverage(unittest.TestCase):
 
     def test_the_report_never_holds_the_value(self):
         self.assertNotIn(SECRET, json.dumps(self.scan()))
+
+
+def _raw_sqlite_uris(source: str) -> list[int]:
+    """Lines of every `….connect(<uri>, uri=True)` whose URI is not built by a percent-encoding
+    builder: `sqlite_uri(…)`, `readonly_uri(…)`, `<path>.as_uri() + …`, or a name that the
+    enclosing function binds only to one of those (I-5 polish, F2)."""
+    tree = ast.parse(source)
+    parent = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+
+    def builds(node) -> bool:
+        if isinstance(node, ast.Call):
+            f = node.func
+            return (f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)) in ("sqlite_uri", "readonly_uri")
+        while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            node = node.left
+        return isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "as_uri"
+
+    def scope(node):
+        while node in parent and not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            node = parent[node]
+        return node
+
+    bad = []
+    for call in ast.walk(tree):
+        if not isinstance(call, ast.Call):
+            continue
+        f = call.func
+        if (f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)) != "connect":
+            continue
+        if not any(k.arg == "uri" and isinstance(k.value, ast.Constant) and k.value.value is True
+                   for k in call.keywords):
+            continue
+        target = call.args[0] if call.args else next((k.value for k in call.keywords if k.arg == "database"), None)
+        if isinstance(target, ast.Name):
+            values = [n.value for n in ast.walk(scope(call))
+                      if isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None
+                      and any(isinstance(t, ast.Name) and t.id == target.id
+                              for t in (n.targets if isinstance(n, ast.Assign) else [n.target]))]
+            ok = bool(values) and all(builds(v) for v in values)
+        else:
+            ok = target is not None and builds(target)
+        if not ok:
+            bad.append(call.lineno)
+    return bad
+
+
+def _sqlite(path: Path, table: str, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute(f"CREATE TABLE {table}(id INTEGER PRIMARY KEY, content TEXT)")
+        conn.execute(f"INSERT INTO {table}(content) VALUES (?)", (text,))
+        conn.commit()
+
+
+def _write(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+class TranscriptHomes(unittest.TestCase):
+    """I-5: Codex, Hermes and OpenCode transcripts are read like Claude's, under an isolated HOME.
+
+    Every location here is the tool's own (paths.transcript_homes names the evidence). A home that
+    is absent is not a degradation; one that exists and cannot be read is named in `not_scanned`.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name).resolve()
+        self.user = self.base / "user"
+        isolate_home(self, self.user)
+        saved = {(L, "STATE"): L.STATE, (L, "OUT"): L.OUT, (L, "known_values"): L.known_values,
+                 (L, "SESSIONS"): L.SESSIONS, (L, "ROOT"): L.ROOT, (L, "SUPPRESSIONS"): L.SUPPRESSIONS,
+                 (paths, "COMPANION_DB"): paths.COMPANION_DB, (paths, "DB"): paths.DB,
+                 (paths, "STATE"): paths.STATE, (paths, "DASHBOARD_HTML"): paths.DASHBOARD_HTML,
+                 (scan_env, "salt"): scan_env.salt}
+        self.addCleanup(lambda: [setattr(o, n, v) for (o, n), v in saved.items()])
+        L.STATE, L.OUT = self.base / "state.json", self.base / "leak-scan.json"
+        L.known_values = lambda: ({SECRET: "demo/API_TOKEN"}, [], [])
+        L.SESSIONS = self.base / "no-claude-sessions"
+        L.ROOT = self.base / "engine"            # no Git marker: an installed package, not a hole
+        L.SUPPRESSIONS = self.base / "no-rules.json"
+        paths.COMPANION_DB, paths.DB = self.base / "absent-companion.db", self.base / "absent-own.db"
+        paths.STATE, paths.DASHBOARD_HTML = self.base / "runtime", self.base / "dashboard.html"
+        scan_env.salt = lambda: "e" * 64
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def scan(self, full=True):
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(L.main(["leaks"] + (["--full"] if full else [])), 0)
+        return json.loads(L.OUT.read_text())
+
+    def wheres(self, doc):
+        return [h["where"] for h in doc["hits"]]
+
+    def holes(self, doc):
+        return [n for n in doc["not_scanned"] if n.get("unreadable")]
+
+    # ── the failing test the node names: a Codex rollout ──
+
+    def test_a_value_planted_in_a_codex_rollout_is_a_sighting(self):
+        rollout = _write(self.user / ".codex" / "sessions" / "2026" / "10" / "13"
+                         / "rollout-2026-10-13T09-00-00-0199aaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl",
+                         '{"type":"response_item","payload":{"output":"auth failed for ' + SECRET + '"}}\n')
+        doc = self.scan()
+        self.assertIn(str(rollout), self.wheres(doc), doc["not_scanned"])
+        self.assertEqual(self.holes(doc), [])
+        self.assertNotIn(SECRET, json.dumps(doc), "the report names the file, never the value")
+
+    def test_codex_home_and_archived_sessions_follow_codex_home(self):
+        elsewhere = self.base / "codex-elsewhere"
+        os.environ["CODEX_HOME"] = str(elsewhere)
+        archived = _write(elsewhere / "archived_sessions" / "rollout-2026-09-01T00-00-00-x.jsonl", SECRET)
+        ignored = _write(self.user / ".codex" / "sessions" / "rollout-ignored.jsonl", SECRET)
+        doc = self.scan()
+        self.assertIn(str(archived), self.wheres(doc))
+        self.assertNotIn(str(ignored), self.wheres(doc), "CODEX_HOME replaces ~/.codex, as it does for Codex")
+
+    def test_a_compressed_codex_rollout_is_read_or_named(self):
+        """Codex compresses finished rollouts to `.jsonl.zst` (codex-rs/rollout/src/compression.rs)."""
+        try:
+            from compression import zstd
+        except ImportError:
+            zstd = None
+        path = self.user / ".codex" / "sessions" / "2026" / "10" / "01" / "rollout-old.jsonl.zst"
+        path.parent.mkdir(parents=True)
+        if zstd is None:
+            path.write_bytes(b"\x28\xb5\x2f\xfd synthetic frame")
+            doc = self.scan()
+            self.assertTrue(any("rollout-old.jsonl.zst" in n["what"] and "zstd" in n["why"]
+                                for n in self.holes(doc)), doc["not_scanned"])
+            return
+        path.write_bytes(zstd.compress(("x" * 5000 + SECRET + "\n").encode()))
+        doc = self.scan()
+        self.assertIn(str(path), self.wheres(doc))
+        self.assertEqual(self.scan(full=False)["hits"], [], "an unchanged compressed rollout is not re-read")
+
+    def test_without_a_zstd_decoder_a_compressed_rollout_is_a_named_hole(self):
+        """Python 3.11–3.13 has no `compression.zstd`: the file is unmeasured, never clean."""
+        _write(self.user / ".codex" / "sessions" / "rollout-old.jsonl.zst", "frame")
+        with patch.dict(sys.modules, {"compression.zstd": None, "compression": None}):
+            doc = self.scan()
+        named = [n for n in self.holes(doc) if n["what"].endswith("rollout-old.jsonl.zst")]
+        self.assertTrue(named and "zstd" in named[0]["why"], doc["not_scanned"])
+        self.assertEqual({h["agent"]: h["state"] for h in doc["coverage"]["transcript_homes"]}["codex"],
+                         "unreadable")
+
+    def test_a_corrupt_compressed_rollout_is_a_hole(self):
+        path = _write(self.user / ".codex" / "sessions" / "rollout-bad.jsonl.zst", "not a zstd frame")
+        doc = self.scan()
+        self.assertTrue(any(n["what"].endswith("rollout-bad.jsonl.zst") for n in self.holes(doc)),
+                        doc["not_scanned"])
+        self.assertIn("source-unreadable", {d["code"] for d in doc["degraded"]})
+        self.assertTrue(path.exists())
+
+    # ── Hermes: state.db, sessions/<id>.json(l), profiles ──
+
+    def test_hermes_state_db_session_files_and_profiles_are_read(self):
+        hermes = self.user / ".hermes"
+        _sqlite(hermes / "state.db", "messages", f"tool error: {SECRET}")
+        log = _write(hermes / "sessions" / "20261013_090000_abc.json", '{"messages":["' + SECRET + '"]}')
+        diverted = _write(hermes / "sessions" / "abc.jsonl", SECRET + "\n")
+        _sqlite(hermes / "profiles" / "work" / "state.db", "messages", SECRET)
+        doc = self.scan()
+        where = self.wheres(doc)
+        self.assertIn(f"{hermes / 'state.db'}#messages.content", where)
+        self.assertIn(f"{hermes / 'profiles' / 'work' / 'state.db'}#messages.content", where)
+        self.assertIn(str(log), where)
+        self.assertIn(str(diverted), where)
+        self.assertEqual(self.holes(doc), [])
+
+    def test_hermes_home_override_is_followed(self):
+        other = self.base / "hermes-profile"
+        os.environ["HERMES_HOME"] = str(other)
+        _sqlite(other / "state.db", "messages", SECRET)
+        self.assertIn(f"{other / 'state.db'}#messages.content", self.wheres(self.scan()))
+
+    def test_a_store_that_will_not_open_is_named(self):
+        _write(self.user / ".hermes" / "state.db", "this is not a SQLite database at all, only text")
+        doc = self.scan()
+        self.assertTrue(any("state.db" in n["what"] for n in doc["not_scanned"]), doc["not_scanned"])
+        self.assertIn("source-unreadable", {d["code"] for d in doc["degraded"]})
+
+    # ── OpenCode: opencode.db (and channel databases), the legacy storage tree ──
+
+    def test_opencode_database_and_legacy_storage_are_read(self):
+        data = self.user / ".local" / "share" / "opencode"
+        _sqlite(data / "opencode.db", "part", SECRET)
+        _sqlite(data / "opencode-beta-2.db", "part", SECRET)
+        legacy = _write(data / "storage" / "part" / "msg_1" / "prt_1.json", '{"text":"' + SECRET + '"}')
+        doc = self.scan()
+        where = self.wheres(doc)
+        self.assertIn(f"{data / 'opencode.db'}#part.content", where)
+        self.assertIn(f"{data / 'opencode-beta-2.db'}#part.content", where)
+        self.assertIn(str(legacy), where)
+
+    def test_opencode_follows_xdg_data_home_and_opencode_db(self):
+        xdg = self.base / "xdg"
+        os.environ["XDG_DATA_HOME"] = str(xdg)
+        os.environ["OPENCODE_DB"] = "custom.db"
+        _sqlite(xdg / "opencode" / "custom.db", "part", SECRET)
+        self.assertIn(f"{xdg / 'opencode' / 'custom.db'}#part.content", self.wheres(self.scan()))
+        absolute = self.base / "elsewhere.db"
+        os.environ["OPENCODE_DB"] = str(absolute)
+        _sqlite(absolute, "part", SECRET)
+        self.assertIn(f"{absolute}#part.content", self.wheres(self.scan()))
+
+    # ── absence is not a hole; an unreadable home is ──
+
+    def test_missing_homes_are_not_a_degradation(self):
+        doc = self.scan()
+        self.assertEqual(doc["degraded"], [])
+        self.assertEqual(self.holes(doc), [])
+        self.assertEqual({h["agent"]: h["state"] for h in doc["coverage"]["transcript_homes"]},
+                         {"claude": "absent", "codex": "absent", "hermes": "absent", "opencode": "absent"})
+
+    @unittest.skipIf(os.geteuid() == 0, "root lists a mode-000 folder")
+    def test_a_home_that_exists_but_will_not_read_is_named_with_a_reason(self):
+        for agent, folder in (("codex", self.user / ".codex"), ("hermes", self.user / ".hermes"),
+                              ("opencode", self.user / ".local" / "share" / "opencode")):
+            with self.subTest(agent=agent):
+                (folder / "sessions").mkdir(parents=True)
+                folder.chmod(0)
+                try:
+                    doc = self.scan()
+                finally:
+                    folder.chmod(0o700)
+                label = "~/" + str(folder.relative_to(self.user))
+                named = [n for n in self.holes(doc) if n["what"].startswith(label)]
+                self.assertTrue(named and all(n["why"] for n in named), doc["not_scanned"])
+                self.assertIn("source-unreadable", {d["code"] for d in doc["degraded"]})
+                state = {h["agent"]: h["state"] for h in doc["coverage"]["transcript_homes"]}
+                self.assertEqual(state[agent], "unreadable")
+
+    def test_coverage_names_each_home_it_read(self):
+        _write(self.user / ".codex" / "sessions" / "rollout-a.jsonl", "nothing here")
+        homes = {h["agent"]: h for h in self.scan()["coverage"]["transcript_homes"]}
+        self.assertEqual(homes["codex"]["state"], "scanned")
+        self.assertEqual(homes["codex"]["home"], "~/.codex")
+        self.assertEqual(homes["hermes"]["state"], "absent")
+
+    # ── a rewritten JSON file is read again whole, an appended JSONL from its offset ──
+
+    def test_a_rewritten_session_file_is_read_again_whole(self):
+        log = _write(self.user / ".hermes" / "sessions" / "s1.json", '{"messages":["' + "x" * 60 + '"]}')
+        self.assertEqual(self.scan()["hits"], [])
+        stamp = log.stat().st_mtime_ns
+        log.write_text('{"messages":["' + SECRET + '", "' + "x" * 60 + '"]}', encoding="utf-8")
+        os.utime(log, ns=(stamp + 10**9, stamp + 10**9))
+        self.assertIn(str(log), self.wheres(self.scan(full=False)),
+                      "the value sits before the old size: an offset would have skipped it")
+
+    # ── round 1 review: unit tier ──
+
+    def homes(self, doc):
+        return {h["home"]: h["state"] for h in doc["coverage"]["transcript_homes"]}
+
+    def stores_read(self, doc):
+        return {s["store"]: s for s in doc["coverage"]["transcript_stores"]}
+
+    def test_a_home_the_deadline_cut_is_partial_not_scanned(self):
+        """U1: nothing under the home was read, so it was not `scanned`."""
+        _write(self.user / ".codex" / "sessions" / "rollout-cut.jsonl", SECRET)
+        _sqlite(self.user / ".hermes" / "state.db", "messages", SECRET)
+        os.environ["OBSERVATORY_STEP_DEADLINE"] = f"{__import__('time').time() + 30:.3f}"
+        doc = self.scan()
+        self.assertTrue(doc["partial"])
+        self.assertEqual(self.homes(doc)["~/.codex"], "partial")
+        self.assertEqual(self.homes(doc)["~/.hermes"], "partial")
+
+    def test_a_symlinked_profile_and_a_link_loop_are_named(self):
+        """U2: a profile that is a link, or a link loop, is a hole, never silently gone."""
+        profiles = self.user / ".hermes" / "profiles"
+        (profiles / "real").mkdir(parents=True)
+        outside = self.base / "outside-profile"
+        _sqlite(outside / "state.db", "messages", SECRET)
+        (profiles / "linked").symlink_to(outside, target_is_directory=True)
+        (profiles / "loop").symlink_to(profiles / "loop")
+        (profiles / "stray.txt").write_text("not a profile")
+        doc = self.scan()
+        named = {n["what"]: n["why"] for n in self.holes(doc)}
+        self.assertIn("~/.hermes/profiles/linked", named)
+        self.assertIn("~/.hermes/profiles/loop", named)
+        self.assertIn("symbolic link", named["~/.hermes/profiles/loop"])
+        self.assertIn("~/.hermes/profiles/stray.txt", named)
+        self.assertFalse(any(str(outside) in w for w in self.wheres(doc)), "a linked profile is not followed")
+
+    def _incremental(self, mutate, db, table="part"):
+        first = self.scan()
+        self.assertEqual(first["hits"], [], "the first pass sees no value")
+        mutate()
+        doc = self.scan(full=False)
+        self.assertTrue(doc["incremental"])
+        self.assertIn(f"{db}#{table}.data", self.wheres(doc))
+
+    def _opencode(self, rows, text_pk=True):
+        db = self.user / ".local" / "share" / "opencode" / "opencode.db"
+        db.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE part(id TEXT PRIMARY KEY, time_updated INTEGER NOT NULL, data TEXT NOT NULL)"
+                         if text_pk else "CREATE TABLE part(id INTEGER PRIMARY KEY, data TEXT)")
+            conn.executemany("INSERT INTO part(id, time_updated, data) VALUES (?, ?, ?)" if text_pk else
+                             "INSERT INTO part(id, data) VALUES (?, ?)", rows)
+            conn.commit()
+        return db
+
+    def test_a_store_replaced_by_one_with_a_higher_rowid_is_read_again(self):
+        """U3a: a new file under the old name; the mark of the old one proves nothing. Its
+        newest old row and its count are what the old file's were, so only the inode tells."""
+        old = [(f"p{i}", i, "clean " * 4) for i in range(3)]
+        db = self._opencode(old)
+
+        def replace():
+            fresh = db.with_name("fresh.db")
+            with closing(sqlite3.connect(fresh)) as conn:
+                conn.execute("CREATE TABLE part(id TEXT PRIMARY KEY, time_updated INTEGER NOT NULL, data TEXT NOT NULL)")
+                conn.executemany("INSERT INTO part VALUES (?, ?, ?)",
+                                 [old[0], ("p1", 1, SECRET), old[2]] + [(f"q{i}", 0, "clean") for i in range(3)])
+                conn.commit()
+            os.replace(fresh, db)
+        self._incremental(replace, db)
+
+    def test_a_row_inserted_below_the_mark_is_read(self):
+        """U3d: a row deleted and inserted again under its old rowid, newest row untouched."""
+        db = self._opencode([(i, "clean") for i in range(1, 4)], text_pk=False)
+
+        def reinsert():
+            with closing(sqlite3.connect(db)) as conn:
+                conn.execute("DELETE FROM part WHERE id = 2")
+                conn.commit()
+            self.assertEqual(self.scan(full=False)["hits"], [])
+            with closing(sqlite3.connect(db)) as conn:
+                conn.execute("INSERT INTO part(id, data) VALUES (2, ?)", (SECRET,))
+                conn.commit()
+        self._incremental(reinsert, db)
+
+    def test_a_reused_rowid_of_the_deleted_newest_row_is_read(self):
+        """U3b: a TEXT primary key table hands the next row the deleted newest rowid. No update
+        column here (Hermes `system_prompts`), so only the newest row's digest tells."""
+        db = self.user / ".hermes" / "state.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE system_prompts(hash TEXT PRIMARY KEY, data TEXT NOT NULL)")
+            conn.executemany("INSERT INTO system_prompts VALUES (?, ?)", [(f"h{i}", "clean") for i in range(3)])
+            conn.commit()
+
+        def reuse():
+            with closing(sqlite3.connect(db)) as conn:
+                conn.execute("DELETE FROM system_prompts WHERE rowid = (SELECT max(rowid) FROM system_prompts)")
+                conn.execute("INSERT INTO system_prompts VALUES ('h9', ?)", (SECRET,))
+                conn.commit()
+                self.assertEqual(conn.execute("SELECT rowid FROM system_prompts WHERE hash='h9'").fetchone()[0], 3)
+        self._incremental(reuse, db, table="system_prompts")
+
+    def test_a_row_rewritten_in_place_is_read_again(self):
+        """U3c: opencode rewrites a part while it streams and bumps `time_updated`."""
+        db = self._opencode([(f"p{i}", 100 + i, "clean") for i in range(3)])
+
+        def rewrite():
+            with closing(sqlite3.connect(db)) as conn:
+                conn.execute("UPDATE part SET data = ?, time_updated = 200 WHERE id = 'p0'", (SECRET,))
+                conn.commit()
+        self._incremental(rewrite, db)
+
+    def test_a_hermes_session_updated_in_place_is_read_again(self):
+        """U3c: Hermes rewrites a `sessions` row (TEXT id) and moves `last_activity_at`."""
+        db = self.user / ".hermes" / "state.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE sessions(id TEXT PRIMARY KEY, title TEXT, last_activity_at REAL)")
+            conn.executemany("INSERT INTO sessions VALUES (?, ?, ?)", [(f"s{i}", "t", 1.0 + i) for i in range(3)])
+            conn.commit()
+
+        def touch():
+            with closing(sqlite3.connect(db)) as conn:
+                conn.execute("UPDATE sessions SET title = ?, last_activity_at = 9.0 WHERE id = 's0'", (SECRET,))
+                conn.commit()
+        self.assertEqual(self.scan()["hits"], [])
+        touch()
+        self.assertIn(f"{db}#sessions.title", self.wheres(self.scan(full=False)))
+
+    def test_a_store_larger_than_a_page_is_read_to_the_end(self):
+        """U4: pages are separate statements; the last row of the last page is still read."""
+        db = self._opencode([(f"p{i:05d}", i, SECRET if i == 1234 else "clean") for i in range(1300)])
+        doc = self.scan()
+        self.assertIn(f"{db}#part.data", self.wheres(doc))
+        self.assertEqual(self.stores_read(doc)["~/.local/share/opencode/opencode.db"]["rows_read"], 1300)
+
+    # ── planted reverts that stayed green in round 1 ──
+
+    @unittest.skipIf(os.geteuid() == 0, "root lists a folder without read permission")
+    def test_r2d_an_unlistable_opencode_data_folder_without_storage_is_named(self):
+        data = self.user / ".local" / "share" / "opencode"
+        data.mkdir(parents=True)
+        data.chmod(0o300)                   # searchable, not listable: storage/ is plainly absent
+        try:
+            doc = self.scan()
+        finally:
+            data.chmod(0o700)
+        self.assertTrue(any(n["what"] == "~/.local/share/opencode" for n in self.holes(doc)), doc["not_scanned"])
+
+    @unittest.skipIf(os.geteuid() == 0, "root lists a folder without read permission")
+    def test_r2e_an_unlistable_hermes_profiles_folder_is_named(self):
+        profiles = self.user / ".hermes" / "profiles"
+        profiles.mkdir(parents=True)
+        profiles.chmod(0o300)
+        try:
+            doc = self.scan()
+        finally:
+            profiles.chmod(0o700)
+        self.assertTrue(any(n["what"] == "~/.hermes/profiles" for n in self.holes(doc)), doc["not_scanned"])
+
+    def test_r3_an_unchanged_json_is_not_read_again(self):
+        _write(self.user / ".hermes" / "sessions" / "s1.json", '{"messages":["' + "x" * 300 + '"]}')
+        self.assertGreater(self.scan()["read_bytes"], 0)
+        self.assertEqual(self.scan(full=False)["read_bytes"], 0)
+
+    def test_r4_a_second_incremental_pass_reads_no_row_and_repeats_no_sighting(self):
+        hermes = self.user / ".hermes" / "state.db"
+        opencode = self.user / ".local" / "share" / "opencode" / "opencode.db"
+        _sqlite(hermes, "messages", SECRET)
+        _sqlite(opencode, "part", SECRET)
+        first = self.scan()
+        self.assertEqual(len(first["hits"]), 2)
+        second = self.scan(full=False)
+        self.assertEqual(second["hits"], [], "a row read once is not reported again")
+        rows = self.stores_read(second)
+        self.assertEqual(rows["~/.hermes/state.db"]["rows_read"], 0)
+        self.assertEqual(rows["~/.local/share/opencode/opencode.db"]["rows_read"], 0)
+        marks = json.loads(L.STATE.read_text())["sqlite"]["stores"]
+        self.assertEqual(marks[str(hermes)], {"messages": 1})
+        self.assertEqual(marks[str(opencode)], {"part": 1})
+
+    # ── round 1 review: product tier ──
+
+    def test_codex_and_claude_histories_and_codex_databases_are_read(self):
+        codex = self.user / ".codex"
+        history = _write(codex / "history.jsonl", '{"text":"' + SECRET + '"}\n')
+        claude = _write(self.user / ".claude" / "history.jsonl", '{"display":"' + SECRET + '"}\n')
+        thread = codex / "thread_history_1.sqlite"
+        with closing(sqlite3.connect(thread)) as conn:
+            conn.execute("CREATE TABLE thread_items(thread_id TEXT NOT NULL, turn_id TEXT NOT NULL, "
+                         "item_id TEXT NOT NULL, rollout_ordinal INTEGER NOT NULL, created_at_ms INTEGER NOT NULL, "
+                         "item_json TEXT NOT NULL, PRIMARY KEY (thread_id, turn_id, item_id))")
+            conn.execute("CREATE TABLE thread_turns(thread_id TEXT NOT NULL, turn_id TEXT NOT NULL, "
+                         "status TEXT NOT NULL, error_json TEXT, PRIMARY KEY (thread_id, turn_id))")
+            conn.execute("INSERT INTO thread_items VALUES ('t', 'u', 'i', 0, 0, ?)", ('{"text":"' + SECRET + '"}',))
+            conn.execute("INSERT INTO thread_turns VALUES ('t', 'u', 'failed', ?)", (SECRET,))
+            conn.commit()
+        _sqlite(codex / "logs_2.sqlite", "logs", SECRET)
+        _sqlite(codex / "memories_1.sqlite", "stage1_outputs", SECRET)
+        _sqlite(codex / "memories_v2_1.sqlite", "stage1_outputs", SECRET)
+        _write(codex / "queue_1.sqlite-wal", "not a database")     # a sidecar is not a store
+        where = self.wheres(self.scan())
+        for expected in (str(history), str(claude), f"{thread}#thread_items.item_json",
+                         f"{thread}#thread_turns.error_json", f"{codex / 'logs_2.sqlite'}#logs.content",
+                         f"{codex / 'memories_1.sqlite'}#stage1_outputs.content",
+                         f"{codex / 'memories_v2_1.sqlite'}#stage1_outputs.content"):
+            self.assertIn(expected, where)
+        self.assertFalse(any("sqlite-wal" in w for w in where))
+
+    def test_codex_sqlite_home_and_hermes_data_dir_suffix_are_followed(self):
+        os.environ["CODEX_SQLITE_HOME"] = str(self.base / "codex-db")
+        os.environ["HERMES_DATA_DIR_SUFFIX"] = "-beta"
+        _sqlite(self.base / "codex-db" / "state_5.sqlite", "threads", SECRET)
+        _sqlite(self.user / ".hermes-beta" / "state.db", "messages", SECRET)
+        _sqlite(self.user / ".hermes" / "state.db", "messages", SECRET)
+        where = self.wheres(self.scan())
+        self.assertIn(f"{self.base / 'codex-db' / 'state_5.sqlite'}#threads.content", where)
+        self.assertIn(f"{self.user / '.hermes-beta' / 'state.db'}#messages.content", where)
+        self.assertNotIn(f"{self.user / '.hermes' / 'state.db'}#messages.content", where,
+                         "the suffix replaces ~/.hermes, as it does for Hermes")
+
+    # ── round 2 review ──
+
+    def test_a_blob_in_an_update_column_does_not_break_the_scan(self):
+        """F1: the signature kept raw bytes and the state file would not serialise."""
+        db = self.user / ".local" / "share" / "opencode" / "opencode.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE part(id TEXT PRIMARY KEY, time_updated BLOB, data TEXT)")
+            conn.execute("INSERT INTO part VALUES ('p0', ?, 'clean')", (b"\x00\x01binary",))
+            conn.execute("INSERT INTO part VALUES ('p1', ?, 'clean')", (b"\x00\x02binary",))
+            conn.commit()
+        self.assertEqual(self.scan()["hits"], [])
+        self.assertIn("sqlite_signatures", json.loads(L.STATE.read_text()))
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("UPDATE part SET data = ?, time_updated = ? WHERE id = 'p0'", (SECRET, b"\x00\x09new"))
+            conn.commit()
+        self.assertIn(f"{db}#part.data", self.wheres(self.scan(full=False)))
+
+    def _threads(self, rows):
+        db = self.user / ".codex" / "state_5.sqlite"
+        db.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE threads(id TEXT PRIMARY KEY, title TEXT NOT NULL, updated_at INTEGER NOT NULL)")
+            conn.executemany("INSERT INTO threads VALUES (?, ?, ?)", rows)
+            conn.commit()
+        return db
+
+    def test_an_edit_that_keeps_the_update_column_at_its_max_is_read_once(self):
+        """F2: Codex `updated_at` is in seconds; an edit within the max's second does not move it."""
+        db = self._threads([("t0", "clean", 1000), ("t1", "clean", 1001), ("t2", "clean", 1002)])
+        self.assertEqual(self.scan()["hits"], [])
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("UPDATE threads SET title = ?, updated_at = 1002 WHERE id = 't0'", (SECRET,))
+            conn.commit()
+        self.assertIn(f"{db}#threads.title", self.wheres(self.scan(full=False)))
+        self.assertEqual(self.scan(full=False)["hits"], [], "the row at the max is not reported every tick")
+
+    def test_the_finest_update_column_is_preferred(self):
+        self.assertLess(L.UPDATED_COLUMNS.index("updated_at_ms"), L.UPDATED_COLUMNS.index("updated_at"))
+
+    def test_a_changed_rowid_set_with_the_same_count_is_read(self):
+        """F3: ids 1,2,4,5; delete 1 and insert 3 between two passes: same count, same newest row."""
+        db = self.user / ".local" / "share" / "opencode" / "opencode.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE part(id INTEGER PRIMARY KEY, data TEXT)")
+            conn.executemany("INSERT INTO part VALUES (?, 'clean')", [(1,), (2,), (4,), (5,)])
+            conn.commit()
+
+        def swap():
+            with closing(sqlite3.connect(db)) as conn:
+                conn.execute("DELETE FROM part WHERE id = 1")
+                conn.execute("INSERT INTO part VALUES (3, ?)", (SECRET,))
+                conn.commit()
+        self._incremental(swap, db)
+
+    def test_each_page_is_its_own_bounded_statement(self):
+        """F5/U4: no single long read holds the database; a writer waits for one page at most."""
+        db = self._opencode([(f"p{i:05d}", i, "clean") for i in range(1300)])
+        seen: list[str] = []
+        original = sqlite3.connect
+
+        def traced(*args, **kwargs):
+            conn = original(*args, **kwargs)
+            if str(db) in str(args[0] if args else kwargs.get("database", "")):
+                conn.set_trace_callback(seen.append)
+            return conn
+        with patch.object(sqlite3, "connect", traced):
+            self.scan()
+        reads = [s for s in seen if 'FROM "part" WHERE rowid >' in s]
+        self.assertGreaterEqual(len(reads), 3, seen)
+        self.assertTrue(all(f"LIMIT {L.PAGE}" in s for s in reads), reads)
+
+    def test_claude_config_dir_moves_the_prompt_history(self):
+        moved = _write(self.base / "claude-config" / "history.jsonl", SECRET + "\n")
+        ignored = _write(self.user / ".claude" / "history.jsonl", SECRET + "\n")
+        os.environ["CLAUDE_CONFIG_DIR"] = str(moved.parent)
+        where = self.wheres(self.scan())
+        self.assertIn(str(moved), where)
+        self.assertNotIn(str(ignored), where, "CLAUDE_CONFIG_DIR replaces ~/.claude, as it does for Claude Code")
+
+    def test_every_codex_database_name_is_globbed(self):
+        """F5/F6: each pattern on its own — queue, goals and the agent message board."""
+        codex = self.user / ".codex"
+        names = ("state_5", "logs_2", "thread_history_1", "memories_1", "memories_v2_1", "queue_1", "goals_1",
+                 "agent_message_board_1")
+        for name in names:
+            _sqlite(codex / f"{name}.sqlite", "t", SECRET)
+        where = self.wheres(self.scan())
+        for name in names:
+            self.assertIn(f"{codex / (name + '.sqlite')}#t.content", where, name)
+
+    @unittest.skipIf(os.geteuid() == 0, "root lists a mode-000 folder")
+    def test_a_hole_in_a_nested_home_leaves_the_outer_home_partial(self):
+        """F7: a locked folder under ~/.claude/projects is that home's hole; ~/.claude is partial."""
+        projects = self.user / ".claude" / "projects"
+        (projects / "locked").mkdir(parents=True)
+        L.SESSIONS = projects
+        history = _write(self.user / ".claude" / "history.jsonl", SECRET + "\n")
+        (projects / "locked").chmod(0)
+        try:
+            doc = self.scan()
+        finally:
+            (projects / "locked").chmod(0o700)
+        self.assertIn(str(history), self.wheres(doc))
+        states = self.homes(doc)
+        self.assertEqual(states["~/.claude/projects"], "unreadable")
+        self.assertEqual(states["~/.claude"], "partial")
+
+    # ── round 3 review ──
+
+    @staticmethod
+    def _damage(db: Path) -> None:
+        """Zero the type byte of a table leaf page about three quarters into the file."""
+        raw = bytearray(db.read_bytes())
+        size = int.from_bytes(raw[16:18], "big") or 65536
+        pages = len(raw) // size
+        for page in range(int(pages * 0.75), pages + 1):
+            if raw[(page - 1) * size] == 0x0D:
+                raw[(page - 1) * size] = 0
+                db.write_bytes(bytes(raw))
+                break
+        else:
+            raise AssertionError("no table leaf page to damage")
+        with closing(sqlite3.connect(db)) as conn, contextlib.suppress(sqlite3.DatabaseError):
+            conn.execute("SELECT count(*), sum(length(data)) FROM part").fetchone()
+            raise AssertionError("the damage did not reach the table")
+
+    def _big(self, db: Path, table: str = "part", first: str | None = None) -> Path:
+        db.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(db)) as conn:
+            if first:
+                conn.execute("CREATE TABLE note(id INTEGER PRIMARY KEY, data TEXT)")
+                conn.execute("INSERT INTO note(data) VALUES (?)", (first,))
+            conn.execute(f"CREATE TABLE {table}(id INTEGER PRIMARY KEY, data TEXT)")
+            conn.executemany(f"INSERT INTO {table}(data) VALUES (?)", [("clean " + "x" * 180,)] * 2000)
+            conn.commit()
+        return db
+
+    def test_a_damaged_page_is_a_hole_not_a_clean_table(self):
+        """N1: any error from a table used to be read as WITHOUT ROWID and its loop broke in silence."""
+        db = self._big(self.user / ".local" / "share" / "opencode" / "opencode.db", first=SECRET)
+        self._damage(db)
+        doc = self.scan()
+        self.assertIn(f"{db}#note.data", self.wheres(doc), "the readable table still counts")
+        self.assertTrue(any(n["what"] == str(db) for n in self.holes(doc)), doc["not_scanned"])
+        self.assertIn("source-unreadable", {d["code"] for d in doc["degraded"]})
+        self.assertEqual(self.homes(doc)["~/.local/share/opencode"], "unreadable")
+
+    def test_a_damaged_hermes_state_db_is_unreadable_end_to_end(self):
+        db = self._big(self.user / ".hermes" / "state.db")
+        self._damage(db)
+        doc = self.scan()
+        self.assertTrue(any(n["what"] == str(db) and n["why"] for n in self.holes(doc)), doc["not_scanned"])
+        self.assertEqual(self.homes(doc)["~/.hermes"], "unreadable")
+        self.assertFalse(self.stores_read(doc)["~/.hermes/state.db"]["read"])
+
+    def test_invalid_utf8_in_the_newest_row_is_read_not_skipped(self):
+        db = self._opencode([(1, "clean"), (2, "clean")], text_pk=False)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("INSERT INTO part(id, data) VALUES (3, CAST(? AS TEXT))", (b"\xff\xfe" + SECRET.encode(),))
+            conn.commit()
+        doc = self.scan()
+        self.assertIn(f"{db}#part.data", self.wheres(doc))
+        self.assertEqual(self.holes(doc), [])
+        self.assertNotIn(SECRET, json.dumps(doc))
+
+    def test_invalid_utf8_in_the_update_column_keeps_the_scan_and_its_state(self):
+        db = self.user / ".local" / "share" / "opencode" / "opencode.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE part(id TEXT PRIMARY KEY, time_updated TEXT, data TEXT)")
+            conn.execute("INSERT INTO part VALUES ('p0', CAST(? AS TEXT), ?)", (b"\xff1", SECRET))
+            conn.execute("INSERT INTO part VALUES ('p1', CAST(? AS TEXT), 'clean')", (b"\xff2",))
+            conn.commit()
+        self.assertIn(f"{db}#part.data", self.wheres(self.scan()))
+        self.assertIn("sqlite_signatures", json.loads(L.STATE.read_text()))
+        self.assertEqual(self.scan(full=False)["hits"], [], "read once, not every tick")
+
+    def test_a_bulk_update_past_the_digest_cap_is_reported_once(self):
+        """L1: 200 rows share the new maximum: one digest of the set, not 200, and no repeat."""
+        db = self._opencode([(f"p{i:03d}", i, SECRET if i == 0 else "clean") for i in range(200)])
+        self.assertEqual(len(self.scan()["hits"]), 1)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("UPDATE part SET time_updated = 500")
+            conn.commit()
+        self.assertEqual(len(self.scan(full=False)["hits"]), 1, "the bulk update is read once")
+        for _ in range(2):
+            idle = self.scan(full=False)
+            self.assertEqual(idle["hits"], [], "an idle pass reports nothing again")
+            self.assertEqual(self.stores_read(idle)["~/.local/share/opencode/opencode.db"]["rows_read"], 0)
+
+    def test_a_rowid_sum_collision_is_read(self):
+        """L2: {2,5} -> {3,4} and r -> r + 2147483647 keep the count and the sum modulo the prime."""
+        for label, ids, swap in (
+                ("same-sum set", [1, 2, 5, 6], ([2, 5], [(3, SECRET), (4, "clean")])),
+                ("modulus move", [1, 3, 5_000_000_000], ([3], [(3 + 2147483647, SECRET)]))):
+            with self.subTest(label):
+                db = self.user / ".local" / "share" / "opencode" / "opencode.db"
+                if db.exists():
+                    db.unlink()
+                db = self._opencode([(i, "clean") for i in ids], text_pk=False)
+                L.STATE.unlink(missing_ok=True)
+
+                def move(gone=swap[0], new=swap[1]):
+                    with closing(sqlite3.connect(db)) as conn:
+                        conn.executemany("DELETE FROM part WHERE id = ?", [(g,) for g in gone])
+                        conn.executemany("INSERT INTO part(id, data) VALUES (?, ?)", new)
+                        conn.commit()
+                self._incremental(move, db)
+
+    def test_a_varchar_column_is_read(self):
+        """L6: `VARCHAR(255)` has TEXT affinity; the exact-name match skipped it."""
+        db = self.user / ".hermes" / "state.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE notes(id INTEGER PRIMARY KEY, body VARCHAR(255), kind NCHAR(10))")
+            conn.execute("INSERT INTO notes(body, kind) VALUES (?, 'x')", (SECRET,))
+            conn.commit()
+        self.assertIn(f"{db}#notes.body", self.wheres(self.scan()))
+
+    def test_a_real_without_rowid_table_is_still_read(self):
+        db = self.user / ".hermes" / "state.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT) WITHOUT ROWID")
+            conn.execute("INSERT INTO kv VALUES ('a', ?)", (SECRET,))
+            conn.commit()
+        doc = self.scan()
+        self.assertIn(f"{db}#kv.v", self.wheres(doc))
+        self.assertEqual(self.holes(doc), [])
+
+    # ── round 4 review ──
+
+    def _plant_names(self, db: Path, table: bytes | None = None, column: bytes | None = None) -> None:
+        """Rename a table or a column to bytes that are not UTF-8, through writable_schema."""
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("PRAGMA writable_schema=ON")
+            if table is not None:
+                conn.execute("UPDATE sqlite_master SET name = CAST(? AS TEXT), tbl_name = CAST(? AS TEXT), "
+                             "sql = CAST(? AS TEXT) WHERE name = 'bad'",
+                             (table, table, b'CREATE TABLE "' + table + b'"(id INTEGER PRIMARY KEY, data TEXT)'))
+            if column is not None:
+                conn.execute("UPDATE sqlite_master SET sql = CAST(? AS TEXT) WHERE name = 'cols'",
+                             (b'CREATE TABLE cols(id INTEGER PRIMARY KEY, data TEXT, "' + column + b'" TEXT)',))
+            conn.commit()
+
+    def _report_written_and_other_tables_read(self, db: Path, expected: list[str]) -> dict:
+        L.OUT.unlink(missing_ok=True)
+        doc = self.scan()                                   # main returned 0 and wrote its report
+        for where in expected:
+            self.assertIn(f"{db}#{where}", self.wheres(doc))
+        hole = [n for n in self.holes(doc) if n["what"] == str(db)]
+        self.assertTrue(hole and hole[0]["why"].startswith(L.PARTIAL), doc["not_scanned"])
+        self.assertIn("~/.codex", {h["home"] for h in doc["coverage"]["transcript_homes"]},
+                      "every other home is still measured")
+        return doc
+
+    def test_a_table_name_that_is_not_utf8_is_a_hole_not_a_crash(self):
+        """M1: `PRAGMA table_info("zzz\\xff")` raised UnicodeEncodeError, not a sqlite3.Error."""
+        db = self.user / ".hermes" / "state.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE bad(id INTEGER PRIMARY KEY, data TEXT)")
+            conn.execute("CREATE TABLE other(id INTEGER PRIMARY KEY, data TEXT)")
+            conn.execute("INSERT INTO other(data) VALUES (?)", (SECRET,))
+            conn.commit()
+        self._plant_names(db, table=b"zzz\xff")
+        doc = self._report_written_and_other_tables_read(db, ["other.data"])
+        self.assertIn("UnicodeEncodeError", next(n["why"] for n in self.holes(doc) if n["what"] == str(db)))
+
+    def test_a_column_name_that_is_not_utf8_leaves_the_rest_of_the_table_read(self):
+        """M1: `SELECT *` raised UnicodeDecodeError decoding the cursor's column names."""
+        db = self.user / ".hermes" / "state.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE cols(id INTEGER PRIMARY KEY, data TEXT, yyyq TEXT)")
+            conn.execute("INSERT INTO cols(data, yyyq) VALUES (?, 'x')", (SECRET,))
+            conn.execute("CREATE TABLE other(id INTEGER PRIMARY KEY, data TEXT)")
+            conn.execute("INSERT INTO other(data) VALUES (?)", (SECRET,))
+            conn.commit()
+        self._plant_names(db, column=b"yyy\xff")
+        self._report_written_and_other_tables_read(db, ["cols.data", "other.data"])
+
+    def test_a_store_that_raises_anything_is_a_hole_and_the_report_is_written(self):
+        """M1: whatever a store raises, the other homes are measured and the report is written."""
+        _sqlite(self.user / ".hermes" / "state.db", "messages", SECRET)
+        _write(self.user / ".codex" / "sessions" / "rollout-x.jsonl", SECRET)
+        L.OUT.unlink(missing_ok=True)
+        with patch.object(L, "scan_sqlite", side_effect=RuntimeError("synthetic")):
+            doc = self.scan()
+        self.assertTrue(any(n["what"].endswith("state.db") and "RuntimeError" in n["why"]
+                            for n in self.holes(doc)), doc["not_scanned"])
+        self.assertTrue(any(w.endswith("rollout-x.jsonl") for w in self.wheres(doc)))
+
+    def _generated(self, db: Path, tables=("g", "h")) -> None:
+        db.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(db)) as conn:
+            for t in tables:
+                conn.execute(f"CREATE TABLE {t}(id INTEGER PRIMARY KEY, data TEXT)")
+                conn.execute(f"INSERT INTO {t}(data) VALUES (?)", (SECRET,))
+                # VIRTUAL generated column added after the row: reading it raises an error whose
+                # message quotes the cell (`bad JSON path: '<value>'`).
+                conn.execute(f"ALTER TABLE {t} ADD COLUMN x TEXT GENERATED ALWAYS AS (json_extract('{{}}', data)) VIRTUAL")
+            conn.commit()
+
+    def test_a_generated_column_does_not_blind_its_table(self):
+        """L3: `SELECT *` evaluated the generated column; main read both tables."""
+        db = self.user / ".hermes" / "state.db"
+        self._generated(db)
+        doc = self.scan()
+        self.assertIn(f"{db}#g.data", self.wheres(doc))
+        self.assertIn(f"{db}#h.data", self.wheres(doc))
+        self.assertEqual(self.holes(doc), [])
+        self.assertNotIn(SECRET, L.OUT.read_text())
+
+    def test_a_hole_never_carries_the_error_message(self):
+        """M2: SQLite's message can quote a cell; only the error's type reaches the report."""
+        db = self.user / ".hermes" / "state.db"
+        _sqlite(db, "messages", "clean")
+
+        def quoting(*_args, **_kwargs):
+            raise sqlite3.OperationalError(f"bad JSON path: '{SECRET}'")
+        with patch.object(L, "table_signature", side_effect=quoting):
+            doc = self.scan()
+        self.assertTrue(any(n["what"] == str(db) for n in self.holes(doc)), doc["not_scanned"])
+        self.assertNotIn(SECRET, L.OUT.read_text())
+        self.assertNotIn(SECRET, json.dumps(F.findings(doc)))
+        self.assertNotIn(SECRET, L.STATE.read_text())
+
+    def test_a_trailing_comment_does_not_hide_without_rowid(self):
+        """L5: the `)` inside `/* (old) */` was taken for the end of the column list."""
+        db = self.user / ".hermes" / "state.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT) WITHOUT ROWID /* (old) */")
+            conn.execute("INSERT INTO kv VALUES ('a', ?)", (SECRET,))
+            conn.commit()
+        doc = self.scan()
+        self.assertIn(f"{db}#kv.v", self.wheres(doc))
+        self.assertEqual(self.holes(doc), [])
+
+    def test_a_partial_store_note_says_read_in_part_with_the_table_and_type(self):
+        """L7: the wording of the hole a damaged table leaves."""
+        db = self._big(self.user / ".hermes" / "state.db")
+        self._damage(db)
+        why = next(n["why"] for n in self.holes(self.scan()) if n["what"] == str(db))
+        self.assertTrue(why.startswith("a SQLite store read only in part; these tables could not be read: "), why)
+        self.assertIn("part (DatabaseError)", why)
+        self.assertNotIn("would not open", why)
+
+    # ── round 5 review ──
+
+    def _everything(self, doc) -> str:
+        return L.OUT.read_text() + (L.STATE.read_text() if L.STATE.exists() else "") + json.dumps(F.findings(doc))
+
+    def _scan_printing(self) -> tuple[dict, str]:
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(L.main(["leaks", "--full"]), 0)
+        return json.loads(L.OUT.read_text()), out.getvalue()
+
+    def test_a_schema_error_quoting_a_value_never_reaches_the_report(self):
+        """F1: `malformed database schema (t) - unknown table option: '<value>'` was copied whole."""
+        db = self.user / ".hermes" / "state.db"
+        _sqlite(db, "t", "clean")
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("PRAGMA writable_schema=ON")
+            conn.execute("UPDATE sqlite_master SET sql = ? WHERE name = 't'",
+                         (f"CREATE TABLE t(id INTEGER PRIMARY KEY, content TEXT) '{SECRET}'",))
+            conn.commit()
+        doc, printed = self._scan_printing()
+        self.assertTrue(any(n["what"] == str(db) for n in self.holes(doc)), doc["not_scanned"])
+        self.assertNotIn(SECRET, self._everything(doc))
+        self.assertNotIn(SECRET, printed)
+
+    def test_an_open_error_quoting_a_value_never_reaches_the_report(self):
+        db = self.user / ".hermes" / "state.db"
+        _sqlite(db, "t", "clean")
+        original = sqlite3.connect
+
+        def refusing(*args, **kwargs):
+            if str(db) in str(args[0] if args else ""):
+                raise sqlite3.OperationalError(f"cannot open '{SECRET}'")
+            return original(*args, **kwargs)
+        with patch.object(sqlite3, "connect", refusing):
+            doc, printed = self._scan_printing()
+        self.assertTrue(any(n["what"] == str(db) and "would not open" in n["why"] for n in self.holes(doc)))
+        self.assertNotIn(SECRET, self._everything(doc) + printed)
+
+    def test_a_store_that_stops_midway_keeps_its_sightings_and_says_so(self):
+        """F3: the catch-all dropped sightings already counted and said `would not open`."""
+        db = self.user / ".hermes" / "state.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE a_first(id INTEGER PRIMARY KEY, data TEXT)")
+            conn.execute("INSERT INTO a_first(data) VALUES (?)", (SECRET,))
+            conn.execute("CREATE TABLE z_last(id INTEGER PRIMARY KEY, data TEXT)")
+            conn.commit()
+        original = L.table_signature
+
+        def stopping(conn, table, *args, **kwargs):
+            if table == "z_last":
+                raise RuntimeError(f"stopped near '{SECRET}'")
+            return original(conn, table, *args, **kwargs)
+        with patch.object(L, "table_signature", stopping):
+            doc, printed = self._scan_printing()
+        self.assertIn(f"{db}#a_first.data", self.wheres(doc), "a sighting counted before the stop stays")
+        why = next(n["why"] for n in self.holes(doc) if n["what"] == str(db))
+        self.assertEqual(why, "a SQLite store stopped while reading (RuntimeError)")
+        self.assertEqual(self.stores_read(doc)["~/.hermes/state.db"]["rows_read"], 1,
+                         "L5: the rows it read before it stopped, not 0")
+        self.assertNotIn(SECRET, self._everything(doc) + printed)
+
+    def test_a_column_named_rowid_does_not_shadow_the_real_rowid(self):
+        """F2: `rowid TEXT` with NULL, `rowid INTEGER` duplicates, `rowid` holding text."""
+        db = self.user / ".hermes" / "state.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE a_first(id INTEGER PRIMARY KEY, data TEXT)")
+            conn.execute("INSERT INTO a_first(data) VALUES (?)", (SECRET,))
+            conn.execute("CREATE TABLE nul(rowid TEXT, body TEXT)")
+            conn.execute("INSERT INTO nul(rowid, body) VALUES (NULL, ?)", (SECRET,))
+            conn.execute("CREATE TABLE dup(rowid INTEGER, body TEXT)")
+            conn.executemany("INSERT INTO dup(rowid, body) VALUES (1, ?)", [("clean",)] * 600 + [(SECRET,)])
+            conn.execute("CREATE TABLE txt(rowid TEXT, body TEXT)")
+            conn.execute("INSERT INTO txt(rowid, body) VALUES ('a', 'clean'), ('b', ?)", (SECRET,))
+            conn.commit()
+        for full in (True, False):
+            with self.subTest(full=full):
+                doc = self.scan(full=full) if full else self.scan(full=False)
+                where = self.wheres(doc)
+                if full:
+                    for t in ("a_first.data", "nul.body", "dup.body", "txt.body"):
+                        self.assertIn(f"{db}#{t}", where)
+                    self.assertEqual(self.holes(doc), [])
+                    self.assertEqual(self.stores_read(doc)["~/.hermes/state.db"]["rows_read"], 1 + 1 + 601 + 2)
+                else:
+                    self.assertEqual(doc["hits"], [], "and nothing is read twice")
+
+    def test_the_rowid_sum_helper_is_type_safe(self):
+        """F2: a text value reached `_mod` through a shadowed rowid and raised TypeError, which
+        turned the whole store into a hole. Anything but an integer counts as SQLite counts it."""
+        self.assertEqual(L._mod("a", 7), 0)
+        self.assertEqual(L._mod(None, 7), 0)
+        self.assertEqual(L._mod(-9, 7), -2, "SQLite's % keeps the dividend's sign")
+
+    def test_a_table_shadowing_every_rowid_alias_is_read_whole(self):
+        db = self.user / ".hermes" / "state.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute('CREATE TABLE all3(rowid TEXT, "_ROWID_" TEXT, oid TEXT, body TEXT)')
+            conn.execute("INSERT INTO all3 VALUES (NULL, NULL, NULL, ?)", (SECRET,))
+            conn.commit()
+        doc = self.scan()
+        self.assertIn(f"{db}#all3.body", self.wheres(doc))
+        self.assertEqual(self.holes(doc), [])
+
+    def test_a_stored_generated_column_is_read(self):
+        """F5: a STORED generated column holds the only whole copy; reading it evaluates nothing."""
+        db = self.user / ".hermes" / "state.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("CREATE TABLE g(id INTEGER PRIMARY KEY, a TEXT, b TEXT, "
+                         "joined TEXT GENERATED ALWAYS AS (a || b) STORED)")
+            conn.execute("INSERT INTO g(a, b) VALUES (?, ?)", (SECRET[:20], SECRET[20:]))
+            conn.commit()
+        where = self.wheres(self.scan())
+        self.assertIn(f"{db}#g.joined", where)
+        self.assertNotIn(f"{db}#g.a", where)
+
+    def test_a_quote_inside_a_name_is_doubled(self):
+        """F6: `_q` doubles `"`; without it the statement breaks and the table becomes a hole."""
+        db = self.user / ".hermes" / "state.db"
+        db.parent.mkdir(parents=True)
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute('CREATE TABLE "we""ird"(id INTEGER PRIMARY KEY, "co""l" TEXT, updated_at INTEGER)')
+            conn.execute('INSERT INTO "we""ird"("co""l", updated_at) VALUES (?, 1)', (SECRET,))
+            conn.commit()
+        doc = self.scan()
+        self.assertIn(f'{db}#we"ird.co"l', self.wheres(doc))
+        self.assertEqual(self.holes(doc), [])
+
+    def test_the_fallback_without_rowid_parser_on_its_own(self):
+        """F4/F6: SQLite before 3.37 has no pragma_table_list; the parser must agree with SQLite."""
+
+        class NoTableList:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def execute(self, sql, *args):
+                if "pragma_table_list" in sql:
+                    raise sqlite3.OperationalError("no such table: pragma_table_list")
+                return self.conn.execute(sql, *args)
+
+        cases = [
+            "CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT) without rowid",
+            "CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT) /* WITHOUT ROWID */",
+            "CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT) -- WITHOUT ROWID",
+            "CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT) WITHOUT ROWID /* (old) */",
+            "CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT DEFAULT ') WITHOUT ROWID')",
+            "CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT DEFAULT '/*') WITHOUT ROWID",
+            "CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT DEFAULT '--') WITHOUT ROWID",
+            'CREATE TABLE kv(k TEXT PRIMARY KEY, "v--" TEXT) WITHOUT ROWID',
+            "CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT) STRICT, WITHOUT ROWID",
+            "CREATE TABLE kv(k TEXT, v TEXT DEFAULT '/*') -- */ WITHOUT ROWID",
+            "CREATE TABLE kv(k TEXT PRIMARY KEY, [v)x] TEXT) WITHOUT ROWID",
+            "CREATE TABLE kv(k TEXT PRIMARY KEY, [it's] TEXT) WITHOUT ROWID",
+            "CREATE TABLE kv(k TEXT PRIMARY KEY, `it's` TEXT) WITHOUT ROWID",
+            "CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT) -- it's\nWITHOUT ROWID",
+        ]
+        for sql in cases:
+            with self.subTest(sql=sql), closing(sqlite3.connect(":memory:")) as mem:
+                mem.execute(sql)
+                stored = mem.execute("SELECT sql FROM sqlite_master WHERE name = 'kv'").fetchone()[0]
+                real = bool(mem.execute("SELECT wr FROM pragma_table_list WHERE name = 'kv'").fetchone()[0])
+                self.assertEqual(L._without_rowid(NoTableList(mem), "kv", stored), real)
+
+    # ── round 6 review ──
+
+    def test_a_store_path_with_uri_characters_is_read_read_only(self):
+        """N1: `file:{path}?mode=ro` cut the path at `?` or `#`, lost `mode=ro`, read nothing
+        and created an empty file; `%XX` was decoded into another path."""
+        for name in ("ho?me", "ho#me", "ho%41me", "ho me", "ho%2Fme"):
+            with self.subTest(name=name):
+                home = self.base / name / ".hermes"
+                os.environ["HERMES_HOME"] = str(home)
+                db = home / "state.db"
+                _sqlite(db, "messages", SECRET)
+                L.STATE.unlink(missing_ok=True)
+                before = {p for p in self.base.rglob("*")}
+                doc = self.scan()
+                created = {p for p in self.base.rglob("*")} - before - {L.STATE, L.OUT}
+                self.assertEqual(created, set(), "the scan creates nothing beside what it reads")
+                self.assertIn(f"{db}#messages.content", self.wheres(doc))
+                self.assertEqual(self.holes(doc), [])
+
+    def test_no_sqlite_uri_is_built_from_a_raw_path(self):
+        """N1, everywhere: the same `f"file:{path}?mode=…"` read Observatory's own store. An AST
+        scan (polish F2): every `connect(…, uri=True)` in the engine takes a URI built by
+        `sqlite_uri`, `readonly_uri` or `<path>.as_uri() + …`, or a name bound only to those."""
+        engine = Path(L.__file__).resolve().parents[1]
+        offenders = []
+        for py in sorted(engine.rglob("*.py")):
+            if "tests" in py.relative_to(engine).parts:
+                continue
+            offenders += [f"{py.relative_to(engine)}:{n}" for n in _raw_sqlite_uris(py.read_text(encoding="utf-8"))]
+        self.assertEqual(offenders, [])
+
+    def test_the_uri_scan_catches_every_way_of_building_a_raw_uri(self):
+        """Polish F2: the line regex caught 2 of 12 forms; each of these must be named."""
+        bad = [
+            'sqlite3.connect(f"file:{db}?mode=ro", uri=True)',
+            'u = f"file:{db}?mode=ro"\nsqlite3.connect(u, uri=True)',
+            'sqlite3.connect(\n    f"file:{db}?mode=ro",\n    uri=True)',
+            'sqlite3.connect("file:%s?mode=ro" % db, uri=True)',
+            'sqlite3.connect("file:" + str(db) + "?mode=ro", uri=True)',
+            'sqlite3.connect("file:{}?mode=ro".format(db), uri=True)',
+            'sqlite3.connect(rf"file:{db}?mode=ro", uri=True)',
+            'sqlite3.connect(F"file:{db}?mode=ro", uri=True)',
+            'sqlite3.connect(f"""file:{db}?mode=ro""", uri=True)',
+            'sqlite3.connect(f"file://{db}?mode=ro", uri=True)',
+            'sqlite3.connect(database=f"file:{db}?mode=ro", uri=True)',
+            '_sq.connect(f"file:{db}?mode=ro", uri=True)',
+            'u = paths.sqlite_uri(db)\nif x:\n    u = f"file:{db}"\nsqlite3.connect(u, uri=True)',
+        ]
+        good = [
+            "sqlite3.connect(paths.sqlite_uri(db), uri=True)",
+            'sqlite3.connect(sqlite_uri(db, "rw"), uri=True, timeout=60)',
+            "u = paths.sqlite_uri(db)\nsqlite3.connect(u, uri=True)",
+            "u = readonly_uri(db)\nsqlite3.connect(u, uri=True, timeout=30)",
+            'sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)',
+            'sqlite3.connect(db.as_uri() + "?mode=ro" + ("&immutable=1" if x else ""), uri=True)',
+            "sqlite3.connect(db)",
+            "real_connect(target, *a, **k)",
+        ]
+
+        def wrapped(snippet):
+            return "def f(db, x, paths, sqlite3, _sq, sqlite_uri, readonly_uri, real_connect, target, a, k):\n" + \
+                "".join("    " + line + "\n" for line in snippet.splitlines())
+        for snippet in bad:
+            with self.subTest(bad=snippet):
+                self.assertTrue(_raw_sqlite_uris(wrapped(snippet)), snippet)
+        for snippet in good:
+            with self.subTest(good=snippet):
+                self.assertEqual(_raw_sqlite_uris(wrapped(snippet)), [], snippet)
+
+    def test_sqlite_uri_never_touches_the_filesystem(self):
+        """Polish F3: `Path.resolve()` raises RuntimeError on a symlink loop on Python 3.11
+        and 3.12; the callers catch only sqlite3.Error, so a loop became a traceback."""
+        with patch.object(Path, "resolve", side_effect=RuntimeError("Symlink loop")):
+            uri = paths.sqlite_uri(self.base / "loop" / "state.db")
+        self.assertTrue(uri.startswith("file:///") and uri.endswith("?mode=ro"), uri)
+
+    def test_a_symlink_loop_store_is_unreadable_not_a_traceback(self):
+        """Polish F3, end to end: the store under a loop is a sqlite3 failure for its caller."""
+        loop = self.base / "loop"
+        loop.symlink_to(loop)
+        spec = importlib.util.spec_from_file_location("disk_usage_probe", ROOT / "plugins" / "disk_usage.py")
+        disk_usage = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(disk_usage)
+        with patch.object(paths, "DB", loop / "observatory.db"), \
+                patch.object(Path, "resolve", side_effect=RuntimeError("Symlink loop")):
+            self.assertEqual(disk_usage.last_measured(), {})
+        with self.assertRaises(sqlite3.Error):
+            sqlite3.connect(paths.sqlite_uri(loop), uri=True).execute("SELECT 1")
+
+    def test_dot_dot_after_a_symlink_names_the_file_a_plain_open_names(self):
+        """Round 8: `os.path.abspath` collapsed `C/lnk/../store.db` to `C/store.db` on paper,
+        while the operating system — and the plain-path writer — follow `lnk` first and reach
+        `A/B/store.db`. Reader and writer must name one file."""
+        inner = self.base / "A" / "B" / "inner"
+        inner.mkdir(parents=True)
+        (self.base / "C").mkdir()
+        (self.base / "C" / "lnk").symlink_to(inner, target_is_directory=True)
+        _sqlite(self.base / "A" / "B" / "store.db", "t", "the writer's file")
+        _sqlite(self.base / "C" / "store.db", "t", "a different file")
+        dotted = self.base / "C" / "lnk" / ".." / "store.db"
+        with closing(sqlite3.connect(dotted)) as plain:
+            expected = plain.execute("SELECT content FROM t").fetchone()[0]
+        with closing(sqlite3.connect(paths.sqlite_uri(dotted), uri=True)) as reader:
+            self.assertEqual(reader.execute("SELECT content FROM t").fetchone()[0], expected)
+        self.assertEqual(expected, "the writer's file")
+
+    def test_the_uri_encodes_question_mark_hash_and_percent(self):
+        uri = paths.sqlite_uri(Path("/s/a?b#c%d e/x.db"))
+        self.assertIn("a%3Fb%23c%25d%20e", uri)
+        self.assertTrue(uri.endswith("/x.db?mode=ro"), uri)
+
+    def test_a_trailing_slash_is_dropped_as_pathlib_drops_it(self):
+        """Polish F4: the URI names the normalised path; `state.db/` and `state.db` are one
+        file, as `Path("state.db/")` already is. Intended, and documented in ONBOARDING."""
+        self.assertEqual(paths.sqlite_uri(str(self.base / "state.db") + "/"), paths.sqlite_uri(self.base / "state.db"))
+
+    def test_sqlite_uri_keeps_the_path_whole_and_read_only(self):
+        uri = paths.sqlite_uri(Path("/tmp/ho?me#x/%41 b/state.db"))
+        self.assertTrue(uri.startswith("file:///"), uri)
+        self.assertTrue(uri.endswith("?mode=ro"), uri)
+        self.assertEqual(uri.count("?"), 1)
+        self.assertNotIn("#", uri)
+        self.assertIn("%2541", uri)
+
+    def _shadowed(self, rows: int, at_max: int | None) -> Path:
+        """A table with its own column named `rowid` (so the real one is `_rowid_`)."""
+        db = self.user / ".local" / "share" / "opencode" / "opencode.db"
+        db.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(db)) as conn:
+            if at_max is None:
+                conn.execute("CREATE TABLE part(rowid TEXT, data TEXT)")
+                conn.executemany("INSERT INTO part(rowid, data) VALUES (?, 'clean')",
+                                 [(f"r{i}",) for i in range(rows)])
+            else:
+                conn.execute("CREATE TABLE part(rowid TEXT, time_updated INTEGER, data TEXT)")
+                conn.executemany("INSERT INTO part(rowid, time_updated, data) VALUES (?, ?, 'clean')",
+                                 [(f"r{i}", at_max) for i in range(rows)])
+            conn.commit()
+        return db
+
+    def test_a_shadowed_rowid_newest_row_rewritten_is_read(self):
+        """L1: `_row_digest` must key on the real rowid; the declared `rowid` holds text."""
+        db = self._shadowed(4, at_max=None)
+        self.assertEqual(self.scan()["hits"], [])
+        with closing(sqlite3.connect(db)) as conn:
+            conn.execute("UPDATE part SET data = ? WHERE _rowid_ = (SELECT max(_rowid_) FROM part)", (SECRET,))
+            conn.commit()
+        self.assertIn(f"{db}#part.data", self.wheres(self.scan(full=False)))
+
+    def test_a_shadowed_rowid_at_max_set_is_read_once_and_edits_are_seen(self):
+        """L1: the at-max rows, `_set_digest` and `at_old_max` must key on the real rowid —
+        per-row digests (5 rows) and one set digest (100 rows)."""
+        for size in (5, 100):
+            with self.subTest(size=size):
+                db = self.user / ".local" / "share" / "opencode" / "opencode.db"
+                db.unlink(missing_ok=True)
+                L.STATE.unlink(missing_ok=True)
+                db = self._shadowed(size, at_max=7)
+                self.assertEqual(self.scan()["hits"], [])
+                idle = self.scan(full=False)
+                self.assertEqual(idle["hits"], [])
+                self.assertEqual(self.stores_read(idle)["~/.local/share/opencode/opencode.db"]["rows_read"], 0,
+                                 "an unchanged at-max set is not read again")
+                with closing(sqlite3.connect(db)) as conn:
+                    conn.execute("UPDATE part SET data = ? WHERE rowid = 'r2'", (SECRET,))
+                    conn.commit()
+                self.assertIn(f"{db}#part.data", self.wheres(self.scan(full=False)), "an edit at the max is read")
+                self.assertEqual(self.scan(full=False)["hits"], [], "and reported once")
+
+    def test_a_text_mark_from_an_old_state_file_is_read_from_the_start(self):
+        """L2: `int("…")` raised ValueError and blinded the store until the weekly pass."""
+        db = self.user / ".hermes" / "state.db"
+        _sqlite(db, "messages", SECRET)
+        self.scan()
+        state = json.loads(L.STATE.read_text())
+        state["sqlite"]["stores"][str(db)]["messages"] = "not-a-rowid"
+        L.STATE.write_text(json.dumps(state))
+        doc = self.scan(full=False)
+        self.assertIn(f"{db}#messages.content", self.wheres(doc))
+        self.assertEqual(self.holes(doc), [])
+
+    def test_the_table_names_the_four_agents(self):
+        rows = paths.transcript_homes(sessions=self.base / "claude")
+        self.assertEqual(list(dict.fromkeys(r["agent"] for r in rows)), ["claude", "codex", "hermes", "opencode"])
+        self.assertTrue(all(r["evidence"] for r in rows), "each location carries its source")
 
 
 def _doc(codes, hit, known=3):

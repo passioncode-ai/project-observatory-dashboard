@@ -182,7 +182,7 @@ def main(argv: list[str]) -> int:
         # READ-ONLY on purpose. `store_db.connect()` opens read-write and, since
         # migrations were added, applies them — so a gate step would have been a
         # writer into the very store it is auditing.
-        conn = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
         conn.row_factory = sqlite3.Row
         code, lines = audit(rows(conn))
         conn.close()

@@ -55,7 +55,7 @@ def existing(store: pathlib.Path) -> list[pathlib.Path]:
 
 def take(db: pathlib.Path, stamp: str) -> pathlib.Path:
     dest = db.parent / f"{PREFIX}{stamp}"
-    src = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    src = sqlite3.connect(paths.sqlite_uri(db), uri=True)
     try:
         out = sqlite3.connect(dest)
         try:

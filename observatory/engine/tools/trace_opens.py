@@ -48,6 +48,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import urllib.parse
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -166,10 +167,13 @@ def install() -> None:
         # `file:…?mode=ro` is a URI, not a path: recording it verbatim produced
         # a "write" of a filename containing a query string. The mode is IN the
         # string, and a read-only connection is a read.
+        # Read as SQLite reads it (I-5, round 6): `file:///abs/path%20x?mode=ro`, from
+        # `paths.sqlite_uri`, as well as the older `file:/abs/path?mode=ro`; the path is
+        # percent-decoded and ends at `?` or `#`.
         s = str(target)
         if s.startswith("file:"):
-            path, _, query = s[len("file:"):].partition("?")
-            _record("r" if "mode=ro" in query else "w", path)
+            parts = urllib.parse.urlsplit(s)
+            _record("r" if "mode=ro" in parts.query else "w", urllib.parse.unquote(parts.path))
         else:
             _record("w", target)
         return real_connect(target, *a, **k)

@@ -372,6 +372,124 @@ Rotation changes the local slot; provider revocation is a separate action.
 
 Vault slot discovery reports unreadable ancestors and excludes symbolic links or special files as unmeasured. Session directory links are likewise unmeasured and are never followed.
 
+The leak scan reads the transcripts of every agent CLI it knows, each from the tool's own
+location (`paths.transcript_homes`):
+
+| Agent | What is read |
+|---|---|
+| Claude Code | the configured `sessions` source; `history.jsonl` in `$CLAUDE_CONFIG_DIR` (default `~/.claude`) |
+| Codex | in `$CODEX_HOME` (default `~/.codex`): `sessions/` and `archived_sessions/`, including compressed `rollout-*.jsonl.zst` files, and `history.jsonl`; in `$CODEX_SQLITE_HOME` (default `$CODEX_HOME`): `state_*`, `logs_*`, `thread_history_*`, `memories*`, `queue_*`, `goals_*` and `agent_message_board_*` `.sqlite` |
+| Hermes | `$HERMES_HOME` (default `~/.hermes` followed by `$HERMES_DATA_DIR_SUFFIX`) and each `profiles/<name>/`: its `state.db` database and `sessions/*.json|*.jsonl` |
+| opencode | `$XDG_DATA_HOME/opencode` (default `~/.local/share/opencode`): its `opencode*.db` databases (or `$OPENCODE_DB`) and the legacy `storage/**/*.json` tree |
+
+These variables are read from the scan's own environment. On the tick that is the scheduler's
+environment (the launchd job or systemd unit), not your shell profile: a `CODEX_HOME` exported
+in `~/.zshrc` does not reach the tick, which then reads `~/.codex`. A `HERMES_HOME` outside
+`~/.hermes` replaces it, as it does for Hermes itself: `~/.hermes` is then not read.
+
+Every read-only or `file:`-URI open of a SQLite store goes through a percent-encoded URI. That
+covers the leak scan's stores and Observatory's own store: `paths.sqlite_uri`, or `as_uri()` in
+the few modules that build their own. So a folder name holding `?`, `#`, `%` or a space is read
+as the path it is, read-only, and no empty file is created where the path used to be cut. (Opening
+a WAL store read-only may still create its `-shm` and `-wal` beside it; see below.)
+
+Observatory's own writer (`store/db.py`) opens its store by plain path, not a URI. A plain path
+is not parsed, so it cannot be cut.
+
+The URI spells the absolute path as given and never looks it up. `..` is kept, so
+`C/link/../store.db` names the file the operating system and the writer reach through `link`.
+Only a trailing slash (`state.db/` opens `state.db`) and `.` parts are dropped, as `pathlib`
+drops them. A path under a symlink loop fails inside SQLite, as an error the caller already
+handles, on every supported Python.
+
+A home that is absent is not a degradation. A home that exists and cannot be read, a profile
+that is a symbolic link or not a folder, a database that will not open, and a compressed
+rollout this Python cannot decode (zstd needs Python 3.14) are named in `not_scanned` with
+the reason. `coverage.transcript_homes` in `store/raw/leak-scan.json` lists each home as
+`absent`, `scanned`, `partial` (the step's deadline left a file or a database under it unread)
+or `unreadable`; `coverage.transcript_stores` lists each database with the rows it read.
+
+A `.jsonl` is read from its last offset; any other file is read whole again when its size or
+modification time changes.
+
+A database is read from the highest rowid each table reached last time. The rows below that mark
+are read again whole in three cases:
+
+- the file was replaced;
+- the row count or the sum of the rowids changed in a way the new rows do not explain, for
+  example rows deleted, or a row inserted under the mark with a new rowid;
+- the newest row was rewritten or its rowid reused.
+
+A table with an update column is also read by that column. The finest-grained column wins, in
+this order: `updated_at_ms`, `time_updated`, `updated_at`, `last_activity_at`,
+`source_updated_at`. Rows above the last maximum are read again. A row at that maximum is read
+again only when its digest is not the one recorded for it, so an edit within the same second
+is seen and the newest row is not reported every tick. Up to 64 such rows keep a digest each.
+Above that, one digest covers the whole set, and the set is read again only when that digest
+changes, so a bulk update is reported once.
+
+A table that cannot be read is a hole, never a clean table. Examples are a damaged page, a
+missing module, and a table name that is not UTF-8. The store is named in `not_scanned` as read
+only in part, with each table and the error's type, never SQLite's message, which can quote a
+cell. Its other tables are still read and its marks do not move. Every SQLite store error is
+reported by its type only, whether the store would not open, its schema is malformed, or a
+table failed.
+
+Some cases are handled without making the table a hole:
+
+- **A column whose name is not UTF-8** cannot be put in a statement. It is named the same way,
+  and the rest of its table is read.
+- **VIRTUAL generated columns** are not read. They are computed from the columns that are, and
+  evaluating one can fail. **STORED generated columns** are read, because their values are on
+  disk.
+- **A column named `rowid`** (or `_rowid_`, or `oid`) does not stand in for the real rowid: rows
+  are paged on whichever of the three names the table's own columns leave free. A table that
+  takes all three is read whole on every pass, so a value in one is reported every pass.
+- **Text that is not UTF-8** is read as its bytes.
+- **A store that fails in any other way** is named as having stopped while reading, with the
+  error's type. The sightings counted before it stopped still stand, and the rest of the scan
+  goes on.
+
+Because the marks of a store read only in part never move, a table that can never be read keeps
+every pass over that store a re-read from its old marks: complete, if it never had any.
+
+**Seen only by the weekly complete pass, not sooner:**
+
+- A row replaced under its own rowid below the newest row, in a table with no update column.
+  This covers a delete and re-insert of the same id, and `INSERT OR REPLACE`.
+- An edit that does not move the update column. Codex renames a thread with
+  `UPDATE threads SET title = ?` and bumps nothing.
+- An edit below a maximum that is already in the future.
+- An update column holding values of mixed types; its maximum is compared within one type.
+- A change of rowids under the mark whose count, rowid sum and sum of squares all collide. Two
+  independent sums make this impractical, not impossible.
+- Codex `thread_items`, which is upserted in place
+  (`ON CONFLICT … DO UPDATE SET item_json …`) and whose `updated_at_ordinal` counts per thread,
+  so for this scan it is effectively weekly. The rollout `.jsonl` files carry the same content
+  and are read incrementally.
+
+Reading a database is read-only, though not free of side effects. SQLite opens a WAL
+database's `-shm` file, and may create `-wal` and `-shm` beside it. Rows are read 500 per
+statement. The signature's aggregates, however (the count, the two rowid sums and the update
+maximum), each scan the whole table in one statement. On a rollback-journal database a writer
+can therefore wait for one such scan. Codex, opencode and Hermes run their stores in WAL mode by
+default, and there a reader does not block a writer.
+
+Not covered:
+
+- Codex's `sqlite_home` setting in `config.toml`; only `CODEX_SQLITE_HOME` is read.
+- Codex development databases under `~/.codex/sqlite/*.db`, which the installed binary does not
+  name.
+- The transcripts of other CLIs: Cursor, Gemini CLI, Kiro.
+- Rows with a rowid of 0 or below: every read starts above rowid 0.
+- Text stored in a column without text affinity (an `INTEGER` or `REAL` column holding text);
+  only columns with TEXT or BLOB affinity are read.
+- A `WITHOUT ROWID` table, or one whose own columns take all three of `rowid`, `_rowid_` and
+  `oid`, is read whole on every pass, so a value in one is reported every pass.
+- An FTS5 table whose name does not end in `_fts` is read as well as its `<name>_content`
+  shadow table, so its text is counted twice. Only names matching `*_fts` are skipped as
+  mirrors.
+
 Leak discovery reports unreadable sessions, log directories, dashboard metadata and
 tracked-tree listings as `source-unreadable`, preserving sightings from readable
 siblings. Permission/stat/timeout errors never become an empty healthy source.

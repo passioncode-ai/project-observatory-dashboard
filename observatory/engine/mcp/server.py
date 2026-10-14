@@ -936,7 +936,7 @@ def observatory_findings(
     # metadata belongs.
     degraded, checked_at = [], None
     try:
-        c = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+        c = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
         row = c.execute("SELECT finished_at FROM scans WHERE finished_at IS NOT NULL"
                         " ORDER BY finished_at DESC LIMIT 1").fetchone()
         c.close()

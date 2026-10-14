@@ -296,7 +296,7 @@ def _from_ledger() -> tuple[list[dict], list[dict]]:
         # measured empty, not a failure to read one.
         return [], []
     try:
-        conn = sqlite3.connect(f"file:{paths.DB}?mode=ro", uri=True)
+        conn = sqlite3.connect(paths.sqlite_uri(paths.DB), uri=True)
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT l.session_id AS sid, l.project_id AS pid, min(l.created_at) AS started,"
@@ -351,7 +351,7 @@ def _scan_companion() -> dict:
                               "reason": f"{STORE} does not exist, so no session is known; "
                                         f"activity falls back to commits alone"}]}
     try:
-        conn = sqlite3.connect(f"file:{STORE}?mode=ro", uri=True)
+        conn = sqlite3.connect(paths.sqlite_uri(STORE), uri=True)
         conn.row_factory = sqlite3.Row
     except sqlite3.Error as exc:
         return {"scanned_on": now()[:10], "source": str(STORE), "sessions": [],

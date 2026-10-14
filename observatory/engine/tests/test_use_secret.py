@@ -395,6 +395,21 @@ def test_where_reports_the_source_it_would_take() -> None:
     check("and prints no value", PLANTED not in p.stdout, "IT LEAKED")
 
 
+#: Every variable that moves an agent's transcript home away from HOME (paths.transcript_homes).
+TRANSCRIPT_OVERRIDES = ("CODEX_HOME", "CODEX_SQLITE_HOME", "HERMES_HOME", "HERMES_DATA_DIR_SUFFIX",
+                        "XDG_DATA_HOME", "OPENCODE_DB", "CLAUDE_CONFIG_DIR")
+
+
+def transcripts_isolated(env: dict, d: pathlib.Path) -> dict:
+    """The leak scan reads every agent's transcript home under HOME (I-5): HOME is a synthetic,
+    empty folder here and no override survives, so a test never reads the machine's own transcripts.
+    The estate's workspace, state and scratch stay where `estate()` put them (OBSERVATORY_*)."""
+    user = d / "user"
+    user.mkdir(exist_ok=True)
+    out = {k: v for k, v in env.items() if k not in TRANSCRIPT_OVERRIDES}
+    return {**out, "HOME": str(user), "USERPROFILE": str(user)}
+
+
 # ── the leak hunt ──────────────────────────────────────────────────────────
 
 def test_the_leak_scan_finds_a_planted_value() -> None:
@@ -406,7 +421,7 @@ def test_the_leak_scan_finds_a_planted_value() -> None:
         + PLANTED + ' returned by the provider"}\n', encoding="utf-8")
     env2 = {**env, "OBSERVATORY_SESSIONS": str(d / "sessions")}
     p = subprocess.run([sys.executable, str(ROOT / "tools/scan_leaks.py"), "--full"],
-                       env=env2, capture_output=True, text=True, timeout=300,
+                       env=transcripts_isolated(env2, d), capture_output=True, text=True, timeout=300,
                        cwd=str(ROOT))
     out = json.loads(((d / "scratch") / "leak-scan.json").read_text(encoding="utf-8"))
     hits = [h for h in out["hits"] if "abc.jsonl" in h["where"]]
@@ -434,7 +449,7 @@ def test_the_observatory_store_is_in_the_leak_scan() -> None:
     conn.commit()
     conn.close()
     env2 = {**env, "OBSERVATORY_DB": str(db)}
-    subprocess.run([sys.executable, str(ROOT / "tools/scan_leaks.py"), "--full"], env=env2,
+    subprocess.run([sys.executable, str(ROOT / "tools/scan_leaks.py"), "--full"], env=transcripts_isolated(env2, d),
                    capture_output=True, text=True, timeout=300, cwd=str(ROOT))
     out = json.loads(((d / "scratch") / "leak-scan.json").read_text(encoding="utf-8"))
     hits = [h for h in out["hits"] if str(db) in h["where"]]
@@ -461,7 +476,7 @@ def test_the_companion_store_is_read_as_a_database_not_named_as_unread() -> None
     c.commit(); c.close()
     env2 = {**env, "OBSERVATORY_SESSIONS": str(d / "nosessions"), "CLAUDE_MEM_DB": str(mem)}
     p = subprocess.run([sys.executable, str(ROOT / "tools/scan_leaks.py"), "--full"],
-                       env=env2, capture_output=True, text=True, timeout=300, cwd=str(ROOT))
+                       env=transcripts_isolated(env2, d), capture_output=True, text=True, timeout=300, cwd=str(ROOT))
     out = json.loads(((d / "scratch") / "leak-scan.json").read_text(encoding="utf-8"))
     hits = [h for h in out["hits"] if "claude-mem.db" in h["where"]]
     check("the planted value is found inside the SQLite store",
@@ -475,7 +490,7 @@ def test_the_companion_store_is_read_as_a_database_not_named_as_unread() -> None
     broken = d / "broken.db"
     broken.write_text("not a database", encoding="utf-8")
     subprocess.run([sys.executable, str(ROOT / "tools/scan_leaks.py"), "--full"],
-                   env={**env2, "CLAUDE_MEM_DB": str(broken)}, capture_output=True, text=True, timeout=300, cwd=str(ROOT))
+                   env=transcripts_isolated({**env2, "CLAUDE_MEM_DB": str(broken)}, d), capture_output=True, text=True, timeout=300, cwd=str(ROOT))
     out2 = json.loads(((d / "scratch") / "leak-scan.json").read_text(encoding="utf-8"))
     check("a store that will not open is named among what was not scanned, with the reason",
           any("broken.db" in n.get("what", "") and "would not open" in n.get("why", "") for n in out2.get("not_scanned", [])),
@@ -487,7 +502,7 @@ def test_the_file_a_value_lives_in_is_not_a_sighting() -> None:
     d, env = estate()
     env2 = {**env, "OBSERVATORY_SESSIONS": str(d / "nosessions")}
     subprocess.run([sys.executable, str(ROOT / "tools/scan_leaks.py"), "--full"],
-                   env=env2, capture_output=True, text=True, timeout=300, cwd=str(ROOT))
+                   env=transcripts_isolated(env2, d), capture_output=True, text=True, timeout=300, cwd=str(ROOT))
     out = json.loads(((d / "scratch") / "leak-scan.json").read_text(encoding="utf-8"))
     homes = [h for h in out["hits"] if h["where"].endswith("demo/.env")]
     check("a value in its own file raises nothing", not homes, str(homes))
@@ -502,7 +517,7 @@ def test_an_undistinctive_value_is_named_rather_than_hunted() -> None:
     d, env = estate(with_value="examplesessions")
     env2 = {**env, "OBSERVATORY_SESSIONS": str(d / "nosessions")}
     subprocess.run([sys.executable, str(ROOT / "tools/scan_leaks.py"), "--full"],
-                   env=env2, capture_output=True, text=True, timeout=300, cwd=str(ROOT))
+                   env=transcripts_isolated(env2, d), capture_output=True, text=True, timeout=300, cwd=str(ROOT))
     out = json.loads(((d / "scratch") / "leak-scan.json").read_text(encoding="utf-8"))
     skipped = [s for s in out.get("skipped", []) if "DEMO_API_KEY" in s["what"]]
     check("it is not searched for", not any(
