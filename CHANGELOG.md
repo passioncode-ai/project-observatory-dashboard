@@ -3,6 +3,25 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Added
+
+- **Each project's spend, this month and over the last 30 days** (J-11, OBS-93). The spend scan now reads every
+  key in the OpenRouter door's ledger by its hash, one request per key. Beside the estate's month it writes
+  `projects` and `unattributed` into `store/raw/spend.json` (`schema_version` 2; the existing fields are
+  unchanged). `tools/spend.py project [PROJECT] [--json]` answers from that file without asking the provider
+  (`monthUsd`, `last30Usd`, `keys`, `partial`, `unread`, `fresh`). It is the figure Fabric's launcher reads as a
+  project's recent spend (contract DEC-0037).
+  - A key belongs to the project named in its ledger row's `project` field, normalised to that project's vault
+    folder.
+  - `unattributed` is its own total, never guessed into a project. It holds keys whose ledger row names no project,
+    and an account's spend on hashes no ledger row holds.
+  - A window that was not read whole is `null`, never a lower figure, and the key is named in `unread`. This covers:
+    a key the provider would not answer for, a pending row with no hash, and a key rotated inside the window,
+    because the ledger keeps only the successor's hash (OBS-103).
+  - No finding fires yet. A project's limit is enforced once a recorded spend policy is readable (J-11F).
+
 ## 0.24.5 — 2026-10-14
 
 The leak scan reads every agent's transcripts (Codex, Hermes and opencode beside Claude Code) and a scan its
