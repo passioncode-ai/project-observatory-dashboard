@@ -93,6 +93,19 @@ scan of this month no older than 36 hours, the estate total is what the provider
 still open; without one, it is the meter's own ledger. `full grant --status` names which (`estateCountedFrom`).
 The finding `spend.estate_month` is a warning at the alert ratio (80 %) and critical at the limit (OBS-56).
 
+**Each project's spend** (J-11, OBS-93; `schema_version` 2 of the same file). The scan also reads every key of
+the door's ledger by its hash (`openrouter.read_activity`, one request per key) and sums it under the ledger row's
+`project`, normalised to the project's vault folder (`vault_project.resolve`), in two windows: the current UTC
+month and the last 30 completed UTC days (`projects.<folder>.month_usd`, `last30_usd`, `keys`). A key whose row
+names no project, and each account's spend on hashes no ledger row holds (its figure minus its ledger keys'), are
+`unattributed`; nothing is attributed from a name. A window not read whole is `null`, never a lower figure, with
+the key named in `unread`: a key the provider would not answer for, a pending row without a hash, and a key
+rotated inside the window, because `rotate` keeps only the successor's hash and the predecessor's spend falls to
+the unattributed residual. `tools/spend.py project [PROJECT] --json` answers from the file without asking the
+provider (`monthUsd`, `last30Usd`, `partial`, `unread`, `fresh` by the same 36-hour rule): it is the figure the
+contract's launcher reads as a project's recent spend (DEC-0037). A per-project limit is not enforced yet: the
+finding waits on a readable recorded spend policy.
+
 A reservation counts its amount until `expiresAt` (default one hour later); a settled receipt counts what was
 spent instead (`full grant --settle RECEIPT --usd USD`); an unsettled one lapses. `remainingUsd` is the smallest
 remainder over the grant's windows, `null` for an unlimited grant. `full grant --status` reports the month

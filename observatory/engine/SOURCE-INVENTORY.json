@@ -427,8 +427,8 @@
       "path": "collectors/scan_spend.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4c09abd78f0a2e3354160b03be1268e1abdc4135cff29ef083d8ddc7e3db115d",
-      "bytes": 3943
+      "export_sha256": "9633eed5d498ec0511638ba6ff1ed4956c6a6085afdcd879bc642da01811c788",
+      "bytes": 14883
     },
     {
       "path": "collectors/scan_vault.py",
@@ -835,8 +835,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "973e546bbcfd614b4c547c15082007fce3c3e5330269841f6d2d9fc3415e15fb",
-      "bytes": 77336,
+      "export_sha256": "48297b310e19199c0a73439a58fcf3e817805845627cfe0d53b12934afabc2bf",
+      "bytes": 79031,
       "upstream_modified": true
     },
     {
@@ -1390,8 +1390,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "4c2650c47187c961f9347442395a887673fbcd221d7d58501ef2357436f5120e",
-      "bytes": 84594,
+      "export_sha256": "3b30f1ddea3ae3314d2af3aa7a7d2f187bf02d9063b797f7318a58b8574f24c8",
+      "bytes": 84704,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -3642,8 +3642,8 @@
       "path": "tests/test_spend.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "68b41cd7b7d7a16097936ca5155c50a7e975f3b275eec3af697b07cbf19d73ec",
-      "bytes": 5165
+      "export_sha256": "248ba66281e6f139ac50cfa8293c4da8e35ae086af0d5780c7f75344564be3bc",
+      "bytes": 18411
     },
     {
       "path": "tests/test_stale_collapse.py",
@@ -4637,6 +4637,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/spend.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "fb3ab6a2a034ebfd5450dc0d2c815123164667d3fc742deed0f9a55c0c31a573",
+      "bytes": 8683
+    },
+    {
       "path": "tools/sqlite_scan.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -4794,7 +4801,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 621,
+  "file_count": 622,
   "excluded": [
     "git-history",
     "operator-registries",
