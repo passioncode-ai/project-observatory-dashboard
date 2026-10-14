@@ -3723,8 +3723,8 @@
       "path": "tests/test_scan_agents.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fa3b927dd00240903a1e16dccc293b3a36a5f901e7e57e1a7c7c3130ce00cd0b",
-      "bytes": 24101
+      "export_sha256": "56200d4644a747aa29cfaaa3035349291aa2901c38467220d3e755eacc4ffb65",
+      "bytes": 24217
     },
     {
       "path": "tests/test_scan_ids.py",

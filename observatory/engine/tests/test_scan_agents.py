@@ -91,7 +91,8 @@ class Fixture(unittest.TestCase):
         self.services = self.base / "services"
         self.services.mkdir()
         env = {k: v for k, v in os.environ.items() if not k.startswith(("OBSERVATORY_", "FABRIC_"))}
-        env.update(HOME=str(self.home), FABRIC_SERVICES_DIR=str(self.services))
+        # USERPROFILE too: Windows resolves `~` and Path.home() from it, not from HOME.
+        env.update(HOME=str(self.home), USERPROFILE=str(self.home), FABRIC_SERVICES_DIR=str(self.services))
         self.env = patch.dict(os.environ, env, clear=True)
         self.env.start()
         (self.home / "Library/LaunchAgents").mkdir(parents=True)
