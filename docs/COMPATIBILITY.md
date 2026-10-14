@@ -212,3 +212,14 @@ used to be followed by SQLite's message, which is no longer copied anywhere.
 On a busy machine the first tick or two may stop at the step's deadline and raise
 `secret.leak_scan_partial` until the marks catch up. Nothing is removed; older readers ignore
 the new keys.
+
+## Registry: agents (OBS-83)
+
+New file `registry/agents.json` (schema_version 1, `observatory/engine/schemas/agents.schema.json`),
+written by the emit from `store/raw/agents.json` (new, collector `collectors/scan_agents.py`, tick step
+`scan-agents`, run with `features.machine_watch`) and `store/raw/mcp.json`, and validated by
+`validate`. It declares a new source, `SRC-0020`. Rows are `agent:<service-id>.<instance>`, one per
+fabric-service/0.1 descriptor, and carry no `auth` field and no absolute home path. The wiki projection
+mirrors it as it mirrors every registry document. A workspace upgraded from an earlier release gets the
+file on its first tick with the feature on. Until then it is absent, and no reader requires it.
+

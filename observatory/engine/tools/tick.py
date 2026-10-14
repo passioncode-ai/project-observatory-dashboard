@@ -479,6 +479,7 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
 
     step("scan-cloudflare", PY, "collectors/scan_cloudflare.py", SCRATCH / "cloudflare_zones.json")
     step("scan-mcp", PY, "collectors/scan_mcp.py", SCRATCH / "mcp.json", "--declarations-only")
+    step("scan-agents", PY, "collectors/scan_agents.py", SCRATCH / "agents.json")
     # THE HARNESS: what every agent session loads, what it costs, which skills match a security rule
     # (docs/design/HARNESS.md). Files only; nothing runs.
     step("scan-harness", PY, "collectors/scan_harness.py", SCRATCH / "harness.json")
