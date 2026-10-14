@@ -3,6 +3,15 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Documentation
+
+- **The README's capability table names records and lessons** (N-4, USR-009). A new row, "Can agents keep what
+  they learned?", names `observatory_record`, `observatory_learn`, `observatory_lesson`, `observatory_search` and
+  `observatory_recall`, says every write is a proposal, and links [Install](README.md#install) and the
+  [MCP section](README.md#mcp).
+
 ## 0.24.5 — 2026-10-14
 
 The leak scan reads every agent's transcripts (Codex, Hermes and opencode beside Claude Code) and a scan its
