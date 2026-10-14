@@ -332,7 +332,9 @@ def parse(text: str) -> tuple[list[tuple[str, str]], int]:
     """
     out: list[tuple[str, str]] = []
     unparsed = 0
-    lines = text.splitlines()
+    # A byte-order mark is not part of the first name (review round 7: the first
+    # variable of a `.env` saved with one was never inventoried).
+    lines = (text[1:] if text.startswith("﻿") else text).splitlines()
     i = 0
     while i < len(lines):
         line = lines[i]

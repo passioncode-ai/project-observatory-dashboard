@@ -215,6 +215,15 @@ def test_a_known_prefix_or_a_secret_name_wins_over_word_shape():
           set(credential_shape.PREFIXES) <= set(scan_env.KNOWN_PREFIX) and "secret_" in credential_shape.PREFIXES)
 
 
+def test_the_first_line_after_a_bom_is_inventoried():
+    """A `.env` saved with a byte-order mark lost its first variable (review round 7)."""
+    import scan_env
+    pairs, unparsed = scan_env.parse("﻿FIRST_TOKEN=abc\nSECOND=2\n")
+    check("the first variable after a BOM is read", [n for n, _ in pairs] == ["FIRST_TOKEN", "SECOND"],
+          str([n for n, _ in pairs]))
+    check("and nothing is counted unparsed", unparsed == 0, str(unparsed))
+
+
 def test_a_comment_is_not_a_value_end_to_end():
     """The defect was in the PARSER, so the assertion has to run the pair.
 
@@ -591,6 +600,7 @@ if __name__ == "__main__":
                test_a_prefixed_token_is_a_secret_and_a_uuid_is_decided_by_its_name,
                test_a_public_identifier_with_a_prefix_stays_configuration,
                test_a_known_prefix_or_a_secret_name_wins_over_word_shape,
+               test_the_first_line_after_a_bom_is_inventoried,
                test_a_comment_is_not_a_value_end_to_end,
                test_the_parser_keeps_a_value_whole,
                test_only_a_secret_is_fingerprinted,

@@ -281,8 +281,8 @@
     {
       "path": "collectors/scan_env.py",
       "source_sha256": "dc68044a2a51db2551236e66d92156ece2f9362b328feedf7dfee684c5618c9b",
-      "export_sha256": "4303faf47c91a37300c38c9eb853a64429c92c362774ea304263c5e6673cac07",
-      "bytes": 23739,
+      "export_sha256": "673e89cf6142bf8a1c2c90da0af85d45c958b095cb2bcbfd7b178a5bbdecccf9",
+      "bytes": 23928,
       "python_comments_removed": 67,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -464,8 +464,8 @@
       "path": "credential_shape.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8995d288a6f83ad86277ec48ab727a1a8418452233b863fd6d2ed3a3467e01ab",
-      "bytes": 10080
+      "export_sha256": "6e4a3f6e216bbcba8d983c78ffcd6ad76602288cbade67ffd40046231b1048e0",
+      "bytes": 10092
     },
     {
       "path": "dashboard/agents_page.py",
@@ -821,8 +821,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "de01370692b394637b28ca1d6ba122436eb6b7217e8fa5762a9b39b66248d1ec",
-      "bytes": 17237,
+      "export_sha256": "7beb6ab64fc70b013a92b3798f9bc72d8deeb35e0bd999f8b45712133dc11cb8",
+      "bytes": 18307,
       "upstream_modified": true
     },
     {
@@ -1408,8 +1408,8 @@
       "path": "oslocks.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "081fd0bca8240d91cc1dc6ed045d1aca9d6f891543fefc54593a436ab05ee933",
-      "bytes": 4482
+      "export_sha256": "143085049d948d2285f499cfa6d4c1c797f1dfc7540806d0c98779d4f052c404",
+      "bytes": 6081
     },
     {
       "path": "osprivacy.py",
@@ -2184,8 +2184,8 @@
       "path": "tests/test_agent.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bc2cc07470955bc0ab1efcdf45a68753fb988590ce443b2232468d1a20caf965",
-      "bytes": 30858
+      "export_sha256": "37b794dfa57540aff2c21d999977f2b88bd01579b1c98b9cd815e0f6c298cbfa",
+      "bytes": 30868
     },
     {
       "path": "tests/test_agent_faults.py",
@@ -2205,8 +2205,8 @@
       "path": "tests/test_agent_queue.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c80be89b7378e0b1905b7dcf782c222134273d2934e5aca3aeff903c21a16e1f",
-      "bytes": 17741
+      "export_sha256": "dcd298aab54e989e7b053127f17329c8d1aacd247b9e3940c92771d54db73253",
+      "bytes": 17746
     },
     {
       "path": "tests/test_agent_secrets.py",
@@ -2580,8 +2580,8 @@
       "path": "tests/test_env_inventory.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3624c147bb3650250f3234696d07c8f0e490455da0fe0bd25a6d8723f15b8bef",
-      "bytes": 30482
+      "export_sha256": "00af43281425d6ea0a8d8964ac466e859485b2eddfbdff46061e5ce2bee4f79b",
+      "bytes": 30999
     },
     {
       "path": "tests/test_env_page.py",
@@ -2911,8 +2911,8 @@
       "path": "tests/test_leak_coverage.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c28385ef9a159a726810f03845e7dbfa8c1ccf761b168e5bd126fd99ac1c0e0d",
-      "bytes": 27757
+      "export_sha256": "2b95c259f3263063ac6922004758c126a4461a2b5d9255485962dba92c3826d1",
+      "bytes": 48523
     },
     {
       "path": "tests/test_leak_scan_incremental.py",
@@ -3572,8 +3572,8 @@
       "path": "tests/test_secrets.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0a0b6f6002ec1faba986111bb3af388eec7714649ddd118d6653d5280fca61e0",
-      "bytes": 15316
+      "export_sha256": "4863dec90fcc81afc9ec23b6e5a161dc2b2843054414512abdef6ff371baa6c8",
+      "bytes": 67598
     },
     {
       "path": "tests/test_serverd.py",
@@ -4126,8 +4126,8 @@
     {
       "path": "tools/check_secrets.py",
       "source_sha256": "bfd9be34804f652745f6085df1791139eea563b8e924002f9b7759d2f2f05f41",
-      "export_sha256": "7cdcb0b8210b6edf98a4fabe8f6e8cbeb90ddda3c35d5848f52e997183653744",
-      "bytes": 18417,
+      "export_sha256": "05e1a01bd857654354980a2d43820ad713a7f5241c3f4065c4bfdb1486e5a798",
+      "bytes": 47144,
       "python_comments_removed": 69,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,
@@ -4349,8 +4349,8 @@
     {
       "path": "tools/leak_findings.py",
       "source_sha256": "73d3b27886625b7a2f615898fc7ea9671577f28255a32303bfd0b7a9565de030",
-      "export_sha256": "eb3418c0c397e0c3ab37522433d7cfaeee2c595e853c4a6092501b576336fed5",
-      "bytes": 11736,
+      "export_sha256": "37c65af957ac871971e0b4e9a31de8ce7e9b5d822f89d3aba8b2dd42ebce9c0c",
+      "bytes": 12671,
       "python_comments_removed": 2,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,
@@ -4545,8 +4545,8 @@
     {
       "path": "tools/scan_leaks.py",
       "source_sha256": "a6dead1ccdd505ddbdb6efabe884d1cc2acc8be744930c70cf1b1223eb39bc1e",
-      "export_sha256": "625cdf39cd1cb2e8b5a8cbaab63e84cfe6c86b12667f2089db85e8def3159435",
-      "bytes": 38395,
+      "export_sha256": "8885ccb61cea822bb8ab825b1b4846e091ae0bbc53144e534422767af18c7132",
+      "bytes": 47972,
       "python_comments_removed": 25,
       "python_docstrings_removed": 6,
       "tool_descriptions_retained": 0,

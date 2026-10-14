@@ -47,6 +47,22 @@ if os.name != "nt":
                 native |= theirs
         _fcntl.flock(fd, native)
 
+    def fd_path(fd: int) -> str | None:
+        """The real, canonical path the OS reports for an open descriptor — macOS
+        `F_GETPATH`, Linux `/proc/self/fd` — or None where it cannot say. Here because
+        this module is the engine's one door to `fcntl` (the leak scan proves a file it
+        opened lies inside the data folder with it, review round 14)."""
+        if hasattr(_fcntl, "F_GETPATH"):
+            try:
+                raw = _fcntl.fcntl(fd, _fcntl.F_GETPATH, bytes(1024))
+            except OSError:
+                return None
+            return os.fsdecode(raw.split(b"\0", 1)[0])
+        try:
+            return os.readlink(f"/proc/self/fd/{fd}")
+        except OSError:
+            return None
+
 else:  # pragma: no cover - exercised by the Windows CI row
     import ctypes
     import msvcrt
@@ -96,3 +112,22 @@ else:  # pragma: no cover - exercised by the Windows CI row
             if err in (_ERROR_LOCK_VIOLATION, _ERROR_IO_PENDING):
                 raise BlockingIOError(errno.EWOULDBLOCK, "the file is locked by another handle")
             raise ctypes.WinError(err)
+
+    _GetFinalPathNameByHandleW = _kernel32.GetFinalPathNameByHandleW
+    _GetFinalPathNameByHandleW.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
+    _GetFinalPathNameByHandleW.restype = wintypes.DWORD
+
+    def fd_path(fd: int) -> str | None:
+        """The final path of an open descriptor (`GetFinalPathNameByHandleW`), without
+        the `\\\\?\\` prefix; None when Windows cannot say."""
+        buf = ctypes.create_unicode_buffer(32768)
+        try:
+            n = _GetFinalPathNameByHandleW(wintypes.HANDLE(msvcrt.get_osfhandle(fd)), buf, len(buf), 0)
+        except OSError:
+            return None
+        if not n or n >= len(buf):
+            return None
+        path = buf.value
+        if path.startswith("\\\\?\\UNC\\"):
+            return "\\\\" + path[8:]
+        return path[4:] if path.startswith("\\\\?\\") else path

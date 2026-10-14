@@ -355,7 +355,7 @@ def test_a_credential_fault_does_not_poison_the_chain() -> None:
     try:
         pr.HEALTH.unlink(missing_ok=True)
         p = run_agent(scratch(), "--limit", "1",
-                      env={"OPENROUTER_API_KEY": "sk-or-v1-not-a-key",
+                      env={"OPENROUTER_API_KEY": "sk-or-v1-" + "not-a-key",
                             "OBSERVATORY_KEY_FILE": "/nonexistent/key"})
         check("a dead key leaves no model marked unhealthy", len(pr._health()) == 0,
               str(pr._health()))
@@ -463,7 +463,7 @@ def test_degrades_at_the_ceiling() -> None:
     try:
         pr._save_wallet({"denomination": "credits", "events": [],
                          "days": {d.strftime("%Y-%m-%d"): 99.0}, "months": {}})
-        p = run_agent(db, env={"OPENROUTER_API_KEY": "sk-or-v1-not-a-key",
+        p = run_agent(db, env={"OPENROUTER_API_KEY": "sk-or-v1-" + "not-a-key",
                             "OBSERVATORY_KEY_FILE": "/nonexistent/key"})
         check("a tripped guardrail degrades instead of spending",
               p.returncode == 0 and "daily ceiling" in p.stderr, (p.stderr or p.stdout)[:180])

@@ -55,7 +55,7 @@ PREFIXES = ("sk-", "sk_", "rk_", "pk_live_", "pk_test_", "ghp_", "gho_", "ghu_",
 #: A vendor whose body is shorter than the commit gate's default measurable
 #: length still defines it exactly: a GitLab token is `glpat-` and twenty
 #: characters. `tools/check_secrets.py` reads its minimum from here.
-BODY_MIN = {"glpat-": 20}
+BODY_MIN = {"glpat-": 20, "AIza": 20}
 
 _PREFIXED = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(re.escape(p) for p in PREFIXES)
                        + r")([A-Za-z0-9_\-]{16,})")

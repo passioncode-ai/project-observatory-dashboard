@@ -63,6 +63,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 import atomic              
 import paths              
 import safe_git  # noqa: E402  — the engine's one git door
+import oslocks  # noqa: E402  — the engine's one door to fcntl (a descriptor's path)
+import osprivacy  # noqa: E402  — opens that refuse a link on every OS
 import sqlite_scan  # noqa: E402  — when a store may be read from its last mark (PB-131)
 import step_budget  # noqa: E402  — the time this tick step has left (OBS-52)
 
@@ -122,11 +124,81 @@ DESTINATIONS = {
 }
 
 
-def _read(p: pathlib.Path) -> str | None:
+def _fd_path(fd: int) -> str | None:
+    """The real, canonical path of an open descriptor (`oslocks.fd_path`: macOS
+    `F_GETPATH`, Linux `/proc/self/fd`, Windows `GetFinalPathNameByHandleW`); None
+    where the OS cannot say. Review round 14: through the engine's `fcntl` door, not
+    a direct import, which the Windows/Linux boundary refuses."""
+    return oslocks.fd_path(fd)
+
+
+def _inside(real: str | None, within: pathlib.Path) -> bool:
+    """Does the opened file's real path lie under `within`? Decided by IDENTITY:
+    some ancestor of `real` is the same folder (device and inode) as `within`.
+
+    Review round 8: comparing canonical path strings needed `within` opened for
+    its path, and a folder this user may traverse but not list (mode 0311) will
+    not open on macOS even with O_EVTONLY (measured); `stat` needs only the
+    traversal right. A case variant of the folder's name is the same inode, so it
+    compares equal (round 7). Anything unknown is False — a hole, never a guess.
+
+    Review round 9: each ANCESTOR is read with `lstat`, never `stat`. `real` is the
+    descriptor's canonical path, so every ancestor of it was a real folder when the
+    path was reported; were one swapped for a link to `within` after the open,
+    `stat` would follow that link and call an outside file inside. `lstat` reads the
+    link itself, whose inode is not the folder's. `within` itself is still `stat`ed:
+    a data folder reached through a link is that folder."""
+    if real is None:
+        return False
     try:
-        return p.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+        target = os.stat(within)
+    except (OSError, ValueError):
+        return False
+    for anc in pathlib.PurePath(real).parents:
+        try:
+            st = os.lstat(anc)
+        except (OSError, ValueError):
+            continue
+        if (st.st_dev, st.st_ino) == (target.st_dev, target.st_ino):
+            return True
+    return False
+
+
+class _Outside(Exception):
+    """The opened file's real path is not under the folder it was meant to be in."""
+
+
+def _read_regular(p: pathlib.Path, within: pathlib.Path | None = None) -> bytes | None:
+    """A regular file's bytes, or None — `lstat`, then an `O_NOFOLLOW|O_NONBLOCK`
+    open, then `fstat` on the descriptor (review round 6). A FIFO, a device or a
+    link is never read: `os.stat` then a blocking open let a file swapped to a
+    FIFO between the two calls hold the scan for ever. A path the OS refuses
+    outright (a NUL in it: `ValueError`) is None too.
+
+    `within` (review round 7): after the open, the DESCRIPTOR's real path must lie
+    under that folder's canonical path. A parent folder swapped for a link
+    between any path check and the open is caught here, where it cannot race;
+    `_Outside` is raised so the caller can say so."""
+    try:
+        if not stat.S_ISREG(os.lstat(p).st_mode):
+            return None
+        fd = osprivacy.open(p, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
+        with os.fdopen(fd, "rb") as fh:
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                return None
+            # No guess (review round 8): a path the OS will not give is a hole,
+            # never a `realpath` that a racing link can satisfy.
+            if within is not None and not _inside(_fd_path(fh.fileno()), within):
+                raise _Outside(p)
+            return fh.read()
+    except (OSError, ValueError):
         return None
+
+
+def _read(p: pathlib.Path, within: pathlib.Path | None = None) -> str | None:
+    """A regular file's text, or None (see `_read_regular`; `_Outside` propagates)."""
+    raw = _read_regular(p, within)
+    return None if raw is None else raw.decode("utf-8", errors="replace")
 
 
 def vault_slots(notes: list[dict], *, max_entries: int = 100_000):
@@ -174,6 +246,56 @@ def vault_slots(notes: list[dict], *, max_entries: int = 100_000):
     yield from visit(VAULT, 0)
 
 
+def env_inventory(path: pathlib.Path) -> tuple[list[dict], str | None]:
+    """The env inventory's files, validated, or [] and why it is a hole (review round 5).
+
+    Read as a REGULAR FILE ONLY, through `lstat` and an `O_NOFOLLOW|O_NONBLOCK`
+    open: `Path.exists()` called a dangling link, a link loop and a link into a
+    locked folder "absent", and `read_text` on a FIFO never returned. Absent is
+    the only silent answer; every other type, error or wrong shape is a hole.
+    """
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return [], None
+    except OSError as exc:
+        return [], f"could not be examined ({type(exc).__name__})"
+    if not stat.S_ISREG(info.st_mode):
+        kind = "a symbolic link" if stat.S_ISLNK(info.st_mode) else "not a regular file"
+        return [], f"{kind}; excluded without reading"
+    raw = _read_regular(path)
+    if raw is None:
+        return [], "not a regular file, or could not be read; excluded"
+    try:
+        # `utf-8-sig`: a byte-order mark is accepted (review round 6).
+        doc = json.loads(raw.decode("utf-8-sig"))
+    except (ValueError, RecursionError) as exc:
+        # RecursionError: `"[" * 200000` nests past the parser's stack (round 6).
+        return [], f"could not be read ({type(exc).__name__})"
+    files = doc.get("files") if isinstance(doc, dict) else None
+
+    def text(v: object) -> bool:
+        # A string the report can carry: no NUL, and no lone surrogate (`"\udcff"`
+        # crashed the report's UTF-8 write, review round 7).
+        if not isinstance(v, str) or "\x00" in v:
+            return False
+        try:
+            v.encode("utf-8")
+        except UnicodeEncodeError:
+            return False
+        return True
+
+    ok = isinstance(files, list) and all(
+        isinstance(f, dict) and text(f.get("path")) and text(f.get("project"))
+        and isinstance(f.get("variables"), list)
+        and all(isinstance(v, dict) and text(v.get("name")) and isinstance(v.get("class"), str)
+                for v in f["variables"])
+        for f in files)
+    if not ok:
+        return [], "its shape is not the env inventory's (files[].path, project, variables[].name, class)"
+    return files, None
+
+
 def known_values() -> tuple[dict[str, str], list[dict], list[dict]]:
     """value -> a name for it, plus the homes to exclude and what was skipped."""
     values: dict[str, str] = {}
@@ -182,16 +304,37 @@ def known_values() -> tuple[dict[str, str], list[dict], list[dict]]:
     import scan_env
 
     # 1. the env inventory's secrets, read back out of their own files
-    scan_path = paths.SCRATCH / "env.json"
-    if scan_path.is_file():
-        doc = json.loads(scan_path.read_text(encoding="utf-8"))
-        for f in doc.get("files", []):
-            wanted = {v["name"] for v in f.get("variables", [])
-                      if v.get("class") == "secret"}
+    files, problem = env_inventory(paths.SCRATCH / "env.json")
+    if problem:
+        # A HOLE, NOT A CRASH OR A HANG (review rounds 4 and 5): an env inventory
+        # that is not a regular file, will not read, or has the wrong shape leaves
+        # every env value unlooked-for.
+        skipped.append({"what": "env inventory (env.json)", "unreadable": True,
+                        "why": problem + "; no env value is looked for"})
+    for f in files:
+            wanted = {v["name"] for v in f["variables"] if v["class"] == "secret"}
             if not wanted:
                 continue
+            rel = pathlib.PurePosixPath(f["path"])
+            if rel.is_absolute() or ".." in rel.parts or not rel.parts:
+                # Only a path inside the data folder is read: `/etc/hosts` or
+                # `../x` in a damaged inventory names a file this scan must not open.
+                skipped.append({"what": f["path"], "unreadable": True,
+                                "why": "not a path inside the data folder; not read"})
+                continue
             path = paths.DATA / f["path"]
-            text = _read(path)
+            try:
+                # A SYMLINKED FOLDER INSIDE THE DATA FOLDER (rounds 6 and 7): the
+                # path's text stays inside, its target need not — and a path check
+                # before the open races a folder swapped for a link. The OPEN
+                # DESCRIPTOR's canonical path decides. A hard link to an outside
+                # file cannot be seen by any path check (COMPATIBILITY).
+                text = _read(path, within=paths.DATA)
+            except _Outside:
+                skipped.append({"what": f["path"], "unreadable": True,
+                                "why": "its real path is outside the data folder, or could not be shown "
+                                       "to be inside it; not read"})
+                continue
             if text is None:
                 # A HOLE, not a choice (review round 3): its values cannot be
                 # looked for, so the scan is unmeasured for them.
@@ -541,6 +684,28 @@ def apply_suppressions(rows: list[dict], rules: list[dict]) -> tuple[list[dict],
 NO_VALUES = "nothing to look for: no env scan, no vault and no installed key on this machine"
 
 
+def _clean(obj):
+    """The report as UTF-8 can carry it (review round 8): on Linux a non-UTF-8 file
+    or folder name decodes to a lone surrogate, which `json` writes and UTF-8
+    refuses. Such a string is escaped (`\\udcff`), so the name stays visible."""
+    if isinstance(obj, str):
+        try:
+            obj.encode("utf-8")
+            return obj
+        except UnicodeEncodeError:
+            return obj.encode("utf-8", "backslashreplace").decode("utf-8")
+    if isinstance(obj, dict):
+        return {_clean(k): _clean(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_clean(v) for v in obj]
+    return obj
+
+
+def _write_json(path, doc) -> None:
+    """Every report and state write goes through `_clean` (review round 8)."""
+    atomic.write_json(path, _clean(doc))
+
+
 def _label(path) -> str:
     """A store's name for the report: `~`-relative under the home, never a value."""
     p = pathlib.Path(path)
@@ -604,12 +769,35 @@ def main(argv: list[str]) -> int:
     home_paths = {h["path"] for h in homes}
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     if not values:
-        atomic.write_json(OUT, {
+        holes = sum(1 for k in skipped if k.get("unreadable"))
+        unsearchable = sum(1 for k in skipped if not k.get("unreadable"))
+        # SAID FROM WHAT WAS RECORDED (review rounds 5 and 6): "no env scan, no
+        # vault" was false when a source existed and would not read, or when
+        # values were found and none was distinctive enough to search for.
+        reasons = []
+        if holes:
+            reasons.append(f"{holes} source(s) of values could not be read")
+        if unsearchable:
+            reasons.append(f"{unsearchable} value(s) were found but none is searchable "
+                           f"(too short or not distinctive)")
+        if not reasons:
+            # SAID FROM WHAT WAS FOUND (review round 7): a valid inventory with no
+            # secret class, or a vault that exists and holds no slot, is not "no
+            # env scan, no vault".
+            inv_files, inv_problem = env_inventory(paths.SCRATCH / "env.json")
+            inv_exists = os.path.lexists(paths.SCRATCH / "env.json")
+            reasons.append("no env inventory" if not inv_exists else
+                           f"the env inventory lists {len(inv_files)} file(s) and no secret value")
+            reasons.append("no vault" if not os.path.lexists(VAULT) else "the vault holds no slot")
+            reasons.append("no installed key")
+        why = "nothing to look for: " + "; ".join(reasons) + \
+            (" (each is named in skipped)" if holes or unsearchable else "")
+        _write_json(OUT, {
             "scanned_at": now, "hits": [], "known": 0, "skipped": skipped,
             "degraded": [{"code": "no-values", "source": "leak-scan:no-values",
-                          "why": NO_VALUES, "reason": NO_VALUES,
+                          "why": why, "reason": why,
                           "effect": "a clean report here means UNMEASURED, not clean"}]})
-        print("leaks: nothing to look for — no env scan, no vault, no installed key")
+        print(f"leaks: {why}")
         return 0
 
     # Keep versions separate even when two different values share one name.
@@ -707,7 +895,7 @@ def main(argv: list[str]) -> int:
     own_store = {"path": str(own), "read": own.is_file() and not own_problem and str(own) not in stores_cut,
                  "mode": "full" if full else "incremental", "rows_read": own_rows}
 
-    atomic.write_json(STATE, {"updated_at": now, "offsets": state,
+    _write_json(STATE, {"updated_at": now, "offsets": state,
                               "values_digest": digest, "suppressions_digest": suppression_mark,
                               **({"sqlite": new_mark} if new_mark else {})})
     rows = [{"secret": name, "where": where, "occurrences": n,
@@ -750,7 +938,7 @@ def main(argv: list[str]) -> int:
         d.setdefault("reason", d["why"])
     partial = any(d["code"].startswith("deadline-") for d in degraded)
     targets_read = len(files) if cut_at is None else cut_at
-    atomic.write_json(OUT, {
+    _write_json(OUT, {
         "scanned_at": now,
         "known": len(values),
         "targets": len(files),

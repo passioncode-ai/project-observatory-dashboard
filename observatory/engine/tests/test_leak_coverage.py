@@ -382,6 +382,356 @@ class Coverage(unittest.TestCase):
             L.VAULT, paths.SCRATCH = saved_vault, saved_scratch
         self.assertTrue(any(s.get("unreadable") and "API_KEY" in s["what"] for s in skipped), skipped)
 
+    # ── round 4: every unread folder of the vault and the env inventory is a hole ──
+
+    def _known_values_over(self, vault=None, scratch=None, data=None):
+        saved = (L.VAULT, paths.SCRATCH, paths.DATA, L.DESTINATIONS)
+        L.VAULT = vault or self.readable.parent / "no-vault"
+        paths.SCRATCH = scratch or self.readable.parent / "no-scratch"
+        paths.DATA = data or self.readable.parent
+        L.DESTINATIONS = {}      # never the machine's own key files
+        try:
+            return self.saved[2]()
+        finally:
+            L.VAULT, paths.SCRATCH, paths.DATA, L.DESTINATIONS = saved
+
+    @unittest.skipIf(os.geteuid() == 0, "root lists a mode-000 folder")
+    def test_every_vault_folder_that_will_not_list_is_a_hole(self):
+        for depth in ("root", "project", "env"):
+            with self.subTest(depth=depth):
+                vault = self.readable.parent / f"vault-{depth}"
+                (vault / "demo" / "prod").mkdir(parents=True)
+                (vault / "demo" / "prod" / "API_KEY").write_text("synthetic-slot-" + "q" * 24)
+                locked = {"root": vault, "project": vault / "demo", "env": vault / "demo" / "prod"}[depth]
+                locked.chmod(0)
+                try:
+                    _values, _homes, skipped = self._known_values_over(vault=vault)
+                finally:
+                    locked.chmod(0o700)
+                self.assertTrue(any(k.get("unreadable") and "vault" in k["what"] for k in skipped), skipped)
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a mode-000 file")
+    def test_an_unreadable_env_file_is_marked_unreadable(self):
+        """Fails when `"unreadable": True` is dropped for an env file (round 4)."""
+        scratch = self.readable.parent / "scratch-env"
+        scratch.mkdir()
+        envfile = self.readable.parent / "demo.env"
+        envfile.write_text(f"API_TOKEN={SECRET}\n")
+        envfile.chmod(0)
+        self.addCleanup(lambda: envfile.exists() and envfile.chmod(0o600))
+        (scratch / "env.json").write_text(json.dumps({"files": [{
+            "path": "demo.env", "project": "demo", "variables": [{"name": "API_TOKEN", "class": "secret"}]}]}))
+        _values, _homes, skipped = self._known_values_over(scratch=scratch)
+        self.assertTrue(any(k.get("unreadable") and k["what"] == "demo.env" for k in skipped), skipped)
+
+    def test_a_corrupt_or_unreadable_env_inventory_is_a_hole_not_a_crash(self):
+        scratch = self.readable.parent / "scratch-bad"
+        scratch.mkdir()
+        (scratch / "env.json").write_text("{not json")
+        _values, _homes, skipped = self._known_values_over(scratch=scratch)
+        self.assertTrue(any(k.get("unreadable") and "env" in k["what"] for k in skipped), skipped)
+
+    @unittest.skipIf(os.geteuid() == 0, "root lists a mode-000 folder")
+    def test_a_sessions_root_under_a_locked_ancestor_is_a_hole_not_absent(self):
+        parent = self.readable.parent / "locked-parent"
+        (parent / "sessions" / "projA").mkdir(parents=True)
+        (parent / "sessions" / "projA" / "a.jsonl").write_text("x")
+        parent.chmod(0)
+        self.addCleanup(lambda: parent.exists() and parent.chmod(0o700))
+        self._real_targets_over(parent / "sessions")
+        doc = self.scan()
+        self.assertIn("source-unreadable", {d["code"] for d in doc["degraded"]})
+
+    def test_vault_and_env_holes_raise_the_blind_finding(self):
+        doc = {"known": 3, "hits": [], "not_scanned": [], "degraded": [],
+               "skipped": [{"what": "vault folder ~/v/demo", "why": "could not be listed", "unreadable": True}]}
+        blind = [f for f in F.findings(doc) if f["type"] == "secret.leak_scan_blind"]
+        self.assertTrue(blind and blind[0]["severity"] == "warning", F.findings(doc))
+
+    # ── round 5: env.json is read as a regular file only; a wrong shape is a hole ──
+
+    CHILD = (
+        "import json, pathlib, sys\n"
+        "root = pathlib.Path(sys.argv[1])\n"
+        "sys.path[:0] = [str(root), str(root / 'tools'), str(root / 'collectors')]\n"
+        "import paths, scan_leaks as L\n"
+        "paths.SCRATCH = pathlib.Path(sys.argv[2]); paths.DATA = pathlib.Path(sys.argv[3])\n"
+        "L.VAULT = pathlib.Path(sys.argv[3]) / 'no-vault'; L.DESTINATIONS = {}\n"
+        "print(json.dumps(L.known_values()[2]))\n")
+
+    def _env_holes_in_child(self, scratch):
+        """known_values() in a child with a timeout: a FIFO must never hang the scan."""
+        import subprocess
+        p = subprocess.run([sys.executable, "-c", self.CHILD, str(Path(L.__file__).resolve().parents[1]),
+                            str(scratch), str(self.readable.parent)],
+                           capture_output=True, text=True, timeout=30)
+        self.assertEqual(p.returncode, 0, p.stderr[-400:])
+        return json.loads(p.stdout)
+
+    def _assert_env_hole(self, skipped):
+        self.assertTrue(any(k.get("unreadable") and "env.json" in k["what"] for k in skipped), skipped)
+
+    def test_env_json_that_is_a_fifo_is_a_hole_not_a_hang(self):
+        scratch = self.readable.parent / "scratch-fifo"
+        scratch.mkdir()
+        os.mkfifo(scratch / "env.json")
+        self._assert_env_hole(self._env_holes_in_child(scratch))
+
+    def test_env_json_that_is_a_symlink_is_a_hole(self):
+        base = self.readable.parent
+        cases = {}
+        dangling = base / "scratch-dangling"; dangling.mkdir()
+        (dangling / "env.json").symlink_to(base / "nowhere.json")
+        cases["dangling"] = dangling
+        loop = base / "scratch-loop"; loop.mkdir()
+        (loop / "env.json").symlink_to(loop / "env.json")
+        cases["loop"] = loop
+        locked_dir = base / "locked-env"; locked_dir.mkdir()
+        (locked_dir / "env.json").write_text("{}")
+        locked_dir.chmod(0)
+        self.addCleanup(lambda: locked_dir.exists() and locked_dir.chmod(0o700))
+        into_locked = base / "scratch-locked"; into_locked.mkdir()
+        (into_locked / "env.json").symlink_to(locked_dir / "env.json")
+        cases["into a locked folder"] = into_locked
+        for label, scratch in cases.items():
+            with self.subTest(link=label):
+                self._assert_env_hole(self._env_holes_in_child(scratch))
+
+    def test_env_json_with_a_wrong_shape_is_a_hole_not_a_crash(self):
+        shapes = [{"files": "abc"}, {"files": [1, 2]}, {"files": None},
+                  {"files": [{"path": "demo.env", "project": "demo", "variables": None}]},
+                  {"files": [{"path": "demo.env", "project": "demo", "variables": [{"class": "secret"}]}]},
+                  {"files": [{"project": "demo", "variables": [{"name": "X", "class": "secret"}]}]}]
+        for i, shape in enumerate(shapes):
+            with self.subTest(shape=shape):
+                scratch = self.readable.parent / f"scratch-shape-{i}"
+                scratch.mkdir()
+                (scratch / "env.json").write_text(json.dumps(shape))
+                _values, _homes, skipped = self._known_values_over(scratch=scratch)
+                self._assert_env_hole(skipped)
+
+    def test_an_absolute_or_parent_path_in_env_json_is_a_hole_and_never_read(self):
+        for i, bad in enumerate(("/etc/hosts", "../outside.env", "a/../../outside.env")):
+            with self.subTest(path=bad):
+                scratch = self.readable.parent / f"scratch-path-{i}"
+                scratch.mkdir()
+                (scratch / "env.json").write_text(json.dumps({"files": [{
+                    "path": bad, "project": "demo", "variables": [{"name": "X", "class": "secret"}]}]}))
+                values, homes, skipped = self._known_values_over(scratch=scratch)
+                self.assertFalse(homes, "nothing outside the data folder is read")
+                self.assertTrue(any(k.get("unreadable") and bad in k["what"] for k in skipped), skipped)
+
+    # ── round 6: a listed file is read as a regular file only; the inventory's edges ──
+
+    READ_CHILD = (
+        "import pathlib, sys\n"
+        "root = pathlib.Path(sys.argv[1])\n"
+        "sys.path[:0] = [str(root), str(root / 'tools'), str(root / 'collectors')]\n"
+        "import scan_leaks as L\n"
+        "print(repr(L._read(pathlib.Path(sys.argv[2]))))\n")
+
+    def test_read_never_opens_a_fifo_or_follows_a_link(self):
+        """`_read` of a listed env file or vault slot swapped to a FIFO used to hang (round 6)."""
+        import subprocess
+        base = self.readable.parent
+        fifo = base / "swapped.env"
+        os.mkfifo(fifo)
+        link = base / "linked.env"
+        link.symlink_to(self.readable)
+        for target in (fifo, link):
+            with self.subTest(target=target.name):
+                p = subprocess.run([sys.executable, "-c", self.READ_CHILD, str(Path(L.__file__).resolve().parents[1]),
+                                    str(target)], capture_output=True, text=True, timeout=30)
+                self.assertEqual((p.returncode, p.stdout.strip()), (0, "None"), p.stderr[-300:])
+        self.assertIsNone(L._read(Path(str(base) + "/bad\x00name")), "a NUL in a path is None, not a ValueError")
+
+    def test_a_listed_env_file_that_is_a_fifo_is_a_hole_not_a_hang(self):
+        scratch = self.readable.parent / "scratch-listed-fifo"
+        scratch.mkdir()
+        os.mkfifo(self.readable.parent / "listed.env")
+        (scratch / "env.json").write_text(json.dumps({"files": [{
+            "path": "listed.env", "project": "demo", "variables": [{"name": "X", "class": "secret"}]}]}))
+        skipped = self._env_holes_in_child(scratch)
+        self.assertTrue(any(k.get("unreadable") and k["what"] == "listed.env" for k in skipped), skipped)
+
+    def test_deep_nesting_or_a_nul_path_is_an_inventory_hole(self):
+        for i, raw in enumerate(("[" * 200000, json.dumps({"files": [{
+                "path": "a\x00b.env", "project": "demo", "variables": [{"name": "X", "class": "secret"}]}]}))):
+            with self.subTest(case=i):
+                scratch = self.readable.parent / f"scratch-edge-{i}"
+                scratch.mkdir()
+                (scratch / "env.json").write_text(raw)
+                _values, _homes, skipped = self._known_values_over(scratch=scratch)
+                self._assert_env_hole(skipped)
+
+    def test_a_path_through_a_symlinked_folder_leaving_the_data_folder_is_a_hole(self):
+        base = self.readable.parent
+        data, outside = base / "data-root", base / "outside"
+        data.mkdir(); outside.mkdir()
+        (outside / "x.env").write_text(f"API_TOKEN={SECRET}\n")
+        (data / "escape").symlink_to(outside, target_is_directory=True)
+        scratch = base / "scratch-escape"; scratch.mkdir()
+        (scratch / "env.json").write_text(json.dumps({"files": [{
+            "path": "escape/x.env", "project": "demo", "variables": [{"name": "API_TOKEN", "class": "secret"}]}]}))
+        values, homes, skipped = self._known_values_over(scratch=scratch, data=data)
+        self.assertEqual((values, homes), ({}, []), "nothing outside the data folder is read")
+        self.assertTrue(any(k.get("unreadable") and k["what"] == "escape/x.env" for k in skipped), skipped)
+
+    def test_an_inventory_with_a_bom_is_read(self):
+        scratch = self.readable.parent / "scratch-bom"; scratch.mkdir()
+        # A value the leak scan searches for (`searchable`): SECRET reads as words.
+        value = "Qx7mT2vR" + "9pL4kW8n" + "Z3bY6cH1"
+        (self.readable.parent / "bom.env").write_text(f"API_TOKEN={value}\n")
+        (scratch / "env.json").write_bytes(b"\xef\xbb\xbf" + json.dumps({"files": [{
+            "path": "bom.env", "project": "demo", "variables": [{"name": "API_TOKEN", "class": "secret"}]}]}).encode())
+        values, _homes, skipped = self._known_values_over(scratch=scratch)
+        self.assertEqual(list(values.values()), ["env:demo/API_TOKEN"], skipped)
+
+    def test_no_values_says_why_when_values_were_found_but_none_is_searchable(self):
+        L.known_values = lambda: ({}, [], [{"what": "demo/.env:API_TOKEN", "why": "shorter than 12 characters"}])
+        out = io.StringIO()
+        with redirect_stdout(out):
+            L.main(["leaks", "--full"])
+        doc = json.loads(L.OUT.read_text())
+        why = doc["degraded"][0]["why"]
+        self.assertNotIn("no env scan", why)
+        self.assertIn("searchable", why)
+        self.assertNotIn("no env scan", out.getvalue())
+
+    # ── round 7 ──
+
+    def test_a_lone_surrogate_in_a_path_is_a_shape_hole_not_a_crash(self):
+        for i, bad in enumerate(("\\udcff.env", "\\ud800x.env")):
+            with self.subTest(path=bad):
+                scratch = self.readable.parent / f"scratch-surrogate-{i}"
+                scratch.mkdir()
+                # Written as JSON text with the escape, as a damaged inventory would hold it.
+                (scratch / "env.json").write_text('{"files": [{"path": "' + bad + '", "project": "demo", '
+                                                  '"variables": [{"name": "X", "class": "secret"}]}]}')
+                _values, _homes, skipped = self._known_values_over(scratch=scratch)
+                self._assert_env_hole(skipped)
+                self.assertFalse(any("outside the data folder" in k.get("why", "") for k in skipped), skipped)
+                json.dumps(skipped).encode("utf-8")          # what atomic.write_json needs
+
+    def test_the_read_is_checked_by_the_open_descriptor_not_a_path_check(self):
+        """A folder swapped for a link after any path check: the descriptor's real path decides (round 7)."""
+        base = self.readable.parent
+        data, outside = base / "data-race", base / "outside-race"
+        (data / "proj").mkdir(parents=True); outside.mkdir()
+        (outside / "x.env").write_text("API_TOKEN=" + "Qx7mT2vR" + "9pL4kW8n" + "Z3bY6cH1" + "\n")
+        (data / "proj" / "x.env").write_text("API_TOKEN=" + "Wm4nB8qZ" + "2xK7pL9v" + "R3tY6hC1" + "\n")
+        scratch = base / "scratch-race"; scratch.mkdir()
+        (scratch / "env.json").write_text(json.dumps({"files": [{
+            "path": "proj/x.env", "project": "demo", "variables": [{"name": "API_TOKEN", "class": "secret"}]}]}))
+        real_open = os.open
+
+        def swapping_open(path, flags, *a, **k):
+            # The swap lands between every check and the read.
+            if str(path).endswith("proj/x.env") and not (data / "proj").is_symlink():
+                (data / "proj" / "x.env").unlink(); (data / "proj").rmdir()
+                (data / "proj").symlink_to(outside, target_is_directory=True)
+            return real_open(path, flags, *a, **k)
+        with patch.object(os, "open", swapping_open):
+            values, _homes, skipped = self._known_values_over(scratch=scratch, data=data)
+        self.assertEqual(values, {}, "a value read through the swapped link is not loaded")
+        self.assertTrue(any(k.get("unreadable") and k["what"] == "proj/x.env" for k in skipped), skipped)
+
+    def test_a_case_variant_data_path_is_not_a_false_hole(self):
+        base = self.readable.parent
+        (base / "Data-Case").mkdir()
+        (base / "Data-Case" / "x.env").write_text("API_TOKEN=" + "Qx7mT2vR" + "9pL4kW8n" + "Z3bY6cH1" + "\n")
+        variant = Path(str(base / "Data-Case").replace("Data-Case", "data-case"))
+        if not variant.exists():
+            self.skipTest("a case-sensitive volume: no case variant to test")
+        scratch = base / "scratch-case"; scratch.mkdir()
+        (scratch / "env.json").write_text(json.dumps({"files": [{
+            "path": "x.env", "project": "demo", "variables": [{"name": "API_TOKEN", "class": "secret"}]}]}))
+        values, _homes, skipped = self._known_values_over(scratch=scratch, data=variant)
+        self.assertEqual(list(values.values()), ["env:demo/API_TOKEN"], skipped)
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a mode-0311 folder")
+    def test_a_traverse_only_data_folder_is_still_verified(self):
+        """L6: a data folder at mode 0311 cannot be opened for reading; its canonical
+        path still comes from the OS (O_EVTONLY / O_PATH), never from realpath."""
+        base = self.readable.parent
+        data = base / "data-0311"; data.mkdir()
+        (data / "x.env").write_text("API_TOKEN=" + "Qx7mT2vR" + "9pL4kW8n" + "Z3bY6cH1" + "\n")
+        scratch = base / "scratch-0311"; scratch.mkdir()
+        (scratch / "env.json").write_text(json.dumps({"files": [{
+            "path": "x.env", "project": "demo", "variables": [{"name": "API_TOKEN", "class": "secret"}]}]}))
+        data.chmod(0o311)
+        self.addCleanup(lambda: data.exists() and data.chmod(0o700))
+        values, _homes, skipped = self._known_values_over(scratch=scratch, data=data)
+        self.assertEqual(list(values.values()), ["env:demo/API_TOKEN"], skipped)
+
+    def test_an_unverifiable_data_folder_is_a_hole_not_a_realpath_guess(self):
+        base = self.readable.parent
+        data = base / "data-unverifiable"; data.mkdir()
+        (data / "x.env").write_text("API_TOKEN=" + "Qx7mT2vR" + "9pL4kW8n" + "Z3bY6cH1" + "\n")
+        scratch = base / "scratch-unverifiable"; scratch.mkdir()
+        (scratch / "env.json").write_text(json.dumps({"files": [{
+            "path": "x.env", "project": "demo", "variables": [{"name": "API_TOKEN", "class": "secret"}]}]}))
+        with patch.object(L, "_fd_path", lambda fd: None):
+            values, _homes, skipped = self._known_values_over(scratch=scratch, data=data)
+        self.assertEqual(values, {})
+        self.assertTrue(any(k.get("unreadable") and k["what"] == "x.env" for k in skipped), skipped)
+
+    def test_inside_walks_ancestors_without_following_links(self):
+        """M-G2 (round 9): the descriptor reports `o/dir/secret.env`; swapping `o/dir`
+        for a link to the data folder must not make that path count as inside."""
+        base = self.readable.parent
+        data = base / "data-mg2"; data.mkdir()
+        outside = base / "o" / "dir"; outside.mkdir(parents=True)
+        (outside / "secret.env").write_text("x")
+        real = str((outside / "secret.env").resolve())
+        self.assertFalse(L._inside(real, data), "before the swap: outside")
+        outside.rename(base / "o" / "dir-orig")
+        (base / "o" / "dir").symlink_to(data, target_is_directory=True)
+        self.assertFalse(L._inside(real, data), "after the swap: still outside — an ancestor that is a link "
+                                                "is not the data folder")
+        self.assertTrue(L._inside(str((data / "inner.env").resolve()), data), "a real path inside is inside")
+
+    def test_a_lone_surrogate_in_any_label_never_breaks_the_report(self):
+        """L7: a non-UTF-8 name on Linux decodes to a lone surrogate; the report escapes it."""
+        bad = Path(str(self.readable.parent) + "/sess\udcffion.jsonl")
+        L.targets = lambda days: ([self.readable, bad], [{"what": "session folder ~/p\udcffq", "why": "x",
+                                                          "unreadable": True}])
+        doc = self.scan()
+        text = json.dumps(doc)
+        text.encode("utf-8")
+        self.assertIn("\\\\udcff", text, "the surrogate is written escaped, so it stays visible")
+
+    def test_no_values_names_an_inventory_without_secrets_and_an_empty_vault(self):
+        scratch = self.readable.parent / "scratch-nosecret"; scratch.mkdir()
+        (scratch / "env.json").write_text(json.dumps({"files": [{
+            "path": "a.env", "project": "demo", "variables": [{"name": "PORT", "class": "config"}]}]}))
+        vault = self.readable.parent / "empty-vault"; vault.mkdir()
+        saved = (L.VAULT, paths.SCRATCH, L.DESTINATIONS)
+        L.known_values = self.saved[2]
+        L.VAULT, paths.SCRATCH, L.DESTINATIONS = vault, scratch, {}
+        try:
+            out = io.StringIO()
+            with redirect_stdout(out):
+                L.main(["leaks", "--full"])
+        finally:
+            L.VAULT, paths.SCRATCH, L.DESTINATIONS = saved
+        why = json.loads(L.OUT.read_text())["degraded"][0]["why"]
+        self.assertNotIn("no env scan", why + out.getvalue())
+        self.assertIn("no secret", why)
+        self.assertIn("vault", why)
+
+    def test_holes_alone_still_raise_blind_and_say_why_nothing_was_known(self):
+        doc = {"known": 0, "hits": [], "not_scanned": [],
+               "degraded": [{"code": "no-values", "why": "nothing to look for"}],
+               "skipped": [{"what": "vault:demo", "why": "could not be listed", "unreadable": True},
+                           {"what": "env inventory (env.json)", "why": "not a regular file", "unreadable": True}]}
+        rows = {f["type"]: f for f in F.findings(doc)}
+        self.assertIn("secret.leak_scan_unmeasured", rows)
+        self.assertIn("secret.leak_scan_blind", rows)
+        detail = rows["secret.leak_scan_unmeasured"]["detail"]
+        self.assertNotIn("no env scan, no vault", detail)
+        self.assertIn("2", detail)
+
     def test_vault_unlistable_subtree_keeps_readable_values_and_marks_hole(self):
         vault = self.readable.parent / "vault"
         for project in ("good", "blocked"):

@@ -29,6 +29,71 @@ until someone inventories it, and survives the agent that needed it.
 | Give an MCP server its key as a header, never in the client's config | `vault.py bind PROJECT ENV NAME --header-for URL` (https, or `http://127.0.0.1:<port>` / `http://[::1]:<port>` for a loopback server; `localhost` refused), then `use_secret.py header PROJECT NAME` as the client's helper: Claude Code's `headersHelper`, or Codex's `http_headers_helper` with `--server-url URL`, since Codex exports no server URL; two URLs that disagree are refused (`url-conflict`) and the audit row names the caller | yes (loopback and `--server-url` new) |
 | Be told which services to restart after a rotation | `vault.py rotate` lists each recorded consumer with its `launchctl kickstart -k` command | yes (new) |
 
+## What the commit gate refuses
+
+`tools/check_secrets.py` judges the engine folder's tracked files (`git ls-files -z` under
+`observatory/engine/`, so a non-ASCII name is the file's own name), each read as bytes and decoded as UTF-8 with any other byte kept
+(`surrogateescape`); a file that will not read is a failure, never a skip. The scan reads the WORKING
+TREE, not the index: every folder on a path is opened `O_NOFOLLOW|O_DIRECTORY` relative to the one before
+it, so nothing is read through a link; a path under a folder that is a symbolic link is unreadable (a
+committed key whose folder was swapped for a link to a harmless copy fails the gate; the copy is not read
+in its place). A tracked symbolic link is judged by its target TEXT (what git stores for a link) and never
+followed; any other path that is not a regular file (a FIFO, a device, a folder) is unreadable; a regular
+file is opened `O_NOFOLLOW|O_NONBLOCK`, checked with `fstat` and read up to 32 MB (a larger one is
+unreadable, named so). Every open goes through `osprivacy`; on Windows, which has no folder descriptor,
+each folder on the path is `lstat`ed and a link or junction refused before the file is opened by path
+(a window between that look and the open stays there, which `dir_fd` closes on POSIX). A skip-worktree entry (a sparse checkout) and a tracked file missing from the
+working tree are read from their index blob (`git cat-file`, with `GIT_NO_REPLACE_OBJECTS=1`, so a `refs/replace/`
+stand-in for the blob is not read in its place); a gitlink (a submodule) is skipped and
+named, its own repository not scanned here. File NAMES are never judged, only contents. `--history N` reads `git log -p --root --full-history --no-renames --text
+--diff-merges=first-parent --src-prefix=a/ --dst-prefix=b/ --relative -- .` with `GIT_NO_REPLACE_OBJECTS=1` and `GIT_GRAFT_FILE` set to an empty file, and **refuses a shallow repository** (exit 1, "history
+incomplete": a `.git/shallow` boundary would hide every commit behind it), (non-ASCII names unquoted) the same way — so a file
+holding a NUL or marked `binary`/`-diff` in `.gitattributes` is read as text, a merge's resolution is
+diffed against its first parent, a repository's `diff.noprefix` cannot hide a real `b/` folder, `log.showRoot=false` cannot hide the
+root commit, a `refs/replace/` stand-in or a `.git/info/grafts` entry cannot hide the commit that added a key, and a side branch
+that added a key and removed it before its merge is still read. N counts commits in git's date order,
+side-branch commits included; a renamed or copied file shows its whole content as added lines (also when
+it leaves a `SKIP` path, and whatever `diff.renames` says) — splits it on `\n` only, takes a `+++` line as a file's name only
+between its `diff --git` and its first `@@` (inside a hunk `+++ b/x` and `+++i;` are added lines), unquotes
+a C-quoted name, and applies `SKIP` and `ALLOWLIST` by the same paths as the tree scan. A byte-order mark at the start or at any line start,
+and a lone CR, U+2028, U+2029, NEL, form feed or vertical tab, are read as line structure. **Every rule judges every value, and at one position
+the most severe verdict wins: refused, then fixture, then not judged** — a fixture verdict never hides a
+refusal another rule makes of the same value. Its tests pin every row
+(`observatory/engine/tests/test_secrets.py`: `test_round5_grammar_cases`, `test_round6_counterexamples`,
+`test_round5_seeded_generator` — 2,400 keys — `test_round6_generator_crlf_and_non_utf8` — 1,200 CRLF and
+non-UTF-8 cases — `test_round7_generator_overlaps_bom_and_cr` — 1,200 overlaps — `test_round8_leading_underscores_and_the_cheap_lows`,
+`test_round9_nested_names_slots_and_the_cheap_lows`, `test_round9_history_headers_are_a_state_machine`, the four `test_round10_…` tests, the seven `test_round11_…` tests, the seven `test_round13_…` tests — 12,000 seeded 32- and 40-hex values — the four `test_round14_…` tests, and
+`test_round5_out_of_scope_is_documented_not_refused`).
+
+| | Rule | Example shape |
+|---|---|---|
+| **Refuses** | A **token**: a known issuer prefix — `credential_shape.PREFIXES`, `sk-or-v1-`, `sk-proj-`, `sk-ant-api03-`; the **longest** prefix wins — at a **token start**: the start of the text, any character other than an ASCII letter, ASCII digit or `_` (so a non-ASCII letter such as `é` right before the prefix still starts a token), or a literal `\n`/`\t`/`\r` escape in a string. The token runs to the longest `[A-Za-z0-9_-]` run, and its body is refused at or above the prefix's minimum (`credential_shape.BODY_MIN` where it names one — above or below 24 — else 24), whatever its entropy | `ghp_<36>`, `sk_live_<64 hex>`, `glpat-<20>`, `ghp_` + 36 lower-case letters |
+| **Refuses** | An AWS key id: `AKIA` or `ASIA` at a token start, exactly sixteen `[0-9A-Z]`, then anything but an ASCII letter or digit (end of text, `-backup`, `_x`) | `AKIA<16>`, `AKIA<16>-ghp_<36>` (both refused) |
+| **Refuses** | A private-key block header: `-----BEGIN [A-Z0-9 ]*PRIVATE KEY` — RSA, EC, DSA, OPENSSH, PGP, ENCRYPTED (PKCS#8) or none | `-----BEGIN … PRIVATE KEY` |
+| **Refuses** | A **named secret**: an UPPER_SNAKE name of two or more words ending in `_TOKEN`, `_KEY`, `_SECRET` or `_PASSWORD`, **leading underscores included** (`_API_KEY`, `__DB_PASSWORD`, `self._API_KEY`), words joined by one **or more** `_` (`APP__DB_PASSWORD`, `MYAPP__STRIPE__API_KEY`), the first word possibly starting with a digit (`_2FA_SECRET`), and not preceded by an ASCII letter or digit — as a quoted assignment (`NAME = "v"`, `NAME: 'v'`), a `.env` line (`[export ]NAME=v`), a YAML line (`NAME: v`; an optional `- ` list item and an optional quoted name; indented by spaces, tabs or no-break spaces), a line ending in LF, CRLF or any separator above, or a JSON member (`"NAME": "v"`); its literal value — sixteen or more of `[A-Za-z0-9_\-+/=.~\\]`, a JSON `\/` read as `/`, spaces or tabs after an opening quote and before a closing quote ignored — is a **placeholder** (the token rule's test, on the body after any issuer prefix), reported as a fixture, **checked first**; otherwise it is refused when it passes `scan_env.looks_secret` **or is 32 or more hex characters and nothing else** (`credential_shape`'s own pattern; a hex value under `looks_secret`'s entropy 3.4 is refused all the same) | `STRIPE_SECRET_KEY="<40 hex>"`, `_API_KEY = "<32>"` |
+| **Refuses** | A quoted value of 20+ `[A-Za-z0-9_\-+/=\\]` (a JSON `\/` read as `/`; spaces or tabs after the opening and before the closing quote ignored) assigned with `=` or `:` to the bare word `api_key`, `api-key`, `apikey`, `secret`, `token`, `passwd` or `password` (case-insensitive; leading underscores included; not preceded by an ASCII letter, digit or `_`; a JSON member keyed by the word, `"api_key": "v"`, included) that is not a slot address and not a **placeholder** (both checked first, as in the named rule), and that passes `scan_env.looks_secret`, or is 32 or more hex characters and nothing else, or whose normalised entropy — on the **whole value**, no prefix stripped — is at least 0.78 (a value led by an issuer prefix needs no second measure: every issuer prefix is a `KNOWN_PREFIX`, so `looks_secret` refuses it) (a hex value longer than 35 characters cannot reach 0.78; the hex rule is what refuses it) | `api_key = "<22 random>"`, `token = "<40 hex>"` |
+| **Never refuses** | A **slot address** under a bare word — word segments of letters, either case (joined within a segment by `-`, `_` or `.`, no digits) separated by `/`, then a name as wide as the vault's (`[A-Z_][A-Z0-9_]`: `_` runs anywhere, a digit first only after a leading `_`) of **two or more characters** after its leading underscores and at most 128 in all, leading underscores included, `alpha-web/prod/STRIPE_KEY`, `Alpha-Web/prod/_STRIPE_KEY`, `…/APP__DB_PASSWORD`, `…/_2FA_SECRET`, `…/KEY_` — names a secret and is not judged; a segment with a digit, or a one-character name (`…/X`), makes it a value. A token body under its minimum. A placeholder body — two or more lower-case words of 1–15 letters joined by `-` or `_`, or one repeated character — is reported as a **fixture**, checked before the name rule. A **name** — two or more `_`-separated segments of lower-case letters that is not a placeholder (one word longer than 15 letters) — is skipped, not reported; a one-segment lower-case body is not a name and is refused. After a token that is not judged, the scan resumes right after its prefix, so an inner token is still judged | `sk_your_key_goes_here_please` (fixture), `npm_config_cache_dir` (under minimum) |
+| **Never scanned** (`SKIP`) | `tools/check_secrets.py` (it holds the patterns) and `tests/test_secrets.py` (it plants keys to prove they are refused). `ALLOWLIST` names files whose hits are listed as allowed, each with a reason | — |
+| **Out of scope** (OBS-94) | An encoded value (`%XX`, `\uXXXX`, `\xXX`, ANSI codes) or an ASCII letter, digit or `_` right before the prefix; a value split by a `\` continuation or by implicit string concatenation; a code-level assignment (`os.environ[...] =`, a Python dict, a Kubernetes `name`/`value` pair, a YAML block scalar, Go `NAME := "v"`, Python `NAME: str = "v"`, TypeScript `const NAME: string = "v"`); a `.env` value followed by `;`; a lower-case name or a bare `KEY`, `_KEY` or `__KEY`; a password that fails `looks_secret`; a dotted value such as a JWT (`eyJ….….…`) under a bare word, whose `.` the bare-word alphabet does not include; a value whose `/`-separated parts before the last are letters only and whose last part is upper-case letters, digits and `_` (`alpha/prod/JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP`, a base32 secret), which reads as a slot address and is not judged; a UTF-16 (or other non-UTF-8 wide) encoded file; files outside the engine folder (`CHANGELOG.md`, `docs/`, root `tools/`, `.github/`) | — |
+
+**Fixture convention.** A test needs a key-shaped value: compose it at run time (`"sk" + "-" + body`), or
+make its body a placeholder by the rule above, or add the file to `ALLOWLIST` with a reason. A literal that
+matches a refusing row is refused even when it is a vendor's published example (AWS's documentation key
+id) or a body of upper-case words such as `FAKE`, `KEY`, `FOR`, `TESTS` joined by `_` after `sk-proj-`:
+upper-case words are not a placeholder.
+
+**Public hex values are refused too** (the hex rule's false-positive surface, on purpose): 32 or more hex
+characters under a `*_KEY`, `*_TOKEN`, `*_SECRET` or `*_PASSWORD` name, or a bare word, are refused
+whatever they hold — a GPG key fingerprint (`SIGNING_KEY=<40 hex>`), a `*_PUBLIC_KEY`, a `CACHE_KEY` that
+is a content hash, an `IDEMPOTENCY_KEY`. In a test, compose such a value at run time (`"ab" * 20`, or
+`hashlib.sha1(b"…").hexdigest()`), so no literal is in the tree; in shipped code, name it for what it is
+(`SIGNING_FINGERPRINT`, `CACHE_DIGEST`), which the named rule does not read; or add the file to
+`ALLOWLIST` with the reason.
+
+**What defends the out-of-scope rows** is the known-value leak
+scan (`tools/scan_leaks.py`), which looks for the exact values this machine holds wherever they appear,
+whatever surrounds them; an encoded copy of a value is PB-157's open gap there.
+
 ## Credentials in agent memory
 
 A workflow declares the credentials it needs, by name:

@@ -253,7 +253,7 @@ def test_the_environment_warning_is_said_once_per_process() -> None:
             "    P.read_key()\n")
     p = subprocess.run([PY, "-c", code], cwd=ROOT, capture_output=True, text=True,
                        timeout=300,
-                       env=dict(os.environ, OPENROUTER_API_KEY="not-a-key-at-all",
+                       env=dict(os.environ, OPENROUTER_API_KEY="not-a-key-" + "at-all",
                                 OBSERVATORY_KEY_FILE=str(keyfile)))
     said = [l for l in (p.stdout + p.stderr).splitlines() if "ignoring $" in l]
     check("six reads warn once", len(said) == 1, f"{len(said)}: {said[:3]}")

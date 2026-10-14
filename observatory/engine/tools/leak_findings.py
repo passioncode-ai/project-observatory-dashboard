@@ -124,8 +124,13 @@ def suppression(doc: dict | None) -> list[dict]:
 
 
 def unscanned(doc: dict | None) -> list[dict]:
-    """What the scanner could not read. Absent is not clean."""
-    notes = (doc or {}).get("not_scanned") or []
+    """What the scanner could not read. Absent is not clean.
+
+    A vault folder or slot, an env file or the env inventory that would not read
+    is recorded in `skipped` with `unreadable` (its values were never looked
+    for): it is a hole too, and is named here beside `not_scanned` (round 4)."""
+    notes = ((doc or {}).get("not_scanned") or []) + [
+        k for k in ((doc or {}).get("skipped") or []) if isinstance(k, dict) and k.get("unreadable")]
     if not notes:
         return []
     unreadable = [n for n in notes if n.get("unreadable")]
@@ -218,16 +223,23 @@ def findings(doc: dict | None) -> list[dict]:
     if not doc:
         return []
     if unmeasured(doc):
-        # A sighting is never withheld, not even beside "nothing to look for".
+        # A sighting is never withheld, not even beside "nothing to look for";
+        # nor is a hole (review round 5): when the only sources of values could
+        # not be read, the board says which, and `secret.leak_scan_blind` stands.
+        holes = [k for k in (doc.get("skipped") or []) if isinstance(k, dict) and k.get("unreadable")]
+        detail = ("It ran and found nothing because it knows no values on this "
+                  "machine — no env scan, no vault, no installed key. A clean "
+                  "report from it means UNMEASURED, and the difference is the "
+                  "whole point of saying so." if not holes else
+                  f"It ran and found nothing because the {len(holes)} source(s) of values it found "
+                  "could not be read: " + "; ".join(f"{k.get('what')} — {k.get('why')}" for k in holes[:LISTED])
+                  + ". A clean report from it means UNMEASURED.")
         return sightings(doc) + [{
             "type": "secret.leak_scan_unmeasured",
             "subject": "estate:leak-scan-coverage",
             "severity": "warning",
             **titled("the leak scan had nothing to look for"),
-            "detail": ("It ran and found nothing because it knows no values on this "
-                       "machine — no env scan, no vault, no installed key. A clean "
-                       "report from it means UNMEASURED, and the difference is the "
-                       "whole point of saying so."),
+            "detail": detail,
             "action": "project-observatory full env, then project-observatory full leaks",
-        }]
+        }] + unscanned(doc)
     return sightings(doc) + partial(doc) + suppression(doc) + unscanned(doc)

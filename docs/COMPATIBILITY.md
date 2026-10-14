@@ -145,6 +145,16 @@ unreadable source alone no longer sets it. Readers: only a scan that knew no val
 `secret.leak_scan_partial`. Every coded entry, a `source-unreadable` hole included, holds `/health` as
 degraded: an unread source is unmeasured, not clean; the hole counts every `not_scanned` note marked
 `unreadable` (a session folder that will not list is one, named `~`-relative), every `skipped` entry marked
-`unreadable` (an env file or a vault slot that will not read) and every store that would not open. A document from an older scanner (no `code`, no `targets_read`) still reads:
+`unreadable` (an env file or a vault slot that will not read) and every store that would not open.
+The env inventory and every file it lists are read as regular files only (`lstat`, then an
+`O_NOFOLLOW|O_NONBLOCK` open, then `fstat`): a FIFO, a device, a symbolic link, a NUL in a path, a
+`path` that is absolute, climbs with `..` or resolves outside the data folder through a linked
+folder, a wrong shape or a document nested past the parser's depth is a hole, never a hang or a
+crash; a byte-order mark is accepted. A listed env file is checked AFTER it is opened: the open
+descriptor's canonical path (`F_GETPATH` on macOS, `/proc/self/fd` on Linux) must have an ancestor that
+IS the data folder — the same device and inode, the ancestor read with `lstat` so a link is never
+followed (a folder this user may traverse but not list still compares) — so a folder swapped for a
+link before or after the open is a hole, and a case variant of the data folder's name is not. An inventory string with a lone surrogate or a NUL is a shape hole. A hard link to a file outside the data folder cannot be told
+apart by any path check and is read like any other regular file. A document from an older scanner (no `code`, no `targets_read`) still reads:
 without `known` it is unmeasured as before; with `known` its sightings stand and the partial row says the
 scanner recorded no coverage rather than inventing a count.

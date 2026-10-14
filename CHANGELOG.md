@@ -45,7 +45,6 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 Lessons are agents' work memory and stay in Observatory; an export of project-grade lessons to Fabric project
 memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#lessons)).
-
 - **A DigitalOcean door: database credentials to the vault, and a rotation that moves every consumer you name** (PLN-142):
   `tools/digitalocean.py` over the operator's `doctl` context. `db list` names clusters and which are open to
   the internet; `db consumers CLUSTER` names the App Platform apps that bind one and the password keys they keep
@@ -216,8 +215,22 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
   pass used to hide. The first passes after install are forced full (the known values change with INB-002, and
   changed values reset the offsets), so they stay `partial` for several ticks until the scan has read every
   target once. An unreadable source (`source-unreadable`) holds `/health` as degraded: unread is not clean —
-  a session folder that will not list, an env file or a vault slot that will not read, a store that will not
-  open. **Known gaps, not closed here:** a PEM key stored with escaped newlines in a JSONL line, and base64- or
+  a session folder or a vault folder (root, project, env) that will not list, a sessions root under a locked
+  folder, an env file, a vault slot or the env inventory that will not read or parse, a store that will not
+  open; vault and env holes also raise `secret.leak_scan_blind`, even when they are the only sources of values
+  (the "nothing to look for" row then names them). The env inventory is read as a regular file only: a FIFO,
+  a symbolic link (dangling, a loop, into a locked folder), a wrong JSON shape, or a `path` that is absolute
+  or climbs out of the data folder is a hole, never a hang, a crash or a read of `/etc/hosts`. So is a
+  listed file that is a FIFO or a link (read through `lstat`, `O_NOFOLLOW|O_NONBLOCK`, `fstat`), a path with
+  a NUL, a path that resolves outside the data folder through a linked folder, and an inventory nested
+  past the parser's depth; a byte-order mark is accepted. The no-values reason says when values were found
+  but none is searchable, or that the inventory lists no secret and the vault holds no slot. The env file read
+  is checked by the open descriptor's canonical path, so a folder swapped for a link mid-scan is a hole; a
+  lone surrogate in an inventory string is a shape hole. `scan_env` inventories the first line after a BOM. Round 8: the
+  descriptor's folder is checked by identity (device and inode), so a traverse-only data folder (0311) is
+  verified and nothing falls back to `realpath`; round 9: each ancestor is read with `lstat`, so a folder
+  swapped for a link to the data folder after the open is not followed into it; a lone surrogate in any report or state string is escaped.
+  A hard link to an outside file cannot be seen by a path check (COMPATIBILITY). **Known gaps, not closed here:** a PEM key stored with escaped newlines in a JSONL line, and base64- or
   JSON-escaped echoes of a value, are not matched (PB-157); a crowd of noise sightings can push a real one past
   the six the finding lists; a sighting is reported by the pass that first reads its row or offset only.
 - **A prefixed token is a secret and a UUID is decided by its name** (INB-002): the env classifier read an
@@ -233,7 +246,64 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
   time. One prefix list: `KNOWN_PREFIX` now derives from `credential_shape.PREFIXES`, which gains `ntn_`,
   `ol_api_`, `secret_`, `GOCSPX-` and `tvly-`. The commit gate `tools/check_secrets.py` refuses every one of
   them (no word character or `_` before the prefix, snake-case names excepted, a vendor's own minimum body —
-  `glpat-` 20), and an upper-case name ending in `_TOKEN`, `_KEY`, `_SECRET` or `_PASSWORD`. **Counts change** wherever the `secret` class is read: the SessionStart line, the leak scan's
+  `glpat-` 20). **The gate is an exact grammar** (`docs/design/AGENT-SECRETS.md`, "What the commit gate
+  refuses"): one tokenizer reads a known issuer prefix (and `AKIA`/`ASIA`) at a token start — a literal `\n`,
+  `\t` or `\r` escape included — with the longest `[A-Za-z0-9_-]` run, and refuses a body at or above the
+  prefix's minimum whatever its entropy; a body of lower-case-letter `_` segments is a name, and two or more
+  lower-case words or one repeated character is a placeholder, reported as a fixture. A named secret is an
+  UPPER_SNAKE name ending in `_TOKEN`, `_KEY`, `_SECRET` or `_PASSWORD` as a quoted assignment, a `.env` line, a
+  YAML line (a `- ` list item and a quoted name included) or a JSON member, whose value passes
+  `scan_env.looks_secret`. **Out of the gate's scope, on purpose (OBS-94):** encoded values (`%XX`, `\uXXXX`,
+  `\xXX`, ANSI codes) and an ASCII letter, digit or `_` before the prefix; values split by `\` continuation or implicit
+  concatenation; code-level assignments (`os.environ[...] =`, Python dicts, Kubernetes name/value pairs, YAML
+  block scalars, Go `NAME := "v"`, Python `NAME: str = "v"`, TypeScript `const NAME: string = "v"`); a `.env`
+  value followed by `;`; lower-case names and a bare `KEY`; passwords that fail `looks_secret`; files outside
+  the engine folder. Round 6 made the table exact: every tracked file is read as bytes (a non-UTF-8 file is
+  judged, an unreadable one fails the gate), named-secret lines may end in CRLF, the AWS id has its own
+  pattern (then anything but an ASCII letter or digit) and a token that is not judged lets the scan resume
+  after its prefix, the bare-word rule measures from 20, a DSA or ENCRYPTED private-key header is refused, an
+  `_`-joined placeholder is reported as a fixture, and a vendor minimum above 24 is honoured. Round 7: every
+  rule judges every value and the most severe verdict per position wins, so `API_KEY="<40 hex>"` and a
+  placeholder-led value are refused; the bare-word rule measures the whole value (no prefix stripped) and
+  takes a JSON member keyed by the word; a BOM and lone CR line ends are read as lines. UTF-16 files are out of
+  scope (OBS-94). Round 8: leading underscores are part of a name (`_API_KEY`, `self._API_KEY`); the bare-word
+  rule also refuses a value that passes `scan_env.looks_secret` (a hex value past 35 characters cannot reach
+  the 0.78 floor), reads a JSON `\/` as `/`, and does not judge a slot address (`project/env/NAME`, word
+  segments without digits); `--history` reads git's output as bytes; U+2028, U+2029, NEL, FF and VT are line
+  ends, a BOM at a line start is ignored, and a value may end in spaces inside its quotes. Round 9: a
+  named secret's words may be joined by `__` (`APP__DB_PASSWORD`, `MYAPP__STRIPE__API_KEY`) and its first
+  word may start with a digit (`_2FA_SECRET`), while a bare `_KEY`/`__KEY` stays out of scope; a value may
+  begin after spaces or tabs inside its opening quote, and a YAML line may be indented by no-break spaces;
+  a placeholder is a fixture before the shape test in the bare-word rule as in the named one; a slot
+  address needs a name of two or more characters and may carry an upper-case project and a `_`-led name;
+  the tree is listed with `git ls-files -z`, so a non-ASCII name is read and not reported unreadable;
+  `--history` runs `git log -p --relative -- .` with unquoted names, reads a `+++` line as a header only
+  between `diff --git` and the first `@@` (an added `++ b/x` or `++i;` line is a line), unquotes a C-quoted
+  name and skips `SKIP`'s files, so `check_secrets.py --history 40` exits 0. Round 10: `--history` reads a
+  file holding a NUL or marked `binary`/`-diff` as text (`--text`; git printed "Binary files differ" and its
+  added lines went unscanned), diffs each merge's resolution against its first parent
+  (`--diff-merges=first-parent`), and sets its own `a/`/`b/` prefixes, so a repository's `diff.noprefix`
+  cannot hide a real `b/` folder; a slot name is as wide as the vault's (`APP__DB_PASSWORD`, `_2FA_SECRET`,
+  `KEY_`). Round 11: `--history` also passes `--root` (a `log.showRoot=false` setting hid the root commit),
+  `--full-history` (a side branch that added a key and removed it before its merge) and
+  `GIT_NO_REPLACE_OBJECTS=1` (a `refs/replace/` stand-in), and unquotes a quoted name git ends with a TAB; a
+  slot name is at most 128 characters, as in the vault; the tree scan reads a tracked symbolic link's target
+  text and never follows it (a link to a FIFO blocked the gate), and reports any other non-regular file as
+  unreadable; the bare-word rule's never-deciding "rest after a leading token" measure is gone. Round 13:
+  a value of 32 or more hex characters under a named secret or a bare word is refused whatever its entropy
+  (about 1% of 40-hex and 6.5% of 32-hex values passed under `looks_secret`'s floor); `--history` sets
+  `GIT_GRAFT_FILE` to an empty file and passes `--no-renames`, so a graft cannot hide a commit and a file
+  renamed or copied out of a `SKIP` path shows its content; the tree scan opens every folder on a path
+  without following links (a path under a linked folder is unreadable), caps one read at 32 MB, skips and
+  names a submodule, and reads a sparse-checkout or missing tracked file from its index blob; the text
+  output gives each fixture's own reason. Round 14: every open of the tree scan and the leak scan goes
+  through `osprivacy` (on Windows, which has no folder descriptor, each folder on the path is checked for a
+  link first) and the leak scan reads a descriptor's path through `oslocks.fd_path`, so the engine's
+  Windows/Linux boundary tests hold; an index blob is read without replace objects; `--history` refuses a
+  shallow repository as incomplete (exit 1) rather than reporting clean; the table names the hex rule's
+  false positives (public fingerprints, `*_PUBLIC_KEY`, `CACHE_KEY` hashes, `IDEMPOTENCY_KEY`) and the
+  fixture convention for them. The known-value leak scan is their defence. Newly refused by the grammar, on purpose: a
+  vendor's published example and `FAKE_…` bodies (compose such fixtures at run time). **Counts change** wherever the `secret` class is read: the SessionStart line, the leak scan's
   known values and `agent.secret_outside_vault`; the Env page and `observatory_credentials`;
   `env.tracked_in_git` severity, `env.world_readable` and
   `env.shared_secret`; `remote.same_as_local` and `remote.unbacked`; the agent-memory redaction set; and the
