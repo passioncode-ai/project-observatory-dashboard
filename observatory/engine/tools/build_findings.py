@@ -36,6 +36,7 @@ import estate
 import identity
 import atomic
 import companion_faults              
+import why_asks  # noqa: E402
 import leak_register  # noqa: E402
 import paths              
 from store import db as store_db              
@@ -1382,6 +1383,46 @@ def companion_findings(rows: list[dict], slot: dict,
                       "read the receipt now — it is the only copy",
             "evidence": ["store/raw/record-turn.json#fault"]})
     return out
+
+
+def why_unanswered_findings(measured: dict | None) -> list[dict]:
+    """The companion's request for a `why`, as a rate: is anybody answering it?
+
+    The request ran after every changed turn as a Stop notice — 3,593 times in
+    fourteen days on one machine for 34 answers — and nothing measured that. It is
+    now asked once per record, with the next prompt, and journalled
+    (`why_asks.py`); this reads the answer rate over the window and speaks when
+    the ask costs every session context and records almost nothing: below
+    `why_asks.FLOOR_RATE` with at least `why_asks.FLOOR_ASKS` asks. Fewer asks is
+    too little to judge, and an unmeasured rate (no store) says nothing.
+    """
+    m = measured or {}
+    asked, answered, rate = m.get("asked"), m.get("answered"), m.get("rate")
+    if not isinstance(asked, int) or not isinstance(answered, int) or rate is None:
+        return []
+    if asked < why_asks.FLOOR_ASKS or rate >= why_asks.FLOOR_RATE:
+        return []
+    days = (m.get("window") or {}).get("days", why_asks.WINDOW_DAYS)
+    floor = (" The journal is read from its end and that bound was reached, so the "
+             "count is a floor." if m.get("floor") else "")
+    bad = (f" {m['unreadable']} journal line(s) could not be read." if m.get("unreadable") else "")
+    return [{
+        "type": "observatory.why_unanswered", "subject": "skill:observatory-log",
+        "severity": "warning",
+        **titled("{n} requests for a why went unanswered", n=asked - answered),
+        "detail": (f"{answered} of {asked} records the companion asked about in the last "
+                   f"{days} days received a `why` ({rate:.0%}). Each record is asked about "
+                   f"once, as context on the next prompt, and not at all when the turn "
+                   f"wrote its decision register; below {why_asks.FLOOR_RATE:.0%} the ask "
+                   f"costs every session context and puts almost nothing in the ledger."
+                   + floor + bad),
+        "action": ("check that an ask reached the model: `python \"$(project-observatory "
+                   "full-path)/why_asks.py\" reached <session transcript .jsonl> <memory id>` "
+                   "(exit 0 when the model received it). If it did and agents in this setup "
+                   "still do not answer, the ask is noise here: answer pending records with "
+                   "observatory_record(memory_id=…, why=…), or disable the observatory-log "
+                   "plugin's UserPromptSubmit hook"),
+        "evidence": ["store/raw/why-asks.jsonl", "store/raw/record-turn.json#whyAsks"]}]
 
 
 def blank_page_findings(receipt: dict | None,
@@ -3051,6 +3092,14 @@ def collect() -> list[dict]:
               file=sys.stderr)
         lost, unread = [], 0
     out += companion_findings(lost, slot, unread)
+
+    # THE ASK FOR A WHY, MEASURED. Read here from the journal and the ledger rather
+    # than from the receipt's `whyAsks`, which the next quiet turn of any session
+    # overwrites — the same slot problem `companion_faults.py` solved for faults.
+    try:
+        out += why_unanswered_findings(why_asks.measure_store())
+    except Exception as exc:                                                        # noqa: BLE001
+        print(f"  why-ask rate unreadable: {type(exc).__name__}: {exc}", file=sys.stderr)
 
     # THE INSTALLED COPY IS NOT THIS REPOSITORY, which is how a fix to the hook
     # can have no effect at all. A plugin whose marketplace source is a local

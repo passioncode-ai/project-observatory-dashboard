@@ -12,7 +12,12 @@ failure the whole design refuses.
 
 Prints a JSON object on stdout for the hook to act on:
     {"recorded": true, "memoryId": …, "revision": …, "hasWhy": false,
-     "project": "project:…", "files": 3, "insertions": 40, "deletions": 5}
+     "project": "project:…", "files": 3, "insertions": 40, "deletions": 5,
+     "session": …, "ask": true, "rationale": null}
+`ask` says whether the hook should ask for the `why` at all: false once this record
+has been asked about (`why_asks.py`, once per record), and false when the turn's
+own diff already carries the rationale — the decision register or a task-pipeline
+ledger line, linked in `rationale` and in the record's evidence instead.
 Any refusal is `{"recorded": false, "reason": …}` — never a traceback, because
 the caller is a hook that must degrade silently.
 """
@@ -25,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 import atomic                                                                    
 import paths                                                                     
 import safe_git                                                                  
+import why_asks                                                                  
 
 OWNER = "agent:claude-code"
 MAX_SUBJECTS = 8
@@ -58,7 +64,7 @@ _session_id = ""
 _cwd = ""
 
 
-def out(payload: dict) -> int:
+def out(payload: dict, receipt: dict | None = None) -> int:
     """Print the result for the hook, and leave a receipt for the findings.
 
     **The silence this closes.** `ask-why.py` says nothing when `recorded` is
@@ -77,7 +83,9 @@ def out(payload: dict) -> int:
     # tell whose turn the reason describes. Without it `companion.not_recording`
     # says "the companion could not record the last turn it tried" and cannot
     # say which one.
-    payload = {**payload,
+    # `receipt` is what the receipt carries and the hook does not need — the
+    # `whyAsks` measurement — so the hook's stdin stays the size it was.
+    payload = {**payload, **(receipt or {}),
                "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                "session": _session_id or "",
                "fault": bool(reason) and not any(k in reason for k in NOT_A_FAULT)}
@@ -246,12 +254,28 @@ def diff_facts(cwd: pathlib.Path) -> dict:
             ins += int(parts[0]) if parts[0].isdigit() else 0
             dele += int(parts[1]) if parts[1].isdigit() else 0
     files = sorted({l[3:].split(" -> ")[-1].strip() for l in porcelain})
+    untracked = sorted({l[3:].strip() for l in porcelain if l.startswith("??")})
+    if any(u.endswith("/") for u in untracked):
+        # `status` folds an untracked directory into one `?? docs/` line, which
+        # hides the register inside it. Only the files a rationale can live in are
+        # asked for, so a large untracked tree costs a walk, not a listing.
+        untracked = sorted(set(untracked) | {l.strip() for l in git(
+            cwd, "ls-files", "--others", "--exclude-standard", "--",
+            ":(glob,icase)**/decisions.md", ":(glob,icase)**/adr/**",
+            ".task-pipeline/run.md").splitlines() if l.strip()})
     head = git(cwd, "rev-parse", "--short", "HEAD").strip()
     branch = git(cwd, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    upstream = bool(git(cwd, "rev-parse", "--abbrev-ref", "@{u}").strip())
     unpushed = [l for l in git(cwd, "log", "--oneline", "@{u}..HEAD").splitlines() if l.strip()] \
-        if git(cwd, "rev-parse", "--abbrev-ref", "@{u}").strip() else []
+        if upstream else []
+    # The files the unpushed commits touched: a turn that COMMITTED its decision
+    # register wrote its rationale as surely as one that left it uncommitted.
+    committed = sorted({l.strip() for l in git(cwd, "diff", "--name-only", "@{u}..HEAD")
+                        .splitlines() if l.strip()}) if unpushed else []
     return {"files": files, "insertions": ins, "deletions": dele, "head": head,
-            "branch": branch, "unpushed": [u[:120] for u in unpushed[:MAX_SUBJECTS]]}
+            "branch": branch, "unpushed": [u[:120] for u in unpushed[:MAX_SUBJECTS]],
+            "untracked": untracked, "committed": committed,
+            "base": "@{u}" if unpushed else "HEAD"}
 
 
 def statement_of(facts: dict, repo_id: str) -> str:
@@ -264,6 +288,82 @@ def statement_of(facts: dict, repo_id: str) -> str:
     shown = facts["files"][:MAX_SUBJECTS]
     bits.append("touched: " + ", ".join(shown) + ("…" if n > len(shown) else ""))
     return " | ".join(bits)
+
+
+#: Where a project writes its rationale down. A decision register is any
+#: `decisions.md` (the conventional `docs/DECISIONS.md`, a run's
+#: `<artifacts>/decisions.md`) and any file under an `adr/` directory; the
+#: task-pipeline ledger counts only when the turn added a `decision:` or `stage:`
+#: line to it, because the ledger also records plain notes.
+RUN_LEDGER = ".task-pipeline/run.md"
+LEDGER_LINE = re.compile(r"^\s*(?:[-*]\s*)?(?:decision|stage)\s*:", re.I)
+HEADING = re.compile(r"^\s*#{1,6}\s+(.+?)\s*$")
+ANCHOR_CHARS = 120
+#: An untracked ledger or register is read whole, so it is read bounded.
+READ_LIMIT = 256 * 1024
+
+
+def _is_register(rel: str) -> bool:
+    parts = pathlib.PurePosixPath(rel).parts
+    if not parts:
+        return False
+    return parts[-1].lower() == "decisions.md" or (
+        "adr" in (p.lower() for p in parts[:-1]) and parts[-1].lower().endswith((".md", ".markdown", ".txt")))
+
+
+def _added_lines(top: pathlib.Path, rel: str, facts: dict) -> list[str]:
+    """The lines this work added to `rel`: the whole file when git does not track it
+    yet, else what `git diff <base>` adds — the uncommitted change and the
+    unpushed commits together."""
+    if rel in facts.get("untracked", ()):
+        try:
+            with (top / rel).open("r", encoding="utf-8", errors="replace") as fh:
+                return fh.read(READ_LIMIT).splitlines()
+        except OSError:
+            return []
+    diff = git(top, "diff", facts.get("base") or "HEAD", "--", rel)
+    return [l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++")]
+
+
+def rationale_of(top: pathlib.Path, facts: dict) -> dict | None:
+    """`{source, ref, anchor?}` when this work already wrote its rationale, else None.
+
+    The ledger's `why` is then a LINK to the canonical rationale, never a second
+    copy: the record's evidence names the file, and the hook asks for nothing.
+    Errors read as "no rationale", which asks — the old behaviour.
+    """
+    try:
+        touched = sorted(set(facts.get("files") or ()) | set(facts.get("committed") or ())
+                         | set(facts.get("untracked") or ()))
+        for rel in touched:
+            if _is_register(rel):
+                # The LAST heading added: a register grows at its end, and a new
+                # register's first heading is its title, not a decision.
+                heads = [m.group(1) for l in _added_lines(top, rel, facts)
+                         if (m := HEADING.match(l))]
+                anchor = heads[-1] if heads else None
+                return {"source": "decision-register", "ref": rel,
+                        **({"anchor": anchor[:ANCHOR_CHARS]} if anchor else {})}
+        if RUN_LEDGER in touched:
+            line = next((l.strip() for l in _added_lines(top, RUN_LEDGER, facts)
+                         if LEDGER_LINE.match(l)), None)
+            if line:
+                return {"source": "task-pipeline", "ref": RUN_LEDGER,
+                        "anchor": line[:ANCHOR_CHARS]}
+    except Exception:                                                              # noqa: BLE001
+        return None
+    return None
+
+
+def _why_asks(conn) -> dict | None:
+    """The ask's answer rate for the receipt; None (and a line on stderr) when it
+    cannot be measured — a measurement must never cost the turn its record."""
+    try:
+        return why_asks.measure(conn)
+    except Exception as exc:                                                       # noqa: BLE001
+        print(f"the why-ask rate could not be measured: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        return None
 
 
 def main() -> int:
@@ -304,6 +404,10 @@ def main() -> int:
     statement = statement_of(facts, repo_id)
     evidence = [{"uri": f"repo:{repo_id}", "head": facts["head"], "branch": facts["branch"]},
                 {"uri": "git:status --porcelain", "files": facts["files"][:40]}]
+    rationale = rationale_of(pathlib.Path(top or cwd), facts)
+    if rationale:
+        evidence.append({"uri": f"file:{rationale['ref']}", "kind": "rationale",
+                         **({"anchor": rationale["anchor"]} if rationale.get("anchor") else {})})
 
     # A row with no session id can never be REVISED: the prior-row lookup below
     # is keyed on the session, so every turn would mint a fresh `proposed`
@@ -378,7 +482,8 @@ def main() -> int:
             # append-only is a reason to be careful about what gets appended.
             return out({"recorded": False, "reason": "unchanged since the last turn",
                         "memoryId": prior["memory_id"], "revision": prior["revision"],
-                        "hasWhy": bool(prior["why"]), "project": project_id})
+                        "hasWhy": bool(prior["why"]), "project": project_id},
+                       {"whyAsks": _why_asks(conn)})
         result = L.append(
             conn, owner=OWNER, kind="session", statement=statement,
             why=prior["why"] if prior else None,
@@ -398,8 +503,18 @@ def main() -> int:
             provenance=[{"source": "observatory-log/Stop", "measured": True,
                          **({"continues": continues} if continues else {})}])
         has_why = bool(prior and prior["why"])
+        # ONCE PER RECORD, and never for a turn that wrote its own rationale. The
+        # ask ran after every changed turn — 3,593 times in fourteen days on one
+        # machine for 34 answers — although a session is ONE record revised per
+        # turn, so every ask after the first was the same question again.
+        ask = {"ask": False}
+        if not has_why and rationale is None:
+            ask = why_asks.ask_once(result["memoryId"], args.session_id, project_id)
         return out({"recorded": True, "memoryId": result["memoryId"],
                     "revision": result["revision"], "hasWhy": has_why,
+                    "session": args.session_id, "ask": ask["ask"],
+                    **({"askJournal": ask["journal"]} if "journal" in ask else {}),
+                    "rationale": rationale,
                     "continues": continues,
                     "project": project_id, "files": len(facts["files"]),
                     "insertions": facts["insertions"], "deletions": facts["deletions"],
@@ -412,7 +527,8 @@ def main() -> int:
                     # None means "does not apply": a project with no graph has
                     # not adopted graphify, and that is a choice, not staleness
                     #.
-                    **_knowledge_age(pathlib.Path(top or cwd))})
+                    **_knowledge_age(pathlib.Path(top or cwd))},
+                   {"whyAsks": _why_asks(conn)})
     except Exception as exc:
         return _fault(exc)
     finally:

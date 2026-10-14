@@ -1,5 +1,5 @@
 {
-  "description": "Optional Claude Code hooks: record changes in watched Git projects and request missing reasoning. SessionStart reports brief actionable context. Missing workspace, interpreter or watched project degrades quietly; hooks do not block a turn. Project names and paths stay in the private workspace.",
+  "description": "Optional Claude Code hooks: record changes in watched Git projects and request missing reasoning. SessionStart reports brief actionable context. Stop records the facts of a changed turn and, at most once per record and never when the turn already wrote a decision register or a task-pipeline decision line, leaves a request for the why. UserPromptSubmit hands that pending request to the model with the next prompt, once, and prints nothing when none is pending. Missing workspace, interpreter or watched project degrades quietly; hooks do not block a turn or a prompt. Project names and paths stay in the private workspace.",
   "hooks": {
     "SessionStart": [
       {
@@ -23,6 +23,18 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/record-turn.sh\"",
             "timeout": 20,
             "statusMessage": "Recording what changed"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "py=\"${OBSERVATORY_PYTHON:-}\"; [ -x \"$py\" ] || py=python3; \"$py\" \"${CLAUDE_PLUGIN_ROOT}/hooks/prompt-why.py\" 2>/dev/null; exit 0",
+            "timeout": 5
           }
         ]
       }

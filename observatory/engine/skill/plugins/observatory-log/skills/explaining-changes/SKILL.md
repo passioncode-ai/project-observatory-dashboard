@@ -48,14 +48,17 @@ and nothing in the ledger can tell it from a measured one.
 
 ## Recording it
 
-The Observatory's Stop hook has already stored the facts as a `proposed` record
-and printed its id. Correct that record rather than creating a second one:
+The Observatory's Stop hook has already stored the facts as a `proposed` record.
+Its id arrives once, as context with the next prompt; there is no ask when the
+turn already wrote its rationale to the decision register or the task-pipeline
+ledger, because the record links that file. Correct that record rather than
+creating a second one:
 
 ```
 observatory_record(
   owner="agent:claude-code",
-  memory_id="<the id the hook printed>",
-  expected_revision=<the revision it printed>,
+  memory_id="<the id the hook gave>",
+  expected_revision=<the revision it gave>,
   statement="<the same claim, unchanged>",
   why="<one or two sentences>"
 )

@@ -211,6 +211,7 @@
  "Nothing to clean.": "Очищать нечего.",
  "Nothing was cleaned in the last 7 days.": "За последние 7 дней ничего не очищено.",
  "Notification channel failing": "Канал уведомлений даёт сбои",
+ "Requests for a why left unanswered": "Вопросы «почему» без ответа",
  "Observatory MCP server not declared": "MCP-сервер Observatory не объявлен",
  "Observer state": "Состояние наблюдателя",
  "One order by the chosen column": "Общий порядок по выбранному столбцу",
@@ -833,6 +834,12 @@
  },
  "the buttons act: this page is served by {server}": "кнопки выполняют действия: страницу отдаёт {server}",
  "the commit from the description of release v{n}": "коммит из описания релиза v{n}",
+ "{n} requests for a why went unanswered": {
+  "one": "{n} вопрос «почему» остался без ответа",
+  "few": "{n} вопроса «почему» остались без ответа",
+  "many": "{n} вопросов «почему» остались без ответа",
+  "other": "{n} вопроса «почему» остались без ответа"
+ },
  "the companion could not record {n} turns": {
   "one": "сопутствующий плагин не смог записать {n} ход диалога",
   "few": "сопутствующий плагин не смог записать {n} хода диалога",

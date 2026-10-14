@@ -137,6 +137,7 @@ LABELS: dict[str, str] = {
     "memory.orphan_subject": "Ledger names an unknown project",
     "model.degraded": "Model degraded",
     "notify.channel_failing": "Notification channel failing",
+    "observatory.why_unanswered": "Requests for a why left unanswered",
     "plugin.broken": "Plugin broken",
     "plugin.refused": "Plugin refused",
     "plugin.stale": "Plugin out of date",

@@ -52,6 +52,10 @@
   "one": "the analytics numbers are {n} day old",
   "other": "the analytics numbers are {n} days old"
  },
+ "{n} requests for a why went unanswered": {
+  "one": "{n} request for a why went unanswered",
+  "other": "{n} requests for a why went unanswered"
+ },
  "the companion could not record {n} turns": {
   "one": "the companion could not record {n} turn",
   "other": "the companion could not record {n} turns"

@@ -231,7 +231,7 @@ COVERED_ELSEWHERE = {
         ("tests/test_retention.py", "tombstone"),
     "T8  the plugin declares no SessionStart hook":
         # T8 guards a BOUNDED SessionStart now, not an absent one.
-        ("tests/test_skill.py", "T8 the plugin declares SessionStart and Stop, and nothing else"),
+        ("tests/test_skill.py", "T8 the plugin declares SessionStart, Stop and UserPromptSubmit, and nothing else"),
     "T10 conflicting supported records return together":
         ("tests/test_index.py", "def test_search_returns_conflicts_together"),
 }

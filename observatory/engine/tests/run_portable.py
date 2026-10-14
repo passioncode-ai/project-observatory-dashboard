@@ -176,6 +176,9 @@ BOUNDARY += ('maintain_app',)
 BOUNDARY += ('disk_guard',)
 # The DigitalOcean door against a fake `doctl` and a scratch vault (PLN-142).
 BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
+# The request for a why (M-8): once per record, with the next prompt, measured; and the
+# canary that it reaches the model, read from a synthetic transcript.
+BOUNDARY += ('ask_why', 'ask_why_reach')
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -200,6 +203,8 @@ HELPERS += (
 )
 # task-pipeline's lessons.py emit-observatory output, copied: observatory_lesson's arguments (M-7).
 HELPERS += ('lesson_emitter_fixture.json',)
+# The synthetic transcript the reach canary reads (M-8).
+HELPERS += ('ask_why_transcript.json',)
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'plugins', 'store', 'tools')
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
@@ -208,6 +213,8 @@ ROOT_FILES = (
     'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'memory_snapshot.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'log_policy.py', 'code_freshness.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
+    # The companion's request for a why: journal, measurement, reach (M-8).
+    'why_asks.py',
     # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).
     'maintenance.py', 'app_update.py', 'update_events.py',
     # The organization's signature on a release, checked before any update (audit A04).
@@ -227,6 +234,7 @@ SKILL_FILES = (
     # The companion suites drive the hook scripts themselves.
     'skill/plugins/observatory-log/hooks/record-turn.sh',
     'skill/plugins/observatory-log/hooks/ask-why.py',
+    'skill/plugins/observatory-log/hooks/prompt-why.py',
 
     # Merged from the parallel port streams.
     'skill/plugins/observatory-log/hooks/session-start.sh',

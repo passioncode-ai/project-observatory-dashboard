@@ -575,7 +575,31 @@ as `lesson:` notes are converted once with
 (without `--apply` it lists what it would change and writes nothing).
 
 The optional `observatory-log` plugin adds Claude Code hooks; other hosts can
-use the CLI and MCP without those hooks.
+use the CLI and MCP without those hooks. It declares three, and none of them can
+block a turn or a prompt:
+
+- **SessionStart** prints at most two lines about the project, only when one is
+  actionable.
+- **Stop** records the facts of a turn that changed a watched repository as a
+  `proposed` ledger record, one per session, revised per turn. It asks for the
+  `why` of that record **once**, and not at all when the turn wrote its rationale
+  itself: a file named `decisions.md` in any folder and any letter case, a file under an `adr/`
+  directory, or a `decision:` / `stage:` line in `.task-pipeline/run.md`. The
+  record then links that file in its evidence instead of asking for a copy.
+- **UserPromptSubmit** hands that request to the model with the session's next
+  prompt, as context, once, and prints nothing when no request is pending. The
+  request waits in a private per-session file under
+  `$XDG_STATE_HOME/project-observatory/ask-why/` (`~/.local/state/…` by default;
+  mode 0600, removed when delivered or after seven days). If that file cannot be
+  written, the request falls back to a Stop notice.
+
+Every request is journalled in `store/raw/why-asks.jsonl`. A request counts as
+answered when its record later carries a `why`. The rate over seven days is in
+`store/raw/record-turn.json` (`whyAsks`) and from
+`python "$(project-observatory full-path)/why_asks.py"`. Below 10 % with at least
+20 requests, the board raises `observatory.why_unanswered`.
+`why_asks.py reached <transcript.jsonl> <memory id>` says whether a request
+reached the model in a given session transcript.
 
 For Claude Code, run `project-observatory full agent install`. It adds the
 GitHub marketplace `passioncode-ai/project-observatory-dashboard`, installs
