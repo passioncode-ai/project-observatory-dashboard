@@ -109,6 +109,8 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
     "scan-vault": {"writes": ["store/raw/vault.json"], "reads": ["registry/domains.json"]},
     "scan-cloudflare": {"writes": ["store/raw/cloudflare_zones.json"], "reads": []},
     "scan-mcp": {"writes": ["store/raw/mcp.json"], "reads": []},
+    # Reads the Fabric services directory and launchd, neither written by a step here.
+    "scan-agents": {"writes": ["store/raw/agents.json"], "reads": []},
     "scan-harness": {"writes": ["store/raw/harness.json"], "reads": ["registry/projects.json"]},
     "scan-spend": {"writes": ["store/raw/spend.json"], "reads": []},
     # READS the registry it will later help write, and that is a fixpoint over
@@ -179,6 +181,9 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                              "registry/duplicate-repo-names.json",
                              "registry/cloudflare-zones.json", "registry/products.json",
                              "registry/mcp-servers.json",
+                             # The agents document: the MCP join needs `scan-mcp`'s
+                             # output, and only the emit is sure to run after it.
+                             "registry/agents.json",
                              "registry/domain-liveness.json",
                              # UNDECLARED until it was traced. `validate` reads
                              # this file, so without the write here the graph
@@ -205,7 +210,7 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                              # same reason as the rest: the project join needs
                              # the project list and only `emit` holds it.
                              "registry/google-properties.json"],
-                  "reads": ["store/raw/google.json", "store/raw/remote-env.json",
+                  "reads": ["store/raw/google.json", "store/raw/remote-env.json", "store/raw/agents.json", "registry/agents.json",
                             "store/raw/cloudflare_zones.json", "store/raw/mcp.json", "collectors/products.json",
                             "collectors/host_boundary.json", "store/raw/model.json", "registry/domains.json", "store/raw/domains_live.json",
                             "store/raw/heroku.json", "collectors/heroku_links.json",
@@ -220,6 +225,7 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                                           "registry/domains.json", "registry/domain-liveness.json",
                                           "registry/domain-exclusions.json",
                                           "registry/stale-remotes.json",
+                                          "registry/agents.json",
                                           # The engine reads the Cloudflare
                                           # snapshot from a workspace source
                                           # (`cloudflare_snapshot`), not from a

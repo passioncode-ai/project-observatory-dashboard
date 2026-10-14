@@ -235,6 +235,14 @@ def main():
             if s.get("target") and "?" in s["target"]: errors.append(f"mcp target carries a query string: {s['id']}")
         mt=load("mcp-servers.json").get("totals") or {}
         if mt.get("declarations")!=len(mcps): errors.append("mcp totals disagree with the list")
+    # THE AGENTS ON THIS MACHINE (OBS-83): the rules live beside the generator
+    # (`collectors/scan_agents.py`, `problems`) so the two cannot drift apart.
+    if (INV/"agents.json").is_file():
+        sys.path.insert(0,str(ROOT/"collectors"))
+        import scan_agents
+        adoc=load("agents.json")
+        errors.extend(f"agents.json: {p}" for p in scan_agents.problems(adoc))
+        if set(adoc.get("source_refs") or [])-si: errors.append("agents.json cites an unresolved source")
     zi={z["id"] for z in zones}
     accs=load("accounts.json")["accounts"] if (INV/"accounts.json").is_file() else []
     uniq(accs,"id","accounts",errors)

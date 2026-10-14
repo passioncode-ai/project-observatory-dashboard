@@ -186,6 +186,8 @@ BOUNDARY += ('maintain_app',)
 BOUNDARY += ('disk_guard',)
 # The DigitalOcean door against a fake `doctl` and a scratch vault (PLN-142).
 BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
+# The agents registry: Fabric descriptors, launchd and the MCP inventory -> registry/agents.json (OBS-83).
+BOUNDARY += ('scan_agents',)
 SUITES = LEGACY + BOUNDARY
 HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
            'render_provider_health.py', 'render_dashboard.mjs', 'test_portable_mcp.py', 'run_portable.py',
@@ -277,7 +279,7 @@ def copy_source(target: Path) -> None:
                      if p.suffix in {'.py', '.sh', '.js', '.css', '.html', '.svg'}
                      and '__pycache__' not in p.parts}
     # The dashboard's catalogs and the vendored brand manifest are data it reads.
-    for folder in ('defaults', 'plugins', 'fabric/fixtures', 'fabric/schemas', 'fabric/service-schemas',
+    for folder in ('defaults', 'plugins', 'schemas', 'fabric/fixtures', 'fabric/schemas', 'fabric/service-schemas',
                    'fabric/interop-schemas', 'fabric/memory-schemas', 'fabric/delegation-schemas', 'fabric/node-vectors',
                    'dashboard/locales', 'dashboard/brand'):
         selected |= set((ROOT / folder).glob('*.json'))
