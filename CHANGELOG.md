@@ -3,6 +3,34 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Changed
+
+- **The `observatory-log` plugin asks for a turn's `why` once per record, with the next prompt, and
+  measures the answers** (M-8, INB-004). The Stop hook printed the request as a Stop `systemMessage`
+  after every changed turn. On one machine over fourteen days that was 3,593 requests and 34 answers.
+  A Stop `systemMessage` is a notice for the person and is not rendered into the model's input. Now:
+  - **Once per record.** A session is one record revised per turn, so a session is asked once.
+    `store/raw/why-asks.jsonl` (new, append-only) is the journal.
+  - **Not when the rationale exists.** A turn that wrote a `decisions.md`, a file under `adr/`, or a
+    `decision:` / `stage:` line in `.task-pipeline/run.md` (uncommitted or in unpushed commits) is not
+    asked about. Its record's evidence links the file (`file:<path>`, `anchor` = the newest heading or
+    ledger line), and the record's `why` stays empty.
+  - **Where the model reads it.** A new `UserPromptSubmit` hook, `hooks/prompt-why.py`, hands the
+    pending request to the model as `additionalContext` with the next prompt, once. It prints nothing
+    when nothing is pending. The request waits in `$XDG_STATE_HOME/project-observatory/ask-why/<session>.json`
+    (0600, pruned after seven days). If that file cannot be written, the request falls back to the Stop
+    notice. A fault to record is still a Stop notice.
+  - **Measured.** `store/raw/record-turn.json` gains `whyAsks` (`asked`, `answered`, `rate`, `window`).
+    `why_asks.py` prints the same, and `why_asks.py reached <transcript> <memory id>` says whether a
+    request reached the model in a session transcript. The new finding `observatory.why_unanswered`
+    fires below a 10 % answer rate over seven days with at least 20 requests.
+
+  `tests/test_skill.py` T8 now expects the `UserPromptSubmit` hook it used to forbid, and runs it to
+  show that it prints nothing with no request pending. New suites: `tests/test_ask_why.py` and
+  `tests/test_ask_why_reach.py` (a synthetic transcript fixture).
+
 ## 0.24.5 — 2026-10-14
 
 The leak scan reads every agent's transcripts (Codex, Hermes and opencode beside Claude Code) and a scan its
