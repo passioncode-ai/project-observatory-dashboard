@@ -3,7 +3,15 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.24.5 — 2026-10-14
+
+The leak scan reads every agent's transcripts (Codex, Hermes and opencode beside Claude Code) and a scan its
+deadline cuts short still reports what it saw. Cleanup never removes local work it cannot restore, and the disk
+guard registers worktrees cheaply before its expensive passes. Findings say when the tick, the harness scan or the
+guard could not measure, and RAM and swap refresh on their own. Lessons become their own record kind; OpenRouter
+spend per issued key; a DigitalOcean database door. The companion plugin `observatory-log` moves to 0.24.5: its
+`handling-secrets` skill names the DigitalOcean door, the provider tools that return a credential by design, and
+the header door's `--server-url`.
 
 ### Added
 
@@ -165,6 +173,19 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
   wider than the header, and private names in the board and this file (with the maintainer's local denylist).
   `.claude/agent-sync.json` declares the `OBS` register, so a branch reserves its row's id before writing it.
 
+- **RAM, swap and process memory refresh on their own** (OBS-87, #257): `project-observatory full machine
+  --memory-only` samples RAM, swap and per-process RSS (by executable name, never a command line) into
+  `machine-memory.json` without sizing the disk, and the disk guard takes this sample before its expensive
+  phases. Each source carries its own time: the Machine page, the CLI and MCP say how old each is, an unknown
+  swap stays unknown rather than zero, and a failed sample never re-dates an older one. RSS totals are sums that
+  can count shared pages more than once.
+- **Worktrees are registered before cleanup classifies them** (OBS-87, #255): `collectors/scan_git_hygiene.py
+  OUT --registrations-only` lists each repository's worktrees with `git worktree list --porcelain` alone, within
+  its budget, into `store/raw/worktree-registration.json`; a repository not listed in this pass keeps its old
+  list, marked `stale`. The disk guard refreshes registrations first, starts each pass where the last one stopped
+  (a persisted cursor), bounds each root and keeps each phase's holder evidence. A registration never
+  authorizes a removal.
+
 ### Changed
 
 - **The engine board is the organization's canonical format** (L-1): `docs/backlog.md` holds its table in one
@@ -274,6 +295,10 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
   clones hold a tenth of the place (and 100 MB) the Machine page and `machine.disk_low` name the floor. The walk
   costs about three times `du`'s time (6.3 GB of caches: 7.6 s against 24.7 s under load); one that does not
   finish keeps the last walk's figures, dated, and says so (ENG-006 below).
+
+- **The Russian copy speaks one vocabulary** (#241): 392 dashboard catalog entries and 52 Mac and desktop app
+  strings are rewritten without calques or English left mid-sentence, with one word for one thing and the neutral
+  address of `docs/brand/locales/ru.md`. Keys, placeholders, commands, paths and slot names are unchanged.
 
 ### Fixed
 
@@ -429,6 +454,29 @@ memory is a later seam ([agent memory → Lessons](docs/design/AGENT-MEMORY.md#l
   plan records `survey_partial` and `carried` (count and oldest measurement), `cleanup` prints how many checkouts
   wait for a fresh pass (also in its `--json` summary, so the disk guard's report keeps it), and the Machine page
   and the `observatory_machine` overview show the partial survey.
+- **Cleanup never removes local work it cannot restore** (OBS-84, OBS-86, #255):
+  - a manual worktree removal skips a worktree that holds ignored files, before archiving and again before the
+    removal (preserve or move them, then rerun `full cleanup --apply --include manual`);
+  - `.wrangler` local state is no longer build output, even in an older copied configuration;
+  - nested repositories, hidden index flags and bare repositories refuse removal;
+  - a manual archive is read back, and the worktree's content, HEAD and index are checked again before removal;
+  - a branch is deleted only at the tip that was proven, never through a symbolic branch;
+  - every planned path carries its device and inode, and is checked again, with fresh holders, when it is applied.
+- **Findings say when a measurement is incomplete or old** (OBS-88, OBS-89, OBS-90, #257):
+  - `harness.scan_degraded` names an agent tool configuration the harness scan could not read; names recovered
+    from malformed JSON or TOML are marked `parsed: false`, and a plaintext credential in a Git-tracked
+    configuration is `critical`;
+  - `tick.rotation_degraded` and `tick.collector_starved` name unknown collector scheduling and a planned
+    collector that has not run; a disabled collector is not a measurement;
+  - merged inputs keep their own measurement times (local inputs 2 hours, GitHub 6 hours, daily inputs 48 hours)
+    instead of taking the merge's;
+  - `machine.guard_stopping` warns when Git cleanup stopped in three consecutive disk guard runs, and
+    `machine.guard_degraded` names what the guard could not measure; only a Trash permission cause gets the Full
+    Disk Access remedy.
+- **A failed suite keeps the others' receipts** (OBS-85, #255): the portable runner records an error row for the
+  suite that failed in setup or report writing beside its peers' results, and never publishes a final PASS when
+  writing the report failed.
+
 
 ## 0.24.4 — 2026-10-12
 

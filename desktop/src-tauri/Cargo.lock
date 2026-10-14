@@ -2820,7 +2820,7 @@ dependencies = [
 
 [[package]]
 name = "project-observatory-desktop"
-version = "0.24.4"
+version = "0.24.5"
 dependencies = [
  "libc",
  "percent-encoding",
