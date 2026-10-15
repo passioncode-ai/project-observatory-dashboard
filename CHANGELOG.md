@@ -14,31 +14,54 @@ while the major version is 0, a minor release may change behaviour and says so h
   the model's input. Now:
   - **Once per record.** A session is one record revised per turn, so a session is asked once.
     `store/raw/why-asks.jsonl` (new, append-only) journals each request and each delivery. It rotates
-    to `why-asks.jsonl.1` past 1 MB, and both are read, so a record is not asked again when it scrolls.
-  - **Not when this session wrote the rationale.** No request when this session's own tools wrote it:
-    - non-blank lines, whitespace ignored, added to a `decisions.md` or an `adr/` file outside vendored
-      trees (`vendor/`, `node_modules/`, `third_party/`, `.venv/` …) and submodules, and not deleted;
-    - or a `decision:` / `stage:` line in `.task-pipeline/run.md`, read from disk even when git ignores
-      it.
+    to `why-asks.jsonl.1` past 1 MB, under a lock, and both are read, so a record is not asked again
+    when it scrolls.
+  - **The record first.** The Stop hook writes the record before anything else.
+  - **Not when this session wrote the rationale.** Within 2 seconds after the record is written, one
+    pass over the last 4 MB of the session's transcript (named by the Stop payload) collects this
+    session's writing calls:
+    - Edit, Write, MultiEdit and NotebookEdit, with the file each names;
+    - Bash commands that write through `>`, `>>` (also `cat > file <<EOF`), `tee` or `sed -i`, with
+      the files they write.
 
-    "Its own tools" means the text appears in the input of one of the session's Edit, Write, MultiEdit,
-    NotebookEdit or Bash calls in the transcript the Stop payload names. The following are asked about:
-    another session's edit in the same checkout, a file the session only read, and a turn with no
-    transcript. The record's evidence links the file (`file:<path>`, `anchor` = the newest heading or
-    ledger line), and its `why` stays empty.
+    No request is made in two cases:
+    - one of those calls targets a decision register (a `decisions.md`, or a `.md`, `.markdown` or
+      `.txt` file under `adr/`, outside vendored trees and submodules, not deleted, with at least one
+      non-blank added line, whitespace ignored), and its text carries that file's newest added heading
+      or more than half of its added lines;
+    - one of those calls wrote `.task-pipeline/run.md` (or ran `stage_checkpoint.py`), and a
+      `decision:` or `stage:` line among the ledger's newest 64 KB and 200 such lines, read even when
+      git ignores it, has its text in what those calls wrote.
+
+    A second revision of the same record then links the file (`file:<path>`, `anchor` = the newest
+    heading or ledger line), and its `why` stays empty.
+
+    The turn is asked about in every other case:
+    - another session's edit in the same checkout;
+    - a file the session only read or grepped;
+    - a pull-request body that shares a heading;
+    - a write by a tool the pass does not know;
+    - a subagent's edit (subagents keep their own transcripts);
+    - no transcript;
+    - a pass that runs out of its 2 seconds.
   - **Where the model reads it.** A new `UserPromptSubmit` hook, `hooks/prompt-why.py`, hands the
     pending request to the model as `additionalContext` with the next prompt, once, and records the
-    delivery. It prints nothing when nothing is pending. The request waits in
-    `$XDG_STATE_HOME/project-observatory/ask-why/<session>.json` (0600). An undelivered one older
-    than seven days is pruned by either hook. If that file cannot be written, the request falls back
-    to the Stop notice. An older engine whose recorder does not decide whether to ask also gets the
-    Stop notice, never an injected prompt. A fault to record is still a Stop notice.
+    delivery. The context is capped at 4,000 characters, and a request that does not fit waits for the
+    following prompt without being marked delivered. It prints nothing when nothing is pending, never
+    writes through a symbolic link, and reaches no file for a session id that is not a plain name.
+    - The request waits in `$XDG_STATE_HOME/project-observatory/ask-why/<session>.json` (0600). An
+      undelivered one older than seven days is pruned by either hook.
+    - If that file cannot be written, the request falls back to the Stop notice. An older engine whose
+      recorder does not decide whether to ask also gets the Stop notice, never an injected prompt. A
+      fault to record is still a Stop notice.
   - **Measured.** `store/raw/record-turn.json` gains `whyAsks` (`asked`, `delivered`, `pending`,
     `answered`, `rate`, `window`), with rate = answered ÷ delivered. A request that never reached the
-    model, such as a headless single-prompt session, is pending and never unanswered. `why_asks.py`
-    prints the same, and `why_asks.py reached <transcript> <memory id>` says whether a request reached
-    the model in a session transcript. The new finding `observatory.why_unanswered` fires below a
-    10 % rate over seven days with at least 20 delivered requests.
+    model, such as a headless single-prompt session, is pending and never unanswered.
+    - `why_asks.py` prints the same.
+    - `why_asks.py reached <transcript> <memory id>` says whether a request reached the model in a
+      session transcript.
+    - The new finding `observatory.why_unanswered` fires below a 10 % rate over seven days with at
+      least 20 delivered requests.
 
   `tests/test_skill.py` T8 now expects the `UserPromptSubmit` hook it used to forbid, and runs it to
   show that it prints nothing with no request pending. New suites: `tests/test_ask_why.py` and
