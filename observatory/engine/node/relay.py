@@ -9,10 +9,8 @@ refusal codes, so a node and the contract kit give one answer for one body.
 from __future__ import annotations
 
 import base64
-import calendar
 import json
 import re
-import time
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from . import jcs, p256
@@ -38,8 +36,9 @@ MESSAGE_REFUSALS = ('malformed', 'unsupported-alg', 'unknown-sender', 'bad-key',
 
 # ---- Times ---------------------------------------------------------------------------------------------------------
 
-_INSTANT = re.compile(r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,9})?Z$')
-_RFC3339 = re.compile(r'^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$')
+# ASCII digits only, and fullmatch: `\d` takes other scripts' digits and `$` a trailing newline.
+_INSTANT = re.compile(r'([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(\.[0-9]{1,9})?Z')
+_RFC3339 = re.compile(r'([0-9]{4})-([0-9]{2})-([0-9]{2})[Tt]([0-9]{2}):([0-9]{2}):([0-9]{2})(\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})')
 
 
 def _days_in(year: int, month: int) -> int:
@@ -48,26 +47,37 @@ def _days_in(year: int, month: int) -> int:
     return 30 if month in (4, 6, 9, 11) else 31
 
 
+def _days_from_civil(year: int, month: int, day: int) -> int:
+    """Days since 1970-01-01 in the proleptic Gregorian calendar, for every year 0000-9999 (as JavaScript's `Date`
+    counts them; `calendar.timegm` refuses year 0)."""
+    year -= month <= 2
+    era = year // 400
+    yoe = year - era * 400
+    doy = (153 * (month + (-3 if month > 2 else 9)) + 2) // 5 + day - 1
+    doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
+    return era * 146097 + doe - 719468
+
+
 def _epoch_ms(match: 're.Match', offset_minutes: int = 0) -> Optional[int]:
     year, month, day, hour, minute, second = (int(match.group(i)) for i in range(1, 7))
     if not 1 <= month <= 12 or not 1 <= day <= _days_in(year, month) or hour > 23 or minute > 59 or second > 59:
         return None
     fraction = match.group(7)
     millis = int((fraction[1:] + '00')[:3]) if fraction else 0
-    seconds = calendar.timegm((year, month, day, hour, minute, second, 0, 0, 0)) - offset_minutes * 60
+    seconds = _days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second - offset_minutes * 60
     return seconds * 1000 + millis
 
 
 def instant(value: Any) -> Optional[int]:
     """The milliseconds of an RFC 3339 UTC instant (`Z` only, upper-case `T`, at most nine fraction digits) on a day its
     month has, or None; hour 24 and a leap second are refused. The relay's times are read only through this."""
-    match = _INSTANT.match(value) if isinstance(value, str) else None
+    match = _INSTANT.fullmatch(value) if isinstance(value, str) else None
     return _epoch_ms(match) if match else None
 
 
 def strict_time(value: Any) -> Optional[int]:
     """The contract's `strictTime`: an RFC 3339 date-time with any offset (an estate record's window), or None."""
-    match = _RFC3339.match(value) if isinstance(value, str) else None
+    match = _RFC3339.fullmatch(value) if isinstance(value, str) else None
     if not match:
         return None
     offset = match.group(8)
@@ -78,12 +88,28 @@ def strict_time(value: Any) -> Optional[int]:
 def iso_ms(ms: int) -> str:
     """An instant as `YYYY-MM-DDTHH:MM:SS.mmmZ`, the form the vectors print."""
     seconds, millis = divmod(ms, 1000)
-    return time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(seconds)) + '.%03dZ' % millis
+    return _civil(seconds) + '.%03dZ' % millis
 
 
 def rfc3339(ms: int) -> str:
     """An instant as whole-second RFC 3339 UTC, the form a node signs."""
-    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(ms // 1000))
+    return _civil(ms // 1000) + 'Z'
+
+
+def _civil(seconds: int) -> str:
+    """`YYYY-MM-DDTHH:MM:SS` of whole seconds since the epoch, for years 0000-9999 (the inverse of
+    `_days_from_civil`)."""
+    days, rest = divmod(seconds, 86400)
+    z = days + 719468
+    era = z // 146097
+    doe = z - era * 146097
+    yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
+    doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
+    mp = (5 * doy + 2) // 153
+    day = doy - (153 * mp + 2) // 5 + 1
+    month = mp + (3 if mp < 10 else -9)
+    year = yoe + era * 400 + (month <= 2)
+    return '%04d-%02d-%02dT%02d:%02d:%02d' % (year, month, day, rest // 3600, rest // 60 % 60, rest % 60)
 
 # ---- Origins -------------------------------------------------------------------------------------------------------
 
@@ -154,11 +180,21 @@ def message_body(signer: Callable[[str], str], *, sender: str, to: str, msg_id: 
     return compact
 
 
+_BLOB_DIGEST = re.compile(r'sha256:[0-9a-f]{64}')
+
+
 def relay_request_header(signer: Callable[[str], str], *, relay: str, method: str, digest: str, kid: str,
                          recipients: Sequence[str], iat: str) -> str:
-    """The `Fabric-Relay-Request` value of a blob PUT or GET: base64url of RFC 8785 {alg, kid, recipients, iat, sig}."""
+    """The `Fabric-Relay-Request` value of a blob PUT or GET: base64url of RFC 8785 {alg, kid, recipients, iat, sig}.
+    Everything a relay would refuse is refused here first, so a node never signs a request no relay accepts."""
     if method not in ('PUT', 'GET'):
         raise ValueError('a blob request is a PUT or a GET')
+    if not is_relay_origin(relay):
+        raise ValueError('not a relay origin')
+    if not isinstance(digest, str) or not _BLOB_DIGEST.fullmatch(digest):
+        raise ValueError('a blob digest is sha256: and 64 lowercase hex digits')
+    if instant(iat) is None:
+        raise ValueError('iat is not an RFC 3339 UTC instant')
     if not _sig_kid(kid) or not 1 <= len(recipients) <= MAX_BLOB_RECIPIENTS or not all(map(_sig_kid, recipients)) \
             or len(set(recipients)) != len(recipients):
         raise ValueError('recipients are 1 to 64 distinct #sig kids')
@@ -183,10 +219,46 @@ def _refuse(reason: str) -> dict:
     return {'ok': False, 'reason': reason}
 
 
+#: How deeply a document a node parses may nest. The reference has no bound; a relay message's payload nests a few
+#: levels, and a bound keeps a hostile relay's deeply nested frame from exhausting the parser (`malformed`).
+MAX_JSON_DEPTH = 64
+
+
+def _depth_ok(text: str) -> bool:
+    """Whether brackets outside strings nest at most `MAX_JSON_DEPTH` deep, counted before anything is parsed."""
+    depth, in_string, escaped = 0, False, False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in '[{':
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                return False
+        elif char in ']}':
+            depth -= 1
+    return True
+
+
 def _json(raw: bytes):
+    """JSON with no NaN or Infinity, at most `MAX_FRAME_BYTES` and `MAX_JSON_DEPTH` deep; ValueError otherwise."""
     def no_constants(name: str):
         raise ValueError(name)
-    return json.loads(raw.decode('utf-8'), parse_constant=no_constants)
+    if len(raw) > MAX_FRAME_BYTES:
+        raise ValueError('too large')
+    text = raw.decode('utf-8')
+    if not _depth_ok(text):
+        raise ValueError('too deep')
+    try:
+        return json.loads(text, parse_constant=no_constants)
+    except (RecursionError, MemoryError) as error:
+        raise ValueError('unparseable') from error
 
 
 def verify_message_body(body: Any, expect: Mapping[str, str], sender_key: Callable[[str], Any], now_ms: int) -> dict:
@@ -292,11 +364,12 @@ def peer_keys(record: Optional[Mapping[str, Any]], at_ms: int,
         return [entry for entry in value if isinstance(entry, dict)] if isinstance(value, list) else []
 
     revocations = entries(record.get('revocations')) + entries(list(extra_revocations))
-    machines = {entry.get('ref') for entry in revocations if entry.get('kind') == 'machine'}
-    keys = {entry.get('ref') for entry in revocations if entry.get('kind') == 'device-key'}
-    admitted, excluded = {}, []
+    # Only string references count: an object or an array names nothing and cannot be hashed.
+    machines = {entry.get('ref') for entry in revocations if entry.get('kind') == 'machine' and isinstance(entry.get('ref'), str)}
+    keys = {entry.get('ref') for entry in revocations if entry.get('kind') == 'device-key' and isinstance(entry.get('ref'), str)}
+    admitted, excluded, claimed = {}, [], set()
     for machine in entries(record.get('machines')):
-        if machine.get('id') in machines:
+        if not isinstance(machine.get('id'), str) or machine['id'] in machines:
             continue
         for key in entries(machine.get('deviceKeys')):
             kid, public = key.get('kid'), key.get('publicKey')
@@ -304,16 +377,32 @@ def peer_keys(record: Optional[Mapping[str, Any]], at_ms: int,
                     or not isinstance(public, str) or kid in keys:
                 continue
             octets = _base64(public)
-            if p256.is_ed25519_key(octets):
+            if kid in claimed:
+                # A kid named twice speaks for nobody: neither of its keys is believed.
+                admitted.pop(kid, None)
+                excluded.append({'kid': kid, 'reason': 'bad-key'})
+            elif p256.is_ed25519_key(octets):
                 excluded.append({'kid': kid, 'reason': 'unsupported-alg'})
-            elif p256.key_refusal(octets) is not None:
+            elif p256.key_refusal(octets) is not None or kid != machine['id'] + '#sig':
+                # A kid is bound to the machine that lists it (FAC-SEM-073 holds this for a verified record; a node
+                # checks it again before it believes a key).
                 excluded.append({'kid': kid, 'reason': 'bad-key'})
             else:
                 admitted[kid] = octets
+            claimed.add(kid)
     return {'ok': True, 'revision': record.get('revision'), 'keys': admitted, 'excluded': excluded}
 
 
+_STRICT_B64 = re.compile(r'[A-Za-z0-9+/]*={0,2}')
+
+
 def _base64(text: str) -> bytes:
-    """Base64 SEC 1 octets as the reference reads them (Node's lenient decoder): stray characters are skipped."""
-    cleaned = re.sub(r'[^A-Za-z0-9+/]', '', text.replace('-', '+').replace('_', '/'))
-    return base64.b64decode(cleaned + '=' * (-len(cleaned) % 4)) if len(cleaned) % 4 != 1 else b''
+    """The bytes of canonical, padded standard base64 (re-encoding gives the same text), else b'', which no key
+    validation accepts. Stricter than Node's lenient decoder on purpose: one key has one spelling."""
+    if not isinstance(text, str) or len(text) % 4 or not _STRICT_B64.fullmatch(text):
+        return b''
+    try:
+        raw = base64.b64decode(text, validate=True)
+    except ValueError:
+        return b''
+    return raw if base64.b64encode(raw).decode('ascii') == text else b''
