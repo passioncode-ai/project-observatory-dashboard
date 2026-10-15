@@ -28,12 +28,16 @@ counted, never guessed onto an agent whose name looks similar. A port two descri
 ambiguous: its declarations are attributed to neither, counted, and named in `degraded`.
 
 WHAT IS NEVER WRITTEN. Nothing of `auth`: not the token, not where the token file lives — the
-location is not a fact about the agent and the file is a credential. A URL (the origin, the
-source repository, any URL inside a problem's text) loses its user-info and its query, exactly
-as `scan_mcp.safe_url` does for MCP targets, and the row's `key_in_url` says one was there.
+location is not a fact about the agent and the file is a credential. Every string the document
+carries passes ONE sanitiser (`_text`): any URL in it — with `//`, one slash, a backslash or none,
+since a browser finds the user-info in each — loses its user-info, query, `;params` and fragment,
+as `scan_mcp.safe_url` does for MCP targets, and the row's `key_in_url` says the origin or the
+repository had one. `problems()` refuses the same token shape, so a harmless `?lang=en` in a
+summary is rewritten rather than left to turn the validator red and stop the tick. The emit runs
+the sanitiser again over the whole document, so a scan written by an older collector is cleaned too.
 Values a descriptor quotes back into a problem are dropped, not echoed. Commands are listed by
 name (`doctor`, `update`), never their argument vectors. A path under the home directory is
-written `~/…` (either separator, so a Windows home too). Every string is bounded and encodable
+written `~/…` wherever it occurs in a string (either separator, so a Windows home too). Every string is bounded and encodable
 as UTF-8. No process id and no instant: the document changes when the estate changes, not on
 every tick, so the registry is not committed every thirty minutes for nothing.
 
@@ -64,7 +68,8 @@ DATES ARE THE SCAN'S. `first_seen_on` and `last_seen_running_on` are the day the
 looked, never the day the emit ran. The tick runs this collector under `features.machine_watch`,
 the switch of the lifecycle watch that reads the same descriptors; with it off, or with the step
 starved by the rotation, the emit keeps re-reading the last scan. A scan older than
-`STALE_SECONDS` makes the document `stale: true` with the scan's date in `degraded`, and since it
+`STALE_SECONDS`, or dated after the emit (`clock-skew`), makes the document `stale: true` with the
+scan's date in `degraded`, and since it
 dates nothing after the scan, re-emitting the same old scan changes nothing.
 
 It starts nothing and signals nothing: `launchctl list` is the only command, run once.
@@ -97,6 +102,8 @@ LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 #: A scan older than this is stale: the tick's interval (1800 s) plus its own ceiling (1500 s),
 #: so a collector that ran in the previous tick is still fresh at the end of this one.
 STALE_SECONDS = 1800 + 1500
+#: A scan dated this far after the emit came from a clock that is wrong; it is not trusted as fresh.
+CLOCK_SKEW_SECONDS = 300
 #: Read caps. A real descriptor is about 1 KB and a real manifest tens of KB.
 MAX_DESCRIPTOR_BYTES = 256 * 1024
 MAX_MANIFEST_BYTES = 2 * 1024 * 1024
@@ -107,10 +114,15 @@ _ID = re.compile(r"^[a-z][a-z0-9-]{1,62}$")
 _INSTANCE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 #: `agent:<id>.<instance>`, or `agent:file:<name>` for a descriptor whose own id is unusable.
 AGENT_ID = re.compile(r"^agent:([a-z][a-z0-9-]{1,62}\.[a-z][a-z0-9-]{0,31}|file:[A-Za-z0-9._-]{1,160})$")
-#: A URL carrying user-info or a query: a credential's shape, refused anywhere in the document.
-_KEYED_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s/?#]*@|[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"]*\?")
-_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"]+")
+#: A URL-shaped token: a scheme of two or more characters (so `C:\…` is a drive, not a scheme),
+#: then anything up to whitespace or a quote.
+_TOKEN = re.compile(r"(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]+):([^\s'\"<>]*)")
+#: After the scheme: an authority (`//` with either slash), or user-info with no slashes at all —
+#: `https:u:S@h/`, `http:/u:S@h/` and `http:\\u:S@h/` all reach a host in a WHATWG parser.
+_AUTHORITY = re.compile(r"^[\\/]{2}|^[\\/]*[^\s/\\?#@]*@")
 _QUOTED = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
+#: `fabric_service.validate_descriptor` names a command key unquoted; the key is the descriptor's.
+_COMMAND_NAME = re.compile(r"\b(unknown command|command) \S+")
 
 
 # --- small helpers -------------------------------------------------------------
@@ -119,17 +131,16 @@ def _home() -> str:
     return str(pathlib.Path.home()).rstrip("/\\")
 
 
+def _home_pattern() -> re.Pattern:
+    """The home directory wherever it appears: as a prefix, mid-string, or at the end."""
+    return re.compile(re.escape(_home()) + r"(?=[/\\]|$|[\s'\"])")
+
+
 def tilde(value):
-    """A string with the home directory written `~`, either separator; anything else unchanged."""
-    if not isinstance(value, str):
+    """A string with the home directory written `~` wherever it occurs, either separator."""
+    if not isinstance(value, str) or not _home():
         return value
-    home = _home()
-    if value == home:
-        return "~"
-    for sep in ("/", "\\"):
-        if value.startswith(home + sep):
-            return "~" + sep + value[len(home) + 1:]
-    return value.replace(home + "/", "~/").replace(home + "\\", "~\\")
+    return _home_pattern().sub("~", value)
 
 
 def _clean(value: str) -> str:
@@ -137,38 +148,92 @@ def _clean(value: str) -> str:
     return value.encode("utf-8", "backslashreplace").decode("utf-8")
 
 
-def _text(value, limit: str = "default") -> str | None:
-    """A bounded, UTF-8-safe string, or None for anything that is not a string."""
-    if not isinstance(value, str):
-        return None
-    cap = LIMITS[limit]
-    value = _clean(value)
-    return value if len(value) <= cap else value[:cap - 1] + "…"
+def _normal_url(url: str) -> str:
+    """`scheme:<anything>` as `scheme://<authority>…`: backslashes become slashes and a missing or
+    single slash is made double, so `urlsplit` sees the authority a browser would."""
+    scheme, _, rest = url.partition(":")
+    rest = rest.replace("\\", "/")
+    if rest.startswith("//"):
+        return f"{scheme}:{rest}"                       # already an authority; `file:///…` stays a path
+    return f"{scheme}://{rest.lstrip('/')}"
 
 
 def safe_url(url: str) -> tuple[str, bool]:
-    """(url without user-info and query, whether either was there) — `scan_mcp.safe_url`'s rule,
-    with the host lowercased so an uppercase origin still joins."""
+    """(url without user-info, query, `;params` and fragment, whether user-info or a query was
+    there) — `scan_mcp.safe_url`'s rule, after `_normal_url`, with the host lowercased so an
+    uppercase origin still joins."""
+    if ":" in url and _AUTHORITY.match(url.partition(":")[2]):
+        url = _normal_url(url)
     try:
         s = urlsplit(url)
-        host = s.hostname or ""
-        port = s.port
+        host = s.hostname or ""                         # `hostname` is already lowercase
     except ValueError:
-        scheme = url.split("://", 1)[0] if "://" in url else ""
+        scheme = url.split(":", 1)[0] if ":" in url else ""
         return (scheme + "://…" if scheme.isalpha() else "…"), True
+    port = _port(s)
     netloc = f"[{host}]" if ":" in host else host
     if port:
         netloc += f":{port}"
     keyed = bool(s.query) or s.username is not None or s.password is not None
-    return urlunsplit((s.scheme.lower(), netloc, s.path, "", "")), keyed
+    return urlunsplit((s.scheme.lower(), netloc, s.path.split(";", 1)[0], "", "")), keyed
+
+
+def _port(parts) -> int | None:
+    """The URL's port, or None when it has none or an unusable one. `urlsplit().port` raises
+    ValueError above 65535 and returns 0 for `:0`; neither is a port anything answers on, and
+    neither is a credential, so the port is dropped and the URL is not counted as keyed."""
+    try:
+        port = parts.port
+    except ValueError:
+        return None
+    return port or None
+
+
+def _url_tokens(text: str):
+    """Each URL-shaped token in `text` that reaches an authority: (match, its safe form, keyed)."""
+    for m in _TOKEN.finditer(text):
+        if _AUTHORITY.match(m.group(2)):
+            shown, keyed = safe_url(m.group(0))
+            yield m, shown, keyed
+
+
+def _scrub(text: str) -> str:
+    """Every URL in `text` made safe; every other character kept."""
+    out, last = [], 0
+    for m, shown, _keyed in _url_tokens(text):
+        out.append(text[last:m.start()])
+        out.append(shown)
+        last = m.end()
+    out.append(text[last:])
+    return "".join(out)
+
+
+def _text(value, limit: str = "default") -> str | None:
+    """THE one sanitiser for every string this document carries: UTF-8-safe, every URL without
+    user-info, query or params, the home directory written `~` wherever it occurs, then bounded.
+    None for anything that is not a string."""
+    if not isinstance(value, str):
+        return None
+    cap = LIMITS[limit]
+    value = tilde(_scrub(_clean(value)))
+    return value if len(value) <= cap else value[:cap - 1] + "…"
 
 
 def _safe_problem(text) -> str:
-    """A problem's message without the values it quoted back, and every URL in it made safe."""
-    text = _clean(str(text))
-    text = _QUOTED.sub("…", text)
-    text = _URL.sub(lambda m: safe_url(m.group(0))[0], text)
-    return _text(tilde(text), "problem")
+    """A problem's message without the values it quoted back (or a command key it names bare)."""
+    text = _QUOTED.sub("…", _clean(str(text)))
+    return _text(_COMMAND_NAME.sub(lambda m: m.group(1) + " …", text), "problem")
+
+
+def _sanitise(node):
+    """`_text` over every string of a JSON value, keys included, never re-bounding below 300."""
+    if isinstance(node, str):
+        return _text(node)
+    if isinstance(node, dict):
+        return {_text(k): _sanitise(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_sanitise(v) for v in node]
+    return node
 
 
 def _expand(value: str) -> pathlib.Path:
@@ -262,14 +327,10 @@ def _origin(origin) -> tuple[str | None, str | None, int | None, bool]:
         return None, None, None, False
     shown, keyed = safe_url(origin)
     try:
-        parts = urlsplit(origin)
-        host = (parts.hostname or "").lower() or None
-        port = parts.port
+        parts = urlsplit(_normal_url(origin) if ":" in origin else origin)
     except ValueError:
-        return _text(shown), None, None, True
-    if port is not None and not 1 <= port <= 65535:
-        port = None
-    return _text(shown), _text(host), port, keyed
+        return _text(shown), None, None, keyed
+    return _text(shown), _text(parts.hostname or None), _port(parts), keyed
 
 
 def _manifest(declared, degraded: list, agent_id: str) -> dict:
@@ -486,10 +547,10 @@ def _mcp_key(target) -> tuple[str, int] | None:
         return None
     try:
         parts = urlsplit(target)
-        port = parts.port
     except ValueError:
         return None
-    host = (parts.hostname or "").lower()
+    port = _port(parts)
+    host = parts.hostname or ""                         # already lowercase
     if not host or parts.scheme.lower() not in ("http", "https"):
         return None
     port = port or (443 if parts.scheme.lower() == "https" else 80)
@@ -518,13 +579,17 @@ def _join_mcp(rows: list[dict], mcp_scan: dict | None, degraded: list) -> dict |
             by_key.setdefault(key, []).append(r)
     for row in rows:
         row["mcp_declarations"] = []
-    counts = {"attributed": 0, "ambiguous": 0, "unattributed_http": 0, "stdio": 0}
+    counts = {"attributed": 0, "ambiguous": 0, "unattributed_http": 0, "stdio": 0, "other": 0}
     ambiguous_keys: set[tuple] = set()
     for decl in estate_surfaces.mcp_rows(mcp_scan):
+        if decl.get("transport") == "stdio":
+            # What `scan_mcp` says, literally: its stdio target is the command's basename.
+            counts["stdio"] += 1
+            continue
         key = _mcp_key(decl.get("target"))
         if key is None:
-            # A stdio declaration's target is its command's basename (`scan_mcp`), not a URL.
-            counts["stdio"] += 1
+            # Not stdio and not an HTTP(S) origin: `ws://`, a malformed target, no target at all.
+            counts["other"] += 1
             continue
         owners = by_key.get(key) or []
         if len(owners) > 1:
@@ -552,11 +617,17 @@ def document(scan: dict, mcp_scan: dict | None, previous: dict | None, obs_date:
     degraded = [dict(d) for d in scan.get("degraded") or []]
     scan_day = _day(scan.get("scanned_at")) or obs_date
     scanned = _instant(scan.get("scanned_at"))
-    stale = scanned is None or (now - scanned).total_seconds() > STALE_SECONDS
-    if stale:
+    skew = scanned is not None and (scanned - now).total_seconds() > CLOCK_SKEW_SECONDS
+    stale = scanned is None or skew or (now - scanned).total_seconds() > STALE_SECONDS
+    if skew:
         degraded.append({"source": "fabric-services",
-                         "reason": f"the agents scan is from {scan.get('scanned_at') or 'an unknown time'}, "
-                                   f"older than one tick; nothing in this document is dated after it"})
+                         "reason": _text(f"clock-skew: the agents scan is dated {scan.get('scanned_at')}, after "
+                                         f"this emit; it is treated as stale", "problem")})
+    elif stale:
+        degraded.append({"source": "fabric-services",
+                         "reason": _text(f"the agents scan is from {scan.get('scanned_at') or 'an unknown time'}, "
+                                         f"older than one tick; nothing in this document is dated after it",
+                                         "problem")})
     previous_rows = {r.get("id"): r for r in (previous or {}).get("agents") or [] if isinstance(r, dict)}
     dir_state = ((scan.get("sources") or {}).get("fabric_services") or {}).get("state")
     if dir_state == "unreadable":
@@ -598,6 +669,9 @@ def document(scan: dict, mcp_scan: dict | None, previous: dict | None, obs_date:
             continue
         state = (row.get("supervisor") or {}).get("state") or "not-measured"
         by_state[state] = by_state.get(state, 0) + 1
+    rows = _sanitise(rows)
+    degraded = _sanitise(degraded)
+    sources = _sanitise(sources)
     return {
         "schema_version": SCHEMA_VERSION, "updated_on": obs_date,
         "scanned_on": _day(scan.get("scanned_at")),
@@ -642,8 +716,9 @@ def problems(doc) -> list[str]:
     if not isinstance(doc, dict) or not isinstance(doc.get("agents"), list):
         return ["agents.json carries no `agents` list"]
     out: list[str] = []
-    ids = [r.get("id") for r in doc["agents"] if isinstance(r, dict)]
-    dup = sorted({i for i in ids if ids.count(i) > 1})
+    from collections import Counter
+    dup = sorted(str(i) for i, n in Counter(r.get("id") for r in doc["agents"] if isinstance(r, dict)).items()
+                 if n > 1)
     if dup:
         out.append(f"duplicate agent ids: {dup}")
     for row in doc["agents"]:
@@ -668,10 +743,10 @@ def problems(doc) -> list[str]:
             if field in manifest and (not isinstance(manifest[field], kind) or isinstance(manifest[field], bool)):
                 out.append(f"{rid} manifest.{field} is not a {kind.__name__}")
     strings = list(_strings(doc))
-    home = _home()
-    if any(s.startswith(home + "/") or s.startswith(home + "\\") for s in strings):
+    home = _home_pattern() if _home() else None
+    if home and any(home.search(s) for s in strings):
         out.append("agents.json holds an absolute home path; paths under home are written ~/")
-    if any(_KEYED_URL.search(s) for s in strings):
+    if any(keyed for s in strings for _m, _shown, keyed in _url_tokens(s)):
         out.append("agents.json holds a URL with user-info or a query: a credential's shape, never kept")
     if (doc.get("totals") or {}).get("agents") != len(doc["agents"]):
         out.append("agents.json totals disagree with the list")

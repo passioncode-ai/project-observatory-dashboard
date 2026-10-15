@@ -221,10 +221,14 @@ written by the emit from `store/raw/agents.json` (new, collector `collectors/sca
 `validate`. It declares a new source, `SRC-0020`. Rows are `agent:<service-id>.<instance>`, one per
 fabric-service/0.1 descriptor (`agent:file:<name>` when a descriptor's own id is unusable), and carry no
 `auth` field, no absolute home path and no URL user-info or query (`key_in_url` says one was dropped). The
-document's `stale` is true when the collector's scan is older than one tick, and its dates are the scan's.
+document's `stale` is true when the collector's scan is older than one tick. `updated_on` is the day the emit
+wrote it; `scanned_on`, `first_seen_on` and `last_seen_running_on` are the scan's.
 Rows kept from an unreadable services directory carry `carried_since` and are left out of the supervisor
-totals. `totals.mcp` counts `attributed`, `ambiguous` (an origin two agents claim), `unattributed_http` and
-`stdio` (a declaration with no HTTP origin). The wiki projection
+totals. `totals.mcp` counts `attributed`, `ambiguous` (an origin two agents claim), `unattributed_http`, `stdio`
+(declarations whose transport is stdio) and `other` (neither stdio nor an HTTP(S) origin, such as `ws://` or a
+malformed target). Every string passes one sanitiser: URLs in any slash form lose user-info, query, `;params`
+and fragment, and the home directory is written `~` wherever it occurs. A scan dated after the emit is stale
+(`clock-skew` in `degraded`). The wiki projection
 mirrors it as it mirrors every registry document. A workspace upgraded from an earlier release gets the
 file on its first tick with the feature on. Until then it is absent, and no reader requires it.
 
