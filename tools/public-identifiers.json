@@ -212,6 +212,10 @@
   {
    "token": "opensearch",
    "reason": "a public database engine name (OpenSearch, one of DigitalOcean's managed database engines), named by the DigitalOcean door when it refuses an engine it does not build URLs for; it reaches a private list only through generic environment variable names"
+  },
+  {
+   "token": "bcrypt",
+   "reason": "OpenSSH's key-derivation function name (bcrypt_pbkdf), written in an encrypted private key's header; the SSH-key tests build such headers (PB-163). A public algorithm, not a private project"
   }
  ]
 }
