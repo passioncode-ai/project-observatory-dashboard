@@ -5,6 +5,14 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **The Cloudflare door issues a cache-purge token for one zone** (`issue --preset cache-purge --zone <zone> --vault
+  PROJECT/ENV/NAME`): `Zone Read` and `Cache Purge` on that zone only, named after the zone and the slot. Listing a
+  zone proves nothing about purging it, so the proof is a purge of one URL the site does not serve
+  (`/.well-known/observatory-purge-probe`), never `purge_everything`; a zone preset's probe body may now name the zone.
+  First holder: a landing site that purges its zone after each CI deploy.
+
 ### Documentation
 
 - **The README's capability table names records and lessons** (N-4, USR-009). A new row, "Can agents keep what

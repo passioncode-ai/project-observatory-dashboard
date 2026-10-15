@@ -1403,6 +1403,8 @@ def test_cf_email_presets_grant_exactly_what_the_email_service_needs() -> None:
          "/zones/z1/rulesets/phases/http_request_dynamic_redirect/entrypoint", "rd-value-"),
         ("workers-routes", "zone", ("Zone Read", "Workers Routes Write"),
          "/zones/z1/workers/routes", "wr-value-"),
+        ("cache-purge", "zone", ("Zone Read", "Cache Purge"),
+         "/zones/z1/purge_cache", "cp-value-"),
     ]
     for preset, level, groups, probe, prefix in cases:
         m = cf(); _cf_with_admin(m)
@@ -1442,9 +1444,10 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
               "workers-edit": ("Workers Scripts Write", "Workers KV Storage Write"),
               "email-routing": ("Zone Read", "Email Routing Rules Write"),
               "redirect-rules": ("Zone Read", "Dynamic URL Redirects Write"),
-              "workers-routes": ("Zone Read", "Workers Routes Write")}
+              "workers-routes": ("Zone Read", "Workers Routes Write"),
+              "cache-purge": ("Zone Read", "Cache Purge")}
     level = {"email-send": "account", "workers-edit": "account", "email-routing": "zone",
-             "redirect-rules": "zone", "workers-routes": "zone"}
+             "redirect-rules": "zone", "workers-routes": "zone", "cache-purge": "zone"}
     for preset in groups:
         m = cf(); _cf_with_admin(m)
         log, delivered = [], []
@@ -1544,6 +1547,44 @@ def test_cf_redirect_preset_proves_its_read_on_a_zone_without_redirects() -> Non
     with contextlib.redirect_stderr(io.StringIO()):
         rc = m.cmd_issue_zone("dns-edit", "example.com", "proj/prod/CF_DNS", None, wait=0)
     check("a 404 proves nothing for a preset that did not declare it", rc == 1 and not delivered, str(rc))
+
+
+def test_cf_cache_purge_proves_itself_with_one_harmless_purge() -> None:
+    """Listing a zone proves nothing about purging it, so the cache-purge preset
+    proves its grant by purging ONE url on that zone that the site does not serve:
+    a POST whose body names that url and nothing else, never `purge_everything`.
+    Every other zone preset still proves itself with a plain GET."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    log, delivered = [], []
+    _preset_fake(m, log, [("Zone Read", "zone"), ("Cache Purge", "zone")], "/zones/z1/purge_cache", "cp-value-")
+    m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append((p, e, n))
+    m._journal = lambda *a, **k: None
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_zone("cache-purge", "example.com", "proj/prod/CF_CACHE_PURGE_TOKEN", None, wait=0)
+    probes = [(meth, pl) for meth, path, tok, pl in log
+              if path == "/zones/z1/purge_cache" and tok.startswith("cp-value-")]
+    check("cache-purge issues into its slot", rc == 0 and delivered == [("proj", "prod", "CF_CACHE_PURGE_TOKEN")],
+          str(rc))
+    check("cache-purge proves itself with a POST naming one url on its own zone",
+          probes == [("POST", {"files": ["https://example.com/.well-known/observatory-purge-probe"]})], str(probes))
+    check("cache-purge never purges everything to prove itself",
+          not any(pl and "purge_everything" in pl for _m, _p, _t, pl in log), str(log))
+    check("cache-purge: the token is named after its zone and its slot",
+          any(pl and pl.get("name") == "observatory-cache-purge example.com proj/prod/CF_CACHE_PURGE_TOKEN (managed)"
+              for _m, p, _t, pl in log if p == "/accounts/a1/tokens"), str(log))
+    check("cache-purge: no value printed", "cp-value-" not in out.getvalue(), out.getvalue())
+
+    m = cf(); _cf_with_admin(m)
+    log = []
+    _preset_fake(m, log, [("Zone Read", "zone"), ("DNS Write", "zone")], "/zones/z1/dns_records", "dn-value-")
+    m.deliver_to_vault = lambda *a: None
+    m._journal = lambda *a, **k: None
+    with contextlib.redirect_stdout(io.StringIO()):
+        m.cmd_issue_zone("dns-edit", "example.com", "proj/prod/CF_DNS", None, wait=0)
+    check("a zone preset without a probe body still proves itself with a GET",
+          [meth for meth, path, tok, _pl in log if tok.startswith("dn-value-")] == ["GET"], str(log))
 
 
 def test_cf_email_routing_token_is_one_per_slot() -> None:
@@ -3167,6 +3208,7 @@ if __name__ == "__main__":
                test_cf_fabric_presets_refuse_what_they_do_not_grant,
                test_cf_logs_preset_reads_telemetry_with_a_post_and_grants_nothing_more,
                test_cf_zone_analytics_preset_reads_one_zone_into_the_vault,
+               test_cf_cache_purge_proves_itself_with_one_harmless_purge,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,
