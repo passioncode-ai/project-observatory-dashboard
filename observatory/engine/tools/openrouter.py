@@ -1297,8 +1297,9 @@ def _delivery_failed(admin: str, row: dict) -> None:
 @_locked
 def rotate_one(name: str, doc: dict | None = None) -> dict:
     """Deliver and verify a successor before revoking the predecessor; keep recovery metadata."""
-    # Re-read under the ledger lock: a copy read before it may be stale (two rotations at once).
-    doc = ledger()
+    # Without a caller's own `doc`, the ledger is read here, under the ledger lock: a copy read before the lock
+    # may be stale (two rotations at once). A caller that passes `doc` owns it and writes it back through us.
+    doc = doc if doc is not None else ledger()
     if (doc.get("issued", {}).get(name) or {}).get("claimed"):
         raise ValueError(f"{name!r} was claimed, not issued: there is nowhere to deliver a successor; "
                          f"`issue` its replacement to a destination, then `revoke {name}`")
@@ -1380,7 +1381,7 @@ def cmd_rotate(name: str | None, leaked: bool) -> int:
         targets = [t for t in targets if not (doc["issued"].get(t) or {}).get("claimed")]
     for n in targets:
         try:
-            r = rotate_one(n, doc)
+            r = rotate_one(n)               # re-read under the lock: `doc` above was read before it
             print(f"  {n}: rotated, successor delivered to {r['delivered_to']}, predecessor deleted")
         except (LookupError, ValueError) as exc:
             print(f"  {n}: {exc}", file=sys.stderr)
