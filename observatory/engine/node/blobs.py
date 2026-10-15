@@ -64,11 +64,14 @@ def _request(origin: str, method: str, digest: str, header: str, data: Optional[
             return response.status, response.read(MAX_BLOB_BYTES + 1)
     except urllib.error.HTTPError as error:
         try:
-            refusal = json.loads(error.read(65536)).get('error', {})
-        except (ValueError, AttributeError):
-            refusal = {}
+            document = json.loads(error.read(65536))
+            refusal = document.get('error') if isinstance(document, dict) else None
+        except (ValueError, UnicodeDecodeError, RecursionError):
+            refusal = None
         finally:
             error.close()
+        if not isinstance(refusal, dict):                  # the documented shape, or no code at all
+            refusal = {}
         raise BlobRefused(error.code, str(refusal.get('code', 'unknown')), str(refusal.get('message', ''))) from None
 
 

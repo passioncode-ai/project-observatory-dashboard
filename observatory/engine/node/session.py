@@ -9,20 +9,26 @@ After `welcome` one reader thread owns the socket's input:
 
 - an answer (`accepted`, `pong`, `presence-result`, an `error` with `replyTo`) wakes the call that sent its frame;
 - a `deliver` is checked end to end (`verify_message_body` against this machine's own kid, then `check_replay`),
-  handed to `on_message`, and acknowledged only after the handler returned, so a message the handler could not take is
-  delivered again (at least once). A refused or repeated body is acknowledged without acting on it;
+  handed to `on_message`, and acknowledged only after the handler returned, so a message the handler could not take
+  stays in the mailbox and is delivered again on the next connection (at least once). A refused, repeated or unreadable
+  body is acknowledged, then reported to `on_refused`, without acting on it;
 - `presence`, `heartbeat` and `delta` go to their callbacks unchanged (the estate record's checks are slice 3);
 - a closing `error` and the close code end the session: 4403 means this machine left the estate's admission set or
   the record expired.
+
+Nothing a relay sends ends the reader except a close: a callback that raises, a body no check can read and a frame
+nested too deep are logged and skipped. A link that answers nothing (two missed pings, or 75 s of silence) is closed
+as dead. `keep_connected` reopens a closed session with a jittered backoff, and stops for good on 4401 or 4403.
 
 Logs carry event names, kids, codes and counts; never a body, a payload or a signature.
 """
 from __future__ import annotations
 
-import base64
 import json
 import logging
+import random
 import secrets
+import socket
 import threading
 import time
 from dataclasses import dataclass, field
@@ -35,7 +41,15 @@ LOG = logging.getLogger('observatory.node.session')
 HELLO_TIMEOUT_SECONDS = 10.0
 ANSWER_TIMEOUT_SECONDS = 15.0
 PING_SECONDS = 30.0
+#: Pings unanswered in a row before the link counts as dead (a half-open TCP connection never reports itself).
+DEAD_AFTER_MISSED_PINGS = 2
+#: Silence after which the reader gives up: the node pings every 30 s and the relay answers each, so 75 s of nothing
+#: is a dead link, closed before the relay's own 90 s idle rule.
+RECV_TIMEOUT_SECONDS = 2.5 * PING_SECONDS
 DEFAULT_TTL_SECONDS = 3600
+#: Close codes after which a node does not reconnect: the relay refused this machine (4401) or it left the estate's
+#: admission set (4403). Reconnecting could only be refused again; the person has to look.
+TERMINAL_CLOSE_CODES = (4401, 4403)
 
 
 class RelayError(Exception):
@@ -122,6 +136,7 @@ class RelaySession:
         self._lock = threading.Lock()
         self._closed = threading.Event()
         self.close_code: Optional[int] = None
+        self.close_reason: str = ''
         self.welcome: Optional[Welcome] = None
 
     # ---- Opening ---------------------------------------------------------------------------------------------------
@@ -155,7 +170,7 @@ class RelaySession:
         except BaseException:
             ws.close()
             raise
-        ws.settimeout(None)
+        ws.settimeout(RECV_TIMEOUT_SECONDS)
         self._ws = ws
         LOG.info('relay.session.open', extra={'kid': self.keys.sig_kid, 'revision': self.welcome.estate_revision})
         threading.Thread(target=self._read, name='relay-reader', daemon=True).start()
@@ -165,8 +180,8 @@ class RelaySession:
     @staticmethod
     def _json(text: str) -> dict:
         try:
-            value = json.loads(text)
-        except ValueError:
+            value = relay._json(text.encode('utf-8'))      # bounded in size and depth
+        except (ValueError, UnicodeError):
             raise RelayError('malformed', 'a frame that is not JSON') from None
         if not isinstance(value, dict) or value.get('v') != 1:
             raise RelayError('malformed', 'a frame that is not {v: 1, type, id}')
@@ -174,7 +189,7 @@ class RelaySession:
 
     # ---- Calls -----------------------------------------------------------------------------------------------------
 
-    def _call(self, frame: dict, timeout: float = ANSWER_TIMEOUT_SECONDS) -> dict:
+    def _call(self, frame: dict, timeout: Optional[float] = None) -> dict:
         if self._ws is None or self._closed.is_set():
             raise SessionClosed(self.close_code or 1006)
         done, box = threading.Event(), {}
@@ -182,7 +197,7 @@ class RelaySession:
             self._waiters[frame['id']] = [done, box]
         try:
             self._ws.send_text(json.dumps(frame, separators=(',', ':')))
-            if not done.wait(timeout):
+            if not done.wait(ANSWER_TIMEOUT_SECONDS if timeout is None else timeout):
                 raise TimeoutError('the relay did not answer ' + frame['type'])
         finally:
             with self._lock:
@@ -225,9 +240,10 @@ class RelaySession:
         self._call({'v': 1, 'type': 'ping', 'id': _frame_id()})
 
     def close(self) -> None:
+        """Ends the session; the reader thread frees the socket."""
         self._closed.set()
         if self._ws is not None:
-            self._ws.close(1000)
+            self._ws.abort(1000)
 
     def wait_closed(self, timeout: Optional[float] = None) -> bool:
         return self._closed.wait(timeout)
@@ -246,16 +262,30 @@ class RelaySession:
                 self._dispatch(frame)
         except Closed as closed:
             code, reason = closed.code, closed.reason
+        except socket.timeout:
+            reason = 'relay.session.dead'
         except (WebSocketError, OSError) as error:
             reason = type(error).__name__
+        except Exception as error:                         # nothing a relay sends may leave a session half alive
+            LOG.exception('relay.reader.failed')
+            reason = 'relay.reader.' + type(error).__name__
         finally:
             self.close_code = code
+            self.close_reason = self.close_reason or reason    # the keepalive may have named it first
             self._closed.set()
+            self._ws.close(1000 if code not in TERMINAL_CLOSE_CODES else code)
             with self._lock:
                 waiters = list(self._waiters.values())
             for done, _ in waiters:
                 done.set()
             LOG.info('relay.session.closed', extra={'code': code})
+
+    def _callback(self, name: str, *args) -> None:
+        """A callback's failure is logged and stops nothing: the reader keeps reading."""
+        try:
+            getattr(self, name)(*args)
+        except Exception:
+            LOG.exception('relay.callback.failed', extra={'callback': name})
 
     def _dispatch(self, frame: dict) -> None:
         reply = frame.get('replyTo')
@@ -270,9 +300,9 @@ class RelaySession:
         if kind == 'deliver':
             self._deliver(frame)
         elif kind == 'presence':
-            self.on_presence(frame)
+            self._callback('on_presence', frame)
         elif kind in ('heartbeat', 'delta'):
-            self.on_record(frame)
+            self._callback('on_record', frame)
         elif kind == 'error':
             # An unsolicited error precedes a close: 4403 not-admitted or expired, 4401, 1009, 1008, 1011.
             LOG.warning('relay.session.error', extra={'code': frame.get('code')})
@@ -282,22 +312,34 @@ class RelaySession:
             self._ws.send_text(json.dumps({'v': 1, 'type': 'ack', 'id': _frame_id(), 'seq': seq},
                                           separators=(',', ':')))
 
-    def _deliver(self, frame: dict) -> None:
-        now_ms = int(self.clock() * 1000)
-        raw = p256.b64url_decode(frame.get('body')) if isinstance(frame.get('body'), str) else None
+    def _verdict(self, frame: dict, now_ms: int) -> dict:
+        body_text = frame.get('body')
+        raw = p256.b64url_decode(body_text) if isinstance(body_text, str) and len(body_text) <= relay.MAX_FRAME_BYTES \
+            else None
         try:
             body = raw.decode('ascii') if raw is not None else None
         except UnicodeDecodeError:
             body = None
+        if not body:
+            return {'ok': False, 'reason': 'malformed'}
         expect = {'from': frame.get('from'), 'to': self.keys.sig_kid, 'msgId': frame.get('msgId')}
-        verdict = relay.verify_message_body(body, expect, self.sender_key, now_ms) if body else {'ok': False,
-                                                                                                'reason': 'malformed'}
+        verdict = relay.verify_message_body(body, expect, self.sender_key, now_ms)
         if verdict['ok']:
             verdict = dict(relay.check_replay(self.replay.seen, verdict['payload'], now_ms), payload=verdict['payload'])
+        return verdict
+
+    def _deliver(self, frame: dict) -> None:
+        now_ms = int(self.clock() * 1000)
+        try:
+            verdict = self._verdict(frame, now_ms)
+        except Exception:                                  # a body no check could read is refused, never fatal
+            LOG.exception('relay.deliver.unreadable')
+            verdict = {'ok': False, 'reason': 'malformed'}
         if not verdict['ok']:
             LOG.warning('relay.deliver.refused', extra={'reason': verdict['reason'], 'from': frame.get('from')})
-            self.on_refused(verdict['reason'], frame)
+            # Acknowledged first: a refused body is never redelivered, whatever its callback does.
             self._ack(frame.get('seq'))
+            self._callback('on_refused', verdict['reason'], frame)
             return
         payload = verdict['payload']
         try:
@@ -309,8 +351,59 @@ class RelaySession:
         self._ack(frame.get('seq'))
 
     def _keepalive(self) -> None:
+        missed = 0
         while not self._closed.wait(PING_SECONDS):
             try:
                 self.ping()
-            except (RelayError, SessionClosed, TimeoutError, OSError):
-                LOG.warning('relay.ping.failed')
+                missed = 0
+            except (TimeoutError, OSError):
+                missed += 1
+                LOG.warning('relay.ping.failed', extra={'missed': missed})
+                if missed >= DEAD_AFTER_MISSED_PINGS:
+                    # A half-open link answers nothing and reports nothing: close it so the node reconnects.
+                    self.close_reason = 'relay.session.dead'
+                    self._ws.abort(1001)
+                    return
+            except (RelayError, SessionClosed):
+                return
+
+
+def keep_connected(make_session: Callable[[], 'RelaySession'], stop: threading.Event, *,
+                   on_state: Callable[[str, dict], None] = lambda state, detail: None,
+                   min_backoff: float = 1.0, max_backoff: float = 60.0) -> None:
+    """Holds one relay session open until `stop` is set: opens a session, waits for it to close, and opens another
+    after a jittered, doubling backoff (reset by a session that stayed up a minute). A refusal (`RelayRefused`
+    unauthenticated) or a close 4401 or 4403 is terminal: `on_state('stopped', ...)` names it and the loop ends,
+    because the relay would refuse every retry until a person acts. `on_state` hears `open`, `closed`, `retry` and
+    `stopped`, each with a detail dict that carries no secret."""
+    backoff = min_backoff
+    while not stop.is_set():
+        session = None
+        try:
+            session = make_session()
+            session.open()
+            opened = time.monotonic()
+            on_state('open', {'revision': session.welcome.estate_revision})
+            while not stop.is_set() and not session.wait_closed(1.0):
+                pass
+            if stop.is_set():
+                session.close()
+                break
+            on_state('closed', {'code': session.close_code, 'reason': session.close_reason})
+            if session.close_code in TERMINAL_CLOSE_CODES:
+                on_state('stopped', {'code': session.close_code})
+                return
+            if time.monotonic() - opened >= 60:
+                backoff = min_backoff
+        except RelayRefused as refused:
+            if refused.code in ('unauthenticated', 'protocol-unsupported'):
+                on_state('stopped', {'refusal': refused.code})
+                return
+            on_state('closed', {'refusal': refused.code})
+        except (RelayError, WebSocketError, OSError) as error:
+            on_state('closed', {'error': type(error).__name__})
+        delay = backoff * (0.5 + random.random() / 2)
+        on_state('retry', {'seconds': round(delay, 2)})
+        if stop.wait(delay):
+            break
+        backoff = min(max_backoff, backoff * 2)

@@ -81,11 +81,37 @@ thread owns the socket:
 - a `deliver` is checked end to end:
   - first against this machine's own kid, never a `to` the relay asserts, then against the replay window;
   - it is handed to the handler and acknowledged only after the handler returns, so a message the handler could not
-    take is delivered again;
-  - a refused or repeated body is acknowledged without acting on it;
+    take stays in the mailbox and is delivered again on the next connection;
+  - a refused, repeated or unreadable body is acknowledged first, then reported to `on_refused`, without acting on it;
 - `presence`, `heartbeat` and `delta` go to their callbacks unchanged;
 - a 4403 close (this machine left the admission set, or the record expired) ends the session, and a call after it
   raises `SessionClosed`.
+
+**Nothing a relay sends ends the reader except a close.**
+- A check that raises refuses the body as `malformed`, and it is acknowledged.
+- A callback that raises is logged.
+- A frame nested too deep is skipped.
+- Any other failure closes the session with a recorded reason (`relay.reader.<error>`), never half alive.
+
+**A dead link is closed:** after two pings in a row go unanswered, or after 75 s of silence, which is shorter than the
+relay's own 90-second idle rule. `WebSocket.abort` wakes the blocked reader with `shutdown`. It leaves the descriptor for
+the reader to close: closing it from another thread races the pending `recv`, which then waits out its whole timeout.
+
+`keep_connected` reopens a closed session with a jittered, doubling backoff. It stops for good on 4401 and 4403, and on
+a refused `auth`, because a relay would refuse every retry until a person acts.
+
+The WebSocket client refuses:
+- a frame over 1 MiB, or a message over 1 MiB or 1,024 fragments;
+- text that is not UTF-8;
+- a control frame over 125 bytes;
+- a reserved bit;
+- an unknown opcode;
+- a binary or masked server frame.
+
+It also answers each close as RFC 6455 §7 says:
+- a one-byte payload is 1002;
+- a reason that is not UTF-8 is 1007;
+- 1005, 1006 and 1015 are never echoed.
 
 The replay window is in memory. A node that restarts within a message's life may act on one redelivery again, and the
 payload's own idempotency key absorbs that. Logs carry event names, kids, codes and counts, never a body.
@@ -97,13 +123,25 @@ deletes only what is acknowledged. It can also misbehave the way a relay may:
 - deliver a forged, misdirected or repeated body, even asserting a `to` that matches it;
 - close a revoked session with 4403.
 
-Each of these planted defects failed the suite:
+34 planted defects were run against `tests/test_node_session.py` (raw loopback servers drive the RFC 6455 cases), and
+every one fails it except one equivalent mutant: 1005 is never sendable, so it is never echoed either
+way. Among them:
+- masking: a constant or non-CSPRNG mask, a missing mask bit;
+- every size, fragment, UTF-8, control-frame, RSV and opcode check removed;
+- the `Sec-WebSocket-Accept`, subprotocol and TLS certificate checks removed;
+- no pong;
+- the close-code rules;
+- no hello timeout;
 - no origin check;
 - acknowledging before the handler;
-- no acknowledgement of a refused body;
 - no replay check;
 - trusting the relay's `to`;
-- returning fetched blob bytes without checking their digest.
+- either catch-all removed, or the callbacks unguarded;
+- the dead link never closed;
+- reconnecting that never stops, or stops on every close;
+- blob redirects followed through either opener;
+- an unbounded blob read, or no size or digest check;
+- an error body of another shape crashing the client.
 
 ## What comes next
 
