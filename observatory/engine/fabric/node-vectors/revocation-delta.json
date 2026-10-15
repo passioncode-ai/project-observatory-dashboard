@@ -1,0 +1,4896 @@
+{
+  "about": "Vectors for the revocation delta and the timestamp heartbeat (DEC-0054). An entry's hash, the next head, is the hex SHA-256 of the UTF-8 RFC 8785 form of the entry without sig; entry 1's prev is the genesis, SHA-256 of the RFC 8785 form of {type: \"revocation-delta/1\", estate, sequence: 0}. Every signature is Ed25519 (RFC 8032) by an estate key, a hubKey the trusted revision certifies; the seeds reproduce them byte for byte. trust.record stands for the highest estate-record revision the machine verified and applied (its passkey signature is not part of these vectors); trust.at is the verifier's clock, a string a port parses (an unreadable one is no-clock). The keys are test keys generated for these vectors, never real credentials.",
+  "keys": {
+    "hub-m-4c1e-1": {
+      "seed": "f28cf84f0ff5567ff26463b923f9273e3ca007b8ff64fd6fe0e59c0588f4f9d3",
+      "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g"
+    },
+    "hub-m-9a07-1": {
+      "seed": "4852b6d410ee7b0f94690b7a473b065ad2f4bbd0c1917bd491f2ed3bbcf15fac",
+      "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg"
+    }
+  },
+  "genesis": {
+    "estate": "estate-5d0f1a",
+    "input": "{\"estate\":\"estate-5d0f1a\",\"sequence\":0,\"type\":\"revocation-delta/1\"}",
+    "sha256": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f"
+  },
+  "entries": {
+    "e1": {
+      "entry": {
+        "type": "revocation-delta/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 1,
+        "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+        "at": "2026-10-12T10:00:00Z",
+        "revocation": {
+          "kind": "hub-key",
+          "ref": "hub-m-9a07-1",
+          "revokedAt": "2026-10-12T10:00:00Z"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+      },
+      "signingInput": "{\"alg\":\"EdDSA\",\"at\":\"2026-10-12T10:00:00Z\",\"estate\":\"estate-5d0f1a\",\"kid\":\"hub-m-4c1e-1\",\"prev\":\"eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f\",\"revocation\":{\"kind\":\"hub-key\",\"ref\":\"hub-m-9a07-1\",\"revokedAt\":\"2026-10-12T10:00:00Z\"},\"sequence\":1,\"type\":\"revocation-delta/1\"}",
+      "hash": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce"
+    },
+    "e2": {
+      "entry": {
+        "type": "revocation-delta/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 2,
+        "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+        "at": "2026-10-12T19:05:00+09:00",
+        "revocation": {
+          "kind": "package",
+          "ref": "sha256:abababababababababababababababababababababababababababababababab",
+          "revokedAt": "2026-10-12T10:04:00Z"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+      },
+      "signingInput": "{\"alg\":\"EdDSA\",\"at\":\"2026-10-12T19:05:00+09:00\",\"estate\":\"estate-5d0f1a\",\"kid\":\"hub-m-4c1e-1\",\"prev\":\"8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce\",\"revocation\":{\"kind\":\"package\",\"ref\":\"sha256:abababababababababababababababababababababababababababababababab\",\"revokedAt\":\"2026-10-12T10:04:00Z\"},\"sequence\":2,\"type\":\"revocation-delta/1\"}",
+      "hash": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+    },
+    "e3": {
+      "entry": {
+        "type": "revocation-delta/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 3,
+        "prev": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe",
+        "at": "2026-10-12T10:30:00Z",
+        "revocation": {
+          "kind": "grant",
+          "ref": "grant-share-0042",
+          "revokedAt": "2026-10-12T10:29:00Z"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "M2hp5b8GfdKTzLwzYVuG63BC6rhN4GxoeU_eHPxiC8kPo3poASEZlTVIwdIRR62_0DZqxrTCDHTuBWwgXliQDw"
+      },
+      "signingInput": "{\"alg\":\"EdDSA\",\"at\":\"2026-10-12T10:30:00Z\",\"estate\":\"estate-5d0f1a\",\"kid\":\"hub-m-4c1e-1\",\"prev\":\"7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe\",\"revocation\":{\"kind\":\"grant\",\"ref\":\"grant-share-0042\",\"revokedAt\":\"2026-10-12T10:29:00Z\"},\"sequence\":3,\"type\":\"revocation-delta/1\"}",
+      "hash": "460ead10497f2b77eb5a9a086e3f51c4c694d2020a5459466bad5aaf4edce57a"
+    }
+  },
+  "record": {
+    "schema": "estate-record/1",
+    "estate": "estate-5d0f1a",
+    "revision": 3,
+    "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+    "issuedAt": "2026-10-12T09:00:00Z",
+    "validUntil": "2026-11-11T09:00:00Z",
+    "machines": [
+      {
+        "id": "m-4c1e",
+        "hubKey": {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+          "kid": "hub-m-4c1e-1",
+          "use": "sig",
+          "alg": "EdDSA"
+        }
+      },
+      {
+        "id": "m-9a07",
+        "hubKey": {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+          "kid": "hub-m-9a07-1",
+          "use": "sig",
+          "alg": "EdDSA"
+        }
+      }
+    ],
+    "revocations": [],
+    "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+  },
+  "apply": [
+    {
+      "name": "two entries from the genesis, the first revoking a hub key, the second dated with a +09:00 offset",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": true,
+        "applied": 2,
+        "head": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        }
+      }
+    },
+    {
+      "name": "a page that repeats the entries held is applied from the first new one",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "page": {
+        "head": {
+          "sequence": 3,
+          "sha256": "460ead10497f2b77eb5a9a086e3f51c4c694d2020a5459466bad5aaf4edce57a"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 3,
+            "prev": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe",
+            "at": "2026-10-12T10:30:00Z",
+            "revocation": {
+              "kind": "grant",
+              "ref": "grant-share-0042",
+              "revokedAt": "2026-10-12T10:29:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "M2hp5b8GfdKTzLwzYVuG63BC6rhN4GxoeU_eHPxiC8kPo3poASEZlTVIwdIRR62_0DZqxrTCDHTuBWwgXliQDw"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": true,
+        "applied": 1,
+        "head": {
+          "sequence": 3,
+          "sha256": "460ead10497f2b77eb5a9a086e3f51c4c694d2020a5459466bad5aaf4edce57a"
+        }
+      }
+    },
+    {
+      "name": "an empty page changes nothing",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          }
+        ]
+      },
+      "page": {
+        "head": {
+          "sequence": 0,
+          "sha256": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f"
+        },
+        "entries": []
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": true,
+        "applied": 0,
+        "head": {
+          "sequence": 1,
+          "sha256": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce"
+        }
+      }
+    },
+    {
+      "name": "an unreadable clock is refused before anything is compared",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "not a time"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "no-clock",
+        "index": -1
+      }
+    },
+    {
+      "name": "a page that is not {head, entries}",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": [
+        {
+          "type": "revocation-delta/1",
+          "alg": "EdDSA",
+          "estate": "estate-5d0f1a",
+          "sequence": 1,
+          "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+          "at": "2026-10-12T10:00:00Z",
+          "revocation": {
+            "kind": "hub-key",
+            "ref": "hub-m-9a07-1",
+            "revokedAt": "2026-10-12T10:00:00Z"
+          },
+          "kid": "hub-m-4c1e-1",
+          "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+        }
+      ],
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "malformed",
+        "index": -1
+      }
+    },
+    {
+      "name": "a sequence written as a string (a lax port reads \"1\" as 1)",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": "1",
+          "sha256": "5115e207b6077ead1efaa8ecbf76f8cd0a11dd4a4436252e60d118d39efab38b"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": "1",
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "malformed",
+        "index": 0
+      }
+    },
+    {
+      "name": "a sequence of 2^53, past the largest safe integer",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 9007199254740992,
+          "sha256": "9f3c172e7ba726b3c15f35730b75f536c03fc96f8ffddd0492e227a9b96fff25"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 9007199254740992,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "1FDoIamQq90fKo7TPiEobsT6ArRFFTmzf2g8jg5YsXiLDBZo--6as0zIq46pzkV2ewGcauTXYOS5yBYT3c4xAw"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "malformed",
+        "index": 0
+      }
+    },
+    {
+      "name": "at without an offset (a lax port reads local time)",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "7fcb2d462f05fa0d74431a79338eda0d1cf96bdff26dccd106cde5693fad9af5"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "V3rGPgu54Xzl46OC9Ra-bBSeNrmY5pdMxYGBGFluUWNrAGKmHissyWWhjr90GjBQprirNohZNDVtJuLEqjcUCw"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "malformed",
+        "index": 0
+      }
+    },
+    {
+      "name": "at on 30 February (Date.parse alone reads 2 March)",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "28ae63396f85193513eb6b3eafee27be260419d999ac42bf710674ddf9cebab6"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-02-30T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-02-01T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "9V0LwtFzMOSKBL9ZGrzsAYi4QdIN1O3e4ef31pP0p21gxjzLZJtrNXqipK6sI8-8d-nNK7kBoJw9VWxnLdgiBQ"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "malformed",
+        "index": 0
+      }
+    },
+    {
+      "name": "a revocation dated one second after its entry",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "127e3bc77671e49e5b87ddd880b9e52882586cea79f6d0c433aab69096deb514"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:01Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "3KJQYJLZH19DK6mI1GEDbdgbgr7_1PJ2iM57mG5eYHmXXf0ixXmB5XQu688Rq6RxUwcJJgMswQuFYy_fXuOGBg"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "malformed",
+        "index": 0
+      }
+    },
+    {
+      "name": "prev in upper-case hex",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "c76b86af4a236925b2f2869156723bee2aa1f5007df1e848e992f7b8e5ba7fe4"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "EEED1162E2371D24EEB238E7B568FE95871936219C5E7719FA5080530B8E8B1F",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "0f9rZTaLPZpQ1j-vNAU2oyug8p0pURgnwdFoOL6gqv5MPzOtN4CEg8_VBpPoH_Ke2sZmgJ8fr3xF5axuy_8tBQ"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "malformed",
+        "index": 0
+      }
+    },
+    {
+      "name": "a signature of 85 characters",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQC"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "malformed",
+        "index": 0
+      }
+    },
+    {
+      "name": "an entry of another estate",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "74bd238aeb17c84dcf6a6c4923f33034d82cb064942f4b8aaf15fbb36527d976"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-other",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "ealaAVDeH1Dxm4e7NI8ZgmmUOdIA07UAhiyWBYDXKU7PcRiumPAuDNMlKid3fdwhKpEuGxUhWjp8vMDqM9X5CA"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "wrong-estate",
+        "index": 0
+      }
+    },
+    {
+      "name": "a trusted revision of another estate",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-other",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:058fbf85e12544b161c59c195ff718883d0e22a768e52bf74091c28377099b07"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "wrong-estate",
+        "index": -1
+      }
+    },
+    {
+      "name": "an entry signed as ES256",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "111fb00beca217f88987fe4d4f88dc899ac4ce1ef1f154d6212a364bacff50b1"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "ES256",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "HE7qCqm7w6o-29Cz2DhAvv1dleId_YYjDn4co4d_0TEK39-EDiHyhC6VebmC3vLQDt8Cb4W7GXI_hdWIHORjBg"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "unsupported-alg",
+        "index": 0
+      }
+    },
+    {
+      "name": "a passkey revoked by the delta",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "520767cea8cee6534682b27481af5b068a8c39b1cd36ba41928b4509f5e47d84"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "authority",
+              "ref": "0nGFzb4RDddKfO7TtqkdYA",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "eFDeZH78uuLQKiQu3YMw6xBP-BkKQW6amUifKvdWTdydwx9S19bvpzsmdPk_qfLWxNcjRswJYBhKdMcXh1Q9AA"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "not-revocable",
+        "index": 0
+      }
+    },
+    {
+      "name": "an entry dated 61 s ahead of the clock",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "5731df93f9649bec99c74ffd202715c561f7128e9c38531a047cf5c8d352836d"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T12:01:01Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T12:01:01Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "hja2EzSZkgCGuWMj_kcop3wKVg0DkBsbfks3b63HWymvhdqhS21D4lx5Cd2W9H8FF5p5Icrvp6EFFaY01BF5CA"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "not-yet-valid",
+        "index": 0
+      }
+    },
+    {
+      "name": "an entry dated 60 s ahead of the clock is accepted",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "8bd3d58c472dc1b1e39bf5aa3e89b6d1f867b1c8822918715a50e822aa493e27"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T12:01:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T12:01:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "hv6R0LI8dhpwgNNTKdmDDICM4vG9d4uBjFsWR8H7ILlK-JoPJxZSzqTwdQ6LfCV-CKlmtTqnXNV0lqet4tgbBg"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": true,
+        "applied": 1,
+        "head": {
+          "sequence": 1,
+          "sha256": "8bd3d58c472dc1b1e39bf5aa3e89b6d1f867b1c8822918715a50e822aa493e27"
+        }
+      }
+    },
+    {
+      "name": "a kid in another case (kids compare exactly)",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "97a867bc0c673587f4c81b6203173342600ca330e42b4fbdf820987fa7a05659"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "HUB-M-4C1E-1",
+            "sig": "jxZcWOwoQnUeF_ihmHz9IMzoG0A6k7l5jopoEfayvYfFG8S6qAVNnj60QDiClkOuZ0Hz9kt12oqGi_wdN8iJDQ"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "unknown-signer",
+        "index": 0
+      }
+    },
+    {
+      "name": "a kid no machine of the revision carries",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "acbd9779d0d1fef09a8fed8d139114006bc53634dd0b42d89abc6d554becc1c5"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-gone-1",
+            "sig": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "unknown-signer",
+        "index": 0
+      }
+    },
+    {
+      "name": "signed by a hub key an earlier entry of the same page revokes",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 2,
+          "sha256": "6e437d9fd5f62e9af2cad99735ec8bfdb4886f25d7ad017dd9232872d297b3cf"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T10:08:00Z",
+            "revocation": {
+              "kind": "grant",
+              "ref": "grant-share-0042",
+              "revokedAt": "2026-10-12T10:08:00Z"
+            },
+            "kid": "hub-m-9a07-1",
+            "sig": "scEPl-MwpEphrzAAMLbJYUfdvAAvfjsaxFnhkFST_lSE6g9KZygg3BOi5gOLCEb8_Hre8Maj-FsfiG144LbQAQ"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "revoked-signer",
+        "index": 1,
+        "head": {
+          "sequence": 1,
+          "sha256": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce"
+        }
+      }
+    },
+    {
+      "name": "signed by a hub key the held delta revokes",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          }
+        ]
+      },
+      "page": {
+        "head": {
+          "sequence": 2,
+          "sha256": "6e437d9fd5f62e9af2cad99735ec8bfdb4886f25d7ad017dd9232872d297b3cf"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T10:08:00Z",
+            "revocation": {
+              "kind": "grant",
+              "ref": "grant-share-0042",
+              "revokedAt": "2026-10-12T10:08:00Z"
+            },
+            "kid": "hub-m-9a07-1",
+            "sig": "scEPl-MwpEphrzAAMLbJYUfdvAAvfjsaxFnhkFST_lSE6g9KZygg3BOi5gOLCEb8_Hre8Maj-FsfiG144LbQAQ"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "revoked-signer",
+        "index": 0
+      }
+    },
+    {
+      "name": "signed by the hub of a machine the revision revokes (a revision that still lists it breaks FAC-SEM-076; the check stands anyway)",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "519d1c588f03171f259e39dcac1a4c6eb252b2b55b944e51cd0c664a8885e0ab"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "grant",
+              "ref": "grant-share-0042",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-9a07-1",
+            "sig": "yFzLHT-T0jKaoaSnkxiYWxLjpphJRsG0CofraFp9dKcslnqyOzuVtBOEPBwGFoDdxLXaeOP2f5ZPG7ynU7Y5DQ"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [
+            {
+              "kind": "machine",
+              "ref": "m-9a07",
+              "revokedAt": "2026-10-12T08:00:00Z"
+            }
+          ],
+          "digest": "sha256:c886e1f4ef4b5a6730a381d9b382670dd558cf732bf3896f14f85ae6885cca15"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "revoked-signer",
+        "index": 0
+      }
+    },
+    {
+      "name": "a hub key certified as ES256",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "182acabcfc84ae13ad4c4b814b08afeb412a886bbf1db5e4dbc81927c2ade8b3"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-es-1",
+            "sig": "M8DSEW4G8xmA1iqsIfu7ZA3SukokhoLMVeuCjqQvWpr1PA3dXOnR5IalaGKpjaS8lV7MFyyVVWFQ3EpZDZsuAA"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-es",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "X5MEGjWlAaqV0w1DFVd0Uk7dAq6tZr3fwJyYC28H65I",
+                "kid": "hub-m-es-1",
+                "use": "sig",
+                "alg": "ES256"
+              }
+            },
+            {
+              "id": "m-zero",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "kid": "hub-m-zero-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:e22d1971e67cc6edf60172321f30a709da5db538f3d01b90dffccdbbe6c4ecfe"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "unusable-key",
+        "index": 0
+      }
+    },
+    {
+      "name": "a hub key of small order (the all-zero key)",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "82b65200fd9c1b87ca57d5161f103702fbc165469885a5166d256e9978d8e89c"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-zero-1",
+            "sig": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-es",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "X5MEGjWlAaqV0w1DFVd0Uk7dAq6tZr3fwJyYC28H65I",
+                "kid": "hub-m-es-1",
+                "use": "sig",
+                "alg": "ES256"
+              }
+            },
+            {
+              "id": "m-zero",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                "kid": "hub-m-zero-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:e22d1971e67cc6edf60172321f30a709da5db538f3d01b90dffccdbbe6c4ecfe"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "small-order-key",
+        "index": 0
+      }
+    },
+    {
+      "name": "an entry changed after it was signed",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 1,
+          "sha256": "2f0d45bfe50fdf021406a7e24634b6b7343a2c9b22f8c91b18ad141ff583af09"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-4c1e-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "bad-signature",
+        "index": 0
+      }
+    },
+    {
+      "name": "entry 2 with nothing held: a gap",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "page": {
+        "head": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "gap",
+        "index": 0
+      }
+    },
+    {
+      "name": "a signed entry 2 built on the genesis: a second history",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          }
+        ]
+      },
+      "page": {
+        "head": {
+          "sequence": 2,
+          "sha256": "8ee83c9778c0c6ea3cc8a79d11c4146cb1c21f7882ab079892f7cedcfb2fb57d"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:06:00Z",
+            "revocation": {
+              "kind": "machine",
+              "ref": "m-9a07",
+              "revokedAt": "2026-10-12T10:06:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "Xk7_2eDdv46EK9N2ZfyMdtluGkTjZxFdRwWBFmIpUYYXh3zB2pnE_XtPdwq6HPR2ChccJveF-t0aW4H_PNJXDw"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "broken-chain",
+        "index": 0,
+        "broken": true
+      }
+    },
+    {
+      "name": "a signed entry 2 other than the one held: a fork",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "page": {
+        "head": {
+          "sequence": 2,
+          "sha256": "be921d7c19af6c094a00084b4cbba692b22d53539baaf49cbfde9f51971d4f70"
+        },
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T10:07:00Z",
+            "revocation": {
+              "kind": "machine",
+              "ref": "m-9a07",
+              "revokedAt": "2026-10-12T10:07:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "SZKWX-19ANxbRL7_1KwHPHXrQwgPltSFUGUEKmWu0hIJMWA_GvThjBfYYFY6B4-G4wPKKtI22kP9CSFVlasdAA"
+          }
+        ]
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "fork",
+        "index": 0,
+        "broken": true
+      }
+    }
+  ],
+  "heartbeats": [
+    {
+      "name": "a heartbeat at the head the machine holds",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 5,
+        "at": "2026-10-12T11:00:00Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "fKJdIFYR6oDKfBg4ThqtACqc2BM17hUHJRx0outbiwfALOMeRaivaoxyTBEOu4aDl8-OCyILCnEHdWiZf3yaBg"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": true,
+        "newer": true
+      }
+    },
+    {
+      "name": "a heartbeat whose head is ahead of the machine: accepted, the machine is behind",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 6,
+        "at": "2026-10-12T11:30:00Z",
+        "deltaHead": {
+          "sequence": 3,
+          "sha256": "460ead10497f2b77eb5a9a086e3f51c4c694d2020a5459466bad5aaf4edce57a"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "Dttr6DNy7yd9FzS5DVJaIi9uJ2nUl37X4Uy7ox78XqkM4-0BWQ_1VhY_w3htPYcpiaFYYU1HYv_bRxZzZvfEAw"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": true,
+        "newer": true
+      }
+    },
+    {
+      "name": "the first heartbeat of an estate with no entry: head 0 is the genesis",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": []
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 0,
+        "at": "2026-10-12T11:00:00Z",
+        "deltaHead": {
+          "sequence": 0,
+          "sha256": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "PQ8uoLZIr5dU42YdnR_OKaGn5W5b_1o_an4hnXmedaEiQ_cRwRzUqbr4KMkbjF1Rsm5aF-SoZ4YLtcoS_a2JCg"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": true,
+        "newer": true
+      }
+    },
+    {
+      "name": "the heartbeat already held",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ],
+        "heartbeat": {
+          "type": "heartbeat/1",
+          "alg": "EdDSA",
+          "estate": "estate-5d0f1a",
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00Z",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          },
+          "kid": "hub-m-4c1e-1",
+          "sig": "fKJdIFYR6oDKfBg4ThqtACqc2BM17hUHJRx0outbiwfALOMeRaivaoxyTBEOu4aDl8-OCyILCnEHdWiZf3yaBg"
+        }
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 5,
+        "at": "2026-10-12T11:00:00Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "fKJdIFYR6oDKfBg4ThqtACqc2BM17hUHJRx0outbiwfALOMeRaivaoxyTBEOu4aDl8-OCyILCnEHdWiZf3yaBg"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": true,
+        "newer": false
+      }
+    },
+    {
+      "name": "an older heartbeat changes nothing",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ],
+        "heartbeat": {
+          "type": "heartbeat/1",
+          "alg": "EdDSA",
+          "estate": "estate-5d0f1a",
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00Z",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          },
+          "kid": "hub-m-4c1e-1",
+          "sig": "fKJdIFYR6oDKfBg4ThqtACqc2BM17hUHJRx0outbiwfALOMeRaivaoxyTBEOu4aDl8-OCyILCnEHdWiZf3yaBg"
+        }
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 4,
+        "at": "2026-10-12T10:00:00Z",
+        "deltaHead": {
+          "sequence": 1,
+          "sha256": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "U7_Hp0ojjE2yY8je-7I7W6Ndfl5sHnVGymNl36wFhkZVl81EijlZx2crbxpA7D5aKxNSO93T-sTgkighJSxVAw"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "not-newer"
+      }
+    },
+    {
+      "name": "another heartbeat with the held sequence: a fork",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ],
+        "heartbeat": {
+          "type": "heartbeat/1",
+          "alg": "EdDSA",
+          "estate": "estate-5d0f1a",
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00Z",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          },
+          "kid": "hub-m-4c1e-1",
+          "sig": "fKJdIFYR6oDKfBg4ThqtACqc2BM17hUHJRx0outbiwfALOMeRaivaoxyTBEOu4aDl8-OCyILCnEHdWiZf3yaBg"
+        }
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 5,
+        "at": "2026-10-12T11:00:01Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "KtXhe0_uCngpLj-J4f00o1XpOFYDIbq_2ZDd3Fmce2Sa13sfsHmI5dzUSrTm3JzdoJeJBK-W_9SIyYHks3RgAw"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "fork",
+        "broken": true
+      }
+    },
+    {
+      "name": "a newer heartbeat dated before the held one",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ],
+        "heartbeat": {
+          "type": "heartbeat/1",
+          "alg": "EdDSA",
+          "estate": "estate-5d0f1a",
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00Z",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          },
+          "kid": "hub-m-4c1e-1",
+          "sig": "fKJdIFYR6oDKfBg4ThqtACqc2BM17hUHJRx0outbiwfALOMeRaivaoxyTBEOu4aDl8-OCyILCnEHdWiZf3yaBg"
+        }
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 6,
+        "at": "2026-10-12T10:59:59Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "gMMyOc0xYL3PJQBHKLEaCPdAMSpeXWTItYsMA2zM-pYUuKnUStDHA_DNmHXpseKLaDTIoW7WkFoyKYXYWAcSCQ"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "regressed"
+      }
+    },
+    {
+      "name": "a newer heartbeat whose head moves back",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ],
+        "heartbeat": {
+          "type": "heartbeat/1",
+          "alg": "EdDSA",
+          "estate": "estate-5d0f1a",
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00Z",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          },
+          "kid": "hub-m-4c1e-1",
+          "sig": "fKJdIFYR6oDKfBg4ThqtACqc2BM17hUHJRx0outbiwfALOMeRaivaoxyTBEOu4aDl8-OCyILCnEHdWiZf3yaBg"
+        }
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 6,
+        "at": "2026-10-12T11:30:00Z",
+        "deltaHead": {
+          "sequence": 1,
+          "sha256": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "RQvKCvseMYQIywWG8bmDTYMJD8DYF2a79pbwIbc5D3V3tiZTwtxFNd8feR968WFOjjCKqLLLvGsqOri93OFHAQ"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "regressed"
+      }
+    },
+    {
+      "name": "a newer heartbeat whose revision moves back",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ],
+        "heartbeat": {
+          "type": "heartbeat/1",
+          "alg": "EdDSA",
+          "estate": "estate-5d0f1a",
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00Z",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          },
+          "kid": "hub-m-4c1e-1",
+          "sig": "fKJdIFYR6oDKfBg4ThqtACqc2BM17hUHJRx0outbiwfALOMeRaivaoxyTBEOu4aDl8-OCyILCnEHdWiZf3yaBg"
+        }
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 6,
+        "at": "2026-10-12T11:30:00Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 2,
+          "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "6QxZx9SGeuwmzNL6gR4nlRDxZKncf0jvIdG3pdr1Gj6SIFkklRK6tWLRtSKyCaLAzcPQoZrsGwSYeu5fjHEmAA"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "regressed"
+      }
+    },
+    {
+      "name": "a head at a held sequence with another hash: a fork",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 5,
+        "at": "2026-10-12T11:00:00Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "Ev5HDrDQCeiernUzoi3f7tdNC5jUOPoGmN4A_R-tcizy9vrewbW51xqBf9gp50eQJUeB5Tb5IqkZ3xgmlPfCCg"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "fork",
+        "broken": true
+      }
+    },
+    {
+      "name": "the applied revision's number with another digest: a fork of the record",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 5,
+        "at": "2026-10-12T11:00:00Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "oloaNoR1IlstfILSDeTWO-HuTV4bypiclZvEjGo-dqTvoplGVon49P_kriK-J_jdaxx1S8cf-xbfkT6K02DsBg"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "fork",
+        "broken": true
+      }
+    },
+    {
+      "name": "a heartbeat dated 61 s ahead",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 5,
+        "at": "2026-10-12T12:01:01Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "EghLGiAvmJjP3IlzzwXK0D127r2GGZ8Vi_SQKde8c7NKO1KBElDcOlgmIFqwCkzk_U9Ui1FQqyh_jaJp4M22BQ"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "not-yet-valid"
+      }
+    },
+    {
+      "name": "a heartbeat dated 60 s ahead is accepted",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 5,
+        "at": "2026-10-12T12:01:00Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "QRpwQIIZcEPq_s4JbruhOt22JMbv0GQK3tS11Da6eQEv83h7TlRlWm_rO-hRVpUaR8ERGjulft69nTl_2HBRBg"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": true,
+        "newer": true
+      }
+    },
+    {
+      "name": "a heartbeat signed as ES256",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "ES256",
+        "estate": "estate-5d0f1a",
+        "sequence": 5,
+        "at": "2026-10-12T11:00:00Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "LsgKeWDdxU4gNq4PcMvUf5lPVmGveodf1Ib4wNadrPZioDT1lBbyHQ0L_A00rJWNbajXr6O_6DlDH-6-iqvnDA"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "unsupported-alg"
+      }
+    },
+    {
+      "name": "a heartbeat signed by a hub key the delta revokes",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 5,
+        "at": "2026-10-12T11:00:00Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-9a07-1",
+        "sig": "pk7n5GgwbGfVXO6Efzd6Pn68s8Z4-LbGIBjzlZ3a85mSewFB_vxtvcXKFyUI8eV26To8A1Vngk4gAyJaAUsDDQ"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "revoked-signer"
+      }
+    },
+    {
+      "name": "a heartbeat changed after it was signed",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 5,
+        "at": "2026-10-12T11:00:01Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "fKJdIFYR6oDKfBg4ThqtACqc2BM17hUHJRx0outbiwfALOMeRaivaoxyTBEOu4aDl8-OCyILCnEHdWiZf3yaBg"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "bad-signature"
+      }
+    },
+    {
+      "name": "a head hash in upper case",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 5,
+        "at": "2026-10-12T11:00:00Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362F1A7CDCBBB64B4F9103E2232AAA2A280CD603821649452C6637873BD9ABE"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "kStn0KG0Fa82Np6MGBfiLW046ZGOH_73rijsXOfPX7bX5c4fuNM3YjIeWgZXnY3eXNLqncRImhsPRKVnNGPVBQ"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    },
+    {
+      "name": "a revision digest as bare hex",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 5,
+        "at": "2026-10-12T11:00:00Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "EOXzAdVEVVJRRJf_y6HwURec7H4brfxGEX_3YHtu2m0xuykybxoTyQRaMXcCXDRtuKVl3Q8PzwjPy01yMvOFDA"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    },
+    {
+      "name": "a sequence of -1",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": -1,
+        "at": "2026-10-12T11:00:00Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "eLvUh1MYRwUDNshCV8uZKUkipsPn9BFWyvudwLdfIekLwtnLDKFJfZPGcvQ41MAvoCiqmqN4cuJlg42Ib4kHCQ"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "malformed"
+      }
+    },
+    {
+      "name": "a heartbeat of another estate",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-other",
+        "sequence": 5,
+        "at": "2026-10-12T11:00:00Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "qcx8dNRjiTk70WfyN70ar9f7XNSnp4zARpgLHtT9a-rsCEQoAy00bTuGOcx5P8kjk30iKJPtbxA9RzDiQjGyAg"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "2026-10-12T12:00:00Z"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "wrong-estate"
+      }
+    },
+    {
+      "name": "an unreadable clock",
+      "state": {
+        "estate": "estate-5d0f1a",
+        "entries": [
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 1,
+            "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+            "at": "2026-10-12T10:00:00Z",
+            "revocation": {
+              "kind": "hub-key",
+              "ref": "hub-m-9a07-1",
+              "revokedAt": "2026-10-12T10:00:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+          },
+          {
+            "type": "revocation-delta/1",
+            "alg": "EdDSA",
+            "estate": "estate-5d0f1a",
+            "sequence": 2,
+            "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+            "at": "2026-10-12T19:05:00+09:00",
+            "revocation": {
+              "kind": "package",
+              "ref": "sha256:abababababababababababababababababababababababababababababababab",
+              "revokedAt": "2026-10-12T10:04:00Z"
+            },
+            "kid": "hub-m-4c1e-1",
+            "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+          }
+        ]
+      },
+      "heartbeat": {
+        "type": "heartbeat/1",
+        "alg": "EdDSA",
+        "estate": "estate-5d0f1a",
+        "sequence": 5,
+        "at": "2026-10-12T11:00:00Z",
+        "deltaHead": {
+          "sequence": 2,
+          "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+        },
+        "estateRecord": {
+          "revision": 3,
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "kid": "hub-m-4c1e-1",
+        "sig": "fKJdIFYR6oDKfBg4ThqtACqc2BM17hUHJRx0outbiwfALOMeRaivaoxyTBEOu4aDl8-OCyILCnEHdWiZf3yaBg"
+      },
+      "trust": {
+        "record": {
+          "schema": "estate-record/1",
+          "estate": "estate-5d0f1a",
+          "revision": 3,
+          "parent": "sha256:4d7c9d5653d99158dd358bb5242b5f8811cedf2f813355ddf9fb0cfcbae9b5c6",
+          "issuedAt": "2026-10-12T09:00:00Z",
+          "validUntil": "2026-11-11T09:00:00Z",
+          "machines": [
+            {
+              "id": "m-4c1e",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "xhX3DbJ2oAB0uTTdEeqoRp55x8DmnjwhFWFk-Ho6_0g",
+                "kid": "hub-m-4c1e-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            },
+            {
+              "id": "m-9a07",
+              "hubKey": {
+                "kty": "OKP",
+                "crv": "Ed25519",
+                "x": "JD_3rD1UZ-JVp30nBahVtO1Ac7it7gv1ulTOLPaf3Qg",
+                "kid": "hub-m-9a07-1",
+                "use": "sig",
+                "alg": "EdDSA"
+              }
+            }
+          ],
+          "revocations": [],
+          "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+        },
+        "at": "never"
+      },
+      "expect": {
+        "ok": false,
+        "problem": "no-clock"
+      }
+    }
+  ],
+  "freshness": [
+    {
+      "name": "exactly 72 hours after the heartbeat: current",
+      "input": {
+        "at": "2026-10-15T11:00:00Z",
+        "applied": {
+          "sequence": 2,
+          "revision": 3
+        },
+        "heartbeat": {
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00Z",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          }
+        },
+        "broken": false
+      },
+      "answer": "current"
+    },
+    {
+      "name": "exactly 72 hours, the clock written at +09:00: current",
+      "input": {
+        "at": "2026-10-15T20:00:00+09:00",
+        "applied": {
+          "sequence": 2,
+          "revision": 3
+        },
+        "heartbeat": {
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00Z",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          }
+        },
+        "broken": false
+      },
+      "answer": "current"
+    },
+    {
+      "name": "72 hours and one second: stale",
+      "input": {
+        "at": "2026-10-15T11:00:01Z",
+        "applied": {
+          "sequence": 2,
+          "revision": 3
+        },
+        "heartbeat": {
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00Z",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          }
+        },
+        "broken": false
+      },
+      "answer": "stale"
+    },
+    {
+      "name": "no heartbeat held: stale",
+      "input": {
+        "at": "2026-10-12T12:00:00Z",
+        "applied": {
+          "sequence": 2,
+          "revision": 3
+        },
+        "heartbeat": null,
+        "broken": false
+      },
+      "answer": "stale"
+    },
+    {
+      "name": "a held heartbeat with an unreadable time: stale",
+      "input": {
+        "at": "2026-10-12T12:00:00Z",
+        "applied": {
+          "sequence": 2,
+          "revision": 3
+        },
+        "heartbeat": {
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          }
+        },
+        "broken": false
+      },
+      "answer": "stale"
+    },
+    {
+      "name": "the delta applied to 1, the heartbeat's head at 2: behind",
+      "input": {
+        "at": "2026-10-12T12:00:00Z",
+        "applied": {
+          "sequence": 1,
+          "revision": 3
+        },
+        "heartbeat": {
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00Z",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          }
+        },
+        "broken": false
+      },
+      "answer": "behind"
+    },
+    {
+      "name": "revision 2 applied, the heartbeat names 3: behind",
+      "input": {
+        "at": "2026-10-12T12:00:00Z",
+        "applied": {
+          "sequence": 2,
+          "revision": 2
+        },
+        "heartbeat": {
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00Z",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          }
+        },
+        "broken": false
+      },
+      "answer": "behind"
+    },
+    {
+      "name": "the delta applied past the heartbeat's head: current",
+      "input": {
+        "at": "2026-10-12T12:00:00Z",
+        "applied": {
+          "sequence": 3,
+          "revision": 3
+        },
+        "heartbeat": {
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00Z",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          }
+        },
+        "broken": false
+      },
+      "answer": "current"
+    },
+    {
+      "name": "two signed histories seen: broken, whatever else holds",
+      "input": {
+        "at": "2026-10-12T12:00:00Z",
+        "applied": {
+          "sequence": 2,
+          "revision": 3
+        },
+        "heartbeat": {
+          "sequence": 5,
+          "at": "2026-10-12T11:00:00Z",
+          "deltaHead": {
+            "sequence": 2,
+            "sha256": "7362f1a7cdcbbb64b4f9103e2232aaa2a280cd603821649452c6637873bd9abe"
+          },
+          "estateRecord": {
+            "revision": 3,
+            "digest": "sha256:070512bd06a81493e33a1540eed836621eb220c252d94b3bb580d8478e9d32b4"
+          }
+        },
+        "broken": true
+      },
+      "answer": "broken"
+    }
+  ],
+  "reconciliation": [
+    {
+      "name": "a revision issued when the entry was, listing it",
+      "revision": {
+        "issuedAt": "2026-10-12T10:00:00Z",
+        "revocations": [
+          {
+            "kind": "hub-key",
+            "ref": "hub-m-9a07-1",
+            "revokedAt": "2026-10-12T10:00:00Z"
+          }
+        ]
+      },
+      "entries": [
+        {
+          "type": "revocation-delta/1",
+          "alg": "EdDSA",
+          "estate": "estate-5d0f1a",
+          "sequence": 1,
+          "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+          "at": "2026-10-12T10:00:00Z",
+          "revocation": {
+            "kind": "hub-key",
+            "ref": "hub-m-9a07-1",
+            "revokedAt": "2026-10-12T10:00:00Z"
+          },
+          "kid": "hub-m-4c1e-1",
+          "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+        }
+      ],
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "a revision issued at the entry's time that leaves it out",
+      "revision": {
+        "issuedAt": "2026-10-12T10:00:00Z",
+        "revocations": []
+      },
+      "entries": [
+        {
+          "type": "revocation-delta/1",
+          "alg": "EdDSA",
+          "estate": "estate-5d0f1a",
+          "sequence": 1,
+          "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+          "at": "2026-10-12T10:00:00Z",
+          "revocation": {
+            "kind": "hub-key",
+            "ref": "hub-m-9a07-1",
+            "revokedAt": "2026-10-12T10:00:00Z"
+          },
+          "kid": "hub-m-4c1e-1",
+          "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+        }
+      ],
+      "expect": {
+        "ok": false,
+        "problem": "unreconciled",
+        "missing": [
+          {
+            "index": 0,
+            "kind": "hub-key",
+            "ref": "hub-m-9a07-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a revision issued one second before the entry need not list it",
+      "revision": {
+        "issuedAt": "2026-10-12T09:59:59Z",
+        "revocations": []
+      },
+      "entries": [
+        {
+          "type": "revocation-delta/1",
+          "alg": "EdDSA",
+          "estate": "estate-5d0f1a",
+          "sequence": 1,
+          "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+          "at": "2026-10-12T10:00:00Z",
+          "revocation": {
+            "kind": "hub-key",
+            "ref": "hub-m-9a07-1",
+            "revokedAt": "2026-10-12T10:00:00Z"
+          },
+          "kid": "hub-m-4c1e-1",
+          "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+        }
+      ],
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "an entry dated at +09:00 is compared as an instant (10:05Z, after 10:04:59Z)",
+      "revision": {
+        "issuedAt": "2026-10-12T10:04:59Z",
+        "revocations": [
+          {
+            "kind": "hub-key",
+            "ref": "hub-m-9a07-1",
+            "revokedAt": "2026-10-12T10:00:00Z"
+          }
+        ]
+      },
+      "entries": [
+        {
+          "type": "revocation-delta/1",
+          "alg": "EdDSA",
+          "estate": "estate-5d0f1a",
+          "sequence": 1,
+          "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+          "at": "2026-10-12T10:00:00Z",
+          "revocation": {
+            "kind": "hub-key",
+            "ref": "hub-m-9a07-1",
+            "revokedAt": "2026-10-12T10:00:00Z"
+          },
+          "kid": "hub-m-4c1e-1",
+          "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+        },
+        {
+          "type": "revocation-delta/1",
+          "alg": "EdDSA",
+          "estate": "estate-5d0f1a",
+          "sequence": 2,
+          "prev": "8659f8dea5d71a315decaad3037408a17f85b7a03e87145fc76c62de1540f0ce",
+          "at": "2026-10-12T19:05:00+09:00",
+          "revocation": {
+            "kind": "package",
+            "ref": "sha256:abababababababababababababababababababababababababababababababab",
+            "revokedAt": "2026-10-12T10:04:00Z"
+          },
+          "kid": "hub-m-4c1e-1",
+          "sig": "GCM6y4X0PXWdKRCyPwPGw61EbBPtuv-Q38GdaDIcw835YESNGYlMvImtpPo39KSaJNiId-nENxYf0NTAjTWcBw"
+        }
+      ],
+      "expect": {
+        "ok": true
+      }
+    },
+    {
+      "name": "a revision with a space for T: unreadable, never compared",
+      "revision": {
+        "issuedAt": "2026-10-12 10:00:00Z",
+        "revocations": [
+          {
+            "kind": "hub-key",
+            "ref": "hub-m-9a07-1",
+            "revokedAt": "2026-10-12T10:00:00Z"
+          }
+        ]
+      },
+      "entries": [
+        {
+          "type": "revocation-delta/1",
+          "alg": "EdDSA",
+          "estate": "estate-5d0f1a",
+          "sequence": 1,
+          "prev": "eeed1162e2371d24eeb238e7b568fe95871936219c5e7719fa5080530b8e8b1f",
+          "at": "2026-10-12T10:00:00Z",
+          "revocation": {
+            "kind": "hub-key",
+            "ref": "hub-m-9a07-1",
+            "revokedAt": "2026-10-12T10:00:00Z"
+          },
+          "kid": "hub-m-4c1e-1",
+          "sig": "LivBR4NMBjX7PwBZecQDNV3etFFsGs4KgkTs-2FPFMZe2e86Svh-3SizSmz1r3askoYHSA6h73M64n-t1pqQCA"
+        }
+      ],
+      "expect": {
+        "ok": false,
+        "problem": "malformed",
+        "missing": []
+      }
+    }
+  ]
+}

@@ -90,11 +90,45 @@ Each of these planted defects failed the suite:
 - trusting the relay's `to`;
 - returning fetched blob bytes without checking their digest.
 
+## The estate record and its freshness (OBS-109, slice 3)
+
+| Module | What it does | Reference |
+|---|---|---|
+| `observatory/engine/node/identifiers.py` | identifier equality by normal form (RFC 3986 §6.2.2, RFC 8141 §3.1) | `src/identifiers.ts`, `identifiers.json` |
+| `observatory/engine/node/ed25519.py` | Ed25519 verification that refuses small-order keys first | `src/ed25519.ts` |
+| `observatory/engine/node/webauthn.py` | offline passkey assertions (WebAuthn Level 3 §7.2) and the register of passkey-signed statements: a dedicated `sign.<domain>` RP, origins pinned within it | `src/webauthn.ts`, `src/signing-challenges.ts` |
+| `observatory/engine/node/estate.py` | `verify_estate_record` in the ER table's order: shape, digest, chain to the parent (a revision never drops a revocation), the signing passkey among the trusted ones, the assertion, the window, then the record's own rules FAC-SEM-072…076, 092, 110, 111 | `src/estate-record-rules.ts`, `estate-record.json` |
+| `observatory/engine/node/revocation.py` | the signed revocation delta, the heartbeat and freshness: `current`, `behind`, `stale` (no heartbeat for 72 hours) or `broken` (two signed histories); only `current` accepts what other machines send | `src/revocation-delta.ts`, `revocation-delta.json` |
+
+A node believes a peer's `#sig` key only from a revision `verify_estate_record` accepted (`relay.peer_keys` reads it),
+minus what the delta revokes (`revocation.effective_revocations`). `tests/test_node_estate.py` also re-signs revisions
+with the vectors' EdDSA test passkey to hold each rule: two signing keys on one machine, a key named for another
+machine, an off-curve device key, a small-order hub key, an unpinned publisher key, a credential-shaped secret slot, a
+grant listed twice, a share grant in the personal context, an organization instance without its grant, a pinned origin
+outside the signing RP, a missing user-verification flag, a sign-in RP and a ceremony inside a frame.
+
+Planted defects that failed the suites:
+- estate:
+  - a dropped revocation allowed;
+  - a revoked passkey signing;
+  - a 61-second skew;
+  - no secret detector;
+  - a sign-in RP allowed;
+  - BS without BE;
+  - `topOrigin` ignored;
+- delta:
+  - no `prev` check;
+  - no revoked-signer check;
+  - the 72-hour bound off by one;
+  - a small-order signer;
+  - reconciliation skipping a kind;
+  - no fork detection;
+  - a 61-second skew.
+
 ## What comes next
 
 | Slice | What |
 |---|---|
-| 3 | estate-record verification, revocation deltas and the heartbeat, with the 72-hour freshness rule |
 | 4 | sealed envelopes (HPKE, suite 16/1/1, info `fabric-secret-envelope/1`) to a peer's `#kem` |
 | 5 | the enrollment client, once the contract's machine ceremonies are decided |
 | 6 | the node service and its CLI |

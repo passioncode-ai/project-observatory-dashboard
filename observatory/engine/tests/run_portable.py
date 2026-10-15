@@ -142,6 +142,8 @@ BOUNDARY += ('secret_header',)
 BOUNDARY += ('node_foundation',)
 # The node's relay session (OBS-108): a stdlib WebSocket and RelaySession against a loopback relay stub.
 BOUNDARY += ('node_session',)
+# The node's estate record, passkey assertions, revocation delta and heartbeat (OBS-109).
+BOUNDARY += ('node_estate', 'node_revocation')
 # access-bindings/1: who may do what with agent memory, from the transport (PB-137 N-007).
 BOUNDARY += ('access_binding',)
 # ENG-018: a manifest never pins a tag its release does not have.

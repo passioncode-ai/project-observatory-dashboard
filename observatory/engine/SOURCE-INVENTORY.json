@@ -1099,8 +1099,8 @@
       "path": "fabric/node-vectors/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "475a59c0aa1c008acc5f043edf1811f9bbfa8256e9fc94d3b708eb00208711c0",
-      "bytes": 979
+      "export_sha256": "1b4bdfc6daad81ccf762b9b720c248b6e277cf269a19fd8f4d4d8143a67350a6",
+      "bytes": 1461
     },
     {
       "path": "fabric/node-vectors/canonical.json",
@@ -1108,6 +1108,20 @@
       "upstream_modified": true,
       "export_sha256": "e63411c0e1b615773d20c8c82b34a0c5ef7fc367fffc04d106b537c2628e5663",
       "bytes": 14561
+    },
+    {
+      "path": "fabric/node-vectors/estate-record.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "3c37bf7bf205fe14674954200ef14b8e733e70a7e350ef08293da3edee2f61c0",
+      "bytes": 392916
+    },
+    {
+      "path": "fabric/node-vectors/identifiers.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ff8726a99db6475e3a28f14bead020118ba01a1ac5844d3fd62678e3d9369f8b",
+      "bytes": 7526
     },
     {
       "path": "fabric/node-vectors/p256.json",
@@ -1122,6 +1136,13 @@
       "upstream_modified": true,
       "export_sha256": "6242729104e3fb4f08e144194a94af40b9bb3df15045bba733cf985de281fb3f",
       "bytes": 193112
+    },
+    {
+      "path": "fabric/node-vectors/revocation-delta.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "07aa63ef6293fc5c1f355f21db7b6097e62e512d31bfcf837691d7953c51d3ec",
+      "bytes": 163122
     },
     {
       "path": "fabric/schemas/capability-input.schema.json",
@@ -1437,6 +1458,27 @@
       "bytes": 6419
     },
     {
+      "path": "node/ed25519.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "6d2a09e84667a71a9c2ca8e430ac618dd9efc79f0bd7ab5450806e08710a7039",
+      "bytes": 2393
+    },
+    {
+      "path": "node/estate.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "92d04701861f163ea7b9b4f09c9b7881c98723b3cc90ed36867bc17d7e994d69",
+      "bytes": 24137
+    },
+    {
+      "path": "node/identifiers.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "046c8536a50457cb1edb8b0f39eae202fba0835b230b19134613923c23f10321",
+      "bytes": 6558
+    },
+    {
       "path": "node/jcs.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -1458,11 +1500,25 @@
       "bytes": 16802
     },
     {
+      "path": "node/revocation.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "339193ea282c8a2d4172bcb4725562b06437802d1f69947cfe67a8188ae04e47",
+      "bytes": 24668
+    },
+    {
       "path": "node/session.py",
       "source_sha256": null,
       "upstream_modified": true,
       "export_sha256": "9166f47e8e0acd90dd2df94cf088ea47dc64c9fccd3935939c0f3ac2d382aed3",
       "bytes": 15009
+    },
+    {
+      "path": "node/webauthn.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "8e5326fea06e51f87c4a2360ead9f48c660ea78aa25180a50a9d82ee8c61ad2c",
+      "bytes": 10410
     },
     {
       "path": "node/ws.py",
@@ -2188,8 +2244,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "142d0d62a46065adf04dcbb672d8a78f102847d6b191ea7a928059ab16af2b82",
-      "bytes": 26751,
+      "export_sha256": "4e9ba6a420ed0ad28115edbe556047b0698b7cbf759c47736224430feb095a15",
+      "bytes": 26888,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -3225,11 +3281,25 @@
       "bytes": 12632
     },
     {
+      "path": "tests/test_node_estate.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "73a4166acf72ba4aff1b7973a8c5136be897566032f369024cee326ffa94ab6e",
+      "bytes": 10203
+    },
+    {
       "path": "tests/test_node_foundation.py",
       "source_sha256": null,
       "upstream_modified": true,
       "export_sha256": "cb06ae78b428d2d3cc3a22b69c8ca9ce9cb407860dea7277ba3e121d20c75f4b",
       "bytes": 20442
+    },
+    {
+      "path": "tests/test_node_revocation.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "1d4bc286523fdc7bc61cc5da8a6054c1964a04242937fe0440e1bdc132422f6e",
+      "bytes": 12423
     },
     {
       "path": "tests/test_node_session.py",
@@ -4892,7 +4962,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 635,
+  "file_count": 645,
   "excluded": [
     "git-history",
     "operator-registries",
