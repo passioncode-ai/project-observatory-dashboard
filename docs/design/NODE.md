@@ -178,10 +178,40 @@ Planted defects that failed the suites:
   - no fork detection;
   - a 61-second skew.
 
+## The secret envelope (OBS-113, slice 4)
+
+`observatory/engine/node/envelope.py` ports `src/secret-envelope.ts` (DEC-0047 item 7, DEC-0066). A secret is sealed by
+HPKE base mode (RFC 9180; DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, AES-128-GCM; info `fabric-secret-envelope/1`) to the
+target's `#kem` key. The header is the AEAD's additional data, and the sealer signs `{header, ct}` with its `#sig` key.
+
+`open_envelope` checks in the reference's order:
+1. shape;
+2. algorithm;
+3. recipient;
+4. keys (SEC 1);
+5. signature (low-S);
+6. that the estate record lets the sender hold the slot;
+7. the placement run;
+8. the anti-rollback mark: an equal sequence passes only for the same envelope;
+9. the times;
+10. that it opens.
+
+On success it returns the mark the target writes with the secret in one transaction. `estate_envelope_context` derives
+the sender's key, who may hold a slot and the current placement from the applied revisions. It reads only personal
+secret placements: an envelope names no context.
+
+Sealing with RFC 9180 §A.3.1's ephemeral key reproduces the contract vector's header and ciphertext byte for byte. Six
+planted defects fail `tests/test_node_envelope.py`:
+- no sequence-reuse check;
+- a placement ahead of the applied revision;
+- another info string;
+- no signature check;
+- reading an organization's placement;
+- ignoring a mark ahead of the run.
+
 ## What comes next
 
 | Slice | What |
 |---|---|
-| 4 | sealed envelopes (HPKE, suite 16/1/1, info `fabric-secret-envelope/1`) to a peer's `#kem` |
 | 5 | the enrollment client, once the contract's machine ceremonies are decided |
 | 6 | the node service and its CLI |

@@ -1099,8 +1099,8 @@
       "path": "fabric/node-vectors/README.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1b4bdfc6daad81ccf762b9b720c248b6e277cf269a19fd8f4d4d8143a67350a6",
-      "bytes": 1461
+      "export_sha256": "bae2d1d858d013c3f481e013b7b4e281913322f61a5791acdbf04dc697e68062",
+      "bytes": 1644
     },
     {
       "path": "fabric/node-vectors/canonical.json",
@@ -1143,6 +1143,13 @@
       "upstream_modified": true,
       "export_sha256": "07aa63ef6293fc5c1f355f21db7b6097e62e512d31bfcf837691d7953c51d3ec",
       "bytes": 163122
+    },
+    {
+      "path": "fabric/node-vectors/secret-envelope.json",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "446776b8a49a69d1b772265450cf3b6bdb1e7a0e9da7945e154b710d857c5ead",
+      "bytes": 109989
     },
     {
       "path": "fabric/schemas/capability-input.schema.json",
@@ -1463,6 +1470,13 @@
       "upstream_modified": true,
       "export_sha256": "6d2a09e84667a71a9c2ca8e430ac618dd9efc79f0bd7ab5450806e08710a7039",
       "bytes": 2393
+    },
+    {
+      "path": "node/envelope.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ba18ff5711b58142ad7242e2a8ae103d0073819fcd9a10cb20005c170db4073d",
+      "bytes": 17429
     },
     {
       "path": "node/estate.py",
@@ -2244,8 +2258,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "4e9ba6a420ed0ad28115edbe556047b0698b7cbf759c47736224430feb095a15",
-      "bytes": 26888,
+      "export_sha256": "3e7a6d7e2d135053fe28c7a506b1a15aa1918acf9e4502c538c600b3620b127a",
+      "bytes": 26966,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -3279,6 +3293,13 @@
       "upstream_modified": true,
       "export_sha256": "db939ea762352d81e4aef79e8bb95c814046f8fd89fcc4ee92f53d841cea1991",
       "bytes": 12632
+    },
+    {
+      "path": "tests/test_node_envelope.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "aabcaf8607150f88351422e6bb325fc4816b8601219d905bc7ad42a5f67ef19b",
+      "bytes": 7467
     },
     {
       "path": "tests/test_node_estate.py",
@@ -4962,7 +4983,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 645,
+  "file_count": 648,
   "excluded": [
     "git-history",
     "operator-registries",

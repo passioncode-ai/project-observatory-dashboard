@@ -144,6 +144,8 @@ BOUNDARY += ('node_foundation',)
 BOUNDARY += ('node_session',)
 # The node's estate record, passkey assertions, revocation delta and heartbeat (OBS-109).
 BOUNDARY += ('node_estate', 'node_revocation')
+# The node's sealed secret envelope (OBS-113).
+BOUNDARY += ('node_envelope',)
 # access-bindings/1: who may do what with agent memory, from the transport (PB-137 N-007).
 BOUNDARY += ('access_binding',)
 # ENG-018: a manifest never pins a tag its release does not have.
