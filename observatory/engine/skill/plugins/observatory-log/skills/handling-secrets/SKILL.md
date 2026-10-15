@@ -236,7 +236,8 @@ Adding an Email Routing rule in one zone — one address to a Worker — is
 namespace is `--preset workers-edit --account <slug>`; putting a Worker in front of
 a hostname (`example.com/*`) is the zone right `--preset workers-routes --zone <zone>`;
 sending one hostname to another at the edge (a Single Redirect, `www.` to the apex) is
-the zone right `--preset redirect-rules --zone <zone>`.
+the zone right `--preset redirect-rules --zone <zone>`; purging a zone's edge cache after a
+deploy is `--preset cache-purge --zone <zone>`, proved by purging one URL the site does not serve.
 Each is its own token in its own slot. When a preset's groups are unknown, `cloudflare.py groups
 --account <slug> --match "<words>"` lists the catalogue's names and levels,
 read-only and without ids.
