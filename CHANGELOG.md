@@ -11,15 +11,23 @@ while the major version is 0, a minor release may change behaviour and says so h
   key in the OpenRouter door's ledger by its hash, one request per key. Beside the estate's month it writes
   `projects` and `unattributed` into `store/raw/spend.json` (`schema_version` 2; the existing fields are
   unchanged). `tools/spend.py project [PROJECT] [--json]` answers from that file without asking the provider
-  (`monthUsd`, `last30Usd`, `keys`, `partial`, `unread`, `fresh`). It is the figure Fabric's launcher reads as a
-  project's recent spend (contract DEC-0037).
-  - A key belongs to the project named in its ledger row's `project` field, normalised to that project's vault
-    folder.
+  (`monthUsd`, `last30Usd`, `keys`, `retiredKeys`, `folders`, `through`, `partial`, `unread`, `fresh`). It is the
+  figure Fabric's launcher reads as a project's recent spend (contract DEC-0037).
+  - A key belongs to the project named in its ledger row's `project` field. Every name of one registered project
+    (its folders, its id, its name) is one bucket keyed by its registry id, so any of them answers the whole project.
+  - **A retired key keeps its spend with its project** (OBS-103). `openrouter.py revoke`, a completed `rotate` and
+    `revoke --forget-pending` leave a tombstone in the ledger's `retired` list (name, account, hash, project, day),
+    kept 62 days, and the scan reads it. Before this, a revoked key's spend moved to `unattributed` while its project
+    read as whole and lower.
   - `unattributed` is its own total, never guessed into a project. It holds keys whose ledger row names no project,
-    and an account's spend on hashes no ledger row holds.
-  - A window that was not read whole is `null`, never a lower figure, and the key is named in `unread`. This covers:
-    a key the provider would not answer for, a pending row with no hash, and a key rotated inside the window,
-    because the ledger keeps only the successor's hash (OBS-103).
+    and an account's spend on hashes no ledger row or tombstone holds.
+  - A window that was not read whole is `null`, never a lower figure, and the key is named in `unread`. This covers
+    a key the provider would not answer for or answered with malformed rows, a pending row or tombstone without a
+    hash, a rotation made before tombstones existed, and the keys not reached when the step's deadline
+    (`OBSERVATORY_STEP_DEADLINE`) arrives or the provider becomes unreachable. An unreadable registry nulls every
+    project.
+  - The top-level `partial` stays about the estate total; `attribution_partial` covers the projects, each `degraded`
+    entry carries its `scope`, and `spend.estate_month` names only the accounts not read.
   - No finding fires yet. A project's limit is enforced once a recorded spend policy is readable (J-11F).
 
 ### Documentation

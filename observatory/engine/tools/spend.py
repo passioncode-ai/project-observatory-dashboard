@@ -19,7 +19,14 @@ whole is `null`, never a lower figure; `partial` says so. A project the door's l
 month (the meter's rule, meter.py `measured`), and `degraded` names it.
 
 PROJECT is the project's vault folder, its registry id or its name (`vault_project.resolve`, the rule every
-door uses); an ambiguous one is refused with the candidates.
+door uses); the scan groups every name of one registered project, every vault folder of it included, under its
+registry id, so any of them answers the whole project. An ambiguous one is refused with the candidates. When the
+registry cannot be read (here, or by the scan), which names are one project is unknown and the answer is null
+with `partial`, never the figure of one of its names.
+
+A key revoked or rotated inside a window still counts for its project: the door keeps the retired key's hash as a
+tombstone and the scan reads it. `through` is the last day the provider's report covers for the project's
+accounts (its activity lags about a day).
 
 Exit 0 answered (partial or stale included, said in the answer), 1 no usable scan, 2 a project that cannot be
 resolved. Never a key, never a hash.
@@ -46,8 +53,18 @@ def utcnow() -> datetime:
 
 def _figures(row: dict | None) -> dict:
     row = row or {}
-    return {"monthUsd": row.get("month_usd"), "last30Usd": row.get("last30_usd"), "keys": row.get("keys", 0),
-            "partial": bool(row.get("partial")), "unread": list(row.get("unread") or [])}
+    out = {"monthUsd": row.get("month_usd"), "last30Usd": row.get("last30_usd"), "keys": row.get("keys", 0),
+           "retiredKeys": row.get("retired_keys", 0), "folders": list(row.get("folders") or []),
+           "through": row.get("through"), "partial": bool(row.get("partial")),
+           "unread": list(row.get("unread") or [])}
+    if row.get("note"):
+        out["note"] = row["note"]
+    return out
+
+
+#: Why a project's figure is unknown when the registry could not be read.
+REGISTRY_NOTE = ("the registry could not be read, so which names belong to one project is unknown: the figure "
+                 "of one name could be lower than the project's")
 
 
 def load(path: pathlib.Path) -> tuple[dict | None, list[dict]]:
@@ -80,7 +97,10 @@ def freshness(doc: dict, now: datetime) -> tuple[bool, list[dict]]:
     return True, []
 
 
-def answer(doc: dict | None, problems: list[dict], project: str | None, now: datetime) -> tuple[int, dict]:
+def answer(doc: dict | None, problems: list[dict], project: str | None, now: datetime,
+           also: tuple[str, ...] = (), registry_unread: bool = False) -> tuple[int, dict]:
+    """The answer for one project (`project`, the scan's key; `also`, other spellings to look under), or for every
+    project when `project` is None."""
     head = {"month": None, "window": None, "scannedAt": None, "fresh": False}
     if doc is None:
         base = {**head, "degraded": problems}
@@ -91,17 +111,25 @@ def answer(doc: dict | None, problems: list[dict], project: str | None, now: dat
     head = {"month": doc.get("month"), "window": doc.get("window"), "scannedAt": doc.get("scanned_at"),
             "fresh": fresh}
     degraded = [*(doc.get("degraded") or []), *stale]
+    if registry_unread:
+        degraded.append({"source": "spend:registry", "reason": "the registry would not read here", "scope": "attribution"})
+    registry_unread = registry_unread or any(d.get("source") == "spend:registry" for d in degraded)
     projects = doc.get("projects") or {}
+    if registry_unread:
+        projects = {k: {**v, "month_usd": None, "last30_usd": None, "partial": True, "note": REGISTRY_NOTE}
+                    for k, v in projects.items()}
     if project is None:
         un = doc.get("unattributed") or {}
         return 0, {**head, "projects": {k: _figures(v) for k, v in sorted(projects.items())},
                    "unattributed": {**_figures(un), "unledgeredMonthUsd": un.get("unledgered_month_usd"),
                                     "unledgeredLast30Usd": un.get("unledgered_last30_usd")},
                    "totalUsd": doc.get("total_usd"), "degraded": degraded}
-    row = projects.get(project)
+    row = next((projects[k] for k in (project, *also) if k in projects), None)
     out = {"project": project, **head, **_figures(row), "degraded": degraded}
     if row is None:
-        if any(d.get("source") == "spend:openrouter:ledger" for d in degraded):
+        if registry_unread:
+            out.update(monthUsd=None, last30Usd=None, partial=True, note=REGISTRY_NOTE)
+        elif any(d.get("source") == "spend:openrouter:ledger" for d in degraded):
             out.update(monthUsd=None, last30Usd=None, partial=True,
                        note="the door's ledger could not be read, so no key could be attributed to any project")
         else:
@@ -111,12 +139,21 @@ def answer(doc: dict | None, problems: list[dict], project: str | None, now: dat
     return 0, out
 
 
-def resolve(text: str) -> str:
+def resolve(text: str) -> tuple[str, tuple[str, ...], bool]:
+    """(the scan's key for PROJECT, other spellings to look under, whether the registry was unreadable).
+
+    The scan keys a registered project by its registry id (`collectors/scan_spend.py` `project_key`) and an
+    unregistered one by its name as typed; the folder and the typed text are looked under too, for a scan
+    written while the registry did not yet claim the name."""
     import vault_project
     r = vault_project.resolve(text)
+    if r.how == "unreadable":
+        return text, (), True
+    if r.project_id:
+        return r.project_id, tuple(x for x in (r.folder, text) if x and x != r.project_id), False
     if r.how == "ambiguous" or not r.folder:
         raise LookupError(r.sentence())
-    return r.folder
+    return text, (), False
 
 
 def show(code: int, ans: dict) -> None:
@@ -149,16 +186,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true")
     p.add_argument("--file", help="the spend scan to read (default: the workspace's store/raw/spend.json)")
     a = ap.parse_args(argv)
-    project = None
+    project, also, registry_unread = None, (), False
     if a.project:
         try:
-            project = resolve(a.project)
+            project, also, registry_unread = resolve(a.project)
         except LookupError as exc:
             print(json.dumps({"project": a.project, "error": str(exc)}) if a.json else str(exc),
                   file=sys.stdout if a.json else sys.stderr)
             return 2
     doc, problems = load(pathlib.Path(a.file) if a.file else paths.SCRATCH / "spend.json")
-    code, ans = answer(doc, problems, project, utcnow())
+    code, ans = answer(doc, problems, project, utcnow(), also, registry_unread)
     if a.json:
         print(json.dumps(ans, ensure_ascii=False))
     else:

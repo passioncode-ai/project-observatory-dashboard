@@ -269,6 +269,30 @@ def save_ledger(doc: dict) -> None:
     write_secret(LEDGER, json.dumps(doc, ensure_ascii=False, indent=2))
 
 
+#: How long a retired key's tombstone stays in the ledger. The provider's activity report covers the last 30
+#: completed UTC days, so a key retired longer ago than that can hold no spend in either window the spend scan
+#: counts (`collectors/scan_spend.py`); the margin keeps a late scan whole.
+RETIRED_KEEP_DAYS = 62
+
+
+def _retire(doc: dict, name: str, rec: dict, key_hash: str | None, reason: str) -> None:
+    """Leave a tombstone for a key that left the ledger's `issued` map (revoked, forgotten) or was replaced by
+    its successor (rotated): its name, account, provider hash, project and the UTC day it was retired.
+
+    WHY (J-11). The spend scan attributes a project's spend by reading each key's activity by its hash. A key
+    deleted here took its hash with it, so whatever it spent earlier in the month moved to `unattributed` while
+    its project read as whole and lower. The tombstone keeps the hash for as long as the provider can still
+    report the key's spend. A hash is the provider's public handle, never a value. Older tombstones, and any
+    that are malformed, are pruned on each write."""
+    retired = doc.get("retired") if isinstance(doc.get("retired"), list) else []
+    now = datetime.datetime.now(datetime.timezone.utc).date()
+    cutoff = (now - datetime.timedelta(days=RETIRED_KEEP_DAYS)).isoformat()
+    kept = [r for r in retired if isinstance(r, dict) and str(r.get("retired_on") or "") >= cutoff]
+    kept.append({"name": name, "account": rec.get("account"), "hash": key_hash, "project": rec.get("project"),
+                 "retired_on": now.isoformat(), "reason": reason})
+    doc["retired"] = kept
+
+
 # ─────────────────────────── delivery ────────────────────────────────────────
 
 def deliver(value: str, to: str, *, rotate: bool = False) -> str:
@@ -1204,6 +1228,7 @@ def rotate_one(name: str, doc: dict | None = None) -> dict:
         raise ValueError("A finite positive ceiling is required")
     private_io.check(LEDGER)
     label, admin = read_admin(rec["account"])
+    previous_hash = rec.get("hash")
     old = find_key(admin, name)
     d = _request("/keys", admin,
                  {"name": f"{name}-next", "limit": limit,
@@ -1227,6 +1252,16 @@ def rotate_one(name: str, doc: dict | None = None) -> dict:
         _request(f"/keys/{new_row['hash']}", admin, {"name": name}, method="PATCH")
         rec["rotation_status"] = "complete"
         rec.pop("predecessor_hash", None)
+        # The predecessor's tombstone (J-11): its spend before today stays readable by hash for the spend scan.
+        # `tombstoned_rotations` counts the rotations that left one; a row rotated before this change has
+        # fewer than `rotations`, and `tombstones_since` bounds when those older rotations happened.
+        _retire(doc, name, rec, (old or {}).get("hash") or previous_hash, "rotated")
+        tombstoned = rec.get("tombstoned_rotations")
+        if type(tombstoned) is not int or tombstoned < 0:
+            tombstoned = 0
+        if tombstoned == 0:
+            rec["tombstones_since"] = today()
+        rec["tombstoned_rotations"] = tombstoned + 1
         save_ledger(doc)
     except (OSError, ValueError, RuntimeError):
         _journal("rotation-partial", f"openrouter/{label}/{name}",
@@ -1412,6 +1447,8 @@ def forget_pending_key(name: str, reason: str) -> dict:
              require_success=True, reason=reason, destination=rec.get("destination"),
              attestation_only=True)
     doc["issued"].pop(name)
+    # No hash to read by: the spend scan reads the project's windows that include this day as unread.
+    _retire(doc, name, rec, None, "forgotten-pending")
     save_ledger(doc)
     _journal("forget-pending", f"openrouter/{rec.get('account')}/{name}", reason=reason,
              destination=rec.get("destination"))
@@ -1458,6 +1495,7 @@ def revoke_key(name_or_label: str) -> dict:
         _request(f"/keys/{row['hash']}", admin, method="DELETE")
     doc = ledger()
     doc["issued"].pop(name, None)
+    _retire(doc, name, rec, rec.get("hash") or (row or {}).get("hash"), "revoked")
     save_ledger(doc)
     _journal("revoke", f"openrouter/{rec['account']}/{name}")
     return {"name": name, "label": (row or {}).get("label"), "revoked": True,
