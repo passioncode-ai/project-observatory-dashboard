@@ -4315,8 +4315,8 @@
     {
       "path": "tools/check_secrets.py",
       "source_sha256": "bfd9be34804f652745f6085df1791139eea563b8e924002f9b7759d2f2f05f41",
-      "export_sha256": "05e1a01bd857654354980a2d43820ad713a7f5241c3f4065c4bfdb1486e5a798",
-      "bytes": 47144,
+      "export_sha256": "c0e13b28090826e85c3558503a68d32c75d6c4198ffc910e292146509a5a44e2",
+      "bytes": 47469,
       "python_comments_removed": 69,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,
