@@ -69,7 +69,8 @@ project-observatory full ssh-keys create NAME [--comment TEXT] [--no-passphrase]
    of `~/.ssh/config`, and the config must not be a link. Every check runs before anything is
    generated, so a refusal leaves nothing behind.
 2. `~/.ssh` is created with mode 0700 if missing. An existing folder keeps its mode; a mode wider
-   than 0700 is a finding, not something this command changes.
+   than 0700 is a finding, not something this command changes. A `~/.ssh` that is a link is refused:
+   nothing is written through a link.
 3. `ssh-keygen -q -t ed25519 -a 100 -C COMMENT -f TMP/NAME` runs in a private temporary folder
    inside `~/.ssh`. Without `--no-passphrase` it inherits the terminal and asks for the passphrase
    itself; a run with no terminal is refused before it starts ("a passphrase is typed by a
@@ -180,7 +181,7 @@ the step to retry.
 
 | Reader | Surface |
 |---|---|
-| A person | `project-observatory full ssh-keys list \| show NAME \| copy NAME \| create NAME \| send NAME --to … \| findings` (`--json` on `list` and `findings`); `full --help`; [ONBOARDING.md](../ONBOARDING.md#ssh-keys-on-this-machine) |
+| A person | `project-observatory full ssh-keys [list] \| show NAME \| copy NAME \| create NAME \| send NAME --to … \| findings` (`--json` on `list` and `findings`); `full --help`; [ONBOARDING.md](../ONBOARDING.md#ssh-keys-on-this-machine) |
 | An agent | `observatory_ssh_keys` (read-only: the inventory, one key's public line with `name`, the findings and the commands); the same CLI; [AGENT-ONBOARDING.md](../AGENT-ONBOARDING.md#ssh-keys) |
 | The board | the findings above, from `store/raw/ssh-keys.json` |
 | The dashboard | a section on the keys page: OBS-111 |
