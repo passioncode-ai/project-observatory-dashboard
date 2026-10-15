@@ -51,6 +51,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tools"))
 import credential_shape  # noqa: E402
+import osprivacy  # noqa: E402  — O_NOFOLLOW and friends on every OS
 
 CMD = "project-observatory full ssh-keys"
 #: A key name `create` accepts: one file name in ~/.ssh.
@@ -224,7 +225,7 @@ def read_public(path: pathlib.Path) -> dict:
         raise Refused(f"{tilde(path)} is not a regular file (a link is not followed)")
     if st.st_size > PUB_MAX_BYTES:
         raise Refused(f"{tilde(path)} is not one public key line; nothing was copied or sent")
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    fd = osprivacy.open(path, os.O_RDONLY | osprivacy.NOFOLLOW)
     try:
         raw = os.read(fd, PUB_MAX_BYTES + 1)
     finally:
@@ -260,7 +261,7 @@ def private_header(path: pathlib.Path) -> dict | None:
     passphrase). The key material comes far later and is never decoded. The file's access time
     is put back, because it is the only local trace of when ssh last used the key."""
     st = os.lstat(path)
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    fd = osprivacy.open(path, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
@@ -754,9 +755,10 @@ def cmd_create(args) -> int:
     if not folder.exists():
         folder.mkdir(mode=0o700)
         os.chmod(folder, 0o700)
-    temp = pathlib.Path(tempfile.mkdtemp(prefix=".observatory-keygen-", dir=folder))
     linked: list[pathlib.Path] = []
-    try:
+    # A private folder inside ~/.ssh (same file system, so os.link works), removed on every path.
+    with tempfile.TemporaryDirectory(prefix=".observatory-keygen-", dir=folder) as scratch:
+        temp = pathlib.Path(scratch)
         argv = [keygen, "-q", "-t", "ed25519", "-a", "100", "-C", comment, "-f", str(temp / name)]
         if not passphrase:
             argv += ["-N", ""]
@@ -783,13 +785,6 @@ def cmd_create(args) -> int:
             linked.append(dst)
         os.chmod(target, 0o600)
         os.chmod(pub, 0o644)
-    finally:
-        for leftover in (temp / name, temp / f"{name}.pub"):
-            leftover.unlink(missing_ok=True)
-        try:
-            temp.rmdir()
-        except OSError:
-            pass
     parsed = read_public(pub)
     print(f"Created {tilde(target)} (ed25519)")
     print(parsed["line"])
@@ -845,7 +840,7 @@ def host_block(args, name: str) -> str:
 
 def append_config(block: str) -> None:
     config = ssh_dir() / "config"
-    fd = os.open(config, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    fd = osprivacy.open(config, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
     try:
         size = os.fstat(fd).st_size
         lead = ""

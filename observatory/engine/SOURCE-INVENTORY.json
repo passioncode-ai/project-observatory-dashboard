@@ -3210,8 +3210,8 @@
       "path": "tests/test_pipeline.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "053b3f3c9e3b6b360c855f0ec011f8b147192597fee2308b5a02f9cecf20605d",
-      "bytes": 47874
+      "export_sha256": "f3bc6d87e876c4a4c044d6c0a0c62ec7376012ca88d812f4939af00bc27557fe",
+      "bytes": 48107
     },
     {
       "path": "tests/test_plugin_pair.py",
@@ -4651,6 +4651,20 @@
       "bytes": 4051
     },
     {
+      "path": "tools/ssh_key_findings.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ddd1582ecfee4fb2d8bf77e090a4594b232e368be41101ebddb1da257e1541e0",
+      "bytes": 9061
+    },
+    {
+      "path": "tools/ssh_keys.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "3b6c5f595d9c2503c723383c87768189306e0d1c7868d2b495ee0519a574211f",
+      "bytes": 50312
+    },
+    {
       "path": "tools/sweep_fixtures.py",
       "source_sha256": "74721cb24f8c7d220e2eb7cb31899bc939f692cb5b339803b5e1863677429d58",
       "export_sha256": "c7d73d913cc8b1e341ce011552171ae3e6fb2ebd0b4f4058d09324b9def76913",
@@ -4801,7 +4815,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 622,
+  "file_count": 624,
   "excluded": [
     "git-history",
     "operator-registries",
