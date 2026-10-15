@@ -1419,8 +1419,15 @@
       "path": "node/__init__.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cb50bce121fe33e3fdcdb34b894f093771c37bde949a58b10be590eccdac5e55",
-      "bytes": 414
+      "export_sha256": "5c9a92a2405694ee27a630ebc2c3660b92a0e309c4ff627cbf1d2114653b2c0a",
+      "bytes": 627
+    },
+    {
+      "path": "node/blobs.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7112fc71b4a53b841f30c70e3ebae0a1913f3e57d6e403c62fab27d62c95a6a1",
+      "bytes": 4840
     },
     {
       "path": "node/device_keys.py",
@@ -1449,6 +1456,20 @@
       "upstream_modified": true,
       "export_sha256": "5a0ceff293c68327a4bd35157ab27284a0dfa46d91d8d70484e47e4c0a0eaff8",
       "bytes": 16802
+    },
+    {
+      "path": "node/session.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "9166f47e8e0acd90dd2df94cf088ea47dc64c9fccd3935939c0f3ac2d382aed3",
+      "bytes": 15009
+    },
+    {
+      "path": "node/ws.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "b4f5e30027a87a40720693cb86d3355863e49242d2e90ab3b2c59ef8848e4e79",
+      "bytes": 9036
     },
     {
       "path": "observatory.py",
@@ -2167,8 +2188,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "3fb353a0a9efb7d6238dad6a7d5d7cf6dfeea92f2b4b27f6fbc3f55fe2511a49",
-      "bytes": 26616,
+      "export_sha256": "142d0d62a46065adf04dcbb672d8a78f102847d6b191ea7a928059ab16af2b82",
+      "bytes": 26751,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -3209,6 +3230,13 @@
       "upstream_modified": true,
       "export_sha256": "cb06ae78b428d2d3cc3a22b69c8ca9ce9cb407860dea7277ba3e121d20c75f4b",
       "bytes": 20442
+    },
+    {
+      "path": "tests/test_node_session.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "3b4b872eccc1c1962d918a8837ba28b9e18e35185cab3a586f2d1711a93466ae",
+      "bytes": 23829
     },
     {
       "path": "tests/test_notification.py",
@@ -4864,7 +4892,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 631,
+  "file_count": 635,
   "excluded": [
     "git-history",
     "operator-registries",

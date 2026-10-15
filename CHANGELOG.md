@@ -13,6 +13,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   own vectors (vendored in `observatory/engine/fabric/node-vectors/`). A device-key store keeps the machine's `#sig`
   and `#kem` keys owner-only and never replaces them. Nothing runs yet: the relay session client, the estate record
   and the node service are the next slices ([NODE.md](docs/design/NODE.md)).
+- **The node's relay session** (OBS-108). `node/ws.py` is a WebSocket client on the standard library and
+  `node/session.py` holds one machine's connection to a relay: it signs `auth` only for the origin it dialled, sends
+  signed messages, and acts on a delivered one only after checking its signature, its recipient (this machine) and
+  the replay window, acknowledging it after the handler took it. `node/blobs.py` puts and fetches blobs by digest
+  and refuses fetched bytes that are not the named blob.
 
 ### Documentation
 

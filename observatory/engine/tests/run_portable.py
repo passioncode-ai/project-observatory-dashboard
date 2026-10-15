@@ -140,6 +140,8 @@ BOUNDARY += ('textkeys',)
 BOUNDARY += ('secret_header',)
 # The agent-network node's foundation (RM-21 P5, OBS-107): RFC 8785, ES256, fabric-relay/0.1 over the contract vectors.
 BOUNDARY += ('node_foundation',)
+# The node's relay session (OBS-108): a stdlib WebSocket and RelaySession against a loopback relay stub.
+BOUNDARY += ('node_session',)
 # access-bindings/1: who may do what with agent memory, from the transport (PB-137 N-007).
 BOUNDARY += ('access_binding',)
 # ENG-018: a manifest never pins a tag its release does not have.
