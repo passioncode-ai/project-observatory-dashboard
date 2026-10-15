@@ -21,7 +21,7 @@ import sys
 import tempfile
 import unittest
 import urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -39,7 +39,7 @@ class ScanSpend(unittest.TestCase):
         import scan_spend
         import vault_project
 
-        def activity(key):
+        def activity(key, timeout=None):
             answer = answers[key]
             if isinstance(answer, int):
                 raise urllib.error.HTTPError("https://openrouter.ai/api/v1/activity", answer, "x", {}, io.BytesIO())
@@ -100,9 +100,38 @@ def ledger_row(account: str, key_hash, project=None, **extra) -> dict:
             "limit_usd": 10, **extra}
 
 
-def tomb(name, key_hash, project, day, reason="revoked", account="acct-a") -> dict:
-    return {"name": name, "account": account, "hash": key_hash, "project": project, "retired_on": day,
-            "reason": reason}
+def tomb(name, key_hash, project, day, reason="revoked", account="acct-a", by_day=None, covers=None) -> dict:
+    """A tombstone as the door writes it: with a usage snapshot (`by_day`) or without one."""
+    out = {"name": name, "account": account, "hash": key_hash, "project": project, "retired_on": day,
+           "reason": reason, "snapshot_at": f"{day}T10:00:00+00:00"}
+    if by_day is None:
+        return {**out, "usage": "unread", "usage_error": "RuntimeError"}
+    return {**out, "usage": "read", "usage_by_day": by_day, "covers_through": covers or day}
+
+
+class Door:
+    """`tools/openrouter.py` on a ledger file in a temporary folder, against a fake provider."""
+
+    def __init__(self, tmp: str, issued: dict, provider):
+        import openrouter
+        self.m = openrouter
+        self.led = Path(tmp).resolve() / "ledger.json"
+        self.patches = [patch.object(openrouter, "LEDGER", self.led),
+                        patch.object(openrouter, "read_admin", lambda label: (label, "admin")),
+                        patch.object(openrouter, "_request", provider),
+                        patch.object(openrouter, "deliver", lambda value, to, **o: "slot"),
+                        patch.object(openrouter, "_journal", lambda *a, **k: None),
+                        patch.object(openrouter.paths, "SCRATCH", Path(tmp).resolve())]
+        for p_ in self.patches:
+            p_.start()
+        openrouter.save_ledger(issued if "issued" in issued else {"issued": issued})
+
+    def ledger(self) -> dict:
+        return json.loads(self.led.read_text())
+
+    def close(self) -> None:
+        for p_ in self.patches:
+            p_.stop()
 
 
 class ProjectSpend(unittest.TestCase):
@@ -129,6 +158,7 @@ class ProjectSpend(unittest.TestCase):
         import vault_project
         keys = self.KEYS if keys is None else keys
         asked: list[str] = []
+        timeouts: list = []
 
         def key_activity(admin, key_hash):
             asked.append(key_hash)
@@ -150,7 +180,9 @@ class ProjectSpend(unittest.TestCase):
             with patch.object(openrouter, "admins", lambda: [("acct-a", Path("acct-a"))]), \
                     patch.object(openrouter, "read_admin", lambda label: (label, "admin-" + str(label))), \
                     patch.object(openrouter, "ledger", read_ledger), \
-                    patch.object(scan_spend, "activity", lambda key: self.ACCOUNT if account is None else account), \
+                    patch.object(scan_spend, "activity",
+                                 lambda key, timeout=None: (timeouts.append(timeout),
+                                                            self.ACCOUNT if account is None else account)[1]), \
                     patch.object(scan_spend, "key_activity", key_activity), \
                     patch.object(scan_spend, "utcnow", lambda: NOW), \
                     patch.object(step_budget, "remaining",
@@ -161,6 +193,7 @@ class ProjectSpend(unittest.TestCase):
                 self.assertEqual(scan_spend.main(["scan_spend.py", str(out)]), 0)
             doc = json.loads(out.read_text())
             doc["_asked"] = asked
+            doc["_timeouts"] = timeouts
             return doc
 
     def test_two_projects_get_their_month_and_last_30_days_and_the_rest_is_unattributed(self):
@@ -189,63 +222,212 @@ class ProjectSpend(unittest.TestCase):
         """The round-1 repro: k1 $2 and k2 $4 on one project, k2 revoked. Before the tombstone the project read
         $2 and whole, and the $4 went to unattributed."""
         ledger = {"issued": {"k1": ledger_row("acct-a", "h-k1", "alpha-web")},
-                  "retired": [tomb("k2", "h-k2", "alpha-web", "2026-10-08")]}
-        doc = self.scan(ledger=ledger, keys={"h-k1": [{"date": OCT, "usage": 2.0}], "h-k2": [{"date": OCT, "usage": 4.0}]},
+                  "retired": [tomb("k2", "h-k2", "alpha-web", "2026-10-08", by_day={"2026-10-05": 4.0})]}
+        doc = self.scan(ledger=ledger, keys={"h-k1": [{"date": OCT, "usage": 2.0}]},
                         account=[{"date": OCT, "usage": 6.0}])
         alpha = doc["projects"]["alpha-web"]
         self.assertEqual((alpha["month_usd"], alpha["partial"], alpha["keys"], alpha["retired_keys"]),
                          (6.0, False, 1, 1))
         self.assertEqual(doc["unattributed"]["month_usd"], 0.0)
+        # The deleted key is never asked for: the provider keeps no history of it (404, measured 2026-10-15).
+        self.assertNotIn("h-k2", doc["_asked"])
 
-    def test_the_door_leaves_the_tombstone_the_scan_reads(self):
-        """End to end: `openrouter.revoke_key` on a real ledger file, then the scan on what it left."""
-        import openrouter
+    def test_after_its_snapshot_a_deleted_key_spends_nothing(self):
+        """Retired on 10-08 with a snapshot through 10-08: the days after count 0, and the window is whole."""
+        ledger = {"issued": {}, "retired": [tomb("k2", "h-k2", "alpha-web", "2026-10-08",
+                                                 by_day={"2026-09-20": 1.0, "2026-10-08": 0.5})]}
+        alpha = self.scan(ledger=ledger, keys={}, account=[{"date": SEP, "usage": 1.0},
+                                                           {"date": "2026-10-08", "usage": 0.5}])["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["last30_usd"], alpha["partial"]), (0.5, 1.5, False))
+
+    def test_a_snapshot_missing_its_retirement_day_nulls_the_windows_holding_it(self):
+        ledger = {"issued": {}, "retired": [tomb("k2", "h-k2", "alpha-web", "2026-10-08",
+                                                 by_day={"2026-09-20": 1.0}, covers="2026-10-07")]}
+        alpha = self.scan(ledger=ledger, keys={})["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["last30_usd"], alpha["partial"]), (None, None, True))
+
+    def test_a_tombstone_without_a_snapshot_nulls_its_windows(self):
+        ledger = {**self.LEDGER, "retired": [tomb("k2", "h-k2", "alpha-web", "2026-10-08")]}
+        doc = self.scan(ledger=ledger)
+        alpha = doc["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["last30_usd"], alpha["partial"]), (None, None, True))
+        self.assertIn("no usage snapshot", alpha["unread"][0]["reason"])
+        self.assertNotIn("h-k2", doc["_asked"])
+
+    def test_a_hash_a_tombstone_and_a_live_row_share_is_not_read_as_zero(self):
+        ledger = {**self.LEDGER, "retired": [tomb("old", "h-alpha", "alpha-web", "2026-10-08",
+                                                  by_day={"2026-10-05": 2.0})]}
+        doc = self.scan(ledger=ledger)
+        alpha = doc["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["partial"]), (None, True))
+        self.assertIn("held by another ledger entry", alpha["unread"][0]["reason"])
+        self.assertNotIn("h-alpha", doc["_asked"])
+
+    def test_a_ledger_entry_that_is_not_an_object_nulls_every_project(self):
+        for ledger in ({"issued": {**self.LEDGER["issued"], "broken": "not-a-row"}},
+                       {**self.LEDGER, "retired": "not-a-list"},
+                       {**self.LEDGER, "retired": [42]}):
+            with self.subTest(ledger=str(ledger)[-30:]):
+                doc = self.scan(ledger=ledger)
+                for name in ("alpha-web", "beta-api"):
+                    self.assertIsNone(doc["projects"][name]["month_usd"])
+                self.assertIsNone(doc["unattributed"]["month_usd"])
+                self.assertIn("spend:openrouter:ledger", [d["source"] for d in doc["degraded"]])
+
+    def test_the_account_read_is_cut_to_the_deadline(self):
+        doc = self.scan(remaining=[1e9, 50.0, 1e9, 1e9, 1e9])
+        self.assertEqual(doc["_timeouts"], [35.0])
+        self.assertEqual(self.scan()["_timeouts"], [60.0])
+
+    def revoke_through_the_door(self, activity_answer) -> dict:
+        """`openrouter.revoke_key` on a real ledger file; the provider's activity for k2 is `activity_answer`."""
+        calls: list = []
+
+        def provider(path, key, payload=None, method=None):
+            calls.append((method or "GET", path))
+            if path == "/keys/h-k2" and method is None:
+                return {"data": {"name": "k2", "hash": "h-k2", "label": "x", "usage_daily": 0.5}}
+            if path.startswith("/activity?api_key_hash=h-k2"):
+                if isinstance(activity_answer, Exception):
+                    raise activity_answer
+                return {"data": activity_answer}
+            return {"data": {}}
         with tempfile.TemporaryDirectory() as tmp:
-            led = Path(tmp).resolve() / "ledger.json"
-            with patch.object(openrouter, "LEDGER", led), \
-                    patch.object(openrouter, "read_admin", lambda label: (label, "admin")), \
-                    patch.object(openrouter, "_request", lambda *a, **k: {"data": {"hash": "h-k2", "label": "x"}}), \
-                    patch.object(openrouter, "_journal", lambda *a, **k: None), \
-                    patch.object(openrouter.paths, "SCRATCH", Path(tmp).resolve()):
-                openrouter.save_ledger({"issued": {"k1": ledger_row("acct-a", "h-k1", "alpha-web"),
-                                                   "k2": ledger_row("acct-a", "h-k2", "alpha-web")}})
-                openrouter.revoke_key("k2")
-                left = json.loads(led.read_text())
+            door = Door(tmp, {"k1": ledger_row("acct-a", "h-k1", "alpha-web"),
+                              "k2": ledger_row("acct-a", "h-k2", "alpha-web")}, provider)
+            try:
+                door.m.revoke_key("k2")
+                left = door.ledger()
+            finally:
+                door.close()
+        snap = [i for i, c in enumerate(calls) if c[1].startswith("/activity")]
+        delete = [i for i, c in enumerate(calls) if c[0] == "DELETE"]
+        self.assertTrue(delete and (not snap or snap[0] < delete[0]), calls)
+        return left
+
+    def test_the_door_snapshots_a_revoked_key_and_the_project_reads_whole(self):
+        left = self.revoke_through_the_door([{"date": OCT, "usage": 4.0}])
         self.assertNotIn("k2", left["issued"])
         (stone,) = left["retired"]
-        self.assertEqual({k: stone[k] for k in ("name", "hash", "project", "reason", "account")},
+        self.assertEqual({k: stone[k] for k in ("name", "hash", "project", "reason", "account", "usage")},
                          {"name": "k2", "hash": "h-k2", "project": "alpha-web", "reason": "revoked",
-                          "account": "acct-a"})
+                          "account": "acct-a", "usage": "read"})
+        self.assertEqual(stone["usage_by_day"]["2026-10-05"], 4.0)
+        self.assertEqual(stone["usage_by_day"][stone["covers_through"]], 0.5)   # today so far, from usage_daily
         self.assertRegex(stone["retired_on"], r"^\d{4}-\d{2}-\d{2}$")
-        stone["retired_on"] = "2026-10-08"        # inside the fixed clock's month
-        doc = self.scan(ledger=left, keys={"h-k1": [{"date": OCT, "usage": 2.0}], "h-k2": [{"date": OCT, "usage": 4.0}]},
+        # Read on the fixed clock: the snapshot's own today is past the window, so only 10-05 counts.
+        stone["retired_on"] = stone["covers_through"] = "2026-10-08"
+        doc = self.scan(ledger=left, keys={"h-k1": [{"date": OCT, "usage": 2.0}]},
                         account=[{"date": OCT, "usage": 6.0}])
         self.assertEqual((doc["projects"]["alpha-web"]["month_usd"], doc["projects"]["alpha-web"]["partial"]),
                          (6.0, False))
 
-    def test_a_completed_rotation_leaves_a_tombstone_for_its_predecessor(self):
-        import openrouter
-        with tempfile.TemporaryDirectory() as tmp:
-            led = Path(tmp).resolve() / "ledger.json"
+    def test_an_unreadable_snapshot_still_revokes_and_the_project_reads_null(self):
+        left = self.revoke_through_the_door(RuntimeError("openrouter answered HTTP 500; provider response withheld"))
+        self.assertNotIn("k2", left["issued"])
+        (stone,) = left["retired"]
+        self.assertEqual((stone["usage"], stone["usage_error"]), ("unread", "RuntimeError"))
+        stone["retired_on"] = "2026-10-08"
+        alpha = self.scan(ledger=left, keys={"h-k1": [{"date": OCT, "usage": 2.0}]},
+                          account=[{"date": OCT, "usage": 6.0}])["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["partial"]), (None, True))
 
-            def fake(path, key, payload=None, method=None):
-                if path == "/keys/h-old" and method is None:
-                    return {"data": {"name": "k1", "hash": "h-old"}}
-                if path == "/keys" and payload:
-                    return {"data": {"hash": "h-new", "label": "y"}, "key": "sk-or-v1-" + "n" * 40}
-                return {"data": {}}
-            with patch.object(openrouter, "LEDGER", led), \
-                    patch.object(openrouter, "read_admin", lambda label: (label, "admin")), \
-                    patch.object(openrouter, "_request", fake), \
-                    patch.object(openrouter, "deliver", lambda value, to, **o: "slot"), \
-                    patch.object(openrouter, "_journal", lambda *a, **k: None):
-                openrouter.save_ledger({"issued": {"k1": ledger_row("acct-a", "h-old", "alpha-web", rotations=0)}})
-                openrouter.rotate_one("k1")
-                left = json.loads(led.read_text())
+    def test_a_completed_rotation_leaves_a_tombstone_for_its_predecessor(self):
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-old" and method is None:
+                return {"data": {"name": "k1", "hash": "h-old", "usage_daily": 0.0}}
+            if path.startswith("/activity?api_key_hash=h-old"):
+                return {"data": [{"date": SEP, "usage": 1.0}]}
+            if path == "/keys" and payload:
+                return {"data": {"hash": "h-new", "label": "y"}, "key": "sk-or-v1-" + "n" * 40}
+            return {"data": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            door = Door(tmp, {"k1": ledger_row("acct-a", "h-old", "alpha-web", rotations=1,
+                                               rotated_on="2026-09-01")}, provider)
+            try:
+                door.m.rotate_one("k1")
+                left = door.ledger()
+            finally:
+                door.close()
         row = left["issued"]["k1"]
-        self.assertEqual((row["hash"], row["rotations"], row["tombstoned_rotations"]), ("h-new", 1, 1))
-        self.assertEqual([(t["hash"], t["reason"], t["project"]) for t in left["retired"]],
-                         [("h-old", "rotated", "alpha-web")])
+        self.assertEqual((row["hash"], row["rotations"], row["tombstoned_rotations"]), ("h-new", 2, 1))
+        # The first tracked rotation records the day of the last untracked one, not today.
+        self.assertEqual(row["tombstones_since"], "2026-09-01")
+        self.assertEqual([(t["hash"], t["reason"], t["project"], t["usage"]) for t in left["retired"]],
+                         [("h-old", "rotated", "alpha-web", "read")])
+
+    def test_a_forgotten_pending_row_leaves_a_tombstone_without_usage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            door = Door(tmp, {"k3": ledger_row("acct-a", None, "alpha-web", pending=True)},
+                        lambda *a, **k: {"data": {}})
+            try:
+                door.m.forget_pending_key("k3", "deleted at the provider by name")
+                left = door.ledger()
+            finally:
+                door.close()
+        (stone,) = left["retired"]
+        self.assertEqual((stone["name"], stone["hash"], stone["reason"], stone["usage"]),
+                         ("k3", None, "forgotten-pending", "unread"))
+
+    def test_tombstones_older_than_62_days_are_pruned_and_unreadable_ones_kept(self):
+        import openrouter
+        today = datetime.now(timezone.utc).date()
+        doc = {"issued": {}, "retired": [{"name": "old", "retired_on": (today - timedelta(days=70)).isoformat()},
+                                         {"name": "recent", "retired_on": (today - timedelta(days=10)).isoformat()},
+                                         "not-an-object"]}
+        openrouter._retire(doc, "new", {"account": "acct-a", "project": "alpha-web"}, "h-new", "revoked")
+        self.assertEqual([r if isinstance(r, str) else r["name"] for r in doc["retired"]],
+                         ["recent", "not-an-object", "new"])
+
+    def test_a_retired_list_that_is_not_a_list_is_refused_before_any_delete(self):
+        calls: list = []
+        with tempfile.TemporaryDirectory() as tmp:
+            door = Door(tmp, {"issued": {"k2": ledger_row("acct-a", "h-k2", "alpha-web")}, "retired": {"x": 1}},
+                        lambda path, key, payload=None, method=None: calls.append(method) or {"data": {}})
+            try:
+                with self.assertRaises(RuntimeError):
+                    door.m.revoke_key("k2")
+            finally:
+                door.close()
+        self.assertNotIn("DELETE", calls)
+
+    def test_two_rotations_at_once_both_land(self):
+        """Each rotation reads the ledger, calls the provider and writes the ledger whole; without the ledger
+        lock the second write dropped the first one's successor."""
+        import threading
+        import time
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys" and payload:
+                time.sleep(0.3)                     # both rotations are mid-flight together
+                return {"data": {"hash": "h-" + payload["name"]}, "key": "sk-or-v1-" + "n" * 40}
+            if path.startswith("/keys/h-") and method is None and "-next" not in path:
+                return {"data": {"name": path.split("/keys/h-")[1], "hash": path.split("/keys/")[1]}}
+            if path.startswith("/activity"):
+                return {"data": []}
+            return {"data": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            door = Door(tmp, {"k1": ledger_row("acct-a", "h-k1", "alpha-web"),
+                              "k2": ledger_row("acct-a", "h-k2", "beta-api")}, provider)
+            try:
+                errors: list = []
+                def run(n):
+                    try:
+                        door.m.rotate_one(n)
+                    except Exception as exc:        # noqa: BLE001 - reported below
+                        errors.append(exc)
+                threads = [threading.Thread(target=run, args=(n,)) for n in ("k1", "k2")]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join(30)
+                left = door.ledger()
+            finally:
+                door.close()
+        self.assertEqual(errors, [])
+        self.assertEqual({n: left["issued"][n]["hash"] for n in ("k1", "k2")},
+                         {"k1": "h-k1-next", "k2": "h-k2-next"})
+        self.assertEqual(sorted(t["hash"] for t in left["retired"]), ["h-k1", "h-k2"])
 
     def test_a_tombstone_without_a_hash_nulls_the_windows_it_covers(self):
         ledger = {**self.LEDGER, "retired": [tomb("lost", None, "alpha-web", "2026-10-02", "forgotten-pending")]}
@@ -254,7 +436,8 @@ class ProjectSpend(unittest.TestCase):
         self.assertEqual(alpha["unread"][0]["key"], "lost")
 
     def test_a_tombstone_from_before_both_windows_is_not_read(self):
-        ledger = {**self.LEDGER, "retired": [tomb("ancient", "h-ancient", "alpha-web", "2026-08-01")]}
+        ledger = {**self.LEDGER, "retired": [tomb("ancient", "h-ancient", "alpha-web", "2026-08-01",
+                                                  by_day={"2026-08-01": 9.0})]}
         doc = self.scan(ledger=ledger)
         self.assertNotIn("h-ancient", doc["_asked"])
         self.assertEqual(doc["projects"]["alpha-web"]["retired_keys"], 0)
@@ -307,20 +490,23 @@ class ProjectSpend(unittest.TestCase):
         ledger = json.loads(json.dumps(self.LEDGER))
         ledger["issued"]["alpha-agent"].update(rotated_on="2026-10-10", rotations=2, tombstoned_rotations=1,
                                                tombstones_since="2026-09-20")
-        ledger["retired"] = [tomb("alpha-agent", "h-pred", "alpha-web", "2026-10-10", "rotated")]
-        doc = self.scan(ledger=ledger, keys={**self.KEYS, "h-pred": [{"date": OCT, "usage": 4.0}]},
-                        account=[{"date": OCT, "usage": 2.0 + 0.5 + 1.25 + 4.0}, {"date": SEP, "usage": 1.25}])
+        ledger["retired"] = [tomb("alpha-agent", "h-pred", "alpha-web", "2026-10-10", "rotated",
+                                  by_day={"2026-10-05": 4.0})]
+        doc = self.scan(ledger=ledger, account=[{"date": OCT, "usage": 2.0 + 0.5 + 1.25 + 4.0},
+                                                {"date": SEP, "usage": 1.25}])
         alpha = doc["projects"]["alpha-web"]
         self.assertEqual((alpha["month_usd"], alpha["last30_usd"]), (6.0, None))
-        self.assertIn("h-pred", doc["_asked"])
+        self.assertIn("before tombstones existed", " ".join(d["reason"] for d in doc["degraded"]
+                                                            if d["source"] == "spend:openrouter:key:alpha-agent"))
 
     def test_every_rotation_tracked_reads_whole(self):
         ledger = json.loads(json.dumps(self.LEDGER))
         ledger["issued"]["alpha-agent"].update(rotated_on="2026-10-10", rotations=1, tombstoned_rotations=1,
                                                tombstones_since="2026-10-10")
-        ledger["retired"] = [tomb("alpha-agent", "h-pred", "alpha-web", "2026-10-10", "rotated")]
-        alpha = self.scan(ledger=ledger, keys={**self.KEYS, "h-pred": [{"date": SEP, "usage": 4.0}]},
-                          account=[{"date": OCT, "usage": 3.75}, {"date": SEP, "usage": 5.25}])["projects"]["alpha-web"]
+        ledger["retired"] = [tomb("alpha-agent", "h-pred", "alpha-web", "2026-10-10", "rotated",
+                                  by_day={"2026-09-20": 4.0})]
+        alpha = self.scan(ledger=ledger, account=[{"date": OCT, "usage": 3.75},
+                                                  {"date": SEP, "usage": 5.25}])["projects"]["alpha-web"]
         self.assertEqual((alpha["month_usd"], alpha["last30_usd"], alpha["partial"]), (2.0, 7.0, False))
 
     def test_a_pending_rotation_counts_its_predecessor(self):
@@ -334,8 +520,8 @@ class ProjectSpend(unittest.TestCase):
         self.assertEqual((alpha["month_usd"], alpha["last30_usd"], alpha["partial"]), (6.0, 7.0, False))
 
     def test_the_deadline_stops_the_reads_and_names_what_was_not_reached(self):
-        # The account read and the first key fit; the deadline arrives before the second key.
-        doc = self.scan(remaining=[1e9, 1e9, 1.0])
+        # The account read (its check and its timeout) and the first key fit; the deadline arrives before the second.
+        doc = self.scan(remaining=[1e9, 1e9, 1e9, 1.0])
         self.assertEqual(doc["_asked"], ["h-alpha"])
         self.assertEqual(doc["projects"]["alpha-web"]["month_usd"], 2.0)
         self.assertIsNone(doc["projects"]["beta-api"]["month_usd"])

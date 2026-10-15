@@ -11,11 +11,14 @@ this sums the current UTC month per account (OBS-56).
 PER PROJECT (J-11, OBS-93). Under contract DEC-0037 Fabric's launcher proposes a project's limit from its agents'
 cost presets and its recent spend, and Observatory measures that spend. Every key of the door's ledger
 (`openrouter-issued.json`) is read once by its hash (`openrouter.read_activity`: the last 30 completed UTC days,
-by day and model) and summed under the ledger row's `project`. So is every key the ledger retired inside the
-window: `revoke`, a completed `rotate` and `revoke --forget-pending` leave a tombstone (`retired`: name, account,
-hash, project, `retired_on`) for as long as the provider can still report the key's spend, so a key that is gone
-keeps its spend with its project. Two windows: the current UTC month (what a monthly limit counts) and the last
-30 completed UTC days (what "recent spend" means when the month has just begun).
+by day and model) and summed under the ledger row's `project`. A key the door retired inside the windows keeps
+its spend too: `revoke`, a completed `rotate` and `revoke --forget-pending` leave a tombstone (`retired`: name,
+account, hash, project, `retired_on`) with a usage snapshot read just before the DELETE (`usage_by_day`, through
+`covers_through`), because the provider keeps no history of a deleted key: on 2026-10-15 `GET /activity
+?api_key_hash=` for a hash that never existed, and `GET /keys/{hash}` for a key revoked earlier, both answered
+404. The scan counts the snapshot and never asks for the deleted key; after its snapshot a deleted key spends
+nothing. Two windows, both of completed UTC days (the provider's report has no today): the current month so far
+(what a monthly limit counts) and the last 30 days (what "recent spend" means when the month has just begun).
 
 ONE PROJECT, ONE BUCKET. A ledger row's `project` is resolved by the rule every door uses
 (`vault_project.resolve`): a string the registry claims is grouped under that project's registry id, so a
@@ -32,14 +35,18 @@ A WINDOW NOT READ WHOLE IS NULL, NEVER A LOWER FIGURE. A project's window is `nu
 `unread`, when any of its keys could not be read for it:
   - the provider would not answer for the key, or answered something that is not an activity report (a row
     that is not an object, a usage that is not a number, a cut-off body);
-  - a pending row has no hash yet, and a tombstone without one (a forgotten pending row) covers its day;
+  - a pending row has no hash yet;
+  - a tombstone has no usage snapshot (its read failed, or a forgotten pending row had no hash): every window
+    starting on or before its day; or its snapshot does not reach the retirement day: the windows holding it;
+  - two ledger entries hold the same hash, so neither can be told apart;
   - a key was rotated before tombstones existed: the row's `rotations` count more rotations than
     `tombstoned_rotations`, and the untracked ones happened on or before `tombstones_since` (or on `rotated_on`
     when none was tracked), so every window starting on or before that day is null;
   - the step's deadline (`OBSERVATORY_STEP_DEADLINE`) arrived, or the provider became unreachable: the scan
     stops reading, writes what it read, and names every key it did not reach.
 An account's unattributed residual is null too while any of its keys is unread, since the two cannot be told
-apart. A pending rotation still holds `predecessor_hash` and is read like any key.
+apart. A pending rotation still holds `predecessor_hash` and is read like any key. A ledger entry that is not an
+object may be any project's key, so it nulls every project and the unattributed total.
 
 WHAT IT RECORDS. Per account: the door's label, the month's USD and the last 30 days', the number of activity
 rows and the last day they cover (the provider's activity lags about a day). Per project: the two windows, its
@@ -84,9 +91,14 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def activity(key: str) -> list:
+#: The account read's own ceiling; near the step's deadline it is cut to what is left less a margin to write.
+ACCOUNT_TIMEOUT_S = 60.0
+WRITE_MARGIN_S = 15.0
+
+
+def activity(key: str, timeout: float = ACCOUNT_TIMEOUT_S) -> list:
     req = urllib.request.Request(f"{API}/activity", headers={"Authorization": "Bearer " + key})
-    with urllib.request.urlopen(req, timeout=60) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         doc = json.loads(r.read())
     if not isinstance(doc, dict):
         raise ValueError("the activity report is not an object")
@@ -137,11 +149,34 @@ def sums(rows: list[tuple[str, float]], month: str, start: str, end: str) -> dic
     """USD per window. The last-30 window is bounded here too: a row outside it is not counted."""
     out = {"month": 0.0, "last30": 0.0}
     for day, usd in rows:
-        if day.startswith(month):
+        if day.startswith(month) and day <= end:    # completed days only, as the provider reports them
             out["month"] += usd
         if start <= day <= end:
             out["last30"] += usd
     return out
+
+
+def snapshot_sums(tomb: dict, month: str, start: str, end: str) -> tuple[dict[str, float], list[str]] | None:
+    """A retired key's spend per window from its tombstone's usage snapshot, and the windows its snapshot does not
+    cover; None when there is no usable snapshot.
+
+    The snapshot holds the key's spend by UTC day up to `covers_through`, read just before the DELETE. After the
+    snapshot the key is deleted and spends nothing more, so a later day counts 0. The one day the snapshot may
+    miss is the retirement day itself (when the key's `usage_daily` could not be read): a window holding that
+    completed day is unknown."""
+    if tomb.get("usage") != "read" or not isinstance(tomb.get("usage_by_day"), dict):
+        return None
+    rows = []
+    for day, usd in tomb["usage_by_day"].items():
+        if isinstance(usd, bool) or not isinstance(usd, (int, float)) or not math.isfinite(usd):
+            return None
+        rows.append((str(day)[:10], float(usd)))
+    retired = str(tomb.get("retired_on") or "")[:10]
+    covers = str(tomb.get("covers_through") or "")[:10]
+    unknown: list[str] = []
+    if not covers or covers < retired:
+        unknown = [w for w in windows_from(retired, month, start) if retired <= end]
+    return sums(rows, month, start, end), unknown
 
 
 def windows_from(day: str, month: str, start: str) -> list[str]:
@@ -262,16 +297,57 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
         return b
 
     issued = doc.get("issued") or {}
+    retired = doc.get("retired", [])
+    malformed: list[str] = []
+    if not isinstance(retired, list):           # `ledger()` refuses this; an older door or a hand edit may not
+        malformed.append("retired")
+        retired = []
+    rows = []
     for name, rec in sorted(issued.items()):
-        if not isinstance(rec, dict):
+        if isinstance(rec, dict):
+            rows.append((name, rec))
+        else:
+            malformed.append(f"issued:{name}")
+    stones = []
+    for i, tomb in enumerate(retired):
+        if not isinstance(tomb, dict):
+            malformed.append(f"retired[{i}]")
             continue
+        if windows_from(str(tomb.get("retired_on") or "")[:10], month, start):
+            stones.append(tomb)                 # retired before either window began: no spend to find there
+    # A hash two entries hold would be counted once and read as 0 for the other: neither is trusted.
+    holders: dict[str, int] = {}
+    for _name, rec in rows:
+        for h in {rec.get("hash"), rec.get("predecessor_hash")} - {None, ""}:
+            holders[h] = holders.get(h, 0) + 1
+    for tomb in stones:
+        if tomb.get("hash"):
+            holders[tomb["hash"]] = holders.get(tomb["hash"], 0) + 1
+    shared = {h for h, n in holders.items() if n > 1}
+    ledgered = {label: {w: 0.0 for w in WINDOWS} for label in seen}
+
+    def not_whole(account) -> None:
+        if account in seen:
+            seen[account]["whole"] = False
+
+    def doubled(name: str, bucket: Bucket, account) -> None:
+        bucket.miss(name, "its provider hash is held by another ledger entry too, so its spend cannot be "
+                          "told apart", list(WINDOWS))
+        attribution(f"spend:openrouter:key:{name}", "a provider hash held by two ledger entries")
+        not_whole(account)
+
+    for name, rec in rows:
         bucket = bucket_for(rec.get("project"))
         bucket.keys += 1
         bucket.accounts.add(str(rec.get("account")))
         if not rec.get("hash"):
             bucket.miss(name, "no provider hash in the ledger (pending: minted or not, unknown)", list(WINDOWS))
             attribution(f"spend:openrouter:key:{name}", "no provider hash to read by")
-            seen.get(rec.get("account"), {})["whole"] = False
+            not_whole(rec.get("account"))
+            continue
+        hashes = [h for h in (rec.get("hash"), rec.get("predecessor_hash")) if h]
+        if any(h in shared for h in hashes):
+            doubled(name, bucket, rec.get("account"))
             continue
         untracked = untracked_rotation(rec)
         if untracked:
@@ -279,30 +355,40 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
             if hidden:
                 bucket.miss(name, f"rotated on or before {untracked} without a tombstone: the predecessor's spend "
                                   "cannot be read by hash", hidden)
-        work.append((name, rec, [h for h in (rec.get("hash"), rec.get("predecessor_hash")) if h], bucket))
-    retired = doc.get("retired") if isinstance(doc.get("retired"), list) else []
-    for tomb in retired:
-        if not isinstance(tomb, dict):
-            continue
+                attribution(f"spend:openrouter:key:{name}", f"rotated on or before {untracked} before tombstones "
+                                                            f"existed: {', '.join(hidden)} not attributable")
+        work.append((name, rec, hashes, bucket))
+    for tomb in stones:
         day = str(tomb.get("retired_on") or "")[:10]
-        if not windows_from(day, month, start):
-            continue                    # retired before either window began: no spend to find there
         bucket = bucket_for(tomb.get("project"))
         bucket.retired += 1
-        bucket.accounts.add(str(tomb.get("account")))
+        account = tomb.get("account")
+        bucket.accounts.add(str(account))
         name = str(tomb.get("name") or "?")
-        if not tomb.get("hash"):
-            bucket.miss(name, f"retired on {day} ({tomb.get('reason')}) with no provider hash",
-                        windows_from(day, month, start))
-            attribution(f"spend:openrouter:key:{name}", "a retired key with no provider hash to read by")
-            seen.get(tomb.get("account"), {})["whole"] = False
+        if tomb.get("hash") in shared:
+            doubled(name, bucket, account)
             continue
-        work.append((name, tomb, [tomb["hash"]], bucket))
+        got = snapshot_sums(tomb, month, start, end)
+        if got is None:
+            # No snapshot of what it spent, and the provider keeps no history of a deleted key (404, measured
+            # 2026-10-15): every window it may have spent in is unknown.
+            bucket.miss(name, f"retired on {day} ({tomb.get('reason')}) with no usage snapshot: "
+                              f"{tomb.get('usage_error') or 'none recorded'}", windows_from(day, month, start))
+            attribution(f"spend:openrouter:key:{name}", "a retired key with no usage snapshot")
+            not_whole(account)
+            continue
+        usd, unknown = got
+        bucket.add(usd)
+        if account in ledgered:
+            for w in WINDOWS:
+                ledgered[account][w] += usd[w]
+        if unknown:
+            bucket.miss(name, f"its snapshot does not cover {day}, the day it was retired", unknown)
+            attribution(f"spend:openrouter:key:{name}", f"the retirement day {day} is not in its usage snapshot")
+            not_whole(account)
 
     # Read every hash once, under the step's deadline.
     admins: dict[str, str | None] = {}
-    read: set[str] = set()
-    ledgered = {label: {w: 0.0 for w in WINDOWS} for label in seen}
     stopped: str | None = None
     for name, rec, hashes, bucket in work:
         account = rec.get("account")
@@ -335,14 +421,11 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
         got = {w: 0.0 for w in WINDOWS}
         try:
             for h in hashes:
-                if h in read:
-                    continue
-                rows, bad = clean(key_activity(admin, h))
+                got_rows, bad = clean(key_activity(admin, h))
                 if bad:
                     raise ValueError(f"{bad} activity row(s) not well formed")
-                for w, usd in sums(rows, month, start, end).items():
+                for w, usd in sums(got_rows, month, start, end).items():
                     got[w] += usd
-                read.add(h)
         except openrouter.Unreachable as exc:
             stopped = f"not read: the provider became unreachable ({exc})"
             attribution("spend:openrouter:unreachable", "the provider became unreachable; the scan stopped and "
@@ -390,6 +473,14 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
             for w in WINDOWS:
                 b.blind[w] = True
             b.note = "the registry would not read: this name may be one of several for one project"
+    if malformed:
+        # An entry that is not an object may be any project's key: no project's figure can be shown whole.
+        attribution("spend:openrouter:ledger", f"{len(malformed)} ledger entr{'y is' if len(malformed) == 1 else 'ies are'}"
+                                               f" not readable: {', '.join(malformed[:5])}")
+        for b in [*buckets.values(), unattributed]:
+            for w in WINDOWS:
+                b.blind[w] = True
+            b.note = "the door's ledger holds an entry that cannot be read; it may be this project's key"
     un = unattributed.doc(latest)
     un["unledgered_month_usd"] = None if blind["month"] else round(residual["month"], 6)
     un["unledgered_last30_usd"] = None if blind["last30"] else round(residual["last30"], 6)
@@ -427,7 +518,7 @@ def main(argv: list[str]) -> int:
             account(f"spend:openrouter:{label}", f"unreadable: {type(exc).__name__}")
             continue
         try:
-            rows, bad = clean(activity(key))
+            rows, bad = clean(activity(key, min(ACCOUNT_TIMEOUT_S, step_budget.remaining() - WRITE_MARGIN_S)))
         except urllib.error.HTTPError as exc:
             account(f"spend:openrouter:{label}", f"GET /activity HTTP {exc.code}")
             continue

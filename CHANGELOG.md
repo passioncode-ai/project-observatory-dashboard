@@ -15,17 +15,24 @@ while the major version is 0, a minor release may change behaviour and says so h
   figure Fabric's launcher reads as a project's recent spend (contract DEC-0037).
   - A key belongs to the project named in its ledger row's `project` field. Every name of one registered project
     (its folders, its id, its name) is one bucket keyed by its registry id, so any of them answers the whole project.
-  - **A retired key keeps its spend with its project** (OBS-103). `openrouter.py revoke`, a completed `rotate` and
-    `revoke --forget-pending` leave a tombstone in the ledger's `retired` list (name, account, hash, project, day),
-    kept 62 days, and the scan reads it. Before this, a revoked key's spend moved to `unattributed` while its project
-    read as whole and lower.
+  - **A retired key keeps its spend with its project** (OBS-103). The provider keeps no history of a deleted key
+    (`GET /activity?api_key_hash=` and `GET /keys/{hash}` answer 404, measured 2026-10-15). So `openrouter.py
+    revoke`, a completed `rotate` and `revoke --forget-pending` leave a tombstone in the ledger's `retired` list,
+    kept 62 days. It holds the name, account, hash, project and day, and the key's spend by day read just before
+    the DELETE: the last 30 completed days, plus today from `usage_daily`. The scan counts that snapshot, and a
+    deleted key spends nothing after it. A snapshot that cannot be read still lets the delete proceed; that key's
+    windows are then null. Before this, a revoked key's spend moved to `unattributed` while its project read as
+    whole and lower.
+  - **Every door verb that writes the OpenRouter ledger holds one lock** (the one `issue-for-policy` held), across
+    processes and threads. Two rotations at once used to drop one rotation's successor from the ledger. A
+    `retired` that is not a list is refused before any door acts.
   - `unattributed` is its own total, never guessed into a project. It holds keys whose ledger row names no project,
     and an account's spend on hashes no ledger row or tombstone holds.
   - A window that was not read whole is `null`, never a lower figure, and the key is named in `unread`. This covers
-    a key the provider would not answer for or answered with malformed rows, a pending row or tombstone without a
-    hash, a rotation made before tombstones existed, and the keys not reached when the step's deadline
-    (`OBSERVATORY_STEP_DEADLINE`) arrives or the provider becomes unreachable. An unreadable registry nulls every
-    project.
+    a key the provider would not answer for or answered with malformed rows, a pending row, a tombstone without a
+    usage snapshot, a hash two ledger entries hold, a rotation made before tombstones existed, and the keys not reached when the step's deadline
+    (`OBSERVATORY_STEP_DEADLINE`) arrives or the provider becomes unreachable. An unreadable registry, or a ledger
+    entry that is not an object, nulls every project. Both windows hold completed UTC days only.
   - The top-level `partial` stays about the estate total; `attribution_partial` covers the projects, each `degraded`
     entry carries its `scope`, and `spend.estate_month` names only the accounts not read.
   - No finding fires yet. A project's limit is enforced once a recorded spend policy is readable (J-11F).

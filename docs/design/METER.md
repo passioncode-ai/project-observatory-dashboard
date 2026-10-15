@@ -94,28 +94,46 @@ still open; without one, it is the meter's own ledger. `full grant --status` nam
 The finding `spend.estate_month` is a warning at the alert ratio (80 %) and critical at the limit (OBS-56).
 
 **Each project's spend** (J-11, OBS-93; `schema_version` 2 of the same file). The scan also reads every key of
-the door's ledger by its hash (`openrouter.read_activity`, one request per key), and every key the door retired
-inside the windows: `revoke`, a completed `rotate` and `revoke --forget-pending` leave a tombstone in the ledger's
-`retired` list (name, account, hash, project, `retired_on`, reason), kept 62 days, so a key that is gone keeps its
-spend with its project. Two windows: the current UTC month and the last 30 completed UTC days. A key counts for the
-project its ledger row names; every name the registry resolves to one project (its folders, its id, its name) is
-one bucket keyed by the registry id (`projects.<id>`: `month_usd`, `last30_usd`, `keys`, `retired_keys`,
-`folders`, `through`). A key whose row names no project, and each account's spend on hashes no row or tombstone
-holds, are `unattributed`; nothing is attributed from a name.
+the door's ledger by its hash (`openrouter.read_activity`, one request per key). Two windows, both of completed
+UTC days, since the provider's report holds no today: the current month so far and the last 30 days. A key counts
+for the project its ledger row names; every name the registry resolves to one project (its folders, its id, its
+name) is one bucket keyed by the registry id (`projects.<id>`: `month_usd`, `last30_usd`, `keys`,
+`retired_keys`, `folders`, `through`). A key whose row names no project, and each account's spend on hashes no
+row or tombstone holds, are `unattributed`; nothing is attributed from a name.
+
+**A retired key keeps its spend with its project, through a snapshot.** The provider keeps no history of a deleted
+key. Measured on 2026-10-15 with free reads on one door account: `GET /activity?api_key_hash=` for a hash that
+never existed answered 404, and so did `GET /keys/{hash}` for a key revoked earlier. So before every DELETE the
+door reads what the key spent and keeps it. `revoke`, a completed `rotate` and `revoke --forget-pending` leave a
+tombstone in the ledger's `retired` list holding the name, account, hash, project, `retired_on` and reason, and a
+usage snapshot: `usage_by_day`, the last 30 completed days from `/activity` plus today so far from the key's
+`usage_daily`; `covers_through`; and `snapshot_at`. Tombstones are kept 62 days. The scan counts the snapshot and
+never asks for the deleted key: after its snapshot a deleted key spends nothing, so later days count 0. A snapshot
+that could not be read still lets the delete proceed. The tombstone then says `usage: unread`, and the windows the
+key may have spent in are null.
+
+The ledger's read-modify-write runs under one lock beside the ledger, across processes and threads (`issue`,
+`issue-for-policy`, `rotate`, `revoke`, `claim`, `limit`, `enable`/`disable`, `revoke --forget-pending`). Two
+rotations at once used to drop one's successor. A `retired` that is not a list is refused before any door acts.
 
 A window not read whole is `null`, never a lower figure, with the key named in `unread`:
 
 - a key the provider would not answer for, or answered with rows that are not activity;
-- a pending row or a tombstone without a hash;
+- a pending row;
+- a tombstone without a snapshot (every window starting on or before its day), or whose snapshot does not reach
+  the retirement day (the windows holding that day);
+- two ledger entries holding the same hash;
 - a rotation made before tombstones existed: the row's `rotations` exceed `tombstoned_rotations`, and every window
-  starting on or before `tombstones_since` (or `rotated_on`) is null;
+  starting on or before `tombstones_since` (the day of the last untracked rotation) or `rotated_on` is null;
 - the keys not reached when the step's deadline (`OBSERVATORY_STEP_DEADLINE`) arrives or the provider becomes
-  unreachable: the scan stops reading and still writes the file.
+  unreachable: the scan stops reading and still writes the file. Each account read's timeout is cut to the time
+  left less 15 s.
 
-A registry that will not read nulls every project, since which names are one project is unknown. The top-level
-`partial` stays about the estate total (an account not read), so `spend.estate_month` names only account sources;
-`attribution_partial` and each `degraded` entry's `scope` (`account` or `attribution`) say the rest.
-`tools/spend.py project [PROJECT] --json` answers from the file without asking the provider (`monthUsd`,
+A registry that will not read nulls every project, since which names are one project is unknown. A ledger entry
+that is not an object nulls every project and the unattributed total, since it may be any project's key. The
+top-level `partial` stays about the estate total (an account not read), so `spend.estate_month` names only
+account sources; `attribution_partial` and each `degraded` entry's `scope` (`account` or `attribution`) say the
+rest. `tools/spend.py project [PROJECT] --json` answers from the file without asking the provider (`monthUsd`,
 `last30Usd`, `partial`, `unread`, `through`, `fresh` by the same 36-hour rule): it is the figure the contract's
 launcher reads as a project's recent spend (DEC-0037). A per-project limit is not enforced yet: the finding waits
 on a readable recorded spend policy.
