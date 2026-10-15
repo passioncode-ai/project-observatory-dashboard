@@ -345,6 +345,9 @@ def _locked(fn):
 RETIRED_KEEP_DAYS = 62
 #: How close the snapshot's days must come to the provider's own counters for the snapshot to be whole.
 RECONCILE_USD = 0.0001
+#: How many of the latest completed days the provider's activity report may still be missing. Each of them must
+#: fall inside the month or the week the counters check, or be reached by the report, for a snapshot to be whole.
+REPORT_LAG_DAYS = 3
 
 
 def untracked_through(rec: dict) -> str | None:
@@ -352,7 +355,13 @@ def untracked_through(rec: dict) -> str | None:
     a tombstone. Rotations made before tombstones existed left none; they happened on or before the last one
     made before the first tracked rotation (`tombstones_since`), or on `rotated_on` when none was tracked. The
     spend scan nulls every window starting on or before that day, for the live row and, after a revoke, for its
-    tombstone (`_retire` carries it). "unknown" when the day was not recorded: every window."""
+    tombstone (`_retire` carries it). "unknown" when the day was not recorded: every window.
+
+    A rotation still pending (`predecessor_hash` on the row) is not untracked: its predecessor is read by its
+    hash while the row is live, and carried as `predecessor_hash` into a tombstone. So it is subtracted here,
+    the one place both the door and the spend scan take this rule from."""
+    if rec.get("predecessor_hash") and type(rec.get("rotations")) is int and rec["rotations"] >= 1:
+        rec = {**rec, "rotations": rec["rotations"] - 1}
     rotations = rec.get("rotations")
     tracked = rec.get("tombstoned_rotations")
     tracked = tracked if type(tracked) is int and tracked >= 0 else 0
@@ -433,8 +442,10 @@ def usage_snapshot(admin: str, key_hash: str | None) -> dict:
 
     RECONCILED. The snapshot is whole only when the activity days of the current month plus `usage_daily` equal
     `usage_monthly`, and the days of the current week plus `usage_daily` equal `usage_weekly`, each within
-    RECONCILE_USD, and yesterday falls in the month or the week checked. Then today's spend is `usage_daily` and
-    every day through today is known. Otherwise (`reconciled: false`: the activity report has not caught up, the
+    RECONCILE_USD, and each of the last REPORT_LAG_DAYS completed days either falls in the month or the week
+    checked or was reached by the report (`activity_through`): a day the report may still be missing and no
+    counter covers cannot be vouched for (a two-day lag on the Tuesday a month begins; Monday the 1st, unless
+    the report reaches yesterday). Then today's spend is `usage_daily` and every day through today is known. Otherwise (`reconciled: false`: the activity report has not caught up, the
     reads straddled midnight, the key spent while the successor was delivered, or a counter is missing) only the
     activity days are kept, and the spend scan reads the windows holding any day after the last activity day,
     through the retirement day, as unknown. A mismatch is never booked as unattributed while a project reads
@@ -468,16 +479,19 @@ def usage_snapshot(admin: str, key_hash: str | None) -> dict:
         return unread(type(exc).__name__)
     today = read_at.date()
     daily, weekly, monthly = (_counter(row, f) for f in ("usage_daily", "usage_weekly", "usage_monthly"))
-    yesterday = today - datetime.timedelta(days=1)
     monday = today - datetime.timedelta(days=today.weekday())
     month_start = today.replace(day=1)
 
     def total(first: datetime.date) -> float:
         return sum(u for d, u in by_day.items() if first.isoformat() <= d < today.isoformat())
+    reached = max(by_day) if by_day else ""
+    checked_from = min(month_start, monday).isoformat()
+    recent = [(today - datetime.timedelta(days=n)).isoformat() for n in range(1, REPORT_LAG_DAYS + 1)]
+    covered = all(d >= checked_from or d <= reached for d in recent)
     reconciled = (daily is not None and weekly is not None and monthly is not None
                   and abs(total(month_start) + daily - monthly) <= RECONCILE_USD
                   and abs(total(monday) + daily - weekly) <= RECONCILE_USD
-                  and (yesterday >= month_start or yesterday >= monday))
+                  and covered)
     snap = {"usage": "read", "read_at": read_at.isoformat(), "reconciled": reconciled,
             "usage_daily": daily, "usage_weekly": weekly, "usage_monthly": monthly,
             "activity_through": max(by_day) if by_day else None}
@@ -678,10 +692,22 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     # key, its slot and its ceiling, and gets the hash the moment the provider answers.
     old_row = doc["issued"].get(name)
     if isinstance(old_row, dict) and old_row.get("hash"):
-        # The provider has no key by this name (the check above), so the row's key is gone or renamed; its
-        # hash would be lost with the row. Kept as a tombstone whose deletion is not known: the spend scan reads
-        # the project's windows as unknown while it is kept, rather than whole and lower (round 4).
-        _retire(doc, name, old_row, old_row["hash"], "replaced-by-issue", deleted=None)
+        # The provider has no key by this name (the check above), so the row's key is gone or renamed; its hash
+        # would be lost with the row. Asked by hash: gone (404) is a tombstone `deleted: True` with the snapshot
+        # a failed revoke kept (`retiring_snapshot`), if any (round 5, R5-7); still live under another name is
+        # refused, so no key that may still spend ever leaves the ledger untracked (R5-1).
+        try:
+            alive = bool(_request(f"/keys/{old_row['hash']}", admin).get("data"))
+        except RuntimeError as exc:
+            if "HTTP 404" not in str(exc):
+                raise
+            alive = False
+        kept = old_row.get("retiring_snapshot") if isinstance(old_row.get("retiring_snapshot"), dict) else None
+        if alive:
+            # A live key under another name would be dropped from tracking while it keeps spending: refused.
+            raise ValueError(f"the ledger's key {name!r} is still live at the provider under another name; "
+                             f"`revoke {name}` it first (its spend is snapshotted and kept), then issue again")
+        _retire(doc, name, old_row, old_row["hash"], "replaced-by-issue", kept, deleted=True)
     doc["issued"][name] = {"account": label, "hash": None, "destination": to, "project": project,
                            "limit_usd": limit, "limit_reset": reset, "issued_on": today(), "pending": True}
     save_ledger(doc)
@@ -1387,6 +1413,66 @@ def _delivery_failed(admin: str, row: dict) -> None:
     raise RuntimeError("Delivery failed; successor deleted. Predecessor was not revoked") from None
 
 
+def _retire_predecessor(doc: dict, name: str, rec: dict, predecessor: str | None, snapshot: dict) -> None:
+    """The predecessor of a rotation is gone at the provider: its tombstone, and the row's bookkeeping.
+
+    `tombstoned_rotations` counts the rotations that left one; a row rotated before tombstones existed has fewer
+    than `rotations`, and `tombstones_since` bounds when those older rotations happened: the day of the last
+    rotation that left no tombstone (`predecessor_rotated_on`, the row's `rotated_on` before this rotation)."""
+    previous_rotated_on = rec.get("predecessor_rotated_on")
+    for field in ("predecessor_hash", "predecessor_snapshot", "predecessor_rotated_on"):
+        rec.pop(field, None)
+    _retire(doc, name, rec, predecessor, "rotated", snapshot, row_state=False)
+    tombstoned = rec.get("tombstoned_rotations")
+    if type(tombstoned) is not int or tombstoned < 0:
+        tombstoned = 0
+    if tombstoned == 0:
+        rec["tombstones_since"] = previous_rotated_on
+    rec["tombstoned_rotations"] = tombstoned + 1
+    rec["rotation_status"] = "predecessor-retired-rename-pending"
+
+
+def _resume_rotation(doc: dict, name: str, rec: dict, label: str, admin: str) -> dict:
+    """Finish a rotation an earlier run left part done, rather than mint another successor (round 5, R5-3/R5-9).
+
+    The successor is already delivered (the row's hash). A predecessor still on the row is asked by its hash: live
+    (the earlier DELETE failed) is snapshotted, deleted and retired; gone (404: the DELETE went through and its
+    answer was lost) is retired with the snapshot kept on the row before that DELETE (`predecessor_snapshot`).
+    Then the successor gets the row's name and the rotation is complete."""
+    predecessor = rec.get("predecessor_hash")
+    try:
+        if predecessor:
+            try:
+                alive = bool(_request(f"/keys/{predecessor}", admin).get("data"))
+            except RuntimeError as exc:
+                if "HTTP 404" not in str(exc):
+                    raise
+                alive = False
+            if alive:
+                snapshot = usage_snapshot(admin, predecessor)
+                rec["predecessor_snapshot"] = snapshot
+                save_ledger(doc)
+                _request(f"/keys/{predecessor}", admin, method="DELETE")
+            else:
+                kept = rec.get("predecessor_snapshot")
+                snapshot = kept if isinstance(kept, dict) else {
+                    "usage": "unread", "usage_error": "the predecessor was gone at the provider",
+                    "read_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+            _retire_predecessor(doc, name, rec, predecessor, snapshot)
+            save_ledger(doc)
+        if rec.get("hash"):
+            _request(f"/keys/{rec['hash']}", admin, {"name": name}, method="PATCH")
+        rec["rotation_status"] = "complete"
+        save_ledger(doc)
+    except (OSError, ValueError, RuntimeError):
+        _journal("rotation-partial", f"openrouter/{label}/{name}", status="resume-failed")
+        raise RuntimeError("Partial failure: the earlier rotation could not be finished; inspect provider keys "
+                           "and ledger before retrying") from None
+    _journal("rotate", f"openrouter/{label}/{name}", to=rec.get("destination"), resumed=True)
+    return {"name": name, "delivered_to": rec.get("delivered_to"), "rotations": rec.get("rotations"),
+            "rotated_on": rec.get("rotated_on"), "resumed": True}
+
+
 @_locked
 def rotate_one(name: str, doc: dict | None = None) -> dict:
     """Deliver and verify a successor before revoking the predecessor; keep recovery metadata."""
@@ -1407,6 +1493,9 @@ def rotate_one(name: str, doc: dict | None = None) -> dict:
         raise ValueError("A finite positive ceiling is required")
     private_io.check(LEDGER)
     label, admin = read_admin(rec["account"])
+    if rec.get("predecessor_hash") or rec.get("rotation_status") in (
+            "successor-delivered-predecessor-pending", "predecessor-retired-rename-pending"):
+        return _resume_rotation(doc, name, rec, label, admin)
     previous_hash = rec.get("hash")
     previous_rotated_on = rec.get("rotated_on")
     old = find_key(admin, name)
@@ -1424,7 +1513,8 @@ def rotate_one(name: str, doc: dict | None = None) -> dict:
     rec.update({"hash": new_row.get("hash"), "label": new_row.get("label"), "delivered_to": place,
                 "rotated_on": today(), "rotations": rotations + 1,
                 "rotation_status": "successor-delivered-predecessor-pending",
-                "predecessor_hash": old.get("hash") if old else None})
+                "predecessor_hash": old.get("hash") if old else None,
+                "predecessor_rotated_on": previous_rotated_on})
     predecessor = (old or {}).get("hash") or previous_hash
     try:
         # What the predecessor spent, read while it still exists (the provider keeps no history of a deleted key),
@@ -1439,18 +1529,7 @@ def rotate_one(name: str, doc: dict | None = None) -> dict:
         # The predecessor is gone: its tombstone now, before the rename, so a failed PATCH keeps it (J-11).
         # `tombstoned_rotations` counts the rotations that left one; a row rotated before this change has
         # fewer than `rotations`, and `tombstones_since` bounds when those older rotations happened.
-        rec.pop("predecessor_hash", None)
-        rec.pop("predecessor_snapshot", None)
-        _retire(doc, name, rec, predecessor, "rotated", snapshot, row_state=False)
-        tombstoned = rec.get("tombstoned_rotations")
-        if type(tombstoned) is not int or tombstoned < 0:
-            tombstoned = 0
-        if tombstoned == 0:
-            # The day of the last rotation that left no tombstone (None when there was none): every rotation
-            # this row counts beyond `tombstoned_rotations` happened on or before it.
-            rec["tombstones_since"] = previous_rotated_on
-        rec["tombstoned_rotations"] = tombstoned + 1
-        rec["rotation_status"] = "predecessor-retired-rename-pending"
+        _retire_predecessor(doc, name, rec, predecessor, snapshot)
         save_ledger(doc)
         _request(f"/keys/{new_row['hash']}", admin, {"name": name}, method="PATCH")
         rec["rotation_status"] = "complete"

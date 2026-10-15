@@ -23,7 +23,7 @@ import threading
 import time
 import unittest
 import urllib.error
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -369,9 +369,10 @@ class ProjectSpend(unittest.TestCase):
         self.assertEqual((stone["usage_monthly"], stone["usage_weekly"], stone["usage_daily"]), (4.75, 0.75, 0.5))
         # The last request before the DELETE is the key's own row; the activity report came first.
         methods = [(m, p.split("?")[0]) for m, p in calls]
-        delete = methods.index(("DELETE", "/keys/h-k2"))
-        self.assertEqual(methods[delete - 1], ("GET", "/keys/h-k2"))
-        self.assertLess(methods.index(("GET", "/activity")), delete - 1)
+        # The whole exchange, in order: the row by hash, the activity report, the row again (its counters,
+        # the last read), then the DELETE. Nothing else reads the key in between.
+        self.assertEqual(methods, [("GET", "/keys/h-k2"), ("GET", "/activity"), ("GET", "/keys/h-k2"),
+                                   ("DELETE", "/keys/h-k2")])
         doc = self.scan_at(utc(2026, 10, 16, 12), ledger=left, keys={"h-k1": [{"date": OCT, "usage": 2.0}]},
                            account=[{"date": OCT, "usage": 6.0}, {"date": "2026-10-13", "usage": 0.25},
                                     {"date": "2026-10-14", "usage": 0.5}])
@@ -555,8 +556,8 @@ class ProjectSpend(unittest.TestCase):
         self.assertEqual((alpha["month_usd"], alpha["partial"]), (None, True))
 
     def test_an_issue_over_a_row_with_a_hash_keeps_that_hash_as_a_tombstone(self):
-        """The provider has no key by the name any more; the row's hash is kept, its deletion not known, and the
-        project reads null while the tombstone is kept."""
+        """The provider has no key by the name, and the row's key answers 404: its hash is kept as a tombstone,
+        deleted, with no snapshot (no revoke kept one), so the project reads null while it is kept."""
         import openrouter
 
         def provider(path, key, payload=None, method=None):
@@ -577,7 +578,7 @@ class ProjectSpend(unittest.TestCase):
                 door.close()
         self.assertEqual(left["issued"]["k2"]["hash"], "h-fresh")
         (stone,) = left["retired"]
-        self.assertEqual((stone["hash"], stone["reason"], stone["deleted"]), ("h-gone", "replaced-by-issue", None))
+        self.assertEqual((stone["hash"], stone["reason"], stone["deleted"]), ("h-gone", "replaced-by-issue", True))
         alpha = self.scan_at(utc(2026, 10, 16, 12), ledger=left, keys={"h-fresh": []},
                              account=[])["projects"]["alpha-web"]
         self.assertEqual((alpha["month_usd"], alpha["partial"]), (None, True))
@@ -1106,6 +1107,584 @@ class RoundFourProbesRevoke(unittest.TestCase):
                                            tombstoned_rotations=0, predecessor_hash="h-pred",
                                            rotation_status="successor-delivered-predecessor-pending"))
         self.assertTrue(a["month_usd"] is None, f"lower figure marked whole: {a['month_usd']}")
+
+
+class Clock:
+    """A clock the fake provider can move: `now()` answers `t`, and a provider may set `t` mid-call."""
+
+    def __init__(self, t):
+        self.t = t
+
+    def module(self):
+        import datetime as real
+        import types
+        outer = self
+
+        class FakeDT(real.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return outer.t
+        return types.SimpleNamespace(datetime=FakeDT, timezone=real.timezone, timedelta=real.timedelta,
+                                     date=real.date)
+
+
+def snapshot_of(rows, when, today, **counters):
+    """`openrouter.usage_snapshot` of one key, at `when`, against `provider_for(rows, today=today, **counters)`."""
+    import openrouter
+    provider = provider_for("h-k2", rows, today=today, **counters)
+    with patch.object(openrouter, "_request", provider), patch.object(openrouter, "datetime", clock(when)):
+        return openrouter.usage_snapshot("admin", "h-k2")
+
+
+def row(day: str, usd: float) -> dict:
+    return {"date": f"{day} 00:00:00", "usage": usd}
+
+
+class Reconciliation(unittest.TestCase):
+    """One case per clause of the rule that makes a usage snapshot whole (`openrouter.usage_snapshot`), so that
+    dropping or loosening any clause turns a case red (round 5, R5-2). The door's clock is Wednesday 2026-10-14;
+    the week began on Monday 10-12 and the month on 10-01."""
+
+    ROWS = [row("2026-10-05", 4.0), row("2026-10-12", 0.25), row("2026-10-13", 0.5)]
+
+    def snap(self, rows=None, when=None, today="2026-10-14", **counters) -> dict:
+        return snapshot_of(self.ROWS if rows is None else rows, when or AT, today, **counters)
+
+    def test_counters_that_agree_reconcile(self):
+        s = self.snap(daily=0.1)
+        self.assertEqual((s["reconciled"], s["usage_monthly"], s["usage_weekly"]), (True, 4.85, 0.85))
+        self.assertEqual(s["usage_by_day"]["2026-10-14"], 0.1)
+
+    def test_a_week_that_disagrees_alone_does_not(self):
+        week = round(0.25 + 0.5 + 0.1 + 0.5, 9)
+        self.assertFalse(self.snap(daily=0.1, weekly=week)["reconciled"])
+
+    def test_a_month_that_disagrees_alone_does_not_whichever_side(self):
+        for month in (4.85 + 0.5, 4.85 - 0.5):          # the counter above and below the activity days
+            with self.subTest(month=month):
+                self.assertFalse(self.snap(daily=0.1, monthly=month)["reconciled"])
+
+    def test_the_tolerance_is_a_hundredth_of_a_cent(self):
+        self.assertTrue(self.snap(daily=0.1, monthly=4.85 + 0.00009, weekly=0.85 + 0.00009)["reconciled"])
+        self.assertFalse(self.snap(daily=0.1, monthly=4.85 + 0.00011)["reconciled"])
+        self.assertFalse(self.snap(daily=0.1, weekly=0.85 + 0.00011)["reconciled"])
+
+    def test_the_week_begins_on_monday(self):
+        """A Sunday (10-11) belongs to the week before: the provider's weekly counter does not hold it."""
+        s = self.snap(rows=self.ROWS + [row("2026-10-11", 2.0)], daily=0.1)
+        self.assertEqual((s["reconciled"], s["usage_weekly"]), (True, 0.85))
+
+    def test_a_today_row_in_the_activity_report_is_not_added_to_the_counter_check(self):
+        s = self.snap(rows=self.ROWS + [row("2026-10-14", 0.07)], daily=0.1)
+        self.assertTrue(s["reconciled"])
+        self.assertEqual(s["usage_by_day"]["2026-10-14"], 0.1)          # today is the counter's, not the row's
+
+    def test_today_comes_from_the_last_read_even_across_midnight(self):
+        """The activity report is read at 23:59:59 on 10-13; the key's row, the last read, after midnight."""
+        import openrouter
+        moving = Clock(utc(2026, 10, 13, 23, 59, 59))
+        base = provider_for("h-k2", self.ROWS, daily=0.1, today="2026-10-14")
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-k2" and method is None:
+                moving.t = utc(2026, 10, 14, 0, 0, 1)
+            return base(path, key, payload, method)
+        with patch.object(openrouter, "_request", provider), patch.object(openrouter, "datetime", moving.module()):
+            s = openrouter.usage_snapshot("admin", "h-k2")
+        self.assertEqual((s["reconciled"], s["read_at"][:10]), (True, "2026-10-14"))
+        self.assertIn("2026-10-14", s["usage_by_day"])
+
+    def test_a_day_the_report_may_miss_and_no_counter_checks_is_not_vouched_for(self):
+        """Tuesday 2026-12-01: the month began today and the week on Monday 11-30. A two-day lag hides 11-29,
+        which neither counter holds (round 5, probe G); a report that reaches it reconciles."""
+        when = utc(2026, 12, 1, 6)
+        lagged = snapshot_of([row("2026-11-20", 1.0)], when, "2026-12-01", daily=0.5)
+        self.assertFalse(lagged["reconciled"])
+        caught_up = snapshot_of([row("2026-11-20", 1.0), row("2026-11-29", 3.0)], when, "2026-12-01", daily=0.5)
+        self.assertTrue(caught_up["reconciled"])
+
+    def test_monday_the_first_reconciles_only_when_the_report_reaches_yesterday(self):
+        when = utc(2029, 1, 1, 12)
+        self.assertTrue(snapshot_of([row("2028-12-31", 2.0)], when, "2029-01-01", daily=0.0)["reconciled"])
+        self.assertFalse(snapshot_of([row("2028-12-20", 2.0)], when, "2029-01-01", daily=0.0)["reconciled"])
+
+    def test_an_empty_report_with_spend_in_the_month_does_not_reconcile(self):
+        s = self.snap(rows=[], daily=0.0, weekly=0.0, monthly=3.0)
+        self.assertEqual((s["reconciled"], s["activity_through"]), (False, None))
+
+    def test_a_key_that_spent_nothing_reconciles(self):
+        self.assertTrue(self.snap(rows=[], daily=0.0)["reconciled"])
+
+    def test_a_missing_counter_does_not_reconcile(self):
+        for missing in ("daily", "weekly", "monthly"):
+            with self.subTest(missing=missing):
+                self.assertFalse(self.snap(**{"daily": 0.1, missing: None})["reconciled"])
+
+
+class StoneReading(unittest.TestCase):
+    """How the scan reads a tombstone's snapshot and carried state (round 5)."""
+
+    def scan(self, **kw) -> dict:
+        return ProjectSpend().scan(**kw)
+
+    def scan_at(self, now, **kw) -> dict:
+        return ProjectSpend().scan_at(now, **kw)
+
+    def test_an_unreconciled_stone_from_an_empty_report_nulls_every_window_to_its_day(self):
+        stone = tomb("k2", "h-k2", "alpha-web", "2026-10-08", by_day={}, reconciled=False)
+        stone["activity_through"] = None
+        alpha = self.scan(ledger={"issued": {}, "retired": [stone]}, keys={})["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["last30_usd"]), (None, None))
+
+    def test_a_lagged_stone_read_on_its_own_retirement_day_is_null(self):
+        """Retired 10-14, its report reaching 10-10: scanned at noon on 10-14, the gap 10-11..10-13 is in both
+        windows, though the retirement day itself is not yet a completed day."""
+        stone = tomb("k2", "h-k2", "alpha-web", "2026-10-14", by_day={"2026-10-10": 1.0}, reconciled=False)
+        alpha = self.scan_at(utc(2026, 10, 14, 12), ledger={"issued": {}, "retired": [stone]},
+                             keys={})["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["last30_usd"]), (None, None))
+
+    def test_a_stone_without_a_reconciled_field_is_not_whole(self):
+        stone = tomb("k2", "h-k2", "alpha-web", "2026-10-08", by_day={"2026-10-05": 1.0})
+        stone.pop("reconciled")
+        alpha = self.scan(ledger={"issued": {}, "retired": [stone]}, keys={})["projects"]["alpha-web"]
+        self.assertEqual(alpha["month_usd"], None)
+
+    def test_a_stone_not_known_to_be_deleted_is_read_by_its_hash_not_its_snapshot(self):
+        stone = tomb("k9", "h-k9", "alpha-web", "2026-10-02", reason="replaced-by-issue",
+                     by_day={"2026-10-01": 1.0})
+        stone["deleted"] = None
+        doc = self.scan(ledger={"issued": {}, "retired": [stone]},
+                        keys={"h-k9": [row("2026-10-01", 1.0), row("2026-10-12", 2.0)]},
+                        account=[row("2026-10-01", 1.0), row("2026-10-12", 2.0)])
+        self.assertIn("h-k9", doc["_asked"])
+        self.assertEqual((doc["projects"]["alpha-web"]["month_usd"], doc["projects"]["alpha-web"]["partial"]),
+                         (3.0, False))
+
+    def test_a_stone_not_known_to_be_deleted_is_followed_into_the_next_month(self):
+        """Round 5, probe K: retired 10-02, before both November windows; it is still read, and its spend in
+        November stays with its project."""
+        stone = tomb("k9", "h-k9", "alpha-web", "2026-10-02", reason="replaced-by-issue")
+        stone["deleted"] = None
+        led = {"issued": {}, "retired": [stone]}
+        doc = self.scan_at(utc(2026, 11, 5, 12), ledger=led, keys={"h-k9": [row("2026-11-03", 2.0)]},
+                           account=[row("2026-11-03", 2.0)])
+        self.assertEqual((doc["projects"]["alpha-web"]["month_usd"], doc["unattributed"]["month_usd"]), (2.0, 0.0))
+        gone = self.scan_at(utc(2026, 11, 5, 12), ledger=led, keys={"h-k9": 404}, account=[row("2026-11-03", 2.0)])
+        self.assertEqual((gone["projects"]["alpha-web"]["month_usd"], gone["projects"]["alpha-web"]["last30_usd"]),
+                         (None, None))
+        self.assertIn("gone at the provider", gone["projects"]["alpha-web"]["unread"][0]["reason"])
+
+
+class RotationRetry(unittest.TestCase):
+    """A rotation a failure left part done is finished by the retry, never minted again (round 5, R5-3/R5-9)."""
+
+    def rotate_twice(self, provider) -> tuple[dict, dict, list]:
+        import openrouter
+        calls: list = []
+
+        def watched(path, key, payload=None, method=None):
+            calls.append((method or ("POST" if payload else "GET"), path))
+            return provider(path, key, payload, method)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(openrouter, "datetime", clock(AT)):
+            door = Door(tmp, {"k1": ledger_row("acct-a", "h-old", "alpha-web")}, watched)
+            try:
+                with self.assertRaises(RuntimeError):
+                    openrouter.rotate_one("k1")
+                mid = door.ledger()
+                first = len(calls)
+                result = openrouter.rotate_one("k1")
+                left = door.ledger()
+            finally:
+                door.close()
+        self.assertTrue(result.get("resumed"))
+        self.assertNotIn(("POST", "/keys"), calls[first:])             # no second successor
+        return mid, left, calls[first:]
+
+    def keys(self, state):
+        base = provider_for("h-old", [row("2026-10-05", 4.0)], daily=0.0, name="k1")
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys" and payload:
+                return {"data": {"hash": "h-new", "label": "y"}, "key": "sk-or-v1-" + "n" * 40}
+            if path.startswith("/keys/h-new"):
+                return {"data": {"name": "k1-next", "hash": "h-new"}}
+            if path == "/keys/h-old" and method == "DELETE":
+                return state["delete"]()
+            if state.get("gone") and (path == "/keys/h-old" or path.startswith("/activity?api_key_hash=h-old")):
+                raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+            return base(path, key, payload, method)
+        return provider
+
+    def test_a_delete_whose_answer_was_lost_is_retired_with_the_snapshot_kept_before_it(self):
+        state = {}
+
+        def delete():
+            state["gone"] = True
+            raise RuntimeError("openrouter request failed: TimeoutError")   # deleted; the answer is lost
+        state["delete"] = delete
+        mid, left, _calls = self.rotate_twice(self.keys(state))
+        self.assertEqual(mid["issued"]["k1"]["predecessor_snapshot"]["usage"], "read")
+        (stone,) = left["retired"]
+        self.assertEqual((stone["hash"], stone["usage"], stone["reconciled"]), ("h-old", "read", True))
+        row_ = left["issued"]["k1"]
+        self.assertEqual((row_["hash"], row_["rotation_status"], row_["tombstoned_rotations"]), ("h-new", "complete", 1))
+        self.assertNotIn("predecessor_hash", row_)
+
+    def test_a_delete_that_really_failed_is_retried_before_anything_else(self):
+        state = {"fails": 1}
+
+        def delete():
+            if state["fails"]:
+                state["fails"] -= 1
+                raise RuntimeError("openrouter answered HTTP 502; provider response withheld")
+            state["gone"] = True
+            return {"data": {}}
+        state["delete"] = delete
+        _mid, left, calls = self.rotate_twice(self.keys(state))
+        self.assertIn(("DELETE", "/keys/h-old"), calls)
+        self.assertTrue(state.get("gone"))
+        self.assertEqual([(t["hash"], t["usage"]) for t in left["retired"]], [("h-old", "read")])
+        self.assertEqual(left["issued"]["k1"]["rotation_status"], "complete")
+
+
+class IssueOverAHashedRow(unittest.TestCase):
+    """`issue` over a ledger row that still holds a hash (round 5, R5-1/R5-7)."""
+
+    def issue(self, provider, row_):
+        import openrouter
+        with tempfile.TemporaryDirectory() as tmp, patch.object(openrouter, "datetime", clock(AT)), \
+                patch.object(openrouter, "vault_destination", lambda to: to):
+            door = Door(tmp, {"k2": row_}, provider)
+            try:
+                try:
+                    openrouter.issue_key("k2", 5.0, "acct-a", "observatory", "alpha-web")
+                    outcome = None
+                except ValueError as exc:
+                    outcome = str(exc)
+                left = door.ledger()
+            finally:
+                door.close()
+        return outcome, left
+
+    @staticmethod
+    def provider(alive: bool):
+        def p(path, key, payload=None, method=None):
+            if path.startswith("/keys?"):
+                return {"data": []}
+            if path == "/keys/h-k2" and method is None:
+                if alive:
+                    return {"data": {"name": "renamed-by-hand", "hash": "h-k2"}}
+                raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+            if path == "/keys" and payload:
+                return {"data": {"hash": "h-fresh", "label": "z"}, "key": "sk-or-v1-" + "f" * 40}
+            return {"data": {}}
+        return p
+
+    def test_a_key_still_live_under_another_name_is_refused(self):
+        outcome, left = self.issue(self.provider(True), ledger_row("acct-a", "h-k2", "alpha-web"))
+        self.assertIn("still live at the provider", outcome)
+        self.assertEqual((left["issued"]["k2"]["hash"], left.get("retired", [])), ("h-k2", []))
+
+    def test_a_key_gone_at_the_provider_is_retired_with_the_snapshot_its_revoke_kept(self):
+        kept = {"usage": "read", "reconciled": True, "usage_by_day": {"2026-10-05": 4.0},
+                "activity_through": "2026-10-05", "read_at": "2026-10-13T09:00:00+00:00"}
+        outcome, left = self.issue(self.provider(False),
+                                   ledger_row("acct-a", "h-k2", "alpha-web", retiring_snapshot=kept))
+        self.assertIsNone(outcome)
+        (stone,) = left["retired"]
+        self.assertEqual((stone["deleted"], stone["usage"], stone["usage_by_day"]), (True, "read", {"2026-10-05": 4.0}))
+        self.assertEqual(left["issued"]["k2"]["hash"], "h-fresh")
+
+
+class KeyserverThreads(unittest.TestCase):
+    def test_a_request_waiting_does_not_hold_the_next_one(self):
+        """A door verb may wait for the ledger lock; the key page must still answer meanwhile (round 5, R5-8)."""
+        import http.server
+        import socketserver
+        import urllib.request
+        import keyserver
+        self.assertTrue(issubclass(keyserver.Server, socketserver.ThreadingMixIn))
+        release = threading.Event()
+
+        class Slow(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                if self.path == "/slow":
+                    release.wait(10)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"ok")
+        srv = keyserver.Server(("127.0.0.1", 0), Slow, "t")
+        port = srv.server_address[1]
+        runner = threading.Thread(target=srv.serve_forever, daemon=True)
+        runner.start()
+        try:
+            slow = threading.Thread(target=lambda: urllib.request.urlopen(f"http://127.0.0.1:{port}/slow", timeout=15).read())
+            slow.start()
+            time.sleep(0.2)
+            t0 = time.monotonic()
+            self.assertEqual(urllib.request.urlopen(f"http://127.0.0.1:{port}/fast", timeout=5).read(), b"ok")
+            self.assertLess(time.monotonic() - t0, 2.0)
+        finally:
+            release.set()
+            slow.join(15)
+            srv.shutdown()
+            srv.server_close()
+
+
+class Fake:
+    """A stateful provider: keys by hash with activity rows and counters; POST /keys mints; DELETE deletes."""
+
+    def __init__(self, keys: dict, today: str, fail_delete_after: set | None = None, fail_patch=False):
+        self.keys = keys            # hash -> {"name", "rows": [(day, usd)], "daily": float, "deleted": bool}
+        self.today = today
+        self.n = 0
+        self.fail_delete_after = fail_delete_after or set()
+        self.fail_patch = fail_patch
+        self.calls = []
+
+    def counters(self, k):
+        t = date.fromisoformat(self.today)
+        monday = (t - timedelta(days=t.weekday())).isoformat()
+        month = self.today[:8] + "01"
+        s = lambda first: round(sum(u for d, u in k["rows"] if first <= d < self.today) + k["daily"], 9)
+        return {"usage_daily": k["daily"], "usage_weekly": s(monday), "usage_monthly": s(month)}
+
+    def __call__(self, path, key, payload=None, method=None):
+        self.calls.append((method or ("POST" if payload else "GET"), path))
+        if path == "/keys" and payload:
+            self.n += 1
+            h = f"h-new{self.n}"
+            self.keys[h] = {"name": payload["name"], "rows": [], "daily": 0.0, "deleted": False}
+            return {"data": {"hash": h, "label": f"lab{self.n}"}, "key": "sk-or-v1-" + str(self.n) * 40}
+        if path.startswith("/keys/"):
+            h = path[len("/keys/"):]
+            k = self.keys.get(h)
+            if not k or k["deleted"]:
+                raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+            if method == "DELETE":
+                k["deleted"] = True
+                if h in self.fail_delete_after:
+                    raise RuntimeError("openrouter request failed: TimeoutError")   # deleted, answer lost
+                return {"data": {}}
+            if method == "PATCH":
+                if self.fail_patch:
+                    raise RuntimeError("openrouter answered HTTP 500; provider response withheld")
+                k["name"] = payload["name"]
+                return {"data": {}}
+            return {"data": {"name": k["name"], "hash": h, **self.counters(k)}}
+        if path.startswith("/activity?api_key_hash="):
+            h = path.split("=", 1)[1].split("&")[0]
+            k = self.keys.get(h)
+            if not k or k["deleted"]:
+                raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+            return {"data": [{"date": d + " 00:00:00", "usage": u} for d, u in k["rows"]]}
+        return {"data": {}}
+
+
+def scan(now, ledger, fake: Fake, account):
+    """Run the real scan over `ledger`, reading keys through the fake provider."""
+    import scan_spend
+    s = ProjectSpend()
+    keys = {}
+    for h, k in fake.keys.items():
+        keys[h] = 404 if k["deleted"] else [{"date": d + " 00:00:00", "usage": u} for d, u in k["rows"]]
+    return s.scan_at(now, ledger=ledger, keys=keys, account=account)
+
+
+class RoundFiveProbes(unittest.TestCase):
+    """The adversarial probes of verification round 5 on #285 (A-K), kept as regression tests. B and K assert
+    the fixed behaviour: a retried rotation deletes its predecessor, and an issue over a live renamed key is
+    refused."""
+    def test_A_rotate_retry_after_lost_delete_answer_loses_predecessor_spend(self):
+        """DELETE of the predecessor succeeds but its answer is lost (timeout). The row keeps predecessor_hash and
+        predecessor_snapshot. The operator retries `rotate k1` (the error says: inspect, then retry)."""
+        import openrouter
+        fake = Fake({"h-old": {"name": "k1", "rows": [("2026-10-05", 4.0)], "daily": 0.0, "deleted": False}},
+                    today="2026-10-14", fail_delete_after={"h-old"})
+        with tempfile.TemporaryDirectory() as tmp, patch.object(openrouter, "datetime", clock(AT)):
+            door = Door(tmp, {"k1": ledger_row("acct-a", "h-old", "alpha-web")}, fake)
+            try:
+                with self.assertRaises(RuntimeError):
+                    openrouter.rotate_one("k1")
+                mid = door.ledger()
+                # The documented remedy without a retry: the scan of the mid state.
+                d_mid = scan(utc(2026, 10, 16, 12), mid, fake, [{"date": "2026-10-05", "usage": 4.0}])
+                openrouter.rotate_one("k1")   # the retry
+                left = door.ledger()
+            finally:
+                door.close()
+        doc = scan(utc(2026, 10, 16, 12), left, fake, [{"date": "2026-10-05", "usage": 4.0}])
+        alpha, un = doc["projects"]["alpha-web"], doc["unattributed"]
+        self.assertTrue(alpha["month_usd"] is None or abs(alpha["month_usd"] - 4.0) < 1e-6,
+                        f"whole and lower: alpha {alpha['month_usd']} partial={alpha['partial']}, "
+                        f"unattributed {un['month_usd']}")
+
+    def test_B_rotate_real_delete_failure_then_retry_leaves_predecessor_live_and_unread(self):
+        """The DELETE really fails (5xx, key still live). Retry: find_key reads the disk row's hash (the
+        successor), so the predecessor h-old is never deleted and its hash leaves the ledger."""
+        import openrouter
+        fake = Fake({"h-old": {"name": "k1", "rows": [("2026-10-05", 4.0)], "daily": 0.0, "deleted": False}},
+                    today="2026-10-14")
+        orig = fake.__call__
+
+        state = {"fail": True}
+
+        def provider(path, key, payload=None, method=None):
+            if method == "DELETE" and path == "/keys/h-old" and state["fail"]:
+                state["fail"] = False
+                raise RuntimeError("openrouter answered HTTP 502; provider response withheld")
+            return orig(path, key, payload, method)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(openrouter, "datetime", clock(AT)):
+            door = Door(tmp, {"k1": ledger_row("acct-a", "h-old", "alpha-web")}, provider)
+            try:
+                with self.assertRaises(RuntimeError):
+                    openrouter.rotate_one("k1")
+                openrouter.rotate_one("k1")
+                left = door.ledger()
+            finally:
+                door.close()
+        self.assertTrue(fake.keys["h-old"]["deleted"], "the retry did not delete the predecessor")
+        self.assertIn("h-old", [t["hash"] for t in left["retired"]])
+        doc = scan(utc(2026, 10, 16, 12), left, fake, [{"date": "2026-10-05", "usage": 4.0}])
+        alpha = doc["projects"]["alpha-web"]
+        self.assertTrue(alpha["month_usd"] is None or abs(alpha["month_usd"] - 4.0) < 1e-6,
+                        f"whole and lower: {alpha['month_usd']}")
+
+    def test_C_empty_activity_with_monthly_spend(self):
+        import openrouter
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-k2" and method is None:
+                return {"data": {"name": "k2", "hash": "h-k2", "usage_daily": 0.0, "usage_weekly": 0.0,
+                                 "usage_monthly": 3.0}}
+            if path.startswith("/activity?api_key_hash=h-k2"):
+                return {"data": []}
+            return {"data": {}}
+        _c, left = door_revoke(provider, when=AT)
+        st = left["retired"][0]
+        doc = scan(utc(2026, 10, 16, 12), left, Fake({"h-k1": {"name": "k1", "rows": [], "daily": 0, "deleted": False}},
+                                                    "2026-10-16"), [{"date": "2026-10-03", "usage": 3.0}])
+        alpha = doc["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["last30_usd"]), (None, None))
+
+    def test_D_zero_spend_key(self):
+        _c, left = door_revoke(provider_for("h-k2", [], daily=0.0), when=AT)
+        st = left["retired"][0]
+        self.assertTrue(st["reconciled"])
+
+    def test_E_monday_the_first_never_reconciles(self):
+        """2029-01-01 is a Monday. A complete activity report and agreeing counters: still not reconciled."""
+        rows = [{"date": "2028-12-31 00:00:00", "usage": 2.0}]
+        when = utc(2029, 1, 1, 12)
+        _c, left = door_revoke(provider_for("h-k2", rows, daily=0.0, today="2029-01-01"), when=when)
+        st = left["retired"][0]
+        self.assertTrue(st["reconciled"])
+        for day in (10, 20, 31):
+            doc = scan(utc(2029, 1, day, 12), left, Fake({"h-k1": {"name": "k1", "rows": [], "daily": 0,
+                                                                   "deleted": False}}, "2029-01-%02d" % day),
+                       [{"date": "2028-12-31", "usage": 2.0}])
+            a = doc["projects"]["alpha-web"]
+            self.assertEqual(a["partial"], False)
+
+    def test_F_month_boundary_retire_on_the_first_tuesday(self):
+        """2026-12-01 is a Tuesday. Activity lags: yesterday (11-30, 3.0) not in the report."""
+        rows = [{"date": "2026-11-20 00:00:00", "usage": 1.0}]
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-k2" and method is None:
+                return {"data": {"name": "k2", "hash": "h-k2", "usage_daily": 0.5, "usage_weekly": 3.5,
+                                 "usage_monthly": 0.5}}
+            if path.startswith("/activity?api_key_hash=h-k2"):
+                return {"data": rows}
+            return {"data": {}}
+        _c, left = door_revoke(provider, when=utc(2026, 12, 1, 6))
+        st = left["retired"][0]
+        self.assertFalse(st["reconciled"])
+
+    def test_G_two_day_lag_outside_both_checks(self):
+        """Tuesday 2026-12-01. The report lags two days: 11-29 (Sun, 3.0) missing; 11-30 (Mon) spent 0.
+        Neither the month (12-01..) nor the week (11-30..) holds 11-29."""
+        rows = [{"date": "2026-11-20 00:00:00", "usage": 1.0}]
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-k2" and method is None:
+                return {"data": {"name": "k2", "hash": "h-k2", "usage_daily": 0.5, "usage_weekly": 0.5,
+                                 "usage_monthly": 0.5}}
+            if path.startswith("/activity?api_key_hash=h-k2"):
+                return {"data": rows}
+            return {"data": {}}
+        _c, left = door_revoke(provider, when=utc(2026, 12, 1, 6))
+        st = left["retired"][0]
+        self.assertFalse(st["reconciled"])
+        doc = scan(utc(2026, 12, 3, 12), left, Fake({"h-k1": {"name": "k1", "rows": [], "daily": 0,
+                                                              "deleted": False}}, "2026-12-03"),
+                   [{"date": "2026-11-20", "usage": 1.0}, {"date": "2026-11-29", "usage": 3.0},
+                    {"date": "2026-12-01", "usage": 0.5}])
+        a = doc["projects"]["alpha-web"]
+        self.assertIsNone(a["last30_usd"])
+
+    def test_H_float_accumulation_30_days(self):
+        rows = [{"date": (date(2026, 10, 1) + timedelta(days=i)).isoformat() + " 00:00:00", "usage": 0.1}
+                for i in range(13)]
+        rows += [{"date": (date(2026, 9, 14) + timedelta(days=i)).isoformat() + " 00:00:00", "usage": 0.1}
+                 for i in range(17)]
+        many = [{"date": r["date"], "usage": 1e-7 * 3} for r in rows for _ in range(30)]
+        _c, left = door_revoke(provider_for("h-k2", rows + many, daily=0.3), when=AT)
+        self.assertTrue(left["retired"][0]["reconciled"])
+
+    def test_I_negative_refund(self):
+        rows = [{"date": "2026-10-05 00:00:00", "usage": 4.0}, {"date": "2026-10-06 00:00:00", "usage": -1.0}]
+        _c, left = door_revoke(provider_for("h-k2", rows, daily=0.0), when=AT)
+        st = left["retired"][0]
+        doc = scan(utc(2026, 10, 16, 12), left, Fake({"h-k1": {"name": "k1", "rows": [], "daily": 0,
+                                                              "deleted": False}}, "2026-10-16"),
+                   [{"date": "2026-10-05", "usage": 4.0}, {"date": "2026-10-06", "usage": -1.0}])
+        self.assertEqual(doc["projects"]["alpha-web"]["month_usd"], 3.0)
+
+    def test_J_issue_replaced_key_still_live_nulls_project_for_window(self):
+        """An issue over a row whose key was renamed at the provider is impossible (find by hash); measure the
+        null horizon of a deleted=None stone instead."""
+        stone = tomb("k9", "h-k9", "alpha-web", "2026-10-02", reason="replaced-by-issue", by_day={})
+        stone["deleted"] = None
+        led = {"issued": {"k1": ledger_row("acct-a", "h-k1", "alpha-web")}, "retired": [stone]}
+        for when in (utc(2026, 10, 16), utc(2026, 11, 1, 1), utc(2026, 11, 2, 1)):
+            doc = scan(when, led, Fake({"h-k1": {"name": "k1", "rows": [], "daily": 0, "deleted": False},
+                                        "h-k9": {"name": "k9", "rows": [], "daily": 0, "deleted": True}},
+                                       when.date().isoformat()), [])
+            a = doc["projects"]["alpha-web"]
+            self.assertEqual((a["month_usd"], a["last30_usd"]), (None, None))
+
+
+
+class RoundFiveProbesIssue(unittest.TestCase):
+    def test_K_issue_over_renamed_live_key_then_month_rolls(self):
+        """The key k2 was renamed in the provider's dashboard and still serves someone. `issue k2` sees no key
+        called k2 (find by hash returns the renamed row), mints a new one, and leaves a deleted=None stone.
+        In November the stone is filtered out (retired before both windows) while the old key keeps spending."""
+        import openrouter
+        fake = Fake({"h-k2": {"name": "renamed-by-hand", "rows": [("2026-10-01", 1.0)], "daily": 0.0,
+                              "deleted": False}}, today="2026-10-02")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(openrouter, "datetime", clock(utc(2026, 10, 2, 9))), \
+                patch.object(openrouter, "today", lambda: "2026-10-02"), \
+                patch.object(openrouter, "vault_destination", lambda to: to):
+            door = Door(tmp, {"k2": ledger_row("acct-a", "h-k2", "alpha-web")}, fake)
+            try:
+                with self.assertRaises(ValueError) as refused:
+                    openrouter.issue_key("k2", 5.0, "acct-a", "vault:x/prod/K", "alpha-web")
+                left = door.ledger()
+            finally:
+                door.close()
+        self.assertIn("still live at the provider", str(refused.exception))
+        self.assertEqual(left["issued"]["k2"]["hash"], "h-k2")
+        fake.keys["h-k2"]["rows"] += [("2026-11-03", 2.0)]
+        doc = scan(utc(2026, 11, 5, 12), left, fake, [{"date": "2026-10-01", "usage": 1.0},
+                                                      {"date": "2026-11-03", "usage": 2.0}])
+        a = doc["projects"]["alpha-web"]
+        self.assertEqual((a["month_usd"], a["partial"]), (2.0, False))
 
 
 class ProjectCommand(unittest.TestCase):

@@ -40,13 +40,17 @@ A WINDOW NOT READ WHOLE IS NULL, NEVER A LOWER FIGURE. A project's window is `nu
   - a tombstone has no usage snapshot (its read failed, or a forgotten pending row had no hash): every window
     starting on or before its day; or its snapshot did not reconcile: the windows holding any day after its last
     activity day through the retirement day;
-  - a tombstone not known to be deleted (a row an `issue` replaced): every window, while it is kept;
+  - a tombstone not known to be deleted whose key is gone at the provider (404): every window, since when it
+    stopped is unknown. Such a tombstone is otherwise read by its hash like a live key while the door keeps it,
+    whatever its `retired_on`, and its spend is attributed to its project (the door writes none today: `issue`
+    over a key still live under another name is refused);
   - a tombstone that carries its row's untracked rotation (`untracked_through`) or a pending predecessor
     (`predecessor_hash`): the windows starting on or before that day, as for the live row;
   - two ledger entries hold the same hash, so neither can be told apart;
   - a key was rotated before tombstones existed: the row's `rotations` count more rotations than
-    `tombstoned_rotations`, and the untracked ones happened on or before `tombstones_since` (or on `rotated_on`
-    when none was tracked), so every window starting on or before that day is null;
+    `tombstoned_rotations` (a pending rotation not counted), and the untracked ones happened on or before
+    `tombstones_since` (or on `rotated_on` when none was tracked), so every window starting on or before that day
+    is null (`openrouter.untracked_through`, the rule `_retire` uses for tombstones too);
   - the step's deadline (`OBSERVATORY_STEP_DEADLINE`) arrived, or the provider became unreachable: the scan
     stops reading, writes what it read, and names every key it did not reach.
 An account's unattributed residual is null too while any of its keys is unread, since the two cannot be told
@@ -206,12 +210,10 @@ def windows_from(day: str, month: str, start: str) -> list[str]:
 
 
 def untracked_rotation(rec: dict) -> str | None:
-    """The latest day an untracked rotation of this live key can have happened on (`openrouter.untracked_through`,
-    the one implementation the door uses for tombstones too), or None. A pending rotation, whose predecessor is
-    still on the row (`predecessor_hash`), is read like any key and does not count as untracked."""
+    """The latest day an untracked rotation of this live key can have happened on, or None: the door's
+    `openrouter.untracked_through`, the one rule for live rows and tombstones alike (a pending rotation,
+    whose predecessor is read by its hash, is not untracked)."""
     import openrouter
-    if rec.get("predecessor_hash") and type(rec.get("rotations")) is int and rec["rotations"] >= 1:
-        rec = {**rec, "rotations": rec["rotations"] - 1}
     return openrouter.untracked_through(rec)
 
 
@@ -322,6 +324,8 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
             continue
         if windows_from(str(tomb.get("retired_on") or "")[:10], month, start):
             stones.append(tomb)                 # retired before either window began: no spend to find there
+        elif tomb.get("deleted", True) is not True:
+            stones.append(tomb)                 # may still be spending: followed while the door keeps it
     # A hash two entries hold would be counted once and read as 0 for the other: neither is trusted.
     holders: dict[str, int] = {}
     for _name, rec in rows:
@@ -375,13 +379,6 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
         if tomb.get("hash") in shared:
             doubled(name, bucket, account)
             continue
-        if tomb.get("deleted", True) is not True:
-            # Not known to be deleted (a row an `issue` replaced): it may still be spending, by a hash no row reads.
-            bucket.miss(name, f"retired on {day} ({tomb.get('reason')}) and not known to be deleted",
-                        list(WINDOWS))
-            attribution(f"spend:openrouter:key:{name}", "a retired key not known to be deleted")
-            not_whole(account)
-            continue
         horizon = str(tomb.get("untracked_through") or "")[:10]
         if horizon:
             hidden = windows_from(horizon, month, start)
@@ -394,6 +391,18 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
             bucket.miss(name, "retired while a rotation was pending: its predecessor's spend was not read", hidden)
             attribution(f"spend:openrouter:key:{name}", "retired with a pending predecessor not read")
             not_whole(account)
+        if tomb.get("deleted", True) is not True:
+            # Not known to be deleted: it may still be spending, so it is read by its hash like a live key, and any
+            # snapshot it carries is not used (the activity report holds those days too). Gone (404): when it
+            # stopped is unknown, so every window reads null (round 5, R5-1).
+            if not tomb.get("hash"):
+                bucket.miss(name, f"retired on {day} ({tomb.get('reason')}), not known to be deleted, with no "
+                                  "hash to read by", list(WINDOWS))
+                attribution(f"spend:openrouter:key:{name}", "a retired key not known to be deleted, no hash")
+                not_whole(account)
+            else:
+                work.append((name, tomb, [tomb["hash"]], bucket))
+            continue
         got = snapshot_sums(tomb, month, start, end)
         if got is None:
             # No snapshot of what it spent, and the provider keeps no history of a deleted key (404, measured
@@ -463,6 +472,8 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
             continue
         except (OSError, RuntimeError, ValueError, TypeError, AttributeError, http.client.HTTPException) as exc:
             reason = str(exc) if isinstance(exc, (RuntimeError, ValueError)) else type(exc).__name__
+            if "retired_on" in rec and "HTTP 404" in reason:
+                reason = "its key, not known to be deleted, is gone at the provider; when it stopped is unknown"
             bucket.miss(name, f"GET /activity: {reason}", list(WINDOWS))
             attribution(f"spend:openrouter:key:{name}", f"GET /activity: {reason}")
             if acct is not None:

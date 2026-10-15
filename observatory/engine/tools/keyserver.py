@@ -755,8 +755,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(500, {"error": "action failed; inspect the local service configuration"})
 
 
-class Server(socketserver.TCPServer):
+class Server(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    """One thread per request (J-11 round 5): a door verb may wait up to the ledger lock's 150 s for another
+    operation, and on a single-threaded server that wait froze the whole key page. The module holds no mutable
+    state of its own, the audit log is written with O_APPEND, and every door verb that writes the ledger runs
+    under its lock. `block_on_close` stays on, so `--once` waits for its one request to finish."""
     allow_reuse_address = True
+    daemon_threads = True
 
     def __init__(self, addr, handler, tok):
         if addr[0] not in ("127.0.0.1", "localhost", "::1"):
@@ -765,7 +770,7 @@ class Server(socketserver.TCPServer):
             raise ValueError("keyserver requires a nonempty token")
         if addr[0] == "::1":
             self.address_family = socket.AF_INET6
-        # A stalled browser must not hold this single-process server forever.
+        # A stalled browser must not hold a request thread forever.
         super().__init__(addr, handler)
         self.token = tok
 
