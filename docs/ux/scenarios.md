@@ -7,7 +7,9 @@ OSS-13–22 (Machine: OSS-21–22) and OSS-24–28 (Agents) in the full-engine s
 alongside existing safety contracts. The suppression contract (PB-032) is OSS-40 (numbered OSS-13 until
 2026-10-06), and OSS-41–55 cover operating the engine: update, maintenance, backups, profile, the
 agent plugin, MCP inventory, the agent's reads, credentials, embeddings, review, Health, models,
-the dashboard server, provider keys and the leak register.
+the dashboard server, provider keys and the leak register. OSS-62–67 cover the machine's SSH keys (PB-163): list, create,
+copy the public part, send it to GitHub or a server, findings and rotation; the private key is
+never shown or moved ([design](../design/SSH-KEYS.md)).
 
 This file indexes the two distinct runtime paths. The table below describes the retained portable compatibility CLI only. Full-engine scenarios are in [portable-scenarios.md](../../observatory/engine/docs/ux/portable-scenarios.md); despite that historical filename, its OSS scenarios cover the full engine. The public site's scenarios live separately in [docs/site/](../site/). The implementation and tests are linked from [MIGRATION.md](../MIGRATION.md).
 

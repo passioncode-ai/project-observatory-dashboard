@@ -208,3 +208,175 @@ The bounded agent view retains carried Git evidence.
 Coverage: `tests/test_machine_findings.py`,
 `test_machine.Tool.test_the_overview_says_when_the_git_survey_is_partial`.
 Status: implemented; product outcome unobserved.
+
+## SSH keys on this machine (PB-163, OBS-110)
+
+The operator asked for one way to make an SSH key, copy the part that gets pasted and send it
+where it goes, without the private key ever being shown or moved. The design is
+[SSH-KEYS.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/SSH-KEYS.md). Two readers use these paths: a person at a
+terminal (`project-observatory full ssh-keys …`) and an agent (the same commands, and the read-only
+MCP tool `observatory_ssh_keys`). **The rule throughout:** the private key is never printed, copied,
+sent, logged or placed in an argument; Observatory reads at most its first line and the cipher
+name in the next one, to say whether it has a passphrase. OSS-58–61 are claimed by open pull
+requests, so these start at OSS-62. Tests named below are in `tests/test_ssh_keys.py`.
+
+### OSS-62 — list my keys
+
+Trigger: "which SSH keys do I have, and where does each one work?"
+
+Funnel:
+1. `full ssh-keys list` (or `observatory_ssh_keys` for an agent).
+2. One row per key: name, type and bits, `SHA256:` fingerprint, comment, passphrase
+   (`yes`, `no`, `unknown`), file modes, where it is used (Host blocks of `~/.ssh/config`, loaded
+   in ssh-agent) and where it is registered (GitHub, for sign-in and for signing).
+3. Then the sources that could not be read, each with its reason and the command that fixes it,
+   and the count of findings (OSS-66). `list` saves the inventory to `store/raw/ssh-keys.json` so
+   the findings board reads the same measurement.
+
+Failure paths:
+- No `~/.ssh`, or no keys in it: "No SSH keys yet" and the create command (exit 0). An empty list
+  never hides an unread source.
+- ssh-agent not running, `gh` missing, not signed in, or without the read scopes: the listing
+  continues and `degraded` names the source and its command (`gh auth refresh -h github.com -s
+  read:public_key,read:ssh_signing_key`). Unread GitHub is "not read", never "not registered".
+- A private key without its `.pub`: the row says the fingerprint is unknown and gives the command
+  that recreates the public half (it asks for the passphrase). Observatory never derives it.
+- A key file that is a symbolic link or unreadable: the row says so; the link is not followed.
+- An `IdentityFile` that names a missing file: a row of its own, marked missing.
+
+Acceptance: no byte of a private key past its header line reaches stdout, stderr, the saved
+inventory or the MCP answer; every unread source is in `degraded`.
+Coverage: `Inventory` and `PrivateBytesNeverLeave` in `tests/test_ssh_keys.py`.
+Status: implemented; product outcome unobserved.
+
+### OSS-63 — create a key
+
+Trigger: "make me a new SSH key for this server" or "for GitHub".
+
+Funnel:
+1. `full ssh-keys create NAME [--comment TEXT] [--host ALIAS --hostname HOST [--user U] [--port N]]`.
+2. In a terminal, `ssh-keygen` itself asks for the passphrase twice. Observatory never sees it.
+3. On macOS, `ssh-add --apple-use-keychain` stores the passphrase in the login Keychain, so the
+   key works without retyping it.
+4. The answer prints the key's path, fingerprint and public line, and the two next commands:
+   copy it (OSS-64) and send it (OSS-65). With `--host`, a Host block naming the key is appended
+   to `~/.ssh/config`.
+
+Failure paths:
+- `NAME` or `NAME.pub` already exists, even as a link: refused, nothing written (exit 2). A key is
+  never overwritten; "choose another name, or rotate (OSS-67)".
+- An invalid name (a path, a leading dot, `.pub` at the end): refused before anything runs.
+- A passphrase is asked but there is no terminal (an agent's run): refused with the reason, "a
+  passphrase is typed by a person". `--no-passphrase` makes an unattended key, says that the
+  findings will list it, and asks for no confirmation beyond the flag.
+- The Host alias is already in `~/.ssh/config`, or the config is a link: refused before the key is
+  generated, so nothing is half done.
+- The Keychain step fails, or the system has no Keychain: the key exists; the answer says the
+  passphrase is not stored and gives the command to retry.
+- `ssh-keygen` is missing: refused, naming it.
+
+Acceptance: ed25519 only; the key is generated in a private temporary folder and linked into place
+with no-replace semantics, so a race with another writer loses rather than overwrites; modes 0600
+and 0644; `~/.ssh` 0700 when this command creates it; no passphrase in any argument.
+Coverage: `Create` in `tests/test_ssh_keys.py`.
+Status: implemented; product outcome unobserved.
+
+### OSS-64 — copy its public part
+
+Trigger: "copy my key so I can paste it".
+
+Funnel:
+1. `full ssh-keys copy NAME`.
+2. The clipboard holds exactly one line, the public key. The terminal shows the same line and its
+   fingerprint, and says where to paste it, or which `send` command does it for you.
+3. `full ssh-keys show NAME` prints the same without touching the clipboard; an agent gets the
+   line from `observatory_ssh_keys` with `name`.
+
+Failure paths:
+- No clipboard tool (`pbcopy` on macOS, `wl-copy` or `xclip` elsewhere): the line is printed and the
+  answer says the clipboard was not set (exit 3).
+- `NAME.pub` is missing: refused with the command that recreates it.
+- `NAME.pub` does not hold one public key line (a private key saved under the wrong name, two
+  keys, a stray header): refused, nothing printed or copied but the reason.
+
+Acceptance: what reaches the clipboard is a line that parsed as a public key; a test plants a
+private key under a `.pub` name and proves none of its bytes reach stdout, stderr, the clipboard or
+an argument.
+Coverage: `CopyPublic`, `PrivateBytesNeverLeave` in `tests/test_ssh_keys.py`.
+Status: implemented; product outcome unobserved.
+
+### OSS-65 — send it to GitHub, a server or a cloud
+
+Trigger: "add this key to GitHub" or "put it on that server".
+
+Funnel, GitHub:
+1. `full ssh-keys send NAME --to github [--as authentication|signing|both] [--title TEXT]`.
+2. GitHub's keys are read first; a key already registered for that use is "already registered"
+   and nothing is added.
+3. Otherwise `gh ssh-key add NAME.pub --type … --title …`. A receipt is written either way, and
+   the answer says how to test it (`ssh -T git@github.com`).
+
+Funnel, a server:
+1. `full ssh-keys send NAME --to server:ALIAS [--verify]`, `ALIAS` being a Host of
+   `~/.ssh/config` or `user@host`.
+2. Through the access that already works there, the public line goes over stdin to a short
+   remote script that creates `~/.ssh` (0700) and `authorized_keys` (0600) if missing and appends
+   the line only when the same key is not already there.
+3. `--verify` then logs in with the new key alone (`IdentitiesOnly`) and reports the result.
+
+Funnel, a cloud: `--to digitalocean` (or any other provider) is refused today with the gap named:
+no Observatory door registers SSH keys there yet (OBS-112). The copied key (OSS-64) goes in the
+provider's console meanwhile.
+
+Failure paths:
+- `gh` missing, not signed in, or without `admin:public_key` (`admin:ssh_signing_key` for
+  signing): refused before anything is sent, with the `gh auth refresh` command.
+- GitHub refuses (the key belongs to another account, validation): GitHub's own message is shown,
+  with anything shaped like a credential removed, and a failure receipt is written.
+- The server asks for a password while no person is at the terminal: refused, naming
+  `--interactive`. Unreachable, or the remote cannot write: the remote's reason is shown.
+- `--verify` fails after the key was added: the answer says both, exit 1.
+
+Acceptance: only the public line leaves the machine; a second send is a no-op with an "already"
+receipt; every outcome, failure included, is a receipt (fingerprint, where, when, who) in the
+movements journal.
+Coverage: `SendGithub`, `SendServer`, `SendCloud`, `Receipts` in `tests/test_ssh_keys.py`.
+Status: GitHub and servers implemented; clouds named as a gap (OBS-112); product outcome
+unobserved.
+
+### OSS-66 — findings about my keys
+
+Trigger: the findings board, or `full ssh-keys findings`.
+
+Rows, each with the command that fixes it: a key with no passphrase; a weak key (DSA, RSA under
+3072 bits); a private key others can read; a `~/.ssh` that others can read or write; a key not used
+for a long time (estimated from the file's access time, so it says "estimated"); a key GitHub
+accepts that this machine does not hold; a key no visible place uses (not on GitHub, in no Host
+block, not loaded); a private key without its public half; an `IdentityFile` that names a missing
+file.
+
+Failure paths: no inventory yet: the board shows nothing for SSH (absent is not clean) and
+`ssh-keys findings` says "No inventory yet" with the `list` command. A finding never quotes a
+private byte.
+
+Acceptance: the same inventory gives the same rows; every type has a label in both languages.
+Coverage: `Findings` in `tests/test_ssh_keys.py`.
+Status: implemented; the dashboard section is OBS-111; product outcome unobserved.
+
+### OSS-67 — rotate a key
+
+Trigger: a key leaked, is weak, or is old.
+
+Funnel (specified; the one command lands with OBS-112):
+1. Create the new key (OSS-63).
+2. Register it everywhere the old one is registered: the same GitHub uses, the servers whose Host
+   blocks name the old key (OSS-65).
+3. Log in with the new key alone on each server and test GitHub.
+4. Only after every check passed, remove the old registration (`gh ssh-key delete ID`; the line in
+   each server's `authorized_keys`) and point the Host blocks at the new key.
+5. The old private file is moved aside, never deleted by Observatory.
+
+Each step writes a receipt. A failed check stops the rotation before any removal and says which
+step to retry. Until OBS-112 the same sequence runs by hand with `create`, `send … --verify` and
+`gh ssh-key delete`.
+Status: specified; OBS-112.
