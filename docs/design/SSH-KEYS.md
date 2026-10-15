@@ -15,8 +15,10 @@ Code: `observatory/engine/tools/ssh_keys.py` (the door and its CLI), `tools/ssh_
 
 ## The rule
 
-**The private key is never shown or moved.** No byte of it past its first two lines is read, and
-nothing read from it is printed, saved, logged, copied, sent or placed in an argument. Everything
+**The private key is never shown or moved.** Only its clear header is read: the BEGIN line, and
+for the OpenSSH format the fields that come before the private section (the cipher name and the
+public key, which the format stores in clear). The private section is never read, and nothing read
+from the file is printed, saved, logged, copied, sent or placed in an argument. Everything
 the door shows, copies or sends is the public line from `NAME.pub`, after it parsed as exactly one
 public key. A `.pub` file that holds anything else — a private key saved under the wrong name, two
 keys, a header — is refused, and its content is not echoed in the refusal.
@@ -31,9 +33,9 @@ makes "copy the part you paste" one step.
 | Source | How | What it gives |
 |---|---|---|
 | `~/.ssh` | the folder's own entries, and one level of subfolders; links are reported, not followed | key pairs: `NAME` and `NAME.pub`; a private key without `.pub`; a `.pub` without a private file (a key held by an agent or a token) |
-| A private key file | `open(O_NOFOLLOW)`, at most 512 bytes; the header line, and for the OpenSSH format the cipher name at the start of the next line | the format (`openssh`, `pem`, `pkcs8`) and the passphrase state, see below; the file's access time is put back afterwards |
-| `NAME.pub` | `ssh-keygen -l -E sha256 -f NAME.pub`, on the public file only | type, bits, `SHA256:` fingerprint, comment |
-| `~/.ssh/config` and its `Include`s | parsed as text: `Host` and `Match` blocks, `IdentityFile` (with `~` and `%d` expanded), depth 3 | which Host blocks use which key; an `IdentityFile` that names a missing file |
+| A private key file | `open(O_NOFOLLOW)`; the BEGIN line one byte at a time (at most 64), then only as many bytes as the next field needs, see below | the format (`openssh`, `pem`, `pkcs8`), the passphrase state, and for the OpenSSH format the public key, so the fingerprint is known even without `.pub`; the file's access time is put back afterwards |
+| `NAME.pub` | `ssh-keygen -l -E sha256 -f NAME.pub`, on the public file only; a link is not followed | type, bits, `SHA256:` fingerprint, comment; a `.pub` that is not the private key's own public half is marked (`mismatch`) and refused by `copy` and `send`; a `.pub` whose first line is a private-key header is a finding (`ssh.private_in_pub`) |
+| `~/.ssh/config` and its `Include`s | parsed as text: `Host` and `Match` blocks, `IdentityFile` (with `~` and `%d` expanded), depth 3; only a regular file of at most 1 MiB, opened non-blocking (a FIFO is named in `degraded`, never waited on) | which Host blocks use which key; an `IdentityFile` that names a missing file, spelled as the config wrote it (`%u` is not expanded into the saved inventory) |
 | ssh-agent | `ssh-add -l -E sha256` | which keys are loaded; keys loaded but on no disk |
 | GitHub | `gh api user/keys` and `gh api user/ssh_signing_keys`, one page of 100 each | which keys GitHub accepts for sign-in and for signing, by fingerprint; GitHub keys this machine does not hold |
 
@@ -42,12 +44,21 @@ sign-in keys as display text; the API answers both kinds as JSON with the key li
 fingerprint is computed (SHA-256 of the decoded key blob, unpadded base64, which is how OpenSSH
 spells it). Adding still goes through `gh ssh-key add`.
 
-**Passphrase without decrypting.** An OpenSSH private key starts with `openssh-key-v1\0`, then the
-cipher name in clear: `none` means no passphrase. Only the first 68 base64 characters of that line
-are decoded, which reach the cipher name and nothing after it (the key material starts after the
-public key, far later). A PEM key says `Proc-Type: 4,ENCRYPTED` in its header; PKCS#8 says
-`ENCRYPTED PRIVATE KEY` in its first line. Anything else is `unknown`, never a guess. The door never
-runs `ssh-keygen -y` (which decrypts) and never offers an empty passphrase to test one.
+**Passphrase and fingerprint without decrypting, and without reading the private section.** An
+OpenSSH private key is a base64 container: `openssh-key-v1\0`, the cipher name, the kdf name, the
+kdf options, the key count, the public key, and only then the private section. All of it up to the
+public key is clear. The reader takes those fields one at a time, each read asking for exactly as
+many base64 characters as the field the previous one announced, so the read ends with the public
+key (and at most the two bytes of the next length field that share its last base64 group). Cipher
+`none` means no passphrase; the public key gives the fingerprint, type and bits even when `.pub` is
+missing. A field longer than 64 bytes or a public key longer than 4 KB is not read: the key is
+`unknown`. A PEM key: the BEGIN line, then exactly ten bytes; `Proc-Type:` there means an
+encrypted key (the rest of that line is read to see `ENCRYPTED`), anything else means none, and
+nothing more is read. PKCS#8 says `ENCRYPTED PRIVATE KEY` in its first line, and nothing after it
+is read. A file whose first byte is not `-` costs one byte. The door never runs `ssh-keygen -y`
+(which decrypts) and never offers an empty passphrase to test one. `HeaderReadIsBounded` in the
+tests spies on every `os.read` and holds the total under the offset of the private section's first
+base64 character, for ed25519, RSA-4096, an encrypted key and a FIDO key.
 
 **Last use, estimated.** ssh reads a private key when it uses it, which updates the file's access
 time on file systems that keep one. That is the only local trace, so the inventory reports it as
@@ -64,11 +75,12 @@ project-observatory full ssh-keys create NAME [--comment TEXT] [--no-passphrase]
                                               [--host ALIAS --hostname HOST [--user USER] [--port N]]
 ```
 
-1. `NAME` is `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, not ending in `.pub`. `~/.ssh/NAME` and
+1. `NAME` is `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, not ending in `.pub`, and not a name ssh reads as
+   something else (`config`, `rc`, `environment`, `authorized_keys*`, `known_hosts*`, `*-cert`). `~/.ssh/NAME` and
    `~/.ssh/NAME.pub` must not exist, as files or links. With `--host`, the alias must not be a Host
    of `~/.ssh/config`, and the config must not be a link. Every check runs before anything is
    generated, so a refusal leaves nothing behind.
-2. `~/.ssh` is created with mode 0700 if missing. An existing folder keeps its mode; a mode wider
+2. `~/.ssh` is created owner-only (`osprivacy.make_private`: 0700, an owner-only ACL on Windows) if missing. An existing folder keeps its mode; a mode wider
    than 0700 is a finding, not something this command changes. A `~/.ssh` that is a link is refused:
    nothing is written through a link.
 3. `ssh-keygen -q -t ed25519 -a 100 -C COMMENT -f TMP/NAME` runs in a private temporary folder
@@ -78,11 +90,14 @@ project-observatory full ssh-keys create NAME [--comment TEXT] [--no-passphrase]
    `--no-passphrase`. The comment defaults to `NAME`, so a public key published on GitHub does not
    carry the machine's host name.
 4. Both files are linked into `~/.ssh` with `os.link`, which fails if the name exists: a writer that
-   raced in between keeps its file, and this run removes what it linked and reports the race. Modes
-   are set to 0600 and 0644. The temporary folder is removed.
+   raced in between keeps its file, and this run removes what it linked and reports the race. The
+   private file is made owner-only (`osprivacy.make_private`), the public one 0644. The temporary
+   folder is removed.
 5. On macOS, unless `--no-passphrase` or `--no-keychain`, `ssh-add --apple-use-keychain` stores
-   the passphrase in the login Keychain (it asks for it once). Elsewhere the key is not added to an
-   agent, and the answer says so.
+   the passphrase in the login Keychain (it asks for it once) and also loads the key into the running
+   agent; the answer says both. Elsewhere the key is not added to an agent, and the answer says so.
+   **Decision (round 1, F13):** the Keychain step stays on by default on macOS: it is what makes a
+   new key usable at once, which is the operator's "quickly"; `--no-keychain` opts out.
 6. With `--host`, a block is appended to `~/.ssh/config` (created 0600 if missing): `Host`,
    `HostName`, `User`, `Port`, `IdentityFile ~/.ssh/NAME`, `IdentitiesOnly yes`, `AddKeysToAgent
    yes`, and `UseKeychain yes` on macOS only (other systems' ssh refuses that option).
@@ -102,8 +117,9 @@ clipboard was not set. `full ssh-keys show NAME` prints without the clipboard.
 `full ssh-keys send NAME --to github [--as authentication|signing|both] [--title TEXT]`
 
 - Reads GitHub's keys of that use first. A key with the same fingerprint is `already registered`.
-- Otherwise `gh ssh-key add ~/.ssh/NAME.pub --type TYPE --title TITLE` (the title defaults to the
-  key's comment). The argument is the public file's path.
+- Otherwise `gh ssh-key add - --type TYPE --title=TITLE`: the validated public line goes on stdin,
+  and the title is one argument (`--title=…`), so a title that looks like an option stays a title.
+  The title defaults to the key's comment.
 - `gh` missing, signed out, or without the scope: refused before anything is sent, with
   `gh auth refresh -h github.com -s admin:public_key` (`admin:ssh_signing_key` for signing).
 - A provider refusal is shown as GitHub said it, control characters removed, anything shaped like a
@@ -113,14 +129,27 @@ clipboard was not set. `full ssh-keys show NAME` prints without the clipboard.
 
 - `ALIAS` is a Host of `~/.ssh/config` or `[user@]host`; it may not start with `-` and is passed
   after `--`, so it cannot become an ssh option.
-- The access that already works: `ssh -o BatchMode=yes -o ConnectTimeout=15 -- ALIAS 'sh -c …'`.
-  `--interactive` drops `BatchMode` so a person can answer a password prompt.
-- The public line goes over stdin to a short POSIX script: it checks the line looks like a key,
-  creates `~/.ssh` (0700) and `authorized_keys` (0600) if missing, and appends the line only when no
-  line already holds the same key blob, after adding a newline if the file does not end with one.
-  It answers `added` or `already`. It never removes or rewrites a line.
-- `--verify` logs in with the new key alone: `ssh -o BatchMode=yes -o IdentitiesOnly=yes -i
-  ~/.ssh/NAME -- ALIAS true`. The argument is the key's path, never its content.
+- The access that already works: `ssh -o BatchMode=yes -o ConnectTimeout=15 -- ALIAS 'sh -s -- LINE'`,
+  with the script on stdin. The remote login shell (csh, fish) parses only that one quoted command;
+  the script itself runs under `sh`. `--interactive` drops `BatchMode` so a person can answer a
+  password prompt.
+- The script checks the line looks like a key, creates `~/.ssh` (0700) and `authorized_keys` (0600)
+  if missing, and appends the line only when no line already holds the same key blob, after adding a
+  newline if the file does not end with one. Its exit code decides: 0 added, 10 already there,
+  anything else a failure, whatever its words on stdout say. It never removes or rewrites a line.
+- `--verify` proves the server accepts **the new key and no other**. A plain `ssh -o
+  IdentitiesOnly=yes -i NEW ALIAS true` does not: `IdentityFile` lines of the config accumulate with
+  `-i`, so a Host block naming the old key logs in with the old key and the check passes (round-1
+  finding F1). So the host is resolved once with `ssh -G ALIAS` (host name, port, user, ProxyJump
+  hops, known-hosts settings), and the login runs with `-F none` (no config at all), `-i NEW` only,
+  `IdentitiesOnly=yes`, `PreferredAuthentications=publickey`, `IdentityAgent=none`, `-p`, `-l` and
+  `-J` from the resolution, and `-v`. It passes only when it exits 0 **and** ssh's own log line
+  `Server accepts key: … SHA256:…` names the new key's fingerprint. A key with a passphrase, run
+  without a person at the terminal, keeps the agent (it may hold the key unlocked); `-F none` with
+  `IdentitiesOnly` still offers that one key only, and the fingerprint check holds either way. A host
+  reached through a `ProxyCommand` is not verified (that command cannot be reproduced without the
+  config): the answer says so and gives the command to check by hand. The argument is the key's
+  path, never its content.
 
 `--to digitalocean` and any other cloud: Observatory's DigitalOcean door handles database
 credentials through `doctl` and has no SSH-key command yet, and no other cloud has a door. The
@@ -144,12 +173,13 @@ the board, and `full ssh-keys findings` prints them.
 
 | Type | Severity | When |
 |---|---|---|
-| `ssh.key_no_passphrase` | warning | the private key's cipher is `none` |
+| `ssh.key_no_passphrase` | warning; info for a FIDO (`*-SK`) handle, which is useless without the security key | the private key's cipher is `none` |
 | `ssh.key_weak` | critical for DSA and RSA under 2048 bits, warning for RSA under 3072 | the type and bits from `ssh-keygen -l` |
-| `ssh.key_readable` | critical | the private file's mode allows group or others (ssh itself refuses such a key) |
-| `ssh.folder_permissions` | warning | `~/.ssh` is readable or writable by group or others |
+| `ssh.key_readable` | critical | `osprivacy.private` says the private file is not owner-only (on POSIX a group or other bit, 0640 included; on Windows the ACL, never the raw 0o666 mode Windows reports) |
+| `ssh.folder_permissions` | warning | `osprivacy.private` says `~/.ssh` is not owner-only |
+| `ssh.private_in_pub` | critical | a `.pub` file's first line is a private-key header, read from that line alone |
 | `ssh.key_unused` | info | not loaded in the agent and last accessed over 180 days ago (estimated) |
-| `ssh.github_orphan` | warning | GitHub accepts a key this machine neither holds nor has loaded |
+| `ssh.github_orphan` | warning, with `gh ssh-key delete ID`; info and no delete command while any private key here has an unknown fingerprint (a PEM key without `.pub`), naming those keys | GitHub accepts a key this machine neither holds nor has loaded |
 | `ssh.key_unregistered` | info | GitHub was read, and the key is not on GitHub, in no Host block and not loaded |
 | `ssh.public_missing` | info | a private key without its `.pub` |
 | `ssh.identity_missing` | warning | an `IdentityFile` names a file that does not exist |
@@ -168,7 +198,9 @@ the step to retry.
 
 ## What is never done
 
-- Read a private key past its header, decrypt it, or ask for its passphrase.
+- Read a private key's private section, decrypt it, or ask for its passphrase.
+- Print a file name, a config value or a provider's message to the terminal without the printable
+  filter (an escape sequence in a name could drive the terminal).
 - Print, save, log, copy or send a private key, or pass one as an argument.
 - Overwrite a key file, or delete one.
 - Change the mode of an existing `~/.ssh` or key file (a finding says what to run).

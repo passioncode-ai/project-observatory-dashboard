@@ -17,8 +17,10 @@ Scenarios: OSS-62–67 in docs/ux/portable-scenarios.md.
 WHY A DOOR AND NOT A HOWTO. Making a key, copying its public line and adding it to GitHub or a
 server took several commands, and the moment between them is when a private key gets pasted
 into the wrong window. Here every path that shows, copies or sends anything reads `NAME.pub`
-and checks it parsed as exactly one public key line; the private file is opened only to read
-its header (the cipher name says whether it has a passphrase) and never past it.
+and checks it parsed as exactly one public key line (and, when the private file is there, that
+it is that key's public half). The private file is opened only to read its clear header: the
+cipher name says whether it has a passphrase, and the public key written in clear after it gives
+the fingerprint. The read stops there, before the private section (`private_header`).
 
 The system's own tools do the work: `ssh-keygen` (fingerprints from the `.pub`, generation),
 `ssh-add` (the agent, the macOS Keychain), `ssh` (the access that already works) and `gh`
@@ -72,29 +74,46 @@ KEY_TYPES = {
 BEGIN = "-----BEGIN "
 PRIVATE_TAIL = "PRIVATE" + " KEY-----"
 OPENSSH_MAGIC = b"openssh-key-v1\0"
-HEADER_BYTES = 512
+#: The longest BEGIN line a private key has (the PKCS#8 encrypted one, 37 characters), with room.
+FIRST_LINE_MAX = 64
+#: An OpenSSH header field (cipher, kdf, kdf options) longer than this is not a key we read.
+FIELD_MAX = 64
+#: A public key in the OpenSSH header longer than this (RSA-16384 is about 2 KB) is not read.
+PUBLIC_BLOB_MAX = 4096
+PROC_TYPE = b"Proc-Type:"
 PUB_MAX_BYTES = 16384
+CONFIG_MAX_BYTES = 1 << 20
+B64 = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
 UNUSED_DAYS = 180
 GITHUB_PAGE = 100
 NOT_KEYS = {"config", "environment", "rc", "known_hosts", "known_hosts.old", "authorized_keys",
             "authorized_keys2"}
+
+
+def reserved(name: str) -> bool:
+    """A name ssh reads as something else: `create` refuses it, and the inventory skips it."""
+    return name in NOT_KEYS or name.startswith("known_hosts") or name.endswith("-cert")
 USES = {"authentication": "admin:public_key", "signing": "admin:ssh_signing_key"}
 LIST_SCOPES = "read:public_key,read:ssh_signing_key"
-#: The remote half of `send --to server:…`: reads ONE public line from stdin, creates
-#: ~/.ssh and authorized_keys owner-only when missing, appends the line only when no line
-#: already holds the same key blob, and never removes or rewrites a line. POSIX sh.
+#: The remote half of `send --to server:…`, sent on stdin to `sh -s -- LINE`, so the remote
+#: login shell (csh, fish) only ever parses that one quoted command: it creates ~/.ssh and
+#: authorized_keys owner-only when missing, appends LINE only when no line already holds the
+#: same key blob, and never removes or rewrites a line. Exit 0 = added, 10 = already there;
+#: anything else is a failure, whatever the words on stdout say.
 REMOTE_APPEND = r"""umask 077
-IFS= read -r line || exit 64
+line=$1
 case "$line" in ssh-*|ecdsa-*|sk-*) ;; *) echo invalid-key; exit 65;; esac
 d="$HOME/.ssh"; f="$d/authorized_keys"
 if [ ! -d "$d" ]; then mkdir -m 700 "$d" || { echo cannot-create-folder; exit 70; }; fi
 if [ ! -e "$f" ]; then { : > "$f" && chmod 600 "$f"; } || { echo cannot-create-file; exit 71; }; fi
 blob=$(printf '%s\n' "$line" | awk '{print $2}')
-if awk -v b="$blob" '{for (i = 1; i <= NF; i++) if ($i == b) found = 1} END {exit !found}' "$f"; then echo already; exit 0; fi
+if awk -v b="$blob" '{for (i = 1; i <= NF; i++) if ($i == b) found = 1} END {exit !found}' "$f"; then echo already; exit 10; fi
 if [ -s "$f" ] && [ -n "$(tail -c 1 "$f")" ]; then printf '\n' >> "$f" || { echo cannot-write; exit 72; }; fi
 printf '%s\n' "$line" >> "$f" || { echo cannot-write; exit 72; }
 echo added
+exit 0
 """
+ADDED, ALREADY = 0, 10
 
 
 class Refused(Exception):
@@ -135,8 +154,10 @@ def stamp(seconds: float) -> str:
     return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def mode(st: os.stat_result) -> str:
-    return "%04o" % stat.S_IMODE(st.st_mode)
+def shown(value) -> str:
+    """Any name or value printed to a terminal: printable characters only, so a file name or a
+    config value carrying an escape sequence cannot drive the terminal."""
+    return said(str(value if value is not None else ""), 400)
 
 
 def said(text: str, limit: int = 300) -> str:
@@ -253,48 +274,148 @@ def keygen_describe(pub: pathlib.Path) -> dict | None:
 
 # ── private keys: the header and nothing else ────────────────────────────────
 
-def private_header(path: pathlib.Path) -> dict | None:
-    """{format, passphrase} when `path` is a private key, else None.
+def _first_line(fd: int) -> bytes:
+    """The first line, one byte at a time, at most FIRST_LINE_MAX. A file whose first byte is
+    not `-` cannot be a PEM block, and costs one byte."""
+    out = b""
+    while len(out) < FIRST_LINE_MAX:
+        c = os.read(fd, 1)
+        if not c:
+            break
+        out += c
+        if out[:1] != b"-" or c == b"\n":
+            break
+    return out
 
-    At most HEADER_BYTES are read: the BEGIN line, and for the OpenSSH format the start of the
-    next line, of which only enough base64 is decoded to reach the cipher name (`none` means no
-    passphrase). The key material comes far later and is never decoded. The file's access time
-    is put back, because it is the only local trace of when ssh last used the key."""
+
+def _line_tail(fd: int) -> bytes:
+    """The rest of the current line, at most FIRST_LINE_MAX bytes."""
+    out = b""
+    while len(out) < FIRST_LINE_MAX:
+        c = os.read(fd, 1)
+        if not c or c == b"\n":
+            break
+        out += c
+    return out
+
+
+class _Base64Prefix:
+    """The decoded start of a PEM body, read from `fd` exactly as far as asked: each read asks
+    for no more characters than are still missing, so nothing past the requested prefix is read."""
+
+    def __init__(self, fd: int):
+        self.fd, self.chars = fd, bytearray()
+
+    def bytes(self, n: int) -> bytes | None:
+        want = -(-n // 3) * 4
+        while len(self.chars) < want:
+            data = os.read(self.fd, want - len(self.chars))
+            if not data:
+                return None
+            for b in data:
+                if b in b"\r\n":
+                    continue
+                if b not in B64:
+                    return None
+                self.chars.append(b)
+        try:
+            return base64.b64decode(bytes(self.chars[:want]))[:n]
+        except ValueError:
+            return None
+
+
+def _u32(data: bytes, at: int) -> int:
+    return int.from_bytes(data[at:at + 4], "big")
+
+
+def _openssh_header(fd: int) -> dict:
+    """Cipher (so: passphrase or not) and the public key, from the clear start of an OpenSSH key.
+
+    The container is: magic, cipher, kdf, kdf options, the key count, the public key, then the
+    private section. Each field is read only once the one before it says how long it is, and
+    the read ends with the public key: the private section is never read."""
+    unknown = {"format": "openssh", "passphrase": "unknown"}
+    r, at = _Base64Prefix(fd), len(OPENSSH_MAGIC)
+    data = r.bytes(at + 4)
+    if not data or not data.startswith(OPENSSH_MAGIC):
+        return unknown
+    fields = []
+    for _ in range(3):                       # cipher, kdf, kdf options
+        n = _u32(data, at)
+        if n > FIELD_MAX:
+            return unknown
+        data = r.bytes(at + 4 + n + 4)
+        if data is None:
+            return unknown
+        fields.append(data[at + 4:at + 4 + n])
+        at += 4 + n
+    out = {"format": "openssh", "passphrase": "no" if fields[0] == b"none" else "yes"}
+    data = r.bytes(at + 8)                   # the key count, then the public key's length
+    if data is None or _u32(data, at) != 1:
+        return out
+    length = _u32(data, at + 4)
+    if not 0 < length <= PUBLIC_BLOB_MAX:
+        return out
+    data = r.bytes(at + 8 + length)
+    if data is None:
+        return out
+    blob = data[at + 8:at + 8 + length]
+    try:
+        ktype = _fields(blob)[0].decode("ascii")
+    except (ValueError, IndexError, UnicodeDecodeError):
+        return out
+    if ktype in KEY_TYPES:
+        out.update(fingerprint=fingerprint(blob), type=KEY_TYPES[ktype], bits=blob_bits(ktype, blob))
+    return out
+
+
+def private_header(path: pathlib.Path) -> dict | None:
+    """{format, passphrase[, fingerprint, type, bits]} when `path` is a private key, else None.
+
+    What is read: the BEGIN line (at most FIRST_LINE_MAX bytes); for the OpenSSH format the clear
+    header up to the end of the public key (`_openssh_header`); for a PEM key the next ten bytes,
+    to see whether they are `Proc-Type:` (an encrypted PEM key says so there). The private section
+    is never read, never decoded and never kept. The file's access time is put back, because it is
+    the only local trace of when ssh last used the key."""
     st = os.lstat(path)
     fd = osprivacy.open(path, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return None
-        head = os.read(fd, HEADER_BYTES)
+        first = _first_line(fd).decode("ascii", "replace").strip()
+        if not (first.startswith(BEGIN) and first.endswith(PRIVATE_TAIL)):
+            return None
+        if first == BEGIN + "OPENSSH " + PRIVATE_TAIL:
+            return _openssh_header(fd)
+        if first == BEGIN + "ENCRYPTED " + PRIVATE_TAIL:
+            return {"format": "pkcs8", "passphrase": "yes"}
+        if first == BEGIN + PRIVATE_TAIL:
+            return {"format": "pkcs8", "passphrase": "no"}
+        if os.read(fd, len(PROC_TYPE)) != PROC_TYPE:
+            return {"format": "pem", "passphrase": "no"}
+        return {"format": "pem", "passphrase": "yes" if b"ENCRYPTED" in _line_tail(fd) else "unknown"}
     finally:
         os.close(fd)
         try:
             os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
         except OSError:
             pass
-    lines = head.decode("ascii", "replace").splitlines()
-    first = lines[0].strip() if lines else ""
-    if not (first.startswith(BEGIN) and first.endswith(PRIVATE_TAIL)):
-        return None
-    if first == BEGIN + "OPENSSH " + PRIVATE_TAIL:
-        start = lines[1].strip() if len(lines) > 1 else ""
-        try:
-            data = base64.b64decode(start[:68])
-        except ValueError:
-            return {"format": "openssh", "passphrase": "unknown"}
-        if not data.startswith(OPENSSH_MAGIC) or len(data) < len(OPENSSH_MAGIC) + 4:
-            return {"format": "openssh", "passphrase": "unknown"}
-        n = int.from_bytes(data[len(OPENSSH_MAGIC):len(OPENSSH_MAGIC) + 4], "big")
-        cipher = data[len(OPENSSH_MAGIC) + 4:len(OPENSSH_MAGIC) + 4 + n]
-        if len(cipher) != n:
-            return {"format": "openssh", "passphrase": "unknown"}
-        return {"format": "openssh", "passphrase": "no" if cipher == b"none" else "yes"}
-    if first == BEGIN + "ENCRYPTED " + PRIVATE_TAIL:
-        return {"format": "pkcs8", "passphrase": "yes"}
-    if first == BEGIN + PRIVATE_TAIL:
-        return {"format": "pkcs8", "passphrase": "no"}
-    encrypted = any(line.startswith("Proc-Type:") and "ENCRYPTED" in line for line in lines[1:3])
-    return {"format": "pem", "passphrase": "yes" if encrypted else "no"}
+
+
+def holds_private_key(path: pathlib.Path) -> bool:
+    """Whether a file's first line is a private-key header (a private key saved as `.pub`).
+    Reads that one line and nothing else."""
+    try:
+        fd = osprivacy.open(path, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
+    except OSError:
+        return False
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return False
+        first = _first_line(fd).decode("ascii", "replace").strip()
+    finally:
+        os.close(fd)
+    return first.startswith(BEGIN) and first.endswith(PRIVATE_TAIL)
 
 
 # ── ~/.ssh/config ─────────────────────────────────────────────────────────────
@@ -303,18 +424,62 @@ CONFIG_LINE = re.compile(r"^\s*(\S+?)\s*(?:=\s*|\s+)(.*?)\s*$")
 
 
 def _expand(value: str) -> tuple[pathlib.Path | None, str]:
+    """(the path ssh would open, the spelling to show). The spelling keeps the config's own
+    tokens (`%d` shown as `~`, `%u` as written), so neither the home path nor the account name
+    reaches a saved inventory."""
     value = value.strip().strip('"')
-    value = value.replace("%d", str(home())).replace("%u", os.environ.get("USER", ""))
-    if "%" in value:
-        return None, value
-    if value.startswith("~/"):
-        return home() / value[2:], value
-    path = pathlib.Path(value)
-    return (path if path.is_absolute() else home() / path), value
+    spelled = value.replace("%d", "~")
+    expanded = value.replace("%d", str(home())).replace("%u", os.environ.get("USER", ""))
+    if "%" in expanded:
+        return None, spelled
+    if expanded.startswith("~/"):
+        return home() / expanded[2:], spelled
+    path = pathlib.Path(expanded)
+    return (path if path.is_absolute() else home() / path), spelled
+
+
+def read_config_file(path: pathlib.Path, degraded: list[dict]) -> str | None:
+    """A config file's text, or None. Only a regular file of at most CONFIG_MAX_BYTES is read:
+    an `Include` of a FIFO hung the listing, and a huge one was read whole."""
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        degraded.append({"source": "ssh-config", "reason": f"{tilde(path)} unreadable: {type(exc).__name__}"})
+        return None
+    if not stat.S_ISREG(st.st_mode):
+        degraded.append({"source": "ssh-config", "reason": f"{tilde(path)} is not a regular file; not read"})
+        return None
+    if st.st_size > CONFIG_MAX_BYTES:
+        degraded.append({"source": "ssh-config", "reason": f"{tilde(path)} is larger than 1 MiB; not read"})
+        return None
+    try:
+        fd = osprivacy.open(path, os.O_RDONLY | osprivacy.NONBLOCK)
+    except OSError as exc:
+        degraded.append({"source": "ssh-config", "reason": f"{tilde(path)} unreadable: {type(exc).__name__}"})
+        return None
+    chunks, size = [], 0
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            degraded.append({"source": "ssh-config", "reason": f"{tilde(path)} is not a regular file; not read"})
+            return None
+        while size <= CONFIG_MAX_BYTES:
+            data = os.read(fd, CONFIG_MAX_BYTES + 1 - size)
+            if not data:
+                break
+            chunks.append(data)
+            size += len(data)
+    finally:
+        os.close(fd)
+    if size > CONFIG_MAX_BYTES:
+        degraded.append({"source": "ssh-config", "reason": f"{tilde(path)} is larger than 1 MiB; not read"})
+        return None
+    return b"".join(chunks).decode("utf-8", "replace")
 
 
 def read_config(degraded: list[dict]) -> list[dict]:
-    """[{hosts, path, raw}] for every IdentityFile of ~/.ssh/config and its Includes."""
+    """[{hosts, path, spelled}] for every IdentityFile of ~/.ssh/config and its Includes."""
     out: list[dict] = []
     seen: set[str] = set()
 
@@ -322,13 +487,11 @@ def read_config(degraded: list[dict]) -> list[dict]:
         if depth > 3:
             degraded.append({"source": "ssh-config", "reason": f"{tilde(path)}: Include deeper than 3 levels not read"})
             return
-        if str(path) in seen or not path.exists():
+        if str(path) in seen:
             return
         seen.add(str(path))
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            degraded.append({"source": "ssh-config", "reason": f"{tilde(path)} unreadable: {type(exc).__name__}"})
+        text = read_config_file(path, degraded)
+        if text is None:
             return
         hosts = ["*"]
         for raw in text.splitlines():
@@ -352,7 +515,9 @@ def read_config(degraded: list[dict]) -> list[dict]:
                         walk(pathlib.Path(found), depth + 1)
             elif key == "identityfile":
                 target, spelled = _expand(value)
-                out.append({"hosts": list(hosts), "path": target, "raw": spelled})
+                if target is not None and "%u" not in value:
+                    spelled = tilde(target)
+                out.append({"hosts": list(hosts), "path": target, "spelled": spelled})
 
     walk(ssh_dir() / "config", 0)
     return out
@@ -360,10 +525,8 @@ def read_config(degraded: list[dict]) -> list[dict]:
 
 def config_hosts() -> set[str]:
     hosts: set[str] = set()
-    path = ssh_dir() / "config"
-    if not path.is_file():
-        return hosts
-    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    text = read_config_file(ssh_dir() / "config", [])
+    for raw in (text or "").splitlines():
         m = CONFIG_LINE.match(raw.split("#", 1)[0])
         if m and m.group(1).lower() == "host":
             hosts.update(m.group(2).split())
@@ -453,7 +616,7 @@ def _candidates(folder: pathlib.Path) -> tuple[list[pathlib.Path], list[pathlib.
         except OSError:
             continue
         for p in entries:
-            if p.name.startswith(".") or p.name in NOT_KEYS or p.name.startswith("known_hosts"):
+            if p.name.startswith(".") or reserved(p.name):
                 continue
             if p.is_symlink():
                 links.append(p)
@@ -468,14 +631,19 @@ def _candidates(folder: pathlib.Path) -> tuple[list[pathlib.Path], list[pathlib.
 
 
 def inventory(github: bool = True) -> dict:
-    """What the machine holds, read without changing anything but access times put back."""
+    """What the machine holds, read without changing anything but access times put back.
+
+    Permissions are osprivacy's answer, never raw mode bits: Windows reports 0o666 for every
+    file and keeps owner-only in an ACL, so a mode check there was a false critical."""
     degraded: list[dict] = []
     folder = ssh_dir()
-    doc: dict = {"schema": "ssh-keys/1", "measured_at": now(), "folder": {"path": "~/.ssh", "exists": False,
-                                                                          "mode": None, "link": False}}
+    doc: dict = {"schema": "ssh-keys/1", "measured_at": now(),
+                 "folder": {"path": "~/.ssh", "exists": False, "mode": None, "private": None, "link": False},
+                 "misplaced": []}
     try:
         st = os.lstat(folder)
-        doc["folder"].update(exists=True, mode=mode(os.stat(folder)), link=stat.S_ISLNK(st.st_mode))
+        doc["folder"].update(exists=True, mode=osprivacy.describe(folder), private=osprivacy.private(folder),
+                             link=stat.S_ISLNK(st.st_mode))
     except FileNotFoundError:
         pass
     keygen_ok = available(tool("ssh-keygen"))
@@ -501,8 +669,9 @@ def inventory(github: bool = True) -> dict:
                 name = tilde(base)
             rows[key] = {"name": name, "path": tilde(base), "private": False, "public": False, "link": False,
                          "format": None, "passphrase": "unknown", "type": None, "bits": None,
-                         "fingerprint": None, "comment": "", "private_mode": None, "public_mode": None,
-                         "last_access": None, "hosts": [], "in_agent": None, "github": None}
+                         "fingerprint": None, "comment": "", "private_mode": None, "private_ok": None,
+                         "public_mode": None, "last_access": None, "hosts": [], "in_agent": None,
+                         "github": None, "mismatch": False}
         return rows[key]
 
     for f in files:
@@ -511,13 +680,13 @@ def inventory(github: bool = True) -> dict:
             header = private_header(f)
         except OSError as exc:
             if pathlib.Path(str(f) + ".pub").exists():
-                r = row(f)
-                r.update(private=True, hint=f"unreadable: {type(exc).__name__}")
+                row(f).update(private=True, hint=f"unreadable: {type(exc).__name__}")
             continue
         if header is None:
             continue
         r = row(f)
-        r.update(private=True, private_mode=mode(st), last_access=stamp(st.st_atime), **header)
+        r.update(private=True, private_mode=osprivacy.describe(f), private_ok=osprivacy.private(f),
+                 last_access=stamp(st.st_atime), **header)
     for link in links:
         base = pathlib.Path(str(link)[:-4]) if link.name.endswith(".pub") else link
         named = any(e["path"] == link for e in config)
@@ -525,18 +694,26 @@ def inventory(github: bool = True) -> dict:
             row(base).update(link=True)
     for pub in pubs:
         base = pathlib.Path(str(pub)[:-4])
+        if holds_private_key(pub):
+            doc["misplaced"].append(tilde(pub))
+            continue
         r = row(base)
         try:
             parsed = read_public(pub)
         except (Refused, OSError):
             r["hint"] = f"{tilde(pub)} is not one public key line"
             continue
-        r.update(public=True, public_mode=mode(os.lstat(pub)), comment=said(parsed["comment"], 120),
-                 type=KEY_TYPES[parsed["type"]], bits=blob_bits(parsed["type"], parsed["blob"]),
-                 fingerprint=parsed["fingerprint"])
-        described = keygen_describe(pub) if keygen_ok else None
-        if described:
-            r.update(described)
+        from_header = r["fingerprint"]
+        r.update(public=True, public_mode=osprivacy.describe(pub), comment=said(parsed["comment"], 120))
+        described = (keygen_describe(pub) if keygen_ok else None) or {
+            "type": KEY_TYPES[parsed["type"]], "bits": blob_bits(parsed["type"], parsed["blob"]),
+            "fingerprint": parsed["fingerprint"]}
+        if from_header and from_header != described["fingerprint"]:
+            # The private key authenticates; a .pub of another key would be copied and sent.
+            r.update(mismatch=True, hint=f"{tilde(pub)} is not the public half of {tilde(base)}; "
+                                         f"`ssh-keygen -y -f {tilde(base)}` prints the right one")
+            continue
+        r.update(described)
     for r in rows.values():
         if r["private"] and not r["public"] and "hint" not in r:
             r["hint"] = (f"no public half: `ssh-keygen -y -f {r['path']} > {r['path']}.pub` recreates it "
@@ -546,8 +723,7 @@ def inventory(github: bool = True) -> dict:
     for entry in config:
         p = entry["path"]
         exists = None if p is None else (p.exists() or p.is_symlink())
-        identity_files.append({"host": " ".join(entry["hosts"]), "path": tilde(p) if p else entry["raw"],
-                               "exists": exists})
+        identity_files.append({"host": " ".join(entry["hosts"]), "path": entry["spelled"], "exists": exists})
         r = by_path.get(str(p)) if p is not None else None
         if r is not None:
             for h in entry["hosts"]:
@@ -635,7 +811,16 @@ def public_of(name: str) -> tuple[pathlib.Path, pathlib.Path, dict]:
         hint = (f"; `ssh-keygen -y -f {tilde(base)} > {tilde(pub)}` recreates it (it asks for the passphrase)"
                 if base.exists() else "")
         raise Refused(f"{tilde(pub)} does not exist{hint}")
-    return base, pub, read_public(pub)
+    parsed = read_public(pub)
+    if os.path.lexists(base) and not os.path.islink(base):
+        try:
+            own = (private_header(base) or {}).get("fingerprint")
+        except OSError:
+            own = None
+        if own and own != parsed["fingerprint"]:
+            raise Refused(f"{tilde(pub)} does not belong to {tilde(base)} ({parsed['fingerprint']} is not "
+                          f"{own}); nothing was copied or sent. `ssh-keygen -y -f {tilde(base)}` prints the right one")
+    return base, pub, parsed
 
 
 def cmd_list(args) -> int:
@@ -652,6 +837,7 @@ def cmd_list(args) -> int:
 
 
 def print_listing(doc: dict) -> None:
+    """The terminal listing. Every value from a file name or the config goes through `shown`."""
     keys = doc["keys"]
     if not keys and not doc["agent_only"]:
         print("No SSH keys yet. Create one: " + f"{CMD} create NAME")
@@ -662,23 +848,25 @@ def print_listing(doc: dict) -> None:
                   ", ".join("sign-in" if u == "authentication" else u for u in k["github"]) or "no")
             agent = {None: "not read", True: "loaded", False: "no"}[k["in_agent"]]
             what = f"{k['type'] or '?'} {k['bits'] or ''}".strip()
-            print(f"  {k['name']}  {what}  {k['fingerprint'] or 'fingerprint unknown'}")
+            print(f"  {shown(k['name'])}  {what}  {k['fingerprint'] or 'fingerprint unknown'}")
             print(f"      passphrase: {k['passphrase']}  agent: {agent}  GitHub: {gh}"
-                  f"  hosts: {', '.join(k['hosts']) or '-'}")
-            print(f"      {k['path']}  {k['private_mode'] or '-'} / {k['public_mode'] or '-'}"
-                  + (f"  comment: {k['comment']}" if k["comment"] else "")
+                  f"  hosts: {shown(', '.join(k['hosts'])) or '-'}")
+            print(f"      {shown(k['path'])}  {shown(k['private_mode'] or '-')} / {shown(k['public_mode'] or '-')}"
+                  + (f"  comment: {shown(k['comment'])}" if k["comment"] else "")
                   + ("  (a link, not followed)" if k["link"] else ""))
             if k.get("hint"):
-                print(f"      {k['hint']}")
+                print(f"      {shown(k['hint'])}")
         for a in doc["agent_only"]:
-            print(f"  (agent only) {a['type']} {a['bits']}  {a['fingerprint']}  {a['comment']}")
-    missing = [f for f in doc["identity_files"] if f["exists"] is False]
-    for f in missing:
-        print(f"  Host {f['host']}: IdentityFile {f['path']} does not exist")
+            print(f"  (agent only) {shown(a['type'])} {a['bits']}  {a['fingerprint']}  {shown(a['comment'])}")
+    for path in doc.get("misplaced") or []:
+        print(f"  {shown(path)} holds a PRIVATE key under a public name: move it (ssh-keys findings)")
+    for f in doc["identity_files"]:
+        if f["exists"] is False:
+            print(f"  Host {shown(f['host'])}: IdentityFile {shown(f['path'])} does not exist")
     if doc["degraded"]:
         print("\nNot read:")
         for d in doc["degraded"]:
-            print(f"  - {d['source']}: {d['reason']}" + (f" — {d['fix']}" if d.get("fix") else ""))
+            print(f"  - {shown(d['source'])}: {shown(d['reason'])}" + (f" — {shown(d['fix'])}" if d.get("fix") else ""))
     import ssh_key_findings
     n = len(ssh_key_findings.findings(doc))
     print(f"\nFindings: {n} ({CMD} findings)")
@@ -729,6 +917,9 @@ def cmd_create(args) -> int:
     if not NAME.fullmatch(name) or name.endswith(".pub"):
         raise Refused(f"{credential_shape.echo(name)} is not a key name: letters, digits, . _ - "
                       f"(at most 64, not starting with a dot or ending in .pub)")
+    if reserved(name):
+        raise Refused(f"{name} is a name ssh reads as something else (config, authorized keys, known hosts or a "
+                      f"certificate); choose another name")
     comment = args.comment if args.comment is not None else name
     if len(comment) > 128 or any(not c.isprintable() for c in comment):
         raise Refused("the comment must be one printable line of at most 128 characters")
@@ -754,7 +945,7 @@ def cmd_create(args) -> int:
         raise Refused("ssh-keygen is not installed; install OpenSSH")
     if not folder.exists():
         folder.mkdir(mode=0o700)
-        os.chmod(folder, 0o700)
+        osprivacy.make_private(folder)
     linked: list[pathlib.Path] = []
     # A private folder inside ~/.ssh (same file system, so os.link works), removed on every path.
     with tempfile.TemporaryDirectory(prefix=".observatory-keygen-", dir=folder) as scratch:
@@ -783,7 +974,7 @@ def cmd_create(args) -> int:
                 raise Refused(f"{tilde(dst)} appeared while the key was being made; it was left as it is and "
                               f"nothing of this run remains") from None
             linked.append(dst)
-        os.chmod(target, 0o600)
+        osprivacy.make_private(target)
         os.chmod(pub, 0o644)
     parsed = read_public(pub)
     print(f"Created {tilde(target)} (ed25519)")
@@ -796,7 +987,7 @@ def cmd_create(args) -> int:
             if k.returncode != 0:
                 notes.append(f"the passphrase is not stored in the Keychain; retry: ssh-add --apple-use-keychain {tilde(target)}")
             else:
-                print("The passphrase is in your login Keychain.")
+                print("The passphrase is in your login Keychain, and the key is loaded into the running agent.")
         else:
             notes.append(f"the passphrase is not stored in a keychain on this system; ssh asks for it on use, "
                          f"or `ssh-add {tilde(target)}` loads it into the agent")
@@ -887,7 +1078,8 @@ def send_github(args) -> int:
             worst = max(worst, 0 if receipt("ssh.already_registered", fp, to=to, how="found by fingerprint") else 4)
             continue
         try:
-            p = run([gh, "ssh-key", "add", str(pub), "--type", use, "--title", title], timeout=60)
+            p = run([gh, "ssh-key", "add", "-", "--type", use, f"--title={title}"],
+                    input=parsed["line"] + "\n", timeout=60)
         except (OSError, subprocess.SubprocessError) as exc:
             p = subprocess.CompletedProcess([], 1, "", type(exc).__name__)
         if p.returncode != 0:
@@ -911,22 +1103,23 @@ def send_server(args, alias: str) -> int:
     if not available(ssh):
         raise Refused("ssh is not installed; install OpenSSH")
     batch = [] if args.interactive else ["-o", "BatchMode=yes"]
-    argv = [ssh, "-o", "ConnectTimeout=15", *batch, "--", alias, "sh -c " + shlex.quote(REMOTE_APPEND)]
+    # The script goes on stdin to `sh -s`; the remote login shell parses only this one command.
+    argv = [ssh, "-o", "ConnectTimeout=15", *batch, "--", alias, "sh -s -- " + shlex.quote(parsed["line"])]
     fp, to = parsed["fingerprint"], f"server:{alias}"
     try:
-        p = run(argv, input=parsed["line"] + "\n", timeout=120)
+        p = run(argv, input=REMOTE_APPEND, timeout=120)
     except (OSError, subprocess.SubprocessError) as exc:
         p = subprocess.CompletedProcess(argv, 255, "", type(exc).__name__)
-    answer = (p.stdout.strip().splitlines() or [""])[-1].strip()
-    if p.returncode != 0 or answer not in ("added", "already"):
-        reason = said(p.stderr) or answer or f"exit {p.returncode}"
+    if p.returncode not in (ADDED, ALREADY):
+        words = (p.stdout.strip().splitlines() or [""])[-1].strip()
+        reason = said(p.stderr) or said(words) or f"exit {p.returncode}"
         hint = ""
         if "password" in p.stderr.lower() and not args.interactive:
             hint = "; the server asks for a password: run with --interactive in a terminal"
         print(f"{alias} did not take the key: {reason}{hint}", file=sys.stderr)
         receipt("ssh.register_failed", fp, to=to, how=f"authorized_keys append: {reason}")
         return 1
-    worst = 0
+    answer = "added" if p.returncode == ADDED else "already"
     if answer == "added":
         print(f"{args.name}: added to {alias}:~/.ssh/authorized_keys")
         worst = 0 if receipt("ssh.registered", fp, to=to, how="authorized_keys append") else 4
@@ -934,24 +1127,95 @@ def send_server(args, alias: str) -> int:
         print(f"{args.name}: already in {alias}:~/.ssh/authorized_keys")
         worst = 0 if receipt("ssh.already_registered", fp, to=to, how="found by key blob") else 4
     if not args.verify:
-        print(f"Test it: ssh -o IdentitiesOnly=yes -i {tilde(base)} {alias} true  (or add --verify)")
+        print(f"Test it: {CMD} send {args.name} --to server:{alias} --verify")
         return worst
-    if not base.is_file():
-        print(f"not verified: there is no private file {tilde(base)} to log in with", file=sys.stderr)
+    ok, why = verify_login(ssh, alias, base, fp, args)
+    if not ok:
+        print(f"the key was {answer}, but it is not verified: {why}", file=sys.stderr)
+        receipt("ssh.verify_failed", fp, to=to, how=said(why))
         return 1
-    check = [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "IdentitiesOnly=yes",
-             "-i", str(base), "--", alias, "true"]
+    print(f"Verified: {alias} accepted {args.name} alone (the server named {fp})")
+    return max(worst, 0 if receipt("ssh.verified", fp, to=to, how="ssh -F none -i KEY, server named the key") else 4)
+
+
+def resolve_host(ssh: str, alias: str) -> dict:
+    """`ssh -G` for one host: what the user's config makes of it. Raises Refused."""
     try:
-        v = run(check, stdin=subprocess.DEVNULL, timeout=60)
+        p = run([ssh, "-G", "--", alias], stdin=subprocess.DEVNULL, timeout=30)
     except (OSError, subprocess.SubprocessError) as exc:
-        v = subprocess.CompletedProcess(check, 255, "", type(exc).__name__)
+        raise Refused(f"ssh -G {alias} could not run ({type(exc).__name__})") from None
+    if p.returncode != 0:
+        raise Refused(f"ssh -G {alias} failed: {said(p.stderr) or p.returncode}")
+    out: dict[str, str] = {}
+    for line in p.stdout.splitlines():
+        key, _, value = line.strip().partition(" ")
+        if key and key.lower() not in out:
+            out[key.lower()] = value.strip()
+    if not HOST_ARG.fullmatch(out.get("hostname", "")) or not out.get("port", "").isdigit() \
+            or not USER_WORD.fullmatch(out.get("user", "")):
+        raise Refused(f"ssh -G {alias} gave no usable host, port and user")
+    return out
+
+
+def verify_login(ssh: str, alias: str, base: pathlib.Path, fp: str, args) -> tuple[bool, str]:
+    """Log in with the new key ALONE, and require the server to name it.
+
+    A plain `ssh -o IdentitiesOnly=yes -i NEW ALIAS` is not alone: IdentityFile lines of the
+    config accumulate with -i, so a Host block naming the old key can log in with it while the
+    answer says the new one worked (round-1 finding F1). So the host is resolved once with
+    `ssh -G`, and the login runs with `-F none` (no config at all), only `-i NEW`, publickey
+    only, and `-v`; it passes only when ssh's own log says the server accepted NEW's
+    fingerprint. The agent is not offered (`IdentityAgent=none`) unless the key has a passphrase
+    and no person is at the terminal: then the agent may hold it unlocked, and `IdentitiesOnly`
+    with `-F none` lets it offer that one key and no other."""
+    if not base.is_file():
+        return False, f"there is no private file {tilde(base)} to log in with"
+    try:
+        host = resolve_host(ssh, alias)
+    except Refused as exc:
+        return False, str(exc)
+    if host.get("proxycommand", "none").lower() != "none":
+        return False, (f"{alias} is reached through a ProxyCommand, which a config-free login cannot "
+                       f"reproduce; check by hand: ssh -v -o IdentitiesOnly=yes -i {tilde(base)} {alias} true, "
+                       f"and look for 'Server accepts key' with {fp}")
+    jump = []
+    if host.get("proxyjump", "none").lower() != "none":
+        hops = []
+        for hop in host["proxyjump"].split(","):
+            m = re.fullmatch(r"(?:([^@:\s]+)@)?([A-Za-z0-9_.-]+)(?::(\d+))?", hop.strip())
+            if not m:
+                return False, f"the jump host {said(hop)} could not be read; verify by hand"
+            try:
+                h = resolve_host(ssh, m.group(2))
+            except Refused as exc:
+                return False, str(exc)
+            hops.append(f"{m.group(1) or h['user']}@{h['hostname']}:{m.group(3) or h['port']}")
+        jump = ["-J", ",".join(hops)]
+    try:
+        passphrase = (private_header(base) or {}).get("passphrase", "unknown")
+    except OSError:
+        passphrase = "unknown"
+    agent = "none" if passphrase == "no" or args.interactive else (os.environ.get("SSH_AUTH_SOCK") or "none")
+    known = ["-o", f"UserKnownHostsFile={host.get('userknownhostsfile', '~/.ssh/known_hosts')}",
+             "-o", f"StrictHostKeyChecking={host.get('stricthostkeychecking', 'ask')}"]
+    if host.get("hostkeyalias"):
+        known += ["-o", f"HostKeyAlias={host['hostkeyalias']}"]
+    check = [ssh, "-v", "-F", "none", *([] if args.interactive else ["-o", "BatchMode=yes"]),
+             "-o", "ConnectTimeout=15", "-o", "IdentitiesOnly=yes", "-o", "PreferredAuthentications=publickey",
+             "-o", f"IdentityAgent={agent}", *known, "-p", host["port"], "-l", host["user"], *jump,
+             "-i", str(base), "--", host["hostname"], "true"]
+    try:
+        v = run(check, stdin=None if args.interactive else subprocess.DEVNULL, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"ssh could not run ({type(exc).__name__})"
+    accepted = re.findall(r"Server accepts key: .*?(SHA256:[A-Za-z0-9+/]+)", v.stderr or "")
+    plain = "\n".join(line for line in (v.stderr or "").splitlines() if not line.startswith("debug"))
     if v.returncode != 0:
-        reason = said(v.stderr) or f"exit {v.returncode}"
-        print(f"the key was {answer} but logging in with it alone failed: {reason}", file=sys.stderr)
-        receipt("ssh.verify_failed", fp, to=to, how=reason)
-        return 1
-    print(f"Verified: {alias} accepts {args.name} alone")
-    return max(worst, 0 if receipt("ssh.verified", fp, to=to, how="ssh -o IdentitiesOnly=yes … true") else 4)
+        return False, f"logging in with it alone failed: {said(plain) or f'exit {v.returncode}'}"
+    if fp not in accepted:
+        named = ", ".join(sorted(set(accepted))) or "no key"
+        return False, f"the server accepted {named}, not {fp}"
+    return True, ""
 
 
 def cmd_findings(args) -> int:
@@ -970,7 +1234,7 @@ def cmd_findings(args) -> int:
         return 0
     print(f"SSH key findings, from the inventory of {doc.get('measured_at')}: {len(rows)}")
     for r in rows:
-        print(f"  [{r['severity']}] {r['title']}\n      {r['action']}")
+        print(f"  [{r['severity']}] {shown(r['title'])}\n      {shown(r['action'])}")
     return 0
 
 

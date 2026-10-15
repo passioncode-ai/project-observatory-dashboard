@@ -30,7 +30,7 @@ UNUSED_DAYS = 180
 EVIDENCE = ["store/raw/ssh-keys.json"]
 TYPES = ("ssh.key_no_passphrase", "ssh.key_weak", "ssh.key_readable", "ssh.folder_permissions",
          "ssh.key_unused", "ssh.github_orphan", "ssh.key_unregistered", "ssh.public_missing",
-         "ssh.identity_missing")
+         "ssh.identity_missing", "ssh.private_in_pub")
 
 
 def _when(text) -> datetime.datetime | None:
@@ -57,13 +57,6 @@ def _weak(k: dict) -> str | None:
     return None
 
 
-def _mode(text) -> int:
-    try:
-        return int(str(text), 8)
-    except ValueError:
-        return 0
-
-
 def findings(doc: dict | None) -> list[dict]:
     if not isinstance(doc, dict) or doc.get("schema") != "ssh-keys/1":
         return []
@@ -71,15 +64,36 @@ def findings(doc: dict | None) -> list[dict]:
     measured = _when(doc.get("measured_at"))
     github_read = isinstance(doc.get("github"), dict)
     folder = doc.get("folder") or {}
-    if folder.get("exists") and _mode(folder.get("mode")) & 0o077:
+    # PERMISSIONS ARE osprivacy's ANSWER (`private`), recorded by the inventory: Windows reports
+    # 0o666 for every file and keeps owner-only in an ACL, so raw mode bits were a false critical.
+    if folder.get("exists") and folder.get("private") is False:
         out.append({"type": "ssh.folder_permissions", "subject": "ssh:~/.ssh", "severity": "warning",
                     **titled("the SSH folder is open to other accounts"),
-                    "detail": f"~/.ssh has mode {folder.get('mode')}: other accounts can list which keys "
+                    "detail": f"~/.ssh is {folder.get('mode')}: other accounts can list which keys "
                               f"exist, and sshd refuses keys in a folder others can write.",
-                    "action": "`chmod 700 ~/.ssh`", "evidence": EVIDENCE})
+                    "action": "`chmod 700 ~/.ssh` (on Windows: remove other accounts from its permissions)",
+                    "evidence": EVIDENCE})
+    for misplaced in doc.get("misplaced") or []:
+        out.append({"type": "ssh.private_in_pub", "subject": f"ssh:{misplaced}", "severity": "critical",
+                    **titled("{path} holds a private key", path=misplaced),
+                    "detail": f"{misplaced} is named as a public key, but its first line is a private-key "
+                              f"header. Anything that shares the .pub (a copy, an upload) shares the private "
+                              f"key. Read from the header line alone.",
+                    "action": "move it to a name without .pub, check where the .pub was copied or sent, and "
+                              "rotate the key if it left this machine",
+                    "evidence": EVIDENCE})
     for k in doc.get("keys") or []:
         name, path, subject = k.get("name"), k.get("path"), _subject(k)
-        if k.get("private") and k.get("passphrase") == "no":
+        if k.get("private") and k.get("passphrase") == "no" and str(k.get("type") or "").endswith("-SK"):
+            # A FIDO key's file is a handle: using it needs the security key itself, and a touch.
+            out.append({"type": "ssh.key_no_passphrase", "subject": subject, "severity": "info",
+                        **titled("{key} has no passphrase", key=name),
+                        "detail": f"{path} is a security-key handle without a passphrase: a copy of the file "
+                                  f"is useless without the security key itself, so this is the usual setup.",
+                        "action": f"nothing is needed; `ssh-keygen -p -f {path}` adds a passphrase if you want "
+                                  f"one on the handle too",
+                        "evidence": EVIDENCE})
+        elif k.get("private") and k.get("passphrase") == "no":
             out.append({"type": "ssh.key_no_passphrase", "subject": subject, "severity": "warning",
                         **titled("{key} has no passphrase", key=name),
                         "detail": f"{path} is stored in clear: anyone who copies the file can use it. "
@@ -97,12 +111,13 @@ def findings(doc: dict | None) -> list[dict]:
                         "action": f"rotate it: `{CMD} create NEW_NAME`, send the new key where this one is "
                                   f"registered, then remove this one (OSS-67)",
                         "evidence": EVIDENCE})
-        if k.get("private") and k.get("private_mode") and _mode(k["private_mode"]) & 0o077:
+        if k.get("private") and k.get("private_ok") is False:
             out.append({"type": "ssh.key_readable", "subject": subject, "severity": "critical",
                         **titled("{key} is readable by other accounts", key=name),
-                        "detail": f"{path} has mode {k['private_mode']}; ssh refuses to use a private key "
+                        "detail": f"{path} is {k.get('private_mode')}; ssh refuses to use a private key "
                                   f"others can read, and others can copy it.",
-                        "action": f"`chmod 600 {path}`", "evidence": EVIDENCE})
+                        "action": f"`chmod 600 {path}` (on Windows: remove other accounts from its permissions)",
+                        "evidence": EVIDENCE})
         last = _when(k.get("last_access"))
         if (k.get("private") and k.get("in_agent") is False and measured and last
                 and (measured - last).days > UNUSED_DAYS):
@@ -138,16 +153,27 @@ def findings(doc: dict | None) -> list[dict]:
                         "action": "point the IdentityFile at an existing key, or remove the line",
                         "evidence": EVIDENCE})
     if github_read:
+        # A private key whose fingerprint is unknown (a PEM key without its .pub) may be the very
+        # key GitHub holds: then nothing is proven foreign, and no delete command is offered.
+        unknown = sorted(k.get("name") for k in doc.get("keys") or []
+                         if k.get("private") and not k.get("fingerprint"))
         for g in doc["github"].get("keys") or []:
-            if g.get("on_machine") is False:
-                out.append({"type": "ssh.github_orphan", "subject": f"ssh:{g.get('fingerprint')}",
-                            "severity": "warning",
-                            **titled("GitHub accepts a key this machine does not hold: {title}",
-                                     title=g.get("title") or g.get("fingerprint")),
-                            "detail": f"GitHub key {g.get('id')} ({g.get('use')}, added {g.get('added')}) "
-                                      f"matches no key on this disk or in the agent.",
-                            "action": f"`gh ssh-key delete {g.get('id')}` if no other machine uses it",
-                            "evidence": EVIDENCE})
+            if g.get("on_machine") is not False:
+                continue
+            row = {"type": "ssh.github_orphan", "subject": f"ssh:{g.get('fingerprint')}", "severity": "warning",
+                   **titled("GitHub accepts a key this machine does not hold: {title}",
+                            title=g.get("title") or g.get("fingerprint")),
+                   "detail": f"GitHub key {g.get('id')} ({g.get('use')}, added {g.get('added')}) "
+                             f"matches no key on this disk or in the agent.",
+                   "action": f"`gh ssh-key delete {g.get('id')}` if no other machine uses it",
+                   "evidence": EVIDENCE}
+            if unknown:
+                row.update(severity="info",
+                           detail=row["detail"] + f" Not proven: the fingerprint of {', '.join(unknown)} on "
+                                                  f"this machine is unknown, and it may be this key.",
+                           action=f"recreate the public half of {', '.join(unknown)} (`ssh-keygen -y -f "
+                                  f"~/.ssh/NAME > ~/.ssh/NAME.pub`), then `{CMD} list` again")
+            out.append(row)
     return out
 
 

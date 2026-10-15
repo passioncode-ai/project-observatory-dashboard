@@ -610,7 +610,7 @@ def observatory_ssh_keys(
     weak, readable by others, unused, registered nowhere visible, a GitHub key no disk holds).
 
     Read-only, and THE PRIVATE KEY IS NEVER IN THE ANSWER: the door reads only a private file's
-    header line and cipher name, to say whether it has a passphrase. With `name`, the answer
+    clear header (the cipher name, and the public key stored in clear), never its private section. With `name`, the answer
     carries that key's PUBLIC line (the part pasted into GitHub or a server, safe to show) and
     the commands that act: `project-observatory full ssh-keys create NAME`, `copy NAME`,
     `send NAME --to github`, `send NAME --to server:HOST --verify`. Those run in a terminal; a

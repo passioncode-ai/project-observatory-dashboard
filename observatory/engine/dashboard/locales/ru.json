@@ -2169,5 +2169,7 @@
  "{key} is registered nowhere this machine can see": "{key} не зарегистрирован нигде, что видно с этой машины",
  "{key} has no public half": "у {key} нет публичной части",
  "{host} names a missing key file": "{host} ссылается на отсутствующий файл ключа",
- "GitHub accepts a key this machine does not hold: {title}": "GitHub принимает ключ, которого нет на этой машине: {title}"
+ "GitHub accepts a key this machine does not hold: {title}": "GitHub принимает ключ, которого нет на этой машине: {title}",
+ "Private SSH key saved as public": "Приватный SSH-ключ сохранён как публичный",
+ "{path} holds a private key": "{path} содержит приватный ключ"
 }

@@ -188,6 +188,7 @@ LABELS: dict[str, str] = {
     "ssh.key_unregistered": "SSH key registered nowhere visible",
     "ssh.key_unused": "SSH key unused for a long time",
     "ssh.key_weak": "Weak SSH key",
+    "ssh.private_in_pub": "Private SSH key saved as public",
     "ssh.public_missing": "SSH key without its public half",
     "store.faults_recurring": "Recurring store faults",
     "store.integrity": "Store integrity failure",

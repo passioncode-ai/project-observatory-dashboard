@@ -216,8 +216,9 @@ where it goes, without the private key ever being shown or moved. The design is
 [SSH-KEYS.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/SSH-KEYS.md). Two readers use these paths: a person at a
 terminal (`project-observatory full ssh-keys …`) and an agent (the same commands, and the read-only
 MCP tool `observatory_ssh_keys`). **The rule throughout:** the private key is never printed, copied,
-sent, logged or placed in an argument; Observatory reads at most its first line and the cipher
-name in the next one, to say whether it has a passphrase. OSS-58–61 are claimed by open pull
+sent, logged or placed in an argument; Observatory reads only its clear header (the BEGIN line,
+and for the OpenSSH format the cipher name and the public key stored in clear before the private
+section), to say whether it has a passphrase and what its fingerprint is. OSS-58–61 are claimed by open pull
 requests, so these start at OSS-62. Tests named below are in `tests/test_ssh_keys.py`.
 
 ### OSS-62 — list my keys
@@ -239,14 +240,20 @@ Failure paths:
 - ssh-agent not running, `gh` missing, not signed in, or without the read scopes: the listing
   continues and `degraded` names the source and its command (`gh auth refresh -h github.com -s
   read:public_key,read:ssh_signing_key`). Unread GitHub is "not read", never "not registered".
-- A private key without its `.pub`: the row says the fingerprint is unknown and gives the command
-  that recreates the public half (it asks for the passphrase). Observatory never derives it.
+- A private key without its `.pub`: for the OpenSSH format the fingerprint comes from the header,
+  where the public key is stored in clear; a PEM key's fingerprint stays unknown. Either way the row
+  gives the command that recreates the public half (it asks for the passphrase).
+- A `.pub` that is not its private key's public half is marked, and `copy` and `send` refuse it. A
+  `.pub` whose first line is a private-key header is a critical finding.
+- An `Include` that is a FIFO, not a regular file, or over 1 MiB is named in `degraded`, never
+  waited on or read whole. Names and config values reach the terminal only through the printable
+  filter.
 - A key file that is a symbolic link or unreadable: the row says so; the link is not followed.
 - An `IdentityFile` that names a missing file: a row of its own, marked missing.
 
 Acceptance: no byte of a private key past its header line reaches stdout, stderr, the saved
 inventory or the MCP answer; every unread source is in `degraded`.
-Coverage: `Inventory` and `PrivateBytesNeverLeave` in `tests/test_ssh_keys.py`.
+Coverage: `Inventory`, `HeaderReadIsBounded` and `PrivateBytesNeverLeave` in `tests/test_ssh_keys.py`.
 Status: implemented; product outcome unobserved.
 
 ### OSS-63 — create a key
@@ -256,8 +263,9 @@ Trigger: "make me a new SSH key for this server" or "for GitHub".
 Funnel:
 1. `full ssh-keys create NAME [--comment TEXT] [--host ALIAS --hostname HOST [--user U] [--port N]]`.
 2. In a terminal, `ssh-keygen` itself asks for the passphrase twice. Observatory never sees it.
-3. On macOS, `ssh-add --apple-use-keychain` stores the passphrase in the login Keychain, so the
-   key works without retyping it.
+3. On macOS, `ssh-add --apple-use-keychain` stores the passphrase in the login Keychain and loads
+   the key into the running agent, so the key works without retyping it (on by default, the
+   operator's "quickly"; `--no-keychain` opts out).
 4. The answer prints the key's path, fingerprint and public line, and the two next commands:
    copy it (OSS-64) and send it (OSS-65). With `--host`, a Host block naming the key is appended
    to `~/.ssh/config`.
@@ -265,7 +273,8 @@ Funnel:
 Failure paths:
 - `NAME` or `NAME.pub` already exists, even as a link: refused, nothing written (exit 2). A key is
   never overwritten; "choose another name, or rotate (OSS-67)".
-- An invalid name (a path, a leading dot, `.pub` at the end): refused before anything runs.
+- An invalid name (a path, a leading dot, `.pub` at the end), or one ssh reads as something else
+  (`config`, `rc`, `authorized_keys`, `known_hosts`, a `-cert` name): refused before anything runs.
 - A passphrase is asked but there is no terminal (an agent's run): refused with the reason, "a
   passphrase is typed by a person". `--no-passphrase` makes an unattended key, says that the
   findings will list it, and asks for no confirmation beyond the flag.
@@ -276,8 +285,9 @@ Failure paths:
 - `ssh-keygen` is missing: refused, naming it.
 
 Acceptance: ed25519 only; the key is generated in a private temporary folder and linked into place
-with no-replace semantics, so a race with another writer loses rather than overwrites; modes 0600
-and 0644; `~/.ssh` 0700 when this command creates it; no passphrase in any argument.
+with no-replace semantics, so a race with another writer loses rather than overwrites; the private
+file and a `~/.ssh` this command creates are owner-only by `osprivacy` (0600/0700, an owner-only ACL
+on Windows), the public file 0644; no passphrase in any argument.
 Coverage: `Create` in `tests/test_ssh_keys.py`.
 Status: implemented; product outcome unobserved.
 
@@ -313,16 +323,19 @@ Funnel, GitHub:
 1. `full ssh-keys send NAME --to github [--as authentication|signing|both] [--title TEXT]`.
 2. GitHub's keys are read first; a key already registered for that use is "already registered"
    and nothing is added.
-3. Otherwise `gh ssh-key add NAME.pub --type … --title …`. A receipt is written either way, and
+3. Otherwise `gh ssh-key add - --type … --title=…`, the validated line on stdin. A receipt is written either way, and
    the answer says how to test it (`ssh -T git@github.com`).
 
 Funnel, a server:
 1. `full ssh-keys send NAME --to server:ALIAS [--verify]`, `ALIAS` being a Host of
    `~/.ssh/config` or `user@host`.
-2. Through the access that already works there, the public line goes over stdin to a short
-   remote script that creates `~/.ssh` (0700) and `authorized_keys` (0600) if missing and appends
-   the line only when the same key is not already there.
-3. `--verify` then logs in with the new key alone (`IdentitiesOnly`) and reports the result.
+2. Through the access that already works there, a short script runs under `sh` (sent on stdin to
+   `sh -s`, whatever the login shell is): it creates `~/.ssh` (0700) and `authorized_keys` (0600) if
+   missing and appends the line only when the same key is not already there. Its exit code, not its
+   words, says added or already.
+3. `--verify` then logs in with the new key and no other: the host is resolved with `ssh -G`, the
+   login runs with `-F none` and `-i NEW` only, and it passes only when ssh's log says the server
+   accepted the new key's fingerprint. A Host block that still names the old key cannot make it pass.
 
 Funnel, a cloud: `--to digitalocean` (or any other provider) is refused today with the gap named:
 no Observatory door registers SSH keys there yet (OBS-112). The copied key (OSS-64) goes in the
@@ -335,12 +348,14 @@ Failure paths:
   with anything shaped like a credential removed, and a failure receipt is written.
 - The server asks for a password while no person is at the terminal: refused, naming
   `--interactive`. Unreachable, or the remote cannot write: the remote's reason is shown.
-- `--verify` fails after the key was added: the answer says both, exit 1.
+- `--verify` fails after the key was added, or the server accepted another key: the answer says
+  both, and which key the server named, exit 1. A host behind a `ProxyCommand` is not verified; the
+  answer gives the command to check by hand.
 
 Acceptance: only the public line leaves the machine; a second send is a no-op with an "already"
 receipt; every outcome, failure included, is a receipt (fingerprint, where, when, who) in the
 movements journal.
-Coverage: `SendGithub`, `SendServer`, `SendCloud`, `Receipts` in `tests/test_ssh_keys.py`.
+Coverage: `SendGithub`, `SendServer` (receipts asserted in each), `SendCloud` in `tests/test_ssh_keys.py`.
 Status: GitHub and servers implemented; clouds named as a gap (OBS-112); product outcome
 unobserved.
 
@@ -348,10 +363,12 @@ unobserved.
 
 Trigger: the findings board, or `full ssh-keys findings`.
 
-Rows, each with the command that fixes it: a key with no passphrase; a weak key (DSA, RSA under
-3072 bits); a private key others can read; a `~/.ssh` that others can read or write; a key not used
-for a long time (estimated from the file's access time, so it says "estimated"); a key GitHub
-accepts that this machine does not hold; a key no visible place uses (not on GitHub, in no Host
+Rows, each with the command that fixes it: a key with no passphrase (info for a FIDO handle, which
+needs the security key); a weak key (DSA, RSA under 3072 bits); a private key others can read, and a
+`~/.ssh` others can read or write, both by `osprivacy` (never Windows' raw mode bits); a private key
+saved as `.pub`; a key not used for a long time (estimated from the file's access time, so it says
+"estimated"); a key GitHub accepts that this machine does not hold (info, with no delete command,
+while any local private key's fingerprint is unknown); a key no visible place uses (not on GitHub, in no Host
 block, not loaded); a private key without its public half; an `IdentityFile` that names a missing
 file.
 
