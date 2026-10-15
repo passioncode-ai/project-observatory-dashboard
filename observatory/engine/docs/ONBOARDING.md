@@ -833,7 +833,9 @@ same summary.
   to `inventory/agents.json`. Nothing of a descriptor's `auth` is copied, and no row is guessed
   from a name. A descriptor, manifest or launchd answer that could not be read is listed under
   `degraded`; without an MCP scan (`project-observatory full scan-mcp`) a row's
-  `mcp_declarations` is `null`, not empty.
+  `mcp_declarations` is `null`, not empty. A URL loses its user-info and query before it is
+  written. With `features.machine_watch` off the document is marked `stale` and dated by its
+  last scan, never by the day it was rewritten.
 
 With `features.auto_cleanup` also on, the tick and the disk guard (below) remove what loses nothing:
 branches merged into the default branch or identical to their upstream, clean

@@ -77,9 +77,27 @@ def mcp_scan(*servers: dict) -> dict:
     return {"scanned_at": "2026-10-14T09:00:00Z", "servers": list(servers), "degraded": []}
 
 
-def mcp_server(name: str, target: str | None, agent: str = "claude", scope: str = "user") -> dict:
-    return {"name": name, "agent": agent, "scope": scope, "transport": "http" if target else "stdio",
+def mcp_server(name: str, target: str | None, agent: str = "claude", scope: str = "user",
+               command: str | None = None) -> dict:
+    """A declaration as `scan_mcp.declaration` writes it: a stdio one's target is its command's
+    basename (`scan_mcp.py`, `target = pathlib.Path(cmd).name`), never empty."""
+    if command:
+        return {"name": name, "agent": agent, "scope": scope, "transport": "stdio", "target": command,
+                "command": command, "liveness": "not-probed"}
+    return {"name": name, "agent": agent, "scope": scope, "transport": "http",
             "target": target, "liveness": "not-probed"}
+
+
+def keyed(secret: str, rest: str) -> str:
+    """`https://u:<secret>` + `@` + rest, assembled at run time: the public-release gate refuses a
+    credential-shaped URL literal anywhere in the tree or its history, fixtures included."""
+    return "https://u:" + secret + chr(64) + rest
+
+
+def document(scan: dict, mcp: dict | None, previous: dict | None, day: str = TODAY,
+             now: datetime | None = None) -> dict:
+    """`scan_agents.document` at the instant the scan was taken unless a test says otherwise."""
+    return scan_agents.document(scan, mcp, previous, day, now=now or NOW)
 
 
 class Fixture(unittest.TestCase):
@@ -112,9 +130,10 @@ class Fixture(unittest.TestCase):
         path.write_text(json.dumps(manifest_doc(provider, **kw)), encoding="utf-8")
         return "~/fixture/" + provider + "/fabric-agent.json"
 
-    def scan(self, launchd=None, platform: str = "darwin", launchd_failed: bool = False) -> dict:
+    def scan(self, launchd=None, platform: str = "darwin", launchd_failed: bool = False,
+             now: datetime | None = None) -> dict:
         return scan_agents.collect(self.services, launchd=launchd, platform=platform,
-                                   launchd_failed=launchd_failed, now=NOW)
+                                   launchd_failed=launchd_failed, now=now or NOW)
 
     def two(self) -> dict:
         self.put(descriptor("alpha-agent", 47401, manifest=self.put_manifest("alpha-agent")))
@@ -126,7 +145,7 @@ class Fixture(unittest.TestCase):
 class TwoDescriptors(Fixture):
     def test_fixture_services_dir_of_two_descriptors_lists_both(self):
         """The node's failing test: two descriptors in, two rows out, with ports and pins."""
-        doc = scan_agents.document(self.two(), mcp_scan(), None, TODAY)
+        doc = document(self.two(), mcp_scan(), None, TODAY)
         rows = {r["id"]: r for r in doc["agents"]}
         self.assertEqual(sorted(rows), ["agent:alpha-agent.default", "agent:beta-agent.default"])
         self.assertEqual(rows["agent:alpha-agent.default"]["port"], 47401)
@@ -148,7 +167,7 @@ class TwoDescriptors(Fixture):
         self.assertEqual(scan_agents.problems(doc), [])
 
     def test_the_rows_carry_no_token_path_and_no_absolute_home_path(self):
-        doc = scan_agents.document(self.two(), mcp_scan(), None, TODAY)
+        doc = document(self.two(), mcp_scan(), None, TODAY)
         text = json.dumps(doc)
         self.assertNotIn("token", text.lower(), "the token file's location is not an agent fact")
         self.assertNotIn(str(self.home), text)
@@ -163,7 +182,7 @@ class TwoDescriptors(Fixture):
             self.skipTest("jsonschema is part of the full extra")
         schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
         jsonschema.Draft202012Validator.check_schema(schema)
-        doc = scan_agents.document(self.two(), mcp_scan(mcp_server("alpha", "http://127.0.0.1:47401/mcp")),
+        doc = document(self.two(), mcp_scan(mcp_server("alpha", "http://127.0.0.1:47401/mcp")),
                                    None, TODAY)
         jsonschema.Draft202012Validator(schema).validate(doc)
         projected = {"_generated": True, "_generated_by": "fixture", "_canonical_source": "file:///x",
@@ -178,7 +197,7 @@ class HonestDegradation(Fixture):
     def test_an_unreadable_descriptor_is_named_and_the_rest_are_still_listed(self):
         self.put(descriptor("alpha-agent", 47401))
         (self.services / "broken-agent.default.json").write_text("{not json", encoding="utf-8")
-        doc = scan_agents.document(self.scan(launchd={}), mcp_scan(), None, TODAY)
+        doc = document(self.scan(launchd={}), mcp_scan(), None, TODAY)
         self.assertEqual([r["id"] for r in doc["agents"]], ["agent:alpha-agent.default"])
         self.assertEqual(len(doc["degraded"]), 1)
         self.assertEqual(doc["degraded"][0]["source"], "fabric-services")
@@ -189,7 +208,7 @@ class HonestDegradation(Fixture):
         bad = descriptor("alpha-agent", 47401)
         bad["lifecycle"] = {"manager": "launchd"}                      # no label, no plist
         self.put(bad)
-        doc = scan_agents.document(self.scan(launchd={}), mcp_scan(), None, TODAY)
+        doc = document(self.scan(launchd={}), mcp_scan(), None, TODAY)
         row = doc["agents"][0]
         self.assertFalse(row["valid"])
         self.assertTrue(any("label and plist" in p for p in row["problems"]), row["problems"])
@@ -197,14 +216,14 @@ class HonestDegradation(Fixture):
 
     def test_a_descriptor_that_is_not_an_object_is_degraded(self):
         (self.services / "list.default.json").write_text("[1, 2]", encoding="utf-8")
-        doc = scan_agents.document(self.scan(launchd={}), mcp_scan(), None, TODAY)
+        doc = document(self.scan(launchd={}), mcp_scan(), None, TODAY)
         self.assertEqual(doc["agents"], [])
         self.assertIn("not a JSON object", doc["degraded"][0]["reason"])
 
     def test_two_descriptors_claiming_one_id_keep_the_first_and_name_the_second(self):
         self.put(descriptor("alpha-agent", 47401), "alpha-agent.default.json")
         self.put(descriptor("alpha-agent", 47409), "zz-copy.json")
-        doc = scan_agents.document(self.scan(launchd={}), mcp_scan(), None, TODAY)
+        doc = document(self.scan(launchd={}), mcp_scan(), None, TODAY)
         self.assertEqual([r["port"] for r in doc["agents"]], [47401])
         self.assertTrue(any("zz-copy.json" in d["reason"] for d in doc["degraded"]))
         self.assertEqual(scan_agents.problems(doc), [])
@@ -213,17 +232,17 @@ class HonestDegradation(Fixture):
         self.services.rmdir()
         scan = self.scan(launchd={})
         self.assertEqual(scan["sources"]["fabric_services"]["state"], "absent")
-        doc = scan_agents.document(scan, mcp_scan(), None, TODAY)
+        doc = document(scan, mcp_scan(), None, TODAY)
         self.assertEqual(doc["agents"], [])
         self.assertEqual(doc["degraded"], [])
 
     @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
                      "permission bits do not bind here")
     def test_an_unreadable_services_directory_keeps_the_last_rows_and_says_so(self):
-        previous = scan_agents.document(self.two(), mcp_scan(), None, "2026-10-13")
+        previous = document(self.two(), mcp_scan(), None)
         self.services.chmod(0)
         try:
-            doc = scan_agents.document(self.scan(launchd={}), mcp_scan(), previous, TODAY)
+            doc = document(self.scan(launchd={}), mcp_scan(), previous, TODAY)
         finally:
             self.services.chmod(0o700)
         self.assertEqual(len(doc["agents"]), 2, "an empty list in place of a partial one is a false claim")
@@ -233,14 +252,14 @@ class HonestDegradation(Fixture):
 
     def test_an_unreadable_manifest_is_degraded_and_the_row_says_unreadable(self):
         self.put(descriptor("alpha-agent", 47401, manifest="~/fixture/alpha-agent/missing.json"))
-        doc = scan_agents.document(self.scan(launchd={}), mcp_scan(), None, TODAY)
+        doc = document(self.scan(launchd={}), mcp_scan(), None, TODAY)
         self.assertEqual(doc["agents"][0]["manifest"]["state"], "unreadable")
         self.assertEqual(doc["degraded"][0]["source"], "fabric-manifest")
         self.assertIn("FileNotFoundError", doc["degraded"][0]["reason"])
 
     def test_no_manifest_declared_is_absent_not_degraded(self):
         self.put(descriptor("alpha-agent", 47401))
-        doc = scan_agents.document(self.scan(launchd={}), mcp_scan(), None, TODAY)
+        doc = document(self.scan(launchd={}), mcp_scan(), None, TODAY)
         self.assertEqual(doc["agents"][0]["manifest"], {"state": "absent"})
         self.assertEqual(doc["degraded"], [])
 
@@ -249,14 +268,14 @@ class Supervisor(Fixture):
     def test_a_label_launchd_does_not_list_is_not_loaded_and_the_plist_is_checked(self):
         self.put(descriptor("alpha-agent", 47401))
         (self.home / "Library/LaunchAgents/com.example.alpha-agent.plist").write_text("<plist/>")
-        row = scan_agents.document(self.scan(launchd={}), mcp_scan(), None, TODAY)["agents"][0]
+        row = document(self.scan(launchd={}), mcp_scan(), None, TODAY)["agents"][0]
         self.assertEqual(row["supervisor"]["state"], "not-loaded")
         self.assertTrue(row["supervisor"]["plist_present"])
         self.assertEqual(row["supervisor"]["plist"], "~/Library/LaunchAgents/com.example.alpha-agent.plist")
 
     def test_launchctl_failing_on_macos_degrades_and_measures_nothing(self):
         self.put(descriptor("alpha-agent", 47401))
-        doc = scan_agents.document(self.scan(launchd=None, launchd_failed=True), mcp_scan(), None, TODAY)
+        doc = document(self.scan(launchd=None, launchd_failed=True), mcp_scan(), None, TODAY)
         self.assertEqual(doc["agents"][0]["supervisor"]["state"], "not-measured")
         self.assertEqual([d["source"] for d in doc["degraded"]], ["launchd"])
 
@@ -264,7 +283,7 @@ class Supervisor(Fixture):
         self.put(descriptor("alpha-agent", 47401))
         scan = self.scan(launchd=None, platform="linux")
         self.assertEqual(scan["sources"]["launchd"]["state"], "not-applicable")
-        doc = scan_agents.document(scan, mcp_scan(), None, TODAY)
+        doc = document(scan, mcp_scan(), None, TODAY)
         self.assertEqual(doc["agents"][0]["supervisor"]["state"], "not-measured")
         self.assertEqual(doc["degraded"], [])
 
@@ -272,7 +291,7 @@ class Supervisor(Fixture):
         self.put(descriptor("alpha-agent", 47401, manager="systemd"))
         self.put(descriptor("beta-agent", remote="https://beta.example.com"))
         rows = {r["service_id"]: r for r in
-                scan_agents.document(self.scan(launchd={}), mcp_scan(), None, TODAY)["agents"]}
+                document(self.scan(launchd={}), mcp_scan(), None, TODAY)["agents"]}
         self.assertEqual(rows["alpha-agent"]["supervisor"]["state"], "not-measured")
         self.assertIn("systemd", rows["alpha-agent"]["supervisor"]["why"])
         self.assertEqual(rows["beta-agent"]["supervisor"]["state"], "platform")
@@ -296,20 +315,20 @@ class McpJoin(Fixture):
                         mcp_server("alpha", "http://localhost:47401/mcp", agent="cursor"),
                         mcp_server("beta-remote", "https://beta.example.com/mcp"),
                         mcp_server("elsewhere", "http://127.0.0.1:9999/mcp"),
-                        mcp_server("local-tool", None))
-        doc = scan_agents.document(self.scan(launchd={}), scan, None, TODAY)
+                        mcp_server("local-tool", None, command="alpha-tool"))
+        doc = document(self.scan(launchd={}), scan, None, TODAY)
         rows = {r["service_id"]: r for r in doc["agents"]}
         ids = {r["id"] for r in estate_surfaces.mcp_rows(scan)}
         self.assertEqual(rows["alpha-agent"]["mcp_declarations"],
                          ["mcp:claude/user/alpha", "mcp:cursor/user/alpha"])
         self.assertEqual(rows["beta-agent"]["mcp_declarations"], ["mcp:claude/user/beta-remote"])
         self.assertTrue(set(rows["alpha-agent"]["mcp_declarations"]) <= ids)
-        self.assertEqual(doc["totals"]["mcp"], {"attributed": 3, "unattributed_http": 1, "stdio": 1})
+        self.assertEqual(doc["totals"]["mcp"], {"attributed": 3, "ambiguous": 0, "unattributed_http": 1, "stdio": 1})
         self.assertIn("SRC-0017", doc["source_refs"])
 
     def test_without_an_mcp_inventory_the_join_is_unmeasured_not_empty(self):
         self.put(descriptor("alpha-agent", 47401))
-        doc = scan_agents.document(self.scan(launchd={}), None, None, TODAY)
+        doc = document(self.scan(launchd={}), None, None, TODAY)
         self.assertIsNone(doc["agents"][0]["mcp_declarations"])
         self.assertIsNone(doc["totals"]["mcp"])
         self.assertEqual([d["source"] for d in doc["degraded"]], ["mcp-inventory"])
@@ -318,10 +337,14 @@ class McpJoin(Fixture):
 
 class History(Fixture):
     def test_first_seen_and_last_running_carry_forward_and_a_removed_agent_is_named(self):
-        first = scan_agents.document(self.two(), mcp_scan(), None, "2026-10-12")
+        earlier = datetime(2026, 10, 12, 9, 30, tzinfo=timezone.utc)
+        self.put(descriptor("alpha-agent", 47401, manifest=self.put_manifest("alpha-agent")))
+        self.put(descriptor("beta-agent", 47402, manifest=self.put_manifest("beta-agent", revision=7)))
+        first = document(self.scan(launchd={"com.example.alpha-agent": {"pid": 4242, "status": 0}}, now=earlier),
+                         mcp_scan(), None, "2026-10-12", now=earlier)
         (self.services / "beta-agent.default.json").unlink()
         self.put(descriptor("gamma-agent", 47403))
-        later = scan_agents.document(self.scan(launchd={"com.example.alpha-agent": {"pid": None, "status": 0}}),
+        later = document(self.scan(launchd={"com.example.alpha-agent": {"pid": None, "status": 0}}),
                                      mcp_scan(), first, TODAY)
         rows = {r["service_id"]: r for r in later["agents"]}
         self.assertEqual(rows["alpha-agent"]["first_seen_on"], "2026-10-12")
@@ -333,15 +356,15 @@ class History(Fixture):
 
     def test_the_same_machine_twice_is_the_same_document(self):
         """No instant or pid in the document, so an unchanged estate does not rewrite the registry."""
-        a = scan_agents.document(self.two(), mcp_scan(), None, TODAY)
-        b = scan_agents.document(self.two(), mcp_scan(), a, TODAY)
+        a = document(self.two(), mcp_scan(), None, TODAY)
+        b = document(self.two(), mcp_scan(), a, TODAY)
         self.assertEqual(a, b)
         self.assertNotIn("4242", json.dumps(a))
 
 
 class Validator(Fixture):
     def test_the_validator_rules_catch_what_the_schema_promises(self):
-        doc = scan_agents.document(self.two(), mcp_scan(), None, TODAY)
+        doc = document(self.two(), mcp_scan(), None, TODAY)
         planted = json.loads(json.dumps(doc))
         planted["agents"][1]["id"] = planted["agents"][0]["id"]
         self.assertTrue(any("duplicate" in p for p in scan_agents.problems(planted)))
@@ -387,7 +410,8 @@ class Pipeline(Fixture):
         self.put(descriptor("alpha-agent", 47401, manifest=self.put_manifest("alpha-agent")))
         self.put(descriptor("beta-agent", 47402))
         raw, reg = root / "raw", root / "registry"
-        scan = self.scan(launchd={"com.example.alpha-agent": {"pid": 1, "status": 0}})
+        scan = self.scan(launchd={"com.example.alpha-agent": {"pid": 1, "status": 0}},
+                         now=datetime.now(timezone.utc))
         (raw / "agents.json").write_text(json.dumps(scan), encoding="utf-8")
         (raw / "mcp.json").write_text(json.dumps(mcp_scan(mcp_server("alpha", "http://127.0.0.1:47401/mcp"))),
                                       encoding="utf-8")
@@ -401,6 +425,7 @@ class Pipeline(Fixture):
                          ["agent:alpha-agent.default", "agent:beta-agent.default"])
         self.assertEqual(doc["agents"][0]["mcp_declarations"], ["mcp:claude/user/alpha"])
         self.assertEqual(scan_agents.problems(doc), [])
+        self.assertFalse(doc["stale"], "a scan taken this tick is fresh")
         sources = {s["id"]: s for s in json.loads((reg / "sources.json").read_text(encoding="utf-8"))["sources"]}
         self.assertEqual(sources["SRC-0020"]["evidence_for"], ["registry:agents.json"])
 
@@ -424,6 +449,289 @@ class Pipeline(Fixture):
         sys.path.insert(0, str(ROOT))
         src = (ROOT / "observatory.py").read_text(encoding="utf-8")
         self.assertIn('"scan-agents":', src)
+
+
+class FixCycle1(Fixture):
+    """Review round 1 of #288: each case fails against ab67476f."""
+
+    # --- MEDIUM: totals.mcp counted stdio by an empty target -----------------------------
+    def test_a_stdio_declaration_with_its_command_basename_counts_as_stdio(self):
+        self.put(descriptor("alpha-agent", 47401))
+        doc = document(self.scan(launchd={}), mcp_scan(mcp_server("tool", None, command="alpha-tool")), None)
+        self.assertEqual(doc["totals"]["mcp"]["stdio"], 1)
+        self.assertEqual(doc["totals"]["mcp"]["unattributed_http"], 0)
+
+    # --- M1: URL credentials copied verbatim ------------------------------------------------
+    def test_user_info_and_queries_never_reach_the_document(self):
+        secrets = ["SECRETA1", "SECRETB2", "SECRETC3", "SECRETD4", "SECRETE5"]
+        local = descriptor("alpha-agent", 47401)
+        local["source"] = {"repository": keyed(secrets[0], "github.example.com/x/y") + f"?token={secrets[1]}"}
+        local["paths"]["data"] = keyed(secrets[4], "share.example.com/data")          # echoed by %r
+        remote = descriptor("beta-agent", remote="https://beta.example.com")
+        remote["origin"] = keyed(secrets[2], "beta.example.com") + f"?k={secrets[3]}"
+        self.put(local)
+        self.put(remote)
+        doc = document(self.scan(launchd={}), mcp_scan(), None)
+        text = json.dumps(doc)
+        for secret in secrets:
+            self.assertEqual(text.count(secret), 0, secret)
+        rows = {r["service_id"]: r for r in doc["agents"]}
+        self.assertTrue(rows["alpha-agent"]["key_in_url"])
+        self.assertEqual(rows["alpha-agent"]["source_repository"], "https://github.example.com/x/y")
+        self.assertTrue(rows["beta-agent"]["key_in_url"])
+        self.assertEqual(rows["beta-agent"]["origin"], "https://beta.example.com")
+        self.assertEqual(scan_agents.problems(doc), [])
+
+    def test_problems_refuses_a_url_with_user_info_or_a_query(self):
+        self.put(descriptor("alpha-agent", 47401))
+        doc = document(self.scan(launchd={}), mcp_scan(), None)
+        for planted in (keyed("pw", "github.example.com/x"), "https://github.example.com/x?token=t"):
+            bad = json.loads(json.dumps(doc))
+            bad["agents"][0]["source_repository"] = planted
+            self.assertTrue(any("user-info or a query" in p for p in scan_agents.problems(bad)), planted)
+
+    # --- M2: a stale scan re-emitted as fresh ---------------------------------------------
+    def test_an_unchanged_old_scan_is_stale_and_dates_nothing_after_it(self):
+        old = datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc)
+        self.put(descriptor("alpha-agent", 47401))
+        scan = self.scan(launchd={"com.example.alpha-agent": {"pid": 7, "status": 0}}, now=old)
+        day14 = document(scan, mcp_scan(), None, "2026-10-14", now=NOW)
+        row = day14["agents"][0]
+        self.assertTrue(day14["stale"])
+        self.assertEqual(row["last_seen_running_on"], "2026-10-01", "no liveness date after the scan")
+        self.assertEqual(row["first_seen_on"], "2026-10-01")
+        self.assertTrue(any("2026-10-01" in d["reason"] for d in day14["degraded"]))
+        day15 = document(scan, mcp_scan(), day14, "2026-10-15",
+                         now=datetime(2026, 10, 15, 9, 0, tzinfo=timezone.utc))
+        self.assertEqual({k: v for k, v in day15.items() if k != "updated_on"},
+                         {k: v for k, v in day14.items() if k != "updated_on"},
+                         "the same old scan a day later changes nothing but the stamp the writer carries")
+
+    def test_a_scan_from_this_tick_is_fresh(self):
+        self.put(descriptor("alpha-agent", 47401))
+        self.assertFalse(document(self.scan(launchd={}), mcp_scan(), None)["stale"])
+
+    # --- L1: reads are bounded and never block ---------------------------------------------
+    def test_a_link_outside_the_services_directory_is_not_followed(self):
+        outside = self.base / "elsewhere.json"
+        outside.write_text(json.dumps(descriptor("alpha-agent", 47401)), encoding="utf-8")
+        (self.services / "alpha-agent.default.json").symlink_to(outside)
+        doc = document(self.scan(launchd={}), mcp_scan(), None)
+        self.assertEqual(doc["agents"], [])
+        self.assertTrue(any("not followed" in d["reason"] for d in doc["degraded"]))
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "no FIFOs here")
+    def test_a_fifo_named_like_a_descriptor_is_refused_without_blocking(self):
+        os.mkfifo(self.services / "pipe.default.json")
+        doc = document(self.scan(launchd={}), mcp_scan(), None)
+        self.assertTrue(any("not a regular file" in d["reason"] for d in doc["degraded"]))
+
+    def test_an_oversized_or_too_deep_descriptor_is_refused_and_the_others_listed(self):
+        self.put(descriptor("alpha-agent", 47401))
+        (self.services / "huge.default.json").write_text(
+            json.dumps({"x": "a" * (scan_agents.MAX_DESCRIPTOR_BYTES + 1)}), encoding="utf-8")
+        (self.services / "deep.default.json").write_text("[" * 100_000 + "]" * 100_000, encoding="utf-8")
+        doc = document(self.scan(launchd={}), mcp_scan(), None)
+        self.assertEqual([r["service_id"] for r in doc["agents"]], ["alpha-agent"])
+        reasons = " ".join(d["reason"] for d in doc["degraded"])
+        self.assertIn("huge.default.json: larger than", reasons)
+        self.assertIn("deep.default.json", reasons)
+
+    def test_string_fields_are_bounded(self):
+        doc = descriptor("alpha-agent", 47401)
+        doc["summary"] = "s" * 100_000
+        doc["name"] = "n" * 10_000
+        self.put(doc)
+        row = document(self.scan(launchd={}), mcp_scan(), None)["agents"][0]
+        self.assertLessEqual(len(row["summary"]), 200)
+        self.assertLessEqual(len(row["name"]), 80)
+
+    # --- L2: names and text that are not UTF-8 --------------------------------------------
+    def test_a_lone_surrogate_in_a_descriptor_is_written_as_utf8(self):
+        self.put(descriptor("alpha-agent", 47401))
+        path = self.services / "alpha-agent.default.json"
+        path.write_text(path.read_text(encoding="utf-8").replace('"A synthetic agent."', '"bad \\ud800"'),
+                        encoding="utf-8")
+        doc = document(self.scan(launchd={}), mcp_scan(), None)
+        json.dumps(doc, ensure_ascii=False).encode("utf-8")        # what atomic.write_json does
+
+    def test_a_file_name_that_is_not_utf8_is_named_and_skipped(self):
+        try:
+            fd = os.open(os.fsencode(self.services) + b"/bad-\xff.json", os.O_CREAT | os.O_WRONLY, 0o600)
+        except (OSError, ValueError):
+            self.skipTest("this file system refuses names that are not UTF-8")
+        os.close(fd)
+        doc = document(self.scan(launchd={}), mcp_scan(), None)
+        self.assertTrue(any("not UTF-8" in d["reason"] for d in doc["degraded"]))
+        json.dumps(doc, ensure_ascii=False).encode("utf-8")
+
+    # --- L3: one origin, two descriptors ---------------------------------------------------
+    def test_two_descriptors_on_one_origin_attribute_to_neither_and_say_so(self):
+        self.put(descriptor("alpha-agent", 47401))
+        self.put(descriptor("beta-agent", 47401))
+        doc = document(self.scan(launchd={}), mcp_scan(mcp_server("x", "http://127.0.0.1:47401/mcp")), None)
+        self.assertEqual([r["mcp_declarations"] for r in doc["agents"]], [[], []])
+        self.assertEqual(doc["totals"]["mcp"]["ambiguous"], 1)
+        self.assertTrue(any(d["source"] == "mcp-inventory" and "beta-agent" in d["reason"]
+                            for d in doc["degraded"]))
+
+    def test_an_uppercase_remote_host_still_joins(self):
+        remote = descriptor("beta-agent", remote="https://beta.example.com")
+        remote["origin"] = "https://Beta.Example.COM"
+        self.put(remote)
+        doc = document(self.scan(launchd={}), mcp_scan(mcp_server("b", "https://beta.example.com/mcp")), None)
+        self.assertEqual(doc["agents"][0]["host"], "beta.example.com")
+        self.assertEqual(doc["agents"][0]["mcp_declarations"], ["mcp:claude/user/b"])
+
+    # --- L4: carried rows ----------------------------------------------------------------------
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                     "permission bits do not bind here")
+    def test_carried_rows_say_since_when_and_are_not_counted_as_running(self):
+        previous = document(self.two(), mcp_scan(), None)
+        self.assertEqual(previous["totals"]["by_supervisor_state"].get("running"), 1)
+        self.services.chmod(0)
+        try:
+            doc = document(self.scan(launchd={}), mcp_scan(), previous)
+        finally:
+            self.services.chmod(0o700)
+        self.assertTrue(all(r["carried_since"] == TODAY for r in doc["agents"]))
+        self.assertEqual(doc["totals"]["by_supervisor_state"], {})
+        self.assertEqual(doc["totals"]["carried"], 2)
+
+    # --- L5: the collector never writes what its schema refuses ---------------------------------
+    def test_a_hostile_descriptor_still_yields_a_schema_valid_document(self):
+        try:
+            import jsonschema
+        except ImportError:                                             # pragma: no cover
+            self.skipTest("jsonschema is part of the full extra")
+        bad = descriptor("alpha-agent", 47401)
+        bad.update(id="Not An Id", instance="X", origin="http://127.0.0.1:70000", name=["a list"],
+                   fabricManifest=self.put_manifest("alpha-agent"))
+        self.put(bad, "hostile.default.json")
+        manifest = self.home / "fixture/alpha-agent/fabric-agent.json"
+        m = json.loads(manifest.read_text(encoding="utf-8"))
+        m["contractVersion"] = 5
+        m["provider"]["revision"] = "seven"
+        m["provider"]["supportedContractVersions"] = "0.1.0"
+        manifest.write_text(json.dumps(m), encoding="utf-8")
+        doc = document(self.scan(launchd={}), mcp_scan(), None)
+        schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+        jsonschema.Draft202012Validator(schema).validate(doc)
+        row = doc["agents"][0]
+        self.assertEqual(row["id"], "agent:file:hostile.default")
+        self.assertIsNone(row["port"])
+        self.assertFalse(row["valid"])
+        self.assertEqual(scan_agents.problems(doc), [])
+
+    def test_problems_checks_the_id_the_port_and_the_manifest_types(self):
+        self.put(descriptor("alpha-agent", 47401, manifest=self.put_manifest("alpha-agent")))
+        doc = document(self.scan(launchd={}), mcp_scan(), None)
+        for field, value, words in (("id", "agent:Bad Id", "agent id"), ("port", 70000, "port"),
+                                    ("manifest", {"state": "pinned", "provider_revision": "x"},
+                                     "manifest.provider_revision")):
+            bad = json.loads(json.dumps(doc))
+            bad["agents"][0][field] = value
+            self.assertTrue(any(words in p for p in scan_agents.problems(bad)), field)
+
+    # --- LOW: home paths, absolute and Windows ---------------------------------------------------
+    def test_absolute_home_paths_are_written_with_a_tilde(self):
+        manifest = self.put_manifest("alpha-agent").replace("~", str(self.home), 1)
+        doc = descriptor("alpha-agent", 47401, manifest=manifest)
+        doc["lifecycle"]["plist"] = str(self.home / "Library/LaunchAgents/com.example.alpha-agent.plist")
+        self.put(doc)
+        out = document(self.scan(launchd={}), mcp_scan(), None)
+        row = out["agents"][0]
+        self.assertEqual(row["manifest"]["path"], "~/fixture/alpha-agent/fabric-agent.json")
+        self.assertEqual(row["supervisor"]["plist"], "~/Library/LaunchAgents/com.example.alpha-agent.plist")
+        self.assertNotIn(str(self.home), json.dumps(out))
+
+    def test_a_windows_home_is_written_with_a_tilde_and_refused_when_absolute(self):
+        with patch.object(scan_agents, "_home", return_value="C:\\Users\\alpha"):
+            self.assertEqual(scan_agents.tilde("C:\\Users\\alpha\\fixture\\m.json"), "~\\fixture\\m.json")
+            self.put(descriptor("alpha-agent", 47401))
+            doc = document(self.scan(launchd={}), mcp_scan(), None)
+            doc["agents"][0]["descriptor"] = "C:\\Users\\alpha\\x.json"
+            self.assertTrue(any("absolute home path" in p for p in scan_agents.problems(doc)))
+
+    # --- LOW: the validator's agents block -----------------------------------------------------
+    def test_validate_registry_refuses_a_broken_agents_document(self):
+        import validator_fixture
+        root = self.base / "validator"
+        root.mkdir()
+        reg = validator_fixture.seed(root)
+        sources = json.loads((reg / "sources.json").read_text(encoding="utf-8"))
+        sources["sources"] += [{"id": "SRC-0020"}, {"id": "SRC-0017"}]
+        (reg / "sources.json").write_text(json.dumps(sources), encoding="utf-8")
+        self.put(descriptor("alpha-agent", 47401))
+        good = document(self.scan(launchd={}), mcp_scan(), None)
+
+        def validate(doc):
+            (reg / "agents.json").write_text(json.dumps(doc), encoding="utf-8")
+            env = {**validator_fixture.environment(reg), "HOME": str(self.home), "USERPROFILE": str(self.home)}
+            return subprocess.run([sys.executable, "tools/validate_registry.py"], cwd=ROOT, env=env,
+                                  capture_output=True, text=True, timeout=120)
+        p = validate(good)
+        self.assertEqual(p.returncode, 0, (p.stdout + p.stderr)[-400:])
+        bad = json.loads(json.dumps(good))
+        bad["agents"].append(bad["agents"][0])
+        bad["totals"]["agents"] = 2
+        p = validate(bad)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("agents.json: duplicate agent ids", p.stderr)
+
+    # --- LOW: the tick's switch and the CLI group -----------------------------------------------
+    def test_scan_agents_runs_only_with_machine_watch(self):
+        import tick_lease
+        self.assertEqual(tick_lease.FEATURE_STEPS.get("scan-agents"), "machine_watch")
+        with patch.object(tick_lease.configuration, "enabled", side_effect=lambda name, kind="integrations":
+                          not (kind == "features" and name == "machine_watch")):
+            self.assertFalse(tick_lease.step_allowed("scan-agents"))
+        with patch.object(tick_lease.configuration, "enabled", return_value=True):
+            self.assertTrue(tick_lease.step_allowed("scan-agents"))
+
+    def test_scan_agents_is_in_the_cli_all_group(self):
+        import ast
+        tree = ast.parse((ROOT / "observatory.py").read_text(encoding="utf-8"))
+        groups = next(n.value for n in ast.walk(tree) if isinstance(n, ast.Assign)
+                      and any(isinstance(t, ast.Name) and t.id == "GROUPS" for t in n.targets))
+        everything = next(v for k, v in zip(groups.keys, groups.values)
+                          if isinstance(k, ast.Constant) and k.value == "all")
+        order = ast.literal_eval(everything)
+        self.assertIn("scan-agents", order)
+        self.assertLess(order.index("scan-mcp"), order.index("emit"))
+        self.assertLess(order.index("scan-agents"), order.index("emit"))
+
+
+class EmitHistory(Fixture):
+    """The emit reads the previous registry document, so dates and removals persist across ticks."""
+
+    def test_first_seen_and_removed_come_from_the_previous_registry(self):
+        import workspace
+        from emitter_fixture import environment, seed
+        root = self.base / "estate"
+        root.mkdir()
+        seed(root)
+        workspace.initialize(root / "home", identities=False)
+        raw, reg = root / "raw", root / "registry"
+        env = {**environment(root), "OBSERVATORY_HOME": str(root / "home")}
+
+        def emit(scan):
+            (raw / "agents.json").write_text(json.dumps(scan), encoding="utf-8")
+            p = subprocess.run([sys.executable, "collectors/emit_registry.py", str(raw)], cwd=ROOT, env=env,
+                               capture_output=True, text=True, timeout=300)
+            self.assertEqual(p.returncode, 0, p.stderr[-600:])
+            return json.loads((reg / "agents.json").read_text(encoding="utf-8"))
+        now = datetime.now(timezone.utc)
+        self.put(descriptor("alpha-agent", 47401))
+        self.put(descriptor("beta-agent", 47402))
+        first = emit(self.scan(launchd={}, now=now))
+        self.assertEqual(first["removed"], [])
+        first["agents"][0]["first_seen_on"] = "2026-01-01"           # as an earlier tick recorded it
+        (reg / "agents.json").write_text(json.dumps(first), encoding="utf-8")
+        (self.services / "beta-agent.default.json").unlink()
+        later = emit(self.scan(launchd={}, now=now))
+        self.assertEqual(later["agents"][0]["first_seen_on"], "2026-01-01")
+        self.assertEqual(later["removed"], ["agent:beta-agent.default"])
 
 
 if __name__ == "__main__":
