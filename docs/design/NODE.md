@@ -39,6 +39,21 @@ Each check was also run against a planted defect, and the suite failed every tim
 - a revoked machine kept;
 - a changed `relay-auth/1` input.
 
+**Where the node is stricter than the reference.** Each answer is still one of the reference's codes:
+- a document nested deeper than 64 levels, or larger than a frame (1 MiB), is `malformed`, not parsed. A hostile relay's
+  deeply nested frame would otherwise exhaust the parser and stop the session's reader;
+- a device key's base64 must be its one canonical spelling;
+- a `#sig` kid counts only when it is its own machine's `<id>#sig`, and a kid listed twice counts for neither machine.
+  A verified record already holds both by FAC-SEM-073; the node checks them again before it believes a key.
+
+Times read as JavaScript's `Date` reads them, for every year 0000-9999 (`calendar.timegm` refuses year 0). Only ASCII
+digits are accepted, and nothing may follow the closing `Z`.
+
+**Device keys under concurrency.** `load_or_create` holds the folder's lock across the check, the generation and the
+writes. Each file is created exclusively (written to a temporary file, then hard-linked), so two processes starting
+together end with one key set, the one both return. A folder another account owns, or one others may write, is
+refused.
+
 Signing needs the engine's `full` extra (`cryptography`). Canonical JSON and key validation use the standard library
 alone.
 

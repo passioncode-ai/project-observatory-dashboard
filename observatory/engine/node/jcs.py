@@ -66,8 +66,15 @@ def _utf16(key: str) -> bytes:
         raise CanonicalError('a lone surrogate has no canonical form') from error
 
 
-def rfc8785(value: Any) -> str:
+#: How deeply a value may nest. RFC 8785 sets no bound; this one keeps recursion far from Python's limit, and every
+#: document a node signs or checks nests a few levels. A deeper value has no canonical form here.
+MAX_DEPTH = 64
+
+
+def rfc8785(value: Any, _depth: int = 0) -> str:
     """The RFC 8785 text of a parsed JSON value; encode it as UTF-8 to sign or hash it."""
+    if _depth > MAX_DEPTH:
+        raise CanonicalError('a value nested more than %d levels has no canonical form here' % MAX_DEPTH)
     if value is None:
         return 'null'
     if value is True:
@@ -85,13 +92,13 @@ def rfc8785(value: Any) -> str:
     if isinstance(value, str):
         return _string(value)
     if isinstance(value, (list, tuple)):
-        return '[' + ','.join(rfc8785(item) for item in value) + ']'
+        return '[' + ','.join(rfc8785(item, _depth + 1) for item in value) + ']'
     if isinstance(value, dict):
         for key in value:
             if not isinstance(key, str):
                 raise CanonicalError('an object key is a string')
         keys = sorted(value, key=_utf16)
-        return '{' + ','.join(_string(key) + ':' + rfc8785(value[key]) for key in keys) + '}'
+        return '{' + ','.join(_string(key) + ':' + rfc8785(value[key], _depth + 1) for key in keys) + '}'
     raise CanonicalError(type(value).__name__ + ' is not a JSON value')
 
 
@@ -103,5 +110,5 @@ def is_canonical(value: Any, raw: bytes) -> bool:
     """Whether `raw` is exactly the RFC 8785 form of `value`; a value that has none is not."""
     try:
         return canonical_bytes(value) == raw
-    except CanonicalError:
+    except (CanonicalError, RecursionError, MemoryError):
         return False
