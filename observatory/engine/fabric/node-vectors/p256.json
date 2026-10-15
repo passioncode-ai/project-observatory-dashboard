@@ -1,0 +1,161 @@
+{
+  "$comment": "P-256 public keys for isValidP256Key (src/p256.ts), SEC 1 v2 §3.2.2, as raw uncompressed points in base64 (DEC-0053). The generator G is SEC 2 v2 §2.4.2's; the fresh key was generated for the purpose. Each invalid point names the refusal `p256KeyRefusal` returns (DEC-0047); `jwk` holds the same check over RFC 7518 JWKs, the form relay keys travel in, with `refusal` null for a valid key.",
+  "valid": [
+    {
+      "name": "the generator G",
+      "publicKey": "BGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfU="
+    },
+    {
+      "name": "a fresh key",
+      "publicKey": "BAHGBUpk86a7T8dKfivt0reHA9K98y8wGqK7KxYsfTST0vLrMClgedhguTryzFDbMOvr8znzujd70eanEI5AoB4="
+    },
+    {
+      "name": "the point with x = 0",
+      "publicKey": "BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAZkhceA4vg9ckM71dhKBrtlQcKvMdrocXKL+FahdPk/Q="
+    }
+  ],
+  "invalid": [
+    {
+      "name": "the point at infinity (the single byte 0x00)",
+      "publicKey": "AA==",
+      "refusal": "point-at-infinity"
+    },
+    {
+      "name": "a compressed point (prefix 0x02)",
+      "publicKey": "AmsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW",
+      "refusal": "bad-encoding"
+    },
+    {
+      "name": "the uncompressed prefix with 64 bytes",
+      "publicKey": "BGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UQ==",
+      "refusal": "bad-encoding"
+    },
+    {
+      "name": "a hybrid prefix (0x06)",
+      "publicKey": "BmsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfU=",
+      "refusal": "bad-encoding"
+    },
+    {
+      "name": "y off the curve (G with y + 1)",
+      "publicKey": "BGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfY=",
+      "refusal": "not-on-curve"
+    },
+    {
+      "name": "x = p, out of range",
+      "publicKey": "BP////8AAAABAAAAAAAAAAAAAAAA////////////////T+NC4v4af5uO5+tKfA+eFivOM1drMV7Oy7ZAaDe/UfU=",
+      "refusal": "coordinate-out-of-range"
+    },
+    {
+      "name": "y = 2^256 − 1, out of range",
+      "publicKey": "BGsX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW//////////////////////////////////////////8=",
+      "refusal": "coordinate-out-of-range"
+    },
+    {
+      "name": "x = 0, y = 0",
+      "publicKey": "BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      "refusal": "not-on-curve"
+    },
+    {
+      "name": "the same point with x + p: on the curve modulo p, out of range",
+      "publicKey": "BP////8AAAABAAAAAAAAAAAAAAAA////////////////ZkhceA4vg9ckM71dhKBrtlQcKvMdrocXKL+FahdPk/Q=",
+      "refusal": "coordinate-out-of-range"
+    },
+    {
+      "name": "x = 0 with y = p, out of range",
+      "publicKey": "BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/////wAAAAEAAAAAAAAAAAAAAAD///////////////8=",
+      "refusal": "coordinate-out-of-range"
+    }
+  ],
+  "jwk": [
+    {
+      "name": "the base point G (SEC 2 §2.4.2) as a JWK",
+      "jwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "axfR8uEsQkf4vOblY6RA8ncDfYEt6zOg9KE5RdiYwpY",
+        "y": "T-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU"
+      },
+      "refusal": null
+    },
+    {
+      "name": "RFC 6979 §A.2.5's P-256 public key U as a JWK",
+      "jwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "YP7UuiVanTHJYet0xjVtaMBJuJI7Yfps5mliLmDyn7Y",
+        "y": "eQP-EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk"
+      },
+      "refusal": null
+    },
+    {
+      "name": "x = p: a coordinate out of range",
+      "jwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "_____wAAAAEAAAAAAAAAAAAAAAD_______________8",
+        "y": "T-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU"
+      },
+      "refusal": "coordinate-out-of-range"
+    },
+    {
+      "name": "y = 2^256 − 1: a coordinate out of range",
+      "jwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "axfR8uEsQkf4vOblY6RA8ncDfYEt6zOg9KE5RdiYwpY",
+        "y": "__________________________________________8"
+      },
+      "refusal": "coordinate-out-of-range"
+    },
+    {
+      "name": "(G.x, G.y + 1): not on the curve",
+      "jwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "axfR8uEsQkf4vOblY6RA8ncDfYEt6zOg9KE5RdiYwpY",
+        "y": "T-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfY"
+      },
+      "refusal": "not-on-curve"
+    },
+    {
+      "name": "(0, 0): not on the curve (b ≠ 0), and not a way to write the identity",
+      "jwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "y": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      "refusal": "not-on-curve"
+    },
+    {
+      "name": "x of 31 octets",
+      "jwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "F9Hy4SxCR_i85uVjpEDydwN9gS3rM6D0oTlF2JjClg",
+        "y": "T-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU"
+      },
+      "refusal": "bad-encoding"
+    },
+    {
+      "name": "x with base64 padding",
+      "jwk": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "axfR8uEsQkf4vOblY6RA8ncDfYEt6zOg9KE5RdiYwpY=",
+        "y": "T-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU"
+      },
+      "refusal": "bad-encoding"
+    },
+    {
+      "name": "a P-384 JWK",
+      "jwk": {
+        "kty": "EC",
+        "crv": "P-384",
+        "x": "axfR8uEsQkf4vOblY6RA8ncDfYEt6zOg9KE5RdiYwpY",
+        "y": "T-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU"
+      },
+      "refusal": "bad-encoding"
+    }
+  ]
+}

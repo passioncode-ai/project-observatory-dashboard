@@ -5,6 +5,15 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **The agent-network node's foundation** (OBS-107, RM-21). `observatory/engine/node/` holds what one machine
+  signs to join a relay and to send a message or a blob, and how it checks what the relay delivers: RFC 8785,
+  P-256 key validation, low-S ES256 and fabric-relay/0.1, ported from the contract kit and run over the contract's
+  own vectors (vendored in `observatory/engine/fabric/node-vectors/`). A device-key store keeps the machine's `#sig`
+  and `#kem` keys owner-only and never replaces them. Nothing runs yet: the relay session client, the estate record
+  and the node service are the next slices ([NODE.md](docs/design/NODE.md)).
+
 ### Documentation
 
 - **The README's capability table names records and lessons** (N-4, USR-009). A new row, "Can agents keep what
