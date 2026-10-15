@@ -20,6 +20,10 @@ from urllib.parse import urlsplit
 GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 MAX_MESSAGE_BYTES = 1_048_576
 MAX_HANDSHAKE_BYTES = 16_384
+#: Fragments one message may arrive in; empty continuation frames would otherwise never reach the byte limit.
+MAX_FRAGMENTS = 1024
+#: Close codes a peer may send (RFC 6455 §7.4): 1005, 1006 and 1015 are never on the wire.
+_SENDABLE = frozenset({1000, 1001, 1002, 1003, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014})
 OP_CONT, OP_TEXT, OP_BINARY, OP_CLOSE, OP_PING, OP_PONG = 0x0, 0x1, 0x2, 0x8, 0x9, 0xA
 
 
@@ -153,9 +157,21 @@ class WebSocket:
             raise WebSocketError('a message over 1 MiB')
         self._send_frame(OP_TEXT, data)
 
+    def _answer_close(self, code: Optional[int]) -> None:
+        """Answers a peer's close once: its code echoed when it may be sent, else an empty close."""
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            self._send_frame(OP_CLOSE, struct.pack('!H', code) if code in _SENDABLE or (code and 3000 <= code <= 4999)
+                             else b'')
+        except OSError:
+            pass
+
     def recv_text(self) -> str:
-        """The next text message; answers pings, raises `Closed` on a close and `WebSocketError` on a binary message."""
-        parts, opcode = [], None
+        """The next text message; answers pings, raises `Closed` on a close and `WebSocketError` on a binary message,
+        an unknown opcode, a message over 1 MiB or `MAX_FRAGMENTS` frames, or text that is not UTF-8."""
+        parts, opcode, total = [], None, 0
         while True:
             fin, op, payload = self._frame()
             if op == OP_PING:
@@ -164,24 +180,31 @@ class WebSocket:
             if op == OP_PONG:
                 continue
             if op == OP_CLOSE:
+                if len(payload) == 1:                       # a status code is two bytes or absent
+                    self._answer_close(1002)
+                    raise Closed(1002, 'a one-byte close payload')
                 code = struct.unpack('!H', payload[:2])[0] if len(payload) >= 2 else 1005
-                reason = payload[2:].decode('utf-8', 'replace')
-                if not self.closed:
-                    self.closed = True
-                    try:
-                        self._send_frame(OP_CLOSE, payload[:2])
-                    except OSError:
-                        pass
+                try:
+                    reason = payload[2:].decode('utf-8')
+                except UnicodeDecodeError:
+                    self._answer_close(1007)
+                    raise Closed(1007, 'a close reason that is not UTF-8') from None
+                self._answer_close(code if len(payload) >= 2 else None)
                 raise Closed(code, reason)
             if op == OP_BINARY:
                 raise WebSocketError('a binary message: the relay speaks text frames only')
+            if op not in (OP_TEXT, OP_CONT):
+                raise WebSocketError('an unknown opcode %d' % op)
             if op == OP_TEXT and opcode is None:
                 opcode = op
             elif op != OP_CONT or opcode is None:
                 raise WebSocketError('a fragment out of order')
             parts.append(payload)
-            if sum(map(len, parts)) > MAX_MESSAGE_BYTES:
+            total += len(payload)
+            if total > MAX_MESSAGE_BYTES:
                 raise WebSocketError('a message over 1 MiB')
+            if len(parts) > MAX_FRAGMENTS:
+                raise WebSocketError('a message in more than %d fragments' % MAX_FRAGMENTS)
             if fin:
                 try:
                     return b''.join(parts).decode('utf-8')
@@ -191,13 +214,24 @@ class WebSocket:
     def settimeout(self, seconds: Optional[float]) -> None:
         self._sock.settimeout(seconds)
 
-    def close(self, code: int = 1000) -> None:
+    def abort(self, code: int = 1000) -> None:
+        """Ends the connection from another thread than the reader: a close frame, then `shutdown`, which wakes a
+        reader blocked in `recv`. The descriptor stays open for that reader to close: closing it here races the
+        pending `recv`, which would then wait out its whole timeout on a closed descriptor."""
         if not self.closed:
             self.closed = True
             try:
                 self._send_frame(OP_CLOSE, struct.pack('!H', code))
             except OSError:
                 pass
+        try:
+            self._sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    def close(self, code: int = 1000) -> None:
+        """Ends the connection and frees the descriptor; the reader's own thread calls this."""
+        self.abort(code)
         try:
             self._sock.close()
         except OSError:

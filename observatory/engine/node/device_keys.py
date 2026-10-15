@@ -12,18 +12,45 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import secrets
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional
 
+import osprivacy
 import private_io
 
 from . import p256
 
-DEVICE_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:~-]{0,127}$')
+DEVICE_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:~-]{0,127}\Z')       # \Z, not $: no trailing newline
 _FILES = ('device.json', 'sig.pem', 'kem.pem')
+_LOCK = '.device-keys.lock'
+
+
+def _write_exclusive(path: Path, text: str) -> None:
+    """Writes an owner-only file that did not exist: the bytes go to a temporary file, which is then hard-linked to
+    `path`. The link fails when `path` exists, so a key file is never replaced, even by a writer that lost a race."""
+    private_io.check(path)
+    private_io.parent(path.parent)
+    fd, name = tempfile.mkstemp(prefix='.device-key-', dir=path.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(name, path)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
+def _private_folder(folder: Path) -> None:
+    """Refuses a folder another account owns, or one a group or others may write: either could swap the keys."""
+    if not osprivacy.owned_by_me(folder) or osprivacy.others_may_write(folder):
+        raise RuntimeError('the device-key folder must be owned by this account and writable by it alone')
 
 
 def new_device_id() -> str:
@@ -64,7 +91,7 @@ class DeviceKeys:
     """The `#sig` and `#kem` keys of one device."""
 
     def __init__(self, device_id: str, sig_key, kem_key, created: str):
-        if not DEVICE_ID.match(device_id):
+        if not isinstance(device_id, str) or not DEVICE_ID.fullmatch(device_id):
             raise ValueError('a device id is opaque: [A-Za-z0-9][A-Za-z0-9._:~-]{0,127}')
         self.device_id = device_id
         self._sig = sig_key
@@ -116,17 +143,23 @@ class DeviceKeys:
         """Writes the keys into `folder`; refuses to replace keys already there, because a replaced key is a lost
         device: the estate record still names the old one. Replacing a key is the record's ceremony (DEC-0084)."""
         folder = Path(folder)
+        with private_io.lock(folder / _LOCK):
+            self._save(folder)
+
+    def _save(self, folder: Path) -> None:
+        """Under the folder's lock. Each file is created exclusively; device.json last, so a folder with it holds a
+        whole key set."""
         if any((folder / name).exists() for name in _FILES):
             raise FileExistsError('device keys already exist in this folder')
-        private_io.write(folder / 'sig.pem', _pem(self._sig))
-        private_io.write(folder / 'kem.pem', _pem(self._kem))
-        # Written last: a folder with device.json holds a whole key set.
-        private_io.write(folder / 'device.json', json.dumps({'schema': 'device-keys/1', 'id': self.device_id,
-                                                             'created': self.created}, indent=1) + '\n')
+        _write_exclusive(folder / 'sig.pem', _pem(self._sig))
+        _write_exclusive(folder / 'kem.pem', _pem(self._kem))
+        _write_exclusive(folder / 'device.json', json.dumps({'schema': 'device-keys/1', 'id': self.device_id,
+                                                              'created': self.created}, indent=1) + '\n')
 
     @classmethod
     def load(cls, folder: Path) -> 'DeviceKeys':
         folder = Path(folder)
+        _private_folder(folder)
         meta = json.loads(private_io.read(folder / 'device.json'))
         if not isinstance(meta, dict) or meta.get('schema') != 'device-keys/1':
             raise ValueError('not a device-keys/1 folder')
@@ -138,15 +171,18 @@ class DeviceKeys:
 
     @classmethod
     def load_or_create(cls, folder: Path) -> 'DeviceKeys':
+        """The folder's keys, or new ones written there. The check, the generation and the writes happen under the
+        folder's lock, so two processes starting together end with one key set, the one both return."""
         folder = Path(folder)
-        if (folder / 'device.json').exists():
-            return cls.load(folder)
-        if (folder / 'sig.pem').exists() or (folder / 'kem.pem').exists():
-            # A half-written set (a crash between files) is never completed with a new key beside an old one.
-            raise RuntimeError('incomplete device keys: device.json is missing beside a key file')
-        keys = cls.generate()
-        keys.save(folder)
-        return keys
+        with private_io.lock(folder / _LOCK):
+            if (folder / 'device.json').exists():
+                return cls.load(folder)
+            if (folder / 'sig.pem').exists() or (folder / 'kem.pem').exists():
+                # A half-written set (a crash between files) is never completed with a new key beside an old one.
+                raise RuntimeError('incomplete device keys: device.json is missing beside a key file')
+            keys = cls.generate()
+            keys._save(folder)
+            return keys
 
     def __repr__(self) -> str:                          # never the private keys
         return 'DeviceKeys(%s)' % self.device_id

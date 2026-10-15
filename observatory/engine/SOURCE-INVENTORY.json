@@ -1447,15 +1447,15 @@
       "path": "node/blobs.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7112fc71b4a53b841f30c70e3ebae0a1913f3e57d6e403c62fab27d62c95a6a1",
-      "bytes": 4840
+      "export_sha256": "473bb79de6cb411759f1947be481c8a43348a8fdc86a12031bd18b45eed3ca18",
+      "bytes": 5056
     },
     {
       "path": "node/device_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ee1f54961394797e39fb3256f91344f9b0f3b8f907e894222c0e41b2159f389f",
-      "bytes": 6419
+      "export_sha256": "8830659cb1d358a52fd0f66835a39b20a5ed388f3a7059eb40ae41290d50786d",
+      "bytes": 8135
     },
     {
       "path": "node/ed25519.py",
@@ -1482,8 +1482,8 @@
       "path": "node/jcs.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "80b2b8b5ca250e150bf914540288c538c1a0c33bbd292cd2f9eec52c47efbb7f",
-      "bytes": 3918
+      "export_sha256": "9a6d0a36bbd0aeb47a19004f0f7608ed08204a47795cb00514daf15b06504d98",
+      "bytes": 4354
     },
     {
       "path": "node/p256.py",
@@ -1496,8 +1496,8 @@
       "path": "node/relay.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5a0ceff293c68327a4bd35157ab27284a0dfa46d91d8d70484e47e4c0a0eaff8",
-      "bytes": 16802
+      "export_sha256": "da4712a561006f6e697a39fe558a3b9b16bae48454129144b9e0172c6f8fe4fc",
+      "bytes": 20699
     },
     {
       "path": "node/revocation.py",
@@ -1510,8 +1510,8 @@
       "path": "node/session.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9166f47e8e0acd90dd2df94cf088ea47dc64c9fccd3935939c0f3ac2d382aed3",
-      "bytes": 15009
+      "export_sha256": "a63ea2e6de6ac0b0ee5caf4bf074ec9243121b6cf74779874587e3e465aa775d",
+      "bytes": 20166
     },
     {
       "path": "node/webauthn.py",
@@ -1524,8 +1524,8 @@
       "path": "node/ws.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b4f5e30027a87a40720693cb86d3355863e49242d2e90ab3b2c59ef8848e4e79",
-      "bytes": 9036
+      "export_sha256": "53ea024fd2bea0e38e94471e0fa28ad53f8c8d53bfc02f4f3238f2a595098389",
+      "bytes": 11009
     },
     {
       "path": "observatory.py",
@@ -3291,8 +3291,8 @@
       "path": "tests/test_node_foundation.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cb06ae78b428d2d3cc3a22b69c8ca9ce9cb407860dea7277ba3e121d20c75f4b",
-      "bytes": 20442
+      "export_sha256": "6e81348c98909c64f28fd8d993609773e92a442e83311bb9058863286560565d",
+      "bytes": 27591
     },
     {
       "path": "tests/test_node_revocation.py",
@@ -3305,8 +3305,8 @@
       "path": "tests/test_node_session.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3b4b872eccc1c1962d918a8837ba28b9e18e35185cab3a586f2d1711a93466ae",
-      "bytes": 23829
+      "export_sha256": "c0c38635701df588e98790adb8ed837e110f3e43a7403187e77bce7747ea55e2",
+      "bytes": 44395
     },
     {
       "path": "tests/test_notification.py",

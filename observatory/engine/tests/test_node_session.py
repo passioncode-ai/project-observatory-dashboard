@@ -9,16 +9,19 @@ test misbehave as a relay may: name another origin, deliver a forged or repeated
 from __future__ import annotations
 
 import base64
+import datetime
 import hashlib
 import json
 import os
 import socket
+import ssl
 import struct
 import sys
 import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -31,11 +34,13 @@ except ImportError:
 
 from node import p256, relay                           # noqa: E402
 from node.blobs import BlobRefused, digest_of, get_blob, put_blob  # noqa: E402
+from node import ws as ws_module                       # noqa: E402
 from node.ws import GUID, Closed, WebSocket, WebSocketError  # noqa: E402
 
 if HAVE_CRYPTO:
     from node.device_keys import DeviceKeys            # noqa: E402
-    from node.session import RelayError, RelayRefused, RelaySession, SessionClosed, connect_url  # noqa: E402
+    from node import session as session_module         # noqa: E402
+    from node.session import RelayError, RelayRefused, RelaySession, SessionClosed, connect_url, keep_connected  # noqa: E402
 
 ESTATE = 'urn:fabric:estate:test'
 WAIT = 5.0
@@ -90,6 +95,8 @@ class RelayStub:
         self.admitted = dict(admitted)                      # kid -> SEC 1 octets
         self.subprotocol, self.hello_relay = subprotocol, hello_relay
         self.tamper = {}                                    # digest -> other bytes a misbehaving relay returns
+        self.ignore_pings = False                           # a half-open link: frames go in, nothing comes back
+        self.no_hello = False                               # upgrade, then silence
         self.server = socket.socket()
         self.server.bind(('127.0.0.1', 0))
         self.server.listen()
@@ -160,6 +167,9 @@ class RelayStub:
         try:
             if not self.upgrade(conn):
                 return
+            if self.no_hello:
+                time.sleep(10)
+                return
             nonce = p256.b64url_encode(os.urandom(32))
             conn.send({'v': 1, 'type': 'hello', 'id': 'h', 'protocol': 'fabric-relay/0.1',
                        'relay': self.hello_relay or self.origin, 'nonce': nonce, 'time': '2026-10-15T00:00:00Z'})
@@ -220,7 +230,8 @@ class RelayStub:
                 box = self.mailbox.get(conn.kid, [])
                 self.mailbox[conn.kid] = [m for m in box if m['seq'] != frame['seq']]
         elif kind == 'ping':
-            conn.send({'v': 1, 'type': 'pong', 'id': 'p', 'replyTo': reply})
+            if not self.ignore_pings:
+                conn.send({'v': 1, 'type': 'pong', 'id': 'p', 'replyTo': reply})
         elif kind == 'presence-query':
             with self.lock:
                 known = [k for k in frame['kids'] if k in self.admitted]
@@ -256,6 +267,21 @@ class RelayStub:
         if conn is not None:
             conn.send({'v': 1, 'type': 'error', 'id': 'n', 'code': 'not-admitted', 'message': 'revoked'})
             conn.close(4403)
+
+    def send_to(self, kid, frame=None, raw=None):
+        with self.lock:
+            conn = self.sessions.get(kid)
+        if raw is not None:
+            conn.raw(0x1, raw)
+        else:
+            conn.send(frame)
+
+    def shutdown(self, kid, code=1001):
+        """The relay going away: a close with no error frame."""
+        with self.lock:
+            conn = self.sessions.pop(kid, None)
+        if conn is not None:
+            conn.close(code)
 
     def stop(self):
         self.server.close()
@@ -473,12 +499,410 @@ class Blobs(unittest.TestCase):
             get_blob(self.relay.origin, self.b, digest, [self.b.sig_kid])
         self.assertEqual(caught.exception.code, 'digest-mismatch')
 
+    def test_an_error_body_of_another_shape_still_refuses(self):
+        from node import blobs
+        server = socket.socket()
+        server.bind(('127.0.0.1', 0))
+        server.listen()
+        self.addCleanup(server.close)
+
+        def serve():
+            sock, _ = server.accept()
+            sock.recv(65536)
+            body = b'{"error": "x"}'
+            sock.sendall(b'HTTP/1.1 400 Bad\r\nContent-Length: %d\r\nConnection: close\r\n\r\n' % len(body) + body)
+            sock.close()
+        threading.Thread(target=serve, daemon=True).start()
+        with self.assertRaises(BlobRefused) as caught:
+            get_blob('http://127.0.0.1:%d' % server.getsockname()[1], self.b, 'sha256:' + 'ab' * 32, [self.b.sig_kid])
+        self.assertEqual((caught.exception.status, caught.exception.code), (400, 'unknown'))
+
+    def test_a_blob_larger_than_the_limit_is_refused_after_reading_no_more(self):
+        from node import blobs
+        server = socket.socket()
+        server.bind(('127.0.0.1', 0))
+        server.listen()
+        self.addCleanup(server.close)
+
+        def serve(endless):
+            sock, _ = server.accept()
+            sock.recv(65536)
+            if endless:                                     # no length, never ends: only a bounded read returns
+                sock.sendall(b'HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n')
+                try:
+                    while True:
+                        sock.sendall(b'z' * 4096)
+                except OSError:
+                    pass
+            else:
+                sock.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: 2000\r\nConnection: close\r\n\r\n' + b'z' * 2000)
+            sock.close()
+        for endless in (False, True):
+            threading.Thread(target=serve, args=(endless,), daemon=True).start()
+            errors = []
+
+            def fetch():
+                try:
+                    get_blob('http://127.0.0.1:%d' % server.getsockname()[1], self.b, 'sha256:' + 'ab' * 32,
+                             [self.b.sig_kid])
+                except Exception as error:
+                    errors.append(error)
+            with mock.patch.multiple(blobs, MAX_BLOB_BYTES=1000, TIMEOUT_SECONDS=3):
+                reader = threading.Thread(target=fetch, daemon=True)
+                reader.start()
+                reader.join(10)                             # an unbounded read of an endless body never returns
+            self.assertFalse(reader.is_alive(), 'the read is not bounded')
+            self.assertIsInstance(errors[0], BlobRefused)
+            self.assertEqual(errors[0].code, 'too-large')
+
     def test_arguments_are_checked_before_anything_is_sent(self):
         for call in (lambda: get_blob(self.relay.origin, self.b, 'sha256:XYZ', [self.b.sig_kid]),
                      lambda: put_blob('http://localhost:1', self.a, b'x', [self.b.sig_kid]),
                      lambda: put_blob(self.relay.origin, self.a, b'x', [])):
             with self.assertRaises(ValueError):
                 call()
+
+
+# ---- RFC 6455 on a raw loopback server ------------------------------------------------------------------------------
+
+class RawServer:
+    """One connection: the upgrade (its answer configurable), then `script(conn)` in the server thread."""
+
+    def __init__(self, script, *, accept=None, protocol='fabric-relay.v1'):
+        self.server = socket.socket()
+        self.server.bind(('127.0.0.1', 0))
+        self.server.listen()
+        self.url = 'ws://127.0.0.1:%d/v1/connect' % self.server.getsockname()[1]
+        self.received, self.done = [], threading.Event()
+        self.accept, self.protocol, self.script = accept, protocol, script
+        threading.Thread(target=self.run, daemon=True).start()
+
+    def run(self):
+        sock, _ = self.server.accept()
+        conn = Conn(sock)
+        try:
+            while b'\r\n\r\n' not in conn.buffer:
+                conn.buffer += sock.recv(4096)
+            head, conn.buffer = conn.buffer.split(b'\r\n\r\n', 1)
+            headers = {l.split(':', 1)[0].lower(): l.split(':', 1)[1].strip() for l in head.decode().split('\r\n')[1:]}
+            accept = self.accept or base64.b64encode(hashlib.sha1((headers['sec-websocket-key'] + GUID).encode()).digest()).decode()
+            sock.sendall(('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+                          'Sec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: %s\r\n\r\n' % (accept, self.protocol)).encode())
+            self.script(conn, self)
+        except (OSError, ConnectionError):
+            pass
+        finally:
+            self.done.set()
+            sock.close()
+            self.server.close()
+
+    def read_raw(self, conn):
+        """A client frame as sent: (first byte, mask bit, mask, unmasked payload)."""
+        first, second = conn.read(2)
+        n = second & 0x7F
+        if n == 126:
+            n = struct.unpack('!H', conn.read(2))[0]
+        elif n == 127:
+            n = struct.unpack('!Q', conn.read(8))[0]
+        mask = conn.read(4) if second & 0x80 else b''
+        data = conn.read(n)
+        if mask:
+            data = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+        return first, bool(second & 0x80), mask, data
+
+
+def header(first, n):
+    return bytes([first]) + (bytes([n]) if n < 126 else bytes([126]) + struct.pack('!H', n) if n < 65536
+                             else bytes([127]) + struct.pack('!Q', n))
+
+
+class Frames(unittest.TestCase):
+    def client(self, script, **kw):
+        server = RawServer(script, **kw)
+        ws = WebSocket.connect(server.url, subprotocol='fabric-relay.v1', timeout=5)
+        ws.settimeout(5)
+        self.addCleanup(ws.close)
+        return server, ws
+
+    def test_client_frames_are_masked_with_fresh_random_keys(self):
+        seen = []
+
+        def script(conn, server):
+            for _ in range(3):
+                seen.append(server.read_raw(conn))
+        calls = []
+        real = os.urandom
+        with mock.patch.object(ws_module.os, 'urandom', side_effect=lambda n: calls.append(n) or real(n)):
+            server, ws = self.client(script)
+            for text in ('one', 'two', 'three'):
+                ws.send_text(text)
+            server.done.wait(5)
+        self.assertEqual([d for _, _, _, d in seen], [b'one', b'two', b'three'])
+        self.assertTrue(all(masked for _, masked, _, _ in seen))
+        self.assertEqual(len({m for _, _, m, _ in seen}), 3)
+        self.assertGreaterEqual(calls.count(4), 3)
+
+    def refused(self, frames: bytes):
+        _, ws = self.client(lambda conn, server: conn.sock.sendall(frames) or time.sleep(1))
+        with self.assertRaises((WebSocketError, Closed)) as caught:
+            ws.recv_text()
+        return caught.exception
+
+    def test_what_a_client_refuses(self):
+        cases = {
+            'a frame over 1 MiB': header(0x81, ws_module.MAX_MESSAGE_BYTES + 1),
+            'a message over 1 MiB in two fragments': header(0x01, 600_000) + b'a' * 600_000 + header(0x80, 600_000) + b'b' * 600_000,
+            'too many fragments': header(0x01, 1) + b'a' + header(0x00, 0) * (ws_module.MAX_FRAGMENTS + 1) + header(0x80, 0),
+            'text that is not UTF-8': header(0x81, 2) + b'\xc3\x28',
+            'a control frame over 125 bytes': header(0x89, 126) + b'p' * 126,
+            'a reserved bit': header(0xC1, 1) + b'x',
+            'an unknown opcode': header(0x83, 1) + b'x',
+            'an unknown opcode in a message': header(0x01, 1) + b'x' + header(0x83, 1) + b'y',
+            'a binary message': header(0x82, 1) + b'x',
+            'a masked server frame': bytes([0x81, 0x81]) + b'\0\0\0\0x',
+        }
+        for name, frames in cases.items():
+            with self.subTest(name):
+                error = self.refused(frames)
+                self.assertIsInstance(error, WebSocketError)
+                if 'unknown opcode' in name:
+                    self.assertIn('unknown opcode', str(error))
+
+    def test_a_ping_is_answered_with_its_payload(self):
+        got = []
+
+        def script(conn, server):
+            conn.sock.sendall(header(0x89, 4) + b'ping' + header(0x81, 2) + b'ok')
+            got.append(server.read_raw(conn))
+        server, ws = self.client(script)
+        self.assertEqual(ws.recv_text(), 'ok')
+        server.done.wait(5)
+        self.assertEqual((got[0][0] & 0x0F, got[0][3]), (0xA, b'ping'))
+
+    def test_close_frames(self):
+        for payload, code, echoed in ((b'\x03', 1002, struct.pack('!H', 1002)),
+                                      (struct.pack('!H', 1000) + b'\xff', 1007, struct.pack('!H', 1007)),
+                                      (b'', 1005, b''),
+                                      (struct.pack('!H', 4403) + b'gone', 4403, struct.pack('!H', 4403))):
+            got = []
+
+            def script(conn, server, payload=payload):
+                conn.sock.sendall(header(0x88, len(payload)) + payload)
+                got.append(server.read_raw(conn))
+            server, ws = self.client(script)
+            with self.assertRaises(Closed) as caught:
+                ws.recv_text()
+            server.done.wait(5)
+            self.assertEqual(caught.exception.code, code)
+            self.assertEqual(got[0][3], echoed)
+
+    def test_the_upgrade_must_prove_the_key_and_the_subprotocol(self):
+        for kw in ({'accept': base64.b64encode(b'x' * 20).decode()}, {'protocol': 'other.v1'}):
+            server = RawServer(lambda conn, server: None, **kw)
+            with self.assertRaises(WebSocketError):
+                WebSocket.connect(server.url, subprotocol='fabric-relay.v1', timeout=5)
+
+    @unittest.skipUnless(HAVE_CRYPTO, 'needs the engine full extra')
+    def test_tls_verifies_the_certificate(self):
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.x509.oid import NameOID
+        key = ec.generate_private_key(ec.SECP256R1())
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, '127.0.0.1')])
+        now = datetime.datetime.now(datetime.timezone.utc)
+        cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+                .serial_number(1).not_valid_before(now - datetime.timedelta(days=1))
+                .not_valid_after(now + datetime.timedelta(days=1))
+                .add_extension(x509.SubjectAlternativeName([x509.IPAddress(__import__('ipaddress').ip_address('127.0.0.1'))]), False)
+                .sign(key, hashes.SHA256()))
+        folder = Path(__import__('tempfile').mkdtemp())
+        self.addCleanup(lambda: [p.unlink() for p in folder.iterdir()] and folder.rmdir())
+        (folder / 'c.pem').write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+        (folder / 'k.pem').write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                                         serialization.NoEncryption()))
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(folder / 'c.pem', folder / 'k.pem')
+        server = socket.socket()
+        server.bind(('127.0.0.1', 0))
+        server.listen()
+        self.addCleanup(server.close)
+
+        def serve():
+            try:
+                sock, _ = server.accept()
+                with context.wrap_socket(sock, server_side=True):
+                    pass
+            except (OSError, ssl.SSLError):
+                pass
+        threading.Thread(target=serve, daemon=True).start()
+        with self.assertRaises(ssl.SSLCertVerificationError):
+            WebSocket.connect('wss://127.0.0.1:%d/v1/connect' % server.getsockname()[1], subprotocol='fabric-relay.v1',
+                              timeout=5)
+
+
+@unittest.skipUnless(HAVE_CRYPTO, 'needs the engine full extra (cryptography)')
+class Hardening(unittest.TestCase):
+    """Findings of the #293 review: nothing a relay sends kills the reader; a dead link closes; the node reconnects."""
+
+    def setUp(self):
+        self.a, self.b = DeviceKeys.generate(), DeviceKeys.generate()
+        self.relay = RelayStub({self.a.sig_kid: self.a.sig_public, self.b.sig_kid: self.b.sig_public})
+        self.peers = {self.a.sig_kid: self.a.sig_public, self.b.sig_kid: self.b.sig_public}
+        self.sessions = []
+
+    def tearDown(self):
+        for session in self.sessions:
+            session.close()
+        self.relay.stop()
+
+    def open(self, keys, **kw):
+        session = RelaySession(self.relay.origin, keys, ESTATE, self.peers.get, on_message=kw.pop('on_message', print),
+                               **kw)
+        session.open()
+        self.sessions.append(session)
+        return session
+
+    def body(self, payload_overrides=None, depth=0):
+        now = int(time.time()) * 1000
+        payload = {'type': relay.MESSAGE_TYPE, 'from': self.a.sig_kid, 'to': self.b.sig_kid, 'msgId': 'p-1',
+                   'iat': relay.rfc3339(now), 'exp': relay.rfc3339(now + 60_000), 'payload': None}
+        payload.update(payload_overrides or {})
+        head = p256.b64url_encode(b'{"alg":"ES256","typ":"fabric-relay-message+jwt"}')
+        text = json.dumps(payload, separators=(',', ':'), sort_keys=True)
+        if depth:
+            text = '[' * depth + ']' * depth
+        part = p256.b64url_encode(text.encode())
+        return head + '.' + part + '.' + self.a.sign(head + '.' + part)
+
+    def test_poison_bodies_are_refused_acknowledged_and_survived(self):
+        refused = []
+        b = self.open(self.b, on_refused=lambda reason, frame: refused.append(reason))
+        seqs = [self.relay.deliver_raw(self.b.sig_kid, **{'from': self.a.sig_kid, 'msgId': 'p-%d' % i,
+                                                          'body': p256.b64url_encode(body.encode())})
+                for i, body in enumerate([self.body({'iat': '0000-01-01T00:00:00Z'}), self.body(depth=900),
+                                          self.body(depth=100_000)])]
+        self.assertTrue(eventually(lambda: len(refused) == 3))
+        self.assertTrue(eventually(lambda: all((self.b.sig_kid, s) in self.relay.acks for s in seqs)))
+        b.ping()                                            # the reader is alive
+
+    def test_a_check_that_raises_refuses_the_body(self):
+        refused = []
+
+        def broken_lookup(kid):
+            raise RuntimeError('lookup')
+        b = RelaySession(self.relay.origin, self.b, ESTATE, broken_lookup, on_message=print,
+                         on_refused=lambda reason, frame: refused.append(reason))
+        b.open()
+        self.sessions.append(b)
+        seq = self.relay.deliver_raw(self.b.sig_kid, **{'from': self.a.sig_kid, 'msgId': 'p-1',
+                                                        'body': p256.b64url_encode(self.body().encode())})
+        self.assertTrue(eventually(lambda: refused == ['malformed']))
+        self.assertTrue(eventually(lambda: (self.b.sig_kid, seq) in self.relay.acks))
+        b.ping()
+
+    def test_an_unexpected_failure_closes_the_session_with_its_reason(self):
+        class Broken(session_module.ReplayStore):
+            def add(self, *args):
+                raise RuntimeError('store')
+        received = []
+        b = RelaySession(self.relay.origin, self.b, ESTATE, self.peers.get, on_message=received.append,
+                         replay=Broken())
+        b.open()
+        self.sessions.append(b)
+        self.relay.deliver_raw(self.b.sig_kid, **{'from': self.a.sig_kid, 'msgId': 'p-1',
+                                                  'body': p256.b64url_encode(self.body().encode())})
+        self.assertTrue(b.wait_closed(5))
+        self.assertEqual(b.close_reason, 'relay.reader.RuntimeError')
+
+    def test_a_frame_nested_too_deep_is_skipped(self):
+        b = self.open(self.b)
+        self.relay.send_to(self.b.sig_kid, raw=('[' * 5000 + ']' * 5000).encode())
+        self.relay.send_to(self.b.sig_kid, raw=b'{"v":1,"type":' + b'[' * 70 + b']' * 70 + b',"id":"x"}')
+        b.ping()
+
+    def test_callbacks_that_raise_stop_nothing(self):
+        def boom(*args):
+            raise RuntimeError('callback')
+        b = self.open(self.b, on_presence=boom, on_refused=boom)
+        self.relay.send_to(self.b.sig_kid, {'v': 1, 'type': 'presence', 'id': 'q', 'kid': self.a.sig_kid,
+                                            'state': 'online', 'lastSeen': '2026-10-15T00:00:00Z'})
+        seq = self.relay.deliver_raw(self.b.sig_kid, **{'from': self.a.sig_kid, 'msgId': 'x', 'body': 'AAAA'})
+        self.assertTrue(eventually(lambda: (self.b.sig_kid, seq) in self.relay.acks))
+        b.ping()
+
+    def test_a_relay_that_never_says_hello_times_out(self):
+        self.relay.no_hello = True
+        errors = []
+
+        def attempt():
+            try:
+                RelaySession(self.relay.origin, self.a, ESTATE, self.peers.get, on_message=print).open()
+            except Exception as error:
+                errors.append(error)
+        with mock.patch.object(session_module, 'HELLO_TIMEOUT_SECONDS', 0.3):
+            thread = threading.Thread(target=attempt, daemon=True)
+            thread.start()
+            thread.join(3)                                  # well before the stub's 10 s silence ends
+        self.assertFalse(thread.is_alive())
+        self.assertIsInstance(errors[0], socket.timeout)
+
+    def test_a_dead_link_is_closed(self):
+        with mock.patch.multiple(session_module, PING_SECONDS=0.1, ANSWER_TIMEOUT_SECONDS=0.1):
+            b = self.open(self.b)
+            self.relay.ignore_pings = True
+            self.assertTrue(b.wait_closed(5))
+        self.assertEqual(b.close_reason, 'relay.session.dead')
+
+    def test_keep_connected_reopens_and_stops_on_4403(self):
+        states, stop = [], threading.Event()
+        thread = threading.Thread(target=keep_connected, args=(
+            lambda: RelaySession(self.relay.origin, self.b, ESTATE, self.peers.get, on_message=print), stop),
+            kwargs={'on_state': lambda state, detail: states.append((state, detail)), 'min_backoff': 0.05},
+            daemon=True)
+        thread.start()
+        self.assertTrue(eventually(lambda: [s for s, _ in states].count('open') == 1))
+        self.relay.shutdown(self.b.sig_kid, 1001)            # the relay restarts
+        self.assertTrue(eventually(lambda: [s for s, _ in states].count('open') == 2))
+        self.relay.revoke(self.b.sig_kid)                     # this machine leaves the estate
+        thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(states[-1], ('stopped', {'code': 4403}))
+        stop.set()
+
+
+class Redirects(unittest.TestCase):
+    """A blob request follows no redirect, through either opener: the signed header never reaches another origin."""
+
+    def test_no_redirect_is_followed(self):
+        from node import blobs
+        hits = []
+        server = socket.socket()
+        server.bind(('127.0.0.1', 0))
+        server.listen()
+        self.addCleanup(server.close)
+        port = server.getsockname()[1]
+
+        def serve():
+            for _ in range(4):
+                try:
+                    sock, _ = server.accept()
+                except OSError:
+                    return
+                request = sock.recv(65536).decode('latin-1')
+                hits.append(request.split(' ')[1])
+                sock.sendall(b'HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:%d/elsewhere\r\nContent-Length: 0\r\n'
+                             b'Connection: close\r\n\r\n' % port)
+                sock.close()
+        threading.Thread(target=serve, daemon=True).start()
+        import urllib.request
+        import urllib.error
+        for opener in (blobs._OPENER, blobs._LOCAL_OPENER):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                opener.open(urllib.request.Request('http://127.0.0.1:%d/v1/blobs/x' % port), timeout=5)
+            self.assertEqual(caught.exception.code, 302)
+            caught.exception.close()
+        self.assertNotIn('/elsewhere', hits)
 
 
 if __name__ == '__main__':

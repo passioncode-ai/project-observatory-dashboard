@@ -15,6 +15,7 @@ import os
 import re
 import stat
 import struct
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -318,6 +319,114 @@ class DeviceKeyStore(unittest.TestCase):
         self.assertNotEqual(new_device_id(), new_device_id())
         with self.assertRaises(ValueError):
             DeviceKeys('person@example', None, None, '')
+
+
+class AdversarialRound(unittest.TestCase):
+    """Findings of the #291 adversarial review (round 2): each input now gets a typed answer, never an exception."""
+
+    def test_year_0000_is_an_instant_as_javascript_reads_it(self):
+        self.assertEqual(relay.instant('0000-01-01T00:00:00Z'), -62167219200000)
+        self.assertEqual(relay.iso_ms(relay.instant('0000-02-29T12:00:00Z')), '0000-02-29T12:00:00.000Z')
+        self.assertEqual(relay.strict_time('0000-01-01T00:00:00+00:00'), -62167219200000)
+        self.assertEqual(relay.iso_ms(relay.instant('9999-12-31T23:59:59.999Z')), '9999-12-31T23:59:59.999Z')
+        for days in (-719_528, -1, 0, 1, 20_000, 2_900_000):        # 0000-01-01 to year 9909
+            ms = days * 86_400_000 + 12_345_000
+            self.assertEqual(relay.instant(relay.iso_ms(ms)), ms)
+
+    def test_non_ascii_digits_and_trailing_newlines_are_no_time(self):
+        for text in ('２０２６-10-12T00:00:00Z', '2026-10-12T00:00:00Z\n', '٢٠٢٦-10-12T00:00:00Z'):
+            self.assertIsNone(relay.instant(text))
+            self.assertIsNone(relay.strict_time(text))
+        self.assertIsNone(relay.strict_time('2026-10-12T00:00:00+00:00\n'))
+
+    @needs_crypto
+    def test_a_body_dated_year_0000_is_refused_not_raised(self):
+        keys = DeviceKeys.generate()
+        header = p256.b64url_encode(jcs.canonical_bytes({'alg': 'ES256', 'kid': keys.sig_kid, 'typ': relay.MESSAGE_TYP}))
+        payload = p256.b64url_encode(jcs.canonical_bytes({
+            'type': relay.MESSAGE_TYPE, 'from': keys.sig_kid, 'to': 'm-b#sig', 'msgId': 'x',
+            'iat': '0000-01-01T00:00:00Z', 'exp': '0000-01-01T01:00:00Z', 'payload': None}))
+        body = header + '.' + payload + '.' + keys.sign(header + '.' + payload)
+        expect = {'from': keys.sig_kid, 'to': 'm-b#sig', 'msgId': 'x'}
+        self.assertEqual(relay.verify_message_body(body, expect, {keys.sig_kid: keys.sig_public}.get,
+                                                   ms('2026-10-12T00:00:00Z')), {'ok': False, 'reason': 'expired'})
+        self.assertEqual(relay.check_replay(lambda f, m: False, {'from': 'a', 'msgId': 'b', 'exp': '0000-01-01T00:00:00Z'},
+                                            0)['reason'], 'expired')
+        self.assertEqual(relay.peer_keys({'issuedAt': '0000-01-01T00:00:00Z', 'validUntil': '0000-01-02T00:00:00Z'},
+                                         0), {'ok': False, 'refusal': 'expired'})
+
+    def test_deep_nesting_is_malformed(self):
+        for depth in (65, 600, 900, 100_000):
+            nested = p256.b64url_encode(('[' * depth + ']' * depth).encode())
+            header = p256.b64url_encode(b'{"alg":"ES256","typ":"fabric-relay-message+jwt"}')
+            for body in (header + '.' + nested + '.sig', nested + '.' + nested + '.sig'):
+                self.assertEqual(relay.verify_message_body(body, {'from': 'a', 'to': 'b', 'msgId': 'c'},
+                                                           lambda kid: None, 0), {'ok': False, 'reason': 'malformed'})
+        for depth in (65, 3000, 100_000):
+            value = p256.b64url_encode(('{"a":' * depth + '1' + '}' * depth).encode())
+            answer = relay.parse_relay_request(value)
+            self.assertFalse(answer['ok'])
+            self.assertIn(answer['code'], ('malformed', 'too-large'))
+        self.assertEqual(relay.parse_relay_request(p256.b64url_encode(('[' * 64 + ']' * 64).encode()))['code'],
+                         'malformed')
+        self.assertFalse(jcs.is_canonical(json.loads('[' * 64 + ']' * 64), b'x'))
+        with self.assertRaises(jcs.CanonicalError):
+            jcs.rfc8785(json.loads('[' * 66 + ']' * 66))
+
+    def test_peer_keys_are_bound_to_their_machine_and_read_strictly(self):
+        good = base64.b64encode(p256.point(vectors('relay')['machineKey'])).decode()
+        record = {'issuedAt': '2026-10-12T00:00:00Z', 'validUntil': '2026-11-01T00:00:00Z', 'revocations': [
+            {'kind': 'machine', 'ref': {'unhashable': True}}, {'kind': 'device-key', 'ref': ['x']}], 'machines': [
+            {'id': 'm-a', 'deviceKeys': [{'kid': 'm-a#sig', 'use': 'sig', 'publicKey': good}]},
+            {'id': 'm-b', 'deviceKeys': [{'kid': 'm-a#sig', 'use': 'sig', 'publicKey': good}]},
+            {'id': 'm-c', 'deviceKeys': [{'kid': 'm-x#sig', 'use': 'sig', 'publicKey': good}]},
+            {'id': 'm-d', 'deviceKeys': [{'kid': 'm-d#sig', 'use': 'sig', 'publicKey': good[:20] + '=' + good[21:]}]},
+            {'id': 'm-e', 'deviceKeys': [{'kid': 'm-e#sig', 'use': 'sig', 'publicKey': good + 'A'}]},
+            {'id': {'not': 'a string'}, 'deviceKeys': []},
+            {'id': 'm-f', 'deviceKeys': [{'kid': 'm-f#sig', 'use': 'sig', 'publicKey': good}]}]}
+        answer = relay.peer_keys(record, ms('2026-10-13T00:00:00Z'))
+        self.assertEqual(sorted(answer['keys']), ['m-f#sig'])
+        self.assertEqual(sorted(e['kid'] for e in answer['excluded']), ['m-a#sig', 'm-d#sig', 'm-e#sig', 'm-x#sig'])
+
+    @needs_crypto
+    def test_a_blob_request_no_relay_accepts_is_never_signed(self):
+        keys = DeviceKeys.generate()
+        base = dict(relay='https://relay.example', method='PUT', digest='sha256:' + 'ab' * 32, kid=keys.sig_kid,
+                    recipients=['m-b#sig'], iat='2026-10-12T00:00:00Z')
+        for bad in ({'relay': 'https://relay.example/x'}, {'digest': 'sha256:AB'}, {'iat': '2026-02-30T00:00:00Z'},
+                    {'method': 'POST'}):
+            with self.assertRaises(ValueError):
+                relay.relay_request_header(keys.sign, **dict(base, **bad))
+
+    @needs_crypto
+    def test_one_key_set_when_processes_start_together(self):
+        script = ('import sys; sys.path.insert(0, %r); from pathlib import Path; from node.device_keys import DeviceKeys;'
+                  'k = DeviceKeys.load_or_create(Path(sys.argv[1])); print(k.device_id, k.sig_public.hex(), '
+                  'k.kem_public.hex())') % str(ROOT)
+        for trial in range(6):
+            folder = Path(tmpdir.mkdtemp()).resolve() / 'device'
+            runs = [subprocess.Popen([sys.executable, '-c', script, str(folder)], stdout=subprocess.PIPE, text=True)
+                    for _ in range(4)]
+            outputs = {run.communicate(timeout=60)[0].strip() for run in runs}
+            disk = DeviceKeys.load(folder)
+            self.assertEqual(outputs, {'%s %s %s' % (disk.device_id, disk.sig_public.hex(), disk.kem_public.hex())},
+                             trial)
+            self.assertEqual(sorted(p.name for p in folder.iterdir() if not p.name.startswith('.')),
+                             ['device.json', 'kem.pem', 'sig.pem'])
+
+    @needs_crypto
+    def test_a_folder_others_may_write_is_refused(self):
+        folder = Path(tmpdir.mkdtemp()).resolve() / 'device'
+        DeviceKeys.load_or_create(folder)
+        os.chmod(folder, 0o777)
+        with self.assertRaises(RuntimeError):
+            DeviceKeys.load(folder)
+        os.chmod(folder, 0o700)
+        self.assertTrue(DeviceKeys.load(folder).device_id)
+
+    def test_device_ids_end_where_they_end(self):
+        with self.assertRaises(ValueError):
+            DeviceKeys('m-1234\n', None, None, '')
 
 
 # ---- The relay's checks, in the reference's order, as a cross-check of what the node signs -------------------------
