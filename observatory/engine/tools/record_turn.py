@@ -15,9 +15,11 @@ Prints a JSON object on stdout for the hook to act on:
      "project": "project:…", "files": 3, "insertions": 40, "deletions": 5,
      "session": …, "ask": true, "rationale": null}
 `ask` says whether the hook should ask for the `why` at all: false once this record
-has been asked about (`why_asks.py`, once per record), and false when the turn's
-own diff already carries the rationale — the decision register or a task-pipeline
-ledger line, linked in `rationale` and in the record's evidence instead.
+has been asked about (`why_asks.py`, once per record), and false when this
+session's own tools already wrote the rationale — the decision register or a
+task-pipeline ledger line, attributed through `--transcript` — linked in
+`rationale` and in the record's evidence instead. When `ask` is true, `journal`
+names the file the prompt hook appends its delivery to.
 Any refusal is `{"recorded": false, "reason": …}` — never a traceback, because
 the caller is a hook that must degrade silently.
 """
@@ -254,6 +256,9 @@ def diff_facts(cwd: pathlib.Path) -> dict:
             ins += int(parts[0]) if parts[0].isdigit() else 0
             dele += int(parts[1]) if parts[1].isdigit() else 0
     files = sorted({l[3:].split(" -> ")[-1].strip() for l in porcelain})
+    # A deleted file holds no rationale: removing `docs/DECISIONS.md` is not
+    # writing one, so a `D` in either column takes the file out of the reading.
+    deleted = sorted({l[3:].split(" -> ")[-1].strip() for l in porcelain if "D" in l[:2]})
     untracked = sorted({l[3:].strip() for l in porcelain if l.startswith("??")})
     if any(u.endswith("/") for u in untracked):
         # `status` folds an untracked directory into one `?? docs/` line, which
@@ -270,11 +275,12 @@ def diff_facts(cwd: pathlib.Path) -> dict:
         if upstream else []
     # The files the unpushed commits touched: a turn that COMMITTED its decision
     # register wrote its rationale as surely as one that left it uncommitted.
-    committed = sorted({l.strip() for l in git(cwd, "diff", "--name-only", "@{u}..HEAD")
-                        .splitlines() if l.strip()}) if unpushed else []
+    committed = sorted({l.strip() for l in git(cwd, "diff", "--name-only", "--diff-filter=d",
+                                               "@{u}..HEAD").splitlines() if l.strip()}) \
+        if unpushed else []
     return {"files": files, "insertions": ins, "deletions": dele, "head": head,
             "branch": branch, "unpushed": [u[:120] for u in unpushed[:MAX_SUBJECTS]],
-            "untracked": untracked, "committed": committed,
+            "untracked": untracked, "committed": committed, "deleted": deleted,
             "base": "@{u}" if unpushed else "HEAD"}
 
 
@@ -293,14 +299,28 @@ def statement_of(facts: dict, repo_id: str) -> str:
 #: Where a project writes its rationale down. A decision register is any
 #: `decisions.md` (the conventional `docs/DECISIONS.md`, a run's
 #: `<artifacts>/decisions.md`) and any file under an `adr/` directory; the
-#: task-pipeline ledger counts only when the turn added a `decision:` or `stage:`
-#: line to it, because the ledger also records plain notes.
+#: task-pipeline ledger counts only for a `decision:` or `stage:` line, because the
+#: ledger also records plain notes.
 RUN_LEDGER = ".task-pipeline/run.md"
-LEDGER_LINE = re.compile(r"^\s*(?:[-*]\s*)?(?:decision|stage)\s*:", re.I)
+LEDGER_LINE = re.compile(r"^\s*(?:[-*]\s*)?(?:decision|stage)\s*:\s*(.*)$", re.I)
 HEADING = re.compile(r"^\s*#{1,6}\s+(.+?)\s*$")
 ANCHOR_CHARS = 120
-#: An untracked ledger or register is read whole, so it is read bounded.
+#: An untracked or ignored ledger or register is read whole, so it is read bounded.
 READ_LIMIT = 256 * 1024
+#: Somebody else's history inside the checkout: a vendored library's own ADRs are
+#: not this project's rationale. Submodules are added from `.gitmodules`.
+VENDORED = frozenset({"vendor", "vendors", "node_modules", "third_party", "third-party",
+                      "thirdparty", "external", "bower_components", ".venv", "venv",
+                      "site-packages", ".git"})
+#: A line shorter than this (`---`, `## x`) is too common to attribute anything.
+MIN_NEEDLE = 6
+#: The part of a session transcript read for attribution: its end, where this
+#: session's newest work is. A register written further back than this is not
+#: found, and the turn is asked about — the failure is toward asking.
+TRANSCRIPT_TAIL = 64 << 20
+#: The tools whose INPUT carries text the session wrote. A tool's result (a Read of
+#: the file another session edited) is never attribution.
+WRITING_TOOLS = frozenset({"Edit", "MultiEdit", "Write", "NotebookEdit", "Bash"})
 
 
 def _is_register(rel: str) -> bool:
@@ -311,45 +331,128 @@ def _is_register(rel: str) -> bool:
         "adr" in (p.lower() for p in parts[:-1]) and parts[-1].lower().endswith((".md", ".markdown", ".txt")))
 
 
+def _submodules(top: pathlib.Path) -> list[str]:
+    if not (top / ".gitmodules").is_file():
+        return []
+    out = git(top, "config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$")
+    return [l.split(None, 1)[1].strip().rstrip("/") for l in out.splitlines() if len(l.split(None, 1)) == 2]
+
+
+def _vendored(rel: str, submodules: list[str]) -> bool:
+    if any(p.lower() in VENDORED for p in pathlib.PurePosixPath(rel).parts[:-1]):
+        return True
+    return any(rel == s or rel.startswith(s + "/") for s in submodules)
+
+
+def _read_bounded(path: pathlib.Path) -> list[str]:
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            return fh.read(READ_LIMIT).splitlines()
+    except OSError:
+        return []
+
+
 def _added_lines(top: pathlib.Path, rel: str, facts: dict) -> list[str]:
-    """The lines this work added to `rel`: the whole file when git does not track it
-    yet, else what `git diff <base>` adds — the uncommitted change and the
-    unpushed commits together."""
+    """The non-blank lines this work added to `rel`: the whole file when git does not
+    track it, else what `git diff <base>` adds — the uncommitted change and the
+    unpushed commits together — ignoring whitespace, so re-indenting a register
+    adds nothing."""
     if rel in facts.get("untracked", ()):
+        lines = _read_bounded(top / rel)
+    else:
+        diff = git(top, "diff", "--ignore-all-space", "--ignore-blank-lines",
+                   facts.get("base") or "HEAD", "--", rel)
+        lines = [l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++")]
+    return [l for l in lines if l.strip()]
+
+
+def _written_by_session(transcript: str | None, texts: list[str]) -> bool:
+    """Did THIS session write any of `texts`? Read from its own transcript.
+
+    The working tree is shared: two sessions in one checkout see each other's
+    uncommitted edits, so a register another session is writing must not silence
+    this session's ask. A session wrote a line when the line appears in the INPUT of
+    one of its writing tools — an Edit's new text, a Write's content, a Bash command
+    or heredoc. No transcript (another host, an older hook) means no attribution,
+    and the turn is asked about.
+    """
+    needles = [t.strip() for t in texts if len(t.strip()) >= MIN_NEEDLE]
+    if not transcript or not needles:
+        return False
+    path = pathlib.Path(transcript)
+    try:
+        with path.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - TRANSCRIPT_TAIL))
+            data = fh.read()
+    except OSError:
+        return False
+    forms = {json.dumps(t, ensure_ascii=a)[1:-1] for t in needles for a in (False, True)}
+    raw = [f.encode("utf-8") for f in forms]
+    for line in data.split(b"\n"):
+        if not any(r in line for r in raw):
+            continue
         try:
-            with (top / rel).open("r", encoding="utf-8", errors="replace") as fh:
-                return fh.read(READ_LIMIT).splitlines()
-        except OSError:
-            return []
-    diff = git(top, "diff", facts.get("base") or "HEAD", "--", rel)
-    return [l[1:] for l in diff.splitlines() if l.startswith("+") and not l.startswith("+++")]
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(rec, dict) or rec.get("type") != "assistant":
+            continue
+        content = (rec.get("message") or {}).get("content")
+        for item in content if isinstance(content, list) else ():
+            if not isinstance(item, dict) or item.get("type") != "tool_use" \
+                    or item.get("name") not in WRITING_TOOLS:
+                continue
+            blob = json.dumps(item.get("input"), ensure_ascii=False) \
+                + json.dumps(item.get("input"), ensure_ascii=True)
+            if any(f in blob for f in forms):
+                return True
+    return False
 
 
-def rationale_of(top: pathlib.Path, facts: dict) -> dict | None:
-    """`{source, ref, anchor?}` when this work already wrote its rationale, else None.
+def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None) -> dict | None:
+    """`{source, ref, anchor?}` when THIS session already wrote its rationale, else None.
 
-    The ledger's `why` is then a LINK to the canonical rationale, never a second
-    copy: the record's evidence names the file, and the hook asks for nothing.
-    Errors read as "no rationale", which asks — the old behaviour.
+    Three things must hold. The file is a decision register (or the run ledger with a
+    `decision:` / `stage:` line) outside a vendored tree or a submodule; the work added
+    at least one non-blank line to it, ignoring whitespace, and did not delete it; and
+    that text appears in what this session's own tools wrote (`_written_by_session`).
+    The ledger's `why` is then a LINK to the canonical rationale, never a second copy:
+    the record's evidence names the file, and the hook asks for nothing. Errors read
+    as "no rationale", which asks — the old behaviour.
     """
     try:
-        touched = sorted(set(facts.get("files") or ()) | set(facts.get("committed") or ())
-                         | set(facts.get("untracked") or ()))
+        deleted = set(facts.get("deleted") or ())
+        touched = sorted((set(facts.get("files") or ()) | set(facts.get("committed") or ())
+                          | set(facts.get("untracked") or ())) - deleted)
+        subs = _submodules(top) if any(_is_register(r) for r in touched) else []
         for rel in touched:
-            if _is_register(rel):
-                # The LAST heading added: a register grows at its end, and a new
-                # register's first heading is its title, not a decision.
-                heads = [m.group(1) for l in _added_lines(top, rel, facts)
-                         if (m := HEADING.match(l))]
-                anchor = heads[-1] if heads else None
-                return {"source": "decision-register", "ref": rel,
-                        **({"anchor": anchor[:ANCHOR_CHARS]} if anchor else {})}
+            if not _is_register(rel) or _vendored(rel, subs):
+                continue
+            added = _added_lines(top, rel, facts)
+            if not added or not _written_by_session(transcript, added):
+                continue
+            # The LAST heading added: a register grows at its end, and a new
+            # register's first heading is its title, not a decision.
+            heads = [m.group(1) for l in added if (m := HEADING.match(l))]
+            anchor = heads[-1] if heads else None
+            return {"source": "decision-register", "ref": rel,
+                    **({"anchor": anchor[:ANCHOR_CHARS]} if anchor else {})}
+        # THE RUN LEDGER, tracked or not. Many projects ignore `.task-pipeline/`, so
+        # `git status` never lists it; it is read from disk then, and only what this
+        # session's tools wrote into it counts.
         if RUN_LEDGER in touched:
-            line = next((l.strip() for l in _added_lines(top, RUN_LEDGER, facts)
-                         if LEDGER_LINE.match(l)), None)
-            if line:
+            lines = _added_lines(top, RUN_LEDGER, facts)
+        elif (top / RUN_LEDGER).is_file() and not git(top, "ls-files", "--", RUN_LEDGER).strip():
+            lines = _read_bounded(top / RUN_LEDGER)
+        else:
+            lines = []
+        for line in reversed(lines):
+            m = LEDGER_LINE.match(line)
+            if m and _written_by_session(transcript, [m.group(1)]):
                 return {"source": "task-pipeline", "ref": RUN_LEDGER,
-                        "anchor": line[:ANCHOR_CHARS]}
+                        "anchor": line.strip()[:ANCHOR_CHARS]}
     except Exception:                                                              # noqa: BLE001
         return None
     return None
@@ -370,6 +473,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cwd", required=True)
     ap.add_argument("--session-id", default="")
+    # The session's own transcript (the Stop payload's `transcript_path`): what this
+    # session wrote, as against what any session left in the shared working tree.
+    ap.add_argument("--transcript", default="")
     args = ap.parse_args()
     # BEFORE THE FIRST GUARD, not beside the one that checks it. The assignment
     # sat after the git-repository check, so the earliest returns — the common
@@ -404,7 +510,7 @@ def main() -> int:
     statement = statement_of(facts, repo_id)
     evidence = [{"uri": f"repo:{repo_id}", "head": facts["head"], "branch": facts["branch"]},
                 {"uri": "git:status --porcelain", "files": facts["files"][:40]}]
-    rationale = rationale_of(pathlib.Path(top or cwd), facts)
+    rationale = rationale_of(pathlib.Path(top or cwd), facts, args.transcript or None)
     if rationale:
         evidence.append({"uri": f"file:{rationale['ref']}", "kind": "rationale",
                          **({"anchor": rationale["anchor"]} if rationale.get("anchor") else {})})
@@ -514,6 +620,9 @@ def main() -> int:
                     "revision": result["revision"], "hasWhy": has_why,
                     "session": args.session_id, "ask": ask["ask"],
                     **({"askJournal": ask["journal"]} if "journal" in ask else {}),
+                    # Where the prompt hook records that it DELIVERED the ask: the
+                    # answer rate is measured on delivered asks only.
+                    **({"journal": str(why_asks.JOURNAL)} if ask["ask"] else {}),
                     "rationale": rationale,
                     "continues": continues,
                     "project": project_id, "files": len(facts["files"]),

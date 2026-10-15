@@ -1390,32 +1390,37 @@ def why_unanswered_findings(measured: dict | None) -> list[dict]:
 
     The request ran after every changed turn as a Stop notice — 3,593 times in
     fourteen days on one machine for 34 answers — and nothing measured that. It is
-    now asked once per record, with the next prompt, and journalled
-    (`why_asks.py`); this reads the answer rate over the window and speaks when
-    the ask costs every session context and records almost nothing: below
-    `why_asks.FLOOR_RATE` with at least `why_asks.FLOOR_ASKS` asks. Fewer asks is
-    too little to judge, and an unmeasured rate (no store) says nothing.
+    now asked once per record, delivered with the next prompt and journalled
+    (`why_asks.py`); this reads the answer rate over the window and speaks when the
+    ask costs every session context and records almost nothing: below
+    `why_asks.FLOOR_RATE` with at least `why_asks.FLOOR_ASKS` DELIVERED asks. An ask
+    that was never delivered — a headless session with no second prompt — is
+    pending, not unanswered, and never counts. Fewer delivered asks is too little to
+    judge, and an unmeasured rate (no store) says nothing.
     """
     m = measured or {}
-    asked, answered, rate = m.get("asked"), m.get("answered"), m.get("rate")
-    if not isinstance(asked, int) or not isinstance(answered, int) or rate is None:
+    delivered, answered, rate = m.get("delivered"), m.get("answered"), m.get("rate")
+    if not isinstance(delivered, int) or not isinstance(answered, int) or rate is None:
         return []
-    if asked < why_asks.FLOOR_ASKS or rate >= why_asks.FLOOR_RATE:
+    if delivered < why_asks.FLOOR_ASKS or rate >= why_asks.FLOOR_RATE:
         return []
     days = (m.get("window") or {}).get("days", why_asks.WINDOW_DAYS)
-    floor = (" The journal is read from its end and that bound was reached, so the "
-             "count is a floor." if m.get("floor") else "")
+    pending = m.get("pending") or 0
+    waiting = (f" {pending} further ask(s) never reached the model (no later prompt in "
+               f"their session) and are not counted." if pending else "")
+    floor = (" A journal generation was larger than its read bound, so the counts "
+             "are floors." if m.get("floor") else "")
     bad = (f" {m['unreadable']} journal line(s) could not be read." if m.get("unreadable") else "")
     return [{
         "type": "observatory.why_unanswered", "subject": "skill:observatory-log",
         "severity": "warning",
-        **titled("{n} requests for a why went unanswered", n=asked - answered),
-        "detail": (f"{answered} of {asked} records the companion asked about in the last "
-                   f"{days} days received a `why` ({rate:.0%}). Each record is asked about "
-                   f"once, as context on the next prompt, and not at all when the turn "
-                   f"wrote its decision register; below {why_asks.FLOOR_RATE:.0%} the ask "
-                   f"costs every session context and puts almost nothing in the ledger."
-                   + floor + bad),
+        **titled("{n} requests for a why went unanswered", n=delivered - answered),
+        "detail": (f"{answered} of {delivered} records whose request for a `why` reached "
+                   f"the model in the last {days} days received one ({rate:.0%}). Each "
+                   f"record is asked about once, as context on the next prompt, and not "
+                   f"at all when the session wrote its decision register; below "
+                   f"{why_asks.FLOOR_RATE:.0%} the ask costs every session context and "
+                   f"puts almost nothing in the ledger." + waiting + floor + bad),
         "action": ("check that an ask reached the model: `python \"$(project-observatory "
                    "full-path)/why_asks.py\" reached <session transcript .jsonl> <memory id>` "
                    "(exit 0 when the model received it). If it did and agents in this setup "

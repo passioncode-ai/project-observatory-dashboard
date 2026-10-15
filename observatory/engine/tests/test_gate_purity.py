@@ -459,7 +459,8 @@ def test_the_page_is_allowed_and_says_why() -> None:
     expected = {"store/raw/record-turn.json", "store/raw/integrity.json",
                 "store/raw/tick-lease.json", "store/raw/store-faults.jsonl",
                 "store/raw/companion-faults.jsonl", "store/raw/serverd.json",
-                "store/raw/why-asks.jsonl"}
+                "store/raw/why-asks.jsonl", "store/raw/why-asks.jsonl.1",
+                "store/raw/why-asks.jsonl.lock"}
     check(f"exactly the {len(expected)} known foreign writers are exempted",
           set(foreign) == expected,
           f"unexpected: {sorted(set(foreign) - expected)}, "

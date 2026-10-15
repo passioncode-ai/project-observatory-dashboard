@@ -201,7 +201,8 @@ LOG_SUFFIXES = ('.log', '.err', '.out', '.jsonl')
 #: required to hold still; `test_every_receipt_a_session_hook_writes_is_exempt` keeps
 #: this set equal to what those modules write.
 SESSION_RECEIPTS = frozenset({'store/raw/record-turn.json', 'store/raw/sessions-seen.jsonl',
-                              'store/raw/companion-faults.jsonl', 'store/raw/why-asks.jsonl'})
+                              'store/raw/companion-faults.jsonl', 'store/raw/why-asks.jsonl',
+                              'store/raw/why-asks.jsonl.1', 'store/raw/why-asks.jsonl.lock'})
 
 
 def volatile(name: str, databases: set[str]) -> bool:

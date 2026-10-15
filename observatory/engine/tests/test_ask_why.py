@@ -1,34 +1,32 @@
 #!/usr/bin/env python3
-"""The ask for a `why`: once per record, not when the rationale is already written,
-delivered with the next prompt, and measured.
+"""The ask for a `why`: once per record, not when this session already wrote the
+rationale, delivered with the next prompt, and measured on what was delivered.
 
 **What this replaces.** The Stop hook printed a request for a `why` as a Stop
 `systemMessage` after EVERY turn that changed a watched repository. Measured over
 fourteen days of one machine's transcripts: 3,593 asks, 2.93 million characters of
 hook output (each stored twice in the transcript), and 34 `observatory_record` calls
 carrying a memory id in the same window — at most 0.95 % answered. Three causes,
-each with its case below:
+each with its cases below:
 
 1. **Every turn asked again.** A session is ONE record revised per turn, so the
    second changed turn asked for the same record's why a second time.
 2. **The why already existed.** A turn that wrote the project's decision register
    (`docs/DECISIONS.md`, `docs/adr/*`, a `decisions.md`) or a task-pipeline ledger
    line (`decision:` / `stage:` in `.task-pipeline/run.md`) had written its
-   rationale; asking for a second copy in the ledger is noise. The record now links
-   that file in its evidence and the hook stays silent.
+   rationale. The record now links that file and the hook stays silent — but only
+   for a rationale THIS session's own tools wrote (read from its transcript), with
+   at least one non-blank added line, not deleted, and outside a vendored tree.
 3. **The channel.** A Stop `systemMessage` is a notice shown to the person; it is
    not part of what the model reads. The ask now travels as the next
-   `UserPromptSubmit`'s `additionalContext`, once (`tests/test_ask_why_reach.py`
-   proves that channel against a recorded transcript).
+   `UserPromptSubmit`'s `additionalContext`, once (`tests/test_ask_why_reach.py`).
 
-And it is measured: every ask is journalled (`store/raw/why-asks.jsonl`), an ask is
-answered when its record later carries a `why`, the receipt
-`store/raw/record-turn.json` carries `whyAsks`, and `observatory.why_unanswered`
-fires below a 10 % answer rate over 7 days with at least 20 asks.
+And it is measured on DELIVERED asks: the prompt hook journals each delivery, a
+headless session that never sends a second prompt adds nothing to the denominator,
+and `observatory.why_unanswered` fires below 10 % over 7 days with at least 20
+delivered asks — through `build_findings.collect()`, which a case here drives.
 
-The hook fails OPEN for the person's prompt and toward ASKING for the record: an
-unreadable journal asks (the old behaviour), an unwritable pending store falls back
-to the old Stop notice, and nothing here ever blocks a turn or a prompt.
+The hook fails OPEN for the person's prompt and toward ASKING for the record.
 """
 from __future__ import annotations
 import json
@@ -39,6 +37,7 @@ import stat
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -65,11 +64,14 @@ def _git(repo: pathlib.Path, *args: str) -> str:
 
 
 class Fixture:
-    """A watched checkout, an isolated store and scratch, and an isolated hook state."""
+    """A watched checkout, an isolated store and scratch, an isolated hook state, and
+    the session's own transcript."""
 
     def __init__(self) -> None:
         self.work, self.repo, built = watched_repo.build()
         self.state = self.work / "xdg-state"
+        self.transcripts = self.work / "transcripts"
+        self.transcripts.mkdir()
         self.env = {**os.environ, **built,
                     "OBSERVATORY_DB": str(self.work / "observatory.db"),
                     "OBSERVATORY_SCRATCH": str(self.work / "scratch"),
@@ -86,10 +88,35 @@ class Fixture:
     def pending_dir(self) -> pathlib.Path:
         return self.state / "project-observatory" / "ask-why"
 
-    def stop(self, session: str = "sess-1") -> subprocess.CompletedProcess:
-        return subprocess.run(["bash", str(STOP)], input=json.dumps(
-            {"session_id": session, "cwd": str(self.repo), "stop_hook_active": False}),
-            text=True, capture_output=True, env=self.env, timeout=300)
+    def transcript(self, session: str) -> pathlib.Path:
+        return self.transcripts / f"{session}.jsonl"
+
+    def wrote(self, text: str, *, session: str = "sess-1", tool: str = "Edit",
+              rel: str = "docs/DECISIONS.md") -> None:
+        """Record in the session's transcript that ITS tool wrote `text`."""
+        key = {"Edit": "new_string", "Write": "content", "Bash": "command"}[tool]
+        inp = {key: text} if tool == "Bash" else {"file_path": str(self.repo / rel), key: text}
+        rec = {"type": "assistant", "sessionId": session, "message": {
+            "role": "assistant", "content": [{"type": "tool_use", "id": "toolu_fixture",
+                                              "name": tool, "input": inp}]}}
+        with self.transcript(session).open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + "\n")
+
+    def read_back(self, text: str, *, session: str = "sess-1") -> None:
+        """Record that the session READ `text` (a tool result) — never attribution."""
+        rec = {"type": "user", "sessionId": session, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_fixture", "content": text}]}}
+        with self.transcript(session).open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + "\n")
+
+    def stop(self, session: str = "sess-1", transcript: bool = True) -> subprocess.CompletedProcess:
+        payload = {"session_id": session, "cwd": str(self.repo), "stop_hook_active": False}
+        if transcript:
+            t = self.transcript(session)
+            t.touch()
+            payload["transcript_path"] = str(t)
+        return subprocess.run(["bash", str(STOP)], input=json.dumps(payload),
+                              text=True, capture_output=True, env=self.env, timeout=300)
 
     def prompt(self, session: str = "sess-1", raw: str | None = None,
                ) -> subprocess.CompletedProcess:
@@ -102,11 +129,12 @@ class Fixture:
     def receipt(self) -> dict:
         return json.loads((self.scratch / "record-turn.json").read_text(encoding="utf-8"))
 
-    def journal(self) -> list[dict]:
+    def journal(self, event: str | None = "asked") -> list[dict]:
         f = self.scratch / "why-asks.jsonl"
         if not f.is_file():
             return []
-        return [json.loads(l) for l in f.read_text(encoding="utf-8").splitlines() if l.strip()]
+        rows = [json.loads(l) for l in f.read_text(encoding="utf-8").splitlines() if l.strip()]
+        return [r for r in rows if event is None or (r.get("event") or "asked") == event]
 
     def ledger(self, sql: str, *args) -> list:
         con = sqlite3.connect(f"file:{self.work / 'observatory.db'}?mode=ro", uri=True)
@@ -122,6 +150,17 @@ class Fixture:
         out = json.loads(p.stdout)
         hso = out.get("hookSpecificOutput") or {}
         return hso.get("additionalContext", "") if hso.get("hookEventName") == "UserPromptSubmit" else ""
+
+    def change(self, name: str = "src.py") -> None:
+        """A real code change beside whatever else the case plants."""
+        (self.repo / name).write_text(f"print('{name}')\n", encoding="utf-8")
+
+    def commit_all(self, message: str = "base") -> None:
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", message)
+
+
+REGISTER = "# Decisions\n\n## DEC-0001 one record per decision\n\nBecause the ask repeated.\n"
 
 
 class AskOncePerRecord(unittest.TestCase):
@@ -148,6 +187,20 @@ class AskOncePerRecord(unittest.TestCase):
         self.assertIn("observatory_record(", delivered)
         self.assertEqual(fx.context(fx.prompt()), "", "delivered once, then silent")
 
+    def test_in_the_real_order_the_second_prompt_gets_nothing(self):
+        # Stop, prompt, Stop, prompt — what a live session does. The hook's own
+        # `ask` check is what keeps the second prompt silent: the pending file was
+        # consumed by the first prompt, so only the hook can refuse to leave another.
+        fx = Fixture()
+        fx.stop()
+        first = fx.context(fx.prompt())
+        self.assertIn("observatory_record(", first)
+        (fx.repo / "second.txt").write_text("the second turn's work\n", encoding="utf-8")
+        p = fx.stop()
+        self.assertEqual((p.returncode, p.stdout.strip()), (0, ""))
+        self.assertEqual(fx.context(fx.prompt()), "", "the same record is not asked again")
+        self.assertFalse((fx.pending_dir / "sess-1.json").exists())
+
     def test_the_next_prompt_gets_it_once_and_another_session_never(self):
         fx = Fixture()
         fx.stop("sess-a")
@@ -163,7 +216,6 @@ class AskOncePerRecord(unittest.TestCase):
         fx.stop()
         mid = fx.journal()[0]["memoryId"]
         fx.prompt()                                     # the ask is consumed
-        # The agent answers through the ledger, as the ask tells it to.
         code = ("import sys; sys.path.insert(0, '.')\n"
                 "from store import db, ledger as L\n"
                 "c = db.connect()\n"
@@ -180,15 +232,16 @@ class AskOncePerRecord(unittest.TestCase):
         fx.stop()
         self.assertEqual(len(fx.journal()), 1, "no second ask")
         self.assertEqual(fx.context(fx.prompt()), "")
-        self.assertEqual(fx.receipt()["whyAsks"]["answered"], 1, fx.receipt().get("whyAsks"))
+        w = fx.receipt()["whyAsks"]
+        self.assertEqual((w["delivered"], w["answered"], w["rate"]), (1, 1, 1.0), w)
 
 
-class SkipWhenTheRationaleExists(unittest.TestCase):
+class SkipWhenThisSessionWroteTheRationale(unittest.TestCase):
     def test_a_turn_editing_the_decision_register_is_not_asked_about(self):
         fx = Fixture()
         (fx.repo / "docs").mkdir()
-        (fx.repo / "docs/DECISIONS.md").write_text(
-            "# Decisions\n\n## DEC-0001 one record per decision\n\nBecause.\n", encoding="utf-8")
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.wrote(REGISTER, tool="Write")
         p = fx.stop()
         self.assertEqual(p.returncode, 0, p.stderr[-300:])
         self.assertEqual(p.stdout.strip(), "")
@@ -203,18 +256,32 @@ class SkipWhenTheRationaleExists(unittest.TestCase):
         why = fx.ledger("SELECT why FROM ledger WHERE kind='session'")[0][0]
         self.assertIsNone(why, "a link to the canonical rationale, never a second copy")
 
-    def test_an_adr_or_a_committed_register_counts_too(self):
+    def test_an_edit_to_a_tracked_register_counts(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.commit_all()
+        added = "## DEC-0002 measure delivered asks only\n"
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write("\n" + added)
+        fx.change()
+        fx.wrote(added)
+        fx.stop()
+        self.assertEqual(fx.journal(), [])
+        self.assertIn("DEC-0002", fx.receipt()["rationale"]["anchor"])
+
+    def test_an_adr_in_an_unpushed_commit_counts_too(self):
         fx = Fixture()
         (fx.repo / "docs/adr").mkdir(parents=True)
-        (fx.repo / "docs/adr/0002-store.md").write_text("# 0002 The store\n", encoding="utf-8")
-        _git(fx.repo, "add", "-A")
-        _git(fx.repo, "commit", "-qm", "adr")
-        # A commit is only "unpushed" against an upstream: give it one.
+        adr = "# 0002 The store\n\nOne store per workspace.\n"
+        (fx.repo / "docs/adr/0002-store.md").write_text(adr, encoding="utf-8")
+        fx.commit_all("adr")
         bare = fx.work / "origin.git"
         _git(fx.work, "init", "-q", "--bare", str(bare))
         _git(fx.repo, "remote", "add", "upstream-fixture", str(bare))
         _git(fx.repo, "push", "-q", "upstream-fixture", "HEAD~1:refs/heads/main")
         _git(fx.repo, "branch", "-q", "--set-upstream-to=upstream-fixture/main")
+        fx.wrote(adr, tool="Write", rel="docs/adr/0002-store.md")
         fx.stop()
         self.assertEqual(fx.journal(), [])
         self.assertEqual((fx.receipt().get("rationale") or {}).get("ref"),
@@ -224,26 +291,116 @@ class SkipWhenTheRationaleExists(unittest.TestCase):
         fx = Fixture()
         (fx.repo / ".task-pipeline").mkdir()
         (fx.repo / ".task-pipeline/run.md").write_text(
-            "# run\n\n- note: looked around\n", encoding="utf-8")
-        fx.stop("sess-plain")
+            "# run\n\n- note: looked around the code\n", encoding="utf-8")
+        fx.wrote("- note: looked around the code", tool="Bash")
+        fx.stop("sess-1")
         self.assertEqual(len(fx.journal()), 1, "a run ledger without a decision line asks")
 
         fx2 = Fixture()
         (fx2.repo / ".task-pipeline").mkdir()
         (fx2.repo / ".task-pipeline/run.md").write_text(
             "# run\n\n- decision: keep the slot, add a journal\n", encoding="utf-8")
+        fx2.wrote("keep the slot, add a journal", tool="Bash")
         fx2.stop()
         self.assertEqual(fx2.journal(), [])
         r = fx2.receipt().get("rationale") or {}
         self.assertEqual((r.get("source"), r.get("ref")), ("task-pipeline", ".task-pipeline/run.md"), r)
         self.assertIn("keep the slot", r.get("anchor", ""))
 
-    def test_a_file_merely_named_like_a_register_elsewhere_is_still_a_register(self):
+    def test_an_ignored_run_ledger_is_read_from_disk(self):
+        # Many projects ignore `.task-pipeline/`; `git status` never lists it.
         fx = Fixture()
-        (fx.repo / "artifacts").mkdir()
-        (fx.repo / "artifacts/decisions.md").write_text("## D1 x\n", encoding="utf-8")
+        (fx.repo / ".gitignore").write_text(".task-pipeline/\n", encoding="utf-8")
+        fx.commit_all("ignore")
+        (fx.repo / ".task-pipeline").mkdir()
+        (fx.repo / ".task-pipeline/run.md").write_text(
+            "# run\n\n- stage: plan approved, two hooks\n", encoding="utf-8")
+        fx.change()
+        fx.wrote("python3 stage_checkpoint.py record --stage 'plan approved, two hooks'", tool="Bash")
         fx.stop()
         self.assertEqual(fx.journal(), [])
+        self.assertEqual((fx.receipt().get("rationale") or {}).get("source"), "task-pipeline")
+
+    def test_a_register_in_a_run_artifacts_folder_counts(self):
+        fx = Fixture()
+        (fx.repo / "artifacts").mkdir()
+        (fx.repo / "artifacts/decisions.md").write_text("## D1 keep the receipt\n", encoding="utf-8")
+        fx.wrote("## D1 keep the receipt", tool="Write", rel="artifacts/decisions.md")
+        fx.stop()
+        self.assertEqual(fx.journal(), [])
+
+
+class NotARationale(unittest.TestCase):
+    """What the review found the skip fired on — each beside a real code change."""
+
+    def asked(self, fx: Fixture, transcript: bool = True) -> None:
+        p = fx.stop(transcript=transcript)
+        self.assertEqual(p.returncode, 0, p.stderr[-300:])
+        self.assertEqual(len(fx.journal()), 1, f"asked: {fx.receipt()}")
+        self.assertIsNone(fx.receipt().get("rationale"), fx.receipt())
+        ev = json.loads(fx.ledger("SELECT evidence_json FROM ledger WHERE kind='session'")[0][0])
+        self.assertFalse([e for e in ev if e.get("kind") == "rationale"], ev)
+
+    def test_deleting_the_register(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.commit_all()
+        (fx.repo / "docs/DECISIONS.md").unlink()
+        fx.change()
+        fx.wrote(REGISTER)                   # even a transcript naming its old text
+        self.asked(fx)
+
+    def test_a_whitespace_only_edit(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.commit_all()
+        (fx.repo / "docs/DECISIONS.md").write_text(
+            REGISTER.replace("## DEC-0001", "##   DEC-0001") + "\n\n", encoding="utf-8")
+        fx.change()
+        fx.wrote("##   DEC-0001 one record per decision")
+        self.asked(fx)
+
+    def test_an_empty_untracked_register(self):
+        fx = Fixture()
+        (fx.repo / "src").mkdir()
+        (fx.repo / "src/decisions.md").write_text("\n  \n", encoding="utf-8")
+        fx.change()
+        self.asked(fx)
+
+    def test_a_vendored_libraries_adr(self):
+        fx = Fixture()
+        adr = fx.repo / "vendor/somelib/docs/adr/0001-their-choice.md"
+        adr.parent.mkdir(parents=True)
+        adr.write_text("# 0001 Their choice\n\nNot ours.\n", encoding="utf-8")
+        fx.change()
+        fx.wrote("# 0001 Their choice", tool="Write",
+                 rel="vendor/somelib/docs/adr/0001-their-choice.md")
+        self.asked(fx)
+
+    def test_another_sessions_register_edit_in_the_same_checkout(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.wrote(REGISTER, session="someone-else", tool="Write")
+        fx.change()
+        self.asked(fx)
+
+    def test_reading_the_register_is_not_writing_it(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.read_back(REGISTER)
+        fx.change()
+        self.asked(fx)
+
+    def test_no_transcript_means_no_attribution(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.change()
+        self.asked(fx, transcript=False)
 
 
 class FailOpen(unittest.TestCase):
@@ -261,9 +418,10 @@ class FailOpen(unittest.TestCase):
         (fx.state / "project-observatory").write_text("not a directory", encoding="utf-8")
         p = fx.stop()
         self.assertEqual(p.returncode, 0)
-        msg = json.loads(p.stdout or "{}").get("systemMessage", "")
-        self.assertIn("observatory_record(", msg, "the ask is never lost")
-        self.assertNotIn("decision", json.loads(p.stdout or "{}"))
+        out = json.loads(p.stdout or "{}")
+        self.assertIn("observatory_record(", out.get("systemMessage", ""), "never lost")
+        self.assertIn("this turn", out["systemMessage"])
+        self.assertNotIn("decision", out)
 
     def test_the_prompt_hook_never_fails_a_prompt(self):
         fx = Fixture()
@@ -278,20 +436,42 @@ class FailOpen(unittest.TestCase):
         self.assertEqual((p.returncode, p.stdout.strip()), (0, ""))
         self.assertFalse((fx.pending_dir / "sess-1.json").exists(), "a torn file is dropped")
 
+    def test_a_traversal_session_id_cannot_reach_a_file_outside(self):
+        fx = Fixture()
+        fx.pending_dir.mkdir(parents=True)
+        outside = fx.pending_dir.parent / "escaped.json"
+        outside.write_text(json.dumps({"asks": [{"at": "2099-01-01T00:00:00Z",
+                                                  "memoryId": "mem:x", "context": "PLANTED"}]}),
+                           encoding="utf-8")
+        for sid in ("../escaped", "..", "a/../../escaped", "/etc/passwd"):
+            p = fx.prompt(raw=json.dumps({"session_id": sid}))
+            self.assertEqual((p.returncode, p.stdout.strip()), (0, ""), sid)
+        self.assertTrue(outside.exists(), "the file outside the directory was not taken")
+        p = subprocess.run([PY, str(ASK)], input=json.dumps(
+            {"recorded": True, "hasWhy": False, "ask": True, "memoryId": "mem:y",
+             "revision": 1, "session": "../escaped"}),
+            text=True, capture_output=True, env=fx.env, timeout=60)
+        self.assertNotIn("mem:y", outside.read_text(encoding="utf-8"),
+                         "nor can the Stop hook write there")
+
     def test_a_fault_is_still_spoken_at_stop(self):
         p = subprocess.run([PY, str(ASK)], input=json.dumps(
             {"recorded": False, "fault": True, "reason": "IllegalTransition: x"}),
             text=True, capture_output=True, timeout=60)
         self.assertIn("could NOT record", json.loads(p.stdout)["systemMessage"])
 
-    def test_an_old_recorder_without_the_ask_field_is_asked_as_before(self):
+    def test_an_old_recorder_without_the_ask_field_gets_the_old_stop_notice(self):
+        # An engine that decides nothing about asking would inject into the model's
+        # context every turn; it keeps the old Stop notice instead.
         fx = Fixture()
         p = subprocess.run([PY, str(ASK)], input=json.dumps(
             {"recorded": True, "hasWhy": False, "memoryId": "mem:old", "revision": 3,
              "project": "project:watched", "files": 1, "session": "sess-old"}),
             text=True, capture_output=True, env=fx.env, timeout=60)
-        self.assertEqual(p.stdout.strip(), "")
-        self.assertIn("mem:old", fx.context(fx.prompt("sess-old")))
+        msg = json.loads(p.stdout)["systemMessage"]
+        self.assertIn("mem:old", msg)
+        self.assertNotIn("asked about once", msg)
+        self.assertEqual(fx.context(fx.prompt("sess-old")), "", "nothing injected")
 
 
 class PendingStoreHygiene(unittest.TestCase):
@@ -304,61 +484,106 @@ class PendingStoreHygiene(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(fx.pending_dir.stat().st_mode), 0o700)
         doc = json.loads(f.read_text(encoding="utf-8"))
         self.assertEqual(sorted(doc), ["asks"])
-        self.assertEqual(sorted(doc["asks"][0]), ["at", "context", "memoryId", "revision"])
+        self.assertEqual(sorted(doc["asks"][0]), ["at", "context", "journal", "memoryId", "revision"])
+        self.assertEqual(pathlib.Path(doc["asks"][0]["journal"]).name, "why-asks.jsonl")
 
-    def test_an_abandoned_ask_is_pruned(self):
+    def test_an_abandoned_ask_is_pruned_by_either_hook(self):
         fx = Fixture()
         fx.pending_dir.mkdir(parents=True)
         old = fx.pending_dir / "gone-session.json"
         old.write_text(json.dumps({"asks": []}), encoding="utf-8")
         os.utime(old, (1, 1))
         fx.stop()
-        self.assertFalse(old.exists(), "a session that never prompted again leaves nothing")
+        self.assertFalse(old.exists(), "pruned when the Stop hook leaves an ask")
+        old.write_text(json.dumps({"asks": []}), encoding="utf-8")
+        os.utime(old, (1, 1))
+        fx.prompt()
+        self.assertFalse(old.exists(), "and when the prompt hook delivers one")
 
 
 class Measured(unittest.TestCase):
-    def test_the_receipt_carries_the_rate(self):
+    def test_a_headless_session_adds_nothing_to_the_denominator(self):
+        # One prompt, one Stop, no further prompt: the ask never reached the model.
         fx = Fixture()
         fx.stop()
         w = fx.receipt().get("whyAsks") or {}
-        self.assertEqual((w.get("asked"), w.get("answered")), (1, 0), w)
-        self.assertEqual(w.get("rate"), 0.0)
-        self.assertEqual((w.get("window") or {}).get("days"), 7, w)
+        self.assertEqual((w.get("asked"), w.get("delivered"), w.get("pending")), (1, 0, 1), w)
+        self.assertIsNone(w.get("rate"), "nothing delivered is no rate, not a zero rate")
 
-    def test_the_measurement_counts_distinct_records_and_their_answers(self):
+    def test_a_delivered_unanswered_ask_counts(self):
+        fx = Fixture()
+        fx.stop()
+        fx.prompt()
+        rows = fx.journal(event="delivered")
+        self.assertEqual(len(rows), 1, fx.journal(event=None))
+        (fx.repo / "again.txt").write_text("x\n", encoding="utf-8")
+        fx.stop()
+        w = fx.receipt()["whyAsks"]
+        self.assertEqual((w["asked"], w["delivered"], w["pending"], w["answered"], w["rate"]),
+                         (1, 1, 0, 0, 0.0), w)
+        self.assertEqual(w["window"]["days"], 7)
+
+    def test_the_measurement_counts_delivered_records_and_their_answers(self):
         import why_asks
         con = sqlite3.connect(":memory:")
         con.execute("CREATE TABLE ledger (memory_id TEXT, revision INT, why TEXT)")
         con.executemany("INSERT INTO ledger VALUES (?,?,?)",
                         [("m1", 1, None), ("m1", 2, "because"), ("m2", 1, None),
-                         ("m3", 1, "  ")])
-        rows = [{"at": "2026-10-14T10:00:00Z", "memoryId": m} for m in ("m1", "m2", "m3", "m1")]
+                         ("m3", 1, "  "), ("m4", 1, "answered though never delivered")])
+        at = "2026-10-14T10:00:00Z"
+        rows = [{"at": at, "memoryId": m} for m in ("m1", "m2", "m3", "m4", "m1")]
+        rows += [{"at": at, "memoryId": m, "event": "delivered"} for m in ("m1", "m2", "m3")]
         rows.append({"at": "2020-01-01T00:00:00Z", "memoryId": "m-old"})
+        rows.append({"at": "2099-01-01T00:00:00Z", "memoryId": "m-future"})
         got = why_asks.measure(con, rows=rows, now="2026-10-14T12:00:00Z")
-        self.assertEqual((got["asked"], got["answered"], got["rate"]), (3, 1, 0.333), got)
-        self.assertEqual(why_asks.measure(con, rows=[], now="2026-10-14T12:00:00Z")["rate"], None)
+        self.assertEqual((got["asked"], got["delivered"], got["pending"], got["answered"],
+                          got["rate"]), (4, 3, 1, 1, 0.333), got)
+        self.assertIsNone(why_asks.measure(con, rows=[], now="2026-10-14T12:00:00Z")["rate"])
+
+    def test_the_journal_rotates_and_an_old_record_is_still_seen(self):
+        import why_asks
+        d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-why-rotate-"))
+        journal = d / "why-asks.jsonl"
+        with mock.patch.object(why_asks, "JOURNAL", journal), \
+                mock.patch.object(why_asks, "PREVIOUS", d / "why-asks.jsonl.1"), \
+                mock.patch.object(why_asks, "ROTATE_BYTES", 2000):
+            self.assertTrue(why_asks.ask_once("mem:first")["ask"])
+            with journal.open("a", encoding="utf-8") as fh:
+                for i in range(40):
+                    fh.write(json.dumps({"at": "2026-10-14T00:00:00Z", "memoryId": f"m{i}"}) + "\n")
+            self.assertTrue(why_asks.ask_once("mem:second")["ask"])
+            self.assertTrue((d / "why-asks.jsonl.1").is_file(), "rotated")
+            self.assertLess(journal.stat().st_size if journal.exists() else 0, 2000)
+            self.assertFalse(why_asks.ask_once("mem:first")["ask"], "still asked once")
+            with journal.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"at": "2026-10-14T00:00:00Z", "memoryId": "pad"}) + "\n")
+            self.assertTrue(why_asks.ask_once("mem:third")["ask"])
+            self.assertTrue((d / "why-asks.jsonl.1").is_file(), "a small journal is not rotated")
 
 
 class TheFinding(unittest.TestCase):
-    def findings(self, asked, answered):
+    def findings(self, delivered, answered, pending=0):
         import build_findings
-        rate = None if not asked else round(answered / asked, 3)
+        rate = None if not delivered else round(answered / delivered, 3)
         return build_findings.why_unanswered_findings(
-            {"asked": asked, "answered": answered, "rate": rate,
+            {"asked": delivered + pending, "delivered": delivered, "pending": pending,
+             "answered": answered, "rate": rate,
              "window": {"days": 7, "since": "2026-10-07T00:00:00Z"}})
 
-    def test_it_fires_below_ten_percent_with_twenty_asks(self):
-        out = self.findings(25, 1)
+    def test_it_fires_below_ten_percent_with_twenty_delivered(self):
+        out = self.findings(25, 1, pending=4)
         self.assertEqual([f["type"] for f in out], ["observatory.why_unanswered"])
         f = out[0]
         self.assertEqual(f["title_args"]["n"], 24)
         self.assertIn("1 of 25", f["detail"])
+        self.assertIn("4 further ask(s) never reached the model", f["detail"])
         self.assertTrue(f["action"] and f["evidence"])
 
     def test_it_is_silent_otherwise(self):
-        self.assertEqual(self.findings(19, 0), [], "too few asks to judge")
+        self.assertEqual(self.findings(19, 0), [], "too few delivered to judge")
         self.assertEqual(self.findings(30, 3), [], "10 % is the floor, not below it")
-        self.assertEqual(self.findings(0, 0), [])
+        self.assertEqual(self.findings(0, 0, pending=60), [],
+                         "undelivered asks — headless sessions — are never unanswered")
         import build_findings
         self.assertEqual(build_findings.why_unanswered_findings(None), [])
 
@@ -368,6 +593,30 @@ class TheFinding(unittest.TestCase):
         ru = json.loads((ROOT / "dashboard/locales/ru.json").read_text(encoding="utf-8"))
         self.assertIn(finding_types.LABELS["observatory.why_unanswered"], ru)
         self.assertIn(self.findings(25, 1)[0]["title_id"], ru)
+
+    def test_the_board_raises_it_from_the_store_and_the_journal(self):
+        # The production path: `collect()` reads the journal and the workspace's own
+        # store. 22 delivered asks, none answered; 30 more that were never delivered.
+        import paths
+        import build_findings
+        from store import db as store_db
+        store_db.connect().close()                       # the workspace store exists
+        journal = paths.SCRATCH / "why-asks.jsonl"
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            with journal.open("w", encoding="utf-8") as fh:
+                for i in range(52):
+                    fh.write(json.dumps({"at": now, "memoryId": f"mem:board{i}", "event": "asked"}) + "\n")
+                for i in range(22):
+                    fh.write(json.dumps({"at": now, "memoryId": f"mem:board{i}", "event": "delivered"}) + "\n")
+            got = [f for f in build_findings.collect() if f["type"] == "observatory.why_unanswered"]
+            self.assertEqual(len(got), 1, "the board carries the finding")
+            self.assertEqual(got[0]["title_args"]["n"], 22)
+            self.assertIn("30 further ask(s)", got[0]["detail"])
+        finally:
+            journal.unlink()
 
 
 if __name__ == "__main__":

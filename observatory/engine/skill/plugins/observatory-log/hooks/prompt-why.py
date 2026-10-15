@@ -12,6 +12,11 @@ whole design is about that cost:
 - **Never in the way of the prompt.** Every error — a payload that is not JSON, a
   session id that is not a plain name, a torn file — is exit 0 with nothing on
   stdout. It cannot block: it prints no `decision`, and it exits 0 on every path.
+- **Delivery is recorded.** For each ask handed over it appends
+  `{"event": "delivered"}` to the engine's journal (`store/raw/why-asks.jsonl`, the
+  path the recorder named), because the answer rate is measured on delivered asks: a
+  headless session that never sends a second prompt never receives its ask, and must
+  not count as having ignored it.
 - **Where the model reads it.** The ask goes out as
   `hookSpecificOutput.additionalContext`, which Claude Code renders into the
   model's input; the Stop `systemMessage` it replaces is a notice for the person
@@ -41,6 +46,39 @@ def pending_dir() -> str:
     base = os.environ.get("XDG_STATE_HOME") or os.path.join(
         os.path.expanduser("~"), ".local", "state")
     return os.path.join(base, "project-observatory", "ask-why")
+
+
+def _record_delivery(ask: dict, session: str) -> None:
+    """Append a `delivered` row to the journal the recorder named. Never raises."""
+    journal = ask.get("journal")
+    if not isinstance(journal, str) or os.path.basename(journal) != "why-asks.jsonl" \
+            or os.path.islink(journal) or not os.path.isdir(os.path.dirname(journal) or "/nonexistent"):
+        return
+    row = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+           "memoryId": ask.get("memoryId"), "event": "delivered", "session": session}
+    if not isinstance(row["memoryId"], str):
+        return
+    try:
+        with open(journal, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        pass                    # an undelivered count is a floor, not a failed prompt
+
+
+def _prune(directory: str) -> None:
+    """Remove pending asks older than STALE_SECONDS: sessions that ended without a
+    further prompt. Run only after a delivery, so a quiet prompt stays one `stat`."""
+    try:
+        now = time.time()
+        for name in os.listdir(directory):
+            path = os.path.join(directory, name)
+            try:
+                if now - os.stat(path).st_mtime > STALE_SECONDS:
+                    os.unlink(path)
+            except OSError:
+                pass
+    except OSError:
+        pass
 
 
 def _fresh(stamp) -> bool:
@@ -77,13 +115,16 @@ def main() -> int:
             os.unlink(taking)
         except OSError:
             pass
+    _prune(os.path.dirname(path))
     asks = doc.get("asks") if isinstance(doc, dict) else None
-    texts = [a["context"] for a in (asks or [])
-             if isinstance(a, dict) and isinstance(a.get("context"), str)
-             and a["context"].strip() and _fresh(a.get("at"))]
-    if not texts:
+    chosen = [a for a in (asks or [])
+              if isinstance(a, dict) and isinstance(a.get("context"), str)
+              and a["context"].strip() and _fresh(a.get("at"))]
+    if not chosen:
         return 0
-    context = "\n\n---\n\n".join(texts)[:MAX_CHARS]
+    context = "\n\n---\n\n".join(a["context"] for a in chosen)[:MAX_CHARS]
+    for a in chosen:
+        _record_delivery(a, session)
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                              "additionalContext": context}},
                      ensure_ascii=False))

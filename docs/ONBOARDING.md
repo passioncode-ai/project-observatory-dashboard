@@ -582,22 +582,43 @@ block a turn or a prompt:
   actionable.
 - **Stop** records the facts of a turn that changed a watched repository as a
   `proposed` ledger record, one per session, revised per turn. It asks for the
-  `why` of that record **once**, and not at all when the turn wrote its rationale
-  itself: a file named `decisions.md` in any folder and any letter case, a file under an `adr/`
-  directory, or a `decision:` / `stage:` line in `.task-pipeline/run.md`. The
-  record then links that file in its evidence instead of asking for a copy.
-- **UserPromptSubmit** hands that request to the model with the session's next
-  prompt, as context, once, and prints nothing when no request is pending. The
-  request waits in a private per-session file under
-  `$XDG_STATE_HOME/project-observatory/ask-why/` (`~/.local/state/…` by default;
-  mode 0600, removed when delivered or after seven days). If that file cannot be
-  written, the request falls back to a Stop notice.
+  `why` of that record **once**. It does not ask when this session's own tools
+  already wrote the rationale:
+  - a file named `decisions.md` in any folder and any letter case, or a file under
+    an `adr/` directory, outside vendored trees (`vendor/`, `node_modules/`,
+    `third_party/`, `.venv/` and similar) and submodules;
+  - or a `decision:` / `stage:` line in `.task-pipeline/run.md`, which is read from
+    disk even when `.task-pipeline/` is ignored by git.
 
-Every request is journalled in `store/raw/why-asks.jsonl`. A request counts as
-answered when its record later carries a `why`. The rate over seven days is in
-`store/raw/record-turn.json` (`whyAsks`) and from
+  "Wrote" means three things. The work added at least one non-blank line,
+  ignoring whitespace, and did not delete the file. That text appears in the input
+  of one of this session's own Edit, Write, MultiEdit, NotebookEdit or Bash calls,
+  in the transcript Claude Code names in the Stop payload; a file the session only
+  read does not count. So another session editing the register in the same
+  checkout does not silence this session. Without a transcript (another host, or
+  a register written further back than its last 64 MB), the turn is asked about.
+  When the rationale counts, the record links that file in its evidence instead
+  of asking for a copy.
+- **UserPromptSubmit** hands that request to the model with the session's next
+  prompt, as context, once. It records the delivery and prints nothing when no
+  request is pending. The request waits in a private per-session file under
+  `$XDG_STATE_HOME/project-observatory/ask-why/` (`~/.local/state/…` by default;
+  mode 0600). The file is removed when delivered. An undelivered one older than
+  seven days is removed the next time either hook writes or delivers a request. If
+  the file cannot be written, the request falls back to a Stop notice. An engine
+  older than this plugin, whose recorder does not decide whether to ask, also gets
+  the Stop notice, never an injected prompt.
+
+Every request is journalled in `store/raw/why-asks.jsonl` (it rotates to
+`why-asks.jsonl.1` past 1 MB; both are read, so a record is not asked again when it
+scrolls), and so is every delivery. A delivered request counts as answered when its
+record later carries a `why`. A request that never reached the model, such as a
+headless session with a single prompt, is pending and is never counted as
+unanswered. The rate over seven days, answered ÷ delivered, is in
+`store/raw/record-turn.json` (`whyAsks`: `asked`, `delivered`, `pending`,
+`answered`, `rate`, `window`) and from
 `python "$(project-observatory full-path)/why_asks.py"`. Below 10 % with at least
-20 requests, the board raises `observatory.why_unanswered`.
+20 delivered requests, the board raises `observatory.why_unanswered`.
 `why_asks.py reached <transcript.jsonl> <memory id>` says whether a request
 reached the model in a given session transcript.
 

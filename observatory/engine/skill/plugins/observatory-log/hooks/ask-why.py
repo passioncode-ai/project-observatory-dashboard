@@ -45,7 +45,9 @@ def pending_dir() -> str:
     return os.path.join(base, "project-observatory", "ask-why")
 
 
-def message(r: dict) -> str:
+def message(r: dict, at_stop: bool = False) -> str:
+    """The ask. `at_stop` words it for a Stop notice, which follows the turn it is
+    about, rather than for the next prompt, which comes after it."""
     mid = r.get("memoryId")
     rev = r.get("revision")
     project = r.get("project", "this project")
@@ -54,10 +56,10 @@ def message(r: dict) -> str:
     unpushed = r.get("unpushed") or 0
     extra = f", {unpushed} unpushed commit(s)" if unpushed else ""
     text = (
-        f"Observatory recorded the facts of your previous turn in {project}: "
+        f"Observatory recorded the facts of {'this' if at_stop else 'your previous'} turn in {project}: "
         f"{files} file{plural} changed, +{r.get('insertions', 0)}/-{r.get('deletions', 0)}"
-        f"{extra}. Stored as {mid}@{rev}, state proposed, with no `why`. This record is "
-        "asked about once.\n\n"
+        f"{extra}. Stored as {mid}@{rev}, state proposed, with no `why`."
+        + (" This record is asked about once." if r.get("ask") is True else "") + "\n\n"
         "The diff already says WHAT changed. Add WHY — one or two sentences a "
         "reader in six months could not reconstruct from the diff: the constraint "
         "that forced the shape, the alternative rejected, the trap avoided.\n\n"
@@ -65,8 +67,8 @@ def message(r: dict) -> str:
         f"expected_revision={rev}, statement=<the same claim>, why=<the reason>)\n\n"
         "If the change genuinely needs no explanation — a typo, a rename — say so "
         "and skip it. An empty `why` on a trivial edit is honest; an invented one "
-        "is worse than nothing, because it will be read as true. Then answer the "
-        "user's new message."
+        "is worse than nothing, because it will be read as true."
+        + ("" if at_stop else " Then answer the user's new message.")
     )
     # THE NUDGE AT THE MOMENT OF WORK. The agent is already inside this project;
     # rebuilding its graph or touching its note costs least right now. Thresholds
@@ -112,9 +114,15 @@ def leave_for_next_prompt(session: str, r: dict, text: str) -> bool:
         except (OSError, ValueError, AttributeError):
             asks = []
         asks = [a for a in asks if a.get("memoryId") != r.get("memoryId")]
-        asks.append({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
-                     "memoryId": r.get("memoryId"), "revision": r.get("revision"),
-                     "context": text})
+        entry = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+                 "memoryId": r.get("memoryId"), "revision": r.get("revision"),
+                 "context": text}
+        # Where `prompt-why.py` records the delivery: the engine's journal, named by
+        # the recorder. Only a file of that exact name is ever written there.
+        journal = r.get("journal")
+        if isinstance(journal, str) and os.path.basename(journal) == "why-asks.jsonl":
+            entry["journal"] = journal
+        asks.append(entry)
         tmp = f"{path}.{os.getpid()}.tmp"
         # Created owner-only by the umask, not by a raw `os.open`: this script runs
         # from the plugin's own copy without the engine, so `osprivacy` (the one
@@ -166,15 +174,23 @@ def main() -> int:
         return 0                                          # already explained
     if r.get("rationale"):
         return 0          # the turn wrote its rationale; the record links that file
-    if r.get("ask") is False:
-        return 0          # this record was asked about already (a missing field asks)
+    if "ask" not in r:
+        # AN OLDER ENGINE, which decides nothing about asking: it would send this
+        # every changed turn, and an every-turn ask injected into the model's context
+        # is worse than the notice it replaces. So it gets the old Stop notice.
+        print(json.dumps({"systemMessage": message(r, at_stop=True), "suppressOutput": True},
+                         ensure_ascii=False))
+        return 0
+    if r.get("ask") is not True:
+        return 0          # this record was asked about already
 
     text = message(r)
     if leave_for_next_prompt(r.get("session"), r, text):
         return 0
     # THE OLD CHANNEL, as the fallback. A notice the model may not read is better
     # than an ask that silently never happens.
-    print(json.dumps({"systemMessage": text, "suppressOutput": True}, ensure_ascii=False))
+    print(json.dumps({"systemMessage": message(r, at_stop=True), "suppressOutput": True},
+                     ensure_ascii=False))
     return 0
 
 

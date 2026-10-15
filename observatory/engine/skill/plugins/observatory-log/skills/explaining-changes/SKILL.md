@@ -49,10 +49,11 @@ and nothing in the ledger can tell it from a measured one.
 ## Recording it
 
 The Observatory's Stop hook has already stored the facts as a `proposed` record.
-Its id arrives once, as context with the next prompt; there is no ask when the
-turn already wrote its rationale to the decision register or the task-pipeline
-ledger, because the record links that file. Correct that record rather than
-creating a second one:
+Its id arrives once, as context with the next prompt. There is no ask when this
+session's own tools already wrote the rationale (non-blank lines in a
+`decisions.md` or an `adr/` file outside vendored trees, or a `decision:` /
+`stage:` line in `.task-pipeline/run.md`), because the record links that file.
+Correct that record rather than creating a second one:
 
 ```
 observatory_record(
