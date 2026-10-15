@@ -252,8 +252,8 @@
       "path": "collectors/scan_agents.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a1708f9fe2c26c40838455f4f447ddfe5491d83f37d0dfb6e98fe4917cc2081f",
-      "bytes": 23273
+      "export_sha256": "b648708fecf0c9c489fce59e371d8021de4f3c006016a08228bee4aeb5095dcb",
+      "bytes": 33756
     },
     {
       "path": "collectors/scan_bitbucket.py",
@@ -814,8 +814,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "92fe63355515539a941f4bf1c1afab676ae7e815381e6766515fee8e2451c4dc",
-      "bytes": 11800,
+      "export_sha256": "7c80742d8222215a4eba3f67404d354e0d9335fcd4e41c1fd8678870aaae4b74",
+      "bytes": 11904,
       "upstream_modified": true
     },
     {
@@ -828,15 +828,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "23bb39c1f8760f86b3d26d459437776a8037e5e1f07c13ee1f00d92b841e6ffe",
-      "bytes": 22211,
+      "export_sha256": "b8f0a595ba270e7ab809cc1716a16a7947d06c26f5509add7302d245d50d16f9",
+      "bytes": 22704,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c41f5eefb24ed8e7df85477883c1d88336f473842f8dc02debf6f2b5840d82f9",
-      "bytes": 102826,
+      "export_sha256": "05d9f32bece92123840e0b09d76ac7cbee24ede20686f57b8c949dda7aec3988",
+      "bytes": 103016,
       "upstream_modified": true
     },
     {
@@ -1830,8 +1830,8 @@
       "path": "schemas/agents.schema.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5d5708c071717d487847d9023f2e9cfecbde3f991c1ebbd82b478a45c34ecf99",
-      "bytes": 7906
+      "export_sha256": "65303892630cee631d3cbb3ba3ac3f47c8749507a6b54d0c1be543dfe555f1d9",
+      "bytes": 13038
     },
     {
       "path": "service_events.py",
@@ -3723,8 +3723,8 @@
       "path": "tests/test_scan_agents.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "56200d4644a747aa29cfaaa3035349291aa2901c38467220d3e755eacc4ffb65",
-      "bytes": 24217
+      "export_sha256": "005591c7fc512aad85dfda21ebccaab0c77d0d73fc9a8fe67f9d83e36b82f542",
+      "bytes": 42323
     },
     {
       "path": "tests/test_scan_ids.py",
