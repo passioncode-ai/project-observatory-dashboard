@@ -19,6 +19,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 import urllib.error
 from datetime import datetime, timedelta, timezone
@@ -100,13 +102,80 @@ def ledger_row(account: str, key_hash, project=None, **extra) -> dict:
             "limit_usd": 10, **extra}
 
 
-def tomb(name, key_hash, project, day, reason="revoked", account="acct-a", by_day=None, covers=None) -> dict:
-    """A tombstone as the door writes it: with a usage snapshot (`by_day`) or without one."""
+def tomb(name, key_hash, project, day, reason="revoked", account="acct-a", by_day=None, reconciled=True,
+         through=None, **extra) -> dict:
+    """A tombstone as the door writes it: with a usage snapshot (`by_day`, reconciled or not) or without one."""
     out = {"name": name, "account": account, "hash": key_hash, "project": project, "retired_on": day,
-           "reason": reason, "snapshot_at": f"{day}T10:00:00+00:00"}
+           "reason": reason, "deleted": True, "read_at": f"{day}T10:00:00+00:00", **extra}
     if by_day is None:
         return {**out, "usage": "unread", "usage_error": "RuntimeError"}
-    return {**out, "usage": "read", "usage_by_day": by_day, "covers_through": covers or day}
+    return {**out, "usage": "read", "usage_by_day": by_day, "reconciled": reconciled,
+            "activity_through": through or (max(by_day) if by_day else None)}
+
+
+def utc(*a) -> datetime:
+    return datetime(*a, tzinfo=timezone.utc)
+
+
+#: The door's clock in the door tests: Wednesday 2026-10-14, noon UTC (the week began on Monday 10-12).
+AT = None   # set below, once `utc` exists
+
+
+def clock(*moments):
+    """A stand-in for `openrouter.datetime` whose now() walks through `moments` (the last one sticks)."""
+    import datetime as real
+    import types
+    seq = list(moments)
+
+    class FakeDT(real.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return seq.pop(0) if len(seq) > 1 else seq[0]
+    return types.SimpleNamespace(datetime=FakeDT, timezone=real.timezone, timedelta=real.timedelta, date=real.date)
+
+
+def provider_for(key_hash: str, rows: list, daily=0.0, monthly="sum", weekly="sum", name="k2", today="2026-10-14"):
+    """A fake provider for one key: its activity rows, and its own counters. "sum" makes a counter agree with the
+    rows of the current month or week (from Monday) plus `daily`; a number sets it; None leaves it out."""
+    from datetime import date as d_
+    t = d_.fromisoformat(today)
+    monday = (t - timedelta(days=t.weekday())).isoformat()
+
+    def agreed(first):
+        return round(sum(r["usage"] for r in rows if first <= r["date"][:10] < today) + (daily or 0.0), 9)
+    counters = {"usage_daily": daily, "usage_monthly": agreed(today[:8] + "01") if monthly == "sum" else monthly,
+                "usage_weekly": agreed(monday) if weekly == "sum" else weekly}
+
+    def provider(path, key, payload=None, method=None):
+        if path == f"/keys/{key_hash}" and method is None:
+            return {"data": {"name": name, "hash": key_hash,
+                             **{k: v for k, v in counters.items() if v is not None}}}
+        if path.startswith(f"/activity?api_key_hash={key_hash}"):
+            return {"data": rows}
+        return {"data": {}}
+    return provider
+
+
+def door_revoke(provider, when, row=None) -> tuple[list, dict]:
+    """`openrouter.revoke_key("k2")` on a real ledger file holding k1 and k2, at `when`: (calls, the ledger)."""
+    import openrouter
+    calls: list = []
+
+    def watched(path, key, payload=None, method=None):
+        calls.append((method or "GET", path))
+        return provider(path, key, payload, method)
+    with tempfile.TemporaryDirectory() as tmp, patch.object(openrouter, "datetime", clock(when)):
+        door = Door(tmp, {"k1": ledger_row("acct-a", "h-k1", "alpha-web"),
+                          "k2": row or ledger_row("acct-a", "h-k2", "alpha-web")}, watched)
+        try:
+            openrouter.revoke_key("k2")
+            left = door.ledger()
+        finally:
+            door.close()
+    return calls, left
+
+
+AT = utc(2026, 10, 14, 12, 0)
 
 
 class Door:
@@ -184,7 +253,7 @@ class ProjectSpend(unittest.TestCase):
                                  lambda key, timeout=None: (timeouts.append(timeout),
                                                             self.ACCOUNT if account is None else account)[1]), \
                     patch.object(scan_spend, "key_activity", key_activity), \
-                    patch.object(scan_spend, "utcnow", lambda: NOW), \
+                    patch.object(scan_spend, "utcnow", lambda: globals()["NOW"]), \
                     patch.object(step_budget, "remaining",
                                  (lambda: next(clock, 0.0)) if clock else (lambda: float("inf"))), \
                     patch.object(vault_project, "load_projects", (lambda: None) if projects == "unreadable"
@@ -195,6 +264,14 @@ class ProjectSpend(unittest.TestCase):
             doc["_asked"] = asked
             doc["_timeouts"] = timeouts
             return doc
+
+    def scan_at(self, now, **kw) -> dict:
+        global NOW
+        saved, NOW = NOW, now
+        try:
+            return self.scan(**kw)
+        finally:
+            NOW = saved
 
     def test_two_projects_get_their_month_and_last_30_days_and_the_rest_is_unattributed(self):
         doc = self.scan()
@@ -240,9 +317,9 @@ class ProjectSpend(unittest.TestCase):
                                                            {"date": "2026-10-08", "usage": 0.5}])["projects"]["alpha-web"]
         self.assertEqual((alpha["month_usd"], alpha["last30_usd"], alpha["partial"]), (0.5, 1.5, False))
 
-    def test_a_snapshot_missing_its_retirement_day_nulls_the_windows_holding_it(self):
+    def test_an_unreconciled_snapshot_nulls_the_windows_holding_its_gap(self):
         ledger = {"issued": {}, "retired": [tomb("k2", "h-k2", "alpha-web", "2026-10-08",
-                                                 by_day={"2026-09-20": 1.0}, covers="2026-10-07")]}
+                                                 by_day={"2026-09-20": 1.0}, reconciled=False)]}
         alpha = self.scan(ledger=ledger, keys={})["projects"]["alpha-web"]
         self.assertEqual((alpha["month_usd"], alpha["last30_usd"], alpha["partial"]), (None, None, True))
 
@@ -279,69 +356,137 @@ class ProjectSpend(unittest.TestCase):
         self.assertEqual(doc["_timeouts"], [35.0])
         self.assertEqual(self.scan()["_timeouts"], [60.0])
 
-    def revoke_through_the_door(self, activity_answer) -> dict:
-        """`openrouter.revoke_key` on a real ledger file; the provider's activity for k2 is `activity_answer`."""
+    def test_the_door_snapshots_a_revoked_key_and_the_project_reads_whole(self):
+        """Reconciled: the activity days plus usage_daily equal the provider's month and week counters."""
+        rows = [{"date": OCT, "usage": 4.0}, {"date": "2026-10-13 00:00:00", "usage": 0.25}]
+        calls, left = door_revoke(provider_for("h-k2", rows, daily=0.5), when=AT)
+        stone = left["retired"][0]
+        self.assertEqual({k: stone[k] for k in ("name", "hash", "project", "reason", "usage", "reconciled",
+                                                "deleted", "retired_on")},
+                         {"name": "k2", "hash": "h-k2", "project": "alpha-web", "reason": "revoked",
+                          "usage": "read", "reconciled": True, "deleted": True, "retired_on": "2026-10-14"})
+        self.assertEqual(stone["usage_by_day"], {"2026-10-05": 4.0, "2026-10-13": 0.25, "2026-10-14": 0.5})
+        self.assertEqual((stone["usage_monthly"], stone["usage_weekly"], stone["usage_daily"]), (4.75, 0.75, 0.5))
+        # The last request before the DELETE is the key's own row; the activity report came first.
+        methods = [(m, p.split("?")[0]) for m, p in calls]
+        delete = methods.index(("DELETE", "/keys/h-k2"))
+        self.assertEqual(methods[delete - 1], ("GET", "/keys/h-k2"))
+        self.assertLess(methods.index(("GET", "/activity")), delete - 1)
+        doc = self.scan_at(utc(2026, 10, 16, 12), ledger=left, keys={"h-k1": [{"date": OCT, "usage": 2.0}]},
+                           account=[{"date": OCT, "usage": 6.0}, {"date": "2026-10-13", "usage": 0.25},
+                                    {"date": "2026-10-14", "usage": 0.5}])
+        alpha = doc["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["partial"]), (6.75, False))
+        self.assertNotIn("h-k2", doc["_asked"])
+
+    def test_a_snapshot_that_does_not_reconcile_nulls_the_days_after_its_activity(self):
+        """The activity report lags: 10-13 (3.0) is in the month counter but not yet in /activity."""
+        rows = [{"date": "2026-10-10 00:00:00", "usage": 1.0}]
+        _calls, left = door_revoke(provider_for("h-k2", rows, daily=0.1, monthly=4.1, weekly=3.1), when=AT)
+        stone = left["retired"][0]
+        self.assertEqual((stone["reconciled"], stone["activity_through"]), (False, "2026-10-10"))
+        self.assertNotIn("2026-10-14", stone["usage_by_day"])          # today is not vouched for
+        alpha = self.scan_at(utc(2026, 10, 16, 12), ledger=left, keys={"h-k1": []},
+                             account=[{"date": "2026-10-10", "usage": 1.0}, {"date": "2026-10-13", "usage": 3.0},
+                                      {"date": "2026-10-14", "usage": 0.1}])["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["last30_usd"], alpha["partial"]), (None, None, True))
+        self.assertIn("did not reconcile", alpha["unread"][-1]["reason"])
+
+    def test_a_snapshot_without_usage_daily_does_not_cover_today(self):
+        """The month and week counters agree with the activity days, but today's own counter is missing."""
+        rows = [{"date": OCT, "usage": 4.0}]
+        _calls, left = door_revoke(provider_for("h-k2", rows, daily=None, monthly=4.0, weekly=0.0), when=AT)
+        stone = left["retired"][0]
+        self.assertFalse(stone["reconciled"])
+        self.assertNotIn("2026-10-14", stone["usage_by_day"])
+        alpha = self.scan_at(utc(2026, 10, 16, 12), ledger=left, keys={"h-k1": []},
+                             account=[{"date": OCT, "usage": 4.0}])["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["partial"]), (None, True))
+
+    def test_an_unreadable_snapshot_still_revokes_and_the_project_reads_null(self):
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-k2" and method is None:
+                return {"data": {"name": "k2", "hash": "h-k2"}}
+            if path.startswith("/activity"):
+                raise RuntimeError("openrouter answered HTTP 500; provider response withheld")
+            return {"data": {}}
+        calls, left = door_revoke(provider, when=AT)
+        self.assertNotIn("k2", left["issued"])
+        self.assertIn(("DELETE", "/keys/h-k2"), calls)
+        stone = left["retired"][0]
+        self.assertEqual((stone["usage"], stone["usage_error"]), ("unread", "RuntimeError"))
+        alpha = self.scan_at(utc(2026, 10, 16, 12), ledger=left, keys={"h-k1": [{"date": OCT, "usage": 2.0}]},
+                             account=[{"date": OCT, "usage": 6.0}])["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["partial"]), (None, True))
+
+    def test_a_failed_write_before_the_delete_deletes_nothing_and_a_retry_snapshots(self):
+        """Round 4 P4: the snapshot is written to the row before the DELETE; when that write fails, no DELETE."""
+        import openrouter
+        provider = provider_for("h-k2", [{"date": OCT, "usage": 4.0}], daily=0.0)
         calls: list = []
 
-        def provider(path, key, payload=None, method=None):
+        def watched(path, key, payload=None, method=None):
             calls.append((method or "GET", path))
-            if path == "/keys/h-k2" and method is None:
-                return {"data": {"name": "k2", "hash": "h-k2", "label": "x", "usage_daily": 0.5}}
-            if path.startswith("/activity?api_key_hash=h-k2"):
-                if isinstance(activity_answer, Exception):
-                    raise activity_answer
-                return {"data": activity_answer}
-            return {"data": {}}
-        with tempfile.TemporaryDirectory() as tmp:
-            door = Door(tmp, {"k1": ledger_row("acct-a", "h-k1", "alpha-web"),
-                              "k2": ledger_row("acct-a", "h-k2", "alpha-web")}, provider)
+            return provider(path, key, payload, method)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(openrouter, "datetime", clock(AT)):
+            door = Door(tmp, {"k2": ledger_row("acct-a", "h-k2", "alpha-web")}, watched)
             try:
-                door.m.revoke_key("k2")
+                with patch.object(openrouter, "save_ledger", side_effect=OSError("disk full")):
+                    with self.assertRaises(OSError):
+                        openrouter.revoke_key("k2")
+                self.assertNotIn(("DELETE", "/keys/h-k2"), calls)
+                openrouter.revoke_key("k2")
                 left = door.ledger()
             finally:
                 door.close()
-        snap = [i for i, c in enumerate(calls) if c[1].startswith("/activity")]
-        delete = [i for i, c in enumerate(calls) if c[0] == "DELETE"]
-        self.assertTrue(delete and (not snap or snap[0] < delete[0]), calls)
-        return left
+        self.assertEqual(left["retired"][0]["usage"], "read")
 
-    def test_the_door_snapshots_a_revoked_key_and_the_project_reads_whole(self):
-        left = self.revoke_through_the_door([{"date": OCT, "usage": 4.0}])
-        self.assertNotIn("k2", left["issued"])
-        (stone,) = left["retired"]
-        self.assertEqual({k: stone[k] for k in ("name", "hash", "project", "reason", "account", "usage")},
-                         {"name": "k2", "hash": "h-k2", "project": "alpha-web", "reason": "revoked",
-                          "account": "acct-a", "usage": "read"})
-        self.assertEqual(stone["usage_by_day"]["2026-10-05"], 4.0)
-        self.assertEqual(stone["usage_by_day"][stone["covers_through"]], 0.5)   # today so far, from usage_daily
-        self.assertRegex(stone["retired_on"], r"^\d{4}-\d{2}-\d{2}$")
-        # Read on the fixed clock: the snapshot's own today is past the window, so only 10-05 counts.
-        stone["retired_on"] = stone["covers_through"] = "2026-10-08"
-        doc = self.scan(ledger=left, keys={"h-k1": [{"date": OCT, "usage": 2.0}]},
-                        account=[{"date": OCT, "usage": 6.0}])
-        self.assertEqual((doc["projects"]["alpha-web"]["month_usd"], doc["projects"]["alpha-web"]["partial"]),
-                         (6.0, False))
+    def test_a_failure_after_the_delete_keeps_the_snapshot_for_the_retry(self):
+        """The DELETE succeeded and the ledger write after it failed: the retry finds the key gone (404) and
+        retires it with the snapshot written before the DELETE."""
+        import openrouter
+        state = {"deleted": False}
+        base = provider_for("h-k2", [{"date": OCT, "usage": 4.0}], daily=0.0)
 
-    def test_an_unreadable_snapshot_still_revokes_and_the_project_reads_null(self):
-        left = self.revoke_through_the_door(RuntimeError("openrouter answered HTTP 500; provider response withheld"))
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-k2" and method == "DELETE":
+                state["deleted"] = True
+                return {"data": {}}
+            if state["deleted"] and (path == "/keys/h-k2" or path.startswith("/activity")):
+                raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+            return base(path, key, payload, method)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(openrouter, "datetime", clock(AT)):
+            door = Door(tmp, {"k2": ledger_row("acct-a", "h-k2", "alpha-web")}, provider)
+            try:
+                real = openrouter.save_ledger
+                writes = {"n": 0}
+
+                def save_once_then_fail(doc):
+                    writes["n"] += 1
+                    if writes["n"] > 1:
+                        raise OSError("disk full")
+                    real(doc)
+                with patch.object(openrouter, "save_ledger", save_once_then_fail):
+                    with self.assertRaises(OSError):
+                        openrouter.revoke_key("k2")
+                self.assertTrue(state["deleted"])
+                openrouter.revoke_key("k2")
+                left = door.ledger()
+            finally:
+                door.close()
+        stone = left["retired"][0]
+        self.assertEqual((stone["usage"], stone["reconciled"]), ("read", True))
         self.assertNotIn("k2", left["issued"])
-        (stone,) = left["retired"]
-        self.assertEqual((stone["usage"], stone["usage_error"]), ("unread", "RuntimeError"))
-        stone["retired_on"] = "2026-10-08"
-        alpha = self.scan(ledger=left, keys={"h-k1": [{"date": OCT, "usage": 2.0}]},
-                          account=[{"date": OCT, "usage": 6.0}])["projects"]["alpha-web"]
-        self.assertEqual((alpha["month_usd"], alpha["partial"]), (None, True))
 
     def test_a_completed_rotation_leaves_a_tombstone_for_its_predecessor(self):
+        import openrouter
+        base = provider_for("h-old", [{"date": SEP, "usage": 1.0}], daily=0.0, name="k1")
+
         def provider(path, key, payload=None, method=None):
-            if path == "/keys/h-old" and method is None:
-                return {"data": {"name": "k1", "hash": "h-old", "usage_daily": 0.0}}
-            if path.startswith("/activity?api_key_hash=h-old"):
-                return {"data": [{"date": SEP, "usage": 1.0}]}
             if path == "/keys" and payload:
                 return {"data": {"hash": "h-new", "label": "y"}, "key": "sk-or-v1-" + "n" * 40}
-            return {"data": {}}
-        with tempfile.TemporaryDirectory() as tmp:
+            return base(path, key, payload, method)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(openrouter, "datetime", clock(AT)):
             door = Door(tmp, {"k1": ledger_row("acct-a", "h-old", "alpha-web", rotations=1,
                                                rotated_on="2026-09-01")}, provider)
             try:
@@ -350,11 +495,92 @@ class ProjectSpend(unittest.TestCase):
             finally:
                 door.close()
         row = left["issued"]["k1"]
-        self.assertEqual((row["hash"], row["rotations"], row["tombstoned_rotations"]), ("h-new", 2, 1))
+        self.assertEqual((row["hash"], row["rotations"], row["tombstoned_rotations"], row["rotation_status"]),
+                         ("h-new", 2, 1, "complete"))
         # The first tracked rotation records the day of the last untracked one, not today.
         self.assertEqual(row["tombstones_since"], "2026-09-01")
-        self.assertEqual([(t["hash"], t["reason"], t["project"], t["usage"]) for t in left["retired"]],
-                         [("h-old", "rotated", "alpha-web", "read")])
+        self.assertNotIn("predecessor_snapshot", row)
+        (stone,) = left["retired"]
+        self.assertEqual((stone["hash"], stone["reason"], stone["project"], stone["usage"], stone["reconciled"]),
+                         ("h-old", "rotated", "alpha-web", "read", True))
+        self.assertNotIn("untracked_through", stone)            # the row carries its own horizon
+
+    def test_a_failed_rename_after_the_delete_keeps_the_tombstone(self):
+        """Round 4 P5: the predecessor is deleted, then the successor's rename fails."""
+        import openrouter
+        base = provider_for("h-old", [{"date": OCT, "usage": 4.0}], daily=0.0, name="k1")
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys" and payload:
+                return {"data": {"hash": "h-new", "label": "y"}, "key": "sk-or-v1-" + "n" * 40}
+            if method == "PATCH":
+                raise RuntimeError("openrouter answered HTTP 500; provider response withheld")
+            return base(path, key, payload, method)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(openrouter, "datetime", clock(AT)):
+            door = Door(tmp, {"k1": ledger_row("acct-a", "h-old", "alpha-web")}, provider)
+            try:
+                with self.assertRaises(RuntimeError):
+                    door.m.rotate_one("k1")
+                left = door.ledger()
+            finally:
+                door.close()
+        self.assertEqual([(t["hash"], t["usage"]) for t in left["retired"]], [("h-old", "read")])
+        self.assertEqual(left["issued"]["k1"]["rotation_status"], "predecessor-retired-rename-pending")
+
+    def test_revoking_a_row_with_an_untracked_rotation_keeps_its_project_null(self):
+        """Round 4 P10: the row's horizon goes with it into the tombstone, even with a reconciled snapshot."""
+        rows = [{"date": "2026-10-08 00:00:00", "usage": 1.0}]
+        row = ledger_row("acct-a", "h-k2", "alpha-web", rotations=1, rotated_on="2026-10-05")
+        _calls, left = door_revoke(provider_for("h-k2", rows, daily=0.0), when=AT, row=row)
+        stone = left["retired"][0]
+        self.assertEqual((stone["reconciled"], stone["untracked_through"]), (True, "2026-10-05"))
+        doc = self.scan_at(utc(2026, 10, 16, 12), ledger=left, keys={"h-k1": []},
+                           account=[{"date": "2026-10-03", "usage": 7.0}, {"date": "2026-10-08", "usage": 1.0}])
+        self.assertEqual((doc["projects"]["alpha-web"]["month_usd"], doc["projects"]["alpha-web"]["partial"]),
+                         (None, True))
+        self.assertIn("spend:openrouter:key:k2", [d["source"] for d in doc["degraded"]])
+
+    def test_revoking_a_row_mid_rotation_keeps_its_project_null(self):
+        """Round 4 P9: a rotation left predecessor_hash; revoking the successor carries it into the tombstone."""
+        rows = [{"date": "2026-10-08 00:00:00", "usage": 1.0}]
+        row = ledger_row("acct-a", "h-k2", "alpha-web", rotations=1, rotated_on="2026-10-09",
+                         tombstoned_rotations=0, predecessor_hash="h-pred",
+                         rotation_status="successor-delivered-predecessor-pending")
+        _calls, left = door_revoke(provider_for("h-k2", rows, daily=0.0), when=AT, row=row)
+        stone = left["retired"][0]
+        self.assertEqual((stone["predecessor_hash"], stone["predecessor_usage"]), ("h-pred", "unread"))
+        alpha = self.scan_at(utc(2026, 10, 16, 12), ledger=left, keys={"h-k1": []},
+                             account=[{"date": "2026-10-03", "usage": 7.0},
+                                      {"date": "2026-10-08", "usage": 1.0}])["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["partial"]), (None, True))
+
+    def test_an_issue_over_a_row_with_a_hash_keeps_that_hash_as_a_tombstone(self):
+        """The provider has no key by the name any more; the row's hash is kept, its deletion not known, and the
+        project reads null while the tombstone is kept."""
+        import openrouter
+
+        def provider(path, key, payload=None, method=None):
+            if path.startswith("/keys?") or path.startswith("/keys/h-gone"):
+                if path.startswith("/keys/h-gone"):
+                    raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+                return {"data": []}
+            if path == "/keys" and payload:
+                return {"data": {"hash": "h-fresh", "label": "z"}, "key": "sk-or-v1-" + "f" * 40}
+            return {"data": {}}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(openrouter, "datetime", clock(AT)):
+            door = Door(tmp, {"k2": ledger_row("acct-a", "h-gone", "alpha-web")}, provider)
+            try:
+                with patch.object(openrouter, "vault_destination", lambda to: to):
+                    door.m.issue_key("k2", 5.0, "acct-a", "observatory", "alpha-web")
+                left = door.ledger()
+            finally:
+                door.close()
+        self.assertEqual(left["issued"]["k2"]["hash"], "h-fresh")
+        (stone,) = left["retired"]
+        self.assertEqual((stone["hash"], stone["reason"], stone["deleted"]), ("h-gone", "replaced-by-issue", None))
+        alpha = self.scan_at(utc(2026, 10, 16, 12), ledger=left, keys={"h-fresh": []},
+                             account=[])["projects"]["alpha-web"]
+        self.assertEqual((alpha["month_usd"], alpha["partial"]), (None, True))
 
     def test_a_forgotten_pending_row_leaves_a_tombstone_without_usage(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -369,21 +595,32 @@ class ProjectSpend(unittest.TestCase):
         self.assertEqual((stone["name"], stone["hash"], stone["reason"], stone["usage"]),
                          ("k3", None, "forgotten-pending", "unread"))
 
-    def test_tombstones_older_than_62_days_are_pruned_and_unreadable_ones_kept(self):
+    def test_tombstones_are_kept_62_days_and_unreadable_ones_always(self):
         import openrouter
         today = datetime.now(timezone.utc).date()
-        doc = {"issued": {}, "retired": [{"name": "old", "retired_on": (today - timedelta(days=70)).isoformat()},
-                                         {"name": "recent", "retired_on": (today - timedelta(days=10)).isoformat()},
-                                         "not-an-object"]}
+        doc = {"issued": {}, "retired": [
+            {"name": "d31", "retired_on": (today - timedelta(days=31)).isoformat()},   # the windows still need it
+            {"name": "d61", "retired_on": (today - timedelta(days=61)).isoformat()},
+            {"name": "d62", "retired_on": (today - timedelta(days=62)).isoformat()},
+            {"name": "d63", "retired_on": (today - timedelta(days=63)).isoformat()},
+            {"name": "no-day", "hash": "h-x", "project": "alpha-web"},                  # round 4 P6
+            {"name": "bad-day", "retired_on": "someday"},
+            "not-an-object"]}
         openrouter._retire(doc, "new", {"account": "acct-a", "project": "alpha-web"}, "h-new", "revoked")
         self.assertEqual([r if isinstance(r, str) else r["name"] for r in doc["retired"]],
-                         ["recent", "not-an-object", "new"])
+                         ["d31", "d61", "d62", "no-day", "bad-day", "not-an-object", "new"])
 
     def test_a_retired_list_that_is_not_a_list_is_refused_before_any_delete(self):
+        """The fake holds the key, so only the refusal stands between the call and a DELETE (round 4, M6)."""
         calls: list = []
+        provider = provider_for("h-k2", [{"date": OCT, "usage": 1.0}], daily=0.0)
+
+        def watched(path, key, payload=None, method=None):
+            calls.append(method)
+            return provider(path, key, payload, method)
         with tempfile.TemporaryDirectory() as tmp:
             door = Door(tmp, {"issued": {"k2": ledger_row("acct-a", "h-k2", "alpha-web")}, "retired": {"x": 1}},
-                        lambda path, key, payload=None, method=None: calls.append(method) or {"data": {}})
+                        watched)
             try:
                 with self.assertRaises(RuntimeError):
                     door.m.revoke_key("k2")
@@ -391,9 +628,8 @@ class ProjectSpend(unittest.TestCase):
                 door.close()
         self.assertNotIn("DELETE", calls)
 
-    def test_two_rotations_at_once_both_land(self):
-        """Each rotation reads the ledger, calls the provider and writes the ledger whole; without the ledger
-        lock the second write dropped the first one's successor."""
+    def rotate_two_at_once(self, first, second) -> dict:
+        """Two rotations started together: `first(door)` and, 50 ms later, `second(door)`."""
         import threading
         import time
 
@@ -411,12 +647,15 @@ class ProjectSpend(unittest.TestCase):
                               "k2": ledger_row("acct-a", "h-k2", "beta-api")}, provider)
             try:
                 errors: list = []
-                def run(n):
+
+                def run(fn, delay):
+                    time.sleep(delay)
                     try:
-                        door.m.rotate_one(n)
+                        fn(door)
                     except Exception as exc:        # noqa: BLE001 - reported below
                         errors.append(exc)
-                threads = [threading.Thread(target=run, args=(n,)) for n in ("k1", "k2")]
+                threads = [threading.Thread(target=run, args=(first, 0.0)),
+                           threading.Thread(target=run, args=(second, 0.05))]
                 for t in threads:
                     t.start()
                 for t in threads:
@@ -425,9 +664,55 @@ class ProjectSpend(unittest.TestCase):
             finally:
                 door.close()
         self.assertEqual(errors, [])
+        return left
+
+    def test_two_rotations_at_once_both_land(self):
+        """Each rotation reads the ledger, calls the provider and writes the ledger whole; without the ledger
+        lock the second write dropped the first one's successor."""
+        left = self.rotate_two_at_once(lambda d: d.m.rotate_one("k2"), lambda d: d.m.rotate_one("k1"))
         self.assertEqual({n: left["issued"][n]["hash"] for n in ("k1", "k2")},
                          {"k1": "h-k1-next", "k2": "h-k2-next"})
         self.assertEqual(sorted(t["hash"] for t in left["retired"]), ["h-k1", "h-k2"])
+
+    def test_the_rotate_command_reads_the_ledger_under_the_lock(self):
+        """Round 4 M14: `cmd_rotate` reads the ledger before it waits for the lock; passing that copy to the
+        rotation would write back the ledger as it was before the other rotation landed."""
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            left = self.rotate_two_at_once(lambda d: d.m.rotate_one("k2"), lambda d: d.m.cmd_rotate("k1", False))
+        self.assertEqual({n: left["issued"][n]["hash"] for n in ("k1", "k2")},
+                         {"k1": "h-k1-next", "k2": "h-k2-next"})
+
+    def test_the_lock_refusal_names_every_locked_verb(self):
+        import openrouter
+        import oslocks
+        with tempfile.TemporaryDirectory() as tmp:
+            led = Path(tmp).resolve() / "ledger.json"
+            with patch.object(openrouter, "LEDGER", led), patch.object(openrouter, "POLICY_LOCK_WAIT_S", 0.25):
+                fd = os.open(led.parent / ".openrouter-policy.lock", os.O_RDWR | os.O_CREAT, 0o600)
+                result: list = []
+
+                def other():           # another thread's open file description holds it
+                    try:
+                        with openrouter._ledger_lock():
+                            pass
+                    except RuntimeError as exc:
+                        result.append(str(exc))
+                try:
+                    oslocks.flock(fd, oslocks.LOCK_EX)
+                    import threading
+                    t = threading.Thread(target=other)
+                    t.start()
+                    t.join(10)
+                finally:
+                    oslocks.flock(fd, oslocks.LOCK_UN)
+                    os.close(fd)
+        self.assertEqual(len(result), 1)
+        self.assertIn("for 0.2 s", result[0])
+        for verb in openrouter.LOCKED_VERBS:
+            self.assertIn(verb, result[0])
+        self.assertGreaterEqual(openrouter.POLICY_LOCK_WAIT_S, 120.0)
 
     def test_a_tombstone_without_a_hash_nulls_the_windows_it_covers(self):
         ledger = {**self.LEDGER, "retired": [tomb("lost", None, "alpha-web", "2026-10-02", "forgotten-pending")]}
@@ -576,6 +861,251 @@ class ProjectSpend(unittest.TestCase):
         text = json.dumps(doc)
         for h in ("h-alpha", "h-beta", "h-claimed"):
             self.assertNotIn(h, text)
+
+
+class RoundFourProbes(unittest.TestCase):
+    """The adversarial probes of verification round 4 on #285 (P1-P10), kept as regression tests: each one is a
+    way a retired key's spend could be lost, counted twice, or hidden behind a whole, lower figure."""
+    def scan_at(self, now, **kw):
+        return ProjectSpend().scan_at(now, **kw)
+
+    def test_P1_activity_lag_yesterday_silently_lost(self):
+        """Revoke at 00:30 UTC; /activity for the key does not hold yesterday yet (the lag the scan's own
+        `through` documents). usage_daily is read, so covers_through = today and the scan reads the project whole."""
+        import openrouter
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-k2" and method is None:
+                return {"data": {"name": "k2", "hash": "h-k2", "usage_daily": 0.1}}
+            if path.startswith("/activity?api_key_hash=h-k2"):
+                return {"data": [{"date": "2026-10-10 00:00:00", "usage": 1.0}]}   # 10-14 (3.0) not yet reported
+            return {"data": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            door = Door(tmp, {"k1": ledger_row("acct-a", "h-k1", "alpha-web"),
+                              "k2": ledger_row("acct-a", "h-k2", "alpha-web")}, provider)
+            try:
+                with patch.object(openrouter, "datetime", clock(utc(2026, 10, 15, 0, 30))):
+                    openrouter.revoke_key("k2")
+                left = door.ledger()
+            finally:
+                door.close()
+        stone = left["retired"][0]
+        doc = self.scan_at(utc(2026, 10, 16, 12), ledger=left, keys={"h-k1": [{"date": "2026-10-05 00:00:00", "usage": 2.0}]},
+                           account=[{"date": "2026-10-05 00:00:00", "usage": 2.0}, {"date": "2026-10-10 00:00:00", "usage": 1.0},
+                                    {"date": "2026-10-14 00:00:00", "usage": 3.0}, {"date": "2026-10-15 00:00:00", "usage": 0.1}])
+        alpha = doc["projects"]["alpha-web"]
+        # True spend of alpha: 2.0 + 1.0 + 3.0 + 0.1 = 6.1. A defect-free scan says 6.1 or null.
+        self.assertTrue(alpha["month_usd"] is None or abs(alpha["month_usd"] - 6.1) < 1e-6,
+                        f"silent undercount: {alpha['month_usd']} partial={alpha['partial']}")
+
+    def test_P2_rotate_snapshot_today_from_stale_row_crossing_midnight(self):
+        """rotate reads the predecessor's row (usage_daily of 10-14) before mint+delivery; the snapshot is stamped
+        after delivery, past midnight, so 10-14's usage_daily lands on 10-15 while /activity already holds 10-14."""
+        import openrouter
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-old" and method is None:
+                return {"data": {"name": "k1", "hash": "h-old", "usage_daily": 5.0}}
+            if path.startswith("/activity?api_key_hash=h-old"):
+                return {"data": [{"date": "2026-10-14 00:00:00", "usage": 5.0}]}
+            if path == "/keys" and payload:
+                return {"data": {"hash": "h-new", "label": "y"}, "key": "sk-or-v1-" + "n" * 40}
+            return {"data": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            door = Door(tmp, {"k1": ledger_row("acct-a", "h-old", "alpha-web")}, provider)
+            try:
+                # today() (rotated_on) at 23:59:50, the snapshot after a 15 s delivery, _retire after it.
+                with patch.object(openrouter, "datetime", clock(utc(2026, 10, 14, 23, 59, 50), utc(2026, 10, 15, 0, 0, 5))):
+                    openrouter.rotate_one("k1")
+                left = door.ledger()
+            finally:
+                door.close()
+        stone = left["retired"][0]
+        doc = self.scan_at(utc(2026, 10, 16, 12), ledger=left, keys={"h-new": []},
+                           account=[{"date": "2026-10-14 00:00:00", "usage": 5.0}])
+        alpha = doc["projects"]["alpha-web"]
+        self.assertTrue(alpha["month_usd"] is None or abs(alpha["month_usd"] - 5.0) < 1e-6,
+                        f"double count: {alpha['month_usd']} partial={alpha['partial']}")
+
+    def test_P3_rotate_stale_usage_daily_misses_spend_during_delivery(self):
+        import openrouter
+        reads = {"n": 0}
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-old" and method is None:
+                reads["n"] += 1
+                return {"data": {"name": "k1", "hash": "h-old", "usage_daily": 0.2 if reads["n"] == 1 else 0.9}}
+            if path.startswith("/activity?api_key_hash=h-old"):
+                return {"data": []}
+            if path == "/keys" and payload:
+                return {"data": {"hash": "h-new", "label": "y"}, "key": "sk-or-v1-" + "n" * 40}
+            return {"data": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            door = Door(tmp, {"k1": ledger_row("acct-a", "h-old", "alpha-web")}, provider)
+            try:
+                openrouter.rotate_one("k1")
+                left = door.ledger()
+            finally:
+                door.close()
+        stone = left["retired"][0]
+        self.assertGreater(reads["n"], 1, "the predecessor's usage_daily was not re-read before the DELETE")
+
+    def test_P4_revoke_crash_after_delete_loses_snapshot(self):
+        import openrouter
+        state = {"deleted": False}
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-k2" and method == "DELETE":
+                state["deleted"] = True
+                return {"data": {}}
+            if path == "/keys/h-k2" and method is None:
+                if state["deleted"]:
+                    raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+                return {"data": {"name": "k2", "hash": "h-k2", "usage_daily": 0.5}}
+            if path.startswith("/activity?api_key_hash=h-k2"):
+                if state["deleted"]:
+                    raise RuntimeError("openrouter answered HTTP 404; provider response withheld")
+                return {"data": [{"date": "2026-10-05 00:00:00", "usage": 4.0}]}
+            return {"data": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            door = Door(tmp, {"k2": ledger_row("acct-a", "h-k2", "alpha-web")}, provider)
+            try:
+                real = openrouter.save_ledger
+                with patch.object(openrouter, "save_ledger", side_effect=OSError("disk full")):
+                    with self.assertRaises(OSError):
+                        openrouter.revoke_key("k2")
+                mid = door.ledger()
+                openrouter.revoke_key("k2")     # the documented retry
+                left = door.ledger()
+            finally:
+                door.close()
+        self.assertEqual(left["retired"][0]["usage"], "read", "the snapshot read before the DELETE was lost")
+
+    def test_P5_rotate_patch_failure_after_delete_loses_snapshot(self):
+        import openrouter
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-old" and method is None:
+                return {"data": {"name": "k1", "hash": "h-old", "usage_daily": 0.0}}
+            if path.startswith("/activity?api_key_hash=h-old"):
+                return {"data": [{"date": "2026-10-05 00:00:00", "usage": 4.0}]}
+            if path == "/keys" and payload:
+                return {"data": {"hash": "h-new", "label": "y"}, "key": "sk-or-v1-" + "n" * 40}
+            if method == "PATCH":
+                raise RuntimeError("openrouter answered HTTP 500; provider response withheld")
+            return {"data": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            door = Door(tmp, {"k1": ledger_row("acct-a", "h-old", "alpha-web")}, provider)
+            try:
+                with self.assertRaises(RuntimeError):
+                    openrouter.rotate_one("k1")
+                left = door.ledger()
+            finally:
+                door.close()
+        rec = left["issued"]["k1"]
+        self.assertTrue(left.get("retired"), "predecessor deleted, its snapshot kept nowhere")
+
+    def test_P6_prune_drops_a_tombstone_without_retired_on(self):
+        import openrouter
+        doc = {"issued": {}, "retired": [{"name": "x", "hash": "h-x", "project": "alpha-web", "usage": "read",
+                                          "usage_by_day": {"2026-10-05": 9.0}}]}
+        openrouter._retire(doc, "new", {"account": "a", "project": "p"}, "h-n", "revoked")
+        self.assertIn("x", [r.get("name") for r in doc["retired"]])
+
+    @unittest.skipIf(os.name == "nt", "the holder process takes the lock with fcntl")
+    def test_P7_lock_threads_and_reentrancy_and_processes(self):
+        import openrouter
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(openrouter, "LEDGER", Path(tmp) / "l.json"), patch.object(openrouter, "POLICY_LOCK_WAIT_S", 0.5):
+                order = []
+                def a():
+                    with openrouter._ledger_lock():
+                        with openrouter._ledger_lock():      # re-entrant
+                            order.append("a-in"); time.sleep(0.3); order.append("a-out")
+                def b():
+                    time.sleep(0.05)
+                    with openrouter._ledger_lock():
+                        order.append("b-in")
+                ts_ = [threading.Thread(target=a), threading.Thread(target=b)]
+                [t.start() for t in ts_]; [t.join() for t in ts_]
+                self.assertEqual(order, ["a-in", "a-out", "b-in"])
+                # another process holds it: we refuse after the wait
+                lockf = Path(tmp) / ".openrouter-policy.lock"
+                holder = subprocess.Popen([sys.executable, "-c",
+                    "import fcntl,os,sys,time; fd=os.open(sys.argv[1], os.O_RDWR|os.O_CREAT, 0o600); fcntl.flock(fd, fcntl.LOCK_EX); print('held', flush=True); time.sleep(3)", str(lockf)],
+                    stdout=subprocess.PIPE, text=True)
+                holder.stdout.readline()
+                t0 = time.monotonic()
+                with self.assertRaises(RuntimeError) as cm:
+                    with openrouter._ledger_lock():
+                        pass
+                holder.kill(); holder.wait(); holder.stdout.close()
+                self.assertEqual(getattr(openrouter._LOCK_STATE, "depth", 0), 0)
+
+    def test_P8_no_value_in_tombstone_or_degraded(self):
+        import openrouter
+        value = "sk-or-v1-" + "s" * 64
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-old" and method is None:
+                return {"data": {"name": "k1", "hash": "h-old", "usage_daily": 0.0, "key": value}}
+            if path.startswith("/activity?api_key_hash=h-old"):
+                raise RuntimeError("openrouter answered HTTP 500; provider response withheld")
+            if path == "/keys" and payload:
+                return {"data": {"hash": "h-new", "label": "y", "key": value}, "key": value}
+            return {"data": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            door = Door(tmp, {"k1": ledger_row("acct-a", "h-old", "alpha-web")}, provider)
+            try:
+                openrouter.rotate_one("k1")
+                text = door.led.read_text()
+            finally:
+                door.close()
+        self.assertNotIn(value, text)
+        self.assertNotIn("admin", json.loads(text)["retired"][0].get("usage_error", ""))
+
+
+
+class RoundFourProbesRevoke(unittest.TestCase):
+    scan_at = RoundFourProbes.scan_at
+
+    def revoke(self, row):
+        import openrouter
+
+        def provider(path, key, payload=None, method=None):
+            if path == "/keys/h-cur" and method is None:
+                return {"data": {"name": "k1", "hash": "h-cur", "usage_daily": 0.0}}
+            if path.startswith("/activity?api_key_hash=h-cur"):
+                return {"data": [{"date": "2026-10-08 00:00:00", "usage": 1.0}]}
+            return {"data": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            door = Door(tmp, {"k1": row}, provider)
+            try:
+                with patch.object(openrouter, "datetime", clock(utc(2026, 10, 10, 12))):
+                    before = self.scan_at(utc(2026, 10, 10, 12), ledger=door.ledger(),
+                                          keys={"h-cur": [{"date": "2026-10-08 00:00:00", "usage": 1.0}], "h-pred": 404},
+                                          account=[{"date": "2026-10-03 00:00:00", "usage": 7.0},
+                                                   {"date": "2026-10-08 00:00:00", "usage": 1.0}])
+                    openrouter.revoke_key("k1")
+                left = door.ledger()
+            finally:
+                door.close()
+        after = self.scan_at(utc(2026, 10, 14, 12), ledger=left, keys={},
+                             account=[{"date": "2026-10-03 00:00:00", "usage": 7.0}, {"date": "2026-10-08 00:00:00", "usage": 1.0}])
+        return before["projects"]["alpha-web"], after["projects"]["alpha-web"], after
+
+    def test_P10_revoking_a_row_with_an_untracked_rotation_unhides_a_lower_total(self):
+        """Rotated 10-05 before tombstones existed (predecessor spent 7.0 on 10-03); the scan nulls alpha.
+        Revoke the row: the guard leaves with it, and alpha reads 1.0, whole."""
+        b, a, doc = self.revoke(ledger_row("acct-a", "h-cur", "alpha-web", rotations=1, rotated_on="2026-10-05"))
+        self.assertTrue(a["month_usd"] is None, f"lower figure marked whole: {a['month_usd']}")
+
+    def test_P9_revoking_a_row_mid_rotation_drops_the_predecessor(self):
+        """A rotation left predecessor_hash (h-pred, already deleted, spent 7.0 on 10-03); revoke as cleanup."""
+        b, a, doc = self.revoke(ledger_row("acct-a", "h-cur", "alpha-web", rotations=1, rotated_on="2026-10-09",
+                                           tombstoned_rotations=0, predecessor_hash="h-pred",
+                                           rotation_status="successor-delivered-predecessor-pending"))
+        self.assertTrue(a["month_usd"] is None, f"lower figure marked whole: {a['month_usd']}")
 
 
 class ProjectCommand(unittest.TestCase):

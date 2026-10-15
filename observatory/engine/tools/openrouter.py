@@ -276,6 +276,10 @@ def save_ledger(doc: dict) -> None:
 #: How deep this thread is inside the ledger lock: `issue-for-policy` holds it while it calls `issue_key`.
 _LOCK_STATE = threading.local()
 
+#: Every verb that reads the ledger and writes it back, each holding `_ledger_lock` for the whole operation.
+LOCKED_VERBS = ("issue", "issue-for-policy", "rotate", "revoke", "revoke --forget-pending", "claim", "limit",
+                "enable", "disable")
+
 
 @contextlib.contextmanager
 def _ledger_lock():
@@ -286,7 +290,9 @@ def _ledger_lock():
     the copy they had read, so the second write dropped the first one's change: two rotations at once left one
     key's ledger row naming a deleted hash (J-11 round 2). Two `issue-for-policy` runs each read the other's keys
     before either moved them, and opposite splits ended both keys high (round 3: $16 against a $10 limit).
-    Re-entrant within a thread. A second operation waits up to POLICY_LOCK_WAIT_S, then refuses."""
+
+    Re-entrant within a thread. A second operation waits up to POLICY_LOCK_WAIT_S, then refuses: long enough for
+    a rotation whose delivery takes its full minute, so a mint from the key page waits rather than fails."""
     depth = getattr(_LOCK_STATE, "depth", 0)
     if depth:
         _LOCK_STATE.depth = depth + 1
@@ -305,9 +311,9 @@ def _ledger_lock():
                 break
             except BlockingIOError:
                 if time.monotonic() >= give_up:
-                    raise RuntimeError(f"another door operation (issue-for-policy, issue, rotate, revoke, claim, "
-                                       f"limit) has held the ledger's policy lock for {POLICY_LOCK_WAIT_S:.0f} s; nothing "
-                                       f"was read or moved — run again when it is done") from None
+                    raise RuntimeError(f"another door operation ({', '.join(LOCKED_VERBS)}) has held the ledger's "
+                                       f"policy lock for {POLICY_LOCK_WAIT_S:.1f} s; nothing was read or moved — "
+                                       f"run again when it is done") from None
                 time.sleep(0.05)
         _LOCK_STATE.depth = 1
         try:
@@ -337,13 +343,35 @@ def _locked(fn):
 #: completed UTC days, so a key retired longer ago than that can hold no spend in either window the spend scan
 #: counts (`collectors/scan_spend.py`); the margin keeps a late scan whole.
 RETIRED_KEEP_DAYS = 62
+#: How close the snapshot's days must come to the provider's own counters for the snapshot to be whole.
+RECONCILE_USD = 0.0001
+
+
+def untracked_through(rec: dict) -> str | None:
+    """The latest day an untracked rotation of this key can have happened on, or None when every rotation left
+    a tombstone. Rotations made before tombstones existed left none; they happened on or before the last one
+    made before the first tracked rotation (`tombstones_since`), or on `rotated_on` when none was tracked. The
+    spend scan nulls every window starting on or before that day, for the live row and, after a revoke, for its
+    tombstone (`_retire` carries it). "unknown" when the day was not recorded: every window."""
+    rotations = rec.get("rotations")
+    tracked = rec.get("tombstoned_rotations")
+    tracked = tracked if type(tracked) is int and tracked >= 0 else 0
+    rotated_on = str(rec.get("rotated_on") or "")[:10]
+    if type(rotations) is not int or rotations < 0:
+        rotations = 1 if rotated_on else 0
+    if rotations <= tracked:
+        return None
+    if tracked == 0:
+        return rotated_on or "unknown"
+    return str(rec.get("tombstones_since") or "unknown")[:10]
 
 
 def _retire(doc: dict, name: str, rec: dict, key_hash: str | None, reason: str,
-            snapshot: dict | None = None) -> None:
-    """Leave a tombstone for a key that left the ledger's `issued` map (revoked, forgotten) or was replaced by
-    its successor (rotated): its name, account, provider hash, project, the UTC day it was retired, and what it
-    had spent (`snapshot`, from `usage_snapshot`, taken just before the DELETE).
+            snapshot: dict | None = None, deleted: bool | None = True, row_state: bool = True) -> None:
+    """Leave a tombstone for a key that left the ledger's `issued` map (revoked, forgotten, overwritten) or was
+    replaced by its successor (rotated): its name, account, provider hash, project, the UTC day it was retired,
+    whether it is known to be gone at the provider (`deleted`), and what it had spent (`snapshot`, from
+    `usage_snapshot`, read just before the DELETE).
 
     WHY (J-11). The spend scan attributes a project's spend by reading each key's activity by its hash. A key
     deleted here took its hash with it, so whatever it spent earlier in the month moved to `unattributed` while
@@ -352,32 +380,74 @@ def _retire(doc: dict, name: str, rec: dict, key_hash: str | None, reason: str,
     earlier, both answered 404. So the tombstone carries the key's spend by day, read while the key still
     existed; with no snapshot the scan reads the windows it covers as unknown, never as zero.
 
-    Tombstones older than RETIRED_KEEP_DAYS are pruned on each write. An entry that is not an object is kept as
-    it is (the scan names it); a `retired` that is not a list is refused by `ledger()` before any door acts."""
+    What made the row's own figure unknown goes with it: a rotation made before tombstones existed
+    (`untracked_through`) and a rotation still pending (`predecessor_hash`, its spend unread). Otherwise a revoke
+    would turn the scan's honest null for that project into a whole, lower figure (round 4, P9/P10).
+
+    A rotation's own tombstone passes `row_state=False`: the row stays, and carries that state itself.
+
+    Tombstones whose `retired_on` is older than RETIRED_KEEP_DAYS are pruned on each write. An entry that is not
+    an object, or whose `retired_on` does not parse, is kept as it is (the scan names it); a `retired` that is
+    not a list is refused by `ledger()` before any door acts."""
     retired = doc.setdefault("retired", [])
     if not isinstance(retired, list):
         raise RuntimeError("Issued-key ledger's retired list has an unsupported shape; refusing to replace it")
     now = datetime.datetime.now(datetime.timezone.utc).date()
-    cutoff = (now - datetime.timedelta(days=RETIRED_KEEP_DAYS)).isoformat()
-    retired[:] = [r for r in retired if not isinstance(r, dict) or str(r.get("retired_on") or "") >= cutoff]
+    cutoff = now - datetime.timedelta(days=RETIRED_KEEP_DAYS)
+
+    def keep(r) -> bool:
+        if not isinstance(r, dict):
+            return True
+        try:
+            return datetime.date.fromisoformat(str(r.get("retired_on") or "")[:10]) >= cutoff
+        except ValueError:
+            return True
+    retired[:] = [r for r in retired if keep(r)]
     stone = {"name": name, "account": rec.get("account"), "hash": key_hash, "project": rec.get("project"),
-             "retired_on": now.isoformat(), "reason": reason}
+             "retired_on": now.isoformat(), "reason": reason, "deleted": deleted}
     stone.update(snapshot or {"usage": "unread", "usage_error": "no snapshot (no hash to read by)"})
+    horizon = untracked_through(rec) if row_state else None
+    if horizon:
+        stone["untracked_through"] = horizon
+    if row_state and rec.get("predecessor_hash"):
+        stone["predecessor_hash"] = rec["predecessor_hash"]
+        stone["predecessor_usage"] = "unread"
     retired.append(stone)
 
 
-def usage_snapshot(admin: str, key_hash: str | None, row: dict | None) -> dict:
-    """What a key has spent, by UTC day, read just before it is deleted: the last 30 completed days from the
-    activity report (`read_activity`) and today so far from the key's own `usage_daily` (GET /keys/{hash}).
+def _counter(row: dict, field: str) -> float | None:
+    value = (row or {}).get(field)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
 
-    Returns the tombstone's usage fields: `usage: "read"`, `usage_by_day` {day: USD}, `snapshot_at`, and
-    `covers_through` (today when `usage_daily` was read, else yesterday). Never raises: a failed read gives
-    `usage: "unread"` with the error's type, and the delete still proceeds; the spend scan then reads the
-    windows the key may have spent in as unknown. Between this read and the DELETE (one request) the key could
-    still spend; that sliver is not seen."""
-    snapshot_at = datetime.datetime.now(datetime.timezone.utc)
+
+def usage_snapshot(admin: str, key_hash: str | None) -> dict:
+    """What a key has spent, by UTC day, read just before it is deleted, and whether that reading is whole.
+
+    Two reads, in this order: the activity report (`read_activity`: the last 30 completed UTC days), then the
+    key itself (`GET /keys/{hash}`), the last request before the DELETE. Today and the read time come from that
+    last read (`read_at`), never from an earlier read or a clock taken before a delivery. The key's own counters
+    are kept: `usage_daily`, `usage_weekly`, `usage_monthly` (the provider's current UTC day, week from Monday,
+    and calendar month).
+
+    RECONCILED. The snapshot is whole only when the activity days of the current month plus `usage_daily` equal
+    `usage_monthly`, and the days of the current week plus `usage_daily` equal `usage_weekly`, each within
+    RECONCILE_USD, and yesterday falls in the month or the week checked. Then today's spend is `usage_daily` and
+    every day through today is known. Otherwise (`reconciled: false`: the activity report has not caught up, the
+    reads straddled midnight, the key spent while the successor was delivered, or a counter is missing) only the
+    activity days are kept, and the spend scan reads the windows holding any day after the last activity day,
+    through the retirement day, as unknown. A mismatch is never booked as unattributed while a project reads
+    whole.
+
+    Never raises: a failed read gives `usage: "unread"` with the error's type, and the delete still proceeds; the
+    scan then reads the windows the key may have spent in as unknown. No value is stored: only day totals, the
+    three counters and times."""
+    def unread(why: str) -> dict:
+        return {"usage": "unread", "usage_error": why,
+                "read_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
     if not key_hash:
-        return {"usage": "unread", "usage_error": "no provider hash", "snapshot_at": snapshot_at.isoformat()}
+        return unread("no provider hash")
     try:
         rows = read_activity(admin, key_hash)
         by_day: dict[str, float] = {}
@@ -388,17 +458,33 @@ def usage_snapshot(admin: str, key_hash: str | None, row: dict | None) -> dict:
             if not math.isfinite(usd):
                 raise ValueError("an activity usage that is not finite")
             day = str(r.get("date") or "")[:10]
+            datetime.date.fromisoformat(day)
             by_day[day] = by_day.get(day, 0.0) + usd
+        row = _request(f"/keys/{key_hash}", admin).get("data")
+        read_at = datetime.datetime.now(datetime.timezone.utc)
+        if not isinstance(row, dict):
+            raise ValueError("the key's row is not an object")
     except (OSError, RuntimeError, ValueError, TypeError, AttributeError) as exc:
-        return {"usage": "unread", "usage_error": type(exc).__name__, "snapshot_at": snapshot_at.isoformat()}
-    today_ = snapshot_at.date().isoformat()
-    covers = (snapshot_at.date() - datetime.timedelta(days=1)).isoformat()
-    daily = (row or {}).get("usage_daily")
-    if isinstance(daily, (int, float)) and not isinstance(daily, bool) and math.isfinite(daily):
-        by_day[today_] = float(daily)
-        covers = today_
-    return {"usage": "read", "usage_by_day": {d: round(u, 9) for d, u in sorted(by_day.items())},
-            "covers_through": covers, "snapshot_at": snapshot_at.isoformat()}
+        return unread(type(exc).__name__)
+    today = read_at.date()
+    daily, weekly, monthly = (_counter(row, f) for f in ("usage_daily", "usage_weekly", "usage_monthly"))
+    yesterday = today - datetime.timedelta(days=1)
+    monday = today - datetime.timedelta(days=today.weekday())
+    month_start = today.replace(day=1)
+
+    def total(first: datetime.date) -> float:
+        return sum(u for d, u in by_day.items() if first.isoformat() <= d < today.isoformat())
+    reconciled = (daily is not None and weekly is not None and monthly is not None
+                  and abs(total(month_start) + daily - monthly) <= RECONCILE_USD
+                  and abs(total(monday) + daily - weekly) <= RECONCILE_USD
+                  and (yesterday >= month_start or yesterday >= monday))
+    snap = {"usage": "read", "read_at": read_at.isoformat(), "reconciled": reconciled,
+            "usage_daily": daily, "usage_weekly": weekly, "usage_monthly": monthly,
+            "activity_through": max(by_day) if by_day else None}
+    if reconciled:
+        by_day[today.isoformat()] = daily
+    snap["usage_by_day"] = {d: round(u, 9) for d, u in sorted(by_day.items()) if d <= today.isoformat()}
+    return snap
 
 
 # ─────────────────────────── delivery ────────────────────────────────────────
@@ -590,6 +676,12 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     # cleanup that failed, used to leave a live key no ledger knew — and on an account listing past
     # PAGES_MAX the name check could not see it, so the next run minted a second. The row names the
     # key, its slot and its ceiling, and gets the hash the moment the provider answers.
+    old_row = doc["issued"].get(name)
+    if isinstance(old_row, dict) and old_row.get("hash"):
+        # The provider has no key by this name (the check above), so the row's key is gone or renamed; its
+        # hash would be lost with the row. Kept as a tombstone whose deletion is not known: the spend scan reads
+        # the project's windows as unknown while it is kept, rather than whole and lower (round 4).
+        _retire(doc, name, old_row, old_row["hash"], "replaced-by-issue", deleted=None)
     doc["issued"][name] = {"account": label, "hash": None, "destination": to, "project": project,
                            "limit_usd": limit, "limit_reset": reset, "issued_on": today(), "pending": True}
     save_ledger(doc)
@@ -726,8 +818,9 @@ MAX_USD = 1_000_000_000.0
 #: Two ceilings closer than this are the same ceiling: a provider that echoes 3.330000001 or stores
 #: cents must not be re-PATCHed on every run.
 SAME_CEILING_USD = 0.005
-#: How long a run waits for another `issue-for-policy` run to finish before it refuses.
-POLICY_LOCK_WAIT_S = 30.0
+#: How long a door operation waits for another to release the ledger lock before it refuses: past a rotation
+#: whose delivery takes its full 60 s plus its provider calls, so a mint from the key page waits, not fails.
+POLICY_LOCK_WAIT_S = 150.0
 
 
 def _cents(usd, what: str) -> int:
@@ -1332,19 +1425,23 @@ def rotate_one(name: str, doc: dict | None = None) -> dict:
                 "rotated_on": today(), "rotations": rotations + 1,
                 "rotation_status": "successor-delivered-predecessor-pending",
                 "predecessor_hash": old.get("hash") if old else None})
+    predecessor = (old or {}).get("hash") or previous_hash
     try:
+        # What the predecessor spent, read while it still exists (the provider keeps no history of a deleted key),
+        # and kept on the row BEFORE the DELETE: a failure after the DELETE must not lose it (round 4, P5).
+        snapshot = usage_snapshot(admin, predecessor) if old else {
+            "usage": "unread", "usage_error": "the predecessor was not found at the provider",
+            "read_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
+        rec["predecessor_snapshot"] = snapshot
         save_ledger(doc)
-        # What the predecessor spent, read while it still exists: the provider keeps no history of a deleted key.
-        snapshot = usage_snapshot(admin, (old or {}).get("hash") or previous_hash, old)
         if old:
             _request(f"/keys/{old['hash']}", admin, method="DELETE")
-        _request(f"/keys/{new_row['hash']}", admin, {"name": name}, method="PATCH")
-        rec["rotation_status"] = "complete"
-        rec.pop("predecessor_hash", None)
-        # The predecessor's tombstone (J-11): its spend before today stays readable by hash for the spend scan.
+        # The predecessor is gone: its tombstone now, before the rename, so a failed PATCH keeps it (J-11).
         # `tombstoned_rotations` counts the rotations that left one; a row rotated before this change has
         # fewer than `rotations`, and `tombstones_since` bounds when those older rotations happened.
-        _retire(doc, name, rec, (old or {}).get("hash") or previous_hash, "rotated", snapshot)
+        rec.pop("predecessor_hash", None)
+        rec.pop("predecessor_snapshot", None)
+        _retire(doc, name, rec, predecessor, "rotated", snapshot, row_state=False)
         tombstoned = rec.get("tombstoned_rotations")
         if type(tombstoned) is not int or tombstoned < 0:
             tombstoned = 0
@@ -1353,6 +1450,10 @@ def rotate_one(name: str, doc: dict | None = None) -> dict:
             # this row counts beyond `tombstoned_rotations` happened on or before it.
             rec["tombstones_since"] = previous_rotated_on
         rec["tombstoned_rotations"] = tombstoned + 1
+        rec["rotation_status"] = "predecessor-retired-rename-pending"
+        save_ledger(doc)
+        _request(f"/keys/{new_row['hash']}", admin, {"name": name}, method="PATCH")
+        rec["rotation_status"] = "complete"
         save_ledger(doc)
     except (OSError, ValueError, RuntimeError):
         _journal("rotation-partial", f"openrouter/{label}/{name}",
@@ -1586,15 +1687,23 @@ def revoke_key(name_or_label: str) -> dict:
     _label, admin = read_admin(rec["account"])
     row = find_key(admin, name)
     key_hash = rec.get("hash") or (row or {}).get("hash")
-    # What the key spent, read while it still exists: the provider keeps no history of a deleted key.
-    snapshot = usage_snapshot(admin, key_hash, row) if row else {
-        "usage": "unread", "usage_error": "the key was not found at the provider",
-        "snapshot_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
     if row:
+        # What the key spent, read while it still exists (the provider keeps no history of a deleted key), and
+        # kept on the row BEFORE the DELETE: a failure after the DELETE must not lose it (round 4, P4).
+        snapshot = usage_snapshot(admin, key_hash)
+        doc = ledger()
+        if name in doc["issued"]:
+            doc["issued"][name]["retiring_snapshot"] = snapshot
+            save_ledger(doc)
         _request(f"/keys/{row['hash']}", admin, method="DELETE")
+    else:
+        # Gone at the provider: a retry after a failure past the DELETE finds the snapshot it kept.
+        snapshot = rec.get("retiring_snapshot") if isinstance(rec.get("retiring_snapshot"), dict) else {
+            "usage": "unread", "usage_error": "the key was not found at the provider",
+            "read_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}
     doc = ledger()
-    doc["issued"].pop(name, None)
-    _retire(doc, name, rec, key_hash, "revoked", snapshot)
+    current = doc["issued"].pop(name, None)
+    _retire(doc, name, current if isinstance(current, dict) else rec, key_hash, "revoked", snapshot)
     save_ledger(doc)
     _journal("revoke", f"openrouter/{rec['account']}/{name}")
     return {"name": name, "label": (row or {}).get("label"), "revoked": True,

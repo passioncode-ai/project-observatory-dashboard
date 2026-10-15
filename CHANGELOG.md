@@ -17,15 +17,23 @@ while the major version is 0, a minor release may change behaviour and says so h
     (its folders, its id, its name) is one bucket keyed by its registry id, so any of them answers the whole project.
   - **A retired key keeps its spend with its project** (OBS-103). The provider keeps no history of a deleted key
     (`GET /activity?api_key_hash=` and `GET /keys/{hash}` answer 404, measured 2026-10-15). So `openrouter.py
-    revoke`, a completed `rotate` and `revoke --forget-pending` leave a tombstone in the ledger's `retired` list,
-    kept 62 days. It holds the name, account, hash, project and day, and the key's spend by day read just before
-    the DELETE: the last 30 completed days, plus today from `usage_daily`. The scan counts that snapshot, and a
-    deleted key spends nothing after it. A snapshot that cannot be read still lets the delete proceed; that key's
-    windows are then null. Before this, a revoked key's spend moved to `unattributed` while its project read as
-    whole and lower.
+    revoke`, a completed `rotate`, `revoke --forget-pending`, and `issue` over a row that still had a hash, leave a
+    tombstone in the ledger's `retired` list, kept 62 days. It holds the name, account, hash, project, day and
+    `deleted`. It also holds the key's spend by day: the activity report, then the key's own row as the last read
+    before the DELETE.
+    - The snapshot is trusted whole only when the month's and the week's days plus `usage_daily` equal the key's
+      `usage_monthly` and `usage_weekly` within $0.0001 (`reconciled`).
+    - Otherwise every window holding a day after its last activity day, through the retirement day, reads null.
+    - It is written to the ledger before the DELETE, so a failure after the DELETE keeps it for the retry. A
+      rotation's tombstone is written before the successor's rename.
+    - A tombstone carries its row's untracked rotation and pending predecessor, so a revoke never turns an honest
+      null into a whole, lower figure.
+    - A row an `issue` replaced is not known to be deleted, and nulls its project while it is kept.
+    - A snapshot that cannot be read still lets the delete proceed; that key's windows are then null.
   - **Every door verb that writes the OpenRouter ledger holds one lock** (the one `issue-for-policy` held), across
-    processes and threads. Two rotations at once used to drop one rotation's successor from the ledger. A
-    `retired` that is not a list is refused before any door acts.
+    processes and threads. Two rotations at once used to drop one rotation's successor from the ledger. A second
+    operation waits up to 150 s (a rotation's delivery can take a minute), and its refusal names the wait and every
+    locked verb. A `retired` that is not a list is refused before any door acts.
   - `unattributed` is its own total, never guessed into a project. It holds keys whose ledger row names no project,
     and an account's spend on hashes no ledger row or tombstone holds.
   - A window that was not read whole is `null`, never a lower figure, and the key is named in `unread`. This covers

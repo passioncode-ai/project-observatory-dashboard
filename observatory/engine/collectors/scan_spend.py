@@ -13,11 +13,12 @@ cost presets and its recent spend, and Observatory measures that spend. Every ke
 (`openrouter-issued.json`) is read once by its hash (`openrouter.read_activity`: the last 30 completed UTC days,
 by day and model) and summed under the ledger row's `project`. A key the door retired inside the windows keeps
 its spend too: `revoke`, a completed `rotate` and `revoke --forget-pending` leave a tombstone (`retired`: name,
-account, hash, project, `retired_on`) with a usage snapshot read just before the DELETE (`usage_by_day`, through
-`covers_through`), because the provider keeps no history of a deleted key: on 2026-10-15 `GET /activity
-?api_key_hash=` for a hash that never existed, and `GET /keys/{hash}` for a key revoked earlier, both answered
-404. The scan counts the snapshot and never asks for the deleted key; after its snapshot a deleted key spends
-nothing. Two windows, both of completed UTC days (the provider's report has no today): the current month so far
+account, hash, project, `retired_on`, `deleted`) with a usage snapshot read just before the DELETE
+(`openrouter.usage_snapshot`), because the provider keeps no history of a deleted key: on 2026-10-15 `GET
+/activity?api_key_hash=` for a hash that never existed, and `GET /keys/{hash}` for a key revoked earlier, both
+answered 404. A snapshot is trusted whole only when its days reconciled with the provider's own counters in the
+last read before the DELETE (`reconciled: true`); the scan counts it and never asks for the deleted key, and
+after it a deleted key spends nothing. Two windows, both of completed UTC days (the provider's report has no today): the current month so far
 (what a monthly limit counts) and the last 30 days (what "recent spend" means when the month has just begun).
 
 ONE PROJECT, ONE BUCKET. A ledger row's `project` is resolved by the rule every door uses
@@ -37,7 +38,11 @@ A WINDOW NOT READ WHOLE IS NULL, NEVER A LOWER FIGURE. A project's window is `nu
     that is not an object, a usage that is not a number, a cut-off body);
   - a pending row has no hash yet;
   - a tombstone has no usage snapshot (its read failed, or a forgotten pending row had no hash): every window
-    starting on or before its day; or its snapshot does not reach the retirement day: the windows holding it;
+    starting on or before its day; or its snapshot did not reconcile: the windows holding any day after its last
+    activity day through the retirement day;
+  - a tombstone not known to be deleted (a row an `issue` replaced): every window, while it is kept;
+  - a tombstone that carries its row's untracked rotation (`untracked_through`) or a pending predecessor
+    (`predecessor_hash`): the windows starting on or before that day, as for the live row;
   - two ledger entries hold the same hash, so neither can be told apart;
   - a key was rotated before tombstones existed: the row's `rotations` count more rotations than
     `tombstoned_rotations`, and the untracked ones happened on or before `tombstones_since` (or on `rotated_on`
@@ -157,13 +162,15 @@ def sums(rows: list[tuple[str, float]], month: str, start: str, end: str) -> dic
 
 
 def snapshot_sums(tomb: dict, month: str, start: str, end: str) -> tuple[dict[str, float], list[str]] | None:
-    """A retired key's spend per window from its tombstone's usage snapshot, and the windows its snapshot does not
-    cover; None when there is no usable snapshot.
+    """A retired key's spend per window from its tombstone's usage snapshot, and the windows the snapshot cannot
+    vouch for; None when there is no usable snapshot.
 
-    The snapshot holds the key's spend by UTC day up to `covers_through`, read just before the DELETE. After the
-    snapshot the key is deleted and spends nothing more, so a later day counts 0. The one day the snapshot may
-    miss is the retirement day itself (when the key's `usage_daily` could not be read): a window holding that
-    completed day is unknown."""
+    The snapshot holds the key's spend by UTC day, read just before the DELETE (`openrouter.usage_snapshot`).
+    After it the key is deleted and spends nothing more, so a later day counts 0. A snapshot is whole only when
+    its days reconciled with the provider's own counters in that same read (`reconciled: true`). Otherwise every
+    day after the last one the activity report held (`activity_through`), through the retirement day, is
+    unknown, and so is each window holding such a day; with no activity day at all, every window up to the
+    retirement day. A day that does not parse makes every window unknown."""
     if tomb.get("usage") != "read" or not isinstance(tomb.get("usage_by_day"), dict):
         return None
     rows = []
@@ -172,10 +179,19 @@ def snapshot_sums(tomb: dict, month: str, start: str, end: str) -> tuple[dict[st
             return None
         rows.append((str(day)[:10], float(usd)))
     retired = str(tomb.get("retired_on") or "")[:10]
-    covers = str(tomb.get("covers_through") or "")[:10]
+    try:
+        date.fromisoformat(retired)
+    except ValueError:
+        return sums(rows, month, start, end), list(WINDOWS)
     unknown: list[str] = []
-    if not covers or covers < retired:
-        unknown = [w for w in windows_from(retired, month, start) if retired <= end]
+    if tomb.get("reconciled") is not True:
+        last = str(tomb.get("activity_through") or "")[:10]
+        try:
+            gap_first = (date.fromisoformat(last) + timedelta(days=1)).isoformat()
+        except ValueError:
+            gap_first = "0000-00-00"            # no activity day known: anything up to the retirement day
+        unknown = [w for w, first in (("month", f"{month}-01"), ("last30", start))
+                   if gap_first <= end and retired >= first and gap_first <= retired]
     return sums(rows, month, start, end), unknown
 
 
@@ -190,22 +206,13 @@ def windows_from(day: str, month: str, start: str) -> list[str]:
 
 
 def untracked_rotation(rec: dict) -> str | None:
-    """The latest day an untracked rotation of this key can have happened on, or None when every rotation left
-    a tombstone. Rotations made before tombstones existed left none; they happened on or before the first
-    tracked one (`tombstones_since`), or on `rotated_on` when no rotation was tracked."""
-    if rec.get("predecessor_hash"):
-        return None                     # a pending rotation: its predecessor is read like any key
-    rotations = rec.get("rotations")
-    tracked = rec.get("tombstoned_rotations")
-    tracked = tracked if type(tracked) is int and tracked >= 0 else 0
-    rotated_on = str(rec.get("rotated_on") or "")[:10]
-    if type(rotations) is not int or rotations < 0:
-        rotations = 1 if rotated_on else 0
-    if rotations <= tracked:
-        return None
-    if tracked == 0:
-        return rotated_on or "unknown"
-    return str(rec.get("tombstones_since") or "unknown")[:10]
+    """The latest day an untracked rotation of this live key can have happened on (`openrouter.untracked_through`,
+    the one implementation the door uses for tombstones too), or None. A pending rotation, whose predecessor is
+    still on the row (`predecessor_hash`), is read like any key and does not count as untracked."""
+    import openrouter
+    if rec.get("predecessor_hash") and type(rec.get("rotations")) is int and rec["rotations"] >= 1:
+        rec = {**rec, "rotations": rec["rotations"] - 1}
+    return openrouter.untracked_through(rec)
 
 
 class Bucket:
@@ -368,6 +375,25 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
         if tomb.get("hash") in shared:
             doubled(name, bucket, account)
             continue
+        if tomb.get("deleted", True) is not True:
+            # Not known to be deleted (a row an `issue` replaced): it may still be spending, by a hash no row reads.
+            bucket.miss(name, f"retired on {day} ({tomb.get('reason')}) and not known to be deleted",
+                        list(WINDOWS))
+            attribution(f"spend:openrouter:key:{name}", "a retired key not known to be deleted")
+            not_whole(account)
+            continue
+        horizon = str(tomb.get("untracked_through") or "")[:10]
+        if horizon:
+            hidden = windows_from(horizon, month, start)
+            if hidden:
+                bucket.miss(name, f"rotated on or before {horizon} without a tombstone, before it was retired",
+                            hidden)
+                attribution(f"spend:openrouter:key:{name}", f"retired with a rotation untracked through {horizon}")
+        if tomb.get("predecessor_hash"):
+            hidden = windows_from(day, month, start)
+            bucket.miss(name, "retired while a rotation was pending: its predecessor's spend was not read", hidden)
+            attribution(f"spend:openrouter:key:{name}", "retired with a pending predecessor not read")
+            not_whole(account)
         got = snapshot_sums(tomb, month, start, end)
         if got is None:
             # No snapshot of what it spent, and the provider keeps no history of a deleted key (404, measured
@@ -383,8 +409,9 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
             for w in WINDOWS:
                 ledgered[account][w] += usd[w]
         if unknown:
-            bucket.miss(name, f"its snapshot does not cover {day}, the day it was retired", unknown)
-            attribution(f"spend:openrouter:key:{name}", f"the retirement day {day} is not in its usage snapshot")
+            bucket.miss(name, f"its usage snapshot did not reconcile with the provider's counters: the days after "
+                              f"{tomb.get('activity_through') or 'its first'} through {day} are unknown", unknown)
+            attribution(f"spend:openrouter:key:{name}", "a usage snapshot that did not reconcile")
             not_whole(account)
 
     # Read every hash once, under the step's deadline.

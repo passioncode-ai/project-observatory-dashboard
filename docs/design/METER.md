@@ -101,27 +101,58 @@ name) is one bucket keyed by the registry id (`projects.<id>`: `month_usd`, `las
 `retired_keys`, `folders`, `through`). A key whose row names no project, and each account's spend on hashes no
 row or tombstone holds, are `unattributed`; nothing is attributed from a name.
 
-**A retired key keeps its spend with its project, through a snapshot.** The provider keeps no history of a deleted
-key. Measured on 2026-10-15 with free reads on one door account: `GET /activity?api_key_hash=` for a hash that
-never existed answered 404, and so did `GET /keys/{hash}` for a key revoked earlier. So before every DELETE the
-door reads what the key spent and keeps it. `revoke`, a completed `rotate` and `revoke --forget-pending` leave a
-tombstone in the ledger's `retired` list holding the name, account, hash, project, `retired_on` and reason, and a
-usage snapshot: `usage_by_day`, the last 30 completed days from `/activity` plus today so far from the key's
-`usage_daily`; `covers_through`; and `snapshot_at`. Tombstones are kept 62 days. The scan counts the snapshot and
-never asks for the deleted key: after its snapshot a deleted key spends nothing, so later days count 0. A snapshot
-that could not be read still lets the delete proceed. The tombstone then says `usage: unread`, and the windows the
-key may have spent in are null.
+**A retired key keeps its spend with its project, through a snapshot the provider vouches for.** The provider keeps
+no history of a deleted key. Measured on 2026-10-15 with free reads on one door account: `GET
+/activity?api_key_hash=` for a hash that never existed answered 404, and so did `GET /keys/{hash}` for a key
+revoked earlier. So before every DELETE the door reads what the key spent and keeps it. `revoke`, a completed
+`rotate`, `revoke --forget-pending`, and `issue` over a row that still had a hash, leave a tombstone in the
+ledger's `retired` list. It holds the name, account, hash, project, `retired_on`, reason and `deleted` (true when
+the door deleted it; unknown for a row an `issue` replaced). Tombstones are kept 62 days; one whose `retired_on`
+does not parse, or that is not an object, is never pruned.
 
-The ledger's read-modify-write runs under one lock beside the ledger, across processes and threads (`issue`,
-`issue-for-policy`, `rotate`, `revoke`, `claim`, `limit`, `enable`/`disable`, `revoke --forget-pending`). Two
-rotations at once used to drop one's successor. A `retired` that is not a list is refused before any door acts.
+The snapshot (`openrouter.usage_snapshot`) makes two reads. First the activity report: the last 30 completed days,
+by day. Then, as the last request before the DELETE, the key's own row: `usage_daily`, `usage_weekly` and
+`usage_monthly`, the provider's counters for the current UTC day, the week from Monday and the calendar month.
+Today and `read_at` come from that last read, never from an earlier read or a clock taken before a delivery.
+
+The snapshot is **reconciled** only when both checks hold within $0.0001: the month's activity days plus
+`usage_daily` equal `usage_monthly`, and the week's activity days plus `usage_daily` equal `usage_weekly`. Yesterday
+must also fall in the month or the week checked. Then today's spend is `usage_daily`, and every day through the
+retirement is known. Otherwise (`reconciled: false`) only the activity days are kept. That happens when the
+activity report has not caught up, the reads straddle midnight, the key spends while a successor is delivered, or
+a counter is missing. The scan then reads every window holding a day after the last activity day
+(`activity_through`), through the retirement day, as null. A mismatch is never booked as unattributed while the
+project reads whole. After its snapshot a deleted key spends nothing.
+
+The snapshot is written to the ledger before the DELETE: the row's `retiring_snapshot` for a revoke, and
+`predecessor_snapshot` for a rotation. A revoke retried after a failure past the DELETE finds the key gone and
+retires it with that snapshot. A rotation writes the predecessor's tombstone right after the DELETE, before the
+successor's rename, so a failed rename keeps it (`rotation_status: predecessor-retired-rename-pending`). A
+snapshot that could not be read still lets the delete proceed. The tombstone then says `usage: unread`, and the
+windows the key may have spent in are null.
+
+What made the row's own figure unknown goes into its tombstone: a rotation made before tombstones existed
+(`untracked_through`, computed by `openrouter.untracked_through`, the one rule the scan uses for live rows too)
+and a rotation still pending (`predecessor_hash`, its spend unread). A revoke therefore never turns a project's
+honest null into a whole, lower figure.
+
+The ledger's read-modify-write runs under one lock beside the ledger, across processes and threads (`LOCKED_VERBS`:
+`issue`, `issue-for-policy`, `rotate`, `revoke`, `revoke --forget-pending`, `claim`, `limit`, `enable`,
+`disable`). Two rotations at once used to drop one's successor. A second operation waits up to 150 s, longer than a
+rotation whose delivery takes its full minute, so a mint from the key page waits rather than fails; the refusal
+names the wait and every locked verb. A `retired` that is not a list is refused before any door acts. Windows CI
+does not run the door suites. Its job runs the three ledger-lock tests of `tests/test_spend.py` as an
+informational step: like every step of that job, it continues on error, and the outcome is written to the job
+summary.
 
 A window not read whole is `null`, never a lower figure, with the key named in `unread`:
 
 - a key the provider would not answer for, or answered with rows that are not activity;
 - a pending row;
-- a tombstone without a snapshot (every window starting on or before its day), or whose snapshot does not reach
-  the retirement day (the windows holding that day);
+- a tombstone without a snapshot (every window starting on or before its day), or whose snapshot did not reconcile
+  (the windows holding a day after its last activity day, through the retirement day);
+- a tombstone not known to be deleted (every window, while it is kept), or carrying its row's untracked rotation or
+  pending predecessor (the windows starting on or before that day);
 - two ledger entries holding the same hash;
 - a rotation made before tombstones existed: the row's `rotations` exceed `tombstoned_rotations`, and every window
   starting on or before `tombstones_since` (the day of the last untracked rotation) or `rotated_on` is null;
