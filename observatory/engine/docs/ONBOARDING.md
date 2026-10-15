@@ -813,8 +813,9 @@ same summary.
   from a name. A descriptor, manifest or launchd answer that could not be read is listed under
   `degraded`; without an MCP scan (`project-observatory full scan-mcp`) a row's
   `mcp_declarations` is `null`, not empty. A URL loses its user-info and query before it is
-  written. With `features.machine_watch` off the document is marked `stale` and dated by its
-  last scan, never by the day it was rewritten.
+  written, in every field and whatever its slashes. With `features.machine_watch` off the document is marked
+  `stale`. Its top-level `updated_on` is the day the emit last wrote it; `scanned_on`, `first_seen_on` and
+  `last_seen_running_on` come from the scan, never from that day. A scan dated in the future is stale too.
 
 With `features.auto_cleanup` also on, the tick and the disk guard (below) remove what loses nothing:
 branches merged into the default branch or identical to their upstream, clean

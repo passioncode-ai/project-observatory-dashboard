@@ -323,7 +323,7 @@ class McpJoin(Fixture):
                          ["mcp:claude/user/alpha", "mcp:cursor/user/alpha"])
         self.assertEqual(rows["beta-agent"]["mcp_declarations"], ["mcp:claude/user/beta-remote"])
         self.assertTrue(set(rows["alpha-agent"]["mcp_declarations"]) <= ids)
-        self.assertEqual(doc["totals"]["mcp"], {"attributed": 3, "ambiguous": 0, "unattributed_http": 1, "stdio": 1})
+        self.assertEqual(doc["totals"]["mcp"], {"attributed": 3, "ambiguous": 0, "unattributed_http": 1, "stdio": 1, "other": 0})
         self.assertIn("SRC-0017", doc["source_refs"])
 
     def test_without_an_mcp_inventory_the_join_is_unmeasured_not_empty(self):
@@ -700,6 +700,179 @@ class FixCycle1(Fixture):
         self.assertIn("scan-agents", order)
         self.assertLess(order.index("scan-mcp"), order.index("emit"))
         self.assertLess(order.index("scan-agents"), order.index("emit"))
+
+
+def no_slash(form: str, secret: str, rest: str = "h.example.com/x") -> str:
+    """A credential URL without the usual `//`, assembled at run time like `keyed()`."""
+    return form + "u:" + secret + chr(64) + rest
+
+
+class FixCycle2(Fixture):
+    """Review round 3 of #288: each case fails against 03ca5722."""
+
+    # --- MEDIUM 1: one harmless query URL halted the tick --------------------------------
+    def test_every_emitted_string_is_sanitised_and_problems_stays_empty(self):
+        secrets = [f"SECRETX{i}" for i in range(9)]
+        doc = descriptor("alpha-agent", 47401)
+        doc["summary"] = "Guide: https://example.com/guide?lang=en and " + keyed(secrets[0], "docs.example.com/a")
+        doc["name"] = "Alpha " + keyed(secrets[1], "n.example.com")
+        doc["lifecycle"]["label"] = keyed(secrets[2], "l.example.com") + "?q=" + secrets[3]
+        doc["lifecycle"]["plist"] = keyed(secrets[4], "p.example.com/x.plist")
+        doc["fabricManifest"] = keyed(secrets[5], "m.example.com/fabric-agent.json")
+        self.put(doc)
+        beta = descriptor("beta-agent", 47402, manager="systemd", manifest=self.put_manifest("beta-agent"))
+        beta["lifecycle"] = {"manager": keyed(secrets[6], "mgr.example.com") + "?k=" + secrets[7]}
+        self.put(beta)
+        manifest = self.home / "fixture/beta-agent/fabric-agent.json"
+        m = json.loads(manifest.read_text(encoding="utf-8"))
+        m["provider"]["id"] = keyed(secrets[8], "pid.example.com") + "?x=1"
+        manifest.write_text(json.dumps(m), encoding="utf-8")
+        out = document(self.scan(launchd={}), mcp_scan(), None)
+        text = json.dumps(out)
+        for secret in secrets:
+            self.assertEqual(text.count(secret), 0, secret)
+        self.assertNotIn("lang=en", text)
+        self.assertIn("https://example.com/guide", text, "the harmless URL is kept, without its query")
+        self.assertEqual(scan_agents.problems(out), [])
+
+    def test_a_scan_written_by_an_older_collector_is_sanitised_by_the_emit(self):
+        self.put(descriptor("alpha-agent", 47401))
+        scan = self.scan(launchd={})
+        scan["services"][0]["summary"] = "see " + keyed("SECRETOLD", "old.example.com") + " and " + str(self.home)
+        out = document(scan, mcp_scan(), None)
+        self.assertNotIn("SECRETOLD", json.dumps(out))
+        self.assertEqual(scan_agents.problems(out), [])
+
+    # --- MEDIUM 2: URLs without the usual `//` ------------------------------------------
+    def test_credential_urls_without_two_slashes_lose_their_credentials(self):
+        forms = {"https:": "SECRETF1", "http:/": "SECRETF2", "http:\\\\": "SECRETF3"}
+        for form, secret in forms.items():
+            with self.subTest(form=form):
+                for p in self.services.glob("*.json"):
+                    p.unlink()
+                doc = descriptor("alpha-agent", 47401)
+                doc["source"] = {"repository": no_slash(form, secret)}
+                self.put(doc)
+                out = document(self.scan(launchd={}), mcp_scan(), None)
+                self.assertEqual(json.dumps(out).count(secret), 0)
+                self.assertTrue(out["agents"][0]["key_in_url"])
+                self.assertEqual(scan_agents.problems(out), [])
+
+    def test_problems_refuses_credential_urls_without_two_slashes(self):
+        self.put(descriptor("alpha-agent", 47401))
+        good = document(self.scan(launchd={}), mcp_scan(), None)
+        for form in ("https:", "http:/", "http:\\\\"):
+            bad = json.loads(json.dumps(good))
+            bad["agents"][0]["summary"] = no_slash(form, "pw")
+            self.assertTrue(any("user-info or a query" in p for p in scan_agents.problems(bad)), form)
+
+    # --- LOW --------------------------------------------------------------------------------
+    def test_a_home_path_inside_a_string_is_written_with_a_tilde_and_refused_raw(self):
+        doc = descriptor("alpha-agent", 47401)
+        doc["summary"] = f"notes in {self.home}/fixture/notes.md for the team"
+        doc["source"] = {"repository": "file://" + str(self.home) + "/repo"}
+        self.put(doc)
+        out = document(self.scan(launchd={}), mcp_scan(), None)
+        self.assertNotIn(str(self.home), json.dumps(out))
+        self.assertIn("~/fixture/notes.md", out["agents"][0]["summary"])
+        self.assertEqual(out["agents"][0]["source_repository"], "file://~/repo")
+        bad = json.loads(json.dumps(out))
+        bad["agents"][0]["summary"] = f"inside {self.home}/x here"
+        self.assertTrue(any("absolute home path" in p for p in scan_agents.problems(bad)))
+
+    def test_url_params_are_dropped(self):
+        doc = descriptor("alpha-agent", 47401)
+        doc["source"] = {"repository": "https://git.example.com/x;jsessionid=SECRETP1/y"}
+        self.put(doc)
+        out = document(self.scan(launchd={}), mcp_scan(), None)
+        self.assertNotIn("SECRETP1", json.dumps(out))
+        self.assertEqual(out["agents"][0]["source_repository"], "https://git.example.com/x")
+
+    def test_an_unknown_command_key_is_not_echoed(self):
+        doc = descriptor("alpha-agent", 47401)
+        doc["commands"]["SECRETCMD9"] = ["~/x"]
+        self.put(doc)
+        out = document(self.scan(launchd={}), mcp_scan(), None)
+        self.assertNotIn("SECRETCMD9", json.dumps(out))
+        self.assertTrue(any(p.startswith("unknown command") for p in out["agents"][0]["problems"]))
+
+    def test_stdio_is_counted_by_transport_and_the_rest_is_other(self):
+        self.put(descriptor("alpha-agent", 47401))
+        scan = mcp_scan(mcp_server("tool", None, command="alpha-tool"),
+                        {"name": "sock", "agent": "claude", "scope": "user", "transport": "http",
+                         "target": "ws://h.example.com/x", "liveness": "not-probed"},
+                        {"name": "broken", "agent": "claude", "scope": "user", "transport": "http",
+                         "target": "http://[bad", "liveness": "not-probed"})
+        totals = document(self.scan(launchd={}), scan, None)["totals"]["mcp"]
+        self.assertEqual((totals["stdio"], totals["other"], totals["unattributed_http"]), (1, 2, 0))
+
+    def test_a_scan_dated_in_the_future_is_stale_with_clock_skew(self):
+        self.put(descriptor("alpha-agent", 47401))
+        future = datetime(2026, 10, 15, 9, 30, tzinfo=timezone.utc)
+        out = document(self.scan(launchd={}, now=future), mcp_scan(), None, now=NOW)
+        self.assertTrue(out["stale"])
+        self.assertTrue(any(d["reason"].startswith("clock-skew") for d in out["degraded"]))
+
+    def test_the_duplicate_check_is_linear(self):
+        import time
+        rows = [{"id": f"agent:a{i}.default", "supervisor": {"state": "running"}, "manifest": {"state": "absent"}}
+                for i in range(30_000)]
+        rows.append(dict(rows[0]))
+        doc = {"agents": rows, "totals": {"agents": len(rows)}, "source_refs": ["SRC-0020"]}
+        start = time.monotonic()
+        found = scan_agents.problems(doc)
+        self.assertLess(time.monotonic() - start, 5.0, "a quadratic count takes minutes here")
+        self.assertTrue(any("duplicate" in p for p in found))
+
+
+class Round4(Fixture):
+    """Review round 4 of #288: each half of a two-part guard has a test that fails without it."""
+
+    def test_a_quoted_value_in_a_problem_is_dropped_even_without_a_url(self):
+        doc = descriptor("alpha-agent", 47401)
+        doc["paths"]["data"] = "\\\\fileserver\\share\\SECRETQ1"       # a network share, quoted back by %r
+        self.put(doc)
+        out = document(self.scan(launchd={}), mcp_scan(), None)
+        self.assertNotIn("SECRETQ1", json.dumps(out))
+        self.assertTrue(any("network share" in p for p in out["agents"][0]["problems"]))
+
+    def test_an_unquoted_url_in_a_problem_is_made_safe(self):
+        shown = scan_agents._safe_problem("the origin " + keyed("SECRETQ2", "o.example.com") + " is refused")
+        self.assertNotIn("SECRETQ2", shown)
+        self.assertIn("https://o.example.com", shown)
+
+    def test_a_valid_id_with_a_bad_instance_is_a_file_row(self):
+        doc = descriptor("alpha-agent", 47401, instance="Bad Instance")
+        self.put(doc, "alpha.json")
+        row = document(self.scan(launchd={}), mcp_scan(), None)["agents"][0]
+        self.assertEqual((row["id"], row["service_id"], row["instance"]), ("agent:file:alpha", "alpha-agent", None))
+
+    def test_a_bad_id_with_a_valid_instance_is_a_file_row(self):
+        doc = descriptor("alpha-agent", 47401)
+        doc["id"] = "Alpha Agent"
+        self.put(doc, "alpha.json")
+        row = document(self.scan(launchd={}), mcp_scan(), None)["agents"][0]
+        self.assertEqual((row["id"], row["service_id"], row["instance"]), ("agent:file:alpha", None, "default"))
+
+    def test_tilde_handles_each_separator_on_its_own(self):
+        with patch.object(scan_agents, "_home", return_value="/srv/alpha"):
+            self.assertEqual(scan_agents.tilde("at /srv/alpha/x and /srv/alpha"), "at ~/x and ~")
+            self.assertEqual(scan_agents.tilde("/srv/alphabet/x"), "/srv/alphabet/x", "a longer name is not home")
+        with patch.object(scan_agents, "_home", return_value="C:\\Users\\alpha"):
+            self.assertEqual(scan_agents.tilde("in C:\\Users\\alpha\\x"), "in ~\\x")
+
+    def test_port_zero_and_a_port_past_65535_are_no_port_and_not_a_key(self):
+        for origin in ("http://127.0.0.1:0", "http://127.0.0.1:70000"):
+            with self.subTest(origin=origin):
+                for p in self.services.glob("*.json"):
+                    p.unlink()
+                doc = descriptor("alpha-agent", 47401)
+                doc["origin"] = origin
+                self.put(doc)
+                row = document(self.scan(launchd={}), mcp_scan(), None)["agents"][0]
+                self.assertIsNone(row["port"])
+                self.assertFalse(row["key_in_url"])
+                self.assertEqual(row["origin"], "http://127.0.0.1")
 
 
 class EmitHistory(Fixture):

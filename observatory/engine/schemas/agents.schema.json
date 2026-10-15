@@ -187,7 +187,8 @@
                 "attributed",
                 "ambiguous",
                 "unattributed_http",
-                "stdio"
+                "stdio",
+                "other"
               ],
               "properties": {
                 "attributed": {
@@ -201,12 +202,17 @@
                 "stdio": {
                   "type": "integer",
                   "minimum": 0,
-                  "description": "Declarations with no HTTP(S) origin: a command, not an address."
+                  "description": "Declarations whose transport is stdio, as scan_mcp states it."
                 },
                 "ambiguous": {
                   "type": "integer",
                   "minimum": 0,
                   "description": "HTTP declarations whose origin two agents claim; attributed to neither."
+                },
+                "other": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Neither stdio nor an HTTP(S) origin: ws://, a malformed target, no target."
                 }
               },
               "additionalProperties": false
