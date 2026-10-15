@@ -581,27 +581,41 @@ block a turn or a prompt:
 - **SessionStart** prints at most two lines about the project, only when one is
   actionable.
 - **Stop** records the facts of a turn that changed a watched repository as a
-  `proposed` ledger record, one per session, revised per turn. It asks for the
-  `why` of that record **once**. It does not ask when this session's own tools
-  already wrote the rationale:
-  - a file named `decisions.md` in any folder and any letter case, or a file under
-    an `adr/` directory, outside vendored trees (`vendor/`, `node_modules/`,
-    `third_party/`, `.venv/` and similar) and submodules;
-  - or a `decision:` / `stage:` line in `.task-pipeline/run.md`, which is read from
-    disk even when `.task-pipeline/` is ignored by git.
+  `proposed` ledger record, one per session, revised per turn. It writes the
+  record first, then asks for the `why` of that record **once**. It does not ask
+  when this session's own tools already wrote the rationale. That is checked
+  after the record exists, within 2 seconds, from one pass over the last 4 MB of
+  the session's transcript (the Stop payload names it). The pass collects the
+  session's writing calls:
+  - Edit, Write, MultiEdit and NotebookEdit, with the file each names;
+  - Bash commands that write a file through `>`, `>>` (also `cat > file <<EOF`),
+    `tee` or `sed -i`, with the files they write.
 
-  "Wrote" means three things. The work added at least one non-blank line,
-  ignoring whitespace, and did not delete the file. That text appears in the input
-  of one of this session's own Edit, Write, MultiEdit, NotebookEdit or Bash calls,
-  in the transcript Claude Code names in the Stop payload; a file the session only
-  read does not count. So another session editing the register in the same
-  checkout does not silence this session. Without a transcript (another host, or
-  a register written further back than its last 64 MB), the turn is asked about.
-  When the rationale counts, the record links that file in its evidence instead
-  of asking for a copy.
+  The rationale counts in two cases:
+  - **A decision register.** A file named `decisions.md` in any folder and any
+    letter case, or a `.md`, `.markdown` or `.txt` file under an `adr/` directory.
+    It must be outside vendored trees (`vendor/`, `node_modules/`, `third_party/`,
+    `.venv/` and similar) and submodules, and not deleted, and the work must have
+    added at least one non-blank line to it, ignoring whitespace. One of those
+    calls must target that exact file, and its text must carry the addition: the
+    newest added heading, or more than half of the added lines. One common line
+    is not enough.
+  - **The run ledger.** A `decision:` or `stage:` line in `.task-pipeline/run.md`,
+    consulted only when one of those calls wrote the ledger, or ran task-pipeline's
+    `stage_checkpoint.py`. The ledger's newest 64 KB and newest 200 such lines are
+    read, including when git ignores the file, and the line's text must be in what
+    those calls wrote.
+
+  The turn is asked about in every other case: another session's edit in the same
+  checkout, a file the session only read or grepped, a pull-request body that
+  shares a heading, a write by a tool the pass does not know (a copy, a script), a
+  subagent's edit (subagents keep their own transcripts), no transcript, or a pass
+  that runs out of its 2 seconds. When the rationale counts, a second revision of
+  the same record links that file in its evidence instead of asking for a copy.
 - **UserPromptSubmit** hands that request to the model with the session's next
   prompt, as context, once. It records the delivery and prints nothing when no
-  request is pending. The request waits in a private per-session file under
+  request is pending. The context is capped at 4,000 characters. A request that
+  does not fit is not marked delivered: it goes back to wait for the next prompt. The request waits in a private per-session file under
   `$XDG_STATE_HOME/project-observatory/ask-why/` (`~/.local/state/…` by default;
   mode 0600). The file is removed when delivered. An undelivered one older than
   seven days is removed the next time either hook writes or delivers a request. If

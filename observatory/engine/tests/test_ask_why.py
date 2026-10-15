@@ -102,6 +102,27 @@ class Fixture:
         with self.transcript(session).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec) + "\n")
 
+    def bash(self, command: str, *, session: str = "sess-1") -> None:
+        """Record that the session ran `command` through its Bash tool."""
+        self.wrote(command, session=session, tool="Bash")
+
+    def filler(self, megabytes: int, *, session: str = "sess-1") -> None:
+        """Pad the transcript with ordinary conversation, the bulk a long session has."""
+        line = json.dumps({"type": "user", "sessionId": session, "message": {
+            "role": "user", "content": "an ordinary message in a long session " * 4}}) + "\n"
+        with self.transcript(session).open("a", encoding="utf-8") as fh:
+            fh.write(line * (megabytes * (1 << 20) // len(line)))
+
+    def timed_stop(self, session: str = "sess-1", limit: float = 60.0) -> float:
+        import time as _t
+        t0 = _t.monotonic()
+        try:
+            p = self.stop(session, timeout=limit)
+        except subprocess.TimeoutExpired:
+            return limit
+        assert p.returncode == 0, p.stderr[-300:]
+        return _t.monotonic() - t0
+
     def read_back(self, text: str, *, session: str = "sess-1") -> None:
         """Record that the session READ `text` (a tool result) — never attribution."""
         rec = {"type": "user", "sessionId": session, "message": {"role": "user", "content": [
@@ -109,14 +130,15 @@ class Fixture:
         with self.transcript(session).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec) + "\n")
 
-    def stop(self, session: str = "sess-1", transcript: bool = True) -> subprocess.CompletedProcess:
+    def stop(self, session: str = "sess-1", transcript: bool = True,
+             timeout: float = 300) -> subprocess.CompletedProcess:
         payload = {"session_id": session, "cwd": str(self.repo), "stop_hook_active": False}
         if transcript:
             t = self.transcript(session)
             t.touch()
             payload["transcript_path"] = str(t)
         return subprocess.run(["bash", str(STOP)], input=json.dumps(payload),
-                              text=True, capture_output=True, env=self.env, timeout=300)
+                              text=True, capture_output=True, env=self.env, timeout=timeout)
 
     def prompt(self, session: str = "sess-1", raw: str | None = None,
                ) -> subprocess.CompletedProcess:
@@ -249,12 +271,13 @@ class SkipWhenThisSessionWroteTheRationale(unittest.TestCase):
         self.assertEqual(fx.context(fx.prompt()), "", "nothing pending")
         rcpt = fx.receipt()
         self.assertEqual((rcpt.get("rationale") or {}).get("ref"), "docs/DECISIONS.md", rcpt)
-        ev = json.loads(fx.ledger("SELECT evidence_json FROM ledger WHERE kind='session'")[0][0])
+        ev = json.loads(fx.ledger("SELECT evidence_json FROM ledger WHERE kind='session'"
+                                  " ORDER BY revision DESC")[0][0])
         link = [e for e in ev if e.get("uri") == "file:docs/DECISIONS.md"]
         self.assertEqual(len(link), 1, f"the record links the rationale: {ev}")
         self.assertIn("DEC-0001", link[0].get("anchor", ""), link)
-        why = fx.ledger("SELECT why FROM ledger WHERE kind='session'")[0][0]
-        self.assertIsNone(why, "a link to the canonical rationale, never a second copy")
+        whys = [r[0] for r in fx.ledger("SELECT why FROM ledger WHERE kind='session'")]
+        self.assertEqual(set(whys), {None}, "a link to the canonical rationale, never a second copy")
 
     def test_an_edit_to_a_tracked_register_counts(self):
         fx = Fixture()
@@ -269,6 +292,29 @@ class SkipWhenThisSessionWroteTheRationale(unittest.TestCase):
         fx.stop()
         self.assertEqual(fx.journal(), [])
         self.assertIn("DEC-0002", fx.receipt()["rationale"]["anchor"])
+
+    def test_a_shell_heredoc_into_the_register_counts(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.bash("cat > docs/DECISIONS.md <<'EOF'\n" + REGISTER + "EOF")
+        fx.stop()
+        self.assertEqual(fx.journal(), [])
+        self.assertEqual(fx.receipt()["rationale"]["ref"], "docs/DECISIONS.md")
+
+    def test_the_rationale_is_a_follow_up_revision_of_the_same_record(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.wrote(REGISTER, tool="Write")
+        fx.stop()
+        revs = fx.ledger("SELECT memory_id, revision, evidence_json FROM ledger WHERE kind='session'"
+                         " ORDER BY revision")
+        self.assertEqual(len({r["memory_id"] for r in revs}), 1)
+        self.assertEqual([r["revision"] for r in revs], [1, 2], "recorded first, then linked")
+        self.assertFalse([e for e in json.loads(revs[0]["evidence_json"]) if e.get("kind") == "rationale"])
+        self.assertTrue([e for e in json.loads(revs[1]["evidence_json"]) if e.get("kind") == "rationale"])
+        self.assertEqual(fx.receipt()["revision"], 2)
 
     def test_an_adr_in_an_unpushed_commit_counts_too(self):
         fx = Fixture()
@@ -300,7 +346,7 @@ class SkipWhenThisSessionWroteTheRationale(unittest.TestCase):
         (fx2.repo / ".task-pipeline").mkdir()
         (fx2.repo / ".task-pipeline/run.md").write_text(
             "# run\n\n- decision: keep the slot, add a journal\n", encoding="utf-8")
-        fx2.wrote("keep the slot, add a journal", tool="Bash")
+        fx2.bash("printf '%s\\n' '- decision: keep the slot, add a journal' >> .task-pipeline/run.md")
         fx2.stop()
         self.assertEqual(fx2.journal(), [])
         r = fx2.receipt().get("rationale") or {}
@@ -395,12 +441,125 @@ class NotARationale(unittest.TestCase):
         fx.change()
         self.asked(fx)
 
+    def test_a_common_heading_in_a_pull_request_body(self):
+        # Round 3: the session's `gh pr create` heredoc carried `## Context`, which the
+        # register another session is writing also adds.
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text("# Decisions\n\n## Context\n\nWritten by session B.\n",
+                                                  encoding="utf-8")
+        fx.change()
+        fx.bash("gh pr create --title t --body \"$(cat <<'EOF'\n## Context\n\nWhy this PR.\nEOF\n)\"")
+        self.asked(fx)
+
+    def test_a_read_only_grep_of_the_register(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text("# Decisions\n\nWritten by session B.\n",
+                                                  encoding="utf-8")
+        fx.change()
+        fx.bash("grep 'Written by session B.' docs/DECISIONS.md")
+        self.asked(fx)
+
+    def test_an_ignored_ledger_line_this_session_did_not_write(self):
+        # This session writes the ledger (a note), but the `stage:` line is not its.
+        fx = Fixture()
+        (fx.repo / ".gitignore").write_text(".task-pipeline/\n", encoding="utf-8")
+        fx.commit_all("ignore")
+        (fx.repo / ".task-pipeline").mkdir()
+        (fx.repo / ".task-pipeline/run.md").write_text(
+            "# run\n\n- stage: plan approved by another session\n", encoding="utf-8")
+        fx.change()
+        fx.bash("echo '- note: picked up the plan' >> .task-pipeline/run.md")
+        self.asked(fx)
+
+    def test_a_shell_write_to_another_file_with_the_same_text(self):
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.change()
+        fx.bash("cat > notes.md <<'EOF'\n" + REGISTER + "EOF")
+        self.asked(fx)
+
+    def test_a_small_edit_to_a_register_another_session_wrote(self):
+        # The session's Edit does target the register, but its text does not carry
+        # the addition: the heading and most lines are another session's.
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(
+            "# Decisions\n\n## DEC-0009 chosen by session B\n\nWritten by session B.\n\n"
+            "Session B's second paragraph.\n\nfixed a typo here\n", encoding="utf-8")
+        fx.change()
+        fx.wrote("fixed a typo here")
+        self.asked(fx)
+
     def test_no_transcript_means_no_attribution(self):
         fx = Fixture()
         (fx.repo / "docs").mkdir()
         (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
         fx.change()
         self.asked(fx, transcript=False)
+
+
+class WithinTheBudget(unittest.TestCase):
+    """The attribution runs AFTER the record, inside `ATTRIBUTION_SECONDS`. Round 3
+    measured the old per-line scan at 2.4 s for 100 register lines and a killed Stop
+    hook (no record) at 1,500; these cases bound the whole Stop."""
+
+    LIMIT = 8.0       # the 2 s budget, plus interpreter start, git and the append
+
+    def test_a_1500_line_register_and_a_large_transcript(self):
+        fx = Fixture()
+        body = "# Decisions\n\n" + "".join(
+            f"## DEC-{i:04d} a decision about part {i}\n\nBecause of constraint {i}.\n\n"
+            for i in range(1, 501))
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(body, encoding="utf-8")
+        self.assertGreaterEqual(len([l for l in body.splitlines() if l.strip()]), 1000)
+        fx.filler(24)
+        fx.wrote(body, tool="Write")
+        took = fx.timed_stop(limit=60)
+        self.assertLess(took, self.LIMIT, f"the Stop took {took:.1f} s")
+        self.assertEqual(len(fx.ledger("SELECT 1 FROM ledger WHERE kind='session'")) >= 1, True,
+                         "the record exists")
+        self.assertEqual((fx.receipt().get("rationale") or {}).get("ref"), "docs/DECISIONS.md")
+        self.assertEqual(fx.journal(), [])
+
+    def test_a_400_line_ignored_ledger(self):
+        fx = Fixture()
+        (fx.repo / ".gitignore").write_text(".task-pipeline/\n", encoding="utf-8")
+        fx.commit_all("ignore")
+        (fx.repo / ".task-pipeline").mkdir()
+        (fx.repo / ".task-pipeline/run.md").write_text("# run\n\n" + "".join(
+            f"- stage: step {i} of the plan done\n" for i in range(400)), encoding="utf-8")
+        fx.change()
+        fx.filler(24)
+        fx.bash("echo '- note: started' >> .task-pipeline/run.md")
+        took = fx.timed_stop(limit=60)
+        self.assertLess(took, self.LIMIT, f"the Stop took {took:.1f} s")
+        self.assertTrue(fx.ledger("SELECT 1 FROM ledger WHERE kind='session'"), "the record exists")
+        self.assertEqual(len(fx.journal()), 1, "no stage line was this session's: asked")
+
+    def test_the_transcript_pass_itself_stops_at_the_deadline(self):
+        import record_turn
+        fx = Fixture()
+        fx.filler(1)
+        fx.wrote(REGISTER, tool="Write")
+        with self.assertRaises(record_turn._OutOfTime):
+            record_turn.session_writes(str(fx.transcript("sess-1")), fx.repo, deadline=0.0)
+        self.assertTrue(record_turn.session_writes(str(fx.transcript("sess-1")), fx.repo,
+                                                   deadline=float("inf")))
+
+    def test_out_of_time_asks_and_the_record_stands(self):
+        import record_turn
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.wrote(REGISTER, tool="Write")
+        facts = record_turn.diff_facts(fx.repo)
+        got = record_turn.rationale_of(fx.repo, facts, str(fx.transcript("sess-1")), deadline=0.0)
+        self.assertIsNone(got, "past the deadline: no rationale, so the turn is asked")
+        self.assertIsNotNone(record_turn.rationale_of(fx.repo, facts, str(fx.transcript("sess-1"))))
 
 
 class FailOpen(unittest.TestCase):
@@ -499,6 +658,79 @@ class PendingStoreHygiene(unittest.TestCase):
         os.utime(old, (1, 1))
         fx.prompt()
         self.assertFalse(old.exists(), "and when the prompt hook delivers one")
+
+
+class Pins(unittest.TestCase):
+    """Guards round 4 found unpinned: each case fails when its guard is removed."""
+
+    def test_a_symlinked_journal_is_never_written_through(self):
+        fx = Fixture()
+        target = fx.work / "elsewhere.txt"
+        target.write_text("", encoding="utf-8")
+        link_dir = fx.work / "linkdir"
+        link_dir.mkdir()
+        (link_dir / "why-asks.jsonl").symlink_to(target)
+        fx.pending_dir.mkdir(parents=True)
+        (fx.pending_dir / "sess-1.json").write_text(json.dumps({"asks": [
+            {"at": "2099-01-01T00:00:00Z", "memoryId": "mem:s", "revision": 1,
+             "context": "ask mem:s", "journal": str(link_dir / "why-asks.jsonl")}]}), encoding="utf-8")
+        self.assertIn("mem:s", fx.context(fx.prompt()))
+        self.assertEqual(target.read_text(encoding="utf-8"), "", "nothing written through the link")
+
+    def test_rotation_rechecks_the_size_under_the_lock(self):
+        # Another session rotated between our size check and our lock: the journal
+        # is small again, and rotating it now would drop the previous generation.
+        import why_asks, oslocks
+        d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-why-recheck-"))
+        journal, previous = d / "why-asks.jsonl", d / "why-asks.jsonl.1"
+        journal.write_text(json.dumps({"at": "2026-10-14T00:00:00Z", "memoryId": "old"}) + "\n" * 3000,
+                           encoding="utf-8")
+        real = oslocks.flock
+
+        def other_session_rotates_first(fd, op):
+            if op & oslocks.LOCK_EX and journal.stat().st_size > 2000:
+                os.replace(journal, previous)
+                journal.write_text(json.dumps({"at": "2026-10-14T00:00:00Z", "memoryId": "new"}) + "\n",
+                                   encoding="utf-8")
+            return real(fd, op)
+        with mock.patch.object(why_asks, "JOURNAL", journal), \
+                mock.patch.object(why_asks, "PREVIOUS", previous), \
+                mock.patch.object(why_asks, "ROTATE_BYTES", 2000), \
+                mock.patch.object(oslocks, "flock", other_session_rotates_first):
+            why_asks._rotate()
+        self.assertIn('"old"', previous.read_text(encoding="utf-8"), "the previous generation kept")
+        self.assertIn('"new"', journal.read_text(encoding="utf-8"))
+
+    def test_every_journal_file_is_a_session_receipt_and_a_foreign_write(self):
+        import paths, why_asks, workspace_upgrade, observatory as obs
+        for f in (why_asks.JOURNAL, why_asks.PREVIOUS, why_asks.JOURNAL.with_name(why_asks.JOURNAL.name + ".lock")):
+            rel = "store/raw/" + f.relative_to(paths.SCRATCH).as_posix()
+            self.assertIn(rel, workspace_upgrade.SESSION_RECEIPTS)
+            self.assertIn(rel, obs.FOREIGN_WRITES_IGNORED)
+
+    def test_the_floor_is_twenty_delivered_not_twenty_asked(self):
+        import build_findings
+        got = build_findings.why_unanswered_findings(
+            {"asked": 35, "delivered": 5, "pending": 30, "answered": 0, "rate": 0.0,
+             "window": {"days": 7}})
+        self.assertEqual(got, [])
+
+    def test_asks_past_the_cap_are_not_marked_delivered_and_wait(self):
+        fx = Fixture()
+        fx.pending_dir.mkdir(parents=True)
+        journal = fx.scratch / "why-asks.jsonl"
+        asks = [{"at": "2099-01-01T00:00:00Z", "memoryId": f"mem:c{i}", "revision": 1,
+                 "context": f"ask mem:c{i} " + "x" * 1800, "journal": str(journal)} for i in range(3)]
+        (fx.pending_dir / "sess-1.json").write_text(json.dumps({"asks": asks}), encoding="utf-8")
+        first = fx.context(fx.prompt())
+        self.assertLessEqual(len(first), 4000)
+        self.assertIn("mem:c0", first)
+        self.assertNotIn("mem:c2", first)
+        delivered = {r["memoryId"] for r in fx.journal(event="delivered")}
+        self.assertNotIn("mem:c2", delivered, "an ask cut off by the cap is not delivered")
+        second = fx.context(fx.prompt())
+        self.assertIn("mem:c2", second, "it is handed over with the next prompt")
+        self.assertIn("mem:c2", {r["memoryId"] for r in fx.journal(event="delivered")})
 
 
 class Measured(unittest.TestCase):

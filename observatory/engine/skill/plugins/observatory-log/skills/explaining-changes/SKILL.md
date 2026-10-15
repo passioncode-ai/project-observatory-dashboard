@@ -49,10 +49,13 @@ and nothing in the ledger can tell it from a measured one.
 ## Recording it
 
 The Observatory's Stop hook has already stored the facts as a `proposed` record.
-Its id arrives once, as context with the next prompt. There is no ask when this
-session's own tools already wrote the rationale (non-blank lines in a
-`decisions.md` or an `adr/` file outside vendored trees, or a `decision:` /
-`stage:` line in `.task-pipeline/run.md`), because the record links that file.
+Its id arrives once, as context with the next prompt. There is no ask when, within
+2 seconds of the record being written, the hook finds in the last 4 MB of this
+session's transcript an Edit, Write, MultiEdit, NotebookEdit or Bash write (`>`,
+`>>`, `tee`, `sed -i`) that targeted a `decisions.md` or an `adr/` `.md`,
+`.markdown` or `.txt` file (outside vendored trees) with that file's newest
+added heading or most of its added lines, or that wrote a `decision:` /
+`stage:` line into `.task-pipeline/run.md`. The record then links that file.
 Correct that record rather than creating a second one:
 
 ```

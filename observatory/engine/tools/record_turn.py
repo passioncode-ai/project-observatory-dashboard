@@ -24,7 +24,7 @@ Any refusal is `{"recorded": false, "reason": …}` — never a traceback, becau
 the caller is a hook that must degrade silently.
 """
 from __future__ import annotations
-import argparse, json, os, re, sqlite3, subprocess, sys, pathlib
+import argparse, json, os, re, shlex, sqlite3, subprocess, sys, time, pathlib
 from datetime import datetime, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -314,15 +314,33 @@ VENDORED = frozenset({"vendor", "vendors", "node_modules", "third_party", "third
                       "site-packages", ".git"})
 #: A line shorter than this (`---`, `## x`) is too common to attribute anything.
 MIN_NEEDLE = 6
+#: The whole attribution — the transcript pass, the diffs, the ledger read — must
+#: finish inside this many seconds, AFTER the record is written. The Stop hook has
+#: twenty; a turn whose attribution runs out of time is asked about.
+ATTRIBUTION_SECONDS = 2.0
 #: The part of a session transcript read for attribution: its end, where this
-#: session's newest work is. A register written further back than this is not
-#: found, and the turn is asked about — the failure is toward asking.
-TRANSCRIPT_TAIL = 64 << 20
-#: The tools whose INPUT carries text the session wrote. A tool's result (a Read of
-#: the file another session edited) is never attribution.
-WRITING_TOOLS = frozenset({"Edit", "MultiEdit", "Write", "NotebookEdit", "Bash"})
-
-
+#: session's newest work is. A register written further back is not found, and the
+#: turn is asked about — the failure is toward asking.
+TRANSCRIPT_TAIL = 4 << 20
+#: The tail of an ignored run ledger that is read: its newest lines.
+LEDGER_TAIL = 64 * 1024
+#: The ledger lines tried, newest first.
+LEDGER_LINES = 200
+#: The register lines compared when the register adds no heading.
+REGISTER_LINES = 200
+#: Tools whose call names the file it writes, and the input field holding the text.
+FILE_TOOLS = {"Edit": ("file_path", ("new_string",)),
+              "Write": ("file_path", ("content",)),
+              "MultiEdit": ("file_path", ("edits",)),
+              "NotebookEdit": ("notebook_path", ("new_source",))}
+#: A shell write: `> file`, `>> file` (also `cat > file <<EOF`), `tee [-a] file`.
+#: A `>` inside prose (`a -> b`, `x => y`) is not a redirection, so the character
+#: before it must start a word.
+_REDIRECT = re.compile(r"(?:^|[\s;|&(])(?:\d|&)?>>?\s*([\"']?)([^\s'\";|&<>()]+)\1")
+_TEE = re.compile(r"\btee\s+(?:-\S+\s+)*([\"']?)([^\s'\";|&<>()]+)\1")
+_SED_INPLACE = re.compile(r"\bsed\b[^;|&\n]*?\s(?:-i\S*|--in-place\S*)\s[^;|&\n]*")
+#: task-pipeline's own ledger writer, which names no file on its command line.
+_LEDGER_WRITER = re.compile(r"\bstage_checkpoint\.py\b")
 def _is_register(rel: str) -> bool:
     parts = pathlib.PurePosixPath(rel).parts
     if not parts:
@@ -366,32 +384,63 @@ def _added_lines(top: pathlib.Path, rel: str, facts: dict) -> list[str]:
     return [l for l in lines if l.strip()]
 
 
-def _written_by_session(transcript: str | None, texts: list[str]) -> bool:
-    """Did THIS session write any of `texts`? Read from its own transcript.
+class _OutOfTime(Exception):
+    """Attribution passed its budget: the turn is asked about."""
 
-    The working tree is shared: two sessions in one checkout see each other's
-    uncommitted edits, so a register another session is writing must not silence
-    this session's ask. A session wrote a line when the line appears in the INPUT of
-    one of its writing tools — an Edit's new text, a Write's content, a Bash command
-    or heredoc. No transcript (another host, an older hook) means no attribution,
-    and the turn is asked about.
+
+def _check(deadline: float) -> None:
+    if time.monotonic() > deadline:
+        raise _OutOfTime()
+
+
+def _shell_targets(command: str) -> list[str]:
+    """The files a shell command WRITES: redirections, `tee`, `sed -i`. A command that
+    only reads (`grep 'x' docs/DECISIONS.md`) writes nothing."""
+    out = [m.group(2) for m in _REDIRECT.finditer(command)]
+    out += [m.group(2) for m in _TEE.finditer(command)]
+    for m in _SED_INPLACE.finditer(command):
+        try:
+            words = shlex.split(m.group(0))
+        except ValueError:
+            words = m.group(0).split()
+        if words and not words[-1].startswith("-"):
+            out.append(words[-1])
+    return out
+
+
+def _resolve(target: str, cwd: str | None, top: pathlib.Path) -> str:
+    target = os.path.expanduser(target)
+    base = cwd if cwd and os.path.isabs(cwd) else str(top)
+    return os.path.realpath(os.path.join(base, target))
+
+
+def session_writes(transcript: str | None, top: pathlib.Path, deadline: float) -> list[dict]:
+    """This session's WRITING tool calls, from one bounded pass over its transcript.
+
+    Each is `{"targets": {real path, …}, "text": str, "ledger": bool}`: an
+    Edit/Write/MultiEdit/NotebookEdit with the file it names and the text it wrote,
+    or a Bash command with the files it writes (`_shell_targets`) and its text.
+    `ledger` is true for a call that writes the run ledger, including task-pipeline's
+    `stage_checkpoint.py`, which names no file. Only the transcript's last
+    `TRANSCRIPT_TAIL` bytes are read, once, and only lines carrying a `tool_use` are
+    parsed. Raises `_OutOfTime` past the deadline.
     """
-    needles = [t.strip() for t in texts if len(t.strip()) >= MIN_NEEDLE]
-    if not transcript or not needles:
-        return False
-    path = pathlib.Path(transcript)
+    if not transcript:
+        return []
     try:
-        with path.open("rb") as fh:
+        with open(transcript, "rb") as fh:
             fh.seek(0, os.SEEK_END)
             size = fh.tell()
             fh.seek(max(0, size - TRANSCRIPT_TAIL))
             data = fh.read()
     except OSError:
-        return False
-    forms = {json.dumps(t, ensure_ascii=a)[1:-1] for t in needles for a in (False, True)}
-    raw = [f.encode("utf-8") for f in forms]
-    for line in data.split(b"\n"):
-        if not any(r in line for r in raw):
+        return []
+    ledger = os.path.realpath(str(top / RUN_LEDGER))
+    calls: list[dict] = []
+    for n, line in enumerate(data.split(b"\n")):
+        if n % 256 == 0:
+            _check(deadline)
+        if b'"tool_use"' not in line:
             continue
         try:
             rec = json.loads(line)
@@ -400,38 +449,99 @@ def _written_by_session(transcript: str | None, texts: list[str]) -> bool:
         if not isinstance(rec, dict) or rec.get("type") != "assistant":
             continue
         content = (rec.get("message") or {}).get("content")
+        cwd = rec.get("cwd") if isinstance(rec.get("cwd"), str) else None
         for item in content if isinstance(content, list) else ():
-            if not isinstance(item, dict) or item.get("type") != "tool_use" \
-                    or item.get("name") not in WRITING_TOOLS:
+            if not isinstance(item, dict) or item.get("type") != "tool_use":
                 continue
-            blob = json.dumps(item.get("input"), ensure_ascii=False) \
-                + json.dumps(item.get("input"), ensure_ascii=True)
-            if any(f in blob for f in forms):
-                return True
-    return False
+            name, inp = item.get("name"), item.get("input")
+            if not isinstance(inp, dict):
+                continue
+            if name in FILE_TOOLS:
+                key, fields = FILE_TOOLS[name]
+                target = inp.get(key)
+                if not isinstance(target, str):
+                    continue
+                parts = []
+                for f in fields:
+                    v = inp.get(f)
+                    if isinstance(v, list):          # MultiEdit's edits
+                        parts += [e.get("new_string", "") for e in v if isinstance(e, dict)]
+                    elif isinstance(v, str):
+                        parts.append(v)
+                targets = {_resolve(target, cwd, top)}
+                calls.append({"targets": targets, "text": "\n".join(p for p in parts if isinstance(p, str)),
+                              "ledger": ledger in targets})
+            elif name == "Bash" and isinstance(inp.get("command"), str):
+                cmd = inp["command"]
+                targets = {_resolve(t, cwd, top) for t in _shell_targets(cmd)}
+                writes_ledger = ledger in targets or bool(_LEDGER_WRITER.search(cmd))
+                if targets or writes_ledger:
+                    calls.append({"targets": targets, "text": cmd, "ledger": writes_ledger})
+    return calls
 
 
-def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None) -> dict | None:
+def _register_written(added: list[str], text: str) -> bool:
+    """Does `text` — what this session's calls wrote INTO this file — carry the
+    register's addition? Its newest added heading, or most of its added lines. One
+    common line is not enough."""
+    heads = [l.strip() for l in added if HEADING.match(l)]
+    if heads and heads[-1] in text:
+        return True
+    lines = [l.strip() for l in added if len(l.strip()) >= MIN_NEEDLE][:REGISTER_LINES]
+    return bool(lines) and 2 * sum(1 for l in lines if l in text) > len(lines)
+
+
+def _tail_lines(path: pathlib.Path, limit: int) -> list[str]:
+    try:
+        with path.open("rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - limit))
+            lines = fh.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    return lines[1:] if size > limit and lines else lines
+
+
+def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
+                 deadline: float | None = None) -> dict | None:
     """`{source, ref, anchor?}` when THIS session already wrote its rationale, else None.
 
-    Three things must hold. The file is a decision register (or the run ledger with a
-    `decision:` / `stage:` line) outside a vendored tree or a submodule; the work added
-    at least one non-blank line to it, ignoring whitespace, and did not delete it; and
-    that text appears in what this session's own tools wrote (`_written_by_session`).
-    The ledger's `why` is then a LINK to the canonical rationale, never a second copy:
-    the record's evidence names the file, and the hook asks for nothing. Errors read
-    as "no rationale", which asks — the old behaviour.
+    Best-effort and bounded: the caller has already written the record, and this
+    answers within `ATTRIBUTION_SECONDS` or not at all (None, so the turn is asked).
+
+    A decision register counts when it is a `decisions.md` or an `adr/` file
+    (`.md`, `.markdown`, `.txt`) outside a vendored tree or a submodule, not deleted,
+    the work added at least one non-blank line to it (whitespace ignored), and one of
+    this session's writing calls targets that exact file with text carrying the
+    addition (`_register_written`). The run ledger is consulted only when one of
+    those calls wrote it; its newest `decision:` / `stage:` line counts when that
+    line's text is in what those calls wrote. Errors read as "no rationale", which
+    asks — the old behaviour.
     """
+    deadline = deadline if deadline is not None else time.monotonic() + ATTRIBUTION_SECONDS
     try:
         deleted = set(facts.get("deleted") or ())
         touched = sorted((set(facts.get("files") or ()) | set(facts.get("committed") or ())
                           | set(facts.get("untracked") or ())) - deleted)
-        subs = _submodules(top) if any(_is_register(r) for r in touched) else []
-        for rel in touched:
-            if not _is_register(rel) or _vendored(rel, subs):
+        candidates = [r for r in touched if _is_register(r)]
+        ledger_file = top / RUN_LEDGER
+        if not candidates and not ledger_file.is_file():
+            return None
+        calls = session_writes(transcript, top, deadline)
+        if not calls:
+            return None
+        subs = _submodules(top) if candidates else []
+        for rel in candidates:
+            _check(deadline)
+            if _vendored(rel, subs):
+                continue
+            real = os.path.realpath(str(top / rel))
+            text = "\n".join(c["text"] for c in calls if real in c["targets"])
+            if not text:
                 continue
             added = _added_lines(top, rel, facts)
-            if not added or not _written_by_session(transcript, added):
+            if not added or not _register_written(added, text):
                 continue
             # The LAST heading added: a register grows at its end, and a new
             # register's first heading is its title, not a decision.
@@ -439,20 +549,26 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None) 
             anchor = heads[-1] if heads else None
             return {"source": "decision-register", "ref": rel,
                     **({"anchor": anchor[:ANCHOR_CHARS]} if anchor else {})}
-        # THE RUN LEDGER, tracked or not. Many projects ignore `.task-pipeline/`, so
-        # `git status` never lists it; it is read from disk then, and only what this
-        # session's tools wrote into it counts.
-        if RUN_LEDGER in touched:
-            lines = _added_lines(top, RUN_LEDGER, facts)
-        elif (top / RUN_LEDGER).is_file() and not git(top, "ls-files", "--", RUN_LEDGER).strip():
-            lines = _read_bounded(top / RUN_LEDGER)
-        else:
-            lines = []
-        for line in reversed(lines):
-            m = LEDGER_LINE.match(line)
-            if m and _written_by_session(transcript, [m.group(1)]):
-                return {"source": "task-pipeline", "ref": RUN_LEDGER,
-                        "anchor": line.strip()[:ANCHOR_CHARS]}
+        ledger_text = "\n".join(c["text"] for c in calls if c["ledger"])
+        if ledger_text and ledger_file.is_file():
+            _check(deadline)
+            tracked_change = RUN_LEDGER in touched and RUN_LEDGER not in (facts.get("untracked") or ())
+            lines = (_added_lines(top, RUN_LEDGER, facts) if tracked_change
+                     else _tail_lines(ledger_file, LEDGER_TAIL))
+            tried = 0
+            for line in reversed(lines):
+                m = LEDGER_LINE.match(line)
+                if not m:
+                    continue
+                tried += 1
+                if tried > LEDGER_LINES:
+                    break
+                said = m.group(1).strip()
+                if len(said) >= MIN_NEEDLE and said in ledger_text:
+                    return {"source": "task-pipeline", "ref": RUN_LEDGER,
+                            "anchor": line.strip()[:ANCHOR_CHARS]}
+    except _OutOfTime:
+        return None
     except Exception:                                                              # noqa: BLE001
         return None
     return None
@@ -510,10 +626,6 @@ def main() -> int:
     statement = statement_of(facts, repo_id)
     evidence = [{"uri": f"repo:{repo_id}", "head": facts["head"], "branch": facts["branch"]},
                 {"uri": "git:status --porcelain", "files": facts["files"][:40]}]
-    rationale = rationale_of(pathlib.Path(top or cwd), facts, args.transcript or None)
-    if rationale:
-        evidence.append({"uri": f"file:{rationale['ref']}", "kind": "rationale",
-                         **({"anchor": rationale["anchor"]} if rationale.get("anchor") else {})})
 
     # A row with no session id can never be REVISED: the prior-row lookup below
     # is keyed on the session, so every turn would mint a fresh `proposed`
@@ -609,6 +721,34 @@ def main() -> int:
             provenance=[{"source": "observatory-log/Stop", "measured": True,
                          **({"continues": continues} if continues else {})}])
         has_why = bool(prior and prior["why"])
+        # THE RECORD FIRST, the attribution after it. Reading the session's transcript
+        # is best-effort and bounded (`ATTRIBUTION_SECONDS`); when it ran before the
+        # append, a large transcript cost the turn its record — the Stop hook was
+        # killed at its timeout with nothing written. Now a slow or failed
+        # attribution only means the turn is asked about.
+        rationale = None
+        if not has_why:
+            rationale = rationale_of(pathlib.Path(top or cwd), facts, args.transcript or None,
+                                     time.monotonic() + ATTRIBUTION_SECONDS)
+        if rationale:
+            try:
+                # A follow-up revision of the SAME record that links the rationale.
+                result = L.append(
+                    conn, owner=OWNER, kind="session", statement=statement, why=None,
+                    memory_id=result["memoryId"], expected_revision=result["revision"],
+                    project_id=project_id, session_id=args.session_id or None,
+                    workflow_id=workflow_id, function="episodic", scope="project",
+                    state="proposed", confidence=None,
+                    evidence=evidence + [{"uri": f"file:{rationale['ref']}", "kind": "rationale",
+                                          **({"anchor": rationale["anchor"]}
+                                             if rationale.get("anchor") else {})}],
+                    provenance=[{"source": "observatory-log/Stop", "measured": True,
+                                 "rationale": rationale["source"],
+                                 **({"continues": continues} if continues else {})}])
+            except Exception as exc:                                               # noqa: BLE001
+                print(f"the rationale link could not be added: {type(exc).__name__}: {exc}",
+                      file=sys.stderr)
+                rationale = None
         # ONCE PER RECORD, and never for a turn that wrote its own rationale. The
         # ask ran after every changed turn — 3,593 times in fourteen days on one
         # machine for 34 answers — although a session is ONE record revised per

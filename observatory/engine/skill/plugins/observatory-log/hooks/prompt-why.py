@@ -48,6 +48,32 @@ def pending_dir() -> str:
     return os.path.join(base, "project-observatory", "ask-why")
 
 
+SEPARATOR = "\n\n---\n\n"
+
+
+def _put_back(path: str, asks: list) -> None:
+    """Return undelivered asks to the session's pending file, beside any the Stop hook
+    wrote meanwhile. Owner-only, like the file `ask-why.py` writes."""
+    try:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                current = [a for a in (json.load(fh).get("asks") or []) if isinstance(a, dict)]
+        except (OSError, ValueError, AttributeError):
+            current = []
+        ids = {a.get("memoryId") for a in current}
+        merged = [a for a in asks if a.get("memoryId") not in ids] + current
+        tmp = f"{path}.{os.getpid()}.back"
+        mask = os.umask(0o077)
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"asks": merged}, fh, ensure_ascii=False)
+        finally:
+            os.umask(mask)
+        os.replace(tmp, path)
+    except Exception:                                                  # noqa: BLE001
+        pass                          # an ask that is not put back stays pending, unasked
+
+
 def _record_delivery(ask: dict, session: str) -> None:
     """Append a `delivered` row to the journal the recorder named. Never raises."""
     journal = ask.get("journal")
@@ -122,8 +148,22 @@ def main() -> int:
               and a["context"].strip() and _fresh(a.get("at"))]
     if not chosen:
         return 0
-    context = "\n\n---\n\n".join(a["context"] for a in chosen)[:MAX_CHARS]
+    # THE CAP, honestly counted. Only asks that fit inside MAX_CHARS whole are handed
+    # over and marked delivered; the rest go back for the next prompt. The first ask
+    # always goes (cut at the cap if it alone is longer: its record id and the call
+    # to make come first).
+    sent, rest, used = [], [], 0
     for a in chosen:
+        cost = len(a["context"]) + (len(SEPARATOR) if sent else 0)
+        if sent and used + cost > MAX_CHARS:
+            rest.append(a)
+            continue
+        sent.append(a)
+        used += cost
+    if rest:
+        _put_back(path, rest)
+    context = SEPARATOR.join(a["context"] for a in sent)[:MAX_CHARS]
+    for a in sent:
         _record_delivery(a, session)
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                              "additionalContext": context}},
