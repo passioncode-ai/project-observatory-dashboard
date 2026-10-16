@@ -17,23 +17,31 @@ while the major version is 0, a minor release may change behaviour and says so h
     (its folders, its id, its name) is one bucket keyed by its registry id, so any of them answers the whole project.
   - **A retired key keeps its spend with its project** (OBS-103). The provider keeps no history of a deleted key
     (`GET /activity?api_key_hash=` and `GET /keys/{hash}` answer 404, measured 2026-10-15). So `openrouter.py
-    revoke`, a completed `rotate`, `revoke --forget-pending`, and `issue` over a row that still had a hash, leave a
-    tombstone in the ledger's `retired` list, kept 62 days. It holds the name, account, hash, project, day and
-    `deleted`. It also holds the key's spend by day: the activity report, then the key's own row as the last read
-    before the DELETE.
-    - The snapshot is trusted whole only when the month's and the week's days plus `usage_daily` equal the key's
-      `usage_monthly` and `usage_weekly` within $0.0001 (`reconciled`).
+    revoke`, a completed `rotate` and `revoke --forget-pending` leave a tombstone in the ledger's `retired` list,
+    kept 62 days. It holds the name, account, hash, project, day and `deleted`, and the key's spend by day: the
+    activity report, then the key's own row as the last read before the DELETE.
+    - The snapshot is trusted whole only when every clause holds: the month's and the week's (from Monday) days
+      plus `usage_daily` equal the key's `usage_monthly` and `usage_weekly` within $0.0001, and each of the last
+      three completed days falls in the month or week checked, or was reached by the report. A two-day lag on the
+      Tuesday a month begins, and Monday the 1st before the report reaches yesterday, do not reconcile.
     - Otherwise every window holding a day after its last activity day, through the retirement day, reads null.
+      The month window stays null until the month ends. The counter difference is not booked for the gap.
     - It is written to the ledger before the DELETE, so a failure after the DELETE keeps it for the retry. A
       rotation's tombstone is written before the successor's rename.
-    - A tombstone carries its row's untracked rotation and pending predecessor, so a revoke never turns an honest
-      null into a whole, lower figure.
-    - A row an `issue` replaced is not known to be deleted, and nulls its project while it is kept.
+    - A `rotate` of a row a failure left part done finishes that rotation instead of minting another. A predecessor
+      still live is snapshotted, deleted and retired; one already gone is retired with the snapshot kept before its
+      DELETE.
+    - A tombstone carries its row's untracked rotation and pending predecessor, from the one rule the scan uses
+      for live rows (`openrouter.untracked_through`), so a revoke never turns an honest null into a whole, lower
+      figure.
+    - `issue` over a row whose key is gone at the provider keeps its hash as a tombstone, with the snapshot a failed
+      revoke kept. Over a key still live under another name it is refused.
     - A snapshot that cannot be read still lets the delete proceed; that key's windows are then null.
   - **Every door verb that writes the OpenRouter ledger holds one lock** (the one `issue-for-policy` held), across
     processes and threads. Two rotations at once used to drop one rotation's successor from the ledger. A second
     operation waits up to 150 s (a rotation's delivery can take a minute), and its refusal names the wait and every
-    locked verb. A `retired` that is not a list is refused before any door acts.
+    locked verb. The key server answers each request on its own thread, so a request waiting for the lock does not
+    hold the page. A `retired` that is not a list is refused before any door acts.
   - `unattributed` is its own total, never guessed into a project. It holds keys whose ledger row names no project,
     and an account's spend on hashes no ledger row or tombstone holds.
   - A window that was not read whole is `null`, never a lower figure, and the key is named in `unread`. This covers
