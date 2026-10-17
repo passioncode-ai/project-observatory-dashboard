@@ -43,7 +43,12 @@ token is kept. The sanitiser is a fixed point, and `problems()` applies the same
 only fire on a document the sanitiser never touched; the emit runs it over the whole document, so
 a scan written by an older collector is cleaned too. A problem's text stops at its first quote and
 a command key it names is dropped. Commands are listed by name (`doctor`, `update`), never their
-argument vectors. No regular expression here can backtrack over unbounded input. No process id and no instant: the document changes when the estate changes, not on
+argument vectors. No regular expression here can backtrack over unbounded input. What this covers
+is scheme URLs with user-info, a query or a fragment; a schemeless `token=…` or a percent-encoded
+form is not recognised as a URL, and a Windows drive path outside the home (`C:\\work\\x`) holds
+`:\\` and is written `[url]`. A descriptor whose FILE NAME is URL-shaped is not read at all: its id
+would carry the name. When the scan is missing or cannot be used, the emit rewrites the previous
+document with `stale: true` and one degraded line naming the error (`unusable`). No process id and no instant: the document changes when the estate changes, not on
 every tick, so the registry is not committed every thirty minutes for nothing.
 
 WHAT IS NEVER TRUSTED. A descriptor or manifest is opened without blocking, must be a regular
@@ -125,7 +130,7 @@ AGENT_ID = re.compile(r"^agent:([a-z][a-z0-9-]{1,62}\.[a-z][a-z0-9-]{0,31}|file:
 #: THE ONE URL SHAPE THIS DOCUMENT KEEPS: `scheme://host[:port][/path]` and nothing else — no
 #: user-info, query, fragment, `;params`, backslash, or any count of slashes but two. Each class
 #: excludes the character that ends it, so `fullmatch` never backtracks.
-_STRICT_URL = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*)://(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)"
+_STRICT_URL = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*)://(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9][A-Za-z0-9.-]*)"
                          r"(?::([0-9]{1,5}))?(/[^\s@?#;\\]*)?")
 ORIGIN_SCHEMES = frozenset({"http", "https", "ws", "wss"})
 REPOSITORY_SCHEMES = frozenset({"http", "https", "ssh", "git"})
@@ -395,7 +400,7 @@ def _strict_field(value, schemes) -> tuple[StrictURL | None, bool, bool]:
     url = strict_url(unicodedata.normalize("NFC", value), schemes) if isinstance(value, str) else None
     if url is not None:
         return url, False, False
-    keyed = isinstance(value, str) and ("@" in value or "?" in value)
+    keyed = isinstance(value, str) and any(c in value for c in "@?#")
     return None, keyed, True
 
 
@@ -522,6 +527,11 @@ def _descriptor_files(directory: pathlib.Path, degraded: list) -> list[pathlib.P
             degraded.append({"source": "fabric-services",
                              "reason": _text(f"{_clean(path.name)}: a file name that is not UTF-8 — "
                                              f"not read", "problem")})
+            continue
+        if _fix(path.stem) != path.stem or _suspect(path.stem):
+            # Its id would carry the name, and the name may carry a credential; no hash of it either.
+            degraded.append({"source": "fabric-services",
+                             "reason": "a file name shaped like a URL — not read"})
             continue
         if path.is_symlink():
             try:
@@ -687,8 +697,9 @@ def _join_mcp(rows: list[dict], mcp_scan: dict | None, degraded: list) -> dict |
 def document(scan: dict, mcp_scan: dict | None, previous: dict | None, obs_date: str,
              now: datetime | None = None) -> dict:
     """`registry/agents.json` from the collector's scan, the MCP inventory and the last document."""
-    if not isinstance(scan, dict):
-        raise TypeError("the agents scan is not a JSON object")
+    if (not isinstance(scan, dict) or not isinstance(scan.get("services", []), list)
+            or not isinstance(scan.get("sources", {}), dict)):
+        raise TypeError("the agents scan is not a JSON object with a services list")
     now = now or datetime.now(timezone.utc)
     degraded = [_degraded_entry(d) for d in scan.get("degraded") or [] if isinstance(d, dict)]
     if previous is not None and not isinstance(previous, dict):
@@ -749,7 +760,9 @@ def document(scan: dict, mcp_scan: dict | None, previous: dict | None, obs_date:
         for row in rows:
             if row["mcp_declarations"]:
                 row["source_refs"] = sorted(set(row.get("source_refs") or [SOURCE_ID]) | {MCP_SOURCE_ID})
-    sources = copy.deepcopy(scan.get("sources") or {})
+    scan_sources = scan.get("sources") if isinstance(scan.get("sources"), dict) else {}
+    sources = {k: copy.deepcopy(scan_sources[k]) for k in ("fabric_services", "launchd")
+               if isinstance(scan_sources.get(k), dict)}
     sources["mcp_inventory"] = ({"state": "absent"} if mcp_scan is None else
                                 {"state": "read", "scanned_on": _day(mcp_scan.get("scanned_at"))})
     by_state: dict[str, int] = {}
@@ -784,6 +797,27 @@ def document(scan: dict, mcp_scan: dict | None, previous: dict | None, obs_date:
         "degraded": degraded,
         "source_refs": [SOURCE_ID] + ([MCP_SOURCE_ID] if mcp_scan is not None else []),
     }
+
+
+UNUSABLE = "the agents scan could not be used"
+
+
+def unusable(previous, why: str, obs_date: str) -> dict | None:
+    """The previous document when this tick's scan is missing or broken: its rows kept, `stale`
+    true, and one degraded line saying why and from when the rows are. Rewriting it the same way
+    again changes nothing but `updated_on`. None when there is no usable previous document."""
+    if not isinstance(previous, dict) or not isinstance(previous.get("agents"), list):
+        return None
+    doc = copy.deepcopy(previous)
+    doc["updated_on"] = obs_date
+    doc["stale"] = True
+    kept = [d for d in doc.get("degraded") or []
+            if not (isinstance(d, dict) and str(d.get("reason", "")).startswith(UNUSABLE))]
+    day = doc.get("scanned_on") if isinstance(doc.get("scanned_on"), str) else None
+    kept.append({"source": "fabric-services",
+                 "reason": _text(f"{UNUSABLE} ({why}); rows are from {day or 'an unknown day'}", "problem")})
+    doc["degraded"] = kept
+    return doc
 
 
 # --- the validator's rules ------------------------------------------------------------

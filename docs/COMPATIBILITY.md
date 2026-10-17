@@ -229,7 +229,12 @@ totals. `totals.mcp` counts `attributed`, `ambiguous` (an origin two agents clai
 malformed target). URLs fail closed: `origin` and `source_repository` are
 kept only as a strict `scheme://host[:port][/path]` and are otherwise null (with "origin unreadable" in
 `degraded`); in every other string a URL-shaped token that is not strict (`@`, `:/`, `:\`, or `?`/`#` after a
-`scheme:`) is replaced whole by `[url]`, and the home directory is written `~` as a whole path segment. A scan dated after the emit is stale
+`scheme:`) is replaced whole by `[url]`, and the home directory is written `~` as a whole path segment. This
+covers scheme URLs with user-info, a query or a fragment; a schemeless `token=…`, a bare `?key=…` or a
+percent-encoded form is not recognised as a URL. A Windows drive path outside the home (`C:\work\x`) holds
+`:\` and is written `[url]` too. When the scan is missing or cannot be used, the previous document is kept
+with `stale: true` and a degraded line naming the error and the day its rows are from; a descriptor file whose
+name is shaped like a URL is not read. A scan dated after the emit is stale
 (`clock-skew` in `degraded`). The wiki projection
 mirrors it as it mirrors every registry document. A workspace upgraded from an earlier release gets the
 file on its first tick with the feature on. Until then it is absent, and no reader requires it.

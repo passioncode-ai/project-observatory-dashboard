@@ -1006,8 +1006,9 @@ class FixCycle3(Fixture):
 
     # --- F9: shapes an older collector or a hand edit could leave ---------------------------------
     def test_a_scan_that_is_not_an_object_is_refused(self):
-        with self.assertRaises(TypeError):
-            scan_agents.document(["not", "a", "scan"], None, None, TODAY, now=NOW)
+        for scan in (["not", "a", "scan"], {"services": "x"}, {"services": [], "sources": []}):
+            with self.assertRaises(TypeError):
+                scan_agents.document(scan, None, None, TODAY, now=NOW)
 
     def test_a_previous_document_that_is_not_an_object_restarts_dates_and_says_so(self):
         self.put(descriptor("alpha-agent", 47401))
@@ -1099,6 +1100,66 @@ class FixCycle3(Fixture):
         self.assertTrue(scan_agents.problems(tiny_doc("see https:example.com?k=1")))
 
 
+class FixCycle4(Fixture):
+    """Review round 6 of #288."""
+
+    def test_a_file_name_shaped_like_a_url_is_not_read_and_not_named(self):
+        self.put(descriptor("alpha-agent", 47401))
+        (self.services / ("https:u:SECRETFN" + AT + "h.json")).write_text(
+            json.dumps(descriptor("beta-agent", 47402)), encoding="utf-8")
+        (self.services / "x:?SECRETFQ.json").write_text("{}", encoding="utf-8")
+        out = document(self.scan(launchd={}), mcp_scan(), None)
+        text = json.dumps(out)
+        self.assertNotIn("SECRETF", text)
+        self.assertEqual([r["id"] for r in out["agents"]], ["agent:alpha-agent.default"])
+        self.assertEqual(sum(1 for d in out["degraded"] if d["reason"] == "a file name shaped like a URL — not read"), 2)
+        self.assertEqual(scan_agents.problems(out), [])
+
+    def test_unusable_rewrites_the_previous_document_once(self):
+        self.put(descriptor("alpha-agent", 47401))
+        prev = document(self.scan(launchd={}), mcp_scan(), None)
+        once = scan_agents.unusable(prev, "TypeError", "2026-10-15")
+        twice = scan_agents.unusable(once, "TypeError", "2026-10-15")
+        self.assertTrue(once["stale"])
+        self.assertEqual(once, twice, "rewriting it again changes nothing")
+        self.assertIsNone(scan_agents.unusable(["junk"], "TypeError", "2026-10-15"))
+
+    def test_only_the_collectors_own_sources_are_copied(self):
+        self.put(descriptor("alpha-agent", 47401))
+        scan = self.scan(launchd={})
+        scan["sources"][keyed("SECRETSK", "h")] = {"state": "read"}
+        out = document(scan, mcp_scan(), None)
+        self.assertEqual(sorted(out["sources"]), ["fabric_services", "launchd", "mcp_inventory"])
+        self.assertNotIn("SECRETSK", json.dumps(out))
+
+    def test_dict_keys_are_sanitised(self):
+        self.assertNotIn("SECRETDK", json.dumps(scan_agents._sanitise({keyed("SECRETDK", "h"): {"x": 1}})))
+
+    def test_an_nfd_home_is_still_home(self):
+        with patch.object(scan_agents, "_home", return_value="/srv/café"):
+            self.assertEqual(scan_agents._text("at /srv/café/x"), "at ~/x")
+
+    def test_unicode_separators_split_tokens(self):
+        for sep in (" ", " ", "　"):
+            with self.subTest(sep=hex(ord(sep))):
+                text = "note" + sep + "https://h.example.com/x"
+                self.assertEqual(scan_agents._text(text), text, "a strict URL beside a word is kept")
+
+    def test_an_at_in_a_strict_path_is_refused(self):
+        self.assertEqual(scan_agents._text("https://h.example.com/a" + AT + "b"), "[url]")
+        self.assertIsNone(scan_agents.strict_url("https://h.example.com/a" + AT + "b"))
+
+    def test_the_strict_host_starts_alphanumeric_and_a_fragment_is_keyed(self):
+        self.assertIsNone(scan_agents.strict_url("https://-h.example.com"))
+        self.assertIsNone(scan_agents.strict_url("https://.h.example.com"))
+        doc = descriptor("alpha-agent", 47401)
+        doc["origin"] = "https://h.example.com#SECRETHF"
+        self.put(doc)
+        row = document(self.scan(launchd={}), mcp_scan(), None)["agents"][0]
+        self.assertTrue(row["key_in_url"])
+        self.assertIsNone(row["origin"])
+
+
 class EmitHistory(Fixture):
     """The emit reads the previous registry document, so dates and removals persist across ticks."""
 
@@ -1129,13 +1190,25 @@ class EmitHistory(Fixture):
         later = emit(self.scan(launchd={}, now=now))
         self.assertEqual(later["agents"][0]["first_seen_on"], "2026-01-01")
         self.assertEqual(later["removed"], ["agent:beta-agent.default"])
-        kept = (reg / "agents.json").read_bytes()
-        (raw / "agents.json").write_text(json.dumps(["not", "a", "scan"]), encoding="utf-8")
-        p = subprocess.run([sys.executable, "collectors/emit_registry.py", str(raw)], cwd=ROOT, env=env,
-                           capture_output=True, text=True, timeout=300)
-        self.assertEqual(p.returncode, 0, "a broken scan never stops the emit, so never the tick")
-        self.assertIn("keeps its last version", p.stdout)
-        self.assertEqual((reg / "agents.json").read_bytes(), kept)
+        good = json.loads((reg / "agents.json").read_text(encoding="utf-8"))
+        self.assertFalse(good["stale"])
+        for broken in (json.dumps(["not", "a", "scan"]), None):           # a list scan, then no scan at all
+            with self.subTest(scan="list" if broken else "missing"):
+                if broken is None:
+                    (raw / "agents.json").unlink()
+                else:
+                    (raw / "agents.json").write_text(broken, encoding="utf-8")
+                p = subprocess.run([sys.executable, "collectors/emit_registry.py", str(raw)], cwd=ROOT, env=env,
+                                   capture_output=True, text=True, timeout=300)
+                self.assertEqual(p.returncode, 0, "a broken scan never stops the emit, so never the tick")
+                after = json.loads((reg / "agents.json").read_text(encoding="utf-8"))
+                self.assertTrue(after["stale"], "a scan that could not be used is never hidden")
+                self.assertEqual(after["agents"], good["agents"], "the last rows are kept")
+                lines = [d["reason"] for d in after["degraded"] if d["reason"].startswith(scan_agents.UNUSABLE)]
+                self.assertEqual(len(lines), 1, lines)
+                self.assertIn(("TypeError" if broken else "FileNotFoundError"), lines[0])
+                self.assertIn(f"rows are from {good['scanned_on']}", lines[0])
+                self.assertEqual(scan_agents.problems(after), [])
 
 
 if __name__ == "__main__":
