@@ -527,6 +527,9 @@ class TheCarriedLinkIsRechecked(unittest.TestCase):
         _git(other, "add", "-A")
         _git(other, "commit", "-qm", "first")
         (other / "work.py").write_text("x = 1\n", encoding="utf-8")
+        # The other repository even holds a register with the same anchor.
+        (other / "docs").mkdir()
+        (other / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
         reg = pathlib.Path(fx.env["OBSERVATORY_REGISTRY"])
         repos = json.loads((reg / "repositories.json").read_text())
         repos["repositories"].append({"id": "repository:fixture/other", "name_with_owner": "fixture/other",
@@ -578,6 +581,101 @@ class TheCarriedLinkIsRechecked(unittest.TestCase):
         fx.stop()
         self.assertIn("DEC-0003", fx.receipt()["rationale"]["anchor"])
         self.assertEqual(fx.receipt()["rationale"]["source"], "decision-register")
+
+    MADR = ("# Decisions\n\n## DEC-0001 one store per workspace\n\n### Context\n\nTenants.\n\n"
+            "### Decision\n\nOne store.\n\n### Consequences\n\nMore files.\n")
+
+    def madr_fixture(self) -> Fixture:
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(self.MADR, encoding="utf-8")
+        fx.commit_all("register")
+        add = ("\n## DEC-0002 measure delivered asks\n\n### Context\n\nHeadless.\n\n"
+               "### Decision\n\nDelivered only.\n\n### Consequences\n\nA journal row.\n")
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write(add)
+        fx.wrote(add)
+        fx.stop()
+        self.assertEqual(fx.receipt()["rationale"]["anchor"], "DEC-0002 measure delivered asks",
+                         "the entry's own heading, not a repeated subheading")
+        return fx
+
+    def test_a_madr_entry_checked_out(self):
+        fx = self.madr_fixture()
+        _git(fx.repo, "checkout", "--", "docs/DECISIONS.md")
+        self.asked_next(fx)
+
+    def rewrite(self, fx: Fixture, old: str, new: str) -> None:
+        p = fx.repo / "docs/DECISIONS.md"
+        text = p.read_text(encoding="utf-8")
+        assert old in text
+        p.write_text(text.replace(old, new), encoding="utf-8")
+
+    def test_a_struck_withdrawn_heading(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, "## DEC-0002 measure delivered asks",
+                     "## ~~DEC-0002 measure delivered asks~~ WITHDRAWN")
+        self.asked_next(fx)
+
+    def test_the_anchor_left_only_in_a_comment(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, "## DEC-0002 measure delivered asks",
+                     "<!-- ## DEC-0002 measure delivered asks -->\n## DEC-0002 (removed)")
+        self.asked_next(fx)
+
+    def test_the_anchor_left_only_in_a_code_fence(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, "## DEC-0002 measure delivered asks",
+                     "```\n## DEC-0002 measure delivered asks\n```\n## DEC-0002 (removed)")
+        self.asked_next(fx)
+
+    def test_the_anchor_left_only_in_an_index_line(self):
+        fx = self.madr_fixture()
+        self.rewrite(fx, "## DEC-0002 measure delivered asks",
+                     "- DEC-0002 measure delivered asks (superseded)")
+        self.asked_next(fx)
+
+    def test_a_duplicated_anchor_is_not_still_true(self):
+        fx = self.madr_fixture()
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write("\n## DEC-0002 measure delivered asks\n\nA second, conflicting copy.\n")
+        self.asked_next(fx)
+
+    def test_a_register_replaced_by_a_symlink(self):
+        fx = self.madr_fixture()
+        other = fx.repo / "docs/elsewhere.md"
+        other.write_text("## DEC-0002 measure delivered asks\n", encoding="utf-8")
+        (fx.repo / "docs/DECISIONS.md").unlink()
+        (fx.repo / "docs/DECISIONS.md").symlink_to("elsewhere.md")
+        self.asked_next(fx)
+
+    def test_a_register_linked_outside_the_checkout(self):
+        fx = self.madr_fixture()
+        outside = fx.work / "outside.md"
+        outside.write_text("## DEC-0002 measure delivered asks\n", encoding="utf-8")
+        (fx.repo / "docs/DECISIONS.md").unlink()
+        (fx.repo / "docs/DECISIONS.md").symlink_to(outside)
+        self.asked_next(fx)
+
+    def test_an_anchor_near_the_end_of_a_large_register(self):
+        # Over 512 KB, the entry at its very end: the whole file is read, so the link
+        # is still true and carried.
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        bulk = "# Decisions\n\n" + "".join(f"## DEC-{i:05d} old\n\nWhy {i} {'x' * 60}.\n\n"
+                                            for i in range(1, 7001))
+        self.assertGreater(len(bulk), 512 * 1024)
+        (fx.repo / "docs/DECISIONS.md").write_text(bulk, encoding="utf-8")
+        fx.commit_all("register")
+        add = "\n## DEC-99999 the newest entry\n\nWhy.\n"
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write(add)
+        fx.wrote(add)
+        self.linked(fx)
+        fx.change("later.py")
+        fx.stop()
+        self.assertEqual(fx.receipt()["rationale"]["source"], "carried")
+        self.assertEqual(fx.journal(), [])
 
     def test_a_link_still_true_is_carried(self):
         fx = Fixture()
@@ -877,6 +975,43 @@ class WithinTheBudget(unittest.TestCase):
             with self.assertRaises(record_turn._OutOfTime):
                 record_turn._added_lines(fx.repo, "docs/DECISIONS.md", facts,
                                          deadline=record_turn.time.monotonic() + 5)
+
+    def test_the_diff_timeout_never_exceeds_the_time_left(self):
+        import record_turn
+        fx = Fixture()
+        (fx.repo / "docs").mkdir()
+        (fx.repo / "docs/DECISIONS.md").write_text(REGISTER, encoding="utf-8")
+        fx.commit_all("register")
+        with (fx.repo / "docs/DECISIONS.md").open("a", encoding="utf-8") as fh:
+            fh.write("## DEC-0002 x\n")
+        facts = record_turn.diff_facts(fx.repo)
+        seen = []
+        real = record_turn.safe_git.run
+
+        def spy(args, **kw):
+            seen.append(kw.get("timeout"))
+            return real(args, **kw)
+        deadline = record_turn.time.monotonic() + 1.5
+        with mock.patch.object(record_turn.safe_git, "run", side_effect=spy):
+            record_turn._added_lines(fx.repo, "docs/DECISIONS.md", facts, deadline)
+        self.assertTrue(seen and seen[0] is not None and 0 < seen[0] <= 1.5, seen)
+
+    def test_a_line_that_raises_recursion_error_is_skipped(self):
+        import record_turn
+        fx = Fixture()
+        fx.wrote(REGISTER, tool="Write")
+        real = record_turn.json.loads
+        state = {"n": 0}
+
+        def flaky(raw, *a, **k):
+            state["n"] += 1
+            if state["n"] == 1:
+                raise RecursionError("too deep")
+            return real(raw, *a, **k)
+        with mock.patch.object(record_turn.json, "loads", side_effect=flaky):
+            calls = record_turn.session_writes(str(fx.transcript("sess-1")), fx.repo, float("inf"))
+        self.assertEqual(state["n"] >= 2, True)
+        self.assertEqual(len(calls), 0, "the raising line (the call) is skipped, the pass goes on")
 
     def test_a_deeply_nested_line_does_not_abort_the_pass(self):
         import record_turn

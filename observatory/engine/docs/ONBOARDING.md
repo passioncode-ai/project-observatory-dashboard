@@ -598,8 +598,11 @@ block a turn or a prompt:
     `.venv/` and similar) and submodules, and not deleted, and the work must have
     added at least one non-blank line to it, ignoring whitespace. One of those
     calls must target that exact file, and its text must carry the addition: the
-    newest added heading, or more than half of the added lines. One common line
-    is not enough.
+    entry's own heading (the shallowest heading the work added, so a Context /
+    Decision / Consequences entry anchors on its title, not on a subheading), or,
+    when the addition has no heading, more than half of the added lines. One
+    common line is not enough. That heading must also appear in the register
+    exactly once, as a heading line outside fenced code.
   - **The run ledger.** A `decision:` or `stage:` line in `.task-pipeline/run.md`,
     consulted only when one of those calls wrote the ledger, or ran task-pipeline's
     `stage_checkpoint.py`. The ledger's newest 64 KB and newest 200 such lines are
@@ -629,9 +632,12 @@ block a turn or a prompt:
   When the rationale counts, a second revision of the same record links that file
   in its evidence (with the repository's id) instead of asking for a copy. Later
   revisions carry the link forward only while it is still true: the link was
-  written by this hook, it names the current repository, the file still exists in
-  the checkout, and a bounded read of it (256 KB from each end) still contains the
-  link's anchor. So the record stays explained after the register is committed and
+  written by this hook, it names the current repository, the register is a regular
+  file inside the checkout (not a symbolic link, and not under one), and exactly
+  one heading line of it, outside fenced code, still reads the link's anchor. A
+  struck or WITHDRAWN heading, the anchor left in a comment, a code block or an
+  index line, or a second copy of the heading does not count. A register larger
+  than 8 MB is not re-checked, and the link is dropped. So the record stays explained after the register is committed and
   pushed and after the write scrolls out of the transcript, without another
   revision just for the link. A register deleted, reverted, checked out or
   rewritten, or a session that moved to another repository, drops the link and is

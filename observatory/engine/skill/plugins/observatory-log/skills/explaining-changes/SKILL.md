@@ -53,11 +53,12 @@ Its id arrives once, as context with the next prompt. There is no ask when, with
 2 seconds of the record being written, the hook finds in the last 4 MB of this
 session's transcript an Edit, Write, MultiEdit, NotebookEdit or Bash write (`>`,
 `>>`, `tee`, `sed -i`) that targeted a `decisions.md` or an `adr/` `.md`,
-`.markdown` or `.txt` file (outside vendored trees) with that file's newest
-added heading or most of its added lines, or that wrote a `decision:` /
+`.markdown` or `.txt` file (outside vendored trees) with the entry's own
+heading (unique in the register) or, with no heading, most of its added lines, or that wrote a `decision:` /
 `stage:` line into `.task-pipeline/run.md`. Failed calls, subagent calls and
 Bash commands over 65,536 characters are not counted. The record then links
-that file, and keeps the link while the file still holds the linked text.
+that file, and keeps the link while exactly one heading of the file still
+reads that entry's title.
 Correct that record rather than creating a second one:
 
 ```

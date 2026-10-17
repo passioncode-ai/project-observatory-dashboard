@@ -304,9 +304,15 @@ def statement_of(facts: dict, repo_id: str) -> str:
 RUN_LEDGER = ".task-pipeline/run.md"
 LEDGER_LINE = re.compile(r"^\s*(?:[-*]\s*)?(?:decision|stage)\s*:\s*(.*)$", re.I)
 HEADING = re.compile(r"^\s*#{1,6}\s+(.+?)\s*$")
+#: A Markdown heading as a LINE OF THE FILE: at most three spaces of indent, its
+#: level, its text. Used to anchor a link and to re-check it.
+HEADING_LINE = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
+FENCE = re.compile(r"^ {0,3}(```|~~~)")
 ANCHOR_CHARS = 120
 #: An untracked or ignored ledger or register is read whole, so it is read bounded.
 READ_LIMIT = 256 * 1024
+#: The largest register a carried link is re-checked against, read whole.
+CARRY_READ_LIMIT = 8 << 20
 #: Somebody else's history inside the checkout: a vendored library's own ADRs are
 #: not this project's rationale. Submodules are added from `.gitmodules`.
 VENDORED = frozenset({"vendor", "vendors", "node_modules", "third_party", "third-party",
@@ -529,13 +535,65 @@ def session_writes(transcript: str | None, top: pathlib.Path, deadline: float) -
     return calls
 
 
+def _headings(lines: list[str]) -> list[tuple[int, str]]:
+    """(level, text) of every heading line outside fenced code blocks, in order."""
+    out, fenced = [], False
+    for line in lines:
+        if FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        m = HEADING_LINE.match(line)
+        if m:
+            out.append((len(m.group(1)), m.group(2).strip()))
+    return out
+
+
+def _entry_heading(added: list[str]) -> str | None:
+    """The anchor of the entry this work added: its SHALLOWEST heading, the newest of
+    that level. A Context / Decision / Consequences entry anchors on its own title
+    (`## DEC-0002 …`), never on a subheading every older entry repeats; a new file's
+    `# Decisions` title wins only when it is the only level present."""
+    heads = _headings(added)
+    if not heads:
+        return None
+    top = min(level for level, _ in heads)
+    entries = [text for level, text in heads if level == top]
+    # A new register's `# Title` above its entries is not a decision: a lone
+    # level-one heading with deeper headings below defers to the next level.
+    if top == 1 and len(entries) == 1 and any(level > top for level, _ in heads):
+        nxt = min(level for level, _ in heads if level > top)
+        entries = [text for level, text in heads if level == nxt]
+    return entries[-1][:ANCHOR_CHARS]
+
+
+def _anchor_still_true(path: pathlib.Path, anchor: str) -> bool:
+    """Exactly one heading line of the file, outside fenced code, reads `anchor`.
+
+    Not a substring search: a struck or WITHDRAWN heading, the anchor quoted in a
+    comment, a code block or an index line, and a subheading every entry repeats
+    (`Consequences`) all fail it. The file is read whole up to `CARRY_READ_LIMIT`;
+    a larger register is not re-checked, and the link is dropped (the turn asks)."""
+    try:
+        if path.stat().st_size > CARRY_READ_LIMIT:
+            return False
+        with path.open("r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return False
+    return sum(1 for _, text in _headings(lines) if text[:ANCHOR_CHARS] == anchor) == 1
+
+
 def _register_written(added: list[str], text: str) -> bool:
     """Does `text` — what this session's calls wrote INTO this file — carry the
-    register's addition? Its newest added heading, or most of its added lines. One
-    common line is not enough."""
-    heads = [l.strip() for l in added if HEADING.match(l)]
-    if heads and heads[-1] in text:
-        return True
+    register's addition? Its entry heading (`_entry_heading`), or, when the addition
+    has no heading, most of its added lines. One common line is not enough."""
+    entry = _entry_heading(added)
+    if entry is not None:
+        # The entry's own heading must be in what the session wrote. Not any heading:
+        # `### Consequences` is in every MADR entry, so it attributes nothing.
+        return entry in text
     lines = [l.strip() for l in added if len(l.strip()) >= MIN_NEEDLE][:REGISTER_LINES]
     return bool(lines) and 2 * sum(1 for l in lines if l in text) > len(lines)
 
@@ -594,8 +652,11 @@ def rationale_of(top: pathlib.Path, facts: dict, transcript: str | None = None,
                 continue
             # The LAST heading added: a register grows at its end, and a new
             # register's first heading is its title, not a decision.
-            heads = [m.group(1) for l in added if (m := HEADING.match(l))]
-            anchor = heads[-1] if heads else None
+            anchor = _entry_heading(added)
+            # And the entry is in the register NOW, once, as a heading: the same test a
+            # carried link must pass on every later turn.
+            if anchor is not None and not _anchor_still_true(top / rel, anchor):
+                continue
             return {"source": "decision-register", "ref": rel,
                     **({"anchor": anchor[:ANCHOR_CHARS]} if anchor else {})}
         ledger_text = "\n".join(c["text"] for c in calls if c["ledger"])
@@ -653,18 +714,17 @@ def _rationale_links(prior, repo_id: str, top: pathlib.Path) -> list[dict]:
             continue
         try:
             root = top.resolve()
-            path = (root / uri[len("file:"):]).resolve()
-            if root not in path.parents or not path.is_file():
+            named = root / uri[len("file:"):]
+            # A register that is a symbolic link — or sits under one — is refused: the
+            # link would make another file's heading count as this register's.
+            if named.is_symlink() or named.resolve() != named or root not in named.parents \
+                    or not named.is_file():
+                # (`root` is already resolved, so a symlinked parent directory shows up
+                # as `named.resolve() != named`.)
                 continue
-            size = path.stat().st_size
-            with path.open("rb") as fh:
-                head = fh.read(READ_LIMIT)
-                fh.seek(max(0, size - READ_LIMIT))
-                tail = fh.read(READ_LIMIT)
         except OSError:
             continue
-        text = (head + b"\n" + tail).decode("utf-8", errors="replace")
-        if anchor in text:
+        if _anchor_still_true(named, anchor):
             out.append(e)
     return out
 
