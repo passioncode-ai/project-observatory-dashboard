@@ -81,6 +81,8 @@ def strict_time(value: Any) -> Optional[int]:
     if not match:
         return None
     offset = match.group(8)
+    if offset not in ('Z', 'z') and (int(offset[1:3]) > 23 or int(offset[4:6]) > 59):
+        return None                                        # +24:00 and +12:60 are no offset (JavaScript refuses them)
     minutes = 0 if offset in ('Z', 'z') else (1 if offset[0] == '+' else -1) * (int(offset[1:3]) * 60 + int(offset[4:6]))
     return _epoch_ms(match, minutes)
 
@@ -219,8 +221,9 @@ def _refuse(reason: str) -> dict:
     return {'ok': False, 'reason': reason}
 
 
-#: How deeply a document a node parses may nest. The reference has no bound; a relay message's payload nests a few
-#: levels, and a bound keeps a hostile relay's deeply nested frame from exhausting the parser (`malformed`).
+#: How deeply a document a node parses may nest: at most 64 levels of arrays and objects, the same bound
+#: `jcs.MAX_DEPTH` applies to what a node signs. The reference has no bound; a relay message's payload nests a few
+#: levels, and the bound keeps a hostile relay's deeply nested frame from exhausting the parser (`malformed`).
 MAX_JSON_DEPTH = 64
 
 
@@ -246,8 +249,9 @@ def _depth_ok(text: str) -> bool:
     return True
 
 
-def _json(raw: bytes):
-    """JSON with no NaN or Infinity, at most `MAX_FRAME_BYTES` and `MAX_JSON_DEPTH` deep; ValueError otherwise."""
+def parse_json(raw: bytes):
+    """JSON from a relay or a peer: no NaN or Infinity, at most `MAX_FRAME_BYTES` and `MAX_JSON_DEPTH` deep, UTF-8;
+    ValueError otherwise (never RecursionError or MemoryError). The session parses every relay frame with it."""
     def no_constants(name: str):
         raise ValueError(name)
     if len(raw) > MAX_FRAME_BYTES:
@@ -273,7 +277,7 @@ def verify_message_body(body: Any, expect: Mapping[str, str], sender_key: Callab
     if header_raw is None or payload_raw is None:
         return _refuse('malformed')
     try:
-        header, payload = _json(header_raw), _json(payload_raw)
+        header, payload = parse_json(header_raw), parse_json(payload_raw)
     except (ValueError, UnicodeDecodeError):
         return _refuse('malformed')
     if not isinstance(header, dict) or not isinstance(payload, dict):
@@ -326,13 +330,17 @@ def parse_relay_request(value: Any) -> dict:
     about to send. `{'ok': True, 'request': {...}}` or `{'ok': False, 'status': ..., 'code': ...}`."""
     if not isinstance(value, str) or not value:
         return {'ok': False, 'status': 400, 'code': 'malformed'}
-    if len(value.encode('utf-8')) > MAX_RELAY_REQUEST_BYTES:
+    try:
+        encoded = value.encode('utf-8')
+    except UnicodeEncodeError:                             # a lone surrogate is no header value
+        return {'ok': False, 'status': 400, 'code': 'malformed'}
+    if len(encoded) > MAX_RELAY_REQUEST_BYTES:
         return {'ok': False, 'status': 431, 'code': 'too-large'}
     raw = p256.b64url_canonical(value)
     if raw is None:
         return {'ok': False, 'status': 400, 'code': 'malformed'}
     try:
-        parsed = _json(raw)
+        parsed = parse_json(raw)
     except (ValueError, UnicodeDecodeError):
         return {'ok': False, 'status': 400, 'code': 'malformed'}
     if not isinstance(parsed, dict) or sorted(parsed) != ['alg', 'iat', 'kid', 'recipients', 'sig'] \
@@ -378,9 +386,10 @@ def peer_keys(record: Optional[Mapping[str, Any]], at_ms: int,
                 continue
             octets = _base64(public)
             if kid in claimed:
-                # A kid named twice speaks for nobody: neither of its keys is believed.
+                # A kid named twice speaks for nobody: neither of its keys is believed, and it is excluded once.
                 admitted.pop(kid, None)
-                excluded.append({'kid': kid, 'reason': 'bad-key'})
+                if {'kid': kid, 'reason': 'bad-key'} not in excluded:
+                    excluded.append({'kid': kid, 'reason': 'bad-key'})
             elif p256.is_ed25519_key(octets):
                 excluded.append({'kid': kid, 'reason': 'unsupported-alg'})
             elif p256.key_refusal(octets) is not None or kid != machine['id'] + '#sig':

@@ -42,17 +42,24 @@ Each check was also run against a planted defect, and the suite failed every tim
 **Where the node is stricter than the reference.** Each answer is still one of the reference's codes:
 - a document nested deeper than 64 levels, or larger than a frame (1 MiB), is `malformed`, not parsed. A hostile relay's
   deeply nested frame would otherwise exhaust the parser and stop the session's reader;
-- a device key's base64 must be its one canonical spelling;
+- a device key's base64 must be its one canonical spelling, padded standard base64; a signature, an encapsulated key
+  and a JWK coordinate are unpadded base64url with no `+`, `/` or `=`, and also only in their canonical spelling;
+- a time offset is at most `±23:59` (`+24:00` and `+12:60` are no offset, as JavaScript reads them);
 - a `#sig` kid counts only when it is its own machine's `<id>#sig`, and a kid listed twice counts for neither machine.
   A verified record already holds both by FAC-SEM-073; the node checks them again before it believes a key.
 
 Times read as JavaScript's `Date` reads them, for every year 0000-9999 (`calendar.timegm` refuses year 0). Only ASCII
 digits are accepted, and nothing may follow the closing `Z`.
 
+Parsing and signing share one bound: `relay.parse_json` refuses more than 64 levels (`MAX_JSON_DEPTH`) and
+`jcs.rfc8785` refuses the same, so a node never signs a document another node refuses to read.
+
 **Device keys under concurrency.** `load_or_create` holds the folder's lock across the check, the generation and the
 writes. Each file is created exclusively (written to a temporary file, then hard-linked), so two processes starting
 together end with one key set, the one both return. A folder another account owns, or one others may write, is
-refused.
+refused, before the lock is taken (taking it would make the folder 0700 and hide the fault). A writer killed between
+writing a key and linking it leaves a `.device-key-*` temporary file; the next start removes it under the lock, so the
+recovery is to start again, and no stale private key stays on disk.
 
 Signing needs the engine's `full` extra (`cryptography`). Canonical JSON and key validation use the standard library
 alone.

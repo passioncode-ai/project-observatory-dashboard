@@ -73,7 +73,9 @@ MAX_DEPTH = 64
 
 def rfc8785(value: Any, _depth: int = 0) -> str:
     """The RFC 8785 text of a parsed JSON value; encode it as UTF-8 to sign or hash it."""
-    if _depth > MAX_DEPTH:
+    if isinstance(value, (list, tuple, dict)) and _depth >= MAX_DEPTH:
+        # The same bound as the node's parser (relay.MAX_JSON_DEPTH): containers nest at most 64 deep, so a node
+        # never signs a document another node refuses to parse.
         raise CanonicalError('a value nested more than %d levels has no canonical form here' % MAX_DEPTH)
     if value is None:
         return 'null'
