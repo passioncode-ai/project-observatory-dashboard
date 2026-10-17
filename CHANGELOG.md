@@ -53,8 +53,10 @@ while the major version is 0, a minor release may change behaviour and says so h
     No request is made in two cases:
     - one of those calls targets a decision register (a `decisions.md`, or a `.md`, `.markdown` or
       `.txt` file under `adr/`, outside vendored trees and submodules, not deleted, with at least one
-      non-blank added line, whitespace ignored), and its text carries that file's newest added heading
-      or more than half of its added lines;
+      non-blank added line, whitespace ignored), and its text carries the entry's own heading (the
+      shallowest heading the work added, never a repeated `### Consequences`), or, with no heading,
+      more than half of its added lines; that heading must appear in the register exactly once, as a
+      heading line outside fenced code;
     - one of those calls wrote `.task-pipeline/run.md` (or ran `stage_checkpoint.py`), and a
       `decision:` or `stage:` line among the ledger's newest 64 KB and 200 such lines, read even when
       git ignores it, has its text in what those calls wrote.
@@ -62,11 +64,13 @@ while the major version is 0, a minor release may change behaviour and says so h
     The pass skips calls whose result was an error and subagent (`isSidechain`) lines, and it does
     not scan a Bash command longer than 65,536 characters. `sed -i` is read by splitting a command on `;`, `|`,
     `&` and newlines, so the scan is linear in the command's length. A second revision of the same
-    record then links the file (`file:<path>`, `anchor` = the newest heading or ledger line), and its
+    record then links the file (`file:<path>`, `anchor` = the entry heading or the ledger line), and its
     `why` stays empty. The link records the repository's id. A later revision carries the link
     forward only while it is still true: this hook wrote it, it names the current repository, the
-    file still exists in the checkout, and a bounded read of the file (256 KB from each end) still
-    contains the link's anchor. So the record stays explained, with no request and no extra
+    register is a regular file inside the checkout (not a symbolic link, not under one), and exactly
+    one heading line of it, outside fenced code, still reads the anchor. A struck or WITHDRAWN heading,
+    the anchor left in a comment, a code block or an index line, or a duplicate heading does not
+    count; a register over 8 MB is not re-checked. So the record stays explained, with no request and no extra
     revision, after the register is committed and pushed and after the write scrolls out of the
     transcript. A register deleted, reverted, checked out or rewritten, or a session that moved to
     another repository, drops the link and is attributed afresh, and asked about when nothing is
