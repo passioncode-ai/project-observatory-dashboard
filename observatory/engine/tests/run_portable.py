@@ -353,7 +353,9 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 #: average near 150).
 #: A larger --timeout still wins; a smaller one never cuts these short.
 SUITE_SECONDS = {'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'conformance_receipt': 360, 'backup_vault': 300, 'dashboard_render': 600,
-                 'workspace': 300, 'interop': 300, 'indexer_load': 300, 'api_listings': 300}
+                 'workspace': 300, 'interop': 300, 'indexer_load': 300, 'api_listings': 300,
+                 # 74 cases, each driving the real hooks and git: ~70 s on an idle machine.
+                 'ask_why': 360}
 
 
 def suite_timeout(name: str, timeout: int) -> int:

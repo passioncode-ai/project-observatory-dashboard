@@ -148,6 +148,24 @@ It also answers each close as RFC 6455 §7 says:
 
 `keep_connected` closes each session on every exit and logs a listener that raises without letting it end the loop.
 
+Planted defects that fail the suites for these rules (#295):
+- local-fault not terminal, or not logged;
+- a refused opening's `retryAfter` ignored;
+- pings stopping after an error answer;
+- the catch-all not logging;
+- a session closed only on stop;
+- an unguarded listener;
+- no shape check on a deliver frame;
+- revoked senders not told apart;
+- a squatter's hello made terminal;
+- identifiers compared without their type;
+- an empty revoked list;
+- `wrong-origin` not named;
+- a hello of another protocol not retried.
+
+A client data nested past 64 levels is `malformed` in a passkey assertion, by the same bound as a relay frame
+(`relay.json_depth_ok`).
+
 **What is acknowledged.** A body refused for a fault in it (`malformed`, `bad-signature`, `mismatch`, `bad-key`,
 `unsupported-alg`, `lifetime-too-long`, `expired`, `replay`) is acknowledged. A body refused as `unknown-sender` or
 `not-yet-valid` is reported and left unacknowledged: a newer estate revision may list the sender, and a clock may catch

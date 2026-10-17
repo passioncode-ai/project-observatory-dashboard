@@ -163,6 +163,12 @@ class RecordRules(unittest.TestCase):
         framed = resign(record, client_extra={'topOrigin': 'https://sign.example.org'})
         self.assertEqual(verify(framed, self.trust)['problem'], 'cross-origin')
 
+    def test_client_data_nested_too_deep_is_malformed(self):
+        record = resign(copy.deepcopy(self.base))
+        deep = '{"type":"webauthn.get","x":' + '[' * 5000 + ']' * 5000 + '}'
+        record['signature']['clientDataJSON'] = p256.b64url_encode(deep.encode())
+        self.assertEqual(verify(record, self.trust), {'ok': False, 'problem': 'malformed'})
+
     def test_a_revision_chain(self):
         first = resign(self.base)
         second = copy.deepcopy(first)
