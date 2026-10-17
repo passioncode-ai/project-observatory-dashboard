@@ -254,13 +254,19 @@ def parse_json(raw: bytes):
     ValueError otherwise (never RecursionError or MemoryError). The session parses every relay frame with it."""
     def no_constants(name: str):
         raise ValueError(name)
+
+    def finite(text: str) -> float:
+        value = float(text)
+        if value in (float('inf'), float('-inf')):          # 1e400 is no number JSON can carry
+            raise ValueError('a number out of range')
+        return value
     if len(raw) > MAX_FRAME_BYTES:
         raise ValueError('too large')
     text = raw.decode('utf-8')
     if not _depth_ok(text):
         raise ValueError('too deep')
     try:
-        return json.loads(text, parse_constant=no_constants)
+        return json.loads(text, parse_constant=no_constants, parse_float=finite)
     except (RecursionError, MemoryError) as error:
         raise ValueError('unparseable') from error
 
@@ -387,9 +393,10 @@ def peer_keys(record: Optional[Mapping[str, Any]], at_ms: int,
             octets = _base64(public)
             if kid in claimed:
                 # A kid named twice speaks for nobody: neither of its keys is believed, and it is excluded once.
+                # Whatever the earlier listings were excluded for, the kid is now excluded once, as bad-key.
                 admitted.pop(kid, None)
-                if {'kid': kid, 'reason': 'bad-key'} not in excluded:
-                    excluded.append({'kid': kid, 'reason': 'bad-key'})
+                excluded[:] = [entry for entry in excluded if entry['kid'] != kid]
+                excluded.append({'kid': kid, 'reason': 'bad-key'})
             elif p256.is_ed25519_key(octets):
                 excluded.append({'kid': kid, 'reason': 'unsupported-alg'})
             elif p256.key_refusal(octets) is not None or kid != machine['id'] + '#sig':

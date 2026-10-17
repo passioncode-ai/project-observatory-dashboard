@@ -18,6 +18,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   signed messages, and acts on a delivered one only after checking its signature, its recipient (this machine) and
   the replay window, acknowledging it after the handler took it. `node/blobs.py` puts and fetches blobs by digest
   and refuses fetched bytes that are not the named blob.
+  A relay's hello is checked before anything is signed (its origin, a 32-byte nonce), and nothing a relay sends
+  ends the reconnect loop. NODE.md states the stage-1 threat model.
 
 ### Documentation
 

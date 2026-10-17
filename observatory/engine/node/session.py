@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import secrets
 import socket
 import threading
@@ -34,7 +35,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
-from . import p256, relay
+from . import jcs, p256, relay
 from .ws import Closed, WebSocket, WebSocketError
 
 LOG = logging.getLogger('observatory.node.session')
@@ -56,6 +57,22 @@ TERMINAL_REFUSALS = ('unauthenticated', 'protocol-unsupported', 'not-admitted', 
 #: revision is on its way) and a body dated ahead of its clock. Such a body is reported and left unacknowledged, so
 #: the relay delivers it again on the next connection, until its ttl.
 TRANSIENT_REFUSALS = ('unknown-sender', 'not-yet-valid')
+
+
+_NONCE = re.compile(r'[A-Za-z0-9_-]{43}')
+
+
+def retry_after_seconds(value: Any, ceiling: float) -> float:
+    """A relay's `retryAfter` as a wait: a finite number clamped to [0, ceiling]; anything else is no wait."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    try:
+        seconds = float(value)
+    except (OverflowError, ValueError):
+        return 0.0
+    if seconds != seconds or seconds in (float('inf'), float('-inf')):
+        return 0.0
+    return min(max(seconds, 0.0), ceiling)
 
 
 class _LocalFailure(Exception):
@@ -162,13 +179,21 @@ class RelaySession:
             if hello.get('relay') != self.origin:
                 # The signed origin is what keeps a nonce signed for one relay from admitting this machine to another.
                 raise RelayRefused('unauthenticated', 'the relay names another origin than the one dialled')
+            nonce = hello['nonce']
+            raw_nonce = p256.b64url_canonical(nonce) if _NONCE.fullmatch(nonce) else None
+            if raw_nonce is None or len(raw_nonce) != 32:
+                # relay.md: 32 random bytes, base64url. Anything else is no relay of this protocol.
+                raise RelayRefused('protocol-unsupported', 'the relay sent a nonce that is not 32 bytes of base64url')
             now_ms = int(self.clock() * 1000)
-            frame = relay.auth_frame(self.keys.sign, frame_id=_frame_id(), relay=self.origin, nonce=hello['nonce'],
-                                     estate=self.estate, kid=self.keys.sig_kid, iat=relay.rfc3339(now_ms))
+            try:
+                frame = relay.auth_frame(self.keys.sign, frame_id=_frame_id(), relay=self.origin, nonce=nonce,
+                                         estate=self.estate, kid=self.keys.sig_kid, iat=relay.rfc3339(now_ms))
+            except (jcs.CanonicalError, TypeError, ValueError) as error:
+                raise RelayError('malformed', 'the auth frame could not be built: ' + type(error).__name__) from None
             ws.send_text(json.dumps(frame, separators=(',', ':')))
             answer = self._json(ws.recv_text(deadline))
             if answer.get('type') == 'error':
-                raise RelayRefused(str(answer.get('code')), RelayRefused.ADVICE)
+                raise RelayRefused(str(answer.get('code')), RelayRefused.ADVICE, answer.get('retryAfter'))
             if answer.get('type') != 'welcome' or not isinstance(answer.get('session'), str):
                 raise RelayRefused('malformed', 'the relay answered auth with ' + str(answer.get('type')))
             self.welcome = Welcome(answer['session'], answer.get('estateRevision'), answer.get('deltaHead'),
@@ -391,7 +416,9 @@ class RelaySession:
                     self.close_reason = 'relay.session.dead'
                     self._ws.abort(1001)
                     return
-            except (RelayError, SessionClosed):
+            except RelayError:
+                missed = 0                                     # the relay answered: the link is alive
+            except SessionClosed:
                 return
 
 
@@ -401,10 +428,12 @@ def keep_connected(make_session: Callable[[ReplayStore], 'RelaySession'], stop: 
     """Holds one relay session open until `stop` is set: opens a session, waits for it to close, and opens another.
     Every session gets the same `ReplayStore` (`make_session(replay)` passes it to `RelaySession`), so a message
     handled before a link dropped, and delivered again after it, is acted on once. It opens the next
-    after a jittered, doubling backoff (reset by a session that stayed up a minute). A refusal (`RelayRefused`
-    unauthenticated) or a close 4401 or 4403 is terminal: `on_state('stopped', ...)` names it and the loop ends,
+    after a jittered, doubling backoff (reset by a session that stayed up a minute), at least the relay's `retryAfter`
+    (coerced to a finite number up to `max_backoff`). A terminal refusal (`TERMINAL_REFUSALS`) or a close 4401 or 4403
+    is terminal: `on_state('stopped', ...)` names it and the loop ends,
     because the relay would refuse every retry until a person acts. `on_state` hears `open`, `closed`, `retry` and
-    `stopped`, each with a detail dict that carries no secret."""
+    `stopped`, each with a detail dict that carries no secret. Any other failure is reported as `closed` and retried:
+    nothing a relay sends ends the loop."""
     backoff = min_backoff
     replay = ReplayStore()
     while not stop.is_set():
@@ -430,15 +459,22 @@ def keep_connected(make_session: Callable[[ReplayStore], 'RelaySession'], stop: 
             if refused.code in TERMINAL_REFUSALS:
                 on_state('stopped', {'refusal': refused.code})
                 return
+            wait_at_least = retry_after_seconds(refused.retry_after, max_backoff)
             on_state('closed', {'refusal': refused.code})
         except RelayError as error:
             if error.code in TERMINAL_REFUSALS:
                 on_state('stopped', {'refusal': error.code})
                 return
-            wait_at_least = float(error.retry_after or 0)    # `rate-limited` names how long to wait
+            wait_at_least = retry_after_seconds(error.retry_after, max_backoff)   # `rate-limited` names a wait
             on_state('closed', {'refusal': error.code})
         except (WebSocketError, OSError) as error:
             on_state('closed', {'error': type(error).__name__})
+        except Exception as error:                         # nothing ends the loop but `stop` and a terminal refusal
+            LOG.exception('relay.keep-connected.failed')
+            on_state('closed', {'error': type(error).__name__})
+        finally:
+            if session is not None and stop.is_set():
+                session.close()
         delay = max(wait_at_least, backoff * (0.5 + random.random() / 2))
         on_state('retry', {'seconds': round(delay, 2)})
         if stop.wait(delay):

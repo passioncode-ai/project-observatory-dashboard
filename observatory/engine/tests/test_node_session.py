@@ -1054,6 +1054,65 @@ class Reconnects(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 2.0)     # pings every 0.1 s did not hold it open
 
 
+@unittest.skipUnless(HAVE_CRYPTO, 'needs the engine full extra (cryptography)')
+class ScopedRound(unittest.TestCase):
+    """The #293 scoped adversarial round: a stranger's hello cannot end the node's reconnect loop."""
+
+    def setUp(self):
+        self.b = DeviceKeys.generate()
+        self.relay = RelayStub({self.b.sig_kid: self.b.sig_public})
+
+    def tearDown(self):
+        self.relay.stop()
+
+    def hello_with(self, nonce):
+        server = RawServer(lambda conn, srv: conn.send({'v': 1, 'type': 'hello', 'id': 'h', 'protocol': 'fabric-relay/0.1',
+                                                         'relay': 'http://' + srv.url[5:-11], 'nonce': nonce,
+                                                         'time': '2026-10-15T00:00:00Z'}) or time.sleep(1))
+        return 'http://' + server.url[5:-11]
+
+    def test_a_nonce_that_is_not_32_bytes_of_base64url_is_refused_before_signing(self):
+        for nonce in ('\ud800', 'short', 'A' * 44, '+' * 43, 'A' * 42 + 'B'):
+            with self.subTest(repr(nonce)):
+                origin = self.hello_with(nonce)
+                with self.assertRaises(RelayRefused) as caught:
+                    RelaySession(origin, self.b, ESTATE, {}.get, on_message=print).open()
+                self.assertEqual(caught.exception.code, 'protocol-unsupported')
+
+    def test_any_failure_is_reported_and_retried(self):
+        states, stop, calls = [], threading.Event(), []
+
+        def make(replay):
+            calls.append(1)
+            if len(calls) == 1:
+                raise KeyError('a bug anywhere in opening')
+            stop.set()
+            raise OSError('down')
+        thread = threading.Thread(target=keep_connected, args=(make, stop),
+                                  kwargs={'on_state': lambda s, d: states.append((s, d)), 'min_backoff': 0.01},
+                                  daemon=True)
+        thread.start()
+        thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(states[0], ('closed', {'error': 'KeyError'}))
+        self.assertEqual(len(calls), 2)
+
+    def test_retry_after_is_a_finite_wait_or_none(self):
+        for value, expected in ((5, 5.0), (0.25, 0.25), (-3, 0.0), (1e12, 60.0), (float('inf'), 0.0),
+                                (float('nan'), 0.0), ('abc', 0.0), ([1], 0.0), (True, 0.0), (None, 0.0)):
+            self.assertEqual(session_module.retry_after_seconds(value, 60.0), expected, value)
+
+    def test_an_error_answer_to_a_ping_keeps_the_link(self):
+        with mock.patch.multiple(session_module, PING_SECONDS=0.05, ANSWER_TIMEOUT_SECONDS=0.5):
+            b = RelaySession(self.relay.origin, self.b, ESTATE, {}.get, on_message=print)
+            b.open()
+            with mock.patch.object(b, 'ping', side_effect=RelayError('rate-limited')):
+                time.sleep(0.3)
+            self.assertFalse(b.wait_closed(0.3))
+            b.ping()
+            b.close()
+
+
 class Redirects(unittest.TestCase):
     """A blob request follows no redirect, through either opener: the signed header never reaches another origin."""
 
