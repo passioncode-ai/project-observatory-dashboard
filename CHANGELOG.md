@@ -31,6 +31,83 @@ while the major version is 0, a minor release may change behaviour and says so h
   and prints the device id and public keys an enrollment needs; `--show` prints them again. Private keys never leave
   their owner-only files, and a key is never replaced.
 
+### Changed
+
+- **The `observatory-log` plugin asks for a turn's `why` once per record, with the next prompt, and
+  measures the answers on what was delivered** (M-8, INB-004). The Stop hook printed the request as a
+  Stop `systemMessage` after every changed turn. On one machine over fourteen days that was 3,593
+  requests and 34 answers. A Stop `systemMessage` is a notice for the person and is not rendered into
+  the model's input. Now:
+  - **Once per record.** A session is one record revised per turn, so a session is asked once.
+    `store/raw/why-asks.jsonl` (new, append-only) journals each request and each delivery. It rotates
+    to `why-asks.jsonl.1` past 1 MB, under a lock, and both are read, so a record is not asked again
+    when it scrolls.
+  - **The record first.** The Stop hook writes the record before anything else.
+  - **Not when this session wrote the rationale.** Within 2 seconds after the record is written, one
+    pass over the last 4 MB of the session's transcript (named by the Stop payload) collects this
+    session's writing calls:
+    - Edit, Write, MultiEdit and NotebookEdit, with the file each names;
+    - Bash commands that write through `>`, `>>` (also `cat > file <<EOF`), `tee` or `sed -i`, with
+      the files they write.
+
+    No request is made in two cases:
+    - one of those calls targets a decision register (a `decisions.md`, or a `.md`, `.markdown` or
+      `.txt` file under `adr/`, outside vendored trees and submodules, not deleted, with at least one
+      non-blank added line, whitespace ignored), and its text carries that file's newest added heading
+      or more than half of its added lines;
+    - one of those calls wrote `.task-pipeline/run.md` (or ran `stage_checkpoint.py`), and a
+      `decision:` or `stage:` line among the ledger's newest 64 KB and 200 such lines, read even when
+      git ignores it, has its text in what those calls wrote.
+
+    The pass skips calls whose result was an error and subagent (`isSidechain`) lines, and it does
+    not scan a Bash command longer than 65,536 characters. `sed -i` is read by splitting a command on `;`, `|`,
+    `&` and newlines, so the scan is linear in the command's length. A second revision of the same
+    record then links the file (`file:<path>`, `anchor` = the newest heading or ledger line), and its
+    `why` stays empty. The link records the repository's id. A later revision carries the link
+    forward only while it is still true: this hook wrote it, it names the current repository, the
+    file still exists in the checkout, and a bounded read of the file (256 KB from each end) still
+    contains the link's anchor. So the record stays explained, with no request and no extra
+    revision, after the register is committed and pushed and after the write scrolls out of the
+    transcript. A register deleted, reverted, checked out or rewritten, or a session that moved to
+    another repository, drops the link and is attributed afresh, and asked about when nothing is
+    found. A turn that touches a register is attributed again, and a newer decision replaces the
+    anchor. The attribution's `git diff` gets only the time left in the 2 seconds.
+
+    The turn is asked about in every other case:
+    - another session's edit in the same checkout;
+    - a file the session only read or grepped;
+    - a pull-request body that shares a heading;
+    - a write by a tool the pass does not know (`cp`, a script, `perl -i`);
+    - `sed -i` behind a prefix (`sudo`, `xargs`, `env`), `gsed`, or a sed script containing `|`
+      or `;`;
+    - a relative path written after a `cd` in the same command;
+    - a path whose letter case differs from the file's on a case-insensitive volume;
+    - a subagent's edit, a failed call, or a command longer than 65,536 characters;
+    - no transcript;
+    - a pass that runs out of its 2 seconds.
+  - **Where the model reads it.** A new `UserPromptSubmit` hook, `hooks/prompt-why.py`, hands the
+    pending request to the model as `additionalContext` with the next prompt, once, and records the
+    delivery. The context is capped at 4,000 characters, and a request that does not fit waits for the
+    following prompt without being marked delivered. It prints nothing when nothing is pending, never
+    writes through a symbolic link, and reaches no file for a session id that is not a plain name.
+    - The request waits in `$XDG_STATE_HOME/project-observatory/ask-why/<session>.json` (0600). An
+      undelivered one older than seven days is pruned by either hook.
+    - If that file cannot be written, the request falls back to the Stop notice. An older engine whose
+      recorder does not decide whether to ask also gets the Stop notice, never an injected prompt. A
+      fault to record is still a Stop notice.
+  - **Measured.** `store/raw/record-turn.json` gains `whyAsks` (`asked`, `delivered`, `pending`,
+    `answered`, `rate`, `window`), with rate = answered ÷ delivered. A request that never reached the
+    model, such as a headless single-prompt session, is pending and never unanswered.
+    - `why_asks.py` prints the same.
+    - `why_asks.py reached <transcript> <memory id>` says whether a request reached the model in a
+      session transcript.
+    - The new finding `observatory.why_unanswered` fires below a 10 % rate over seven days with at
+      least 20 delivered requests.
+
+  `tests/test_skill.py` T8 now expects the `UserPromptSubmit` hook it used to forbid, and runs it to
+  show that it prints nothing with no request pending. New suites: `tests/test_ask_why.py` and
+  `tests/test_ask_why_reach.py` (a synthetic transcript fixture).
+
 ### Documentation
 
 - **The README's capability table names records and lessons** (N-4, USR-009). A new row, "Can agents keep what

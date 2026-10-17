@@ -425,7 +425,8 @@ def test_the_hook_finds_the_checkout_from_a_flattened_install() -> None:
     # commit). `watched_build` builds a real git repository with a real change
     # plus a registry that names it, which is the same remedy other suites took.
     _work, checkout, wenv = watched_build()
-    env = dict(wenv, CLAUDE_PLUGIN_ROOT=str(flat.parent), OBSERVATORY_ROOT=str(ROOT))
+    env = dict(wenv, CLAUDE_PLUGIN_ROOT=str(flat.parent), OBSERVATORY_ROOT=str(ROOT),
+               XDG_STATE_HOME=str(pathlib.Path(str(_work)) / "hook-state"))
     d = pathlib.Path(str(_work))
     p = subprocess.run(["bash", str(flat / "record-turn.sh")],
                        input=json.dumps({"session_id": "flat-probe",
@@ -493,15 +494,26 @@ def test_the_ask_nudges_when_the_projects_knowledge_is_stale() -> None:
     check("and so are the old notes", (got.get("wikiAgeDays") or 0) > 365,
           second.stdout[-200:])
     hook = ROOT / "skill/plugins/observatory-log/hooks/ask-why.py"
-    p2 = _sp.run([PY, str(hook)], input=second.stdout, capture_output=True,
-                 text=True, timeout=60)
-    msg = (json.loads(p2.stdout or "{}").get("systemMessage") or "")
+    prompt = ROOT / "skill/plugins/observatory-log/hooks/prompt-why.py"
+    # The ask now waits for the next prompt of the session (M-8), in hook state
+    # that must be this fixture's own.
+    henv = dict(os.environ, XDG_STATE_HOME=str(d / "hook-state"))
+
+    def asked(record_stdout: str) -> str:
+        doc = json.loads(record_stdout or "{}")
+        # Each recording here is its own session and record, so each is asked once.
+        doc["ask"] = True
+        _sp.run([PY, str(hook)], input=json.dumps(doc), capture_output=True,
+                text=True, timeout=60, env=henv)
+        q = _sp.run([PY, str(prompt)], input=json.dumps({"session_id": doc.get("session")}),
+                    capture_output=True, text=True, timeout=60, env=henv)
+        return ((json.loads(q.stdout or "{}").get("hookSpecificOutput") or {})
+                .get("additionalContext") or "")
+    msg = asked(second.stdout)
     check("the ask carries the graph nudge", "/graphify . --update" in msg, msg[-300:])
     check("and the wiki nudge", "wiki notes" in msg, msg[-300:])
-    p3 = _sp.run([PY, str(hook)], input=quiet.stdout, capture_output=True,
-                 text=True, timeout=60)
-    msg3 = (json.loads(p3.stdout or "{}").get("systemMessage") or "")
-    check("and a fresh project gets no nudge", "graphify" not in msg3,
+    msg3 = asked(quiet.stdout)
+    check("and a fresh project gets no nudge", "graphify" not in msg3 and "why" in msg3,
           msg3[-200:])
 
 
