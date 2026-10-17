@@ -461,6 +461,13 @@ def _expand(value: str) -> tuple[pathlib.Path | None, str]:
     expanded = expanded.replace("\0", "%")
     if expanded.startswith("~/"):
         return home() / expanded[2:], spelled
+    if expanded.startswith("~"):   # ~user: that account's home, as ssh resolves it
+        user, _, rest = expanded[1:].partition("/")
+        try:
+            import pwd
+            return pathlib.Path(pwd.getpwnam(user).pw_dir) / rest, spelled
+        except (ImportError, KeyError):
+            return None, spelled
     path = pathlib.Path(expanded)
     return (path if path.is_absolute() else home() / path), spelled
 
@@ -543,7 +550,9 @@ def read_config(degraded: list[dict], agents: list[dict] | None = None) -> list[
                         walk(pathlib.Path(found), depth + 1)
             elif key == "identityfile":
                 target, spelled = _expand(value)
-                if target is not None and "%u" not in value and "${" not in value.replace("${HOME}", ""):
+                plain = value.strip().strip('"')
+                if target is not None and "%u" not in value and "${" not in value.replace("${HOME}", "") \
+                        and not (plain.startswith("~") and not plain.startswith("~/")):
                     spelled = tilde(target)
                 out.append({"hosts": list(hosts), "path": target, "spelled": spelled})
             elif key == "identityagent" and agents is not None:
@@ -565,12 +574,30 @@ def config_hosts() -> set[str]:
 
 # ── the agent and GitHub ──────────────────────────────────────────────────────
 
-def agent_fingerprints(degraded: list[dict], sock: str | None = None, label: str = "ssh-agent") -> list[dict] | None:
+#: Seconds one agent may take to answer, and all agents together (round 3: a config naming
+#: many sockets that never answer made `list` wait 15 s for each).
+AGENT_TIMEOUT = 15
+AGENT_BUDGET = 30
+
+
+def agent_fingerprints(degraded: list[dict], sock: str | None = None, label: str = "ssh-agent",
+                       deadline: float | None = None) -> list[dict] | None:
     """The keys an agent holds, by fingerprint: the one SSH_AUTH_SOCK names, or the one at `sock`
-    (an IdentityAgent of the config: 1Password, Secretive). None when it could not be read."""
+    (an IdentityAgent of the config: 1Password, Secretive). None when it could not be read.
+    `deadline` (time.monotonic) bounds all agent reads of one inventory together."""
+    import time as _time
     env = None if sock is None else dict(os.environ, SSH_AUTH_SOCK=sock)
+    left = AGENT_TIMEOUT if deadline is None else min(AGENT_TIMEOUT, deadline - _time.monotonic())
+    if left <= 0:
+        degraded.append({"source": label, "reason": f"not read: the {AGENT_BUDGET} s for reading agents was spent "
+                                                    f"on the ones before it"})
+        return None
     try:
-        p = run([tool("ssh-add"), "-l", "-E", "sha256"], timeout=15, env=env)
+        p = run([tool("ssh-add"), "-l", "-E", "sha256"], timeout=left, env=env)
+    except subprocess.TimeoutExpired:
+        degraded.append({"source": label, "reason": f"did not answer within {left:.0f} s",
+                         "fix": "check that the agent (or the application providing it) is responsive"})
+        return None
     except (OSError, subprocess.SubprocessError) as exc:
         degraded.append({"source": label, "reason": f"ssh-add could not run ({type(exc).__name__})",
                          "fix": "install OpenSSH"})
@@ -636,13 +663,32 @@ def github_keys(uses=("authentication", "signing")) -> tuple[dict, list[dict]]:
 
 # ── the inventory (OSS-62) ────────────────────────────────────────────────────
 
+def _probe(path: pathlib.Path) -> tuple[str, str]:
+    """(kind, error) for `path` without following a link and without raising: kind is file, dir,
+    link, other, missing or error; error names the errno when the look itself failed (EACCES on
+    a parent, ELOOP, EIO). `Path.is_file()` raises some of these on Python 3.11 and swallows them
+    on 3.14, so neither is used where a refusal must become a line of `unseen`."""
+    try:
+        st = os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return "missing", ""
+    except OSError as exc:
+        import errno as _errno
+        return "error", _errno.errorcode.get(exc.errno or 0, type(exc).__name__)
+    if stat.S_ISLNK(st.st_mode):
+        return "link", ""
+    if stat.S_ISREG(st.st_mode):
+        return "file", ""
+    if stat.S_ISDIR(st.st_mode):
+        return "dir", ""
+    return "other", ""
+
 def _candidates(folder: pathlib.Path) -> tuple[list[pathlib.Path], list[pathlib.Path], list[pathlib.Path]]:
     """(files that may be private keys, .pub files, links), from ~/.ssh and one level below."""
     files, pubs, links = [], [], []
     dirs = [folder]
     try:
-        dirs += sorted(p for p in folder.iterdir() if p.is_dir() and not p.is_symlink()
-                       and not p.name.startswith("."))
+        dirs += sorted(p for p in folder.iterdir() if _probe(p)[0] == "dir" and not p.name.startswith("."))
     except OSError:
         pass
     for d in dirs:
@@ -653,15 +699,16 @@ def _candidates(folder: pathlib.Path) -> tuple[list[pathlib.Path], list[pathlib.
         for p in entries:
             if p.name.startswith(".") or reserved(p.name):
                 continue
-            if p.is_symlink():
+            kind = _probe(p)[0]
+            if kind == "link":
                 links.append(p)
             elif p.name.endswith("-cert.pub"):
                 continue
             elif p.name.endswith(".pub"):
-                if p.is_file():
+                if kind == "file":
                     pubs.append(p)
-            elif p.is_file():
-                files.append(p)
+            elif kind in ("file", "error"):
+                files.append(p)   # an unreadable entry still gets its row and an unseen line
     return files, pubs, links
 
 
@@ -675,12 +722,15 @@ def inventory(github: bool = True) -> dict:
     doc: dict = {"schema": "ssh-keys/1", "measured_at": now(),
                  "folder": {"path": "~/.ssh", "exists": False, "mode": None, "private": None, "link": False},
                  "misplaced": []}
+    unseen: list[str] = []
     try:
         st = os.lstat(folder)
         doc["folder"].update(exists=True, mode=osprivacy.describe(folder), private=osprivacy.private(folder),
                              link=stat.S_ISLNK(st.st_mode))
     except FileNotFoundError:
         pass
+    except OSError as exc:
+        unseen.append(f"~/.ssh (could not be read: {type(exc).__name__})")
     keygen_ok = available(tool("ssh-keygen"))
     if not keygen_ok:
         degraded.append({"source": "ssh-keygen", "reason": "not found; fingerprints computed by Observatory "
@@ -690,10 +740,17 @@ def inventory(github: bool = True) -> dict:
     config = read_config(degraded, agent_config)
     for entry in config:   # every key the config names is a key, at any depth, in ~/.ssh or not
         p = entry["path"]
-        if p is not None and p.is_file() and not p.is_symlink() and p not in files:
+        if p is None:
+            continue
+        kind, err = _probe(p)
+        entry["kind"] = kind
+        if kind == "error":
+            unseen.append(f"IdentityFile {entry['spelled']} (could not be looked at: {err})")
+        elif kind == "file" and p not in files:
             files.append(p)
-            if pathlib.Path(str(p) + ".pub").is_file() and pathlib.Path(str(p) + ".pub") not in pubs:
-                pubs.append(pathlib.Path(str(p) + ".pub"))
+            pub = pathlib.Path(str(p) + ".pub")
+            if _probe(pub)[0] == "file" and pub not in pubs:
+                pubs.append(pub)
     rows: dict[str, dict] = {}
 
     def row(base: pathlib.Path) -> dict:
@@ -714,19 +771,24 @@ def inventory(github: bool = True) -> dict:
         try:
             st = os.lstat(f)
             header = private_header(f)
+            if header is not None:
+                mode_text, private_ok = osprivacy.describe(f), osprivacy.private(f)
         except OSError as exc:
-            if pathlib.Path(str(f) + ".pub").exists():
+            if f.name.startswith("id_") or _probe(pathlib.Path(str(f) + ".pub"))[0] != "missing" \
+                    or any(e["path"] == f for e in config):
                 row(f).update(private=True, hint=f"unreadable: {type(exc).__name__}")
+                unseen.append(f"{tilde(f)} (could not be read: {type(exc).__name__})")
             continue
         if header is None:
             continue
         r = row(f)
-        r.update(private=True, private_mode=osprivacy.describe(f), private_ok=osprivacy.private(f),
+        r.update(private=True, private_mode=mode_text, private_ok=private_ok,
                  last_access=stamp(st.st_atime), **header)
     for link in links:
         base = pathlib.Path(str(link)[:-4]) if link.name.endswith(".pub") else link
         named = any(e["path"] == link for e in config)
-        if link.name.startswith("id_") or named or pathlib.Path(str(link) + ".pub").exists() or link.name.endswith(".pub"):
+        if link.name.startswith("id_") or named or _probe(pathlib.Path(str(link) + ".pub"))[0] != "missing" \
+                or link.name.endswith(".pub"):
             row(base).update(link=True)
     for pub in pubs:
         base = pathlib.Path(str(pub)[:-4])
@@ -755,26 +817,26 @@ def inventory(github: bool = True) -> dict:
             r["hint"] = (f"no public half: `ssh-keygen -y -f {r['path']} > {r['path']}.pub` recreates it "
                          f"(it asks for the passphrase)")
     for entry in config:   # a key the config names through a link: a row, never followed
-        p = entry["path"]
-        if p is not None and p.is_symlink():
-            row(p).update(link=True)
+        if entry.get("kind") == "link":
+            row(entry["path"]).update(link=True)
     by_path = {str(pathlib.Path(k)): r for k, r in rows.items()}
     identity_files = []
     for entry in config:
         p = entry["path"]
-        exists = None if p is None else (p.exists() or p.is_symlink())
+        kind = entry.get("kind")
+        exists = None if p is None or kind == "error" else kind != "missing"
         identity_files.append({"host": " ".join(entry["hosts"]), "path": entry["spelled"], "exists": exists})
         r = by_path.get(str(p)) if p is not None else None
         if r is not None:
             for h in entry["hosts"]:
                 if h != "*" and h not in r["hosts"]:
                     r["hosts"].append(h)
-    agent = agent_fingerprints(degraded)
+    deadline = __import__("time").monotonic() + AGENT_BUDGET
+    agent = agent_fingerprints(degraded, deadline=deadline)
     # WHAT THIS INVENTORY COULD NOT SEE. A GitHub key is called foreign (and a delete offered)
     # only when every place a key of this machine can live was read: the agent, every other
     # agent the config names, every IdentityFile, every linked key. Round 2 found five ways a
     # key in use stayed invisible and was offered for deletion.
-    unseen: list[str] = []
     if agent is None:
         unseen.append("the ssh-agent")
     other_agents: list[dict] = []
@@ -801,7 +863,7 @@ def inventory(github: bool = True) -> dict:
         if path == os.environ.get("SSH_AUTH_SOCK") or path in seen_socks:
             continue
         seen_socks.add(path)
-        held = agent_fingerprints(degraded, sock=path, label=f"identity-agent {spelled}")
+        held = agent_fingerprints(degraded, sock=path, label=f"identity-agent {spelled}", deadline=deadline)
         if held is None:
             unseen.append(label)
         else:
@@ -818,7 +880,7 @@ def inventory(github: bool = True) -> dict:
         if p is None:
             unseen.append(f"IdentityFile {entry['spelled']} (Host {' '.join(entry['hosts'])}): the path "
                           f"depends on the host or an unset variable")
-        elif p.exists() and not p.is_symlink() and str(p) not in by_path:
+        elif entry.get("kind") == "file" and str(p) not in by_path:
             unseen.append(f"IdentityFile {entry['spelled']}: not readable as a key")
     for r in rows.values():
         if not r["fingerprint"] and (r["private"] or r["link"]):
@@ -927,9 +989,12 @@ def cmd_list(args) -> int:
 def print_listing(doc: dict) -> None:
     """The terminal listing. Every value from a file name or the config goes through `shown`."""
     keys = doc["keys"]
-    if not keys and not doc["agent_only"] and doc.get("unseen"):
+    local_gaps = list(doc.get("unseen") or []) + [
+        f"{d['source']}: {d['reason']}" for d in doc["degraded"] if not str(d.get("source", "")).startswith("github")
+        and d["reason"] not in " ".join(doc.get("unseen") or [])]
+    if not keys and not doc["agent_only"] and local_gaps:
         print("No SSH keys found where Observatory could look. Not seen: "
-              + "; ".join(shown(u) for u in doc["unseen"]))
+              + "; ".join(shown(u) for u in local_gaps))
     elif not keys and not doc["agent_only"]:
         print("No SSH keys yet. Create one: " + f"{CMD} create NAME")
     else:
@@ -1229,7 +1294,11 @@ def send_server(args, alias: str) -> int:
         print(f"the key was {answer}, but it is not verified: {why}", file=sys.stderr)
         receipt("ssh.verify_failed", fp, to=to, how=said(why))
         return 1
-    print(f"Verified: {alias} accepted {args.name} alone (the server named {fp})")
+    if getattr(args, "_ssh_key_unchecked", False):
+        print(f"Verified: {alias} accepted {fp} for {args.name}; the private file was not checked against "
+              f"{tilde(pub)} (its format stores no public key in clear)")
+    else:
+        print(f"Verified: {alias} accepted {args.name} alone (the server named {fp})")
     return max(worst, 0 if receipt("ssh.verified", fp, to=to, how="ssh -F none -i KEY, server named the key") else 4)
 
 
@@ -1287,10 +1356,18 @@ def verify_login(ssh: str, alias: str, base: pathlib.Path, fp: str, args) -> tup
             hops.append(f"{m.group(1) or h['user']}@{h['hostname']}:{m.group(3) or h['port']}")
         jump = ["-J", ",".join(hops)]
     try:
-        passphrase = (private_header(base) or {}).get("passphrase", "unknown")
+        header = private_header(base) or {}
     except OSError:
-        passphrase = "unknown"
-    agent = "none" if passphrase == "no" or args.interactive else (os.environ.get("SSH_AUTH_SOCK") or "none")
+        header = {}
+    passphrase, own = header.get("passphrase", "unknown"), header.get("fingerprint")
+    # THE AGENT IS OFFERED ONLY FOR A KEY PROVEN TO BE THIS ONE (round 3): a PKCS#8 key stores no
+    # public key in clear, so a `.pub` holding another key B passed the pair check, and the agent
+    # holding B signed for it. Without that proof the agent stays out; a key with a passphrase
+    # then needs a person (--interactive) to type it.
+    proven = own is not None and own == fp
+    agent = (os.environ.get("SSH_AUTH_SOCK") or "none") if proven and passphrase != "no" and not args.interactive \
+        else "none"
+    args._ssh_key_unchecked = not proven
     known = ["-o", f"UserKnownHostsFile={host.get('userknownhostsfile', '~/.ssh/known_hosts')}",
              "-o", f"StrictHostKeyChecking={host.get('stricthostkeychecking', 'ask')}"]
     if host.get("hostkeyalias"):
@@ -1306,7 +1383,11 @@ def verify_login(ssh: str, alias: str, base: pathlib.Path, fp: str, args) -> tup
     accepted = re.findall(r"Server accepts key: .*?(SHA256:[A-Za-z0-9+/]+)", v.stderr or "")
     plain = "\n".join(line for line in (v.stderr or "").splitlines() if not line.startswith("debug"))
     if v.returncode != 0:
-        return False, f"logging in with it alone failed: {said(plain) or f'exit {v.returncode}'}"
+        hint = ""
+        if agent == "none" and passphrase != "no" and not args.interactive:
+            hint = ("; the key has a passphrase and the agent was not used (its private file could not be "
+                    "proven to be this key): run with --interactive and type it")
+        return False, f"logging in with it alone failed: {said(plain) or f'exit {v.returncode}'}{hint}"
     if fp not in accepted:
         named = ", ".join(sorted(set(accepted))) or "no key"
         return False, f"the server accepted {named}, not {fp}"
@@ -1329,7 +1410,7 @@ def cmd_findings(args) -> int:
         return 0
     print(f"SSH key findings, from the inventory of {doc.get('measured_at')}: {len(rows)}")
     for r in rows:
-        print(f"  [{r['severity']}] {shown(r['title'])}\n      {shown(r['action'])}")
+        print(f"  [{r['severity']}] {shown(r['title'])}" + (f"\n      {shown(r['action'])}" if r.get("action") else ""))
     return 0
 
 
@@ -1376,7 +1457,8 @@ def agent_view(name: str | None = None, github: bool = False) -> dict:
             "agentOnly": doc["agent_only"],
             "identityFiles": [f for f in doc["identity_files"] if f["exists"] is False],
             "github": doc["github"],
-            "findings": [{k: r[k] for k in ("type", "severity", "subject", "title", "action")} for r in rows],
+            "findings": [{k: r[k] for k in ("type", "severity", "subject", "title", "detail", "action") if k in r}
+                         for r in rows],
             "commands": _commands(), "degraded": doc["degraded"]}
 
 

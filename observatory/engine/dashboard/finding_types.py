@@ -181,7 +181,7 @@ LABELS: dict[str, str] = {
     "site.dead": "Project site does not answer",
     "skill.stale_session": "Session runs an old skill",
     "ssh.folder_permissions": "SSH folder open to other accounts",
-    "ssh.github_orphan": "GitHub key this machine does not hold",
+    "ssh.github_orphan": "GitHub key not found on this machine",
     "ssh.identity_missing": "SSH config names a missing key",
     "ssh.key_no_passphrase": "SSH key without a passphrase",
     "ssh.key_readable": "SSH key readable by others",

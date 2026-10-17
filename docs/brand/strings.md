@@ -30,7 +30,7 @@ Contract: brand-contract v1
 | ssh.finding_readable | {key} is readable by other accounts | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
 | ssh.finding_folder | the SSH folder is open to other accounts | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
 | ssh.finding_unused | {key} has not been used for a long time | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
-| ssh.finding_orphan | GitHub accepts a key this machine does not hold: {title} | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
+| ssh.finding_orphan | GitHub accepts {title}, not found where Observatory looked | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
 | ssh.finding_unregistered | {key} is registered nowhere this machine can see | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
 | ssh.finding_private_in_pub | {path} holds a private key | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |
 | ssh.finding_public_missing | {key} has no public half | observatory/engine/tools/ssh_key_findings.py | OSS-66 | proposed | copy |

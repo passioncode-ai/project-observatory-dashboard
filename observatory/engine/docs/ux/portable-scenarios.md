@@ -372,8 +372,10 @@ Rows, each with the command that fixes it: a key with no passphrase (info for a 
 needs the security key); a weak key (DSA, RSA under 3072 bits); a private key others can read, and a
 `~/.ssh` others can read or write, both by `osprivacy` (never Windows' raw mode bits); a private key
 saved as `.pub`; a key not used for a long time (estimated from the file's access time, so it says
-"estimated"); a key GitHub accepts that this machine does not hold (a warning with the delete command only when nothing went unseen; otherwise info,
-naming what was not seen, with no delete); a key no visible place uses (not on GitHub, in no Host
+"estimated"); a key GitHub accepts that Observatory did not find in the places it read (always info,
+with no command and no action: it names where Observatory looked and what it could not read, and says
+"if no machine of yours uses it, remove it in GitHub settings"; Observatory never advises deleting
+a GitHub key); a key no visible place uses (not on GitHub, in no Host
 block, not loaded); a private key without its public half; an `IdentityFile` that names a missing
 file.
 

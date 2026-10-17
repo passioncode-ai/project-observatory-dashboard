@@ -153,36 +153,34 @@ def findings(doc: dict | None) -> list[dict]:
                         "action": "point the IdentityFile at an existing key, or remove the line",
                         "evidence": EVIDENCE})
     if github_read:
-        # A GITHUB KEY IS FOREIGN ONLY WHEN EVERYTHING WAS SEEN. A key this machine holds can live
-        # in an agent the config names (1Password, Secretive), behind a linked file, in an
-        # IdentityFile deep or outside ~/.ssh, or at a host-dependent path; the inventory lists
-        # what it could not see (`unseen`). Any such gap, or a local key of unknown fingerprint,
-        # makes the row info with no delete command. An inventory without `unseen` predates the
-        # check and proves nothing.
-        unknown = list(doc["unseen"]) if isinstance(doc.get("unseen"), list) else \
-            ["this inventory predates the coverage check: run `ssh-keys list` again"]
-        unknown += [k.get("path") or k.get("name") for k in doc.get("keys") or []
-                    if (k.get("private") or k.get("link")) and not k.get("fingerprint")
-                    and not any(str(k.get("path") or "") in u for u in unknown)]
-        unknown = sorted(set(unknown))
+        # OBSERVATORY NEVER ADVISES DELETING A GITHUB KEY (round 3, recorded in SSH-KEYS.md). Three
+        # review rounds each found another place a key in use can live where this inventory cannot
+        # see it (an agent socket, a linked or unreadable file, a host-dependent path, an Include
+        # it did not follow). Proving absence is not possible from one machine, so the row is
+        # information only: what GitHub accepts, where Observatory looked, what it could not read.
+        # No command, no action field.
+        unseen = list(doc["unseen"]) if isinstance(doc.get("unseen"), list) else \
+            ["this inventory predates the coverage check"]
+        unseen += [k.get("path") or k.get("name") for k in doc.get("keys") or []
+                   if (k.get("private") or k.get("link")) and not k.get("fingerprint")
+                   and not any(str(k.get("path") or "") in u for u in unseen)]
+        unseen = sorted(set(unseen))
+        looked = ["~/.ssh and one folder below it", "every IdentityFile of ~/.ssh/config", "the ssh-agent"]
+        looked += [f"the agent {a}" for a in sorted({str(k.get("agent")) for k in doc.get("agent_only") or []
+                                                    if k.get("agent")})]
         for g in doc["github"].get("keys") or []:
             if g.get("on_machine") is not False:
                 continue
-            row = {"type": "ssh.github_orphan", "subject": f"ssh:{g.get('fingerprint')}", "severity": "warning",
-                   **titled("GitHub accepts a key this machine does not hold: {title}",
-                            title=g.get("title") or g.get("fingerprint")),
-                   "detail": f"GitHub key {g.get('id')} ({g.get('use')}, added {g.get('added')}) "
-                             f"matches no key on this disk or in the agent.",
-                   "action": f"`gh ssh-key delete {g.get('id')}` if no other machine uses it",
-                   "evidence": EVIDENCE}
-            if unknown:
-                row.update(severity="info",
-                           detail=row["detail"] + " Not proven: this machine may hold it where Observatory "
-                                                  "could not see: " + "; ".join(unknown) + ".",
-                           action=f"make those visible (start the agent, recreate a missing .pub with "
-                                  f"`ssh-keygen -y -f KEY`), then `{CMD} list` again; delete nothing at "
-                                  f"GitHub until this row is a warning")
-            out.append(row)
+            title = g.get("title") or g.get("fingerprint")
+            detail = (f"GitHub accepts key {title} ({g.get('fingerprint')}, {g.get('use')}, added {g.get('added')}), "
+                      f"which Observatory did not find in the places it read on this machine: "
+                      f"{'; '.join(looked)}.")
+            if unseen:
+                detail += " It could not read: " + "; ".join(unseen) + "."
+            detail += " If no machine of yours uses it, remove it in GitHub settings."
+            out.append({"type": "ssh.github_orphan", "subject": f"ssh:{g.get('fingerprint')}", "severity": "info",
+                        **titled("GitHub accepts {title}, not found where Observatory looked", title=title),
+                        "detail": detail, "evidence": EVIDENCE})
     return out
 
 

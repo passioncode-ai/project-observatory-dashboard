@@ -68,10 +68,21 @@ the door puts it back (`os.utime` with the measured access and modification time
 **What was not seen (`unseen`).** A key this machine uses can live where the inventory cannot read
 it: in an agent the config names that is not running, behind a linked key file, at an `IdentityFile`
 whose path depends on the host (`~/keys/%h`) or on an unset variable, in a file that does not parse
-as a key, or in a private key whose fingerprint is unknown. Each such gap is a line of `unseen`. While
-it is not empty, no GitHub key is called foreign: the orphan row is info and names the gaps, with no
-delete command (round 2 found five ways a key in use was offered for deletion), and an empty listing
-says "No SSH keys found where Observatory could look", never "No SSH keys yet".
+as a key, a file or folder whose look failed (EACCES, ELOOP, EIO: `list` never stops on one), an
+`IdentityFile` of an unknown `~user`, or a private key whose fingerprint is unknown. Each such gap is a
+line of `unseen`. An empty listing says "No SSH keys yet" only when nothing went unseen and no local
+source (an agent, the config) is in `degraded`; otherwise it says "No SSH keys found where Observatory
+could look" and names what it could not see.
+
+**Decision (review round 3): Observatory never advises deleting a GitHub key.** Three review rounds
+in a row each found another place a key in use can live where this inventory cannot see it (an agent
+socket, a linked, deep, dot or unreadable file, a host-dependent or `${VAR}` path, an `Include` it did
+not follow, a stale saved answer). Absence cannot be proven from one machine, so `ssh.github_orphan`
+is always severity info and carries no command and no action field. Its text says that GitHub accepts
+the key (title and fingerprint), that Observatory did not find it in the places it read on this machine,
+names those places and the ones it could not read, and ends: "if no machine of yours uses it, remove
+it in GitHub settings". Nothing in the CLI, the board or the MCP answer leads a person or an agent to
+delete a GitHub key.
 
 `list` saves the inventory to `store/raw/ssh-keys.json`, owner-only, with paths spelled from `~`.
 The board reads that file; the MCP tool measures the local sources live.
@@ -165,6 +176,15 @@ send is refused with that gap named (OBS-112) and the copy command as the way me
 when it lands, reads the provider's keys by fingerprint first (DigitalOcean spells them as MD5),
 imports through the CLI that already holds the access, and writes the same receipts.
 
+**Which key the agent may sign with (review round 3).** The agent is offered during `--verify` only
+when the private file's own header gives a fingerprint equal to the `.pub`'s. A PKCS#8 or PEM key
+stores no public key in clear, so a `.pub` holding another key B passed the pair check, and the agent
+holding B signed for it: the server named B, which was the `.pub`'s fingerprint, and the verify passed.
+Without that proof the login uses `IdentityAgent=none`; a key with a passphrase then fails in batch mode
+with the hint to run `--interactive`, and a pass says "the private file was not checked" instead of
+"alone". All agent reads of one inventory share a 30 s budget, each at most 15 s; one that does not
+answer says "did not answer within N s".
+
 ## Receipts
 
 Every create and every send writes one row to the key movements journal
@@ -187,7 +207,7 @@ the board, and `full ssh-keys findings` prints them.
 | `ssh.folder_permissions` | warning | `osprivacy.private` says `~/.ssh` is not owner-only |
 | `ssh.private_in_pub` | critical | a `.pub` file's first line is a private-key header, read from that line alone |
 | `ssh.key_unused` | info | not loaded in the agent and last accessed over 180 days ago (estimated) |
-| `ssh.github_orphan` | warning, with `gh ssh-key delete ID`, only when the inventory saw everything (`unseen` is empty); otherwise info, naming what was not seen, with no delete command | GitHub accepts a key this machine neither holds nor has loaded |
+| `ssh.github_orphan` | always info; no command, no action field (decision of round 3) | GitHub accepts a key Observatory did not find in the places it read; the row names those places and the ones it could not read |
 | `ssh.key_unregistered` | info | GitHub was read, and the key is not on GitHub, in no Host block and not loaded |
 | `ssh.public_missing` | info | a private key without its `.pub` |
 | `ssh.identity_missing` | warning | an `IdentityFile` names a file that does not exist |
@@ -212,8 +232,11 @@ the step to retry.
 - Print, save, log, copy or send a private key, or pass one as an argument.
 - Overwrite a key file, or delete one.
 - Change the mode of an existing `~/.ssh` or key file (a finding says what to run).
-- Remove a line from a server's `authorized_keys`, or a key from GitHub (OBS-112's rotation, after
-  verification, is the only path that will).
+- Remove a line from a server's `authorized_keys` (OBS-112's rotation, after verification, is the only
+  path that will).
+- Advise deleting a GitHub key, or print or return a `gh ssh-key delete` command or any delete action
+  for one. OBS-112's rotation removes the OLD key's registration only after the new key was verified,
+  and only the key the person named.
 - Store an SSH private key in the vault or move it to another machine (PB-163's non-goal).
 - Manage other people's `authorized_keys`, or GPG keys.
 

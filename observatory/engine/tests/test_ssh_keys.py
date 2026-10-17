@@ -246,7 +246,18 @@ if command == ["true"]:
         identities += [x for x in os.environ.get("FAKE_AGENT_IDENTS", "").split(":") if x]
     ak = remote / ".ssh" / "authorized_keys"
     allowed = ak.read_text().split() if ak.is_file() else []
+    agent_blobs = {pathlib.Path(x + ".pub").read_text().split()[1]
+                   for x in os.environ.get("FAKE_AGENT_IDENTS", "").split(":") if x}
+    usable = []
     for ident in identities:
+        first = pathlib.Path(ident).read_text().split("\n", 1)[0] if pathlib.Path(ident).is_file() else ""
+        blob = pathlib.Path(ident + ".pub").read_text().split()[1]
+        if "ENCRYPTED" in first:   # the file cannot be decrypted without a person
+            if o.get("IdentityAgent", "") != "none" and blob in agent_blobs:
+                usable.append(ident)   # the agent holds that public key and signs for it
+            continue
+        usable.append(ident)
+    for ident in usable:
         b64 = pathlib.Path(ident + ".pub").read_text().split()[1]
         fp = "SHA256:" + base64.b64encode(hashlib.sha256(base64.b64decode(b64)).digest()).decode().rstrip("=")
         if verbose:
@@ -463,6 +474,27 @@ class Inventory(Door):
         self.assertTrue(self.key(doc, "id_alpha")["in_agent"])
         self.assertEqual([k["fingerprint"] for k in doc["agent_only"]], [fingerprint(ed25519_blob("x"))])
 
+    def test_an_agent_that_does_not_answer_is_named_as_such(self):
+        import ssh_keys
+        degraded = []
+        with mock.patch.object(ssh_keys, "run", side_effect=subprocess.TimeoutExpired("ssh-add", 15)):
+            self.assertIsNone(ssh_keys.agent_fingerprints(degraded))
+        self.assertIn("did not answer within 15 s", degraded[0]["reason"])
+        self.assertNotIn("install OpenSSH", json.dumps(degraded))
+
+    def test_all_agent_reads_share_one_budget(self):
+        import ssh_keys
+        degraded = []
+        with mock.patch.object(ssh_keys, "run") as run:
+            self.assertIsNone(ssh_keys.agent_fingerprints(degraded, sock="/x", deadline=time.monotonic() - 1))
+            run.assert_not_called()
+        self.assertIn("was spent", degraded[0]["reason"])
+        calls = []
+        with mock.patch.object(ssh_keys, "run", side_effect=lambda *a, **k: calls.append(k["timeout"])
+                               or subprocess.CompletedProcess(a, 1, "", "")):
+            ssh_keys.agent_fingerprints([], deadline=time.monotonic() + 4)
+        self.assertLessEqual(calls[0], 4)
+
     def test_agent_not_running_is_degraded_not_empty(self):
         self.plant("id_alpha")
         doc = self.listing("--no-github", env={"FAKE_AGENT": "down"})
@@ -508,8 +540,67 @@ class Inventory(Door):
         rows = self.orphan_rows()
         self.assertEqual(len(rows), 1, rows)
         self.assertEqual(rows[0]["severity"], "info")
-        self.assertNotIn(f"gh ssh-key delete {key_id}", json.dumps(rows))
+        self.assertNotIn("action", rows[0])
+        self.assertNotIn("gh ssh-key delete", json.dumps(rows))
         return rows[0]
+
+    def test_the_mcp_answer_carries_no_delete_for_a_github_key(self):
+        """Round 3: the MCP view merged a stale saved on_machine with live gaps; it must never
+        hand an agent a delete."""
+        import ssh_keys
+        self.ssh.mkdir(mode=0o700)
+        self.github_holds(ed25519_blob("elsewhere"))
+        self.assertEqual(self.door("list").returncode, 0)
+        view = self.in_process(ssh_keys.agent_view)
+        text = json.dumps(view)
+        self.assertNotIn("gh ssh-key delete", text)
+        rows = [f for f in view["findings"] if f["type"] == "ssh.github_orphan"]
+        self.assertEqual([(r["severity"], "action" in r) for r in rows], [("info", False)])
+
+    def test_list_never_crashes_on_an_unreadable_identity_file_or_include(self):
+        """Round 3 (a): EACCES on an IdentityFile's folder, a link loop, and an unreadable key
+        become lines of `unseen`; `list` exits 0 on 3.11 and 3.14 alike."""
+        self.plant("id_alpha")
+        locked = self.home / "locked"
+        locked.mkdir()
+        (locked / "k").write_text(private_text("none", ed25519_blob("locked")))
+        (self.ssh / "loop").symlink_to(self.ssh / "loop")
+        (self.ssh / "config").write_text("Host a\n  IdentityFile ~/locked/k\nHost b\n  IdentityFile ~/.ssh/loop/k\n"
+                                          "Include ~/locked/more.conf\n")
+        (self.ssh / "id_noread").write_text(private_text())
+        (self.ssh / "id_noread").chmod(0o000)
+        locked.chmod(0o000)
+        try:
+            p = self.door("list", "--json", "--no-github")
+        finally:
+            locked.chmod(0o700)
+            (self.ssh / "id_noread").chmod(0o600)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        doc = json.loads(p.stdout)
+        unseen = " ".join(doc["unseen"])
+        self.assertIn("~/locked/k", unseen)
+        if os.geteuid() != 0:
+            self.assertIn("id_noread", unseen)
+        self.assertEqual(self.key(doc, "id_alpha")["fingerprint"], fingerprint(ed25519_blob("id_alpha")))
+
+    def test_a_tilde_user_identity_file_is_resolved_or_unseen(self):
+        """Round 3 (b): ~user is that account's home (pwd), or a line of `unseen`."""
+        import pwd
+        me = pwd.getpwuid(os.getuid()).pw_name
+        self.ssh.mkdir(mode=0o700)
+        (self.ssh / "config").write_text(f"Host a\n  IdentityFile ~{me}/no-such-key-pb163\n"
+                                          "Host b\n  IdentityFile ~no_such_user_pb163/k\n")
+        doc = self.listing("--no-github")
+        files = {f["path"]: f["exists"] for f in doc["identity_files"]}
+        self.assertIs(files[f"~{me}/no-such-key-pb163"], False)
+        self.assertIsNone(files["~no_such_user_pb163/k"])
+        self.assertTrue(any("~no_such_user_pb163/k" in u for u in doc["unseen"]))
+
+    def test_no_ssh_keys_yet_is_not_said_while_the_agent_is_unread(self):
+        self.ssh.mkdir(mode=0o700)
+        p = self.door("list", "--no-github", env={"FAKE_AGENT": "down"})
+        self.assertNotIn("No SSH keys yet", p.stdout)
+        self.assertIn("No SSH keys found where Observatory could look", p.stdout)
 
     def test_a_key_in_an_agent_the_config_names_is_not_offered_for_deletion(self):
         """(a) `Host *` + IdentityAgent (1Password, Secretive): the key lives only in that agent."""
@@ -1170,6 +1261,35 @@ class SendServer(Door):
         self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
         self.assertNotIn("Verified", p.stdout)
 
+    def test_verify_never_lets_the_agent_sign_for_an_unproven_private_file(self):
+        """Round 3 MEDIUM: `new` is PKCS#8-encrypted (no public key in clear), `new.pub` holds key
+        B's line and the agent holds B; the server accepts B. Verify must not pass."""
+        b = self.plant("id_b")
+        self.ssh.mkdir(mode=0o700, exist_ok=True)
+        pk8 = "ENCRYPTED " + "PRIVATE" + " KEY-----"
+        (self.ssh / "id_new").write_text(BEGIN + pk8 + "\nMIIFHDBOBgkq" + "A" * 60 + "\n" + END + pk8 + "\n")
+        (self.ssh / "id_new").chmod(0o600)
+        (self.ssh / "id_new.pub").write_text(pub_line(b, "new") + "\n")
+        (self.remote / ".ssh").mkdir(mode=0o700)
+        (self.remote / ".ssh" / "authorized_keys").write_text(pub_line(b, "b") + "\n")
+        p = self.door("send", "id_new", "--to", "server:box", "--verify",
+                      env={"FAKE_SSH_SWALLOW": "1", "FAKE_AGENT_IDENTS": str(self.ssh / "id_b")})
+        self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+        self.assertNotIn("Verified", p.stdout)
+        self.assertIn("--interactive", p.stderr)
+        verify = self.calls("ssh")[-1]
+        self.assertIn("IdentityAgent=none", verify)
+
+    def test_a_proven_key_with_a_passphrase_may_use_the_agent(self):
+        """The other side: the header proves the file is the .pub's key, so the agent may sign."""
+        blob = self.plant("id_locked", cipher="aes256-ctr")
+        p = self.door("send", "id_locked", "--to", "server:box", "--verify",
+                      env={"FAKE_AGENT_IDENTS": str(self.ssh / "id_locked")})
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("alone", p.stdout)
+        self.assertNotIn("IdentityAgent=none", self.calls("ssh")[-1])
+        self.assertIn(fingerprint(blob), p.stdout)
+
     def test_a_proxy_command_host_is_not_verified_blind(self):
         self.plant("id_alpha")
         (self.ssh / "config").write_text("Host hop\n  ProxyCommand nc %h %p\n")
@@ -1217,6 +1337,25 @@ class SendCloud(Door):
 
 
 class Findings(Door):
+    def assert_information_only(self, row: dict):
+        """Round 3 decision: never a delete, never a command, never an action, always info."""
+        self.assertEqual(row["severity"], "info")
+        self.assertNotIn("action", row)
+        text = json.dumps(row)
+        self.assertNotIn("gh ssh-key delete", text)
+        self.assertNotIn("`", row["detail"], "no command of any kind")
+        self.assertIn("remove it in GitHub settings", row["detail"])
+        self.assertIn("did not find in the places it read", row["detail"])
+
+    def test_a_complete_inventory_still_never_advises_deleting(self):
+        import ssh_key_findings
+        doc = self.doc()
+        for k in doc["keys"]:
+            k.setdefault("fingerprint", "SHA256:x")
+        rows = [r for r in ssh_key_findings.findings(doc) if r["type"] == "ssh.github_orphan"]
+        self.assertEqual(len(rows), 1)
+        self.assert_information_only(rows[0])
+
     def doc(self) -> dict:
         now = "2026-10-15T00:00:00Z"
         base = {"private": True, "public": True, "link": False, "private_ok": True, "private_mode": "0600",
@@ -1259,10 +1398,10 @@ class Findings(Door):
         self.assertIn("security key", bare["ssh:SHA256:card"]["detail"])
         self.assertNotIn("anyone who copies", bare["ssh:SHA256:card"]["detail"])
         for r in rows:
-            self.assertTrue(r["action"] and r["title_id"] and r["evidence"], r)
+            self.assertTrue(r["title_id"] and r["evidence"], r)
+            self.assertTrue(r.get("action") or r["type"] == "ssh.github_orphan", r)
         orphan = next(r for r in rows if r["type"] == "ssh.github_orphan")
-        self.assertEqual(orphan["severity"], "warning")
-        self.assertIn("gh ssh-key delete 9", orphan["action"])
+        self.assert_information_only(orphan)
         self.assertEqual(rows, ssh_key_findings.findings(self.doc()), "the same inventory gave other rows")
 
     def test_an_unknown_local_fingerprint_makes_an_orphan_info_without_a_delete(self):
@@ -1271,8 +1410,7 @@ class Findings(Door):
         doc = self.doc()
         doc["keys"][4].update(fingerprint=None)
         orphan = next(r for r in ssh_key_findings.findings(doc) if r["type"] == "ssh.github_orphan")
-        self.assertEqual(orphan["severity"], "info")
-        self.assertNotIn("gh ssh-key delete", orphan["action"])
+        self.assert_information_only(orphan)
         self.assertIn("id_lonely", orphan["detail"])
 
     def test_permissions_come_from_osprivacy_not_raw_mode_bits(self):
